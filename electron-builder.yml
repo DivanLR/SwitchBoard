@@ -33,6 +33,9 @@ asarUnpack:
 # prebuilt Electron-ABI binary that rebuild:electron placed in the tree.
 npmRebuild: false
 
+# Harden the packaged binary: disable ELECTRON_RUN_AS_NODE / node CLI inspect.
+afterPack: scripts/after-pack.mjs
+
 win:
   target:
     - target: nsis

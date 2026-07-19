@@ -27,6 +27,10 @@ export interface MockScenario {
 
 export interface MockDriver {
   emitEvent: (sessionId: string, kind: string, payload: Record<string, unknown>) => string
+  setCommands: (projectId: string, commands: string[]) => void
+  endSession: (sessionId: string) => void
+  setSpecKit: (projectId: string, state: Record<string, unknown>) => void
+  setUsage: (sessionId: string, utilization: number, resetsInMinutes: number, limitType: string) => void
   emitLines: (sessionId: string, lines: string[]) => void
   raisePermission: (options: {
     projectId: string
@@ -69,6 +73,9 @@ export function installMockHost(scenario: MockScenario): void {
     branch: string | null
     diffAdds: number | null
     diffDels: number | null
+    usageUtilization: number | null
+    usageResetsAt: number | null
+    usageLimitType: string | null
     startedAt: string
     endedAt: string | null
     endReason: string | null
@@ -107,6 +114,9 @@ export function installMockHost(scenario: MockScenario): void {
         branch: p.session.branch ?? 'main',
         diffAdds: 12,
         diffDels: 4,
+        usageUtilization: null,
+        usageResetsAt: null,
+        usageLimitType: null,
         startedAt: p.session.startedAt ?? now(),
         endedAt: null,
         endReason: null,
@@ -129,8 +139,11 @@ export function installMockHost(scenario: MockScenario): void {
   const pending: MockRequest[] = []
   const decisions: MockRequest[] = []
   const markerByRequest = new Map<string, AnyRecord>()
+  const projectCommands = new Map<string, string[]>()
+  const specKitByProject = new Map<string, AnyRecord>()
   const standingRules: AnyRecord[] = []
   let costToday = 0
+  let tokensToday = 0
 
   const swallowRules: AnyRecord[] = [
     {
@@ -244,6 +257,7 @@ export function installMockHost(scenario: MockScenario): void {
       needsYou: all.filter((s) => s.status === 'needs_you').length,
       pendingInbox: pending.length,
       costTodayUsd: costToday,
+      tokensToday: tokensToday,
     }
   }
 
@@ -333,9 +347,33 @@ export function installMockHost(scenario: MockScenario): void {
       projects.push(project)
       return { ...project, session: undefined }
     },
+    'projects.rename': (req) => {
+      const project = projects.find((p) => p.id === req.projectId)
+      if (project) project.name = String(req.name).trim()
+    },
     'projects.archive': (req) => {
       const project = projects.find((p) => p.id === req.projectId)
+      if (project?.session && !project.session.endedAt) {
+        throw { code: 'ALREADY_ACTIVE', message: 'Stop the session before archiving the project' }
+      }
       if (project) project.archivedAt = now()
+    },
+    'projects.commands': (req) => projectCommands.get(String(req.projectId)) ?? [],
+    'specs.state': (req) =>
+      specKitByProject.get(String(req.projectId)) ?? { installed: false, specs: [] },
+    'specs.detail': (req) => {
+      const state = specKitByProject.get(String(req.projectId)) as
+        | { details?: Record<string, AnyRecord> }
+        | undefined
+      return state?.details?.[String(req.specId)] ?? null
+    },
+    'specs.install': (req) => {
+      const installed = {
+        installed: true,
+        specs: [{ id: '001-example', title: 'Example', status: 'draft', tasksTotal: 0, tasksDone: 0 }],
+      }
+      specKitByProject.set(String(req.projectId), installed)
+      return installed
     },
     'sessions.start': (req) => {
       const project = projects.find((p) => p.id === req.projectId)
@@ -352,6 +390,9 @@ export function installMockHost(scenario: MockScenario): void {
         branch: 'main',
         diffAdds: null,
         diffDels: null,
+        usageUtilization: null,
+        usageResetsAt: null,
+        usageLimitType: null,
         startedAt: now(),
         endedAt: null,
         endReason: null,
@@ -500,6 +541,31 @@ export function installMockHost(scenario: MockScenario): void {
 
   window.__mock = {
     emitEvent: (sessionId, kind, payload) => String(appendEvent(sessionId, kind, payload).id),
+    setCommands: (projectId, commands) => projectCommands.set(projectId, commands),
+    setSpecKit: (projectId, state) => specKitByProject.set(projectId, state),
+    setUsage: (sessionId, utilization, resetsInMinutes, limitType) => {
+      const s = sessions.get(sessionId)
+      if (!s) return
+      s.usageUtilization = utilization
+      s.usageResetsAt = Math.floor(Date.now() / 1000) + resetsInMinutes * 60
+      s.usageLimitType = limitType
+      push('push.sessionStatus', {
+        sessionId,
+        projectId: s.projectId,
+        status: s.status,
+        usageUtilization: utilization,
+        usageResetsAt: s.usageResetsAt,
+        usageLimitType: limitType,
+      })
+    },
+    endSession: (sessionId) => {
+      const s = sessions.get(sessionId)
+      if (s) {
+        s.endedAt = now()
+        s.endReason = 'stopped'
+        setStatus(sessionId, 'done')
+      }
+    },
     emitLines: (sessionId, lines) => {
       for (const line of lines) appendEvent(sessionId, 'raw_output', { text: line })
     },
@@ -546,6 +612,7 @@ export function installMockHost(scenario: MockScenario): void {
     },
     completeTurn: (sessionId, costUsd = 0.01) => {
       costToday += costUsd
+      tokensToday += 140
       appendEvent(sessionId, 'result', {
         totalCostUsd: costUsd,
         usage: { inputTokens: 100, outputTokens: 40 },

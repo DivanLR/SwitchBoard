@@ -48,6 +48,10 @@ export interface Session {
   /** Working-tree line changes since session start, shown in the header (design reference). */
   diffAdds: number | null
   diffDels: number | null
+  /** Subscription rate-limit usage from the SDK rate_limit_event (session usage meter). */
+  usageUtilization: number | null
+  usageResetsAt: number | null
+  usageLimitType: string | null
   startedAt: string
   endedAt: string | null
   endReason: SessionEndReason | null
@@ -234,9 +238,27 @@ export interface SwallowRule {
 
 export type TerseLevel = 'lite' | 'full' | 'ultra'
 
+/** Selectable Claude models for sessions (id -> label shown in settings). */
+export interface ModelChoice {
+  id: string
+  label: string
+}
+
+export const MODEL_CHOICES: readonly ModelChoice[] = [
+  { id: 'default', label: 'Account default' },
+  { id: 'claude-fable-5', label: 'Fable 5 (most capable)' },
+  { id: 'claude-opus-4-8', label: 'Opus 4.8' },
+  { id: 'claude-sonnet-5', label: 'Sonnet 5' },
+  { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5 (fastest)' },
+]
+
 export interface Settings {
   defaultView: 'clean' | 'raw'
   notificationsEnabled: boolean
+  /** Model for planning turns (plan mode); 'default' uses the account default. */
+  planModel: string
+  /** Model for normal work turns; 'default' uses the account default. */
+  workModel: string
   /**
    * Terse (caveman-style) output mode: appends a concise-style instruction to
    * every hosted session's system prompt so the model generates fewer output
@@ -253,6 +275,8 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   defaultView: 'clean',
   notificationsEnabled: true,
+  planModel: 'default',
+  workModel: 'default',
   terseMode: true,
   terseLevel: 'full',
   retentionDecisionDays: 30,
@@ -266,4 +290,51 @@ export interface Draft {
   projectId: string
   text: string
   createdAt: string
+}
+
+// --- Spec Kit (github/spec-kit) per-project specs ---
+
+export type SpecStatus = 'draft' | 'in_progress' | 'complete'
+
+/** One feature spec (a `specs/NNN-name/` directory) — summary for the chip list. */
+export interface SpecSummary {
+  id: string // directory name, e.g. "001-terminal-switchboard"
+  title: string
+  status: SpecStatus
+  tasksTotal: number
+  tasksDone: number
+}
+
+export interface SpecSection {
+  title: string
+  body: string
+}
+
+export interface SpecTask {
+  id: string // e.g. "T001"
+  label: string
+  done: boolean
+}
+
+export interface SpecPhase {
+  label: string
+  tasks: SpecTask[]
+}
+
+/** Full detail for one selected spec. */
+export interface SpecDetail extends SpecSummary {
+  description: string
+  path: string
+  /** Sections parsed from spec.md (## headings). */
+  sections: SpecSection[]
+  /** Tasks grouped by phase from tasks.md. */
+  phases: SpecPhase[]
+  /** Open [NEEDS CLARIFICATION] questions from spec.md. */
+  clarifications: string[]
+}
+
+/** Spec Kit status for a project. */
+export interface SpecKitState {
+  installed: boolean // `.specify/` present
+  specs: SpecSummary[]
 }

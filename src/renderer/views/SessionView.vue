@@ -9,15 +9,23 @@ import type { ProjectListItem } from '@shared/ipc-types'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { useInboxStore } from '@renderer/stores/inbox'
+import { useCommandSuggestions } from '@renderer/composables/useCommandSuggestions'
+import { useSpecsStore } from '@renderer/stores/specs'
 import StreamEvent from '@renderer/components/StreamEvent.vue'
 import SwallowedBlock from '@renderer/components/SwallowedBlock.vue'
 import QuestionEvent from '@renderer/components/QuestionEvent.vue'
+import SpecsView from '@renderer/views/SpecsView.vue'
 
 const props = defineProps<{ project: ProjectListItem }>()
 
 const projects = useProjectsStore()
 const active = useActiveSessionStore()
 const inbox = useInboxStore()
+const specs = useSpecsStore()
+
+// Main-area tab: the live session stream, or the project's Spec Kit specs.
+const mainTab = ref<'session' | 'specs'>('session')
+const specCount = computed(() => specs.stateFor(props.project.id).specs.length)
 
 const composer = ref('')
 const draftRestored = ref(false)
@@ -25,142 +33,19 @@ const busy = ref(false)
 const streamEl = ref<HTMLElement | null>(null)
 const composerEl = ref<HTMLInputElement | null>(null)
 
-// --- Terminal-style command suggestions (FR: composer picks up commands like a
-// terminal autosuggests from history). Inline ghost text plus a dropdown of
-// matching past commands, with up-arrow recall. ---
-const history = ref<string[]>([])
-const histIndex = ref(-1) // up-arrow recall position when the composer is empty
-const suggestIndex = ref(-1) // highlighted dropdown row (-1 = none)
-const suggestDismissed = ref(false)
-
-const MAX_SUGGESTIONS = 6
-
-/** Case-insensitive prefix matches for the dropdown (excludes the exact text). */
-const suggestions = computed<string[]>(() => {
-  const typed = composer.value.trim()
-  if (typed.length === 0 || suggestDismissed.value) return []
-  const lower = typed.toLowerCase()
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const cmd of history.value) {
-    if (cmd === composer.value) continue
-    if (!cmd.toLowerCase().startsWith(lower)) continue
-    if (seen.has(cmd)) continue
-    seen.add(cmd)
-    out.push(cmd)
-    if (out.length >= MAX_SUGGESTIONS) break
-  }
-  return out
-})
-
-/** The single best case-sensitive continuation, rendered inline as ghost text. */
-const ghostMatch = computed<string | null>(() => {
-  if (composer.value.length === 0 || suggestDismissed.value) return null
-  return history.value.find((cmd) => cmd.startsWith(composer.value) && cmd !== composer.value) ?? null
-})
-
-const ghostRest = computed(() => (ghostMatch.value ? ghostMatch.value.slice(composer.value.length) : ''))
-
-function acceptGhost(): boolean {
-  if (!ghostMatch.value) return false
-  composer.value = ghostMatch.value
-  suggestIndex.value = -1
-  return true
-}
-
-function acceptSuggestion(text: string): void {
-  composer.value = text
-  suggestIndex.value = -1
-  suggestDismissed.value = true
-  void nextTick(() => composerEl.value?.focus())
-}
-
-function onComposerInput(): void {
-  histIndex.value = -1
-  suggestIndex.value = -1
-  suggestDismissed.value = false
-}
-
-function caretAtEnd(): boolean {
-  const el = composerEl.value
-  return !!el && el.selectionStart === composer.value.length && el.selectionEnd === composer.value.length
-}
-
-function onComposerKeydown(event: KeyboardEvent): void {
-  const list = suggestions.value
-  switch (event.key) {
-    case 'Tab':
-      if (ghostRest.value) {
-        event.preventDefault()
-        acceptGhost()
-      } else if (suggestIndex.value >= 0 && list[suggestIndex.value]) {
-        event.preventDefault()
-        acceptSuggestion(list[suggestIndex.value])
-      }
-      return
-    case 'ArrowRight':
-      if (ghostRest.value && caretAtEnd()) {
-        event.preventDefault()
-        acceptGhost()
-      }
-      return
-    case 'ArrowDown':
-      if (list.length > 0) {
-        event.preventDefault()
-        suggestIndex.value = Math.min(suggestIndex.value + 1, list.length - 1)
-      } else if (histIndex.value >= 0) {
-        // Recall mode: step toward newer commands, back to an empty line.
-        event.preventDefault()
-        histIndex.value -= 1
-        composer.value = histIndex.value >= 0 ? (history.value[histIndex.value] ?? '') : ''
-        suggestDismissed.value = true
-      }
-      return
-    case 'ArrowUp':
-      if (list.length > 0 && suggestIndex.value > 0) {
-        event.preventDefault()
-        suggestIndex.value -= 1
-      } else if (list.length > 0 && suggestIndex.value === 0) {
-        event.preventDefault()
-        suggestIndex.value = -1
-      } else if (history.value.length > 0 && (composer.value.trim() === '' || histIndex.value >= 0)) {
-        // Recall older commands; stays in recall mode until the developer types.
-        event.preventDefault()
-        histIndex.value = Math.min(histIndex.value + 1, history.value.length - 1)
-        composer.value = history.value[histIndex.value] ?? composer.value
-        suggestDismissed.value = true
-      }
-      return
-    case 'Enter':
-      if (suggestIndex.value >= 0 && list[suggestIndex.value]) {
-        event.preventDefault()
-        acceptSuggestion(list[suggestIndex.value])
-      } else {
-        event.preventDefault()
-        void send()
-      }
-      return
-    case 'Escape':
-      if (list.length > 0 || ghostRest.value) {
-        event.preventDefault()
-        suggestIndex.value = -1
-        suggestDismissed.value = true
-      }
-      return
-    default:
-      return
-  }
-}
-
-async function loadHistory(): Promise<void> {
-  try {
-    history.value = await window.switchboard.invoke('sessions.promptHistory', {
-      projectId: props.project.id,
-    })
-  } catch {
-    history.value = []
-  }
-}
+// Terminal-style composer suggestions (history + plugin/skill commands, ghost
+// text, dropdown, up-arrow recall) live in a dedicated composable.
+const {
+  suggestions,
+  ghostRest,
+  suggestIndex,
+  acceptSuggestion,
+  onComposerInput,
+  onComposerKeydown,
+  load: loadHistory,
+  reset: resetSuggestions,
+  recordSent,
+} = useCommandSuggestions({ composer, composerEl, onSubmit: () => void send() })
 
 const liveSession = computed(() =>
   props.project.session && !props.project.session.endedAt ? props.project.session : null,
@@ -177,12 +62,30 @@ const pendingCount = computed(
 // Session timer (HH:MM:SS, ticking) and usage figures from loaded result events.
 const now = ref(Date.now())
 let tick: ReturnType<typeof setInterval> | undefined
+
+// Ctrl+C interrupts the running session, like a terminal. If text is selected,
+// let the browser copy it instead (matching modern terminal behaviour).
+function onGlobalKeydown(event: KeyboardEvent): void {
+  if (!event.ctrlKey || (event.key !== 'c' && event.key !== 'C') || event.altKey || event.metaKey) {
+    return
+  }
+  const selection = window.getSelection()?.toString() ?? ''
+  if (selection.length > 0) return // preserve copy
+  if (!liveSession.value) return
+  event.preventDefault()
+  void interrupt()
+}
+
 onMounted(() => {
   tick = setInterval(() => {
     now.value = Date.now()
   }, 1000)
+  window.addEventListener('keydown', onGlobalKeydown)
 })
-onUnmounted(() => clearInterval(tick))
+onUnmounted(() => {
+  clearInterval(tick)
+  window.removeEventListener('keydown', onGlobalKeydown)
+})
 
 const sessionTimer = computed(() => {
   if (!liveSession.value) return null
@@ -218,13 +121,13 @@ watch(
 
 watch(
   () => props.project.id,
-  () => {
+  (projectId) => {
     composer.value = ''
     draftRestored.value = false
-    histIndex.value = -1
-    suggestIndex.value = -1
-    suggestDismissed.value = false
-    void loadHistory()
+    mainTab.value = 'session'
+    resetSuggestions()
+    void loadHistory(projectId)
+    void specs.loadState(projectId)
   },
   { immediate: true },
 )
@@ -307,7 +210,13 @@ function rawLinesOf(event: SessionEvent): string[] {
   }
 }
 
-const rawLines = computed(() => active.events.flatMap(rawLinesOf))
+// Stable keys per raw line (event id + line offset) so streaming updates key
+// correctly rather than by array index.
+const rawLines = computed(() =>
+  active.events.flatMap((event) =>
+    rawLinesOf(event).map((text, i) => ({ key: `${event.id}:${i}`, text })),
+  ),
+)
 
 function scrollToBottom(): void {
   void nextTick(() => {
@@ -344,10 +253,7 @@ async function send(): Promise<void> {
     await active.send(text)
     composer.value = ''
     // Surface the just-sent command at the top of the suggestion history at once.
-    history.value = [text, ...history.value.filter((c) => c !== text)]
-    histIndex.value = -1
-    suggestIndex.value = -1
-    suggestDismissed.value = false
+    recordSent(text)
     scrollToBottom()
   } finally {
     busy.value = false
@@ -445,8 +351,31 @@ function openInbox(requestId: string): void {
       </div>
     </header>
 
+    <!-- Session / Specs tabs -->
+    <div class="main-tabs mono">
+      <button
+        class="mt"
+        :class="{ sel: mainTab === 'session' }"
+        data-testid="tab-session"
+        @click="mainTab = 'session'"
+      >
+        session
+      </button>
+      <button class="mt" :class="{ sel: mainTab === 'specs' }" data-testid="tab-specs" @click="mainTab = 'specs'">
+        specs
+        <span v-if="specCount > 0" class="mt-badge">{{ specCount }}</span>
+      </button>
+    </div>
+
+    <SpecsView v-if="mainTab === 'specs'" :project-id="project.id" />
+
     <!-- Clean stream -->
-    <div v-if="active.view === 'clean'" ref="streamEl" class="stream" data-testid="stream">
+    <div
+      v-else-if="active.view === 'clean'"
+      ref="streamEl"
+      class="stream"
+      data-testid="stream"
+    >
       <div class="stream-inner">
         <div v-if="!liveSession && !endedSession" class="stream-empty">
           <div class="mono faint">no session yet for this project</div>
@@ -522,13 +451,13 @@ function openInbox(requestId: string): void {
 
     <!-- Raw view -->
     <div v-else ref="streamEl" class="raw-view" data-testid="stream">
-      <div v-for="(line, index) in rawLines" :key="index" class="raw-line mono" data-testid="raw-line">
-        {{ line }}
+      <div v-for="line in rawLines" :key="line.key" class="raw-line mono" data-testid="raw-line">
+        {{ line.text }}
       </div>
     </div>
 
     <!-- Composer -->
-    <footer class="composer">
+    <footer v-if="mainTab === 'session'" class="composer">
       <div v-if="draftRestored && composer" class="draft-note mono" data-testid="draft-note">
         restored draft from the previous run — send to deliver it
       </div>
@@ -594,6 +523,44 @@ function openInbox(requestId: string): void {
   padding: 14px 22px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
+}
+
+.main-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+.mt {
+  padding: 9px 13px;
+  font-size: 11.5px;
+  color: var(--text-tab);
+  cursor: pointer;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  background: transparent;
+}
+
+.mt:hover {
+  color: var(--text-body);
+}
+
+.mt.sel {
+  color: var(--text-strong);
+  box-shadow: inset 0 -2px 0 var(--green);
+}
+
+.mt-badge {
+  font-size: 10px;
+  color: var(--text-meta);
+  background: var(--bg-chip);
+  border: 1px solid var(--border-strong);
+  border-radius: 99px;
+  padding: 0 6px;
+  line-height: 15px;
 }
 
 .head-row {

@@ -22,6 +22,7 @@ import type { PermissionBroker } from '@main/inbox/permission-broker'
 import { registerProject, suggestProjects } from '@main/projects/discovery'
 import { defaultRiskRules } from '@main/inbox/risk-rules'
 import { defaultSwallowRules } from '@main/stream/swallow-rules'
+import { installSpecKit, readSpecDetail, readSpecKitState } from '@main/specs/spec-kit'
 
 const EVENT_FLUSH_INTERVAL_MS = 33 // >= 30 Hz (contract)
 const COUNTER_DEBOUNCE_MS = 50
@@ -87,6 +88,8 @@ export interface HandlerDeps {
   broker: PermissionBroker
   /** Re-reads swallow rules into the manager's classifier cache. */
   refreshSwallowRules: () => void
+  /** The trusted main window; IPC is accepted only from its webContents (A17). */
+  getWindow: () => BrowserWindow | null
 }
 
 function localMidnightIso(): string {
@@ -96,11 +99,13 @@ function localMidnightIso(): string {
 
 export function computeCounters(repos: Repositories): Counters {
   const live = repos.sessions.listUnended()
+  const midnight = localMidnightIso()
   return {
     running: live.filter((s) => s.status === 'working').length,
     needsYou: live.filter((s) => s.status === 'needs_you').length,
     pendingInbox: repos.requests.pending().length,
-    costTodayUsd: repos.events.costSince(localMidnightIso()),
+    costTodayUsd: repos.events.costSince(midnight),
+    tokensToday: repos.events.tokensSince(midnight),
   }
 }
 
@@ -148,6 +153,14 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         source: suggested ? 'suggested' : 'manual',
       })
     },
+    'projects.rename': (req) => {
+      if (!repos.projects.byId(req.projectId)) {
+        throw { code: 'NOT_FOUND', message: 'Project not found' }
+      }
+      const name = req.name.trim()
+      if (name.length === 0) throw { code: 'INVALID_PATH', message: 'Name cannot be empty' }
+      repos.projects.rename(req.projectId, name)
+    },
     'projects.archive': (req) => {
       const active = repos.sessions.activeForProject(req.projectId)
       if (active) {
@@ -177,6 +190,23 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     },
     'sessions.events': (req) => repos.events.page(req.sessionId, req.beforeSeq, req.limit),
     'sessions.promptHistory': (req) => repos.commandHistory.recent(req.projectId, req.limit),
+    'projects.commands': (req) => repos.projectCommands.get(req.projectId),
+    'specs.state': (req) => {
+      const project = repos.projects.byId(req.projectId)
+      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
+      return readSpecKitState(project.path)
+    },
+    'specs.detail': (req) => {
+      const project = repos.projects.byId(req.projectId)
+      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
+      return readSpecDetail(project.path, req.specId)
+    },
+    'specs.install': async (req) => {
+      const project = repos.projects.byId(req.projectId)
+      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
+      await installSpecKit(project.path)
+      return readSpecKitState(project.path)
+    },
     'inbox.pending': () => repos.requests.pending(),
     'inbox.decide': (req) => broker.decide(req.requestId, req.decision, req.confirmHighRisk ?? false),
     'inbox.alwaysAllow': (req) => {
@@ -215,7 +245,13 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
 
   ipcMain.handle(
     'switchboard:invoke',
-    async (_event, method: InvokeMethod, req: unknown): Promise<WireResult<unknown>> => {
+    async (event, method: InvokeMethod, req: unknown): Promise<WireResult<unknown>> => {
+      // Accept IPC only from the app's own main window webContents (A17): any
+      // other sender (a stray frame, a compromised context) is rejected.
+      const trusted = deps.getWindow()
+      if (!trusted || event.sender.id !== trusted.webContents.id) {
+        return { ok: false, error: { code: 'INTERNAL', message: 'Untrusted IPC sender' } }
+      }
       const handler = handlers[method]
       if (!handler) {
         return { ok: false, error: { code: 'NOT_FOUND', message: `Unknown method ${method}` } }

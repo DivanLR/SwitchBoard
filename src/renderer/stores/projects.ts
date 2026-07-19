@@ -17,7 +17,7 @@ export const useProjectsStore = defineStore('projects', {
     items: [],
     suggestions: [],
     selectedProjectId: null,
-    counters: { running: 0, needsYou: 0, pendingInbox: 0, costTodayUsd: 0 },
+    counters: { running: 0, needsYou: 0, pendingInbox: 0, costTodayUsd: 0, tokensToday: 0 },
     loaded: false,
   }),
 
@@ -61,6 +61,12 @@ export const useProjectsStore = defineStore('projects', {
       await this.refresh()
     },
 
+    async rename(projectId: string, name: string): Promise<void> {
+      await window.switchboard.invoke('projects.rename', { projectId, name })
+      const item = this.items.find((p) => p.id === projectId)
+      if (item) item.name = name
+    },
+
     async startSession(projectId: string, resume = false): Promise<Session> {
       const session = await window.switchboard.invoke('sessions.start', { projectId, resume })
       await this.refresh()
@@ -81,6 +87,9 @@ export const useProjectsStore = defineStore('projects', {
         if (push.branch !== undefined) item.session.branch = push.branch
         if (push.diffAdds !== undefined) item.session.diffAdds = push.diffAdds
         if (push.diffDels !== undefined) item.session.diffDels = push.diffDels
+        if (push.usageUtilization !== undefined) item.session.usageUtilization = push.usageUtilization
+        if (push.usageResetsAt !== undefined) item.session.usageResetsAt = push.usageResetsAt
+        if (push.usageLimitType !== undefined) item.session.usageLimitType = push.usageLimitType
         if (push.endedAt !== undefined) item.session.endedAt = push.endedAt
         if (push.endReason !== undefined) item.session.endReason = push.endReason
       }

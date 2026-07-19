@@ -1,17 +1,21 @@
 <script setup lang="ts">
 // Settings dialog (FR-021) styled to the Switchboard design language.
-import { onMounted, ref } from 'vue'
+// State and transport live in the settings store; this view renders and acts.
+import { computed, onMounted } from 'vue'
 import type { Settings } from '@shared/domain'
+import { MODEL_CHOICES } from '@shared/domain'
+import { useSettingsStore } from '@renderer/stores/settings'
 
 const emit = defineEmits<{ (e: 'close'): void }>()
-const settings = ref<Settings | null>(null)
+const store = useSettingsStore()
+const settings = computed(() => store.settings)
 
-onMounted(async () => {
-  settings.value = await window.switchboard.invoke('settings.get', undefined)
+onMounted(() => {
+  void store.load()
 })
 
-async function save(patch: Partial<Settings>): Promise<void> {
-  settings.value = await window.switchboard.invoke('settings.set', patch)
+function save(patch: Partial<Settings>): void {
+  void store.save(patch)
 }
 </script>
 
@@ -23,6 +27,44 @@ async function save(patch: Partial<Settings>): Promise<void> {
         <button class="btn-outline" @click="emit('close')">close</button>
       </div>
       <div v-if="settings" class="body">
+        <div class="model-group">
+          <div class="section-label mono">PLANNING MODEL</div>
+          <div class="mg-desc">Used while a session is in plan mode.</div>
+          <div class="model-cards">
+            <button
+              v-for="m in MODEL_CHOICES"
+              :key="m.id"
+              class="model-card"
+              :class="{ sel: settings.planModel === m.id }"
+              :data-testid="`plan-model-${m.id}`"
+              @click="save({ planModel: m.id })"
+            >
+              <span class="mc-dot" :class="{ on: settings.planModel === m.id }"></span>
+              <span class="mc-name mono">{{ m.label }}</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="model-group">
+          <div class="section-label mono">WORK MODEL</div>
+          <div class="mg-desc">Runs normal work turns.</div>
+          <div class="model-cards">
+            <button
+              v-for="m in MODEL_CHOICES"
+              :key="m.id"
+              class="model-card"
+              :class="{ sel: settings.workModel === m.id }"
+              :data-testid="`work-model-${m.id}`"
+              @click="save({ workModel: m.id })"
+            >
+              <span class="mc-dot" :class="{ on: settings.workModel === m.id }"></span>
+              <span class="mc-name mono">{{ m.label }}</span>
+            </button>
+          </div>
+        </div>
+        <p class="hint mono">Both apply to sessions started after the change.</p>
+
+        <div class="section-label mono">DISPLAY & BEHAVIOR</div>
         <label class="row">
           <span class="mono">default stream view</span>
           <select
@@ -82,7 +124,76 @@ async function save(patch: Partial<Settings>): Promise<void> {
 
 <style scoped>
 .settings {
-  width: 420px;
+  width: 440px;
+  max-height: 82vh;
+  overflow-y: auto;
+}
+
+.section-label {
+  font-size: 10px;
+  letter-spacing: 0.13em;
+  color: var(--text-faint);
+  margin-top: 4px;
+}
+
+.model-group {
+  margin-bottom: 4px;
+}
+
+.mg-desc {
+  font-size: 12px;
+  color: var(--text-meta);
+  margin: 4px 0 10px;
+}
+
+.model-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.model-card {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 13px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.model-card:hover {
+  border-color: var(--border-strong);
+}
+
+.model-card.sel {
+  background: rgba(62, 207, 154, 0.06);
+  border-color: rgba(62, 207, 154, 0.4);
+}
+
+.mc-dot {
+  width: 8px;
+  min-width: 8px;
+  height: 8px;
+  border-radius: 99px;
+  border: 1.5px solid var(--border-strong);
+}
+
+.mc-dot.on {
+  background: var(--green);
+  border-color: var(--green);
+}
+
+.mc-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-body);
+}
+
+.model-card.sel .mc-name {
+  color: var(--text-strong);
 }
 
 .head {

@@ -16,6 +16,8 @@ import type {
   SessionEvent,
   SessionStatus,
   Settings,
+  SpecDetail,
+  SpecKitState,
   SwallowRule,
 } from './domain'
 
@@ -72,6 +74,7 @@ export interface Counters {
   needsYou: number
   pendingInbox: number
   costTodayUsd: number
+  tokensToday: number
 }
 
 /** projects.list returns projects with live status plus the aggregate counters (FR-005). */
@@ -84,6 +87,7 @@ export interface InvokeMap {
   'projects.list': { req: void; res: ProjectsSnapshot }
   'projects.suggestions': { req: void; res: ProjectSuggestion[] }
   'projects.register': { req: { path: string; name?: string }; res: Project }
+  'projects.rename': { req: { projectId: string; name: string }; res: void }
   'projects.archive': { req: { projectId: string }; res: void }
   'sessions.start': { req: { projectId: string; resume?: boolean }; res: Session }
   'sessions.stop': { req: { sessionId: string }; res: void }
@@ -96,6 +100,14 @@ export interface InvokeMap {
   }
   /** Recent distinct commands (past composer messages) for terminal-style suggestions. */
   'sessions.promptHistory': { req: { projectId: string; limit?: number }; res: string[] }
+  /** Available slash commands / skills (plugins) for the project, for composer suggestions. */
+  'projects.commands': { req: { projectId: string }; res: string[] }
+  /** Spec Kit state for a project: installed? plus the spec summaries. */
+  'specs.state': { req: { projectId: string }; res: SpecKitState }
+  /** Full detail for one spec. */
+  'specs.detail': { req: { projectId: string; specId: string }; res: SpecDetail | null }
+  /** Install Spec Kit into the project (ephemeral uvx; never global). */
+  'specs.install': { req: { projectId: string }; res: SpecKitState }
   'inbox.pending': { req: void; res: PermissionRequest[] }
   'inbox.decide': {
     req: { requestId: string; decision: 'approve' | 'deny'; confirmHighRisk?: boolean }
@@ -134,6 +146,9 @@ export interface SessionStatusPush {
   branch?: string | null
   diffAdds?: number | null
   diffDels?: number | null
+  usageUtilization?: number | null
+  usageResetsAt?: number | null
+  usageLimitType?: string | null
   endedAt?: string | null
   endReason?: SessionEndReason | null
 }

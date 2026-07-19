@@ -19,7 +19,33 @@ const props = defineProps<{ event: SessionEvent }>()
 const emit = defineEmits<{ (e: 'open-inbox', requestId: string): void }>()
 
 const kind = computed(() => props.event.kind)
-const p = computed(() => props.event.payload)
+
+// Per-kind typed accessors: narrow on `kind` once here rather than casting the
+// payload inline throughout the template.
+const prompt = computed(() =>
+  props.event.kind === 'prompt' ? (props.event.payload as PromptPayload) : null,
+)
+const assistant = computed(() =>
+  props.event.kind === 'assistant_text' ? (props.event.payload as AssistantTextPayload) : null,
+)
+const summary = computed(() =>
+  props.event.kind === 'summary' ? (props.event.payload as SummaryPayload) : null,
+)
+const tool = computed(() =>
+  props.event.kind === 'tool_activity' ? (props.event.payload as ToolActivityPayload) : null,
+)
+const marker = computed(() =>
+  props.event.kind === 'permission_marker' || props.event.kind === 'plan_marker'
+    ? (props.event.payload as PermissionMarkerPayload | PlanMarkerPayload)
+    : null,
+)
+const errorPayload = computed(() =>
+  props.event.kind === 'error' ? (props.event.payload as ErrorPayload) : null,
+)
+const result = computed(() =>
+  props.event.kind === 'result' ? (props.event.payload as ResultPayload) : null,
+)
+const rawText = computed(() => (props.event.payload as { text?: string }).text ?? '')
 
 function resultLabel(payload: ResultPayload): string {
   const parts: string[] = ['turn complete']
@@ -32,10 +58,7 @@ function resultLabel(payload: ResultPayload): string {
   return parts.join(' · ')
 }
 
-const markerStatus = computed(() => {
-  if (kind.value !== 'permission_marker' && kind.value !== 'plan_marker') return null
-  return (p.value as PermissionMarkerPayload | PlanMarkerPayload).status
-})
+const markerStatus = computed(() => marker.value?.status ?? null)
 
 const markerChipLabel: Record<string, string> = {
   pending: 'needs approval',
@@ -49,69 +72,67 @@ const markerChipLabel: Record<string, string> = {
 <template>
   <div class="event" :data-testid="`stream-event-${kind}`" :data-event-id="event.id">
     <!-- ❯ prompt -->
-    <div v-if="kind === 'prompt'" class="prompt mono">
+    <div v-if="prompt" class="prompt mono">
       <span class="caret">❯</span>
-      <span class="prompt-text">{{ (p as PromptPayload).text }}</span>
-      <span v-if="(p as PromptPayload).pending" class="pending mono" data-testid="prompt-pending">
-        queued
-      </span>
+      <span class="prompt-text">{{ prompt.text }}</span>
+      <span v-if="prompt.pending" class="pending mono" data-testid="prompt-pending"> queued </span>
     </div>
 
     <!-- assistant narrative -->
-    <div v-else-if="kind === 'assistant_text'" class="assistant">
-      {{ (p as AssistantTextPayload).text
-      }}<span v-if="(p as AssistantTextPayload).partial" class="blink" style="color: var(--green)">▊</span>
+    <div v-else-if="assistant" class="assistant">
+      {{ assistant.text
+      }}<span v-if="assistant.partial" class="blink" style="color: var(--green)">▊</span>
     </div>
 
     <!-- ✦ SUMMARY card -->
-    <div v-else-if="kind === 'summary'" class="summary-card">
+    <div v-else-if="summary" class="summary-card">
       <div class="card-label mono"><span style="color: var(--green)">✦</span> SUMMARY</div>
-      <div class="card-body">{{ (p as SummaryPayload).text }}</div>
+      <div class="card-body">{{ summary.text }}</div>
     </div>
 
     <!-- tool activity (unswallowed) -->
-    <div v-else-if="kind === 'tool_activity'" class="tool mono">
-      <div :class="{ 'tool-error': (p as ToolActivityPayload).isError }">
-        ⏺ {{ (p as ToolActivityPayload).toolName }} {{ (p as ToolActivityPayload).inputPreview }}
-      </div>
-      <div v-if="(p as ToolActivityPayload).resultPreview" class="tool-result">
-        ⎿ {{ (p as ToolActivityPayload).resultPreview }}
-      </div>
+    <div v-else-if="tool" class="tool mono">
+      <div :class="{ 'tool-error': tool.isError }">⏺ {{ tool.toolName }} {{ tool.inputPreview }}</div>
+      <div v-if="tool.resultPreview" class="tool-result">⎿ {{ tool.resultPreview }}</div>
     </div>
 
     <!-- permission / plan markers -->
     <div
-      v-else-if="kind === 'permission_marker' || kind === 'plan_marker'"
+      v-else-if="marker"
       class="marker mono"
       :data-testid="kind === 'plan_marker' ? 'plan-marker' : 'permission-marker'"
     >
       <span class="chip-marker" :class="markerStatus ?? ''">
-        {{ kind === 'plan_marker' && markerStatus === 'pending' ? 'plan approval' : markerChipLabel[markerStatus ?? ''] }}
+        {{
+          kind === 'plan_marker' && markerStatus === 'pending'
+            ? 'plan approval'
+            : markerChipLabel[markerStatus ?? '']
+        }}
       </span>
-      <span class="marker-title">{{ (p as PermissionMarkerPayload).title }}</span>
+      <span class="marker-title">{{ marker.title }}</span>
       <button
         v-if="markerStatus === 'pending'"
         class="review-link mono"
         data-testid="review-in-inbox"
-        @click="emit('open-inbox', (p as PermissionMarkerPayload).requestId)"
+        @click="emit('open-inbox', marker.requestId)"
       >
         review in inbox →
       </button>
     </div>
 
     <!-- ✗ ERROR card -->
-    <div v-else-if="kind === 'error'" class="error-card" data-testid="error-event">
+    <div v-else-if="errorPayload" class="error-card" data-testid="error-event">
       <div class="card-label mono error-label">✗ ERROR</div>
-      <div class="error-body mono">{{ (p as ErrorPayload).text }}</div>
+      <div class="error-body mono">{{ errorPayload.text }}</div>
     </div>
 
     <!-- ✓ result -->
-    <div v-else-if="kind === 'result'" class="done mono" data-testid="result-event">
-      ✓ {{ resultLabel(p as ResultPayload) }}
+    <div v-else-if="result" class="done mono" data-testid="result-event">
+      ✓ {{ resultLabel(result) }}
     </div>
 
     <!-- raw output (unswallowed) -->
-    <div v-else class="raw mono">{{ (p as { text?: string }).text }}</div>
+    <div v-else class="raw mono">{{ rawText }}</div>
   </div>
 </template>
 

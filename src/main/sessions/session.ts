@@ -68,10 +68,18 @@ export interface HostedSessionOptions {
   systemPromptAppend?: string
   /** Path to the bundled standalone Claude executable (avoids the Electron spawn crash). */
   claudeExecutablePath?: string
+  /** Model id for work turns; omitted/'default' uses the account default. */
+  workModel?: string
+  /** Model id for plan-mode turns; applied via setModel when entering plan mode. */
+  planModel?: string
   sink: EventSink
   gate: PermissionGate
   onStatusChange: (status: SessionStatus, detail?: string | null) => void
   onSdkSessionId: (sdkSessionId: string) => void
+  /** Available slash commands / skills reported in the session init message. */
+  onCommands?: (commands: string[]) => void
+  /** Subscription rate-limit usage from rate_limit_event (session usage meter). */
+  onUsage?: (usage: { utilization: number | null; resetsAt: number | null; limitType: string | null }) => void
   /** Fired after every completed turn (branch observation, counters). */
   onTurnComplete: () => void
   onExit: (reason: 'completed' | 'stopped' | 'crashed', detail?: string) => void
@@ -113,6 +121,11 @@ export class HostedSession {
         includePartialMessages: true,
         resume: this.options.resumeSdkSessionId,
         pathToClaudeCodeExecutable: this.options.claudeExecutablePath,
+        // Work model for normal turns; 'default'/undefined uses the account default.
+        model:
+          this.options.workModel && this.options.workModel !== 'default'
+            ? this.options.workModel
+            : undefined,
         // Append-only: keeps Claude Code's own system prompt and adds the terse
         // output-style instruction on top when terse mode is enabled.
         systemPrompt: this.options.systemPromptAppend
@@ -152,6 +165,9 @@ export class HostedSession {
   }
 
   private handleMessage(message: SDKMessage): void {
+    this.captureInitCommands(message)
+    this.applyModelForMode(message)
+    this.captureUsage(message)
     this.mapper.handle(message)
     if (message.type === 'result') {
       this.turnInFlight = false
@@ -159,6 +175,45 @@ export class HostedSession {
       this.recomputeStatus()
       this.options.onTurnComplete()
     }
+  }
+
+  /** Switch to the plan model while a session is in plan mode, else the work model. */
+  private appliedModel: string | null = null
+  private applyModelForMode(message: SDKMessage): void {
+    const mode = (message as { permissionMode?: string }).permissionMode
+    if (!mode) return
+    const norm = (m?: string): string | undefined => (m && m !== 'default' ? m : undefined)
+    const wanted =
+      mode === 'plan' ? norm(this.options.planModel) : norm(this.options.workModel)
+    const target = wanted ?? '__default__'
+    if (this.appliedModel === target) return
+    this.appliedModel = target
+    void this.q?.setModel(wanted).catch(() => {
+      // Best-effort: an older CLI may not support runtime model switching.
+    })
+  }
+
+  private captureUsage(message: SDKMessage): void {
+    if (!this.options.onUsage) return
+    const evt = message as {
+      type?: string
+      rate_limit_info?: { utilization?: number; resetsAt?: number; rateLimitType?: string }
+    }
+    if (evt.type !== 'rate_limit_event' || !evt.rate_limit_info) return
+    const info = evt.rate_limit_info
+    this.options.onUsage({
+      utilization: typeof info.utilization === 'number' ? info.utilization : null,
+      resetsAt: typeof info.resetsAt === 'number' ? info.resetsAt : null,
+      limitType: info.rateLimitType ?? null,
+    })
+  }
+
+  private captureInitCommands(message: SDKMessage): void {
+    if (!this.options.onCommands) return
+    const init = message as { type?: string; subtype?: string; slash_commands?: string[]; skills?: string[] }
+    if (init.type !== 'system' || init.subtype !== 'init') return
+    const commands = [...new Set([...(init.slash_commands ?? []), ...(init.skills ?? [])])].sort()
+    if (commands.length > 0) this.options.onCommands(commands)
   }
 
   /** Composer input (FR-019). Returns queued=true when the send awaits turn completion. */

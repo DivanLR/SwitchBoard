@@ -147,6 +147,9 @@ export class SessionManager {
       branch: readGitBranch(project.path),
       diffAdds: null,
       diffDels: null,
+      usageUtilization: null,
+      usageResetsAt: null,
+      usageLimitType: null,
       startedAt: nowIso(),
       endedAt: null,
       endReason: null,
@@ -172,12 +175,26 @@ export class SessionManager {
           terseLevel: settings.terseLevel,
         }) ?? undefined,
       claudeExecutablePath: resolveClaudeExecutable() ?? undefined,
+      workModel: settings.workModel,
+      planModel: settings.planModel,
       sink: this.makeSink(entry),
       gate: this.callbacks.gate,
       onStatusChange: (status, detail) => this.handleStatusChange(entry, status, detail),
       onSdkSessionId: (sdkSessionId) => {
         entry.row.sdkSessionId = sdkSessionId
         this.repos.sessions.update(row.id, { sdkSessionId })
+      },
+      onCommands: (commands) => this.repos.projectCommands.set(projectId, commands),
+      onUsage: (usage) => {
+        entry.row.usageUtilization = usage.utilization
+        entry.row.usageResetsAt = usage.resetsAt
+        entry.row.usageLimitType = usage.limitType
+        this.repos.sessions.update(row.id, {
+          usageUtilization: usage.utilization,
+          usageResetsAt: usage.resetsAt,
+          usageLimitType: usage.limitType,
+        })
+        this.pushStatus(entry)
       },
       onTurnComplete: () => this.observeBranch(entry),
       onExit: (reason, detail) => this.handleExit(entry, reason, detail),
@@ -388,6 +405,9 @@ export class SessionManager {
       branch: entry.row.branch,
       diffAdds: entry.row.diffAdds,
       diffDels: entry.row.diffDels,
+      usageUtilization: entry.row.usageUtilization,
+      usageResetsAt: entry.row.usageResetsAt,
+      usageLimitType: entry.row.usageLimitType,
       endedAt: entry.row.endedAt,
       endReason: entry.row.endReason,
     })

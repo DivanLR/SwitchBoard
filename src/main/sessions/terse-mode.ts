@@ -10,19 +10,31 @@ const PRESERVE_CLAUSE =
   'configuration values, numeric results, or error messages. Reproduce all of those exactly. ' +
   'Never trade technical accuracy or a required step for brevity.'
 
+// The instruction is prefixed with a hard directive so it is not diluted by the
+// large Claude Code preset system prompt it is appended to.
+const HEADER =
+  '## MANDATORY OUTPUT STYLE — OVERRIDES DEFAULT VERBOSITY.\n' +
+  'This instruction takes precedence over any default tendency to write at length. ' +
+  'Apply it to EVERY response you produce for the rest of this session.\n'
+
 const LEVEL_INSTRUCTIONS: Record<TerseLevel, string> = {
   lite:
-    'OUTPUT STYLE (terse — lite). Trim filler, pleasantries, and hedging from your prose. ' +
-    'Prefer short sentences and lead with the conclusion. Keep enough words to stay clear. ' +
+    HEADER +
+    'Level: LITE. Trim filler, pleasantries, hedging, and preamble. Lead with the conclusion. ' +
+    'Prefer short sentences. Keep enough words to stay clear. ' +
     PRESERVE_CLAUSE,
   full:
-    'OUTPUT STYLE (terse). Write your prose as compactly as possible while staying correct and ' +
-    'unambiguous. Drop articles, filler, pleasantries, and hedging. Favour sentence fragments and ' +
-    'bullet points over full sentences. State the conclusion first, then only load-bearing detail. ' +
+    HEADER +
+    'Level: TERSE. Write prose as compactly as possible while staying correct and unambiguous. ' +
+    'Drop articles, filler, pleasantries, hedging, and any restating of the question. ' +
+    'Strongly prefer sentence fragments and bullet points over full sentences. State the ' +
+    'conclusion first, then only load-bearing detail. No preamble, no summary of what you did ' +
+    'unless asked. ' +
     PRESERVE_CLAUSE,
   ultra:
-    'OUTPUT STYLE (terse — ultra). Maximum compression of prose. Telegraphic fragments only: no ' +
-    'articles, no pronouns where droppable, no filler, no restating the question. One idea per line, ' +
+    HEADER +
+    'Level: ULTRA. Maximum prose compression. Telegraphic fragments only: no articles, no ' +
+    'droppable pronouns, no filler, no restating the question, no preamble. One idea per line, ' +
     'bullets over sentences, symbols/arrows where clearer than words. ' +
     PRESERVE_CLAUSE,
 }

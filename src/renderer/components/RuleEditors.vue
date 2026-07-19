@@ -6,9 +6,11 @@
 import { computed, onMounted, ref } from 'vue'
 import type { PermissionRule, RiskClassificationRule, SwallowRule } from '@shared/domain'
 import { useProjectsStore } from '@renderer/stores/projects'
+import { useRulesStore } from '@renderer/stores/rules'
 
 const emit = defineEmits<{ (e: 'close'): void }>()
 const projects = useProjectsStore()
+const rules = useRulesStore()
 
 type Tab = 'standing' | 'risk' | 'swallow'
 const tab = ref<Tab>('standing')
@@ -22,13 +24,11 @@ async function loadStanding(): Promise<void> {
     standingRules.value = []
     return
   }
-  standingRules.value = await window.switchboard.invoke('rules.standing.list', {
-    projectId: standingProjectId.value,
-  })
+  standingRules.value = await rules.listStanding(standingProjectId.value)
 }
 
 async function revoke(ruleId: string): Promise<void> {
-  await window.switchboard.invoke('rules.standing.revoke', { ruleId })
+  await rules.revokeStanding(ruleId)
   await loadStanding()
 }
 
@@ -49,7 +49,7 @@ function matcherLabel(rule: PermissionRule): string {
 const riskRules = ref<RiskClassificationRule[]>([])
 
 async function loadRisk(): Promise<void> {
-  riskRules.value = await window.switchboard.invoke('rules.risk.list', undefined)
+  riskRules.value = await rules.listRisk()
 }
 
 function addRiskRule(): void {
@@ -71,11 +71,11 @@ function setRiskInputMatcher(rule: RiskClassificationRule, pattern: string): voi
 }
 
 async function saveRisk(): Promise<void> {
-  riskRules.value = await window.switchboard.invoke('rules.risk.save', { rules: riskRules.value })
+  riskRules.value = await rules.saveRisk(riskRules.value)
 }
 
 async function restoreRiskDefaults(): Promise<void> {
-  riskRules.value = await window.switchboard.invoke('rules.risk.restoreDefaults', undefined)
+  riskRules.value = await rules.restoreRiskDefaults()
 }
 
 // --- Swallow rules (global + per project) ---
@@ -89,7 +89,7 @@ const visibleSwallowRules = computed(() =>
 )
 
 async function loadSwallow(): Promise<void> {
-  swallowRules.value = await window.switchboard.invoke('rules.swallow.list', {})
+  swallowRules.value = await rules.listSwallow()
 }
 
 function addSwallowRule(): void {
@@ -110,13 +110,11 @@ function removeSwallowRule(id: string): void {
 }
 
 async function saveSwallow(): Promise<void> {
-  swallowRules.value = await window.switchboard.invoke('rules.swallow.save', {
-    rules: swallowRules.value,
-  })
+  swallowRules.value = await rules.saveSwallow(swallowRules.value)
 }
 
 async function restoreSwallowDefaults(): Promise<void> {
-  swallowRules.value = await window.switchboard.invoke('rules.swallow.restoreDefaults', undefined)
+  swallowRules.value = await rules.restoreSwallowDefaults()
 }
 
 onMounted(async () => {

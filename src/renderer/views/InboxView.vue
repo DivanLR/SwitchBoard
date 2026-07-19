@@ -252,6 +252,9 @@ const historyItems = computed(() => inbox.history)
         </span>
         <div class="hist-main">
           <div class="hist-title">{{ h.title }}</div>
+          <div v-if="h.explanation" class="hist-desc" data-testid="history-desc">
+            {{ h.explanation }}
+          </div>
           <div class="hist-sub mono">
             {{ projectName(h.projectId) }} · {{ h.detail
             }}<span v-if="h.deliveryFailed" data-testid="delivery-failed"> · delivery failed</span>
@@ -483,6 +486,15 @@ const historyItems = computed(() => inbox.history)
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.hist-desc {
+  font-size: 11px;
+  color: var(--text-mid);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .hist-sub {

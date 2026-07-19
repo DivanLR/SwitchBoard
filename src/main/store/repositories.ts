@@ -52,6 +52,9 @@ interface SessionRow {
   branch: string | null
   diffAdds: number | null
   diffDels: number | null
+  usageUtilization: number | null
+  usageResetsAt: number | null
+  usageLimitType: string | null
   startedAt: string
   endedAt: string | null
   endReason: SessionEndReason | null
@@ -133,6 +136,10 @@ export class ProjectsRepo {
   archive(id: string): void {
     this.db.prepare('UPDATE projects SET archivedAt = ? WHERE id = ?').run(nowIso(), id)
   }
+
+  rename(id: string, name: string): void {
+    this.db.prepare('UPDATE projects SET name = ? WHERE id = ?').run(name, id)
+  }
 }
 
 export class SessionsRepo {
@@ -141,8 +148,8 @@ export class SessionsRepo {
   insert(session: Session): void {
     this.db
       .prepare(
-        `INSERT INTO sessions (id, projectId, sdkSessionId, status, statusDetail, branch, diffAdds, diffDels, startedAt, endedAt, endReason)
-         VALUES (@id, @projectId, @sdkSessionId, @status, @statusDetail, @branch, @diffAdds, @diffDels, @startedAt, @endedAt, @endReason)`,
+        `INSERT INTO sessions (id, projectId, sdkSessionId, status, statusDetail, branch, diffAdds, diffDels, usageUtilization, usageResetsAt, usageLimitType, startedAt, endedAt, endReason)
+         VALUES (@id, @projectId, @sdkSessionId, @status, @statusDetail, @branch, @diffAdds, @diffDels, @usageUtilization, @usageResetsAt, @usageLimitType, @startedAt, @endedAt, @endReason)`,
       )
       .run(session)
   }
@@ -162,6 +169,9 @@ export class SessionsRepo {
         | 'branch'
         | 'diffAdds'
         | 'diffDels'
+        | 'usageUtilization'
+        | 'usageResetsAt'
+        | 'usageLimitType'
         | 'endedAt'
         | 'endReason'
       >
@@ -281,6 +291,19 @@ export class EventsRepo {
     const row = this.db
       .prepare(
         `SELECT COALESCE(SUM(json_extract(payload, '$.totalCostUsd')), 0) AS total
+         FROM events WHERE kind = 'result' AND createdAt >= ?`,
+      )
+      .get(sinceIso) as { total: number }
+    return row.total
+  }
+
+  tokensSince(sinceIso: string): number {
+    const row = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(
+           COALESCE(json_extract(payload, '$.usage.inputTokens'), 0) +
+           COALESCE(json_extract(payload, '$.usage.outputTokens'), 0)
+         ), 0) AS total
          FROM events WHERE kind = 'result' AND createdAt >= ?`,
       )
       .get(sinceIso) as { total: number }
@@ -551,6 +574,27 @@ export class CommandHistoryRepo {
   }
 }
 
+/** Available slash commands / skills per project, for composer suggestions. */
+export class ProjectCommandsRepo {
+  constructor(private db: AppDatabase) {}
+
+  set(projectId: string, commands: string[]): void {
+    this.db
+      .prepare(
+        `INSERT INTO project_commands (projectId, commands, updatedAt) VALUES (@projectId, @commands, @updatedAt)
+         ON CONFLICT(projectId) DO UPDATE SET commands = @commands, updatedAt = @updatedAt`,
+      )
+      .run({ projectId, commands: JSON.stringify(commands), updatedAt: nowIso() })
+  }
+
+  get(projectId: string): string[] {
+    const row = this.db
+      .prepare('SELECT commands FROM project_commands WHERE projectId = ?')
+      .get(projectId) as { commands: string } | undefined
+    return row ? (JSON.parse(row.commands) as string[]) : []
+  }
+}
+
 export interface Repositories {
   projects: ProjectsRepo
   sessions: SessionsRepo
@@ -562,6 +606,7 @@ export interface Repositories {
   settings: SettingsRepo
   drafts: DraftsRepo
   commandHistory: CommandHistoryRepo
+  projectCommands: ProjectCommandsRepo
 }
 
 export function createRepositories(db: AppDatabase): Repositories {
@@ -576,5 +621,6 @@ export function createRepositories(db: AppDatabase): Repositories {
     settings: new SettingsRepo(db),
     drafts: new DraftsRepo(db),
     commandHistory: new CommandHistoryRepo(db),
+    projectCommands: new ProjectCommandsRepo(db),
   }
 }

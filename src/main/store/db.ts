@@ -141,6 +141,31 @@ const MIGRATIONS: Migration[] = [
       `)
     },
   },
+  {
+    // Available slash commands / skills per project (from the session init
+    // message), suggested in the composer.
+    name: '004-project-commands',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE project_commands (
+          projectId TEXT PRIMARY KEY REFERENCES projects(id),
+          commands TEXT NOT NULL,
+          updatedAt TEXT NOT NULL
+        );
+      `)
+    },
+  },
+  {
+    // Subscription rate-limit usage per session (session usage meter).
+    name: '005-session-usage',
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE sessions ADD COLUMN usageUtilization REAL;
+        ALTER TABLE sessions ADD COLUMN usageResetsAt INTEGER;
+        ALTER TABLE sessions ADD COLUMN usageLimitType TEXT;
+      `)
+    },
+  },
 ]
 
 export function openDatabase(dbPath: string): AppDatabase {

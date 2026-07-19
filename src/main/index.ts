@@ -59,6 +59,15 @@ function createWindow(): void {
 
   mainWindow.once('ready-to-show', () => mainWindow?.show())
 
+  // Security hardening (Electron checklist A13/A14): the app is a self-contained
+  // SPA that never navigates or opens child windows. Deny both categorically so
+  // a stray link or injected navigation cannot escape the app shell.
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const current = mainWindow?.webContents.getURL()
+    if (url !== current) event.preventDefault()
+  })
+
   // Closing the window hides to tray; sessions keep running (FR-022a).
   mainWindow.on('close', (event) => {
     if (!quitting) {
@@ -89,6 +98,12 @@ function createTray(): void {
 }
 
 function applyContentSecurityPolicy(): void {
+  // The app needs no web permissions (camera/mic/geolocation/notifications are
+  // handled natively in the main process). Deny every renderer permission
+  // request and pre-check (Electron checklist A5).
+  session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false))
+  session.defaultSession.setPermissionCheckHandler(() => false)
+
   // Locality hardening (FR-021b): the renderer may only load itself.
   // Dev mode is exempt so Vite HMR (inline styles, ws) keeps working.
   if (process.env.ELECTRON_RENDERER_URL) return
@@ -158,7 +173,7 @@ async function main(): Promise<void> {
   }
   manager.setNoiseClassifier((event, projectId) => classifyNoise(swallowRules, event, projectId))
 
-  registerIpcHandlers({ repos, manager, broker, refreshSwallowRules })
+  registerIpcHandlers({ repos, manager, broker, refreshSwallowRules, getWindow: () => mainWindow })
   scheduleRetention(() => runRetention(db, repos))
 
   createWindow()
