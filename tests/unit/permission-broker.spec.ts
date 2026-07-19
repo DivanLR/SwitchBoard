@@ -161,7 +161,7 @@ describe('PermissionBroker lifecycle', () => {
     void h.gate('Bash', { command: 'git status' })
     await settle()
     const [first] = h.repos.requests.pending()
-    h.broker.alwaysAllow(first.id, { kind: 'command_prefix', value: 'git status' })
+    h.broker.alwaysAllow(first.id)
 
     const result = await h.gate('Bash', { command: 'git status --short' })
     expect(result.behavior).toBe('allow')
@@ -174,8 +174,8 @@ describe('PermissionBroker lifecycle', () => {
     void h.gate('Write', { file_path: 'C:\\proj\\src\\a.ts' })
     await settle()
     const [req] = h.repos.requests.pending()
-    // Even if the caller tries to widen it, the server derives from the input.
-    h.broker.alwaysAllow(req.id, { kind: 'tool_only' })
+    // Callers cannot supply a matcher at all — the server derives from the input.
+    h.broker.alwaysAllow(req.id)
 
     const rule = h.repos.standingRules.listForProject(h.projectId).at(-1)!
     expect(rule.matcher.kind).toBe('path_glob')
@@ -192,14 +192,14 @@ describe('PermissionBroker lifecycle', () => {
     void h.gate('Bash', { command: 'rm -rf /' })
     await settle()
     const [high] = h.repos.requests.pending()
-    expect(() => h.broker.alwaysAllow(high.id, { kind: 'tool_only' })).toThrow(BrokerError)
+    expect(() => h.broker.alwaysAllow(high.id)).toThrow(BrokerError)
     h.broker.decide(high.id, 'deny')
 
     void h.gate('ExitPlanMode', { plan: 'The plan text' })
     await settle()
     const [plan] = h.repos.requests.pending()
     expect(plan.type).toBe('plan_approval')
-    expect(() => h.broker.alwaysAllow(plan.id, { kind: 'tool_only' })).toThrow(BrokerError)
+    expect(() => h.broker.alwaysAllow(plan.id)).toThrow(BrokerError)
   })
 
   it('shapes plan approvals as single-click inbox items with the plan as detail (FR-007a)', async () => {

@@ -5,7 +5,7 @@
 // items shaped by FR-007a; AskUserQuestion routes to the stream, never the
 // inbox (FR-020).
 import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk'
-import type { PermissionRequest, PermissionRuleMatcher, QuestionOption } from '@shared/domain'
+import type { PermissionRequest, QuestionOption } from '@shared/domain'
 import type { InboxChangedPush } from '@shared/ipc-types'
 import { newId, nowIso, type Repositories } from '@main/store/repositories'
 import type { SessionManager } from '@main/sessions/session-manager'
@@ -382,11 +382,11 @@ export class PermissionBroker {
 
   /**
    * Approves and saves a standing rule (FR-009a); low or medium risk tools only.
-   * The matcher is DERIVED server-side from the request's real tool input
-   * (`deriveMatcher`), never taken from the caller — a renderer must not be able
-   * to widen a rule (e.g. to an unscoped tool_only) beyond the action shown.
+   * The matcher is DERIVED from the request's real tool input (`deriveMatcher`),
+   * never taken from the caller — a renderer must not be able to widen a rule
+   * (e.g. to an unscoped tool_only) beyond the action shown.
    */
-  alwaysAllow(requestId: string, _matcher?: PermissionRuleMatcher) {
+  alwaysAllow(requestId: string) {
     const request = this.repos.requests.byId(requestId)
     if (!request) throw new BrokerError('NOT_FOUND', 'Permission request not found')
     if (request.type === 'plan_approval') {

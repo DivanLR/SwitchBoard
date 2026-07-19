@@ -283,7 +283,6 @@ export interface Settings {
   /** Fixed in v1 but stored for forward compatibility (FR-021a). */
   retentionDecisionDays: number
   retentionSessionsPerProject: number
-  lastFocusedProjectId: string | null
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -300,7 +299,6 @@ export const DEFAULT_SETTINGS: Settings = {
   projectModels: {},
   retentionDecisionDays: 30,
   retentionSessionsPerProject: 2,
-  lastFocusedProjectId: null,
 }
 
 /** Composer message preserved across an application quit and offered on next session start. */

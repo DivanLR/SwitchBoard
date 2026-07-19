@@ -8,7 +8,6 @@ import type {
   PermissionRequest,
   PermissionRequestStatus,
   PermissionRule,
-  PermissionRuleMatcher,
   Project,
   QueuedTask,
   RiskClassificationRule,
@@ -127,9 +126,9 @@ export interface InvokeMap {
     res: { delivered: boolean }
   }
   'inbox.alwaysAllow': {
-    // matcher is optional and advisory only — the main process derives the real
-    // (path-scoped) matcher from the original request's tool input.
-    req: { requestId: string; matcher?: PermissionRuleMatcher }
+    // The main process derives the (path-scoped) matcher from the original
+    // request's tool input; the caller only names the request.
+    req: { requestId: string }
     res: { rule: PermissionRule }
   }
   'inbox.approveAllForProject': {

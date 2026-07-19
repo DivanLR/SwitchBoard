@@ -242,7 +242,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'inbox.pending': () => repos.requests.pending(),
     'inbox.decide': (req) => broker.decide(req.requestId, req.decision, req.confirmHighRisk ?? false),
     'inbox.alwaysAllow': (req) => {
-      const { rule } = broker.alwaysAllow(req.requestId, req.matcher)
+      const { rule } = broker.alwaysAllow(req.requestId)
       return { rule }
     },
     'inbox.approveAllForProject': (req) => broker.approveAllForProject(req.projectId),

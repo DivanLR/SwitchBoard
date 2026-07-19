@@ -30,4 +30,25 @@ describe('registerProject folder-access seeding', () => {
     expect(matchesRule(readRule, 'Read', { file_path: join(folder, 'src', 'a.ts') })).toBe(true)
     expect(matchesRule(readRule, 'Read', { file_path: 'C:\\elsewhere\\secret.txt' })).toBe(false)
   })
+
+  it('re-adding a removed folder restores it instead of hitting the UNIQUE constraint', () => {
+    const db = openDatabase(':memory:')
+    const repos = createRepositories(db)
+    const folder = mkdtempSync(join(tmpdir(), 'fa-'))
+    dirs.push(folder)
+
+    const first = registerProject(repos, { path: folder })
+    repos.projects.archive(first.id)
+    expect(repos.projects.listActive()).toHaveLength(0)
+
+    // Previously threw "UNIQUE constraint failed: projects.path".
+    const again = registerProject(repos, { path: folder, name: 'renamed' })
+    expect(again.id).toBe(first.id)
+    expect(again.archivedAt).toBeNull()
+    expect(again.name).toBe('renamed')
+    expect(repos.projects.listActive()).toHaveLength(1)
+
+    // An active duplicate is still rejected.
+    expect(() => registerProject(repos, { path: folder })).toThrowError(/already registered/)
+  })
 })

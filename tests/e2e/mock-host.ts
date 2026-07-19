@@ -202,7 +202,6 @@ export function installMockHost(scenario: MockScenario): void {
     projectModels: {},
     retentionDecisionDays: 30,
     retentionSessionsPerProject: 2,
-    lastFocusedProjectId: null,
   }
 
   const listeners = new Map<string, Set<(payload: unknown) => void>>()
@@ -360,8 +359,12 @@ export function installMockHost(scenario: MockScenario): void {
     'projects.register': (req) => {
       const path = String(req.path)
       if (path.includes('missing')) throw { code: 'INVALID_PATH', message: 'The folder does not exist' }
-      if (projects.some((p) => p.path === path)) {
-        throw { code: 'DUPLICATE', message: 'The folder is already registered' }
+      const existing = projects.find((p) => p.path === path)
+      if (existing) {
+        // Mirrors the real host: an archived row is restored, an active one is a duplicate.
+        if (!existing.archivedAt) throw { code: 'DUPLICATE', message: 'The folder is already registered' }
+        existing.archivedAt = null
+        return { ...existing, session: undefined }
       }
       const project = {
         id: nextId('proj'),
@@ -534,7 +537,8 @@ export function installMockHost(scenario: MockScenario): void {
         id: nextId('rule'),
         projectId: request.projectId,
         toolName: request.toolName ?? '',
-        matcher: req.matcher,
+        // The real host derives the matcher server-side from the tool input.
+        matcher: { kind: 'tool_only' },
         createdFromRequestId: request.id,
         createdAt: now(),
         revokedAt: null,

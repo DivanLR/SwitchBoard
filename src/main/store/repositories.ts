@@ -138,6 +138,11 @@ export class ProjectsRepo {
     this.db.prepare('UPDATE projects SET archivedAt = ? WHERE id = ?').run(nowIso(), id)
   }
 
+  /** Restore a previously removed project (re-adding the same folder). */
+  unarchive(id: string): void {
+    this.db.prepare('UPDATE projects SET archivedAt = NULL WHERE id = ?').run(id)
+  }
+
   rename(id: string, name: string): void {
     this.db.prepare('UPDATE projects SET name = ? WHERE id = ?').run(name, id)
   }
@@ -245,11 +250,6 @@ export class EventsRepo {
       .run({ ...event, payload: JSON.stringify(event.payload) })
   }
 
-  byId(id: string): SessionEvent | undefined {
-    const row = this.db.prepare('SELECT * FROM events WHERE id = ?').get(id) as EventRow | undefined
-    return row ? toEvent(row) : undefined
-  }
-
   /**
    * Contract-sanctioned in-place update (contracts/session-events.md): marker
    * and question status changes, tool result pairing, and final partial text.
@@ -348,13 +348,6 @@ export class RequestsRepo {
     return rows.map(toRequest)
   }
 
-  pendingForSession(sessionId: string): PermissionRequest[] {
-    const rows = this.db
-      .prepare("SELECT * FROM permission_requests WHERE status = 'pending' AND sessionId = ? ORDER BY createdAt")
-      .all(sessionId) as RequestRow[]
-    return rows.map(toRequest)
-  }
-
   resolve(id: string, status: DecisionOutcome, deliveryFailed = false): void {
     this.db
       .prepare('UPDATE permission_requests SET status = ?, resolvedAt = ?, deliveryFailed = ? WHERE id = ?')
@@ -404,13 +397,6 @@ export class StandingRulesRepo {
       )
       .run({ ...rule, matcher: JSON.stringify(rule.matcher) })
     return rule
-  }
-
-  byId(id: string): PermissionRule | undefined {
-    const row = this.db.prepare('SELECT * FROM permission_rules WHERE id = ?').get(id) as
-      | (Omit<PermissionRule, 'matcher'> & { matcher: string })
-      | undefined
-    return row ? { ...row, matcher: JSON.parse(row.matcher) } : undefined
   }
 
   listForProject(projectId: string, includeRevoked = false): PermissionRule[] {

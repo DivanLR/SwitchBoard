@@ -28,8 +28,17 @@ export function registerProject(
     throw new DiscoveryError('INVALID_PATH', 'The folder does not exist')
   }
   const existing = repos.projects.byPath(path)
-  if (existing && existing.archivedAt === null) {
-    throw new DiscoveryError('DUPLICATE', 'The folder is already registered')
+  if (existing) {
+    if (existing.archivedAt === null) {
+      throw new DiscoveryError('DUPLICATE', 'The folder is already registered')
+    }
+    // Re-adding a previously removed folder: restore the archived row (the
+    // path is UNIQUE, so inserting would fail) — the project keeps its id,
+    // history, and standing rules.
+    repos.projects.unarchive(existing.id)
+    const name = input.name?.trim()
+    if (name) repos.projects.rename(existing.id, name)
+    return { ...existing, archivedAt: null, name: name || existing.name }
   }
   const project = repos.projects.insert({
     name: input.name?.trim() || basename(path),

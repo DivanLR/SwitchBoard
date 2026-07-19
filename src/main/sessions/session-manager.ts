@@ -297,10 +297,6 @@ export class SessionManager {
     return [...this.hosted.values()].some((entry) => entry.session.isMidTask)
   }
 
-  liveSession(sessionId: string): HostedSession | undefined {
-    return this.hosted.get(sessionId)?.session
-  }
-
   liveSessionRow(sessionId: string): Session | undefined {
     const entry = this.hosted.get(sessionId)
     return entry ? { ...entry.row } : undefined
