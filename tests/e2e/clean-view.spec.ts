@@ -1,0 +1,77 @@
+// T040: clean view collapse, in-place expansion, raw completeness, rule
+// editing, and the error exemption (quickstart V3).
+import { expect, test } from '@playwright/test'
+import { installMockHost, twoProjectScenario } from './mock-host'
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(installMockHost, twoProjectScenario())
+  await page.goto('/')
+  await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
+  await page.getByTestId('sidebar-project-alpha').click()
+})
+
+function emitBuildNoise(page: import('@playwright/test').Page, count: number): Promise<void> {
+  return page.evaluate((n) => {
+    const lines = Array.from({ length: n }, (_, i) => `Compiling module ${i} of ${n}`)
+    window.__mock.emitLines('s-alpha', lines)
+  }, count)
+}
+
+test('heavy build output collapses into a labelled swallowed block (FR-015)', async ({ page }) => {
+  await emitBuildNoise(page, 30)
+  await page.evaluate(() =>
+    window.__mock.emitEvent('s-alpha', 'assistant_text', { text: 'Build finished.', partial: false }),
+  )
+
+  const block = page.getByTestId('swallowed-block')
+  await expect(block).toHaveCount(1)
+  await expect(block).toContainText('swallowed 30 lines · build output')
+  // The narrative stays visible.
+  await expect(page.getByTestId('stream-event-assistant_text')).toContainText('Build finished.')
+  // Clean view displays far fewer rows than the raw output (SC-005: >= 60% reduction).
+  await expect(page.getByTestId('stream').getByTestId('stream-event-raw_output')).toHaveCount(0)
+})
+
+test('a swallowed block expands in place (FR-016)', async ({ page }) => {
+  await emitBuildNoise(page, 12)
+  const block = page.getByTestId('swallowed-block')
+  await block.locator('.toggle').click()
+  await expect(block).toContainText('Compiling module 3 of 12')
+})
+
+test('the raw view retains 100% of the output (FR-018)', async ({ page }) => {
+  await emitBuildNoise(page, 25)
+  await page.getByTestId('view-raw').click()
+  await expect(page.getByTestId('raw-line')).toHaveCount(25)
+  await expect(page.getByTestId('swallowed-block')).toHaveCount(0)
+
+  await page.getByTestId('view-clean').click()
+  await expect(page.getByTestId('swallowed-block')).toHaveCount(1)
+})
+
+test('errors are never swallowed (FR-017)', async ({ page }) => {
+  await emitBuildNoise(page, 10)
+  await page.evaluate(() =>
+    window.__mock.emitEvent('s-alpha', 'error', { text: 'Compiling failed: syntax error', fatal: false }),
+  )
+  await emitBuildNoise(page, 10)
+
+  // The error splits the noise into two blocks and stays prominent.
+  await expect(page.getByTestId('error-event')).toBeVisible()
+  await expect(page.getByTestId('swallowed-block')).toHaveCount(2)
+})
+
+test('disabling a swallow rule changes behaviour (FR-015a)', async ({ page }) => {
+  await emitBuildNoise(page, 5)
+  await expect(page.getByTestId('swallowed-block')).toHaveCount(1)
+
+  await page.getByTestId('open-rules').click()
+  await page.getByTestId('tab-swallow').click()
+  await page.getByTestId('swallow-enabled-build output').uncheck()
+  await page.getByTestId('swallow-save').click()
+  await page.getByTestId('rule-editors').getByRole('button', { name: 'close' }).click()
+
+  await emitBuildNoise(page, 5)
+  // New lines are no longer classified; they render as plain raw output.
+  await expect(page.getByTestId('stream').getByTestId('stream-event-raw_output')).toHaveCount(5)
+})

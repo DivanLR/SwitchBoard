@@ -1,0 +1,423 @@
+/* Switchboard theme — 1:1 with the supplied Switchboard.html design reference. */
+@import './assets/fonts.css';
+
+:root {
+  --bg: #0d0e10;
+  --bg-panel: #101114;
+  --bg-card: #15171b;
+  --bg-card-alt: #14161a;
+  --bg-code: #0a0b0d;
+  --bg-hover: #15171b;
+  --bg-active: #1c2026;
+  --bg-seg: #232830;
+  --bg-chip: #1a1d21;
+  --border: #1d2025;
+  --border-card: #22252b;
+  --border-card-alt: #1f2227;
+  --border-soft: #21242a;
+  --border-code: #1b1e23;
+  --border-strong: #2a2e35;
+  --border-seg: #24272d;
+  --border-hist: #17191d;
+  --text-bright: #e8ebf0;
+  --text-strong: #e7eaef;
+  --text-title: #e2e5ea;
+  --text: #d7dae0;
+  --text-body: #c6cad1;
+  --text-name: #d3d7dd;
+  --text-prompt: #cdd1d8;
+  --text-mid: #9aa0ab;
+  --text-meta: #8f95a0;
+  --text-tab: #7d838e;
+  --text-noise: #6a707b;
+  --text-label: #5f6570;
+  --text-faint: #565c66;
+  --text-ghost: #43484f;
+  --green: #3ecf9a;
+  --green-hover: #5adfae;
+  --green-ink: #0a0d0c;
+  --blue: #6ea8e8;
+  --amber: #e8b45a;
+  --amber-hover: #f2c574;
+  --amber-ink: #201505;
+  --red: #e06c55;
+  --detail: #8fa8bd;
+  --sans: 'IBM Plex Sans', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 13px;
+  overflow: hidden;
+}
+
+a {
+  color: var(--green);
+}
+
+a:hover {
+  color: #74e6bd;
+}
+
+::selection {
+  background: rgba(62, 207, 154, 0.28);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #24272d;
+  border-radius: 6px;
+  border: 2px solid #0d0e10;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+input::placeholder {
+  color: var(--text-faint);
+}
+
+input,
+textarea,
+select {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-code);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: 1px solid var(--green);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* Shared button idioms from the reference */
+.btn-solid {
+  background: var(--green);
+  color: var(--green-ink);
+  font-weight: 600;
+  font-size: 11.5px;
+  font-family: var(--mono);
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.btn-solid:hover {
+  background: var(--green-hover);
+}
+
+.btn-armed {
+  background: var(--amber);
+  color: var(--amber-ink);
+  font-weight: 600;
+  font-size: 11.5px;
+  font-family: var(--mono);
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+  animation: sbIn 0.2s ease;
+}
+
+.btn-armed:hover {
+  background: var(--amber-hover);
+}
+
+.btn-outline {
+  color: var(--text-mid);
+  border: 1px solid var(--border-strong);
+  font-size: 11.5px;
+  font-family: var(--mono);
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+  background: transparent;
+}
+
+.btn-outline:hover {
+  border-color: rgba(224, 108, 85, 0.5);
+  color: var(--red);
+}
+
+.btn-quiet {
+  color: var(--text-mid);
+  border: 1px solid var(--border-strong);
+  font-size: 11.5px;
+  font-family: var(--mono);
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+  background: transparent;
+}
+
+.btn-quiet:hover {
+  border-color: var(--green);
+  color: var(--text-strong);
+}
+
+.link-green {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--green);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.link-green:hover {
+  text-decoration: underline;
+}
+
+.mono {
+  font-family: var(--mono);
+}
+
+.dim {
+  color: var(--text-mid);
+}
+
+.faint {
+  color: var(--text-faint);
+}
+
+/* Status pills (session header) */
+.pill {
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  padding: 2px 10px;
+  border-radius: 99px;
+}
+
+.pill.working {
+  color: var(--blue);
+  background: rgba(110, 168, 232, 0.1);
+  border: 1px solid rgba(110, 168, 232, 0.3);
+}
+
+.pill.needs_you {
+  color: var(--amber);
+  background: rgba(232, 180, 90, 0.1);
+  border: 1px solid rgba(232, 180, 90, 0.35);
+}
+
+.pill.done {
+  color: var(--green);
+  background: rgba(62, 207, 154, 0.08);
+  border: 1px solid rgba(62, 207, 154, 0.32);
+}
+
+.pill.error,
+.pill.ended {
+  color: var(--red);
+  background: rgba(224, 108, 85, 0.09);
+  border: 1px solid rgba(224, 108, 85, 0.35);
+}
+
+.pill.ended {
+  color: var(--text-tab);
+  background: transparent;
+  border: 1px solid var(--border-strong);
+}
+
+/* Status dots (sidebar and inbox groups) */
+.dot {
+  width: 8px;
+  min-width: 8px;
+  height: 8px;
+  border-radius: 99px;
+  display: inline-block;
+}
+
+.dot.working {
+  background: var(--blue);
+  animation: sbFade 2.2s ease infinite;
+}
+
+.dot.needs_you {
+  background: var(--amber);
+  animation: sbPulse 1.8s ease infinite;
+}
+
+.dot.done {
+  background: var(--green);
+}
+
+.dot.error {
+  background: var(--red);
+}
+
+.dot.ended {
+  background: var(--text-ghost);
+}
+
+/* Risk chips (inbox cards) */
+.chip-risk {
+  font-family: var(--mono);
+  font-size: 10px;
+  border-radius: 4px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+.chip-risk.low {
+  color: var(--text-tab);
+  border: 1px solid var(--border-strong);
+}
+
+.chip-risk.medium {
+  color: var(--amber);
+  border: 1px solid rgba(232, 180, 90, 0.4);
+}
+
+.chip-risk.high {
+  color: var(--red);
+  border: 1px solid rgba(224, 108, 85, 0.45);
+  background: rgba(224, 108, 85, 0.07);
+}
+
+.chip-risk.plan {
+  color: var(--blue);
+  border: 1px solid rgba(110, 168, 232, 0.4);
+}
+
+/* Stream marker chips */
+.chip-marker {
+  border-radius: 4px;
+  padding: 1px 7px;
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.chip-marker.approved,
+.chip-marker.rule_approved {
+  color: var(--green);
+  border: 1px solid rgba(62, 207, 154, 0.35);
+  background: rgba(62, 207, 154, 0.07);
+}
+
+.chip-marker.denied {
+  color: var(--red);
+  border: 1px solid rgba(224, 108, 85, 0.4);
+  background: rgba(224, 108, 85, 0.07);
+}
+
+.chip-marker.pending {
+  color: var(--amber);
+  border: 1px solid rgba(232, 180, 90, 0.4);
+  background: rgba(232, 180, 90, 0.07);
+}
+
+.chip-marker.expired {
+  color: var(--text-faint);
+  border: 1px solid var(--border-strong);
+}
+
+/* Amber count badge (sidebar rows, inbox tab) */
+.badge-count {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--amber);
+  background: rgba(232, 180, 90, 0.13);
+  border: 1px solid rgba(232, 180, 90, 0.35);
+  border-radius: 99px;
+  padding: 0 6px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+/* Overlay dialogs (registration, rules, settings) */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+}
+
+.dialog {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 16px;
+}
+
+@keyframes sbPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(232, 180, 90, 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 7px rgba(232, 180, 90, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(232, 180, 90, 0);
+  }
+}
+
+@keyframes sbBlink {
+  0%,
+  55% {
+    opacity: 1;
+  }
+  56%,
+  100% {
+    opacity: 0.15;
+  }
+}
+
+@keyframes sbFade {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes sbIn {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

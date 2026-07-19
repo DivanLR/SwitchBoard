@@ -1,0 +1,39 @@
+# --- Dependencies ---
+node_modules/
+
+# --- Build output and generated artifacts (temporary) ---
+out/
+dist/
+.vite/
+*.tsbuildinfo
+
+# --- Packaged executables / releases (published to GitHub manually) ---
+release/
+
+# --- Test and coverage artifacts (temporary) ---
+coverage/
+test-results/
+playwright-report/
+
+# --- Logs and environment ---
+*.log
+.env
+.env.*
+
+# --- OS and editor cruft ---
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+.vscode/
+.idea/
+
+# --- AI assistant tooling, plugins, and instruction files (not the base project) ---
+.claude/
+.specify/
+specs/
+CLAUDE.md
+AGENTS.md
+.cursorrules
+.ponytail
+.ponytail/

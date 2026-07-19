@@ -1,0 +1,52 @@
+appId: com.haefelesoftware.switchboard
+productName: Switchboard
+copyright: Copyright © 2026 Haefele Software
+
+directories:
+  output: release
+  buildResources: build
+
+# Keep the default inclusion (production dependencies are detected and bundled
+# automatically) and only exclude source and tooling that the runtime never loads.
+files:
+  - out/**
+  - '!**/*.map'
+  - '!**/{.eslintrc.cjs,.prettierrc,.prettierignore,eslint.config.mjs}'
+  - '!**/{tsconfig*.json,vite.config.ts,electron.vite.config.ts,vitest.config.ts,playwright.config.ts}'
+  - '!**/{.env,.env.*,.npmrc}'
+  - '!src/**'
+  - '!specs/**'
+  - '!tests/**'
+  - '!scripts/**'
+  - '!docs/**'
+
+# better-sqlite3 is a native module: its .node binary cannot be loaded from
+# inside the asar archive, so unpack it. The binary must already be built for
+# the Electron ABI (the package script runs rebuild:electron first).
+asarUnpack:
+  - '**/node_modules/better-sqlite3/**'
+  # The Agent SDK spawns a bundled standalone executable; it and its sibling
+  # files must be real on-disk files, not inside the asar archive.
+  - '**/node_modules/@anthropic-ai/**'
+
+# Do not let electron-builder rebuild native modules from source; use the
+# prebuilt Electron-ABI binary that rebuild:electron placed in the tree.
+npmRebuild: false
+
+win:
+  target:
+    - target: nsis
+    - target: portable
+  icon: build/icon.ico
+  # The application is not code-signed; Windows SmartScreen will warn on first
+  # run until a signing certificate is configured.
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  artifactName: ${productName}-Setup-${version}.${ext}
+  shortcutName: Switchboard
+
+portable:
+  artifactName: ${productName}-${version}-portable.${ext}
