@@ -2,7 +2,7 @@
 // Sidebar — 1:1 with the design reference: logo, PROJECTS list with animated
 // status dots, mono names, per-project pending badges, branch + timer line,
 // and the running / needs-you / cost-today stats card (FR-003/004/005).
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { isIpcError } from '@shared/ipc-types'
 import { MODEL_CHOICES } from '@shared/domain'
 import { useProjectsStore } from '@renderer/stores/projects'
@@ -108,11 +108,15 @@ const usageReset = computed(() => {
 const ctx = ref<{ id: string; name: string; x: number; y: number } | null>(null)
 const renamingId = ref<string | null>(null)
 const renameVal = ref('')
-const renameInput = ref<HTMLInputElement | null>(null)
 
-watch(renamingId, (id) => {
-  if (id) void nextTick(() => renameInput.value?.focus())
-})
+// The rename input only renders (v-if) for the row being renamed, so this
+// function ref receives its element exactly once, on mount — focus it then.
+function focusOnMount(el: unknown): void {
+  if (el instanceof HTMLInputElement) {
+    el.focus()
+    el.select()
+  }
+}
 
 function openCtx(item: (typeof projects.items)[number], event: MouseEvent): void {
   ctx.value = { id: item.id, name: item.name, x: event.clientX, y: event.clientY }
@@ -185,7 +189,7 @@ async function confirmRemoveNow(): Promise<void> {
   <aside class="sidebar">
     <div class="brand">
       <div class="logo mono"><span style="color: var(--green)">▣</span> switchboard</div>
-      <div class="tagline mono">claude code sessions · one inbox</div>
+      <div class="tagline mono">Claude Code sessions · one inbox</div>
     </div>
 
     <div class="section-row">
@@ -214,11 +218,11 @@ async function confirmRemoveNow(): Promise<void> {
               :class="statusOf(item)"
               :data-testid="`status-badge-${item.name}`"
               :data-status="statusOf(item)"
-              :title="statusOf(item) === 'needs_you' ? 'needs you' : statusOf(item)"
+              :title="statusOf(item) === 'needs_you' ? 'Needs you' : statusOf(item)"
             ></span>
             <input
               v-if="renamingId === item.id"
-              ref="renameInput"
+              :ref="focusOnMount"
               v-model="renameVal"
               class="rename-input mono"
               :data-testid="`rename-input-${item.name}`"
@@ -258,36 +262,36 @@ async function confirmRemoveNow(): Promise<void> {
         </div>
       </div>
       <div v-if="projects.loaded && projects.items.length === 0" class="empty mono">
-        no projects yet — press + to add one
+        No projects yet — press + to add one.
       </div>
     </div>
 
     <div class="settings-row" data-testid="open-settings" @click="emit('open-settings')">
       <span class="gear mono">⚙</span>
-      <span class="settings-label mono">settings</span>
+      <span class="settings-label mono">Settings</span>
       <span class="model-summary mono" data-testid="model-summary">{{ modelSummary }}</span>
     </div>
 
     <div class="stats">
       <div class="stat mono" data-testid="counter-running">
-        <span>running</span><span class="val" data-testid="counter-running-value">{{ projects.counters.running }}</span>
+        <span>Running</span><span class="val" data-testid="counter-running-value">{{ projects.counters.running }}</span>
       </div>
       <div class="stat mono" data-testid="counter-needsyou">
-        <span>needs you</span
+        <span>Needs you</span
         ><span class="val amber" data-testid="counter-needsyou-value">{{ projects.counters.needsYou }}</span>
       </div>
       <div class="stat mono" data-testid="counter-cost">
-        <span>cost today</span><span class="val" data-testid="counter-cost-value">{{ costLabel }}</span>
+        <span>Cost today</span><span class="val" data-testid="counter-cost-value">{{ costLabel }}</span>
       </div>
       <div class="stat mono" data-testid="counter-tokens">
-        <span>tokens today</span
+        <span>Tokens today</span
         ><span class="val" data-testid="counter-tokens-value">{{ tokensLabel }}</span>
       </div>
     </div>
 
     <div v-if="usagePct !== null" class="usage-card" data-testid="usage-meter">
       <div class="usage-head mono">
-        <span>session usage</span>
+        <span>Session usage</span>
         <span :style="{ color: usageColor }">{{ usagePct }}% of {{ usageLimitLabel }}</span>
       </div>
       <div class="usage-bar">
@@ -314,10 +318,10 @@ async function confirmRemoveNow(): Promise<void> {
     >
       <div class="ctx-name mono">{{ ctx.name }}</div>
       <button class="ctx-item mono" data-testid="ctx-rename" @click="startRename">
-        <span style="color: var(--green)">✎</span>rename
+        <span style="color: var(--green)">✎</span>Rename
       </button>
       <button class="ctx-item mono danger" data-testid="ctx-remove" @click="ctxDelete">
-        <span>🗑</span>remove from list
+        <span>🗑</span>Remove from list
       </button>
     </div>
   </div>
@@ -335,14 +339,14 @@ async function confirmRemoveNow(): Promise<void> {
         <p v-if="removeError" class="rd-error mono" data-testid="remove-error">{{ removeError }}</p>
       </div>
       <div class="rd-actions">
-        <button class="btn-outline" data-testid="remove-cancel" @click="cancelRemove">cancel</button>
+        <button class="btn-outline" data-testid="remove-cancel" @click="cancelRemove">Cancel</button>
         <button
           class="btn-solid danger-solid"
           data-testid="remove-confirm"
           :disabled="busy"
           @click="confirmRemoveNow"
         >
-          remove
+          Remove
         </button>
       </div>
     </div>

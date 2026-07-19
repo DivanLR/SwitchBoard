@@ -10,7 +10,7 @@ import type { InboxChangedPush } from '@shared/ipc-types'
 import { newId, nowIso, type Repositories } from '@main/store/repositories'
 import type { SessionManager } from '@main/sessions/session-manager'
 import { classifyRisk } from './risk-rules'
-import { evaluateStandingRules } from './standing-rules'
+import { deriveMatcher, evaluateStandingRules } from './standing-rules'
 
 export class BrokerError extends Error {
   constructor(
@@ -73,42 +73,72 @@ interface CanUseToolContext {
   }
 }
 
+const str = (v: unknown): string | null => (typeof v === 'string' && v.length > 0 ? v : null)
+
+/** File name (last path segment) for a concise title. */
+function baseName(path: string): string {
+  const seg = path.split(/[/\\]/).filter(Boolean)
+  return seg[seg.length - 1] ?? path
+}
+
+/**
+ * Produces a clear, human-first title, a plain-language explanation of what the
+ * action would do, and the underlying detail (exact command / file / input).
+ * Titles are full (never truncated) — the inbox card wraps them.
+ */
 function describeTool(toolName: string, input: Record<string, unknown>): {
   title: string
   explanation: string
   detail: string
 } {
-  const command = typeof input.command === 'string' ? input.command : null
-  const path =
-    typeof input.file_path === 'string'
-      ? input.file_path
-      : typeof input.path === 'string'
-        ? input.path
-        : null
+  const command = str(input.command)
+  const path = str(input.file_path) ?? str(input.path) ?? str(input.notebook_path)
+  const url = str(input.url)
+
   if (toolName === 'Bash' && command) {
     return {
-      title: `Run: ${command.length > 60 ? `${command.slice(0, 60)}…` : command}`,
-      explanation: 'The session wants to run a shell command in the project folder.',
+      title: `Run a command: ${command}`,
+      explanation: 'Claude wants to run this shell command in the project folder.',
       detail: command,
     }
   }
-  if ((toolName === 'Write' || toolName === 'Edit' || toolName === 'NotebookEdit') && path) {
+  if (toolName === 'Write' && path) {
     return {
-      title: `${toolName === 'Write' ? 'Write' : 'Edit'} ${path}`,
-      explanation: 'The session wants to modify a file in the project.',
-      detail: JSON.stringify(input, null, 2),
+      title: `Create or overwrite ${baseName(path)}`,
+      explanation: `Claude wants to write the file ${path}.`,
+      detail: str(input.content) ? `${path}\n\n${String(input.content).slice(0, 4000)}` : path,
+    }
+  }
+  if ((toolName === 'Edit' || toolName === 'NotebookEdit') && path) {
+    const oldStr = str(input.old_string)
+    const newStr = str(input.new_string)
+    return {
+      title: `Edit ${baseName(path)}`,
+      explanation: `Claude wants to change the file ${path}.`,
+      detail:
+        oldStr && newStr
+          ? `${path}\n\n- ${oldStr.slice(0, 1500)}\n+ ${newStr.slice(0, 1500)}`
+          : path,
     }
   }
   if (toolName === 'Read' && path) {
     return {
-      title: `Read ${path}`,
-      explanation: 'The session wants to read a file.',
+      title: `Read ${baseName(path)}`,
+      explanation: `Claude wants to read the file ${path}.`,
       detail: path,
     }
   }
+  if ((toolName === 'WebFetch' || toolName === 'WebSearch') && (url || str(input.query))) {
+    const target = url ?? str(input.query) ?? ''
+    return {
+      title: toolName === 'WebFetch' ? `Fetch a web page` : `Search the web`,
+      explanation: `Claude wants to reach the internet: ${target}`,
+      detail: target,
+    }
+  }
   return {
-    title: `${toolName}`,
-    explanation: `The session wants to use the ${toolName} tool.`,
+    title: `Use the ${toolName} tool`,
+    explanation: `Claude wants to use the ${toolName} tool.`,
     detail: JSON.stringify(input, null, 2),
   }
 }
@@ -350,8 +380,13 @@ export class PermissionBroker {
     return { delivered: true }
   }
 
-  /** Approves and saves a standing rule (FR-009a); low or medium risk tools only. */
-  alwaysAllow(requestId: string, matcher: PermissionRuleMatcher) {
+  /**
+   * Approves and saves a standing rule (FR-009a); low or medium risk tools only.
+   * The matcher is DERIVED server-side from the request's real tool input
+   * (`deriveMatcher`), never taken from the caller — a renderer must not be able
+   * to widen a rule (e.g. to an unscoped tool_only) beyond the action shown.
+   */
+  alwaysAllow(requestId: string, _matcher?: PermissionRuleMatcher) {
     const request = this.repos.requests.byId(requestId)
     if (!request) throw new BrokerError('NOT_FOUND', 'Permission request not found')
     if (request.type === 'plan_approval') {
@@ -363,6 +398,8 @@ export class PermissionBroker {
     if (request.status !== 'pending') {
       throw new BrokerError('NOT_FOUND', 'The request has already been decided')
     }
+    const entry = this.pending.get(requestId)
+    const matcher = deriveMatcher(request.toolName ?? '', entry?.input ?? {})
     const rule = this.repos.standingRules.insert({
       projectId: request.projectId,
       toolName: request.toolName ?? '',

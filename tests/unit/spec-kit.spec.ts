@@ -79,6 +79,34 @@ describe('readSpecKitState + readSpecDetail', () => {
     expect(detail!.clarifications).toEqual(['which X?'])
   })
 
+  it('parses already-answered clarifications from the ## Clarifications section', () => {
+    const p = makeProject()
+    mkdirSync(join(p, '.specify'))
+    const specDir = join(p, 'specs', '003-clar')
+    mkdirSync(specDir, { recursive: true })
+    writeFileSync(
+      join(specDir, 'spec.md'),
+      [
+        '# Feature Specification: Clar',
+        '',
+        '## Clarifications',
+        '',
+        '### Session 2026-07-19',
+        '',
+        '- Q: How should it connect? → A: In-app hosting only.',
+        '- Q: One session per project? → A: Yes, exactly one.',
+        '',
+        '## Requirements',
+        '- FR-001: MUST connect',
+      ].join('\n'),
+    )
+    const detail = readSpecDetail(p, '003-clar')
+    expect(detail!.resolvedClarifications).toEqual([
+      { question: 'How should it connect?', answer: 'In-app hosting only.' },
+      { question: 'One session per project?', answer: 'Yes, exactly one.' },
+    ])
+  })
+
   it('reports complete when all tasks are done', () => {
     const p = makeProject()
     mkdirSync(join(p, '.specify'))

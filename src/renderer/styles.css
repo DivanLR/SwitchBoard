@@ -294,6 +294,7 @@ button {
   border-radius: 4px;
   padding: 1px 6px;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .chip-risk.low {

@@ -3,6 +3,7 @@
 // ✦ SUMMARY cards, approval marker rows, ✗ ERROR cards, ✓ result lines, and
 // mono tool/raw lines (FR-014).
 import { computed } from 'vue'
+import MarkdownText from '@renderer/components/MarkdownText.vue'
 import type {
   AssistantTextPayload,
   ErrorPayload,
@@ -15,10 +16,18 @@ import type {
   ToolActivityPayload,
 } from '@shared/domain'
 
-const props = defineProps<{ event: SessionEvent }>()
+const props = defineProps<{ event: SessionEvent; stamps?: boolean }>()
 const emit = defineEmits<{ (e: 'open-inbox', requestId: string): void }>()
 
 const kind = computed(() => props.event.kind)
+
+/** HH:MM stamp shown when the Timestamps setting is on. */
+const stamp = computed(() => {
+  if (!props.stamps) return null
+  const d = new Date(props.event.createdAt)
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`
+})
 
 // Per-kind typed accessors: narrow on `kind` once here rather than casting the
 // payload inline throughout the template.
@@ -61,16 +70,17 @@ function resultLabel(payload: ResultPayload): string {
 const markerStatus = computed(() => marker.value?.status ?? null)
 
 const markerChipLabel: Record<string, string> = {
-  pending: 'needs approval',
-  approved: 'approved',
-  denied: 'denied',
-  expired: 'expired',
-  rule_approved: 'auto-approved',
+  pending: 'Needs approval',
+  approved: 'Approved',
+  denied: 'Denied',
+  expired: 'Expired',
+  rule_approved: 'Auto-approved',
 }
 </script>
 
 <template>
-  <div class="event" :data-testid="`stream-event-${kind}`" :data-event-id="event.id">
+  <div class="event" :class="{ stamped: stamp }" :data-testid="`stream-event-${kind}`" :data-event-id="event.id">
+    <span v-if="stamp" class="stamp mono" data-testid="event-stamp">{{ stamp }}</span>
     <!-- ❯ prompt -->
     <div v-if="prompt" class="prompt mono">
       <span class="caret">❯</span>
@@ -78,16 +88,16 @@ const markerChipLabel: Record<string, string> = {
       <span v-if="prompt.pending" class="pending mono" data-testid="prompt-pending"> queued </span>
     </div>
 
-    <!-- assistant narrative -->
+    <!-- assistant narrative (Markdown-formatted) -->
     <div v-else-if="assistant" class="assistant">
-      {{ assistant.text
-      }}<span v-if="assistant.partial" class="blink" style="color: var(--green)">▊</span>
+      <MarkdownText :text="assistant.text" />
+      <span v-if="assistant.partial" class="blink" style="color: var(--green)">▊</span>
     </div>
 
     <!-- ✦ SUMMARY card -->
     <div v-else-if="summary" class="summary-card">
       <div class="card-label mono"><span style="color: var(--green)">✦</span> SUMMARY</div>
-      <div class="card-body">{{ summary.text }}</div>
+      <div class="card-body"><MarkdownText :text="summary.text" /></div>
     </div>
 
     <!-- tool activity (unswallowed) -->
@@ -105,7 +115,7 @@ const markerChipLabel: Record<string, string> = {
       <span class="chip-marker" :class="markerStatus ?? ''">
         {{
           kind === 'plan_marker' && markerStatus === 'pending'
-            ? 'plan approval'
+            ? 'Plan approval'
             : markerChipLabel[markerStatus ?? '']
         }}
       </span>
@@ -116,7 +126,7 @@ const markerChipLabel: Record<string, string> = {
         data-testid="review-in-inbox"
         @click="emit('open-inbox', marker.requestId)"
       >
-        review in inbox →
+        Review in inbox →
       </button>
     </div>
 
@@ -139,6 +149,20 @@ const markerChipLabel: Record<string, string> = {
 <style scoped>
 .event {
   margin-bottom: 13px;
+}
+
+/* Timestamps setting: dim HH:MM gutter to the left of the event. */
+.event.stamped {
+  display: grid;
+  grid-template-columns: 38px 1fr;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.stamp {
+  font-size: 10px;
+  color: var(--text-ghost);
+  white-space: nowrap;
 }
 
 .prompt {
@@ -170,9 +194,6 @@ const markerChipLabel: Record<string, string> = {
   font-size: 13px;
   line-height: 1.55;
   color: var(--text-body);
-  text-wrap: pretty;
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 
 .blink {
@@ -197,9 +218,6 @@ const markerChipLabel: Record<string, string> = {
   font-size: 13px;
   line-height: 1.55;
   color: var(--text-body);
-  text-wrap: pretty;
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 
 .tool {

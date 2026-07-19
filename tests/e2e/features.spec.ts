@@ -10,7 +10,7 @@ test.beforeEach(async ({ page }) => {
 })
 
 test('tokens today appears and increases after a completed turn', async ({ page }) => {
-  await expect(page.getByTestId('counter-tokens')).toContainText('tokens today')
+  await expect(page.getByTestId('counter-tokens')).toContainText('Tokens today')
   await expect(page.getByTestId('counter-tokens-value')).toHaveText('0')
   await page.evaluate(() => window.__mock.completeTurn('s-alpha'))
   await expect(page.getByTestId('counter-tokens-value')).not.toHaveText('0')
@@ -25,8 +25,29 @@ test('settings exposes planning and work model cards', async ({ page }) => {
   await panel.getByTestId('work-model-claude-opus-4-8').click()
   await expect(panel.getByTestId('work-model-claude-opus-4-8')).toHaveClass(/sel/)
   // The sidebar model summary reflects the choice.
-  await panel.getByRole('button', { name: 'close' }).click()
+  await panel.getByTestId('settings-done').click()
   await expect(page.getByTestId('model-summary')).toContainText('Opus')
+})
+
+test('settings Terminals tab explains terse mode and its levels', async ({ page }) => {
+  await page.getByTestId('open-settings').click()
+  const panel = page.getByTestId('settings-panel')
+  await panel.getByTestId('settings-tab-term').click()
+  await expect(panel.getByTestId('setting-terse-mode')).toBeVisible()
+  // Terse level cards are shown with explanations while terse mode is on.
+  await expect(panel.getByTestId('terse-level-full')).toBeVisible()
+  await expect(panel).toContainText('conclusion first')
+})
+
+test('settings has a This project tab with a per-project model override', async ({ page }) => {
+  await page.getByTestId('open-settings').click()
+  const panel = page.getByTestId('settings-panel')
+  await panel.getByTestId('settings-tab-proj').click()
+  await expect(panel.getByTestId('proj-settings-picker')).toBeVisible()
+  // Defaults to the global model; picking a card overrides for this project only.
+  await expect(panel.getByTestId('proj-model-global')).toHaveClass(/sel/)
+  await panel.getByTestId('proj-model-claude-haiku-4-5-20251001').click()
+  await expect(panel.getByTestId('proj-model-claude-haiku-4-5-20251001')).toHaveClass(/sel/)
 })
 
 test('the session usage meter shows when a session reports rate-limit usage', async ({ page }) => {
@@ -51,18 +72,20 @@ test('typing "/" lists many available skill commands (not just 6)', async ({ pag
   expect(await items.count()).toBeGreaterThan(10)
 })
 
-test('decision history shows a one-line description of each command', async ({ page }) => {
+test('decision history expands to show the full command description', async ({ page }) => {
   await page.evaluate(() => {
     window.__mock.raisePermission({
       projectId: 'p-alpha',
       title: 'Run: npm test',
       explanation: 'Runs the cart test suite to verify the race fix.',
+      detail: 'Bash: npm test -- cart',
       risk: 'low',
     })
   })
   await page.getByTestId('inbox-group-alpha').getByTestId('approve-btn').click()
   await page.getByTestId('inbox-tab-history').click()
-  await expect(page.getByTestId('history-desc')).toContainText(
+  await page.getByTestId('history-item').first().click()
+  await expect(page.getByTestId('history-detail')).toContainText(
     'Runs the cart test suite to verify the race fix.',
   )
 })

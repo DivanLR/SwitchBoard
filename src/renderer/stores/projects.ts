@@ -67,8 +67,12 @@ export const useProjectsStore = defineStore('projects', {
       if (item) item.name = name
     },
 
-    async startSession(projectId: string, resume = false): Promise<Session> {
-      const session = await window.switchboard.invoke('sessions.start', { projectId, resume })
+    async startSession(projectId: string, resume = false, bypassPermissions = false): Promise<Session> {
+      const session = await window.switchboard.invoke('sessions.start', {
+        projectId,
+        resume,
+        bypassPermissions,
+      })
       await this.refresh()
       return session
     },

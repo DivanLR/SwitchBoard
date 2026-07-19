@@ -25,7 +25,7 @@ test('heavy build output collapses into a labelled swallowed block (FR-015)', as
 
   const block = page.getByTestId('swallowed-block')
   await expect(block).toHaveCount(1)
-  await expect(block).toContainText('swallowed 30 lines · build output')
+  await expect(block).toContainText('Worked quietly for a bit · build output')
   // The narrative stays visible.
   await expect(page.getByTestId('stream-event-assistant_text')).toContainText('Build finished.')
   // Clean view displays far fewer rows than the raw output (SC-005: >= 60% reduction).
@@ -47,6 +47,19 @@ test('the raw view retains 100% of the output (FR-018)', async ({ page }) => {
 
   await page.getByTestId('view-clean').click()
   await expect(page.getByTestId('swallowed-block')).toHaveCount(1)
+})
+
+test('clean view hides commands being run; raw view shows them', async ({ page }) => {
+  await page.evaluate(() => {
+    window.__mock.emitEvent('s-alpha', 'tool_activity', { toolName: 'Bash', inputPreview: 'npm test' })
+    window.__mock.emitEvent('s-alpha', 'assistant_text', { text: 'Tests pass.', partial: false })
+  })
+  // Clean view: the command is not shown, the narrative is.
+  await expect(page.getByTestId('stream').getByTestId('stream-event-tool_activity')).toHaveCount(0)
+  await expect(page.getByTestId('stream-event-assistant_text')).toContainText('Tests pass.')
+  // Raw view: the command line is present.
+  await page.getByTestId('view-raw').click()
+  await expect(page.getByTestId('stream')).toContainText('npm test')
 })
 
 test('errors are never swallowed (FR-017)', async ({ page }) => {

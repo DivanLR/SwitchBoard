@@ -6,21 +6,35 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useInboxStore } from '@renderer/stores/inbox'
+import { useQueueStore } from '@renderer/stores/queue'
+import { useSettingsStore } from '@renderer/stores/settings'
+import { useUpdatesStore } from '@renderer/stores/updates'
 import Sidebar from '@renderer/components/Sidebar.vue'
 import SessionView from '@renderer/views/SessionView.vue'
 import InboxView from '@renderer/views/InboxView.vue'
 import ProjectRegistration from '@renderer/components/ProjectRegistration.vue'
 import RuleEditors from '@renderer/components/RuleEditors.vue'
 import SettingsPanel from '@renderer/components/SettingsPanel.vue'
+import PermissionToasts from '@renderer/components/PermissionToasts.vue'
 
 const projects = useProjectsStore()
 const active = useActiveSessionStore()
 const inbox = useInboxStore()
+const queue = useQueueStore()
+const settingsStore = useSettingsStore()
+const updates = useUpdatesStore()
 
 const showRegistration = ref(false)
 const showRules = ref(false)
 const showSettings = ref(false)
+const settingsTab = ref<'models' | 'proj' | 'term' | 'gen'>('models')
+
+function openSettings(tab: 'models' | 'proj' | 'term' | 'gen' = 'models'): void {
+  settingsTab.value = tab
+  showSettings.value = true
+}
 const bridgeMissing = ref(false)
+const updateDismissed = ref(false)
 
 const unsubscribers: (() => void)[] = []
 
@@ -35,6 +49,7 @@ onMounted(async () => {
     window.switchboard.on('push.sessionStatus', (push) => projects.applyStatusPush(push)),
     window.switchboard.on('push.counters', (counters) => projects.setCounters(counters)),
     window.switchboard.on('push.inboxChanged', (push) => inbox.applyInboxPush(push)),
+    window.switchboard.on('push.queueChanged', (push) => queue.applyQueuePush(push)),
     window.switchboard.on('push.focusRequest', (push) => {
       if (push.target === 'inbox') {
         inbox.focusRequest(push.requestId)
@@ -44,10 +59,14 @@ onMounted(async () => {
         if (push.eventId) active.focusEvent(push.eventId)
       }
     }),
+    window.switchboard.on('push.updateStatus', (status) => {
+      updates.apply(status)
+      if (status.state === 'available' || status.state === 'ready') updateDismissed.value = false
+    }),
   )
 
-  const settings = await window.switchboard.invoke('settings.get', undefined)
-  active.defaultView = settings.defaultView
+  await settingsStore.load()
+  active.defaultView = settingsStore.settings?.defaultView ?? 'clean'
   await Promise.all([projects.refresh(), inbox.refresh()])
 })
 
@@ -69,15 +88,35 @@ const selectedProject = computed(() => projects.selected)
   </div>
 
   <div v-else class="shell">
+    <div
+      v-if="updates.ready && !updateDismissed"
+      class="update-banner mono"
+      data-testid="update-banner"
+    >
+      <span class="ub-dot"></span>
+      <span class="ub-text">
+        A new version{{ updates.status.version ? ` (${updates.status.version})` : '' }} is ready.
+      </span>
+      <button class="ub-install" data-testid="update-banner-install" @click="updates.install()">
+        restart &amp; update
+      </button>
+      <button class="ub-dismiss" data-testid="update-banner-dismiss" @click="updateDismissed = true">
+        ✕
+      </button>
+    </div>
     <div class="panes">
       <Sidebar
         @add-project="showRegistration = true"
         @open-rules="showRules = true"
-        @open-settings="showSettings = true"
+        @open-settings="openSettings()"
       />
 
       <main class="main">
-        <SessionView v-if="selectedProject" :project="selectedProject" />
+        <SessionView
+          v-if="selectedProject"
+          :project="selectedProject"
+          @open-proj-settings="openSettings('proj')"
+        />
         <div v-else class="no-project">
           <div class="mono faint" style="font-size: 12px">no project selected</div>
           <button class="btn-solid" @click="showRegistration = true">add a project</button>
@@ -89,7 +128,8 @@ const selectedProject = computed(() => projects.selected)
 
     <ProjectRegistration v-if="showRegistration" @close="showRegistration = false" />
     <RuleEditors v-if="showRules" @close="showRules = false" />
-    <SettingsPanel v-if="showSettings" @close="showSettings = false" />
+    <SettingsPanel v-if="showSettings" :initial-tab="settingsTab" @close="showSettings = false" />
+    <PermissionToasts />
   </div>
 </template>
 
@@ -97,8 +137,53 @@ const selectedProject = computed(() => projects.selected)
 .shell {
   height: 100vh;
   display: flex;
+  flex-direction: column;
   background: var(--bg);
   overflow: auto;
+}
+
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: rgba(62, 207, 154, 0.08);
+  border-bottom: 1px solid rgba(62, 207, 154, 0.3);
+  font-size: 12px;
+  color: var(--text-body);
+}
+
+.ub-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 99px;
+  background: var(--green);
+  animation: sbFade 2.2s ease infinite;
+}
+
+.ub-text {
+  flex: 1;
+}
+
+.ub-install {
+  background: var(--green);
+  color: var(--green-ink);
+  font-weight: 600;
+  font-size: 11px;
+  font-family: var(--mono);
+  padding: 4px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.ub-dismiss {
+  color: var(--text-tab);
+  font-size: 12px;
+  padding: 2px 6px;
+}
+
+.ub-dismiss:hover {
+  color: var(--text-body);
 }
 
 .panes {

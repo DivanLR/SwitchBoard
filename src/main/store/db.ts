@@ -166,6 +166,23 @@ const MIGRATIONS: Migration[] = [
       `)
     },
   },
+  {
+    // Planned task queue per project: prompts/commands that auto-run in
+    // sequence, each delivered when the session next goes idle.
+    name: '006-task-queue',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE task_queue (
+          id TEXT PRIMARY KEY,
+          projectId TEXT NOT NULL REFERENCES projects(id),
+          text TEXT NOT NULL,
+          position INTEGER NOT NULL,
+          createdAt TEXT NOT NULL
+        );
+        CREATE INDEX idx_taskqueue_project ON task_queue(projectId, position);
+      `)
+    },
+  },
 ]
 
 export function openDatabase(dbPath: string): AppDatabase {

@@ -12,6 +12,7 @@ import { PermissionBroker } from './inbox/permission-broker'
 import { classifyNoise } from './stream/swallow-rules'
 import { createNotifier } from './notifications'
 import { computeCounters, registerIpcHandlers, RendererPush, seedDefaultRules } from './ipc/handlers'
+import { initUpdater } from './updater'
 import type { SwallowRule } from '@shared/domain'
 
 const TRAY_ICON_DATA_URL =
@@ -140,6 +141,9 @@ async function main(): Promise<void> {
     onSessionStatus: (push) => pusher.sessionStatus(push),
     onCountersChanged: () => pusher.countersChanged(),
     onSessionExit: (sessionId) => late.broker?.expireForSession(sessionId),
+    onQueueChanged: (projectId) =>
+      pusher.queueChanged({ projectId, items: repos.taskQueue.listForProject(projectId) }),
+    onProjectCommands: (projectId, commands) => pusher.projectCommands({ projectId, commands }),
     gate: (context) => {
       if (!late.broker) throw new Error('Broker not initialised')
       return late.broker.handle(context)
@@ -175,6 +179,7 @@ async function main(): Promise<void> {
 
   registerIpcHandlers({ repos, manager, broker, refreshSwallowRules, getWindow: () => mainWindow })
   scheduleRetention(() => runRetention(db, repos))
+  initUpdater({ onStatus: (status) => pusher.updateStatus(status) })
 
   createWindow()
   createTray()

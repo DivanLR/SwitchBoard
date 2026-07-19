@@ -31,11 +31,30 @@ export function registerProject(
   if (existing && existing.archivedAt === null) {
     throw new DiscoveryError('DUPLICATE', 'The folder is already registered')
   }
-  return repos.projects.insert({
+  const project = repos.projects.insert({
     name: input.name?.trim() || basename(path),
     path,
     source: input.source ?? 'manual',
   })
+  seedFolderAccessRules(repos, project.id, path)
+  return project
+}
+
+/**
+ * Grant read/write access to a new project's own folder by seeding standing
+ * always-allow rules for the file tools, scoped to a glob under the folder.
+ * They are listed and revocable like any standing rule (FR-009b).
+ */
+function seedFolderAccessRules(repos: Repositories, projectId: string, path: string): void {
+  const glob = `${path.replace(/[\\/]+$/, '')}${path.includes('\\') ? '\\' : '/'}**`
+  for (const toolName of ['Read', 'Write', 'Edit', 'NotebookEdit']) {
+    repos.standingRules.insert({
+      projectId,
+      toolName,
+      matcher: { kind: 'path_glob', value: glob },
+      createdFromRequestId: 'auto:folder-access',
+    })
+  }
 }
 
 const CWD_SCAN_LINES = 50

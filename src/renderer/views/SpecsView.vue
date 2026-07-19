@@ -4,7 +4,8 @@
 // / tasks). When Spec Kit is not installed, an install button scaffolds it
 // per-project (ephemeral uvx; nothing global).
 import { computed, ref, watch } from 'vue'
-import type { SpecStatus } from '@shared/domain'
+import type { SpecPhase, SpecStatus } from '@shared/domain'
+import { SPEC_KIT_COMMANDS } from '@shared/domain'
 import { useSpecsStore } from '@renderer/stores/specs'
 
 const props = defineProps<{ projectId: string }>()
@@ -12,6 +13,43 @@ const specs = useSpecsStore()
 
 type Part = 'spec' | 'clarify' | 'tasks'
 const part = ref<Part>('tasks')
+
+const commands = SPEC_KIT_COMMANDS
+
+function runCommand(command: string): void {
+  void specs.runInSession(props.projectId, `/${command}`)
+}
+
+/** Start implementing a whole spec (the /implement command) with live updates. */
+function startImplementation(): void {
+  if (!detail.value) return
+  void specs.startPhase(
+    props.projectId,
+    detail.value.id,
+    `/speckit-implement Work through the remaining tasks in ${detail.value.path}/tasks.md, marking each [X] as it completes.`,
+  )
+}
+
+/** Start implementing one phase, scoped by its label. */
+function startPhase(phase: SpecPhase): void {
+  if (!detail.value) return
+  const ids = phase.tasks
+    .filter((t) => !t.done)
+    .map((t) => t.id)
+    .filter(Boolean)
+    .join(', ')
+  void specs.startPhase(
+    props.projectId,
+    detail.value.id,
+    `/speckit-implement Implement "${phase.label}" in ${detail.value.path}` +
+      (ids ? ` (tasks ${ids})` : '') +
+      `. Complete only that phase's tasks and mark each [X] in tasks.md as you finish.`,
+  )
+}
+
+function phaseDone(phase: SpecPhase): boolean {
+  return phase.tasks.length > 0 && phase.tasks.every((t) => t.done)
+}
 
 watch(
   () => props.projectId,
@@ -23,11 +61,12 @@ watch(
 
 const state = computed(() => specs.stateFor(props.projectId))
 const detail = computed(() => specs.detail)
+const running = computed(() => specs.isRunning(props.projectId))
 
 const statusLabel: Record<SpecStatus, string> = {
-  draft: 'draft',
-  in_progress: 'in progress',
-  complete: 'complete',
+  draft: 'Draft',
+  in_progress: 'In progress',
+  complete: 'Complete',
 }
 
 const progressPct = computed(() => {
@@ -62,7 +101,7 @@ function statusDot(status: SpecStatus): string {
         :disabled="specs.installing"
         @click="specs.install(props.projectId)"
       >
-        {{ specs.installing ? 'installing…' : 'install spec kit in this project' }}
+        {{ specs.installing ? 'Installing…' : 'Install Spec Kit in this project' }}
       </button>
       <div v-if="specs.installError" class="ni-error mono" data-testid="specs-install-error">
         {{ specs.installError }}
@@ -80,6 +119,20 @@ function statusDot(status: SpecStatus): string {
 
     <!-- Specs present -->
     <div v-else class="has-specs">
+      <!-- Spec Kit command palette -->
+      <div class="cmd-palette" data-testid="speckit-commands">
+        <button
+          v-for="c in commands"
+          :key="c.command"
+          class="cmd-btn mono"
+          :data-testid="`speckit-cmd-${c.command}`"
+          :title="c.hint"
+          @click="runCommand(c.command)"
+        >
+          {{ c.label }}
+        </button>
+      </div>
+
       <!-- Spec chips -->
       <div class="chips">
         <button
@@ -105,9 +158,20 @@ function statusDot(status: SpecStatus): string {
           </div>
           <div v-if="detail.description" class="sc-desc">{{ detail.description }}</div>
           <div class="sc-progress-row mono">
-            <span v-if="detail.status === 'complete'" style="color: var(--green)"
-              >✓ all tasks complete</span
+            <button
+              v-if="detail.status !== 'complete' && !running && detail.tasksTotal > 0"
+              class="btn-solid impl-btn"
+              data-testid="start-implementation"
+              @click="startImplementation"
             >
+              ▶ Start implementation
+            </button>
+            <span v-if="running" class="impl-running" data-testid="implementing">
+              ● Implementing…
+            </span>
+            <span v-if="detail.status === 'complete'" style="color: var(--green)">
+              ✓ All tasks complete
+            </span>
             <span class="sc-progress-label">{{ detail.tasksDone }}/{{ detail.tasksTotal }} tasks</span>
           </div>
           <div class="sc-bar"><div class="sc-fill" :style="{ width: `${progressPct}%` }"></div></div>
@@ -116,7 +180,7 @@ function statusDot(status: SpecStatus): string {
         <!-- Part tabs -->
         <div class="part-tabs mono">
           <button class="pt" :class="{ sel: part === 'spec' }" data-testid="part-spec" @click="part = 'spec'">
-            spec
+            Spec
           </button>
           <button
             class="pt"
@@ -124,13 +188,13 @@ function statusDot(status: SpecStatus): string {
             data-testid="part-clarify"
             @click="part = 'clarify'"
           >
-            clarify
+            Clarify
             <span v-if="detail.clarifications.length > 0" class="pt-badge">{{
               detail.clarifications.length
             }}</span>
           </button>
           <button class="pt" :class="{ sel: part === 'tasks' }" data-testid="part-tasks" @click="part = 'tasks'">
-            tasks
+            Tasks
             <span v-if="detail.tasksTotal > 0" class="pt-badge dim-badge">{{ detail.tasksTotal }}</span>
           </button>
         </div>
@@ -146,12 +210,33 @@ function statusDot(status: SpecStatus): string {
 
         <!-- clarifications -->
         <div v-else-if="part === 'clarify'" data-testid="spec-clarify">
-          <div v-if="detail.clarifications.length === 0" class="muted mono">
-            No open clarifications — the spec has no [NEEDS CLARIFICATION] markers.
+          <div class="clarify-actions">
+            <button class="btn-quiet clarify-run mono" data-testid="run-clarify" @click="runCommand('speckit-clarify')">
+              ✎ Run /clarify again
+            </button>
           </div>
-          <div v-for="(q, i) in detail.clarifications" :key="i" class="card clarify-card">
+
+          <div v-if="detail.clarifications.length === 0 && detail.resolvedClarifications.length === 0" class="muted mono">
+            No clarifications yet. Run <span class="mono">/clarify</span> to have Claude ask, then write
+            the answers into spec.md.
+          </div>
+
+          <!-- Open questions -->
+          <div v-for="(q, i) in detail.clarifications" :key="`open-${i}`" class="card clarify-card open">
             <div class="cl-tag mono">NEEDS CLARIFICATION</div>
             <div class="cl-body">{{ q }}</div>
+          </div>
+
+          <!-- Already answered -->
+          <div v-if="detail.resolvedClarifications.length > 0" class="resolved-label mono">RESOLVED</div>
+          <div
+            v-for="(c, i) in detail.resolvedClarifications"
+            :key="`resolved-${i}`"
+            class="card clarify-card resolved"
+            data-testid="resolved-clarification"
+          >
+            <div class="cl-q">{{ c.question }}</div>
+            <div class="cl-a mono"><span style="color: var(--green)">✓</span> {{ c.answer }}</div>
           </div>
         </div>
 
@@ -161,7 +246,19 @@ function statusDot(status: SpecStatus): string {
             No tasks.md yet. Run <span class="mono">/tasks</span> to generate the task list.
           </div>
           <div v-for="phase in detail.phases" :key="phase.label" class="phase">
-            <div class="phase-label mono">{{ phase.label }}</div>
+            <div class="phase-header">
+              <span class="phase-label mono">{{ phase.label }}</span>
+              <span v-if="phaseDone(phase)" class="phase-done mono">✓ Done</span>
+              <button
+                v-else-if="!running"
+                class="phase-start mono"
+                :data-testid="`start-phase-${phase.label}`"
+                title="Implement this phase; tasks tick off as they complete"
+                @click="startPhase(phase)"
+              >
+                ▶ Start phase
+              </button>
+            </div>
             <div class="phase-tasks">
               <div
                 v-for="task in phase.tasks"
@@ -228,6 +325,39 @@ function statusDot(status: SpecStatus): string {
 
 .has-specs {
   max-width: 840px;
+}
+
+.cmd-palette {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.cmd-btn {
+  font-size: 11px;
+  color: var(--text-body);
+  background: var(--bg-chip);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 5px 11px;
+  cursor: pointer;
+}
+
+.cmd-btn:hover {
+  border-color: var(--green);
+  color: var(--text-strong);
+}
+
+.impl-btn {
+  padding: 7px 16px;
+}
+
+.impl-running {
+  font-size: 11.5px;
+  color: var(--blue);
+  font-family: var(--mono);
+  animation: sbFade 2.2s ease infinite;
 }
 
 .chips {
@@ -410,10 +540,26 @@ function statusDot(status: SpecStatus): string {
   text-wrap: pretty;
 }
 
+.clarify-actions {
+  margin-bottom: 12px;
+}
+
+.clarify-run {
+  font-size: 11px;
+  padding: 5px 12px;
+}
+
 .clarify-card {
   border-radius: 12px;
   margin-bottom: 8px;
+}
+
+.clarify-card.open {
   border-color: rgba(232, 180, 90, 0.35);
+}
+
+.clarify-card.resolved {
+  border-color: var(--border-card-alt);
 }
 
 .cl-tag {
@@ -429,14 +575,60 @@ function statusDot(status: SpecStatus): string {
   margin-top: 6px;
 }
 
+.resolved-label {
+  font-size: 10px;
+  letter-spacing: 0.13em;
+  color: var(--text-faint);
+  margin: 16px 2px 8px;
+}
+
+.cl-q {
+  font-size: 12.5px;
+  color: var(--text-body);
+  line-height: 1.5;
+}
+
+.cl-a {
+  font-size: 11.5px;
+  color: var(--text-mid);
+  margin-top: 6px;
+  line-height: 1.5;
+}
+
 .phase {
   margin-bottom: 12px;
+}
+
+.phase-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 2px 6px;
 }
 
 .phase-label {
   font-size: 11px;
   color: var(--text-meta);
-  margin: 0 2px 6px;
+  flex: 1;
+}
+
+.phase-done {
+  font-size: 10.5px;
+  color: var(--green);
+}
+
+.phase-start {
+  font-size: 10.5px;
+  color: var(--green);
+  border: 1px solid rgba(62, 207, 154, 0.35);
+  background: rgba(62, 207, 154, 0.06);
+  border-radius: 6px;
+  padding: 2px 9px;
+  cursor: pointer;
+}
+
+.phase-start:hover {
+  background: rgba(62, 207, 154, 0.12);
 }
 
 .phase-tasks {

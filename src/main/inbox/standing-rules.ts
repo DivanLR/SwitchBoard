@@ -2,10 +2,38 @@
 // from an approved action, evaluated in creation order before an item is
 // enqueued; revoked rules stop matching immediately. Only low and medium risk
 // requests may create rules; the broker enforces that invariant.
+import { isAbsolute, resolve, sep } from 'node:path'
 import type { PermissionRule, PermissionRuleMatcher } from '@shared/domain'
 import { globToRegExp } from './risk-rules'
 
 const PATH_FIELDS = ['file_path', 'path', 'notebook_path'] as const
+
+/** The literal directory prefix of a glob (everything before the first wildcard). */
+function globBaseDir(glob: string): string {
+  const wild = glob.search(/[*?]/)
+  const prefix = wild === -1 ? glob : glob.slice(0, wild)
+  const cut = Math.max(prefix.lastIndexOf('/'), prefix.lastIndexOf('\\'))
+  return cut === -1 ? prefix : prefix.slice(0, cut)
+}
+
+/**
+ * True when `candidate` matches the glob AND its RESOLVED path stays inside the
+ * glob's base directory. Resolving first collapses `.`/`..`, so a path like
+ * `C:\proj\..\..\secret` can no longer match a `C:\proj\**` rule by string
+ * coincidence (directory-traversal bypass).
+ */
+function withinGlob(glob: string, candidate: string): boolean {
+  const base = globBaseDir(glob)
+  if (!base) return false
+  const resolvedBase = resolve(base).replace(/[/\\]+$/, '')
+  const resolvedCandidate = isAbsolute(candidate)
+    ? resolve(candidate)
+    : resolve(resolvedBase, candidate)
+  if (resolvedCandidate !== resolvedBase && !resolvedCandidate.startsWith(resolvedBase + sep)) {
+    return false
+  }
+  return globToRegExp(glob.replace(/\\/g, '/')).test(resolvedCandidate.replace(/\\/g, '/'))
+}
 
 function pathOf(input: Record<string, unknown>): string | null {
   for (const field of PATH_FIELDS) {
@@ -54,7 +82,7 @@ export function matchesRule(
     case 'path_glob': {
       const path = pathOf(input)
       if (!path || !rule.matcher.value) return false
-      return globToRegExp(rule.matcher.value.replace(/\\/g, '/')).test(path.replace(/\\/g, '/'))
+      return withinGlob(rule.matcher.value, path)
     }
     case 'exact_input':
       return JSON.stringify(input) === rule.matcher.value

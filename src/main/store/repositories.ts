@@ -15,6 +15,7 @@ import type {
   Project,
   ProjectSource,
   RiskClassificationRule,
+  QueuedTask,
   Session,
   SessionEndReason,
   SessionEvent,
@@ -574,6 +575,54 @@ export class CommandHistoryRepo {
   }
 }
 
+/** Planned task queue per project: prompts that auto-run in sequence (FR-023). */
+export class TaskQueueRepo {
+  constructor(private db: AppDatabase) {}
+
+  add(projectId: string, text: string): QueuedTask {
+    const trimmed = text.trim()
+    const next = this.db
+      .prepare('SELECT COALESCE(MAX(position), 0) + 1 AS pos FROM task_queue WHERE projectId = ?')
+      .get(projectId) as { pos: number }
+    const task: QueuedTask = {
+      id: newId(),
+      projectId,
+      text: trimmed,
+      position: next.pos,
+      createdAt: nowIso(),
+    }
+    this.db
+      .prepare(
+        'INSERT INTO task_queue (id, projectId, text, position, createdAt) VALUES (@id, @projectId, @text, @position, @createdAt)',
+      )
+      .run(task)
+    return task
+  }
+
+  listForProject(projectId: string): QueuedTask[] {
+    return this.db
+      .prepare('SELECT * FROM task_queue WHERE projectId = ? ORDER BY position')
+      .all(projectId) as QueuedTask[]
+  }
+
+  remove(id: string): void {
+    this.db.prepare('DELETE FROM task_queue WHERE id = ?').run(id)
+  }
+
+  /** Removes and returns the front-of-queue task for a project, or null if empty. */
+  takeNext(projectId: string): QueuedTask | null {
+    const take = this.db.transaction((): QueuedTask | null => {
+      const row = this.db
+        .prepare('SELECT * FROM task_queue WHERE projectId = ? ORDER BY position LIMIT 1')
+        .get(projectId) as QueuedTask | undefined
+      if (!row) return null
+      this.db.prepare('DELETE FROM task_queue WHERE id = ?').run(row.id)
+      return row
+    })
+    return take()
+  }
+}
+
 /** Available slash commands / skills per project, for composer suggestions. */
 export class ProjectCommandsRepo {
   constructor(private db: AppDatabase) {}
@@ -607,6 +656,7 @@ export interface Repositories {
   drafts: DraftsRepo
   commandHistory: CommandHistoryRepo
   projectCommands: ProjectCommandsRepo
+  taskQueue: TaskQueueRepo
 }
 
 export function createRepositories(db: AppDatabase): Repositories {
@@ -622,5 +672,6 @@ export function createRepositories(db: AppDatabase): Repositories {
     drafts: new DraftsRepo(db),
     commandHistory: new CommandHistoryRepo(db),
     projectCommands: new ProjectCommandsRepo(db),
+    taskQueue: new TaskQueueRepo(db),
   }
 }

@@ -30,6 +30,23 @@ test("a project's plugin/skill commands are suggested in the composer", async ({
   await expect(input).toHaveValue('/ponytail')
 })
 
+test('commands arriving from the session init message load live, without a project switch', async ({
+  page,
+}) => {
+  await page.getByTestId('sidebar-project-alpha').click()
+  const input = page.getByTestId('composer-input')
+  await input.fill('/pony')
+  // Nothing yet: a fresh project has no stored commands.
+  await expect(page.getByTestId('suggest-list')).toHaveCount(0)
+
+  // The session's init message delivers the commands (pushed to the renderer).
+  await page.evaluate(() => window.__mock.setCommands('p-alpha', ['ponytail', 'ponytail-review']))
+
+  // They appear immediately in the already-open composer (no switch needed).
+  await expect(page.getByTestId('ghost-suggestion')).toHaveText('tail')
+  await expect(page.getByTestId('suggest-item-0')).toContainText('/ponytail')
+})
+
 test('a project can be removed via the confirmation popup', async ({ page }) => {
   // Removal requires no live session, so end beta's session first.
   await page.evaluate(() => window.__mock.endSession('s-beta'))

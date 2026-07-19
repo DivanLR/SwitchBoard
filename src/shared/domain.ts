@@ -238,18 +238,22 @@ export interface SwallowRule {
 
 export type TerseLevel = 'lite' | 'full' | 'ultra'
 
-/** Selectable Claude models for sessions (id -> label shown in settings). */
+/** Selectable Claude models for sessions, rendered as settings cards (design reference). */
 export interface ModelChoice {
   id: string
   label: string
+  /** One-line strengths description shown under the name. */
+  desc: string
+  /** Relative cost hint shown at the card's right edge. */
+  price: string
 }
 
 export const MODEL_CHOICES: readonly ModelChoice[] = [
-  { id: 'default', label: 'Account default' },
-  { id: 'claude-fable-5', label: 'Fable 5 (most capable)' },
-  { id: 'claude-opus-4-8', label: 'Opus 4.8' },
-  { id: 'claude-sonnet-5', label: 'Sonnet 5' },
-  { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5 (fastest)' },
+  { id: 'default', label: 'Account default', desc: 'Follows your subscription default model', price: '—' },
+  { id: 'claude-fable-5', label: 'Fable 5', desc: 'Deepest reasoning — best for architecture and tricky plans', price: '$$$' },
+  { id: 'claude-opus-4-8', label: 'Opus 4.8', desc: 'Strong reasoning with faster output', price: '$$$' },
+  { id: 'claude-sonnet-5', label: 'Sonnet 5', desc: 'Fast and strong — the everyday workhorse', price: '$$' },
+  { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', desc: 'Fastest and cheapest — simple, mechanical edits', price: '$' },
 ]
 
 export interface Settings {
@@ -266,6 +270,16 @@ export interface Settings {
    */
   terseMode: boolean
   terseLevel: TerseLevel
+  /** Output display (design reference, Terminals tab). */
+  fontSize: 'sm' | 'md' | 'lg'
+  /** Clean view shows tool activity as collapsible rows instead of hiding it. */
+  showToolRows: boolean
+  /** Show the time next to every event in the Clean view. */
+  timestamps: boolean
+  /** Keep the view pinned to the newest line while the session works. */
+  autoscroll: boolean
+  /** Per-project implementation-model overrides; 'global' or absent follows workModel. */
+  projectModels: Record<string, string>
   /** Fixed in v1 but stored for forward compatibility (FR-021a). */
   retentionDecisionDays: number
   retentionSessionsPerProject: number
@@ -279,6 +293,11 @@ export const DEFAULT_SETTINGS: Settings = {
   workModel: 'default',
   terseMode: true,
   terseLevel: 'full',
+  fontSize: 'md',
+  showToolRows: false,
+  timestamps: false,
+  autoscroll: true,
+  projectModels: {},
   retentionDecisionDays: 30,
   retentionSessionsPerProject: 2,
   lastFocusedProjectId: null,
@@ -289,6 +308,15 @@ export interface Draft {
   id: string
   projectId: string
   text: string
+  createdAt: string
+}
+
+/** A planned prompt/command queued to auto-run when the session next goes idle (FR-023). */
+export interface QueuedTask {
+  id: string
+  projectId: string
+  text: string
+  position: number
   createdAt: string
 }
 
@@ -309,6 +337,29 @@ export interface SpecSection {
   title: string
   body: string
 }
+
+/** A resolved clarification (question already answered), from spec.md. */
+export interface ResolvedClarification {
+  question: string
+  answer: string
+}
+
+/** Spec Kit slash commands offered as buttons in the specs view. */
+export interface SpecKitCommand {
+  command: string // e.g. "speckit-clarify"
+  label: string
+  hint: string
+}
+
+export const SPEC_KIT_COMMANDS: readonly SpecKitCommand[] = [
+  { command: 'speckit-specify', label: '/specify', hint: 'Create or update the feature spec' },
+  { command: 'speckit-clarify', label: '/clarify', hint: 'Ask clarifying questions, write answers back' },
+  { command: 'speckit-plan', label: '/plan', hint: 'Generate the implementation plan' },
+  { command: 'speckit-tasks', label: '/tasks', hint: 'Generate the dependency-ordered task list' },
+  { command: 'speckit-analyze', label: '/analyze', hint: 'Cross-check spec, plan, and tasks' },
+  { command: 'speckit-checklist', label: '/checklist', hint: 'Generate a quality checklist' },
+  { command: 'speckit-implement', label: '/implement', hint: 'Execute the task list' },
+]
 
 export interface SpecTask {
   id: string // e.g. "T001"
@@ -331,6 +382,8 @@ export interface SpecDetail extends SpecSummary {
   phases: SpecPhase[]
   /** Open [NEEDS CLARIFICATION] questions from spec.md. */
   clarifications: string[]
+  /** Clarifications already answered (## Clarifications section). */
+  resolvedClarifications: ResolvedClarification[]
 }
 
 /** Spec Kit status for a project. */

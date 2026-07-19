@@ -30,9 +30,9 @@ function choose(label: string): void {
         {{ option.label }}
       </button>
     </div>
-    <div v-else class="open-hint mono">answer through the composer below</div>
+    <div v-else class="open-hint mono">Answer through the composer below.</div>
     <div v-if="payload.answered" class="answered mono" data-testid="question-answered">
-      ✓ answered: {{ payload.answer }}
+      ✓ Answered: {{ payload.answer }}
     </div>
   </div>
 </template>

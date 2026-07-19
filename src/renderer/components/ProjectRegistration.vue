@@ -46,14 +46,14 @@ async function add(path: string, name?: string): Promise<void> {
   <div class="overlay" @click.self="emit('close')">
     <div class="dialog reg" data-testid="registration-dialog">
       <div class="head">
-        <div class="title mono"><span style="color: var(--green)">▣</span> add a project</div>
-        <button class="btn-outline" @click="emit('close')">close</button>
+        <div class="title mono"><span style="color: var(--green)">▣</span> Add a project</div>
+        <button class="btn-outline" @click="emit('close')">Close</button>
       </div>
 
       <p v-if="error" class="error mono" data-testid="registration-error">{{ error }}</p>
 
       <section>
-        <div class="section-label mono">SUGGESTED · claude code has been used here</div>
+        <div class="section-label mono">SUGGESTED · Claude Code has been used here</div>
         <div v-if="projects.suggestions.length === 0" class="none mono">No suggestions found.</div>
         <div
           v-for="s in projects.suggestions"
@@ -65,7 +65,7 @@ async function add(path: string, name?: string): Promise<void> {
             <div class="s-name mono">{{ s.name }}</div>
             <div class="s-path mono">{{ s.path }}</div>
           </div>
-          <button class="btn-solid" :disabled="busy" @click="add(s.path, s.name)">add</button>
+          <button class="btn-solid" :disabled="busy" @click="add(s.path, s.name)">Add</button>
         </div>
       </section>
 
@@ -83,7 +83,7 @@ async function add(path: string, name?: string): Promise<void> {
             v-model="manualName"
             class="mono"
             data-testid="manual-name"
-            placeholder="display name (optional)"
+            placeholder="Display name (optional)"
           />
           <button
             class="btn-solid"
@@ -91,7 +91,7 @@ async function add(path: string, name?: string): Promise<void> {
             :disabled="busy || manualPath.trim().length === 0"
             @click="add(manualPath.trim(), manualName.trim() || undefined)"
           >
-            add folder
+            Add folder
           </button>
         </div>
       </section>

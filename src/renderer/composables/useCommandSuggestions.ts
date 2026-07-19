@@ -18,6 +18,8 @@ export interface CommandSuggestions {
   onComposerKeydown: (event: KeyboardEvent) => void
   /** Load history + available commands for a project. */
   load: (projectId: string) => Promise<void>
+  /** Replace the available slash commands / skills (e.g. from a live push). */
+  setCommands: (commands: string[]) => void
   /** Reset transient recall/dropdown state (on project switch). */
   reset: () => void
   /** Record a just-sent command at the top of history. */
@@ -182,6 +184,10 @@ export function useCommandSuggestions(opts: {
     }
   }
 
+  function setCommands(commands: string[]): void {
+    availableCommands.value = commands
+  }
+
   function reset(): void {
     histIndex.value = -1
     suggestIndex.value = -1
@@ -201,6 +207,7 @@ export function useCommandSuggestions(opts: {
     onComposerInput,
     onComposerKeydown,
     load,
+    setCommands,
     reset,
     recordSent,
   }

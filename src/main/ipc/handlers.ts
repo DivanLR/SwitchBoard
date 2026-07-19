@@ -11,8 +11,11 @@ import type {
   InvokeMap,
   InvokeMethod,
   IpcError,
+  ProjectCommandsPush,
   ProjectListItem,
+  QueueChangedPush,
   SessionStatusPush,
+  UpdateStatus,
   WireResult,
 } from '@shared/ipc-types'
 import { isIpcError } from '@shared/ipc-types'
@@ -23,6 +26,7 @@ import { registerProject, suggestProjects } from '@main/projects/discovery'
 import { defaultRiskRules } from '@main/inbox/risk-rules'
 import { defaultSwallowRules } from '@main/stream/swallow-rules'
 import { installSpecKit, readSpecDetail, readSpecKitState } from '@main/specs/spec-kit'
+import { check as checkForUpdates, installNow } from '@main/updater'
 
 const EVENT_FLUSH_INTERVAL_MS = 33 // >= 30 Hz (contract)
 const COUNTER_DEBOUNCE_MS = 50
@@ -71,8 +75,20 @@ export class RendererPush {
     this.send('push.inboxChanged', push)
   }
 
+  queueChanged(push: QueueChangedPush): void {
+    this.send('push.queueChanged', push)
+  }
+
+  projectCommands(push: ProjectCommandsPush): void {
+    this.send('push.projectCommands', push)
+  }
+
   focusRequest(push: FocusRequestPush): void {
     this.send('push.focusRequest', push)
+  }
+
+  updateStatus(status: UpdateStatus): void {
+    this.send('push.updateStatus', status)
   }
 
   private send(channel: string, payload: unknown): void {
@@ -171,7 +187,8 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       }
       repos.projects.archive(req.projectId)
     },
-    'sessions.start': (req) => manager.startSession(req.projectId, req.resume ?? false),
+    'sessions.start': (req) =>
+      manager.startSession(req.projectId, req.resume ?? false, req.bypassPermissions ?? false),
     'sessions.stop': (req) => manager.stopSession(req.sessionId),
     'sessions.interrupt': (req) => manager.interruptSession(req.sessionId),
     'sessions.send': (req) => {
@@ -207,6 +224,21 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       await installSpecKit(project.path)
       return readSpecKitState(project.path)
     },
+    'specs.runInSession': (req) => {
+      let session = repos.sessions.activeForProject(req.projectId)
+      if (!session) session = manager.startSession(req.projectId)
+      manager.sendMessage(session.id, req.text)
+      return { sessionId: session.id }
+    },
+    'queue.list': (req) => manager.listQueue(req.projectId),
+    'queue.add': (req) => {
+      manager.enqueueTask(req.projectId, req.text)
+      return manager.listQueue(req.projectId)
+    },
+    'queue.remove': (req) => {
+      manager.removeTask(req.projectId, req.id)
+      return manager.listQueue(req.projectId)
+    },
     'inbox.pending': () => repos.requests.pending(),
     'inbox.decide': (req) => broker.decide(req.requestId, req.decision, req.confirmHighRisk ?? false),
     'inbox.alwaysAllow': (req) => {
@@ -241,6 +273,8 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     },
     'settings.get': () => repos.settings.get(),
     'settings.set': (req) => repos.settings.set(req),
+    'updates.check': async () => ({ status: await checkForUpdates() }),
+    'updates.install': () => installNow(),
   }
 
   ipcMain.handle(

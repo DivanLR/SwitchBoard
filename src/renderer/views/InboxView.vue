@@ -4,7 +4,7 @@
 // "approve all"), item cards with risk chip / explanation / detail box /
 // approve+deny, and the history list of ✓/✗ rows (FR-007..013, SC-004).
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import type { PermissionRequest, PermissionRuleMatcher } from '@shared/domain'
+import type { PermissionRequest } from '@shared/domain'
 import { useInboxStore } from '@renderer/stores/inbox'
 import { useProjectsStore } from '@renderer/stores/projects'
 
@@ -15,6 +15,14 @@ const tab = ref<'inbox' | 'history'>('inbox')
 const confirmingId = ref<string | null>(null)
 const ruleOfferId = ref<string | null>(null)
 const historyFilter = ref<string>('')
+const expandedHistory = ref(new Set<string>())
+
+function toggleHistory(id: string): void {
+  const next = new Set(expandedHistory.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  expandedHistory.value = next
+}
 
 const now = ref(Date.now())
 let timer: ReturnType<typeof setInterval> | undefined
@@ -74,30 +82,23 @@ async function deny(item: PermissionRequest): Promise<void> {
 const ruleEligible = (item: PermissionRequest): boolean =>
   item.type === 'tool_permission' && item.risk !== 'high'
 
-function suggestedMatcher(item: PermissionRequest): PermissionRuleMatcher {
+/**
+ * Human description of the rule that will be saved. The exact matcher is derived
+ * server-side from the real tool input (the broker never trusts a client-sent
+ * matcher); this only mirrors that logic for the preview.
+ */
+function ruleDescription(item: PermissionRequest): string {
   if (item.toolName === 'Bash') {
     const words = item.detail.replace(/^Bash:\s*/, '').trim().split(/\s+/)
-    return { kind: 'command_prefix', value: words.slice(0, 2).join(' ') }
+    return `commands starting "${words.slice(0, 2).join(' ')}"`
   }
-  return { kind: 'tool_only' }
-}
-
-function matcherDescription(matcher: PermissionRuleMatcher): string {
-  switch (matcher.kind) {
-    case 'command_prefix':
-      return `commands starting "${matcher.value}"`
-    case 'path_glob':
-      return `paths matching ${matcher.value}`
-    case 'exact_input':
-      return 'this exact action'
-    case 'tool_only':
-      return 'every use of this tool'
-  }
+  return `${item.toolName} within this file's folder`
 }
 
 async function saveAlwaysAllow(item: PermissionRequest): Promise<void> {
   ruleOfferId.value = null
-  await inbox.alwaysAllow(item.id, suggestedMatcher(item))
+  // Matcher is derived server-side from the original request; pass nothing.
+  await inbox.alwaysAllow(item.id)
 }
 
 async function approveAll(projectId: string): Promise<void> {
@@ -117,7 +118,7 @@ const historyItems = computed(() => inbox.history)
         data-testid="inbox-tab-pending"
         @click="tab = 'inbox'"
       >
-        inbox
+        Inbox
         <span v-if="inbox.pendingCount > 0" class="badge-count" data-testid="inbox-badge">
           {{ inbox.pendingCount }}
         </span>
@@ -128,13 +129,13 @@ const historyItems = computed(() => inbox.history)
         data-testid="inbox-tab-history"
         @click="tab = 'history'"
       >
-        history
+        History
       </div>
     </div>
 
     <div v-if="inbox.undeliverableNotice" class="notice mono" data-testid="undeliverable-notice">
       {{ inbox.undeliverableNotice }}
-      <button class="notice-dismiss" @click="inbox.dismissNotice()">dismiss</button>
+      <button class="notice-dismiss" @click="inbox.dismissNotice()">Dismiss</button>
     </div>
 
     <!-- Inbox tab -->
@@ -163,7 +164,7 @@ const historyItems = computed(() => inbox.history)
             title="Approves all pending non-high-risk items in this group"
             @click="approveAll(group.projectId)"
           >
-            approve all
+            Approve all
           </button>
         </div>
 
@@ -175,10 +176,21 @@ const historyItems = computed(() => inbox.history)
           :data-request-id="item.id"
         >
           <div class="item-head">
-            <span class="item-title">{{ item.title }}</span>
-            <span v-if="item.type === 'plan_approval'" class="chip-risk plan">plan</span>
-            <span v-else class="chip-risk" :class="item.risk">
-              {{ item.risk === 'high' ? 'high risk' : item.risk }}
+            <div class="item-main">
+              <div class="item-title" data-testid="item-title">{{ item.title }}</div>
+              <div class="item-sub">
+                <span v-if="item.toolName" class="item-tool mono">{{ item.toolName }}</span>
+                <span class="item-ago mono">{{ age(item.createdAt) }}</span>
+              </div>
+            </div>
+            <span
+              v-if="item.type === 'plan_approval'"
+              class="chip-risk plan"
+              data-testid="item-risk"
+              >Plan</span
+            >
+            <span v-else class="chip-risk" :class="item.risk" data-testid="item-risk">
+              {{ item.risk === 'high' ? 'High' : item.risk === 'medium' ? 'Medium' : 'Low' }}
             </span>
           </div>
           <div class="item-explain">{{ item.explanation }}</div>
@@ -187,30 +199,28 @@ const historyItems = computed(() => inbox.history)
           <div class="item-actions">
             <template v-if="confirmingId === item.id">
               <button class="btn-armed" data-testid="confirm-high-risk" @click="approve(item)">
-                confirm high-risk
+                Confirm high-risk
               </button>
-              <button class="btn-outline" @click="confirmingId = null">back</button>
+              <button class="btn-outline" @click="confirmingId = null">Back</button>
             </template>
             <template v-else-if="ruleOfferId === item.id">
-              <span class="rule-offer mono">always allow {{ matcherDescription(suggestedMatcher(item)) }}?</span>
+              <span class="rule-offer mono">Always allow {{ ruleDescription(item) }}?</span>
               <button class="btn-solid" data-testid="confirm-always-allow" @click="saveAlwaysAllow(item)">
-                save rule
+                Save rule
               </button>
-              <button class="btn-outline" @click="ruleOfferId = null">back</button>
+              <button class="btn-outline" @click="ruleOfferId = null">Back</button>
             </template>
             <template v-else>
-              <button class="btn-solid" data-testid="approve-btn" @click="approve(item)">approve</button>
-              <button class="btn-outline" data-testid="deny-btn" @click="deny(item)">deny</button>
+              <button class="btn-solid" data-testid="approve-btn" @click="approve(item)">Approve</button>
+              <button class="btn-outline" data-testid="deny-btn" @click="deny(item)">Deny</button>
               <button
                 v-if="ruleEligible(item)"
                 class="always-link mono"
                 data-testid="always-allow-btn"
                 @click="ruleOfferId = item.id"
               >
-                always allow
+                Always allow
               </button>
-              <span style="flex: 1"></span>
-              <span class="item-ago mono">{{ age(item.createdAt) }}</span>
             </template>
           </div>
         </div>
@@ -221,7 +231,7 @@ const historyItems = computed(() => inbox.history)
     <div v-else class="body history">
       <div class="history-filter-row">
         <select v-model="historyFilter" class="history-filter mono" data-testid="history-filter">
-          <option value="">all projects</option>
+          <option value="">All projects</option>
           <option v-for="p in projects.items" :key="p.id" :value="p.id">{{ p.name }}</option>
         </select>
       </div>
@@ -232,35 +242,41 @@ const historyItems = computed(() => inbox.history)
         v-for="h in historyItems"
         :key="h.id"
         class="hist-row"
+        :class="{ open: expandedHistory.has(h.id) }"
         data-testid="history-item"
+        @click="toggleHistory(h.id)"
       >
-        <span
-          v-if="h.status === 'approved' || h.status === 'rule_approved'"
-          class="hist-mark mono"
-          style="color: var(--green)"
-          :data-testid="`outcome-${h.status}`"
-        >
-          ✓
-        </span>
-        <span
-          v-else
-          class="hist-mark mono"
-          style="color: var(--red)"
-          :data-testid="`outcome-${h.status}`"
-        >
-          ✗
-        </span>
-        <div class="hist-main">
-          <div class="hist-title">{{ h.title }}</div>
-          <div v-if="h.explanation" class="hist-desc" data-testid="history-desc">
-            {{ h.explanation }}
+        <div class="hist-head">
+          <span
+            class="hist-arrow mono"
+            :data-testid="`history-arrow-${h.id}`"
+            :class="{ open: expandedHistory.has(h.id) }"
+            >▸</span
+          >
+          <span
+            v-if="h.status === 'approved' || h.status === 'rule_approved'"
+            class="hist-mark mono"
+            style="color: var(--green)"
+            :data-testid="`outcome-${h.status}`"
+          >
+            ✓
+          </span>
+          <span v-else class="hist-mark mono" style="color: var(--red)" :data-testid="`outcome-${h.status}`">
+            ✗
+          </span>
+          <div class="hist-main">
+            <div class="hist-title">{{ h.title }}</div>
+            <div class="hist-sub mono">
+              {{ projectName(h.projectId) }} · {{ h.detail
+              }}<span v-if="h.deliveryFailed" data-testid="delivery-failed"> · delivery failed</span>
+            </div>
           </div>
-          <div class="hist-sub mono">
-            {{ projectName(h.projectId) }} · {{ h.detail
-            }}<span v-if="h.deliveryFailed" data-testid="delivery-failed"> · delivery failed</span>
-          </div>
+          <span class="hist-ago mono">{{ age(h.resolvedAt) }}</span>
         </div>
-        <span class="hist-ago mono">{{ age(h.resolvedAt) }}</span>
+        <div v-if="expandedHistory.has(h.id)" class="hist-detail" data-testid="history-detail" @click.stop>
+          <div v-if="h.explanation" class="hd-explain">{{ h.explanation }}</div>
+          <pre class="hd-detail mono">{{ h.detail }}</pre>
+        </div>
       </div>
     </div>
   </aside>
@@ -387,15 +403,40 @@ const historyItems = computed(() => inbox.history)
 
 .item-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
 }
 
-.item-title {
+.item-main {
   flex: 1;
+  min-width: 0;
+}
+
+.item-sub {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.item-tool {
+  font-size: 10px;
+  color: var(--text-tab);
+  background: var(--bg-chip);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+.item-title {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-title);
+  /* Full ask, wrapped — never truncated or off-screen. */
+  overflow-wrap: anywhere;
+  line-height: 1.4;
 }
 
 .item-explain {
@@ -404,6 +445,7 @@ const historyItems = computed(() => inbox.history)
   color: var(--text-mid);
   margin-top: 5px;
   text-wrap: pretty;
+  overflow-wrap: anywhere;
 }
 
 .item-detail {
@@ -415,8 +457,9 @@ const historyItems = computed(() => inbox.history)
   padding: 6px 9px;
   margin-top: 8px;
   white-space: pre-wrap;
-  word-break: break-all;
-  max-height: 140px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-height: 160px;
   overflow-y: auto;
 }
 
@@ -463,11 +506,31 @@ const historyItems = computed(() => inbox.history)
 }
 
 .hist-row {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  padding: 9px 2px;
+  padding: 3px 2px;
   border-bottom: 1px solid var(--border-hist);
+  cursor: pointer;
+}
+
+.hist-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 0;
+}
+
+.hist-arrow {
+  font-size: 10px;
+  color: var(--text-faint);
+  width: 10px;
+  transition: transform 0.12s ease;
+}
+
+.hist-arrow.open {
+  transform: rotate(90deg);
+}
+
+.hist-row:hover .hist-arrow {
+  color: var(--text-mid);
 }
 
 .hist-mark {
@@ -488,13 +551,30 @@ const historyItems = computed(() => inbox.history)
   text-overflow: ellipsis;
 }
 
-.hist-desc {
-  font-size: 11px;
+.hist-detail {
+  margin: 2px 0 8px 32px;
+}
+
+.hd-explain {
+  font-size: 12px;
+  line-height: 1.5;
   color: var(--text-mid);
-  margin-top: 2px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  margin-bottom: 6px;
+  text-wrap: pretty;
+}
+
+.hd-detail {
+  font-size: 11px;
+  color: var(--detail);
+  background: var(--bg-code);
+  border: 1px solid var(--border-code);
+  border-radius: 6px;
+  padding: 6px 9px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  max-height: 200px;
+  overflow: auto;
 }
 
 .hist-sub {

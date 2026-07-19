@@ -38,7 +38,7 @@ test('requests from two projects land in one inbox, grouped, with risk and expla
   const alphaItem = page.getByTestId('inbox-group-alpha').getByTestId('inbox-item')
   await expect(alphaItem).toContainText('Run: git status')
   await expect(alphaItem).toContainText('The session wants to run a shell command.')
-  await expect(alphaItem.locator('.chip-risk')).toHaveText('low')
+  await expect(alphaItem.locator('.chip-risk')).toHaveText('Low')
   await expect(alphaItem).toContainText(/\d+[smh] ago/)
 })
 
@@ -88,6 +88,9 @@ test('approve-all approves the group but skips high-risk items (FR-011)', async 
     window.__mock.raisePermission({ projectId: 'p-beta', title: 'other group', risk: 'low' })
   })
 
+  // The approval toast sits top-right over the inbox; dismiss it before using
+  // the group controls it overlaps (a real user dismisses or acts on it too).
+  await page.getByTestId('toast-dismiss').click()
   await page.getByTestId('inbox-group-alpha').getByTestId('approve-all').click()
 
   // The high-risk item stays, as does the other project's group.
@@ -109,9 +112,32 @@ test('plan approvals carry the plan badge and approve with a single click (FR-00
       risk: 'low',
     })
   })
-  await expect(page.getByTestId('inbox-item').locator('.chip-risk.plan')).toHaveText('plan')
+  await expect(page.getByTestId('inbox-item').locator('.chip-risk.plan')).toHaveText('Plan')
   await page.getByTestId('approve-btn').click()
   await expect(page.getByTestId('inbox-zero')).toBeVisible()
+})
+
+test('history rows expand via an arrow to show the full description', async ({ page }) => {
+  await page.evaluate(() => {
+    window.__mock.raisePermission({
+      projectId: 'p-alpha',
+      title: 'Run: npm run build',
+      explanation: 'Builds the production bundle to verify the change compiles.',
+      detail: 'Bash: npm run build',
+      risk: 'low',
+    })
+  })
+  await page.getByTestId('inbox-group-alpha').getByTestId('approve-btn').click()
+  await page.getByTestId('inbox-tab-history').click()
+
+  const row = page.getByTestId('history-item').first()
+  await expect(row).toContainText('Run: npm run build')
+  // Detail hidden until expanded.
+  await expect(page.getByTestId('history-detail')).toHaveCount(0)
+  await row.click()
+  await expect(page.getByTestId('history-detail')).toContainText(
+    'Builds the production bundle to verify the change compiles.',
+  )
 })
 
 test('inbox zero state communicates nothing needs attention', async ({ page }) => {

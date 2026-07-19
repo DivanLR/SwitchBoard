@@ -10,6 +10,7 @@ import type {
   PermissionRule,
   PermissionRuleMatcher,
   Project,
+  QueuedTask,
   RiskClassificationRule,
   Session,
   SessionEndReason,
@@ -89,7 +90,10 @@ export interface InvokeMap {
   'projects.register': { req: { path: string; name?: string }; res: Project }
   'projects.rename': { req: { projectId: string; name: string }; res: void }
   'projects.archive': { req: { projectId: string }; res: void }
-  'sessions.start': { req: { projectId: string; resume?: boolean }; res: Session }
+  'sessions.start': {
+    req: { projectId: string; resume?: boolean; bypassPermissions?: boolean }
+    res: Session
+  }
   'sessions.stop': { req: { sessionId: string }; res: void }
   'sessions.interrupt': { req: { sessionId: string }; res: { stillQueued: number } }
   'sessions.send': { req: { sessionId: string; text: string }; res: { eventId: string; queued: boolean } }
@@ -108,13 +112,24 @@ export interface InvokeMap {
   'specs.detail': { req: { projectId: string; specId: string }; res: SpecDetail | null }
   /** Install Spec Kit into the project (ephemeral uvx; never global). */
   'specs.install': { req: { projectId: string }; res: SpecKitState }
+  /**
+   * Run text in the project's session (a spec-kit command or a start-phase
+   * prompt), starting a session first if none is live. Returns its id.
+   */
+  'specs.runInSession': { req: { projectId: string; text: string }; res: { sessionId: string } }
+  /** Planned task queue: prompts/goals that auto-run in sequence (FR-023). */
+  'queue.list': { req: { projectId: string }; res: QueuedTask[] }
+  'queue.add': { req: { projectId: string; text: string }; res: QueuedTask[] }
+  'queue.remove': { req: { projectId: string; id: string }; res: QueuedTask[] }
   'inbox.pending': { req: void; res: PermissionRequest[] }
   'inbox.decide': {
     req: { requestId: string; decision: 'approve' | 'deny'; confirmHighRisk?: boolean }
     res: { delivered: boolean }
   }
   'inbox.alwaysAllow': {
-    req: { requestId: string; matcher: PermissionRuleMatcher }
+    // matcher is optional and advisory only — the main process derives the real
+    // (path-scoped) matcher from the original request's tool input.
+    req: { requestId: string; matcher?: PermissionRuleMatcher }
     res: { rule: PermissionRule }
   }
   'inbox.approveAllForProject': {
@@ -132,6 +147,16 @@ export interface InvokeMap {
   'rules.swallow.restoreDefaults': { req: void; res: SwallowRule[] }
   'settings.get': { req: void; res: Settings }
   'settings.set': { req: Partial<Settings>; res: Settings }
+  /** App auto-update (GitHub releases). */
+  'updates.check': { req: void; res: { status: UpdateStatus['state'] } }
+  'updates.install': { req: void; res: void }
+}
+
+export interface UpdateStatus {
+  state: 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'none' | 'error'
+  version?: string
+  percent?: number
+  message?: string
 }
 
 export type InvokeMethod = keyof InvokeMap
@@ -158,6 +183,18 @@ export interface InboxChangedPush {
   resolved?: { requestId: string; status: PermissionRequestStatus; deliveryFailed?: boolean }
 }
 
+export interface QueueChangedPush {
+  projectId: string
+  items: QueuedTask[]
+}
+
+/** Available slash commands / skills for a project, captured from a session's
+ * init message, pushed so the composer picks them up without a project switch. */
+export interface ProjectCommandsPush {
+  projectId: string
+  commands: string[]
+}
+
 export type FocusRequestPush =
   | { target: 'inbox'; requestId: string }
   | { target: 'session'; sessionId: string; eventId?: string }
@@ -168,7 +205,10 @@ export interface PushMap {
   'push.sessionStatus': SessionStatusPush
   'push.counters': Counters
   'push.inboxChanged': InboxChangedPush
+  'push.queueChanged': QueueChangedPush
+  'push.projectCommands': ProjectCommandsPush
   'push.focusRequest': FocusRequestPush
+  'push.updateStatus': UpdateStatus
 }
 
 export type PushChannel = keyof PushMap
@@ -178,7 +218,10 @@ export const PUSH_CHANNELS: readonly PushChannel[] = [
   'push.sessionStatus',
   'push.counters',
   'push.inboxChanged',
+  'push.queueChanged',
+  'push.projectCommands',
   'push.focusRequest',
+  'push.updateStatus',
 ]
 
 // --- The bridge exposed as `window.switchboard` ---

@@ -1,7 +1,7 @@
 // Central permission inbox state (FR-007..013): pending items grouped by
 // project, decisions, history, and undeliverable-decision surfacing (SC-004).
 import { defineStore } from 'pinia'
-import type { DecisionRecord, PermissionRequest, PermissionRuleMatcher } from '@shared/domain'
+import type { DecisionRecord, PermissionRequest } from '@shared/domain'
 import type { InboxChangedPush } from '@shared/ipc-types'
 
 interface InboxState {
@@ -11,6 +11,8 @@ interface InboxState {
   focusRequestId: string | null
   /** Banner shown when a decision could not reach its session (SC-004). */
   undeliverableNotice: string | null
+  /** Newly-arrived requests shown as approve/deny toasts (approve from the notification). */
+  toasts: PermissionRequest[]
 }
 
 export const useInboxStore = defineStore('inbox', {
@@ -20,6 +22,7 @@ export const useInboxStore = defineStore('inbox', {
     historyProjectId: null,
     focusRequestId: null,
     undeliverableNotice: null,
+    toasts: [],
   }),
 
   getters: {
@@ -63,8 +66,9 @@ export const useInboxStore = defineStore('inbox', {
       return result.delivered
     },
 
-    async alwaysAllow(requestId: string, matcher: PermissionRuleMatcher): Promise<void> {
-      await window.switchboard.invoke('inbox.alwaysAllow', { requestId, matcher })
+    async alwaysAllow(requestId: string): Promise<void> {
+      // The matcher is derived server-side from the original request's input.
+      await window.switchboard.invoke('inbox.alwaysAllow', { requestId })
     },
 
     async approveAllForProject(
@@ -80,17 +84,27 @@ export const useInboxStore = defineStore('inbox', {
 
     applyInboxPush(push: InboxChangedPush): void {
       if (push.added) {
-        if (!this.pending.some((p) => p.id === push.added?.id)) {
-          this.pending.push(push.added)
+        const added = push.added
+        if (!this.pending.some((p) => p.id === added.id)) {
+          this.pending.push(added)
+          // Surface a single most-recent toast (design shows one at a time) so
+          // the request can be approved without hunting the inbox.
+          this.toasts = [added]
         }
       }
       if (push.resolved) {
-        this.pending = this.pending.filter((p) => p.id !== push.resolved?.requestId)
+        const requestId = push.resolved.requestId
+        this.pending = this.pending.filter((p) => p.id !== requestId)
+        this.toasts = this.toasts.filter((t) => t.id !== requestId)
         if (push.resolved.deliveryFailed) {
           this.undeliverableNotice =
             'A decision could not be delivered to its session and was marked expired.'
         }
       }
+    },
+
+    dismissToast(requestId: string): void {
+      this.toasts = this.toasts.filter((t) => t.id !== requestId)
     },
 
     focusRequest(requestId: string): void {

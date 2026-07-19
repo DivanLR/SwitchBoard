@@ -9,6 +9,8 @@ import type { ProjectListItem } from '@shared/ipc-types'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { useInboxStore } from '@renderer/stores/inbox'
+import { useQueueStore } from '@renderer/stores/queue'
+import { useSettingsStore } from '@renderer/stores/settings'
 import { useCommandSuggestions } from '@renderer/composables/useCommandSuggestions'
 import { useSpecsStore } from '@renderer/stores/specs'
 import StreamEvent from '@renderer/components/StreamEvent.vue'
@@ -17,11 +19,38 @@ import QuestionEvent from '@renderer/components/QuestionEvent.vue'
 import SpecsView from '@renderer/views/SpecsView.vue'
 
 const props = defineProps<{ project: ProjectListItem }>()
+const emit = defineEmits<{ (e: 'open-proj-settings'): void }>()
 
 const projects = useProjectsStore()
 const active = useActiveSessionStore()
 const inbox = useInboxStore()
+const queue = useQueueStore()
+const settingsStore = useSettingsStore()
 const specs = useSpecsStore()
+
+const queuedTasks = computed(() => queue.forProject(props.project.id))
+
+// Output settings (Terminals tab): font size, tool rows, timestamps, autoscroll.
+const outputPrefs = computed(() => ({
+  fontSize: settingsStore.settings?.fontSize ?? 'md',
+  showToolRows: settingsStore.settings?.showToolRows ?? false,
+  timestamps: settingsStore.settings?.timestamps ?? false,
+  autoscroll: settingsStore.settings?.autoscroll ?? true,
+}))
+// ponytail: zoom scales the fixed-px stream typography in one place (Chromium-only, fine in Electron).
+const streamZoom = computed(
+  () => ({ sm: '0.92', md: '1', lg: '1.1' })[outputPrefs.value.fontSize],
+)
+
+const PILL_LABELS: Record<string, string> = {
+  working: 'Working',
+  needs_you: 'Needs you',
+  done: 'Done',
+  error: 'Error',
+}
+function pillLabel(status: string): string {
+  return PILL_LABELS[status] ?? status
+}
 
 // Main-area tab: the live session stream, or the project's Spec Kit specs.
 const mainTab = ref<'session' | 'specs'>('session')
@@ -43,6 +72,7 @@ const {
   onComposerInput,
   onComposerKeydown,
   load: loadHistory,
+  setCommands: setSuggestionCommands,
   reset: resetSuggestions,
   recordSent,
 } = useCommandSuggestions({ composer, composerEl, onSubmit: () => void send() })
@@ -76,15 +106,23 @@ function onGlobalKeydown(event: KeyboardEvent): void {
   void interrupt()
 }
 
+let unsubscribeCommands: (() => void) | undefined
 onMounted(() => {
   tick = setInterval(() => {
     now.value = Date.now()
   }, 1000)
   window.addEventListener('keydown', onGlobalKeydown)
+  // A session's init message delivers its slash commands / skills after start;
+  // pick them up live so a newly-added project's suggestions load without a
+  // project switch.
+  unsubscribeCommands = window.switchboard.on('push.projectCommands', (push) => {
+    if (push.projectId === props.project.id) setSuggestionCommands(push.commands)
+  })
 })
 onUnmounted(() => {
   clearInterval(tick)
   window.removeEventListener('keydown', onGlobalKeydown)
+  unsubscribeCommands?.()
 })
 
 const sessionTimer = computed(() => {
@@ -128,6 +166,7 @@ watch(
     resetSuggestions()
     void loadHistory(projectId)
     void specs.loadState(projectId)
+    void queue.load(projectId)
   },
   { immediate: true },
 )
@@ -141,6 +180,10 @@ const items = computed<StreamItem[]>(() => {
   const result: StreamItem[] = []
   let block: { noiseKind: string; events: SessionEvent[] } | null = null
   for (const event of active.events) {
+    // Clean view is a readable narrative: tool activity (commands being run)
+    // is hidden unless the "Show tool activity" setting is on, in which case
+    // it collapses into "worked quietly" rows. The raw view keeps everything.
+    if (event.kind === 'tool_activity' && !outputPrefs.value.showToolRows) continue
     if (event.noiseKind) {
       if (block && block.noiseKind === event.noiseKind) {
         block.events.push(event)
@@ -227,6 +270,7 @@ function scrollToBottom(): void {
 watch(
   () => active.events.length,
   () => {
+    if (!outputPrefs.value.autoscroll) return
     const el = streamEl.value
     if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 160) scrollToBottom()
   },
@@ -260,10 +304,22 @@ async function send(): Promise<void> {
   }
 }
 
-async function start(resume: boolean): Promise<void> {
+async function enqueue(): Promise<void> {
+  const text = composer.value.trim()
+  if (!text) return
+  await queue.add(props.project.id, text)
+  composer.value = ''
+  resetSuggestions()
+}
+
+async function removeQueued(id: string): Promise<void> {
+  await queue.remove(props.project.id, id)
+}
+
+async function start(resume: boolean, bypassPermissions = false): Promise<void> {
   busy.value = true
   try {
-    await projects.startSession(props.project.id, resume)
+    await projects.startSession(props.project.id, resume, bypassPermissions)
   } finally {
     busy.value = false
   }
@@ -301,9 +357,17 @@ function openInbox(requestId: string): void {
           :class="liveSession.status"
           data-testid="session-pill"
         >
-          {{ liveSession.status === 'needs_you' ? 'needs you' : liveSession.status }}
+          {{ pillLabel(liveSession.status) }}
         </span>
-        <span v-else-if="endedSession" class="pill ended">ended</span>
+        <span v-else-if="endedSession" class="pill ended">Ended</span>
+        <button
+          class="ctl mono"
+          data-testid="open-proj-settings"
+          title="Project settings"
+          @click="emit('open-proj-settings')"
+        >
+          ⚙
+        </button>
         <div class="segments mono" data-testid="view-toggle">
           <div
             class="seg"
@@ -311,7 +375,7 @@ function openInbox(requestId: string): void {
             data-testid="view-clean"
             @click="active.setView('clean')"
           >
-            clean
+            Clean
           </div>
           <div
             class="seg"
@@ -319,15 +383,15 @@ function openInbox(requestId: string): void {
             data-testid="view-raw"
             @click="active.setView('raw')"
           >
-            raw
+            Raw
           </div>
         </div>
         <template v-if="liveSession">
           <button class="ctl mono" data-testid="interrupt-btn" title="Interrupt the current activity" @click="interrupt()">
-            interrupt
+            Interrupt
           </button>
           <button class="ctl ctl-stop mono" data-testid="stop-btn" title="Stop the session" @click="stop()">
-            stop
+            Stop
           </button>
         </template>
       </div>
@@ -359,10 +423,10 @@ function openInbox(requestId: string): void {
         data-testid="tab-session"
         @click="mainTab = 'session'"
       >
-        session
+        Session
       </button>
       <button class="mt" :class="{ sel: mainTab === 'specs' }" data-testid="tab-specs" @click="mainTab = 'specs'">
-        specs
+        Specs
         <span v-if="specCount > 0" class="mt-badge">{{ specCount }}</span>
       </button>
     </div>
@@ -375,23 +439,38 @@ function openInbox(requestId: string): void {
       ref="streamEl"
       class="stream"
       data-testid="stream"
+      :style="{ zoom: streamZoom }"
     >
       <div class="stream-inner">
         <div v-if="!liveSession && !endedSession" class="stream-empty">
-          <div class="mono faint">no session yet for this project</div>
-          <button class="btn-solid" data-testid="start-session" :disabled="busy" @click="start(false)">
-            start session
-          </button>
+          <div class="mono faint">No session yet for this project.</div>
+          <div class="start-row">
+            <button class="btn-solid" data-testid="start-session" :disabled="busy" @click="start(false)">
+              Start session
+            </button>
+            <button
+              class="btn-quiet"
+              data-testid="start-session-bypass"
+              :disabled="busy"
+              title="Start with all permission checks bypassed — every tool is auto-approved. Use only in trusted projects."
+              @click="start(false, true)"
+            >
+              Start · bypass permissions
+            </button>
+          </div>
+          <div class="bypass-note mono faint">
+            Bypass auto-approves every tool without inbox prompts. Only for folders you fully trust.
+          </div>
         </div>
 
         <div v-if="endedSession" class="ended" data-testid="ended-banner">
           <div class="mono" style="font-size: 12px; color: var(--text-mid)">
-            session ended <span class="faint">({{ endedSession.endReason ?? 'unknown' }})</span>
+            Session ended <span class="faint">({{ endedSession.endReason ?? 'unknown' }})</span>
             <span v-if="endedSession.statusDetail" class="faint"> — {{ endedSession.statusDetail }}</span>
           </div>
           <div class="ended-actions">
             <button class="btn-solid" data-testid="start-session" :disabled="busy" @click="start(false)">
-              start new session
+              Start new session
             </button>
             <button
               v-if="canResume"
@@ -401,7 +480,7 @@ function openInbox(requestId: string): void {
               title="Start a session resuming the previous conversation context"
               @click="start(true)"
             >
-              resume previous conversation
+              Resume previous conversation
             </button>
           </div>
         </div>
@@ -430,7 +509,12 @@ function openInbox(requestId: string): void {
             :payload="item.event.payload as never"
             @answer="answerQuestion"
           />
-          <StreamEvent v-else :event="item.event" @open-inbox="openInbox" />
+          <StreamEvent
+            v-else
+            :event="item.event"
+            :stamps="outputPrefs.timestamps"
+            @open-inbox="openInbox"
+          />
         </template>
 
         <!-- Live status line -->
@@ -450,7 +534,7 @@ function openInbox(requestId: string): void {
     </div>
 
     <!-- Raw view -->
-    <div v-else ref="streamEl" class="raw-view" data-testid="stream">
+    <div v-else ref="streamEl" class="raw-view" data-testid="stream" :style="{ zoom: streamZoom }">
       <div v-for="line in rawLines" :key="line.key" class="raw-line mono" data-testid="raw-line">
         {{ line.text }}
       </div>
@@ -458,8 +542,30 @@ function openInbox(requestId: string): void {
 
     <!-- Composer -->
     <footer v-if="mainTab === 'session'" class="composer">
+      <!-- Planned task queue ("UP NEXT"): runs each item in order as the session goes idle -->
+      <div v-if="queuedTasks.length > 0" class="queue" data-testid="task-queue">
+        <span class="queue-label mono">UP NEXT</span>
+        <span
+          v-for="(task, index) in queuedTasks"
+          :key="task.id"
+          class="queue-chip mono"
+          :data-testid="`queue-item-${index}`"
+        >
+          <span class="queue-num">{{ index + 1 }}</span>
+          <span class="queue-text">{{ task.text }}</span>
+          <button
+            class="queue-x"
+            :data-testid="`queue-remove-${index}`"
+            title="Remove from the queue"
+            @click="removeQueued(task.id)"
+          >
+            ✕
+          </button>
+        </span>
+        <span class="queue-note mono">Runs automatically when the current goal finishes</span>
+      </div>
       <div v-if="draftRestored && composer" class="draft-note mono" data-testid="draft-note">
-        restored draft from the previous run — send to deliver it
+        Restored draft from the previous run — send to deliver it.
       </div>
       <div class="composer-row">
         <span class="caret mono">❯</span>
@@ -489,7 +595,7 @@ function openInbox(requestId: string): void {
             v-model="composer"
             class="composer-input mono"
             data-testid="composer-input"
-            :placeholder="liveSession ? `Send a message to ${project.name}…` : 'start a session first'"
+            :placeholder="liveSession ? `Send a message to ${project.name}…` : 'Start a session first'"
             :disabled="!liveSession"
             spellcheck="false"
             autocomplete="off"
@@ -499,12 +605,21 @@ function openInbox(requestId: string): void {
         </div>
         <span class="to mono">to {{ project.name }}</span>
         <button
+          class="queue-btn mono"
+          data-testid="composer-queue"
+          title="Add to the queue — runs after the current goal finishes"
+          :disabled="composer.trim().length === 0"
+          @click="enqueue()"
+        >
+          + Queue
+        </button>
+        <button
           class="send-btn mono"
           data-testid="composer-send"
           :disabled="!liveSession || busy || composer.trim().length === 0"
           @click="send()"
         >
-          send ⏎
+          Send ⏎
         </button>
       </div>
     </footer>
@@ -652,8 +767,20 @@ function openInbox(requestId: string): void {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
   padding-top: 80px;
+}
+
+.start-row {
+  display: flex;
+  gap: 8px;
+}
+
+.bypass-note {
+  font-size: 10.5px;
+  max-width: 360px;
+  text-align: center;
+  line-height: 1.5;
 }
 
 .ended {
@@ -721,6 +848,78 @@ function openInbox(requestId: string): void {
   font-size: 11px;
   color: var(--amber);
   margin-bottom: 6px;
+}
+
+/* "UP NEXT": a horizontal strip of queued-goal chips above the composer. */
+.queue {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 18px 0;
+}
+
+.queue-label {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--text-faint);
+}
+
+.queue-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: var(--text-body);
+  background: var(--bg-card);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 4px 10px;
+  max-width: 280px;
+}
+
+.queue-num {
+  color: var(--text-faint);
+}
+
+.queue-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.queue-x {
+  cursor: pointer;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.queue-x:hover {
+  color: var(--red);
+}
+
+.queue-note {
+  font-size: 10.5px;
+  color: var(--text-ghost);
+}
+
+.queue-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+  border: 1px solid var(--border-seg);
+  color: var(--text-tab);
+  font-size: 11px;
+  padding: 7px 12px;
+  border-radius: 6px;
+}
+
+.queue-btn:hover:not(:disabled) {
+  color: var(--text-body);
+}
+
+.queue-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .composer-row {

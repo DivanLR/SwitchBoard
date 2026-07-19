@@ -5,6 +5,7 @@ import { execFile, execFileSync } from 'node:child_process'
 import type {
   EventKind,
   EventPayloadMap,
+  QueuedTask,
   Session,
   SessionEvent,
   SessionStatus,
@@ -35,6 +36,10 @@ export interface SessionManagerCallbacks {
   onCountersChanged: () => void
   /** Wired to the permission broker so pending items expire on session death. */
   onSessionExit: (sessionId: string) => void
+  /** Fired when a project's planned task queue changes (add/remove/auto-run). */
+  onQueueChanged: (projectId: string) => void
+  /** Fired when a session reports its available slash commands / skills (init message). */
+  onProjectCommands: (projectId: string, commands: string[]) => void
   gate: PermissionGate
 }
 
@@ -124,7 +129,7 @@ export class SessionManager {
     }
   }
 
-  startSession(projectId: string, resume = false): Session {
+  startSession(projectId: string, resume = false, bypassPermissions = false): Session {
     const project = this.repos.projects.byId(projectId)
     if (!project) throw new SessionManagerError('NOT_FOUND', 'Project not found')
     const active = this.repos.sessions.activeForProject(projectId)
@@ -165,6 +170,10 @@ export class SessionManager {
     }
 
     const settings = this.repos.settings.get()
+    // Per-project implementation-model override ("This project" settings tab);
+    // 'global' or absent follows the global work model.
+    const override = settings.projectModels?.[projectId]
+    const workModel = override && override !== 'global' ? override : settings.workModel
     entry.session = new HostedSession({
       sessionId: row.id,
       projectPath: project.path,
@@ -175,8 +184,9 @@ export class SessionManager {
           terseLevel: settings.terseLevel,
         }) ?? undefined,
       claudeExecutablePath: resolveClaudeExecutable() ?? undefined,
-      workModel: settings.workModel,
+      workModel,
       planModel: settings.planModel,
+      bypassPermissions,
       sink: this.makeSink(entry),
       gate: this.callbacks.gate,
       onStatusChange: (status, detail) => this.handleStatusChange(entry, status, detail),
@@ -184,7 +194,10 @@ export class SessionManager {
         entry.row.sdkSessionId = sdkSessionId
         this.repos.sessions.update(row.id, { sdkSessionId })
       },
-      onCommands: (commands) => this.repos.projectCommands.set(projectId, commands),
+      onCommands: (commands) => {
+        this.repos.projectCommands.set(projectId, commands)
+        this.callbacks.onProjectCommands(projectId, commands)
+      },
       onUsage: (usage) => {
         entry.row.usageUtilization = usage.utilization
         entry.row.usageResetsAt = usage.resetsAt
@@ -196,14 +209,52 @@ export class SessionManager {
         })
         this.pushStatus(entry)
       },
-      onTurnComplete: () => this.observeBranch(entry),
+      onTurnComplete: () => {
+        this.observeBranch(entry)
+        // A completed turn that left the session idle pulls the next planned task.
+        this.maybeDrainQueue(entry.row.projectId)
+      },
       onExit: (reason, detail) => this.handleExit(entry, reason, detail),
     })
 
     this.hosted.set(row.id, entry)
     entry.session.start()
     this.callbacks.onCountersChanged()
+    // A freshly-started idle session runs any tasks already planned for it.
+    this.maybeDrainQueue(projectId)
     return { ...entry.row }
+  }
+
+  // --- Planned task queue (FR-023) ---
+
+  listQueue(projectId: string): QueuedTask[] {
+    return this.repos.taskQueue.listForProject(projectId)
+  }
+
+  enqueueTask(projectId: string, text: string): void {
+    if (text.trim().length === 0) return
+    this.repos.taskQueue.add(projectId, text)
+    this.callbacks.onQueueChanged(projectId)
+    this.maybeDrainQueue(projectId)
+  }
+
+  removeTask(projectId: string, id: string): void {
+    this.repos.taskQueue.remove(id)
+    this.callbacks.onQueueChanged(projectId)
+  }
+
+  /**
+   * Delivers the front-of-queue task when the project's session is live and
+   * idle (turn finished, nothing blocking on the developer). No-op otherwise,
+   * so the queue simply waits for the current turn or a decision to clear.
+   */
+  private maybeDrainQueue(projectId: string): void {
+    const entry = [...this.hosted.values()].find((e) => e.row.projectId === projectId)
+    if (!entry || entry.session.currentStatus !== 'done') return
+    const next = this.repos.taskQueue.takeNext(projectId)
+    if (!next) return
+    this.callbacks.onQueueChanged(projectId)
+    this.sendMessage(entry.row.id, next.text)
   }
 
   sendMessage(sessionId: string, text: string): { eventId: string; queued: boolean } {

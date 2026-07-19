@@ -170,6 +170,24 @@ describe('PermissionBroker lifecycle', () => {
     expect(history.some((d) => d.status === 'rule_approved')).toBe(true)
   })
 
+  it('derives a folder-scoped matcher for file tools (never unscoped tool_only)', async () => {
+    void h.gate('Write', { file_path: 'C:\\proj\\src\\a.ts' })
+    await settle()
+    const [req] = h.repos.requests.pending()
+    // Even if the caller tries to widen it, the server derives from the input.
+    h.broker.alwaysAllow(req.id, { kind: 'tool_only' })
+
+    const rule = h.repos.standingRules.listForProject(h.projectId).at(-1)!
+    expect(rule.matcher.kind).toBe('path_glob')
+
+    // A write inside the same folder auto-approves; one elsewhere does not.
+    const inside = await h.gate('Write', { file_path: 'C:\\proj\\src\\b.ts' })
+    expect(inside.behavior).toBe('allow')
+    void h.gate('Write', { file_path: 'C:\\elsewhere\\c.ts' })
+    await settle()
+    expect(h.repos.requests.pending().some((r) => r.detail.includes('elsewhere'))).toBe(true)
+  })
+
   it('refuses standing rules for high risk and plan approvals (FR-009a/007a)', async () => {
     void h.gate('Bash', { command: 'rm -rf /' })
     await settle()

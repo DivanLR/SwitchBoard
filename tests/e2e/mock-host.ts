@@ -191,6 +191,15 @@ export function installMockHost(scenario: MockScenario): void {
   let settings: AnyRecord = {
     defaultView: 'clean',
     notificationsEnabled: true,
+    planModel: 'default',
+    workModel: 'default',
+    terseMode: true,
+    terseLevel: 'full',
+    fontSize: 'md',
+    showToolRows: false,
+    timestamps: false,
+    autoscroll: true,
+    projectModels: {},
     retentionDecisionDays: 30,
     retentionSessionsPerProject: 2,
     lastFocusedProjectId: null,
@@ -287,6 +296,25 @@ export function installMockHost(scenario: MockScenario): void {
   const answers: { eventId: string; choice: string }[] = []
   const decisionLog: { requestId: string; decision: string }[] = []
   const queuedBySession = new Map<string, { eventId: string; text: string }[]>()
+  const taskQueueByProject = new Map<string, AnyRecord[]>()
+
+  function deliver(sessionId: string, text: string): void {
+    sends.push({ sessionId, text })
+    appendEvent(sessionId, 'prompt', { text, pending: false })
+    setStatus(sessionId, 'working')
+  }
+
+  // Runs the front-of-queue task when the project's session is live and idle
+  // (mirrors SessionManager.maybeDrainQueue in the real host).
+  function maybeDrainQueue(projectId: string): void {
+    const list = taskQueueByProject.get(projectId) ?? []
+    const project = projects.find((p) => p.id === projectId)
+    const session = project?.session && !project.session.endedAt ? project.session : null
+    if (!session || session.status !== 'done' || list.length === 0) return
+    const next = list.shift() as AnyRecord
+    push('push.queueChanged', { projectId, items: [...list] })
+    deliver(session.id, String(next.text))
+  }
 
   function resolveRequest(request: MockRequest, status: string): void {
     request.status = status
@@ -375,6 +403,17 @@ export function installMockHost(scenario: MockScenario): void {
       specKitByProject.set(String(req.projectId), installed)
       return installed
     },
+    'specs.runInSession': (req) => {
+      let session = [...sessions.values()].find(
+        (s) => s.projectId === req.projectId && !s.endedAt,
+      )
+      if (!session) session = invokeHandlers['sessions.start']({ projectId: req.projectId }) as MockSession
+      sends.push({ sessionId: session.id, text: String(req.text) })
+      appendEvent(session.id, 'prompt', { text: String(req.text), pending: false })
+      return { sessionId: session.id }
+    },
+    'updates.check': () => ({ status: 'none' }),
+    'updates.install': () => undefined,
     'sessions.start': (req) => {
       const project = projects.find((p) => p.id === req.projectId)
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
@@ -455,6 +494,32 @@ export function installMockHost(scenario: MockScenario): void {
         out.push(s.text)
       }
       return out
+    },
+    'queue.list': (req) => [...(taskQueueByProject.get(String(req.projectId)) ?? [])],
+    'queue.add': (req) => {
+      const projectId = String(req.projectId)
+      const text = String(req.text).trim()
+      const list = taskQueueByProject.get(projectId) ?? []
+      if (text.length > 0) {
+        list.push({
+          id: nextId('task'),
+          projectId,
+          text,
+          position: list.length + 1,
+          createdAt: now(),
+        })
+        taskQueueByProject.set(projectId, list)
+        push('push.queueChanged', { projectId, items: [...list] })
+        maybeDrainQueue(projectId)
+      }
+      return [...(taskQueueByProject.get(projectId) ?? [])]
+    },
+    'queue.remove': (req) => {
+      const projectId = String(req.projectId)
+      const list = (taskQueueByProject.get(projectId) ?? []).filter((t) => t.id !== req.id)
+      taskQueueByProject.set(projectId, list)
+      push('push.queueChanged', { projectId, items: [...list] })
+      return [...list]
     },
     'inbox.pending': () => [...pending],
     'inbox.decide': (req) =>
@@ -541,7 +606,12 @@ export function installMockHost(scenario: MockScenario): void {
 
   window.__mock = {
     emitEvent: (sessionId, kind, payload) => String(appendEvent(sessionId, kind, payload).id),
-    setCommands: (projectId, commands) => projectCommands.set(projectId, commands),
+    setCommands: (projectId, commands) => {
+      // Mirrors the real host: a session's init message stores the commands AND
+      // pushes them so a live composer picks them up without a project switch.
+      projectCommands.set(projectId, commands)
+      push('push.projectCommands', { projectId, commands })
+    },
     setSpecKit: (projectId, state) => specKitByProject.set(projectId, state),
     setUsage: (sessionId, utilization, resetsInMinutes, limitType) => {
       const s = sessions.get(sessionId)
@@ -620,11 +690,15 @@ export function installMockHost(scenario: MockScenario): void {
       })
       // Deliver queued composer messages (FR-019).
       const queue = queuedBySession.get(sessionId) ?? []
+      const hadComposerQueue = queue.length > 0
       for (const item of queue.splice(0)) {
         updateEvent(sessionId, item.eventId, { text: item.text, pending: false })
       }
       setStatus(sessionId, 'done')
       pushCounters()
+      // A turn that left the session idle pulls the next planned task (FR-023).
+      const session = sessions.get(sessionId)
+      if (!hadComposerQueue && session) maybeDrainQueue(session.projectId)
     },
     setStatus: (sessionId, status) => setStatus(sessionId, status),
     startFlood: (intervalMs, perTick) => {

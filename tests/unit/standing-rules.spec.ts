@@ -54,6 +54,18 @@ describe('matchesRule', () => {
     expect(matchesRule(rule, 'Write', { file_path: 'C:\\other\\a.ts' })).toBe(false)
   })
 
+  it('rejects directory-traversal that resolves outside the glob base', () => {
+    const rule = makeRule({ toolName: 'Read', matcher: { kind: 'path_glob', value: 'C:\\proj\\**' } })
+    // Resolves to C:\Users\victim\.ssh\id_rsa — outside C:\proj — must NOT match.
+    expect(
+      matchesRule(rule, 'Read', { file_path: 'C:\\proj\\..\\..\\Users\\victim\\.ssh\\id_rsa' }),
+    ).toBe(false)
+    // A legitimate nested path still matches.
+    expect(matchesRule(rule, 'Read', { file_path: 'C:\\proj\\src\\a.ts' })).toBe(true)
+    // A sibling folder with a shared prefix must not match (prefix confusion).
+    expect(matchesRule(rule, 'Read', { file_path: 'C:\\proj-evil\\secret' })).toBe(false)
+  })
+
   it('requires the same tool', () => {
     const rule = makeRule({ toolName: 'Read', matcher: { kind: 'tool_only' } })
     expect(matchesRule(rule, 'Write', {})).toBe(false)

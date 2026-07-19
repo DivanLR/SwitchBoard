@@ -36,6 +36,15 @@ npmRebuild: false
 # Harden the packaged binary: disable ELECTRON_RUN_AS_NODE / node CLI inspect.
 afterPack: scripts/after-pack.mjs
 
+# GitHub-releases auto-update feed. electron-builder writes this into
+# app-update.yml; electron-updater reads it to find newer releases. Publishing a
+# release with `electron-builder --publish always` (needs GH_TOKEN) uploads the
+# installer + latest.yml so installed apps can upgrade themselves.
+publish:
+  provider: github
+  owner: haefelesoftware
+  repo: terminal-switchboard
+
 win:
   target:
     - target: nsis

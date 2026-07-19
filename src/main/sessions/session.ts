@@ -72,6 +72,8 @@ export interface HostedSessionOptions {
   workModel?: string
   /** Model id for plan-mode turns; applied via setModel when entering plan mode. */
   planModel?: string
+  /** Bypass all permission checks for this session (auto-approve every tool). */
+  bypassPermissions?: boolean
   sink: EventSink
   gate: PermissionGate
   onStatusChange: (status: SessionStatus, detail?: string | null) => void
@@ -121,11 +123,17 @@ export class HostedSession {
         includePartialMessages: true,
         resume: this.options.resumeSdkSessionId,
         pathToClaudeCodeExecutable: this.options.claudeExecutablePath,
+        // Grant read/write within the project's own folder without prompting.
+        additionalDirectories: [this.options.projectPath],
         // Work model for normal turns; 'default'/undefined uses the account default.
         model:
           this.options.workModel && this.options.workModel !== 'default'
             ? this.options.workModel
             : undefined,
+        // Bypass mode auto-approves every tool (no inbox prompts); requires the
+        // dangerous-skip flag. The canUseTool gate simply is never invoked then.
+        permissionMode: this.options.bypassPermissions ? 'bypassPermissions' : 'default',
+        allowDangerouslySkipPermissions: this.options.bypassPermissions ? true : undefined,
         // Append-only: keeps Claude Code's own system prompt and adds the terse
         // output-style instruction on top when terse mode is enabled.
         systemPrompt: this.options.systemPromptAppend

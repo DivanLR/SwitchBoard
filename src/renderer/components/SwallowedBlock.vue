@@ -25,13 +25,12 @@ function textOf(event: SessionEvent): string {
 <template>
   <div class="swallowed" data-testid="swallowed-block">
     <div class="toggle mono" @click="expanded = !expanded">
-      {{ expanded ? '▾' : '▸' }} swallowed {{ events.length }}
-      {{ events.length === 1 ? 'line' : 'lines' }} · {{ noiseKind }}
+      {{ expanded ? '▾' : '▸' }} Worked quietly for a bit · {{ noiseKind }}
     </div>
     <div v-if="expanded" class="box">
       <div v-for="event in visibleEvents" :key="event.id" class="line mono">{{ textOf(event) }}</div>
       <div v-if="overCap" class="more mono" data-testid="swallowed-open-raw" @click="emit('open-raw')">
-        … {{ events.length - EXPAND_CAP }} more lines in raw view
+        … {{ events.length - EXPAND_CAP }} more lines in Raw view
       </div>
     </div>
   </div>

@@ -11,32 +11,41 @@ const PRESERVE_CLAUSE =
   'Never trade technical accuracy or a required step for brevity.'
 
 // The instruction is prefixed with a hard directive so it is not diluted by the
-// large Claude Code preset system prompt it is appended to.
+// large Claude Code preset system prompt it is appended to. It is repeated at
+// the end so it frames the response on both sides of the preset.
 const HEADER =
-  '## MANDATORY OUTPUT STYLE — OVERRIDES DEFAULT VERBOSITY.\n' +
-  'This instruction takes precedence over any default tendency to write at length. ' +
-  'Apply it to EVERY response you produce for the rest of this session.\n'
+  '## MANDATORY OUTPUT STYLE — THIS OVERRIDES DEFAULT VERBOSITY AND FORMATTING.\n' +
+  'This is a hard constraint, not a preference. It takes precedence over any default ' +
+  'tendency to write at length, add preamble, or restate the request. Apply it to EVERY ' +
+  'response you produce for the rest of this session, including the very first one.\n'
+
+const REINFORCE =
+  '\nReminder: the output-style constraint above is mandatory for this and every later ' +
+  'reply. If a reply reads like normal prose, it is too long — cut it.'
 
 const LEVEL_INSTRUCTIONS: Record<TerseLevel, string> = {
   lite:
     HEADER +
     'Level: LITE. Trim filler, pleasantries, hedging, and preamble. Lead with the conclusion. ' +
     'Prefer short sentences. Keep enough words to stay clear. ' +
-    PRESERVE_CLAUSE,
+    PRESERVE_CLAUSE +
+    REINFORCE,
   full:
     HEADER +
-    'Level: TERSE. Write prose as compactly as possible while staying correct and unambiguous. ' +
-    'Drop articles, filler, pleasantries, hedging, and any restating of the question. ' +
-    'Strongly prefer sentence fragments and bullet points over full sentences. State the ' +
-    'conclusion first, then only load-bearing detail. No preamble, no summary of what you did ' +
-    'unless asked. ' +
-    PRESERVE_CLAUSE,
+    'Level: TERSE (caveman). Compress prose hard. Telegraphic style: drop articles ' +
+    '("the", "a", "an"), drop filler and hedging, drop pleasantries, never restate the ' +
+    'question, no preamble, no closing summary unless asked. Use sentence fragments and ' +
+    'bullet points, not full sentences. Conclusion first, then only load-bearing detail. ' +
+    'Aim for well under half the words you would normally use. ' +
+    PRESERVE_CLAUSE +
+    REINFORCE,
   ultra:
     HEADER +
     'Level: ULTRA. Maximum prose compression. Telegraphic fragments only: no articles, no ' +
     'droppable pronouns, no filler, no restating the question, no preamble. One idea per line, ' +
     'bullets over sentences, symbols/arrows where clearer than words. ' +
-    PRESERVE_CLAUSE,
+    PRESERVE_CLAUSE +
+    REINFORCE,
 }
 
 /** The append string for the given settings, or null when terse mode is off. */
