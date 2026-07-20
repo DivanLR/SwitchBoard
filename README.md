@@ -170,6 +170,6 @@ Unsigned builds still update, but SmartScreen warns until a signing certificate 
 
 <div align="center">
 
-Built by **Haefele Software** · Powered by the [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overview)
+Powered by the [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overview)
 
 </div>
