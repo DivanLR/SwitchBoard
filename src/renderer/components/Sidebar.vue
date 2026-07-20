@@ -5,13 +5,31 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { isIpcError } from '@shared/ipc-types'
 import { MODEL_CHOICES } from '@shared/domain'
+import { activeAgents } from '@shared/agents'
 import { useProjectsStore } from '@renderer/stores/projects'
+import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useInboxStore } from '@renderer/stores/inbox'
 import { useSettingsStore } from '@renderer/stores/settings'
 
 const projects = useProjectsStore()
+const activeSession = useActiveSessionStore()
 const inbox = useInboxStore()
 const settings = useSettingsStore()
+
+// Agents working in parallel, listed under the project row (design); clicking
+// one opens its chat view in the session pane.
+// ponytail: events exist client-side only for the selected project's session,
+// so other rows stay plain; push agent names via sessionStatus if that matters.
+function agentsFor(item: (typeof projects.items)[number]): { id: string; name: string }[] {
+  if (item.id !== projects.selectedProjectId) return []
+  if (statusOf(item) !== 'working') return []
+  const agents = activeAgents(activeSession.events)
+  return agents.length > 1 ? agents : []
+}
+
+function openAgent(agentId: string): void {
+  activeSession.selectAgent(agentId)
+}
 const emit = defineEmits<{
   (e: 'add-project'): void
   (e: 'open-rules'): void
@@ -259,6 +277,23 @@ async function confirmRemoveNow(): Promise<void> {
             </span>
           </div>
           <div v-if="collisions.has(item.name)" class="path mono">{{ item.path }}</div>
+          <div v-if="agentsFor(item).length > 0" class="agents" :data-testid="`sidebar-agents-${item.name}`">
+            <div
+              v-for="agent in agentsFor(item)"
+              :key="agent.id"
+              class="agent-line"
+              :data-testid="`sidebar-agent-${agent.name}`"
+              @click.stop="openAgent(agent.id)"
+            >
+              <span class="agent-sq"></span>
+              <span
+                class="agent-name mono"
+                :class="{ sel: activeSession.selectedAgentId === agent.id }"
+              >
+                {{ agent.name }}{{ activeSession.selectedAgentId === agent.id ? ' ←' : '' }}
+              </span>
+            </div>
+          </div>
         </div>
       </div>
       <div v-if="projects.loaded && projects.items.length === 0" class="empty mono">
@@ -550,6 +585,48 @@ async function confirmRemoveNow(): Promise<void> {
   margin-top: 2px;
   font-size: 10px;
   color: var(--text-ghost);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Agents working in parallel, listed under the row (design). */
+.agents {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 6px;
+  padding-left: 16px;
+}
+
+.agent-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 -4px;
+  padding: 1px 4px;
+  cursor: pointer;
+}
+
+.agent-line:hover {
+  background: #1a1f2b;
+}
+
+.agent-name.sel {
+  color: var(--text-strong);
+}
+
+.agent-sq {
+  width: 5px;
+  min-width: 5px;
+  height: 5px;
+  background: var(--blue);
+  animation: sbFade 1.8s ease infinite;
+}
+
+.agent-name {
+  font-size: 10px;
+  color: #7e8698;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

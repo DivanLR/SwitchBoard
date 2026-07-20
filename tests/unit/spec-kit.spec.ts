@@ -107,6 +107,20 @@ describe('readSpecKitState + readSpecDetail', () => {
     ])
   })
 
+  it('reports ready when tasks exist but none are done', () => {
+    const p = makeProject()
+    mkdirSync(join(p, '.specify'))
+    const specDir = join(p, 'specs', '004-ready')
+    mkdirSync(specDir, { recursive: true })
+    writeFileSync(join(specDir, 'spec.md'), '# Feature Specification: Ready Feature\n')
+    writeFileSync(join(specDir, 'plan.md'), '# Plan\n\n## Approach\nDo the thing.\n')
+    writeFileSync(join(specDir, 'tasks.md'), '## Phase 1\n- [ ] T001 A\n')
+    const state = readSpecKitState(p)
+    expect(state.specs[0].status).toBe('ready')
+    const detail = readSpecDetail(p, '004-ready')
+    expect(detail!.plan).toEqual([{ title: 'Approach', body: 'Do the thing.' }])
+  })
+
   it('reports complete when all tasks are done', () => {
     const p = makeProject()
     mkdirSync(join(p, '.specify'))

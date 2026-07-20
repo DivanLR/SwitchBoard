@@ -13,6 +13,8 @@ interface ActiveSessionState {
   oldestSeq: number | null
   hasMoreHistory: boolean
   focusEventId: string | null
+  /** Subagent whose chat view is open (Task tool_use id), or null for the session. */
+  selectedAgentId: string | null
 }
 
 const PAGE_SIZE = 300
@@ -26,6 +28,7 @@ export const useActiveSessionStore = defineStore('activeSession', {
     oldestSeq: null,
     hasMoreHistory: false,
     focusEventId: null,
+    selectedAgentId: null,
   }),
 
   getters: {
@@ -41,6 +44,7 @@ export const useActiveSessionStore = defineStore('activeSession', {
       this.events = []
       this.oldestSeq = null
       this.hasMoreHistory = false
+      this.selectedAgentId = null
       if (!sessionId) return
       const events = await window.switchboard.invoke('sessions.events', {
         sessionId,
@@ -86,9 +90,14 @@ export const useActiveSessionStore = defineStore('activeSession', {
       else this.defaultView = view
     },
 
-    async send(text: string): Promise<{ eventId: string; queued: boolean }> {
+    async send(text: string, agentId?: string): Promise<{ eventId: string; queued: boolean }> {
       if (!this.sessionId) throw new Error('No active session')
-      return window.switchboard.invoke('sessions.send', { sessionId: this.sessionId, text })
+      return window.switchboard.invoke('sessions.send', { sessionId: this.sessionId, text, agentId })
+    },
+
+    /** Open (or close, with null) a subagent's chat view. */
+    selectAgent(agentId: string | null): void {
+      this.selectedAgentId = agentId
     },
 
     async answerQuestion(eventId: string, choice: string): Promise<void> {

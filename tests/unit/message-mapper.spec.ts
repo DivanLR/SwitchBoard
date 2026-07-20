@@ -298,3 +298,60 @@ describe('MessageMapper (contracts/session-events.md)', () => {
     expect(previewOf('x'.repeat(1000)).length).toBeLessThanOrEqual(401)
   })
 })
+
+describe('subagent attribution (parent_tool_use_id)', () => {
+  it('stamps agentId on subagent events and toolUseId on tool spawns', () => {
+    const { sink, mapper } = makeMapper()
+    mapper.handle(
+      asMessage({
+        type: 'assistant',
+        session_id: 'sdk-1',
+        message: {
+          content: [
+            { type: 'tool_use', id: 'tu-1', name: 'Task', input: { description: 'Scan', subagent_type: 'Explore' } },
+          ],
+        },
+      }),
+    )
+    mapper.handle(
+      asMessage({
+        type: 'assistant',
+        session_id: 'sdk-1',
+        parent_tool_use_id: 'tu-1',
+        message: { content: [{ type: 'text', text: 'Reading files…' }] },
+      }),
+    )
+    mapper.handle(assistantText('Main loop update'))
+
+    const [spawn, agentText, mainText] = sink.appended
+    expect(spawn.payload).toMatchObject({ toolName: 'Task', toolUseId: 'tu-1' })
+    expect((spawn.payload as { agentId?: string }).agentId).toBeUndefined()
+    expect(agentText.payload).toMatchObject({ text: 'Reading files…', agentId: 'tu-1' })
+    expect((mainText.payload as { agentId?: string }).agentId).toBeUndefined()
+  })
+
+  it('streams main and subagent partials independently and only the main text becomes the summary', () => {
+    const { sink, mapper } = makeMapper()
+    const delta = (text: string, parent?: string): SDKMessage =>
+      asMessage({
+        type: 'stream_event',
+        session_id: 'sdk-1',
+        parent_tool_use_id: parent,
+        event: { type: 'content_block_delta', delta: { type: 'text_delta', text } },
+      })
+    mapper.handle(delta('Main '))
+    mapper.handle(delta('agent says hi', 'tu-9'))
+    mapper.handle(delta('done'))
+    mapper.handle(resultSuccess({ result: 'Main done' }))
+
+    // The main partial finalised to 'Main done' and was upgraded to the turn
+    // summary; the subagent's partial finalised untouched with its agentId.
+    const mainEvent = sink.appended.find((e) => e.kind === 'summary')
+    const agentEvent = sink.appended.find(
+      (e) => (e.payload as { agentId?: string }).agentId === 'tu-9',
+    )
+    expect(mainEvent?.payload).toMatchObject({ text: 'Main done' })
+    expect(agentEvent?.payload).toMatchObject({ text: 'agent says hi', partial: false })
+    expect(agentEvent?.kind).toBe('assistant_text')
+  })
+})

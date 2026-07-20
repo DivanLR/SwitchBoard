@@ -59,26 +59,37 @@ export interface Session {
 
 // --- Event payloads (contracts/session-events.md) ---
 
-export interface PromptPayload {
+/**
+ * Mixed into payloads produced inside a subagent (Task/Agent tool run):
+ * `agentId` is the spawning tool_use id (the SDK's parent_tool_use_id).
+ * Main-loop events leave it unset. Drives the per-agent chat view.
+ */
+export interface AgentScopedPayload {
+  agentId?: string
+}
+
+export interface PromptPayload extends AgentScopedPayload {
   text: string
   /** True while the message is queued and not yet delivered to the session (FR-019). */
   pending?: boolean
 }
 
-export interface AssistantTextPayload {
+export interface AssistantTextPayload extends AgentScopedPayload {
   text: string
   partial: boolean
 }
 
-export interface SummaryPayload {
+export interface SummaryPayload extends AgentScopedPayload {
   text: string
 }
 
-export interface ToolActivityPayload {
+export interface ToolActivityPayload extends AgentScopedPayload {
   toolName: string
   inputPreview: string
   resultPreview?: string
   isError?: boolean
+  /** The SDK tool_use id — subagent events reference it as their agentId. */
+  toolUseId?: string
 }
 
 export interface QuestionOption {
@@ -124,7 +135,7 @@ export interface ResultPayload {
   durationMs: number
 }
 
-export interface RawOutputPayload {
+export interface RawOutputPayload extends AgentScopedPayload {
   text: string
 }
 
@@ -320,7 +331,7 @@ export interface QueuedTask {
 
 // --- Spec Kit (github/spec-kit) per-project specs ---
 
-export type SpecStatus = 'draft' | 'in_progress' | 'complete'
+export type SpecStatus = 'draft' | 'ready' | 'in_progress' | 'complete'
 
 /** One feature spec (a `specs/NNN-name/` directory) — summary for the chip list. */
 export interface SpecSummary {
@@ -342,7 +353,11 @@ export interface ResolvedClarification {
   answer: string
 }
 
-/** Spec Kit slash commands offered as buttons in the specs view. */
+/**
+ * Spec Kit stage commands (the Commands part tab). `label` is the design's
+ * display form (/speckit.clarify); `command` is the real installed skill the
+ * session receives (/speckit-clarify).
+ */
 export interface SpecKitCommand {
   command: string // e.g. "speckit-clarify"
   label: string
@@ -350,13 +365,12 @@ export interface SpecKitCommand {
 }
 
 export const SPEC_KIT_COMMANDS: readonly SpecKitCommand[] = [
-  { command: 'speckit-specify', label: '/specify', hint: 'Create or update the feature spec' },
-  { command: 'speckit-clarify', label: '/clarify', hint: 'Ask clarifying questions, write answers back' },
-  { command: 'speckit-plan', label: '/plan', hint: 'Generate the implementation plan' },
-  { command: 'speckit-tasks', label: '/tasks', hint: 'Generate the dependency-ordered task list' },
-  { command: 'speckit-analyze', label: '/analyze', hint: 'Cross-check spec, plan, and tasks' },
-  { command: 'speckit-checklist', label: '/checklist', hint: 'Generate a quality checklist' },
-  { command: 'speckit-implement', label: '/implement', hint: 'Execute the task list' },
+  { command: 'speckit-clarify', label: '/speckit.clarify', hint: 'Scan the spec for ambiguity and ask up to 5 new clarification questions' },
+  { command: 'speckit-plan', label: '/speckit.plan', hint: 'Regenerate plan.md from the current spec and answers' },
+  { command: 'speckit-tasks', label: '/speckit.tasks', hint: 'Rebuild tasks.md from the plan, phase by phase' },
+  { command: 'speckit-analyze', label: '/speckit.analyze', hint: 'Cross-check spec, plan, and tasks for drift or contradictions' },
+  { command: 'speckit-implement', label: '/speckit.implement', hint: 'Execute every remaining task in tasks.md' },
+  { command: 'speckit-checklist', label: '/speckit.checklist', hint: 'Generate a review checklist for the finished work' },
 ]
 
 export interface SpecTask {
@@ -376,6 +390,8 @@ export interface SpecDetail extends SpecSummary {
   path: string
   /** Sections parsed from spec.md (## headings). */
   sections: SpecSection[]
+  /** Sections parsed from plan.md (## headings); absent when plan.md is missing. */
+  plan?: SpecSection[]
   /** Tasks grouped by phase from tasks.md. */
   phases: SpecPhase[]
   /** Open [NEEDS CLARIFICATION] questions from spec.md. */

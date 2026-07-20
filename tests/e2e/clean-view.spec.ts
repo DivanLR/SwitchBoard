@@ -88,3 +88,79 @@ test('disabling a swallow rule changes behaviour (FR-015a)', async ({ page }) =>
   // New lines are no longer classified; they render as plain raw output.
   await expect(page.getByTestId('stream').getByTestId('stream-event-raw_output')).toHaveCount(5)
 })
+
+test('parallel subagents are listed: stream card, header pill, and sidebar rows', async ({ page }) => {
+  await page.evaluate(() => {
+    window.__mock.emitEvent('s-alpha', 'tool_activity', {
+      toolName: 'Task',
+      inputPreview: '{"description":"Write rotation tests","subagent_type":"test-writer"}',
+    })
+    window.__mock.emitEvent('s-alpha', 'tool_activity', {
+      toolName: 'Task',
+      inputPreview: '{"description":"Implement family revoke","subagent_type":"reuse-guard"}',
+    })
+  })
+  const card = page.getByTestId('agent-list')
+  await expect(card).toContainText('⑂ AGENTS')
+  await expect(card).toContainText('2 working in parallel')
+  await expect(page.getByTestId('agent-row')).toHaveCount(2)
+  await expect(card).toContainText('test-writer')
+  await expect(card).toContainText('Implement family revoke')
+  await expect(page.getByTestId('agents-pill')).toContainText('2 agents')
+  await expect(page.getByTestId('sidebar-agents-alpha')).toContainText('reuse-guard')
+})
+
+test('clicking an agent opens its chat: banner, scoped stream, addressed composer', async ({ page }) => {
+  await page.evaluate(() => {
+    window.__mock.emitEvent('s-alpha', 'tool_activity', {
+      toolName: 'Task',
+      toolUseId: 'tu-1',
+      inputPreview: '{"description":"Write rotation tests","prompt":"Cover reuse-revoke edge cases","subagent_type":"test-writer"}',
+    })
+    window.__mock.emitEvent('s-alpha', 'tool_activity', {
+      toolName: 'Task',
+      toolUseId: 'tu-2',
+      inputPreview: '{"description":"Implement family revoke","subagent_type":"reuse-guard"}',
+    })
+    window.__mock.emitEvent('s-alpha', 'assistant_text', {
+      text: 'Planned 9 cases — 6 written so far.',
+      partial: false,
+      agentId: 'tu-1',
+    })
+    window.__mock.emitEvent('s-alpha', 'assistant_text', {
+      text: 'Main loop narrative.',
+      partial: false,
+    })
+  })
+
+  // The main clean view hides subagent internals.
+  const stream = page.getByTestId('stream')
+  await expect(stream).toContainText('Main loop narrative.')
+  await expect(stream).not.toContainText('Planned 9 cases')
+
+  // AGENTS card rows advertise the chat and open it.
+  await expect(page.getByTestId('agent-list')).toContainText('chat →')
+  await page.getByTestId('agent-row').first().click()
+
+  await expect(page.getByTestId('agent-banner')).toContainText('← alpha')
+  await expect(page.getByTestId('agent-banner')).toContainText('test-writer')
+  await expect(page.getByTestId('agent-banner')).toContainText('subagent')
+  // Scoped stream: the delegating prompt opens the chat, agent output follows,
+  // main-loop text is gone.
+  await expect(stream).toContainText('[alpha] Cover reuse-revoke edge cases')
+  await expect(stream).toContainText('Planned 9 cases — 6 written so far.')
+  await expect(stream).not.toContainText('Main loop narrative.')
+
+  // The sidebar marks the open agent; the composer addresses it.
+  await expect(page.getByTestId('sidebar-agent-test-writer')).toContainText('test-writer ←')
+  await expect(page.getByTestId('composer-to')).toContainText('to test-writer')
+  await page.getByTestId('composer-input').fill('prioritise the replay case')
+  await page.getByTestId('composer-send').click()
+  const sends = await page.evaluate(() => window.__mock.state().sends)
+  expect(sends.some((s) => s.text === '[to test-writer] prioritise the replay case')).toBe(true)
+
+  // Back link returns to the session stream.
+  await page.getByTestId('agent-back').click()
+  await expect(stream).toContainText('Main loop narrative.')
+  await expect(stream).not.toContainText('Planned 9 cases')
+})

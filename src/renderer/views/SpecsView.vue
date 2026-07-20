@@ -1,8 +1,9 @@
 <script setup lang="ts">
-// Per-project specs view backed by GitHub Spec Kit — 1:1 with the design:
-// spec chips, a spec card with status + progress, and part tabs (spec / clarify
-// / tasks). When Spec Kit is not installed, an install button scaffolds it
-// per-project (ephemeral uvx; nothing global).
+// Per-project specs view backed by GitHub Spec Kit — 1:1 with the design
+// (Switchboard.dc.html): spec chips, a spec card with status + progress, part
+// tabs (spec.md / plan.md / tasks.md / Clarify / Commands), the Commands tab
+// with SUGGESTED NEXT + ALL COMMANDS, and the SUGGEST AN EDIT bar. When Spec
+// Kit is not installed, an install button scaffolds it per-project.
 import { computed, ref, watch } from 'vue'
 import type { SpecPhase, SpecStatus } from '@shared/domain'
 import { SPEC_KIT_COMMANDS } from '@shared/domain'
@@ -11,18 +12,22 @@ import { useSpecsStore } from '@renderer/stores/specs'
 const props = defineProps<{ projectId: string }>()
 const specs = useSpecsStore()
 
-type Part = 'spec' | 'clarify' | 'tasks'
+type Part = 'spec' | 'plan' | 'tasks' | 'clarify' | 'cmds'
 const part = ref<Part>('tasks')
 
-const commands = SPEC_KIT_COMMANDS
-
+/** Send a stage command scoped to the selected spec (design: cmd + spec id). */
 function runCommand(command: string): void {
-  void specs.runInSession(props.projectId, `/${command}`)
+  const suffix = detail.value ? ` ${detail.value.id}` : ''
+  void specs.runInSession(props.projectId, `/${command}${suffix}`)
 }
+
+// The phase whose "Start phase" launched the current run (design: ● Running…).
+const runningPhase = ref<string | null>(null)
 
 /** Start implementing a whole spec (the /implement command) with live updates. */
 function startImplementation(): void {
   if (!detail.value) return
+  runningPhase.value = null
   void specs.startPhase(
     props.projectId,
     detail.value.id,
@@ -33,6 +38,7 @@ function startImplementation(): void {
 /** Start implementing one phase, scoped by its label. */
 function startPhase(phase: SpecPhase): void {
   if (!detail.value) return
+  runningPhase.value = phase.label
   const ids = phase.tasks
     .filter((t) => !t.done)
     .map((t) => t.id)
@@ -51,6 +57,18 @@ function phaseDone(phase: SpecPhase): boolean {
   return phase.tasks.length > 0 && phase.tasks.every((t) => t.done)
 }
 
+function phaseCount(phase: SpecPhase): string {
+  return `${phase.tasks.filter((t) => t.done).length}/${phase.tasks.length}`
+}
+
+function phaseRunning(phase: SpecPhase): boolean {
+  if (!running.value) return false
+  if (runningPhase.value) return runningPhase.value === phase.label
+  // Whole-spec run: the first phase that still has open tasks is the live one.
+  const current = detail.value?.phases.find((p) => p.tasks.some((t) => !t.done))
+  return current?.label === phase.label
+}
+
 watch(
   () => props.projectId,
   (projectId) => {
@@ -62,11 +80,15 @@ watch(
 const state = computed(() => specs.stateFor(props.projectId))
 const detail = computed(() => specs.detail)
 const running = computed(() => specs.isRunning(props.projectId))
+watch(running, (r) => {
+  if (!r) runningPhase.value = null
+})
 
 const statusLabel: Record<SpecStatus, string> = {
   draft: 'Draft',
-  in_progress: 'In progress',
-  complete: 'Complete',
+  ready: 'Ready',
+  in_progress: 'Implementing',
+  complete: 'Done',
 }
 
 const progressPct = computed(() => {
@@ -80,8 +102,84 @@ function statusDot(status: SpecStatus): string {
     ? 'var(--green)'
     : status === 'in_progress'
       ? 'var(--blue)'
-      : 'var(--text-faint)'
+      : status === 'ready'
+        ? 'var(--amber)'
+        : 'var(--text-meta)'
 }
+
+// Sections for the docs parts: spec.md or plan.md (design: partDocs).
+const docSections = computed(() => {
+  const d = detail.value
+  if (!d) return []
+  return part.value === 'plan' ? (d.plan ?? []) : d.sections
+})
+
+const openQs = computed(() =>
+  (detail.value?.clarifications ?? []).map((q, i) => ({ id: `Q${i + 1}`, q })),
+)
+const closedQs = computed(() => detail.value?.resolvedClarifications ?? [])
+
+// SUGGESTED NEXT (design logic): open clarifications → clarify; implementing →
+// analyze; done → checklist; otherwise implement.
+const suggested = computed(() => {
+  const d = detail.value
+  if (!d) return null
+  const open = openQs.value.length
+  if (open > 0)
+    return {
+      command: 'speckit-clarify',
+      label: '/speckit.clarify',
+      why: `${open} open clarification${open > 1 ? 's' : ''} on this spec — resolve the ambiguity before more code gets written`,
+    }
+  if (running.value || d.status === 'in_progress')
+    return {
+      command: 'speckit-analyze',
+      label: '/speckit.analyze',
+      why: 'Implementation is running — cross-check spec, plan, and tasks for drift',
+    }
+  if (d.status === 'complete')
+    return {
+      command: 'speckit-checklist',
+      label: '/speckit.checklist',
+      why: 'Every task is checked off — generate a review checklist for the finished work',
+    }
+  return {
+    command: 'speckit-implement',
+    label: '/speckit.implement',
+    why: 'Spec and plan are settled — execute the remaining tasks in tasks.md',
+  }
+})
+
+// SUGGEST AN EDIT: free-text change request, optionally targeted via ✎.
+const editTarget = ref<string | null>(null)
+const specEdit = ref('')
+
+function setTarget(label: string): void {
+  editTarget.value = label
+}
+
+const editPlaceholder = computed(() =>
+  editTarget.value
+    ? 'Describe the change for this part…'
+    : 'Describe a change to this spec — or hit ✎ on a section, task, or question to target it…',
+)
+
+function sendSpecEdit(): void {
+  const text = specEdit.value.trim()
+  if (!text || !detail.value) return
+  const where = editTarget.value ?? `specs/${detail.value.id}`
+  specEdit.value = ''
+  editTarget.value = null
+  void specs.runInSession(props.projectId, `✎ Spec edit → ${where}: ${text}`)
+}
+
+const partTabs: { id: Part; label: string }[] = [
+  { id: 'spec', label: 'spec.md' },
+  { id: 'plan', label: 'plan.md' },
+  { id: 'tasks', label: 'tasks.md' },
+  { id: 'clarify', label: 'Clarify' },
+  { id: 'cmds', label: 'Commands' },
+]
 </script>
 
 <template>
@@ -91,9 +189,10 @@ function statusDot(status: SpecStatus): string {
       <div class="ni-icon mono">◇</div>
       <div class="ni-title">Spec Kit is not set up in this project</div>
       <div class="ni-sub">
-        GitHub Spec Kit adds a spec-driven workflow (<span class="mono">/specify</span>,
-        <span class="mono">/plan</span>, <span class="mono">/tasks</span>,
-        <span class="mono">/implement</span>). It installs into this project only — nothing global.
+        GitHub Spec Kit adds a spec-driven workflow (<span class="mono">/speckit.specify</span>,
+        <span class="mono">/speckit.plan</span>, <span class="mono">/speckit.tasks</span>,
+        <span class="mono">/speckit.implement</span>). It installs into this project only — nothing
+        global.
       </div>
       <button
         class="btn-solid ni-btn"
@@ -113,26 +212,13 @@ function statusDot(status: SpecStatus): string {
       <div class="ni-icon mono">◇</div>
       <div class="ni-title">No specs in this project</div>
       <div class="ni-sub">
-        Run <span class="mono">/specify</span> in the session to scaffold one with spec-kit.
+        Run <span class="mono">/speckit.specify</span> in the session to scaffold one with
+        spec-kit.
       </div>
     </div>
 
     <!-- Specs present -->
     <div v-else class="has-specs">
-      <!-- Spec Kit command palette -->
-      <div class="cmd-palette" data-testid="speckit-commands">
-        <button
-          v-for="c in commands"
-          :key="c.command"
-          class="cmd-btn mono"
-          :data-testid="`speckit-cmd-${c.command}`"
-          :title="c.hint"
-          @click="runCommand(c.command)"
-        >
-          {{ c.label }}
-        </button>
-      </div>
-
       <!-- Spec chips -->
       <div class="chips">
         <button
@@ -143,112 +229,177 @@ function statusDot(status: SpecStatus): string {
           :data-testid="`spec-chip-${s.id}`"
           @click="specs.selectSpec(props.projectId, s.id)"
         >
-          <span class="dot" :style="{ background: statusDot(s.status) }"></span>{{ s.id }}
+          <span class="chip-dot" :style="{ color: statusDot(s.status) }">●</span>{{ s.id }}
         </button>
       </div>
 
       <template v-if="detail">
         <!-- Spec card -->
-        <div class="card spec-card">
+        <div class="spec-card">
           <div class="sc-head">
             <span class="sc-title mono">{{ detail.title }}</span>
-            <span class="sc-status mono" :class="detail.status">{{ statusLabel[detail.status] }}</span>
+            <span class="sc-status mono" :class="detail.status">{{
+              statusLabel[detail.status]
+            }}</span>
             <span style="flex: 1"></span>
-            <span class="sc-path mono">{{ detail.path }}</span>
+            <span class="sc-path mono">{{ detail.path }}/</span>
           </div>
           <div v-if="detail.description" class="sc-desc">{{ detail.description }}</div>
-          <div class="sc-progress-row mono">
+          <div class="sc-progress-row">
             <button
               v-if="detail.status !== 'complete' && !running && detail.tasksTotal > 0"
-              class="btn-solid impl-btn"
+              class="impl-btn mono"
               data-testid="start-implementation"
               @click="startImplementation"
             >
               ▶ Start implementation
             </button>
-            <span v-if="running" class="impl-running" data-testid="implementing">
+            <span v-if="running" class="impl-running mono" data-testid="implementing">
               ● Implementing…
             </span>
-            <span v-if="detail.status === 'complete'" style="color: var(--green)">
+            <span v-if="detail.status === 'complete'" class="mono" style="font-size: 11.5px; color: var(--green)">
               ✓ All tasks complete
             </span>
-            <span class="sc-progress-label">{{ detail.tasksDone }}/{{ detail.tasksTotal }} tasks</span>
+            <span class="sc-progress-label mono">{{ detail.tasksDone }}/{{ detail.tasksTotal }} tasks</span>
+            <span style="flex: 1"></span>
           </div>
           <div class="sc-bar"><div class="sc-fill" :style="{ width: `${progressPct}%` }"></div></div>
         </div>
 
-        <!-- Part tabs -->
+        <!-- Part tabs: spec.md / plan.md / tasks.md / Clarify / Commands -->
         <div class="part-tabs mono">
-          <button class="pt" :class="{ sel: part === 'spec' }" data-testid="part-spec" @click="part = 'spec'">
-            Spec
-          </button>
           <button
+            v-for="t in partTabs"
+            :key="t.id"
             class="pt"
-            :class="{ sel: part === 'clarify' }"
-            data-testid="part-clarify"
-            @click="part = 'clarify'"
+            :class="{ sel: part === t.id }"
+            :data-testid="`part-${t.id}`"
+            @click="part = t.id"
           >
-            Clarify
-            <span v-if="detail.clarifications.length > 0" class="pt-badge">{{
-              detail.clarifications.length
+            {{ t.label }}
+            <span v-if="t.id === 'clarify' && openQs.length > 0" class="pt-badge">{{
+              openQs.length
             }}</span>
-          </button>
-          <button class="pt" :class="{ sel: part === 'tasks' }" data-testid="part-tasks" @click="part = 'tasks'">
-            Tasks
-            <span v-if="detail.tasksTotal > 0" class="pt-badge dim-badge">{{ detail.tasksTotal }}</span>
           </button>
         </div>
 
-        <!-- spec sections -->
-        <div v-if="part === 'spec'" class="sections" data-testid="spec-sections">
-          <div v-if="detail.sections.length === 0" class="muted mono">No spec.md content parsed.</div>
-          <div v-for="sec in detail.sections" :key="sec.title" class="card section">
-            <div class="sec-title mono">## {{ sec.title }}</div>
+        <!-- spec.md / plan.md sections -->
+        <div v-if="part === 'spec' || part === 'plan'" class="sections" data-testid="spec-sections">
+          <div v-if="docSections.length === 0" class="muted">
+            No {{ part }}.md content parsed.
+          </div>
+          <div v-for="sec in docSections" :key="sec.title" class="section">
+            <div class="sec-head">
+              <span class="sec-title mono">## {{ sec.title }}</span>
+              <button
+                class="sec-refine mono"
+                :data-testid="`refine-${sec.title}`"
+                @click="setTarget(`${detail.id}/${part}.md · ${sec.title}`)"
+              >
+                ✎ Refine
+              </button>
+            </div>
             <div class="sec-body">{{ sec.body }}</div>
           </div>
         </div>
 
-        <!-- clarifications -->
+        <!-- Clarify -->
         <div v-else-if="part === 'clarify'" data-testid="spec-clarify">
-          <div class="clarify-actions">
-            <button class="btn-quiet clarify-run mono" data-testid="run-clarify" @click="runCommand('speckit-clarify')">
-              ✎ Run /clarify again
-            </button>
+          <div v-if="openQs.length === 0 && closedQs.length === 0" class="muted">
+            No clarifications yet — the spec has no
+            <span class="mono" style="color: var(--text-meta)">[NEEDS CLARIFICATION]</span>
+            markers.
           </div>
 
-          <div v-if="detail.clarifications.length === 0 && detail.resolvedClarifications.length === 0" class="muted mono">
-            No clarifications yet. Run <span class="mono">/clarify</span> to have Claude ask, then write
-            the answers into spec.md.
+          <div v-if="openQs.length > 0" class="q-label open mono">OPEN · {{ openQs.length }}</div>
+          <div class="q-list">
+            <div v-for="qq in openQs" :key="qq.id" class="q-card open">
+              <div class="q-tags">
+                <span class="q-tag mono">[NEEDS CLARIFICATION]</span>
+                <span class="q-id mono">{{ qq.id }}</span>
+              </div>
+              <div class="q-text">{{ qq.q }}</div>
+              <div class="q-chips">
+                <button
+                  class="q-answer mono"
+                  :data-testid="`answer-${qq.id}`"
+                  @click="setTarget(`${detail.id}/clarify · ${qq.id}`)"
+                >
+                  ✎ Answer in my own words
+                </button>
+              </div>
+            </div>
           </div>
 
-          <!-- Open questions -->
-          <div v-for="(q, i) in detail.clarifications" :key="`open-${i}`" class="card clarify-card open">
-            <div class="cl-tag mono">NEEDS CLARIFICATION</div>
-            <div class="cl-body">{{ q }}</div>
+          <div v-if="closedQs.length > 0" class="q-label resolved mono">
+            RESOLVED · {{ closedQs.length }}
           </div>
-
-          <!-- Already answered -->
-          <div v-if="detail.resolvedClarifications.length > 0" class="resolved-label mono">RESOLVED</div>
-          <div
-            v-for="(c, i) in detail.resolvedClarifications"
-            :key="`resolved-${i}`"
-            class="card clarify-card resolved"
-            data-testid="resolved-clarification"
-          >
-            <div class="cl-q">{{ c.question }}</div>
-            <div class="cl-a mono"><span style="color: var(--green)">✓</span> {{ c.answer }}</div>
+          <div class="q-list">
+            <div
+              v-for="(c, i) in closedQs"
+              :key="`resolved-${i}`"
+              class="q-card resolved"
+              data-testid="resolved-clarification"
+            >
+              <div class="q-tags">
+                <span class="q-tag resolved mono">RESOLVED</span>
+                <span class="q-id mono">Q{{ openQs.length + i + 1 }}</span>
+              </div>
+              <div class="q-text dim">{{ c.question }}</div>
+              <div class="q-answered mono">✓ {{ c.answer }} — written into spec.md</div>
+            </div>
           </div>
         </div>
 
-        <!-- tasks by phase -->
+        <!-- Commands -->
+        <div v-else-if="part === 'cmds'" data-testid="speckit-commands">
+          <template v-if="suggested">
+            <div class="cmd-label next mono">SUGGESTED NEXT</div>
+            <div class="suggested" data-testid="suggested-next">
+              <span class="sug-cmd mono">{{ suggested.label }}</span>
+              <span class="sug-why">{{ suggested.why }}</span>
+              <button
+                class="sug-run mono"
+                data-testid="suggested-run"
+                @click="runCommand(suggested.command)"
+              >
+                ▶ Run
+              </button>
+            </div>
+          </template>
+          <div class="cmd-label all mono">ALL COMMANDS</div>
+          <div class="cmd-hint">Re-run any stage — output streams into the Session tab.</div>
+          <div class="cmd-grid">
+            <button
+              v-for="c in SPEC_KIT_COMMANDS"
+              :key="c.command"
+              class="cmd-card"
+              :data-testid="`speckit-cmd-${c.command}`"
+              @click="runCommand(c.command)"
+            >
+              <div class="cmd-row">
+                <span class="cmd-name mono">{{ c.label }}</span>
+                <span style="flex: 1"></span>
+                <span class="cmd-run mono">▶ Run</span>
+              </div>
+              <div class="cmd-desc">{{ c.hint }}</div>
+            </button>
+          </div>
+        </div>
+
+        <!-- tasks.md by phase -->
         <div v-else data-testid="spec-tasks">
-          <div v-if="detail.phases.length === 0" class="muted mono">
-            No tasks.md yet. Run <span class="mono">/tasks</span> to generate the task list.
+          <div v-if="detail.phases.length === 0" class="muted">
+            No tasks.md yet. Run <span class="mono">/speckit.tasks</span> to generate the task
+            list.
           </div>
           <div v-for="phase in detail.phases" :key="phase.label" class="phase">
             <div class="phase-header">
               <span class="phase-label mono">{{ phase.label }}</span>
-              <span v-if="phaseDone(phase)" class="phase-done mono">✓ Done</span>
+              <span class="phase-count mono">{{ phaseCount(phase) }}</span>
+              <span style="flex: 1"></span>
+              <span v-if="phaseRunning(phase)" class="phase-running mono">● Running…</span>
+              <span v-else-if="phaseDone(phase)" class="phase-done mono">✓ Done</span>
               <button
                 v-else-if="!running"
                 class="phase-start mono"
@@ -270,9 +421,36 @@ function statusDot(status: SpecStatus): string {
                 <span v-else class="task-box"><span class="box"></span></span>
                 <span class="task-id mono">{{ task.id }}</span>
                 <span class="task-label" :class="{ done: task.done }">{{ task.label }}</span>
+                <button
+                  class="task-refine mono"
+                  title="Target an edit at this task"
+                  @click="setTarget(`${detail.id}/tasks.md · ${task.id}`)"
+                >
+                  ✎
+                </button>
               </div>
             </div>
           </div>
+        </div>
+
+        <!-- SUGGEST AN EDIT -->
+        <div class="edit-label mono">SUGGEST AN EDIT</div>
+        <div class="edit-bar">
+          <span class="edit-pen mono">✎</span>
+          <span v-if="editTarget" class="edit-target mono" data-testid="edit-target">
+            → {{ editTarget }}
+            <button class="edit-target-x" title="Clear target" @click="editTarget = null">✕</button>
+          </span>
+          <input
+            v-model="specEdit"
+            class="edit-input mono"
+            data-testid="spec-edit-input"
+            :placeholder="editPlaceholder"
+            @keydown.enter="sendSpecEdit"
+          />
+          <button class="edit-send mono" data-testid="spec-edit-send" @click="sendSpecEdit">
+            Send to project
+          </button>
         </div>
       </template>
     </div>
@@ -293,22 +471,25 @@ function statusDot(status: SpecStatus): string {
 }
 
 .ni-icon {
-  font-size: 22px;
+  font-size: 20px;
   color: var(--text-faint);
 }
 
 .ni-title {
-  font-size: 14px;
+  font-size: 13.5px;
   color: var(--text-mid);
-  margin-top: 12px;
-  font-weight: 600;
+  margin-top: 10px;
 }
 
 .ni-sub {
   font-size: 12px;
   color: var(--text-faint);
-  margin-top: 8px;
+  margin-top: 5px;
   line-height: 1.6;
+}
+
+.ni-sub .mono {
+  color: var(--text-meta);
 }
 
 .ni-btn {
@@ -327,39 +508,7 @@ function statusDot(status: SpecStatus): string {
   max-width: 840px;
 }
 
-.cmd-palette {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-bottom: 16px;
-}
-
-.cmd-btn {
-  font-size: 11px;
-  color: var(--text-body);
-  background: var(--bg-chip);
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  padding: 5px 11px;
-  cursor: pointer;
-}
-
-.cmd-btn:hover {
-  border-color: var(--green);
-  color: var(--text-strong);
-}
-
-.impl-btn {
-  padding: 7px 16px;
-}
-
-.impl-running {
-  font-size: 11.5px;
-  color: var(--blue);
-  font-family: var(--mono);
-  animation: sbFade 2.2s ease infinite;
-}
-
+/* Spec chips */
 .chips {
   display: flex;
   gap: 8px;
@@ -374,8 +523,7 @@ function statusDot(status: SpecStatus): string {
   font-size: 11.5px;
   color: var(--text-meta);
   background: var(--bg-card);
-  border: 1px solid var(--border-card);
-  border-radius: 8px;
+  border: 1px solid #232937;
   padding: 6px 12px;
   cursor: pointer;
 }
@@ -387,18 +535,15 @@ function statusDot(status: SpecStatus): string {
 
 .chip.sel {
   color: var(--text-bright);
-  background: var(--bg-active);
-  border-color: var(--border-strong);
+  background: #1c2230;
+  border-color: #3b4456;
 }
 
-.chip .dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 99px;
-}
-
+/* Spec card */
 .spec-card {
-  border-radius: 12px;
+  background: var(--bg-card);
+  border: 1px solid #232937;
+  padding: 16px 18px;
 }
 
 .sc-head {
@@ -417,21 +562,26 @@ function statusDot(status: SpecStatus): string {
 .sc-status {
   font-size: 10px;
   padding: 2px 9px;
-  border-radius: 99px;
   border: 1px solid var(--border-strong);
   color: var(--text-meta);
 }
 
+.sc-status.ready {
+  color: var(--amber);
+  border-color: rgba(232, 180, 90, 0.4);
+  background: rgba(232, 180, 90, 0.07);
+}
+
 .sc-status.in_progress {
   color: var(--blue);
-  border-color: rgba(110, 168, 232, 0.35);
-  background: rgba(110, 168, 232, 0.08);
+  border-color: rgba(110, 168, 232, 0.4);
+  background: rgba(110, 168, 232, 0.07);
 }
 
 .sc-status.complete {
   color: var(--green);
   border-color: rgba(62, 207, 154, 0.35);
-  background: rgba(62, 207, 154, 0.08);
+  background: rgba(62, 207, 154, 0.06);
 }
 
 .sc-path {
@@ -452,25 +602,47 @@ function statusDot(status: SpecStatus): string {
   align-items: center;
   gap: 12px;
   margin-top: 14px;
+}
+
+.impl-btn {
+  background: var(--green);
+  color: var(--green-ink);
+  font-weight: 600;
+  font-size: 11.5px;
+  padding: 7px 16px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.impl-btn:hover {
+  background: var(--green-hover);
+}
+
+.impl-running {
+  font-size: 11.5px;
+  color: var(--blue);
+  animation: sbFade 2.2s ease infinite;
+}
+
+.sc-progress-label {
   font-size: 11px;
   color: var(--text-faint);
 }
 
 .sc-bar {
   height: 4px;
-  border-radius: 99px;
-  background: var(--bg-code);
+  background: #1b202c;
   margin-top: 10px;
   overflow: hidden;
 }
 
 .sc-fill {
   height: 100%;
-  border-radius: 99px;
   background: var(--green);
   transition: width 0.3s ease;
 }
 
+/* Part tabs */
 .part-tabs {
   display: flex;
   gap: 2px;
@@ -503,17 +675,11 @@ function statusDot(status: SpecStatus): string {
   color: var(--amber);
   background: rgba(232, 180, 90, 0.13);
   border: 1px solid rgba(232, 180, 90, 0.35);
-  border-radius: 99px;
   padding: 0 6px;
   line-height: 15px;
 }
 
-.pt-badge.dim-badge {
-  color: var(--text-meta);
-  background: var(--bg-chip);
-  border-color: var(--border-strong);
-}
-
+/* spec.md / plan.md sections */
 .sections {
   display: flex;
   flex-direction: column;
@@ -521,14 +687,37 @@ function statusDot(status: SpecStatus): string {
 }
 
 .section {
-  border-radius: 12px;
   padding: 12px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-card-alt);
+}
+
+.sec-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .sec-title {
+  flex: 1;
   font-size: 11.5px;
   font-weight: 600;
   color: var(--text-body);
+}
+
+.sec-refine {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  cursor: pointer;
+  border: 1px solid #232937;
+  padding: 2px 8px;
+  user-select: none;
+  background: transparent;
+}
+
+.sec-refine:hover {
+  color: var(--green);
+  border-color: var(--green);
 }
 
 .sec-body {
@@ -540,61 +729,210 @@ function statusDot(status: SpecStatus): string {
   text-wrap: pretty;
 }
 
-.clarify-actions {
-  margin-bottom: 12px;
+/* Clarify */
+.q-label {
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  margin: 0 2px 8px;
 }
 
-.clarify-run {
-  font-size: 11px;
-  padding: 5px 12px;
+.q-label.open {
+  color: var(--amber);
 }
 
-.clarify-card {
-  border-radius: 12px;
-  margin-bottom: 8px;
+.q-label.resolved {
+  color: var(--green);
+  margin-top: 16px;
 }
 
-.clarify-card.open {
-  border-color: rgba(232, 180, 90, 0.35);
+.q-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.clarify-card.resolved {
-  border-color: var(--border-card-alt);
+.q-card {
+  padding: 12px 14px;
 }
 
-.cl-tag {
+.q-card.open {
+  background: var(--bg-card);
+  border: 1px solid rgba(232, 180, 90, 0.3);
+}
+
+.q-card.resolved {
+  background: #10141d;
+  border: 1px solid var(--border-card-alt);
+}
+
+.q-tags {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.q-tag {
   font-size: 10px;
   letter-spacing: 0.1em;
   color: var(--amber);
 }
 
-.cl-body {
+.q-tag.resolved {
+  color: var(--green);
+}
+
+.q-id {
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+
+.q-text {
   font-size: 13px;
   line-height: 1.55;
   color: var(--text-body);
   margin-top: 6px;
+  text-wrap: pretty;
 }
 
-.resolved-label {
-  font-size: 10px;
-  letter-spacing: 0.13em;
-  color: var(--text-faint);
-  margin: 16px 2px 8px;
-}
-
-.cl-q {
-  font-size: 12.5px;
-  color: var(--text-body);
-  line-height: 1.5;
-}
-
-.cl-a {
-  font-size: 11.5px;
+.q-text.dim {
+  font-size: 12.8px;
   color: var(--text-mid);
-  margin-top: 6px;
-  line-height: 1.5;
 }
 
+.q-chips {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.q-answer {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  border: 1px dashed var(--border-strong);
+  padding: 5px 12px;
+  cursor: pointer;
+  user-select: none;
+  background: transparent;
+}
+
+.q-answer:hover {
+  color: var(--text-mid);
+}
+
+.q-answered {
+  font-size: 11.5px;
+  color: var(--green);
+  margin-top: 7px;
+}
+
+/* Commands */
+.cmd-label {
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  margin: 0 2px 8px;
+}
+
+.cmd-label.next {
+  color: var(--green);
+}
+
+.cmd-label.all {
+  color: var(--text-faint);
+  margin: 20px 2px 4px;
+}
+
+.suggested {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 15px;
+  background: rgba(62, 207, 154, 0.05);
+  border: 1px solid rgba(62, 207, 154, 0.35);
+  flex-wrap: wrap;
+}
+
+.sug-cmd {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--green);
+  white-space: nowrap;
+}
+
+.sug-why {
+  flex: 1;
+  min-width: 200px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-mid);
+  text-wrap: pretty;
+}
+
+.sug-run {
+  flex-shrink: 0;
+  background: var(--green);
+  color: var(--green-ink);
+  font-weight: 600;
+  font-size: 11.5px;
+  padding: 7px 16px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.sug-run:hover {
+  background: var(--green-hover);
+}
+
+.cmd-hint {
+  font-size: 11.5px;
+  color: var(--text-tab);
+  margin: 0 2px 10px;
+}
+
+.cmd-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.cmd-card {
+  padding: 10px 13px;
+  background: var(--bg-card);
+  border: 1px solid #232937;
+  cursor: pointer;
+  user-select: none;
+  text-align: left;
+}
+
+.cmd-card:hover {
+  border-color: var(--green);
+}
+
+.cmd-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cmd-name {
+  font-size: 12px;
+  color: var(--green);
+}
+
+.cmd-run {
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+.cmd-desc {
+  font-size: 11.5px;
+  color: var(--text-tab);
+  margin-top: 4px;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+/* tasks.md */
 .phase {
   margin-bottom: 12px;
 }
@@ -609,7 +947,17 @@ function statusDot(status: SpecStatus): string {
 .phase-label {
   font-size: 11px;
   color: var(--text-meta);
-  flex: 1;
+}
+
+.phase-count {
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+.phase-running {
+  font-size: 10.5px;
+  color: var(--blue);
+  animation: sbFade 1.6s ease infinite;
 }
 
 .phase-done {
@@ -621,14 +969,14 @@ function statusDot(status: SpecStatus): string {
   font-size: 10.5px;
   color: var(--green);
   border: 1px solid rgba(62, 207, 154, 0.35);
-  background: rgba(62, 207, 154, 0.06);
-  border-radius: 6px;
   padding: 2px 9px;
   cursor: pointer;
+  user-select: none;
+  background: transparent;
 }
 
 .phase-start:hover {
-  background: rgba(62, 207, 154, 0.12);
+  background: rgba(62, 207, 154, 0.08);
 }
 
 .phase-tasks {
@@ -644,7 +992,6 @@ function statusDot(status: SpecStatus): string {
   padding: 8px 12px;
   background: var(--bg-card);
   border: 1px solid var(--border-card-alt);
-  border-radius: 8px;
 }
 
 .task-check {
@@ -662,7 +1009,6 @@ function statusDot(status: SpecStatus): string {
   display: block;
   width: 11px;
   height: 11px;
-  border-radius: 4px;
   border: 1.5px solid var(--border-strong);
 }
 
@@ -682,10 +1028,98 @@ function statusDot(status: SpecStatus): string {
   text-decoration: line-through;
 }
 
+.task-refine {
+  font-size: 10.5px;
+  color: #454e60;
+  cursor: pointer;
+  padding: 0 3px;
+  background: transparent;
+}
+
+.task-refine:hover {
+  color: var(--green);
+}
+
+/* SUGGEST AN EDIT */
+.edit-label {
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  color: var(--text-faint);
+  margin: 18px 2px 8px;
+}
+
+.edit-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--bg-card);
+  border: 1px solid #232937;
+  flex-wrap: wrap;
+}
+
+.edit-pen {
+  color: var(--amber);
+}
+
+.edit-target {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10.5px;
+  color: var(--green);
+  background: rgba(62, 207, 154, 0.07);
+  border: 1px solid rgba(62, 207, 154, 0.35);
+  padding: 3px 9px;
+  white-space: nowrap;
+}
+
+.edit-target-x {
+  cursor: pointer;
+  color: var(--text-faint);
+  background: transparent;
+}
+
+.edit-target-x:hover {
+  color: var(--red);
+}
+
+.edit-input {
+  flex: 1;
+  min-width: 60px;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-size: 12.5px;
+  padding: 0;
+}
+
+.edit-input:focus {
+  outline: none;
+}
+
+.edit-send {
+  flex-shrink: 0;
+  background: #1c2230;
+  border: 1px solid #3b4456;
+  color: var(--text-body);
+  font-weight: 600;
+  font-size: 11px;
+  padding: 6px 14px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.edit-send:hover {
+  border-color: var(--green);
+  color: var(--text-strong);
+}
+
 .muted {
   font-size: 12.5px;
   color: var(--text-faint);
-  padding: 14px 2px;
+  padding: 4px 2px 14px;
   line-height: 1.6;
 }
 </style>

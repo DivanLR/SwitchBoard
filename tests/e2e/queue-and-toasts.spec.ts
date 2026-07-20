@@ -49,9 +49,32 @@ test('a queued goal can be removed before it runs', async ({ page }) => {
   await expect(page.getByTestId('task-queue')).toHaveCount(0)
 })
 
+test('a focused app shows no toast; blurring enables it and refocusing clears it', async ({
+  page,
+}) => {
+  // Focused (default): the inbox panel is visible, so no popup.
+  await page.evaluate(() => {
+    window.__mock.raisePermission({ projectId: 'p-alpha', title: 'Run: ls', risk: 'low' })
+  })
+  await expect(page.getByTestId('permission-toasts')).toHaveCount(0)
+
+  // Unfocused: the toast appears for the next request.
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')))
+  await page.evaluate(() => {
+    window.__mock.raisePermission({ projectId: 'p-alpha', title: 'Run: pwd', risk: 'low' })
+  })
+  await expect(page.getByTestId('permission-toasts')).toBeVisible()
+
+  // Refocusing the app clears it — the inbox already shows the request.
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(page.getByTestId('permission-toasts')).toHaveCount(0)
+})
+
 test('a permission request surfaces an approval toast that decides without opening the inbox', async ({
   page,
 }) => {
+  // Toasts only appear while the window is unfocused.
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')))
   await page.evaluate(() => {
     window.__mock.raisePermission({
       projectId: 'p-alpha',
@@ -82,6 +105,7 @@ test('a permission request surfaces an approval toast that decides without openi
 })
 
 test('a high-risk toast requires an explicit confirm before approving', async ({ page }) => {
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')))
   await page.evaluate(() => {
     window.__mock.raisePermission({ projectId: 'p-alpha', title: 'Run: rm -rf dist', risk: 'high' })
   })

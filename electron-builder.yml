@@ -42,8 +42,14 @@ afterPack: scripts/after-pack.mjs
 # installer + latest.yml so installed apps can upgrade themselves.
 publish:
   provider: github
-  owner: haefelesoftware
-  repo: terminal-switchboard
+  owner: DivanLR
+  repo: SwitchBoard
+
+# switchboard:// protocol — notification Approve buttons activate through it.
+protocols:
+  - name: Switchboard
+    schemes:
+      - switchboard
 
 win:
   target:

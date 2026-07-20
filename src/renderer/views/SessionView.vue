@@ -5,6 +5,7 @@
 // (FR-014..019a, R2 resume).
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { ResultPayload, SessionEvent } from '@shared/domain'
+import { activeAgents } from '@shared/agents'
 import type { ProjectListItem } from '@shared/ipc-types'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useProjectsStore } from '@renderer/stores/projects'
@@ -132,6 +133,36 @@ const sessionTimer = computed(() => {
   return `${pad(Math.floor(sec / 3600))}:${pad(Math.floor((sec % 3600) / 60))}:${pad(sec % 60)}`
 })
 
+// Subagents still working this turn — listed under the live line (goal: see
+// the agents when multiple are running).
+const workingAgents = computed(() =>
+  liveSession.value?.status === 'working' ? activeAgents(active.events) : [],
+)
+
+// --- Subagent chat view (design: click an agent → its own conversation) ---
+const selectedAgent = computed(
+  () => workingAgents.value.find((a) => a.id === active.selectedAgentId) ?? null,
+)
+
+// A finished/vanished agent closes its chat view; opening one jumps to Session.
+watch(
+  [() => active.selectedAgentId, workingAgents],
+  ([agentId]) => {
+    if (!agentId) return
+    if (!workingAgents.value.some((a) => a.id === agentId)) {
+      active.selectAgent(null)
+    } else {
+      mainTab.value = 'session'
+    }
+  },
+)
+
+const sendTo = computed(() => selectedAgent.value?.name ?? props.project.name)
+
+function agentIdOf(event: SessionEvent): string | undefined {
+  return (event.payload as { agentId?: string }).agentId
+}
+
 const usage = computed(() => {
   let cost = 0
   let tokens = 0
@@ -157,6 +188,17 @@ watch(
   { immediate: true },
 )
 
+// Put the caret in the composer as soon as it can take input (session open,
+// project switch, returning from the Specs tab) — no click needed to type.
+watch(
+  [() => liveSession.value?.id ?? null, mainTab, () => props.project.id, () => active.selectedAgentId],
+  () => {
+    if (!liveSession.value || mainTab.value !== 'session') return
+    void nextTick(() => composerEl.value?.focus())
+  },
+  { immediate: true },
+)
+
 watch(
   () => props.project.id,
   (projectId) => {
@@ -176,10 +218,28 @@ type StreamItem =
   | { type: 'event'; event: SessionEvent }
   | { type: 'block'; noiseKind: string; events: SessionEvent[]; key: string }
 
+// The main stream hides subagent internals (they live in the agent chat view);
+// the agent view shows only that agent's events, opened by its delegating
+// prompt (synthesized — the Task tool input is the conversation opener).
+const scopedEvents = computed<SessionEvent[]>(() => {
+  const agent = selectedAgent.value
+  if (!agent) return active.events.filter((e) => agentIdOf(e) === undefined)
+  const intro: SessionEvent = {
+    id: `agent-intro-${agent.id}`,
+    sessionId: active.sessionId ?? '',
+    seq: -1,
+    kind: 'prompt',
+    payload: { text: `[${props.project.name}] ${agent.prompt}` },
+    noiseKind: null,
+    createdAt: '',
+  }
+  return [intro, ...active.events.filter((e) => agentIdOf(e) === agent.id)]
+})
+
 const items = computed<StreamItem[]>(() => {
   const result: StreamItem[] = []
   let block: { noiseKind: string; events: SessionEvent[] } | null = null
-  for (const event of active.events) {
+  for (const event of scopedEvents.value) {
     // Clean view is a readable narrative: tool activity (commands being run)
     // is hidden unless the "Show tool activity" setting is on, in which case
     // it collapses into "worked quietly" rows. The raw view keeps everything.
@@ -294,7 +354,11 @@ async function send(): Promise<void> {
   if (!text || !liveSession.value) return
   busy.value = true
   try {
-    await active.send(text)
+    const agent = selectedAgent.value
+    // Agent chat: the message goes to the session addressed at the subagent
+    // (the SDK has no direct subagent input channel; the main loop relays).
+    if (agent) await active.send(`[to ${agent.name}] ${text}`, agent.id)
+    else await active.send(text)
     composer.value = ''
     // Surface the just-sent command at the top of the suggestion history at once.
     recordSent(text)
@@ -351,6 +415,13 @@ function openInbox(requestId: string): void {
         <span class="h-name mono" data-testid="session-project-name">{{ project.name }}</span>
         <span class="h-path mono" data-testid="session-project-path">{{ project.path }}</span>
         <span style="flex: 1"></span>
+        <span
+          v-if="workingAgents.length > 1"
+          class="pill agents-pill"
+          data-testid="agents-pill"
+        >
+          ⑂ {{ workingAgents.length }} agents
+        </span>
         <span
           v-if="liveSession"
           class="pill"
@@ -433,15 +504,27 @@ function openInbox(requestId: string): void {
 
     <SpecsView v-if="mainTab === 'specs'" :project-id="project.id" />
 
-    <!-- Clean stream -->
+    <!-- Clean stream (an open agent chat always renders clean) -->
     <div
-      v-else-if="active.view === 'clean'"
+      v-else-if="active.view === 'clean' || selectedAgent"
       ref="streamEl"
       class="stream"
       data-testid="stream"
       :style="{ zoom: streamZoom }"
     >
       <div class="stream-inner">
+        <!-- Agent chat banner: ← back │ ● name · subagent -->
+        <div v-if="selectedAgent" class="agent-banner mono" data-testid="agent-banner">
+          <span class="ab-back" data-testid="agent-back" @click="active.selectAgent(null)">
+            ← {{ project.name }}
+          </span>
+          <span class="ab-sep">│</span>
+          <span class="ab-dot">●</span>
+          <span class="ab-name">{{ selectedAgent.name }}</span>
+          <span class="ab-chip">subagent</span>
+          <span style="flex: 1"></span>
+        </div>
+
         <div v-if="!liveSession && !endedSession" class="stream-empty">
           <div class="mono faint">No session yet for this project.</div>
           <div class="start-row">
@@ -517,8 +600,40 @@ function openInbox(requestId: string): void {
           />
         </template>
 
+        <!-- Agent chat: the live line is the agent's task -->
+        <div v-if="selectedAgent" class="live mono" data-testid="live-line">
+          <span class="blink" style="color: var(--green)">▊</span>
+          {{ selectedAgent.task || selectedAgent.label }}
+        </div>
+
+        <!-- Subagents working in parallel (design: replaces the live line) -->
+        <div v-else-if="workingAgents.length > 1" class="agents mono" data-testid="agent-list">
+          <div class="agents-head">
+            <span class="agents-label">⑂ AGENTS</span>
+            <span class="agents-count">{{ workingAgents.length }} working in parallel</span>
+          </div>
+          <div class="agents-rows">
+            <div
+              v-for="agent in workingAgents"
+              :key="agent.id"
+              class="agent-row"
+              data-testid="agent-row"
+              @click="active.selectAgent(agent.id)"
+            >
+              <span class="agent-dot">●</span>
+              <span class="agent-name">{{ agent.name }}</span>
+              <span class="agent-task">{{ agent.task || agent.label }}</span>
+              <span class="agent-chat">chat →</span>
+            </div>
+          </div>
+        </div>
+
         <!-- Live status line -->
-        <div v-if="liveSession?.status === 'working'" class="live mono" data-testid="live-line">
+        <div
+          v-else-if="liveSession?.status === 'working'"
+          class="live mono"
+          data-testid="live-line"
+        >
           <span class="blink" style="color: var(--green)">▊</span>
           {{ liveSession.statusDetail || 'Working…' }}
         </div>
@@ -595,7 +710,7 @@ function openInbox(requestId: string): void {
             v-model="composer"
             class="composer-input mono"
             data-testid="composer-input"
-            :placeholder="liveSession ? `Send a message to ${project.name}…` : 'Start a session first'"
+            :placeholder="liveSession ? `Send a message to ${sendTo}…` : 'Start a session first'"
             :disabled="!liveSession"
             spellcheck="false"
             autocomplete="off"
@@ -603,7 +718,7 @@ function openInbox(requestId: string): void {
             @keydown="onComposerKeydown"
           />
         </div>
-        <span class="to mono">to {{ project.name }}</span>
+        <span class="to mono" data-testid="composer-to">to {{ sendTo }}</span>
         <button
           class="queue-btn mono"
           data-testid="composer-queue"
@@ -743,6 +858,11 @@ function openInbox(requestId: string): void {
   border-color: rgba(224, 108, 85, 0.5);
 }
 
+.pill.agents-pill {
+  color: var(--blue);
+  border: 1px solid rgba(110, 168, 232, 0.3);
+}
+
 .head-meta {
   display: flex;
   align-items: center;
@@ -813,6 +933,127 @@ function openInbox(requestId: string): void {
   font-size: 12.5px;
   color: var(--text-meta);
   margin-top: 4px;
+}
+
+/* Agent chat banner (design: ← project │ ● name · subagent). */
+.agent-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 9px 12px;
+  background: #0d1017;
+  border: 1px solid #253044;
+  flex-wrap: wrap;
+}
+
+.ab-back {
+  font-size: 11px;
+  color: var(--text-meta);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.ab-back:hover {
+  color: var(--text-strong);
+}
+
+.ab-sep {
+  color: var(--border-seg);
+}
+
+.ab-dot {
+  font-size: 11px;
+  color: var(--blue);
+  animation: sbFade 1.6s ease infinite;
+}
+
+.ab-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+
+.ab-chip {
+  font-size: 10px;
+  color: var(--text-faint);
+  border: 1px solid var(--border-seg);
+  padding: 1px 7px;
+  white-space: nowrap;
+}
+
+/* Parallel-agents card (design: ⑂ AGENTS · N working in parallel). */
+.agents {
+  border: 1px solid var(--border-card-alt);
+  background: #0d1017;
+  padding: 11px 13px;
+  margin-top: 6px;
+}
+
+.agents-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 9px;
+}
+
+.agents-label {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--blue);
+}
+
+.agents-count {
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+.agents-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.agent-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 -6px;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+
+.agent-row:hover {
+  background: var(--bg-card);
+}
+
+.agent-chat {
+  font-size: 10.5px;
+  color: var(--green);
+  white-space: nowrap;
+}
+
+.agent-dot {
+  font-size: 11px;
+  color: var(--blue);
+  animation: sbFade 1.6s ease infinite;
+}
+
+.agent-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-body);
+  white-space: nowrap;
+}
+
+.agent-task {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-meta);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .live-blocked {

@@ -257,11 +257,12 @@ export class SessionManager {
     this.sendMessage(entry.row.id, next.text)
   }
 
-  sendMessage(sessionId: string, text: string): { eventId: string; queued: boolean } {
+  sendMessage(sessionId: string, text: string, agentId?: string): { eventId: string; queued: boolean } {
     const entry = this.requireLive(sessionId)
     const send = entry.session.send(text)
     const sink = this.makeSink(entry)
-    const event = sink.append('prompt', { text, pending: send.queued })
+    // agentId tags prompts addressed at a subagent so they show in its chat view.
+    const event = sink.append('prompt', { text, pending: send.queued, agentId })
     // Record the command for terminal-style composer suggestions.
     this.repos.commandHistory.add(entry.row.projectId, text)
     send.deliver(event.id)

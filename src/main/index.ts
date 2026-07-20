@@ -3,7 +3,7 @@
 // confirmation and graceful shutdown (FR-022, T045), and composition of the
 // store, session manager, permission broker, notifier, and IPC layer.
 import { app, BrowserWindow, dialog, Menu, nativeImage, session, Tray } from 'electron'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { openDatabase } from './store/db'
 import { createRepositories, type Repositories } from './store/repositories'
 import { runRetention, scheduleRetention } from './store/retention'
@@ -11,6 +11,7 @@ import { SessionManager } from './sessions/session-manager'
 import { PermissionBroker } from './inbox/permission-broker'
 import { classifyNoise } from './stream/swallow-rules'
 import { createNotifier } from './notifications'
+import { parseDeepLink, PROTOCOL_SCHEME } from './deep-link'
 import { computeCounters, registerIpcHandlers, RendererPush, seedDefaultRules } from './ipc/handlers'
 import { initUpdater } from './updater'
 import type { SwallowRule } from '@shared/domain'
@@ -27,7 +28,20 @@ const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
   app.quit()
 } else {
-  app.setAppUserModelId('com.switchboard.desktop')
+  // Must match electron-builder's appId: the NSIS shortcut is registered under
+  // that AppUserModelID, and Windows resolves the taskbar icon and notification
+  // branding by matching the running app's AUMID to the shortcut's.
+  app.setAppUserModelId('com.haefelesoftware.switchboard')
+  // switchboard:// protocol: notification Approve buttons activate through it.
+  // Dev runs need the executable + entry args spelled out; packaged builds
+  // register plainly (the installer also writes the registry entries).
+  if (process.defaultApp) {
+    if (process.argv.length >= 2) {
+      app.setAsDefaultProtocolClient(PROTOCOL_SCHEME, process.execPath, [resolve(process.argv[1])])
+    }
+  } else {
+    app.setAsDefaultProtocolClient(PROTOCOL_SCHEME)
+  }
   void main()
 }
 
@@ -50,6 +64,9 @@ function createWindow(): void {
     show: false,
     autoHideMenuBar: true,
     backgroundColor: '#0b0d12',
+    // Packaged builds take the icon from the exe resource; dev needs it set
+    // explicitly or the taskbar shows the stock Electron icon.
+    icon: app.isPackaged ? undefined : join(app.getAppPath(), 'build', 'icon.ico'),
     webPreferences: {
       preload: join(import.meta.dirname, '../preload/index.mjs'),
       contextIsolation: true,
@@ -177,6 +194,31 @@ async function main(): Promise<void> {
   }
   manager.setNoiseClassifier((event, projectId) => classifyNoise(swallowRules, event, projectId))
 
+  // switchboard:// deep links from notification buttons. Approve routes through
+  // the broker, so the pending-status check and the high-risk double-confirm
+  // guard hold exactly as they do in the inbox; anything the broker refuses
+  // falls back to opening the inbox on the item.
+  const handleDeepLink = (url: string): void => {
+    const link = parseDeepLink(url)
+    if (!link) return
+    if (link.verb === 'approve') {
+      try {
+        broker.decide(link.requestId, 'approve')
+        return // approved in place; no need to raise the window
+      } catch {
+        // Expired, already decided, or high-risk (needs the in-app confirm).
+      }
+    }
+    showWindow()
+    pusher.focusRequest({ target: 'inbox', requestId: link.requestId })
+  }
+  const deepLinkIn = (argv: string[]): void => {
+    const url = argv.find((arg) => arg.startsWith(`${PROTOCOL_SCHEME}://`))
+    if (url) handleDeepLink(url)
+  }
+  // Cold start via a notification button while the app was not running.
+  deepLinkIn(process.argv)
+
   registerIpcHandlers({ repos, manager, broker, refreshSwallowRules, getWindow: () => mainWindow })
   scheduleRetention(() => runRetention(db, repos))
   initUpdater({ onStatus: (status) => pusher.updateStatus(status) })
@@ -187,7 +229,15 @@ async function main(): Promise<void> {
   // The app stays resident in the tray when every window is closed (R2).
   app.on('window-all-closed', () => {})
 
-  app.on('second-instance', () => showWindow())
+  app.on('second-instance', (_event, argv) => {
+    // A protocol activation launches a second instance carrying the URL.
+    const url = argv.find((arg) => arg.startsWith(`${PROTOCOL_SCHEME}://`))
+    if (url) {
+      handleDeepLink(url)
+      return
+    }
+    showWindow()
+  })
 
   app.on('activate', () => showWindow())
 

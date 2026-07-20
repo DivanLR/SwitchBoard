@@ -44,12 +44,15 @@
   --amber-ink: #201505;
   --red: #e06c55;
   --detail: #8fa8bd;
-  --sans: 'IBM Plex Sans', system-ui, sans-serif;
-  --mono: 'JetBrains Mono', monospace;
+  /* Updated design (Switchboard.dc.html): JetBrains Mono everywhere. */
+  --sans: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', monospace;
+  --mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', monospace;
 }
 
 * {
   box-sizing: border-box;
+  /* The updated design has zero rounded corners anywhere. */
+  border-radius: 0 !important;
 }
 
 html,
@@ -83,7 +86,6 @@ a:hover {
 
 ::-webkit-scrollbar-thumb {
   background: var(--border-strong);
-  border-radius: 8px;
   border: 2px solid var(--bg);
 }
 

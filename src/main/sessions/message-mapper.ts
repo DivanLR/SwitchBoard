@@ -72,11 +72,11 @@ export class MessageMapper {
   private sink: EventSink
   private onSdkSessionId?: (id: string) => void
   private sdkSessionIdSeen = false
-  /** Live streaming assistant text event, updated in place by `seq` (contract). */
-  private partial: { eventId: string; text: string } | null = null
+  /** Live streaming assistant text per producer ('' = main loop, else the subagent's tool_use id). */
+  private partials = new Map<string, { eventId: string; text: string }>()
   /** tool_use id -> tool_activity event id awaiting its result half. */
   private openToolUses = new Map<string, { eventId: string; payload: EventPayloadMap['tool_activity'] }>()
-  /** Final assistant text of the current turn, candidate for the summary upgrade. */
+  /** Final MAIN-LOOP assistant text of the current turn, candidate for the summary upgrade. */
   private lastAssistantText: { eventId: string; text: string } | null = null
 
   constructor(options: MessageMapperOptions) {
@@ -120,29 +120,40 @@ export class MessageMapper {
     }
   }
 
+  /** Subagent attribution: the SDK stamps messages produced inside a Task tool run. */
+  private agentIdOf(message: SDKMessage): string | undefined {
+    const parent = (message as { parent_tool_use_id?: string | null }).parent_tool_use_id
+    return parent ?? undefined
+  }
+
   private handleAssistant(message: Extract<SDKMessage, { type: 'assistant' }>): void {
+    const agentId = this.agentIdOf(message)
+    const partialKey = agentId ?? ''
     const blocks = (message.message?.content ?? []) as ContentBlockLike[]
     for (const block of blocks) {
       if (block.type === 'text' && typeof block.text === 'string') {
-        if (this.partial) {
+        const partial = this.partials.get(partialKey)
+        if (partial) {
           // The final message replaces its partials in place (contract).
-          this.sink.update(this.partial.eventId, { text: block.text, partial: false }, { persist: true })
-          this.lastAssistantText = { eventId: this.partial.eventId, text: block.text }
-          this.partial = null
+          this.sink.update(partial.eventId, { text: block.text, partial: false, agentId }, { persist: true })
+          if (!agentId) this.lastAssistantText = { eventId: partial.eventId, text: block.text }
+          this.partials.delete(partialKey)
         } else {
-          const event = this.sink.append('assistant_text', { text: block.text, partial: false })
-          this.lastAssistantText = { eventId: event.id, text: block.text }
+          const event = this.sink.append('assistant_text', { text: block.text, partial: false, agentId })
+          if (!agentId) this.lastAssistantText = { eventId: event.id, text: block.text }
         }
       } else if (block.type === 'tool_use' && typeof block.name === 'string') {
         const payload: EventPayloadMap['tool_activity'] = {
           toolName: block.name,
           inputPreview: previewOf(block.input),
+          toolUseId: block.id,
+          agentId,
         }
         const event = this.sink.append('tool_activity', payload)
         if (block.id) this.openToolUses.set(block.id, { eventId: event.id, payload })
       } else if (block.type === 'thinking' && typeof block.thinking === 'string') {
         // Not part of the narrative kinds; retained for raw-view completeness (FR-018).
-        this.sink.append('raw_output', { text: block.thinking })
+        this.sink.append('raw_output', { text: block.thinking, agentId })
       }
     }
   }
@@ -173,18 +184,21 @@ export class MessageMapper {
       delta?: { type?: string; text?: string }
     }
     if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta' && event.delta.text) {
-      if (!this.partial) {
+      const agentId = this.agentIdOf(message)
+      const partialKey = agentId ?? ''
+      const partial = this.partials.get(partialKey)
+      if (!partial) {
         const appended = this.sink.append(
           'assistant_text',
-          { text: event.delta.text, partial: true },
+          { text: event.delta.text, partial: true, agentId },
           { persist: false },
         )
-        this.partial = { eventId: appended.id, text: event.delta.text }
+        this.partials.set(partialKey, { eventId: appended.id, text: event.delta.text })
       } else {
-        this.partial.text += event.delta.text
+        partial.text += event.delta.text
         this.sink.update(
-          this.partial.eventId,
-          { text: this.partial.text, partial: true },
+          partial.eventId,
+          { text: partial.text, partial: true, agentId },
           { persist: false },
         )
       }
@@ -192,12 +206,13 @@ export class MessageMapper {
   }
 
   private handleResult(message: Extract<SDKMessage, { type: 'result' }>): void {
-    // A dangling partial at turn end is finalised as-is so nothing is lost.
-    if (this.partial) {
-      this.sink.update(this.partial.eventId, { text: this.partial.text, partial: false }, { persist: true })
-      this.lastAssistantText = { eventId: this.partial.eventId, text: this.partial.text }
-      this.partial = null
+    // Dangling partials at turn end are finalised as-is so nothing is lost.
+    for (const [key, partial] of this.partials) {
+      const agentId = key || undefined
+      this.sink.update(partial.eventId, { text: partial.text, partial: false, agentId }, { persist: true })
+      if (!agentId) this.lastAssistantText = { eventId: partial.eventId, text: partial.text }
     }
+    this.partials.clear()
 
     if (message.subtype === 'success') {
       const text = message.result ?? ''

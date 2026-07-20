@@ -38,7 +38,16 @@ const updateDismissed = ref(false)
 
 const unsubscribers: (() => void)[] = []
 
+// Approval toasts only appear while the window is unfocused (the inbox panel
+// covers the focused case); focusing the app clears any showing toast.
+const onWindowFocus = (): void => inbox.setWindowFocused(true)
+const onWindowBlur = (): void => inbox.setWindowFocused(false)
+
 onMounted(async () => {
+  window.addEventListener('focus', onWindowFocus)
+  window.addEventListener('blur', onWindowBlur)
+  inbox.windowFocused = document.hasFocus()
+
   if (!window.switchboard) {
     bridgeMissing.value = true
     return
@@ -71,6 +80,8 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('focus', onWindowFocus)
+  window.removeEventListener('blur', onWindowBlur)
   for (const unsubscribe of unsubscribers) unsubscribe()
 })
 

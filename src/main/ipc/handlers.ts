@@ -192,7 +192,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'sessions.stop': (req) => manager.stopSession(req.sessionId),
     'sessions.interrupt': (req) => manager.interruptSession(req.sessionId),
     'sessions.send': (req) => {
-      const result = manager.sendMessage(req.sessionId, req.text)
+      const result = manager.sendMessage(req.sessionId, req.text, req.agentId)
       // Drafts offered in the composer are consumed by the first send (FR-019 edge case).
       const session = repos.sessions.byId(req.sessionId)
       if (session) {

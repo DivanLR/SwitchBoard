@@ -95,7 +95,10 @@ export interface InvokeMap {
   }
   'sessions.stop': { req: { sessionId: string }; res: void }
   'sessions.interrupt': { req: { sessionId: string }; res: { stillQueued: number } }
-  'sessions.send': { req: { sessionId: string; text: string }; res: { eventId: string; queued: boolean } }
+  'sessions.send': {
+    req: { sessionId: string; text: string; agentId?: string }
+    res: { eventId: string; queued: boolean }
+  }
   'sessions.answerQuestion': { req: { sessionId: string; eventId: string; choice: string }; res: void }
   'sessions.events': {
     req: { sessionId: string; beforeSeq?: number; limit?: number }

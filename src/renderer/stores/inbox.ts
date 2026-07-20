@@ -13,6 +13,8 @@ interface InboxState {
   undeliverableNotice: string | null
   /** Newly-arrived requests shown as approve/deny toasts (approve from the notification). */
   toasts: PermissionRequest[]
+  /** Toasts only appear while the window is unfocused — the inbox covers the rest. */
+  windowFocused: boolean
 }
 
 export const useInboxStore = defineStore('inbox', {
@@ -23,6 +25,7 @@ export const useInboxStore = defineStore('inbox', {
     focusRequestId: null,
     undeliverableNotice: null,
     toasts: [],
+    windowFocused: true,
   }),
 
   getters: {
@@ -88,8 +91,10 @@ export const useInboxStore = defineStore('inbox', {
         if (!this.pending.some((p) => p.id === added.id)) {
           this.pending.push(added)
           // Surface a single most-recent toast (design shows one at a time) so
-          // the request can be approved without hunting the inbox.
-          this.toasts = [added]
+          // the request can be approved without hunting the inbox — but only
+          // while the window is unfocused; with the app in use, the inbox
+          // panel already shows the request.
+          if (!this.windowFocused) this.toasts = [added]
         }
       }
       if (push.resolved) {
@@ -105,6 +110,12 @@ export const useInboxStore = defineStore('inbox', {
 
     dismissToast(requestId: string): void {
       this.toasts = this.toasts.filter((t) => t.id !== requestId)
+    },
+
+    /** Window focus/blur (App shell): focusing the app clears any toast — the inbox shows it. */
+    setWindowFocused(focused: boolean): void {
+      this.windowFocused = focused
+      if (focused) this.toasts = []
     },
 
     focusRequest(requestId: string): void {

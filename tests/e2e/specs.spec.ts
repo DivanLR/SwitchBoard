@@ -102,12 +102,16 @@ async function seedSpec(page: import('@playwright/test').Page): Promise<void> {
   await page.getByTestId('tab-specs').click()
 }
 
-test('the specs view offers spec-kit command buttons', async ({ page }) => {
+test('the Commands part suggests the next stage and lists all commands', async ({ page }) => {
   await seedSpec(page)
+  await page.getByTestId('part-cmds').click()
   await expect(page.getByTestId('speckit-commands')).toBeVisible()
+  // One open clarification → the suggested next stage is /speckit.clarify.
+  await expect(page.getByTestId('suggested-next')).toContainText('/speckit.clarify')
+  await expect(page.getByTestId('suggested-next')).toContainText('1 open clarification')
   await page.getByTestId('speckit-cmd-speckit-clarify').click()
   const sends = await page.evaluate(() => window.__mock.state().sends)
-  expect(sends.some((s) => s.text === '/speckit-clarify')).toBe(true)
+  expect(sends.some((s) => s.text === '/speckit-clarify 001-x')).toBe(true)
 })
 
 test('clarify part shows both open and already-resolved clarifications', async ({ page }) => {

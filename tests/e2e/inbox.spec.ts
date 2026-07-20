@@ -88,9 +88,7 @@ test('approve-all approves the group but skips high-risk items (FR-011)', async 
     window.__mock.raisePermission({ projectId: 'p-beta', title: 'other group', risk: 'low' })
   })
 
-  // The approval toast sits top-right over the inbox; dismiss it before using
-  // the group controls it overlaps (a real user dismisses or acts on it too).
-  await page.getByTestId('toast-dismiss').click()
+  // No toast appears while the window is focused, so the group controls are clear.
   await page.getByTestId('inbox-group-alpha').getByTestId('approve-all').click()
 
   // The high-risk item stays, as does the other project's group.

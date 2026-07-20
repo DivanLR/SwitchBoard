@@ -149,6 +149,18 @@ export class HostedSession {
       },
     })
     void this.run()
+    // Slash commands are available the moment the CLI boots — don't wait for
+    // the init message (which only arrives with the first turn), so typing "/"
+    // in a fresh session already lists every command and plugin skill.
+    void this.q
+      .supportedCommands()
+      .then((commands) => {
+        const names = [...new Set(commands.map((c) => c.name))].sort()
+        if (names.length > 0) this.options.onCommands?.(names)
+      })
+      .catch(() => {
+        // Older CLI without the control request — the init message still covers it.
+      })
     this.setStatus('done')
   }
 
@@ -218,9 +230,22 @@ export class HostedSession {
 
   private captureInitCommands(message: SDKMessage): void {
     if (!this.options.onCommands) return
-    const init = message as { type?: string; subtype?: string; slash_commands?: string[]; skills?: string[] }
-    if (init.type !== 'system' || init.subtype !== 'init') return
-    const commands = [...new Set([...(init.slash_commands ?? []), ...(init.skills ?? [])])].sort()
+    const msg = message as {
+      type?: string
+      subtype?: string
+      slash_commands?: string[]
+      skills?: string[]
+      commands?: { name: string }[]
+    }
+    if (msg.type !== 'system') return
+    // Mid-session change (skills discovered while working): REPLACE semantics.
+    if (msg.subtype === 'commands_changed' && msg.commands) {
+      const names = [...new Set(msg.commands.map((c) => c.name))].sort()
+      if (names.length > 0) this.options.onCommands(names)
+      return
+    }
+    if (msg.subtype !== 'init') return
+    const commands = [...new Set([...(msg.slash_commands ?? []), ...(msg.skills ?? [])])].sort()
     if (commands.length > 0) this.options.onCommands(commands)
   }
 

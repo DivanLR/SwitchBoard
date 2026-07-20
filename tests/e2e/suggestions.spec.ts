@@ -17,6 +17,15 @@ test.beforeEach(async ({ page }) => {
   }
 })
 
+test('the composer is focused on session open — typing works without a click', async ({ page }) => {
+  // The beforeEach clicked around; switch projects to re-trigger the focus watch.
+  await page.getByTestId('sidebar-project-beta').click()
+  await expect(page.getByTestId('composer-input')).toBeFocused()
+  // Keystrokes land in the composer with no prior click.
+  await page.keyboard.type('/hel')
+  await expect(page.getByTestId('composer-input')).toHaveValue('/hel')
+})
+
 test('inline ghost text completes from history and Tab accepts it', async ({ page }) => {
   const input = page.getByTestId('composer-input')
   await input.fill('git c')
