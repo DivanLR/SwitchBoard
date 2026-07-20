@@ -13,8 +13,6 @@ export default tseslint.config(
       'coverage/**',
       'playwright-report/**',
       'test-results/**',
-      // Diagnostic harness that mixes Node and in-browser (page.evaluate) code.
-      'scripts/electron-session-probe.mjs',
     ],
   },
   js.configs.recommended,

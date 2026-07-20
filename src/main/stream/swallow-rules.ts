@@ -43,8 +43,7 @@ export function classifyNoise(
     (rule) =>
       rule.enabled &&
       (rule.scope === 'global' || rule.projectId === projectId) &&
-      (rule.eventKindMatcher === '*' || rule.eventKindMatcher === event.kind) &&
-      (rule.eventKindMatcher === '*' || isSwallowableKind(rule.eventKindMatcher)),
+      (rule.eventKindMatcher === '*' || rule.eventKindMatcher === event.kind),
   )
   const ordered = [
     ...applicable.filter((r) => r.scope === 'project').sort((a, b) => a.position - b.position),

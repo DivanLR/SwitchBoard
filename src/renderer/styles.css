@@ -1,6 +1,16 @@
 /* Switchboard theme — 1:1 with the supplied Switchboard.html design reference. */
 @import './assets/fonts.css';
 
+/* Theme toggle (design reference): dark is the palette brightened slightly;
+   light mode is the mockup's filter flip, toggled via html.sb-light. */
+html:not(.sb-light) {
+  filter: brightness(1.19);
+}
+
+html.sb-light {
+  filter: invert(0.93) hue-rotate(180deg) saturate(1.35);
+}
+
 :root {
   /* Palette — updated Switchboard design (Switchboard (1).html): cooler, deeper
      navy-charcoal base with softer rounded surfaces. */

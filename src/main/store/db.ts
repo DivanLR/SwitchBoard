@@ -68,9 +68,6 @@ const MIGRATIONS: Migration[] = [
         );
         CREATE INDEX idx_requests_pending ON permission_requests(status, projectId, createdAt);
 
-        CREATE VIEW decision_history AS
-          SELECT * FROM permission_requests WHERE status != 'pending';
-
         CREATE TABLE permission_rules (
           id TEXT PRIMARY KEY,
           projectId TEXT NOT NULL REFERENCES projects(id),
@@ -181,6 +178,28 @@ const MIGRATIONS: Migration[] = [
         );
         CREATE INDEX idx_taskqueue_project ON task_queue(projectId, position);
       `)
+    },
+  },
+  {
+    // Explicit sidebar ordering (design: drag to reorder / move up-down).
+    name: '007-project-order',
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE projects ADD COLUMN position INTEGER;
+        UPDATE projects SET position = (
+          SELECT COUNT(*) FROM projects p2
+          WHERE p2.createdAt < projects.createdAt
+             OR (p2.createdAt = projects.createdAt AND p2.id < projects.id)
+        );
+      `)
+    },
+  },
+  {
+    // Referenced folders per project (design: header REFS chips) — JSON array
+    // of { path, label }, granted to sessions as additional directories.
+    name: '008-project-refs',
+    up: (db) => {
+      db.exec(`ALTER TABLE projects ADD COLUMN refs TEXT;`)
     },
   },
 ]

@@ -47,6 +47,18 @@ test('commands arriving from the session init message load live, without a proje
   await expect(page.getByTestId('suggest-item-0')).toContainText('/ponytail')
 })
 
+test('suggestions show a small explanation of what each command does', async ({ page }) => {
+  await page.evaluate(() =>
+    window.__mock.setCommands('p-alpha', [
+      { name: 'ponytail', description: 'Forces the laziest working solution' },
+    ]),
+  )
+  await page.getByTestId('composer-input').fill('/')
+  const list = page.getByTestId('suggest-list')
+  await expect(list).toContainText('/ponytail')
+  await expect(list.locator('.suggest-desc')).toHaveText('Forces the laziest working solution')
+})
+
 test('a project can be removed via the confirmation popup', async ({ page }) => {
   // Removal requires no live session, so end beta's session first.
   await page.evaluate(() => window.__mock.endSession('s-beta'))
@@ -95,11 +107,60 @@ test('renaming a project inline updates its name', async ({ page }) => {
   await expect(page.getByTestId('sidebar-project-beta-renamed')).toBeVisible()
 })
 
+test('the context menu moves a project up and down the sidebar', async ({ page }) => {
+  // Scenario order: alpha, beta. Move beta up → beta first.
+  await page.getByTestId('sidebar-project-beta').click({ button: 'right' })
+  await page.getByTestId('ctx-move-up').click()
+  await expect(page.locator('.project').first()).toHaveAttribute(
+    'data-testid',
+    'sidebar-project-beta',
+  )
+
+  // Move beta back down → alpha first again.
+  await page.getByTestId('sidebar-project-beta').click({ button: 'right' })
+  await page.getByTestId('ctx-move-down').click()
+  await expect(page.locator('.project').first()).toHaveAttribute(
+    'data-testid',
+    'sidebar-project-alpha',
+  )
+})
+
 test('the context menu can remove a project (opens the popup)', async ({ page }) => {
   await page.evaluate(() => window.__mock.endSession('s-beta'))
   await page.getByTestId('sidebar-project-beta').click({ button: 'right' })
   await page.getByTestId('ctx-remove').click()
   await expect(page.getByTestId('remove-dialog')).toBeVisible()
+})
+
+test('sidebar collapses to an initials rail and the theme toggle flips light mode', async ({
+  page,
+}) => {
+  await page.getByTestId('collapse-toggle').click()
+  const alpha = page.getByTestId('sidebar-project-alpha')
+  await expect(alpha.locator('.initials')).toHaveText('al')
+  await expect(alpha.locator('.name')).toHaveCount(0)
+  // The per-project color code stays visible on the collapsed rail.
+  await expect(page.getByTestId('project-accent-alpha')).toBeVisible()
+  await page.getByTestId('collapse-toggle').click()
+  await expect(alpha.locator('.name')).toHaveText('alpha')
+
+  await page.getByTestId('theme-toggle').click()
+  await expect(page.locator('html')).toHaveClass(/sb-light/)
+  await page.getByTestId('theme-toggle').click()
+  await expect(page.locator('html')).not.toHaveClass(/sb-light/)
+})
+
+test('a reference can be added by project name and removed from the REFS row', async ({
+  page,
+}) => {
+  await page.getByTestId('sidebar-project-alpha').click()
+  await page.getByTestId('ref-add').click()
+  await page.getByTestId('ref-input').fill('beta')
+  await page.getByTestId('ref-input').press('Enter')
+  await expect(page.getByTestId('ref-chip-beta')).toBeVisible()
+
+  await page.getByTestId('ref-remove-beta').click()
+  await expect(page.getByTestId('ref-chip-beta')).toHaveCount(0)
 })
 
 test('Ctrl+C interrupts the running session, like a terminal', async ({ page }) => {

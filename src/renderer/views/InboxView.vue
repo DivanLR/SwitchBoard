@@ -4,7 +4,7 @@
 // "approve all"), item cards with risk chip / explanation / detail box /
 // approve+deny, and the history list of ✓/✗ rows (FR-007..013, SC-004).
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import type { PermissionRequest } from '@shared/domain'
+import type { DecisionRecord, PermissionRequest } from '@shared/domain'
 import { useInboxStore } from '@renderer/stores/inbox'
 import { useProjectsStore } from '@renderer/stores/projects'
 
@@ -13,8 +13,6 @@ const projects = useProjectsStore()
 
 const tab = ref<'inbox' | 'history'>('inbox')
 const confirmingId = ref<string | null>(null)
-const ruleOfferId = ref<string | null>(null)
-const historyFilter = ref<string>('')
 const expandedHistory = ref(new Set<string>())
 
 function toggleHistory(id: string): void {
@@ -35,11 +33,7 @@ onMounted(() => {
 onUnmounted(() => clearInterval(timer))
 
 watch(tab, (value) => {
-  if (value === 'history') void inbox.loadHistory(historyFilter.value || undefined)
-})
-
-watch(historyFilter, () => {
-  if (tab.value === 'history') void inbox.loadHistory(historyFilter.value || undefined)
+  if (value === 'history') void inbox.loadHistory()
 })
 
 watch(
@@ -79,26 +73,46 @@ async function deny(item: PermissionRequest): Promise<void> {
   await inbox.decide(item.id, 'deny')
 }
 
-const ruleEligible = (item: PermissionRequest): boolean =>
-  item.type === 'tool_permission' && item.risk !== 'high'
+// --- History right-click menu (design: always allow a command from history) ---
+const histCtx = ref<{
+  id: string
+  detail: string
+  allowBase: string | null
+  x: number
+  y: number
+} | null>(null)
 
 /**
- * Human description of the rule that will be saved. The exact matcher is derived
- * server-side from the real tool input (the broker never trusts a client-sent
- * matcher); this only mirrors that logic for the preview.
+ * Flag-aware two-token base command — mirrors the server-side matcher
+ * derivation (`deriveMatcher`); display only, the broker re-derives it.
  */
-function ruleDescription(item: PermissionRequest): string {
-  if (item.toolName === 'Bash') {
-    const words = item.detail.replace(/^Bash:\s*/, '').trim().split(/\s+/)
-    return `commands starting "${words.slice(0, 2).join(' ')}"`
-  }
-  return `${item.toolName} within this file's folder`
+function baseCmd(detail: string): string {
+  const words = detail.trim().split(/\s+/)
+  return words[1] && !words[1].startsWith('-') ? `${words[0]} ${words[1]}` : (words[0] ?? '')
 }
 
-async function saveAlwaysAllow(item: PermissionRequest): Promise<void> {
-  ruleOfferId.value = null
-  // Matcher is derived server-side from the original request; pass nothing.
-  await inbox.alwaysAllow(item.id)
+function openHistCtx(h: DecisionRecord, event: MouseEvent): void {
+  const eligible = h.type === 'tool_permission' && h.toolName === 'Bash' && h.risk !== 'high'
+  histCtx.value = {
+    id: h.id,
+    detail: h.detail,
+    allowBase: eligible ? baseCmd(h.detail) || null : null,
+    // Clamped to the viewport so the menu never opens off-screen.
+    x: Math.min(event.clientX, window.innerWidth - 345),
+    y: Math.min(event.clientY, window.innerHeight - 130),
+  }
+}
+
+async function allowFromHist(): Promise<void> {
+  const ctx = histCtx.value
+  histCtx.value = null
+  if (ctx?.allowBase) await inbox.alwaysAllow(ctx.id)
+}
+
+async function removeHist(): Promise<void> {
+  const ctx = histCtx.value
+  histCtx.value = null
+  if (ctx) await inbox.deleteHistory(ctx.id)
 }
 
 async function approveAll(projectId: string): Promise<void> {
@@ -203,24 +217,9 @@ const historyItems = computed(() => inbox.history)
               </button>
               <button class="btn-outline" @click="confirmingId = null">Back</button>
             </template>
-            <template v-else-if="ruleOfferId === item.id">
-              <span class="rule-offer mono">Always allow {{ ruleDescription(item) }}?</span>
-              <button class="btn-solid" data-testid="confirm-always-allow" @click="saveAlwaysAllow(item)">
-                Save rule
-              </button>
-              <button class="btn-outline" @click="ruleOfferId = null">Back</button>
-            </template>
             <template v-else>
               <button class="btn-solid" data-testid="approve-btn" @click="approve(item)">Approve</button>
               <button class="btn-outline" data-testid="deny-btn" @click="deny(item)">Deny</button>
-              <button
-                v-if="ruleEligible(item)"
-                class="always-link mono"
-                data-testid="always-allow-btn"
-                @click="ruleOfferId = item.id"
-              >
-                Always allow
-              </button>
             </template>
           </div>
         </div>
@@ -229,11 +228,14 @@ const historyItems = computed(() => inbox.history)
 
     <!-- History tab -->
     <div v-else class="body history">
-      <div class="history-filter-row">
-        <select v-model="historyFilter" class="history-filter mono" data-testid="history-filter">
-          <option value="">All projects</option>
-          <option v-for="p in projects.items" :key="p.id" :value="p.id">{{ p.name }}</option>
-        </select>
+      <div class="hist-header">
+        <span class="hist-count mono" data-testid="history-count">
+          DECISIONS · {{ historyItems.length }}
+        </span>
+        <span style="flex: 1"></span>
+        <button class="hist-clear mono" data-testid="history-clear" @click="inbox.clearHistory()">
+          Clear history
+        </button>
       </div>
       <div v-if="historyItems.length === 0" class="empty-sub" style="padding: 24px 4px">
         No decisions recorded yet.
@@ -244,7 +246,9 @@ const historyItems = computed(() => inbox.history)
         class="hist-row"
         :class="{ open: expandedHistory.has(h.id) }"
         data-testid="history-item"
+        title="Right-click for options"
         @click="toggleHistory(h.id)"
+        @contextmenu.prevent="openHistCtx(h, $event)"
       >
         <div class="hist-head">
           <span
@@ -277,6 +281,36 @@ const historyItems = computed(() => inbox.history)
           <div v-if="h.explanation" class="hd-explain">{{ h.explanation }}</div>
           <pre class="hd-detail mono">{{ h.detail }}</pre>
         </div>
+      </div>
+    </div>
+
+    <!-- History right-click context menu -->
+    <div
+      v-if="histCtx"
+      class="hctx-overlay"
+      @click="histCtx = null"
+      @contextmenu.prevent="histCtx = null"
+    >
+      <div
+        class="hctx-menu"
+        data-testid="hist-ctx-menu"
+        :style="{ left: `${histCtx.x}px`, top: `${histCtx.y}px` }"
+        @click.stop
+      >
+        <div class="hctx-detail mono">{{ histCtx.detail }}</div>
+        <button
+          v-if="histCtx.allowBase"
+          class="hctx-item mono"
+          data-testid="hist-ctx-allow"
+          @click="allowFromHist"
+        >
+          <span style="color: var(--green)">✓</span>
+          <span>Always allow <span class="hctx-base">{{ histCtx.allowBase }}</span> commands</span>
+        </button>
+        <button class="hctx-item mono danger" data-testid="hist-ctx-remove" @click="removeHist">
+          <span>✕</span>
+          <span>Remove this entry</span>
+        </button>
       </div>
     </div>
   </aside>
@@ -471,38 +505,82 @@ const historyItems = computed(() => inbox.history)
   flex-wrap: wrap;
 }
 
-.always-link {
-  color: var(--text-tab);
-  font-size: 10.5px;
-}
-
-.always-link:hover {
-  color: var(--green);
-  text-decoration: underline;
-}
-
-.rule-offer {
-  font-size: 10.5px;
-  color: var(--text-mid);
-}
-
 .item-ago {
   font-size: 10.5px;
   color: var(--text-faint);
 }
 
-.history-filter-row {
+.hist-header {
+  display: flex;
+  align-items: center;
   margin-bottom: 8px;
+  padding: 0 2px;
 }
 
-.history-filter {
-  width: 100%;
-  font-size: 11px;
-  padding: 5px 8px;
-  background: var(--bg-code);
+.hist-count {
+  font-size: 10px;
+  letter-spacing: 0.13em;
+  color: var(--text-faint);
+}
+
+.hist-clear {
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+
+.hist-clear:hover {
+  color: var(--red);
+  text-decoration: underline;
+}
+
+.hctx-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+}
+
+.hctx-menu {
+  position: fixed;
+  min-width: 240px;
+  max-width: 330px;
+  background: var(--bg-panel-2, #12161f);
   border: 1px solid var(--border-strong);
-  border-radius: 6px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  padding: 4px;
+}
+
+.hctx-detail {
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+  padding: 6px 9px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hctx-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  text-align: left;
+  font-size: 11.5px;
   color: var(--text-body);
+  padding: 7px 9px;
+}
+
+.hctx-item:hover {
+  background: var(--bg-card);
+}
+
+.hctx-item.danger:hover {
+  color: var(--red);
+}
+
+.hctx-base {
+  color: var(--green);
 }
 
 .hist-row {

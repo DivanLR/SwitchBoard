@@ -11,10 +11,6 @@ interface InboxState {
   focusRequestId: string | null
   /** Banner shown when a decision could not reach its session (SC-004). */
   undeliverableNotice: string | null
-  /** Newly-arrived requests shown as approve/deny toasts (approve from the notification). */
-  toasts: PermissionRequest[]
-  /** Toasts only appear while the window is unfocused — the inbox covers the rest. */
-  windowFocused: boolean
 }
 
 export const useInboxStore = defineStore('inbox', {
@@ -24,8 +20,6 @@ export const useInboxStore = defineStore('inbox', {
     historyProjectId: null,
     focusRequestId: null,
     undeliverableNotice: null,
-    toasts: [],
-    windowFocused: true,
   }),
 
   getters: {
@@ -70,8 +64,18 @@ export const useInboxStore = defineStore('inbox', {
     },
 
     async alwaysAllow(requestId: string): Promise<void> {
-      // The matcher is derived server-side from the original request's input.
+      // From a decided history entry; the matcher is derived server-side.
       await window.switchboard.invoke('inbox.alwaysAllow', { requestId })
+    },
+
+    async deleteHistory(requestId: string): Promise<void> {
+      await window.switchboard.invoke('inbox.deleteHistory', { requestId })
+      this.history = this.history.filter((h) => h.id !== requestId)
+    },
+
+    async clearHistory(): Promise<void> {
+      await window.switchboard.invoke('inbox.clearHistory', undefined)
+      this.history = []
     },
 
     async approveAllForProject(
@@ -90,32 +94,16 @@ export const useInboxStore = defineStore('inbox', {
         const added = push.added
         if (!this.pending.some((p) => p.id === added.id)) {
           this.pending.push(added)
-          // Surface a single most-recent toast (design shows one at a time) so
-          // the request can be approved without hunting the inbox — but only
-          // while the window is unfocused; with the app in use, the inbox
-          // panel already shows the request.
-          if (!this.windowFocused) this.toasts = [added]
         }
       }
       if (push.resolved) {
         const requestId = push.resolved.requestId
         this.pending = this.pending.filter((p) => p.id !== requestId)
-        this.toasts = this.toasts.filter((t) => t.id !== requestId)
         if (push.resolved.deliveryFailed) {
           this.undeliverableNotice =
             'A decision could not be delivered to its session and was marked expired.'
         }
       }
-    },
-
-    dismissToast(requestId: string): void {
-      this.toasts = this.toasts.filter((t) => t.id !== requestId)
-    },
-
-    /** Window focus/blur (App shell): focusing the app clears any toast — the inbox shows it. */
-    setWindowFocused(focused: boolean): void {
-      this.windowFocused = focused
-      if (focused) this.toasts = []
     },
 
     focusRequest(requestId: string): void {

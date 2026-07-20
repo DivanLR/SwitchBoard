@@ -9,12 +9,12 @@ import type {
   PermissionRequestStatus,
   PermissionRule,
   Project,
+  ProjectCommand,
+  ProjectRef,
   QueuedTask,
   RiskClassificationRule,
   Session,
-  SessionEndReason,
   SessionEvent,
-  SessionStatus,
   Settings,
   SpecDetail,
   SpecKitState,
@@ -29,7 +29,6 @@ export type IpcErrorCode =
   | 'SESSION_ENDED'
   | 'CONFIRM_REQUIRED'
   | 'RULE_NOT_ALLOWED'
-  | 'DELIVERY_FAILED'
   | 'INVALID_PATH'
   | 'DUPLICATE'
   | 'INTERNAL'
@@ -88,6 +87,13 @@ export interface InvokeMap {
   'projects.suggestions': { req: void; res: ProjectSuggestion[] }
   'projects.register': { req: { path: string; name?: string }; res: Project }
   'projects.rename': { req: { projectId: string; name: string }; res: void }
+  'projects.move': { req: { projectId: string; toIndex: number }; res: void }
+  'projects.refs.add': {
+    // `target` is a folder path or the name of another registered project.
+    req: { projectId: string; target: string }
+    res: ProjectRef[]
+  }
+  'projects.refs.remove': { req: { projectId: string; path: string }; res: ProjectRef[] }
   'projects.archive': { req: { projectId: string }; res: void }
   'sessions.start': {
     req: { projectId: string; resume?: boolean; bypassPermissions?: boolean }
@@ -107,7 +113,7 @@ export interface InvokeMap {
   /** Recent distinct commands (past composer messages) for terminal-style suggestions. */
   'sessions.promptHistory': { req: { projectId: string; limit?: number }; res: string[] }
   /** Available slash commands / skills (plugins) for the project, for composer suggestions. */
-  'projects.commands': { req: { projectId: string }; res: string[] }
+  'projects.commands': { req: { projectId: string }; res: ProjectCommand[] }
   /** Spec Kit state for a project: installed? plus the spec summaries. */
   'specs.state': { req: { projectId: string }; res: SpecKitState }
   /** Full detail for one spec. */
@@ -129,8 +135,9 @@ export interface InvokeMap {
     res: { delivered: boolean }
   }
   'inbox.alwaysAllow': {
-    // The main process derives the (path-scoped) matcher from the original
-    // request's tool input; the caller only names the request.
+    // From a DECIDED history entry (design: right-click a command in history).
+    // The main process derives the command-prefix matcher from the recorded
+    // command; the caller only names the request.
     req: { requestId: string }
     res: { rule: PermissionRule }
   }
@@ -139,8 +146,16 @@ export interface InvokeMap {
     res: { approved: number; skippedHighRisk: number }
   }
   'inbox.history': { req: { projectId?: string; before?: string; limit?: number }; res: DecisionRecord[] }
-  'rules.standing.list': { req: { projectId: string }; res: PermissionRule[] }
+  'inbox.deleteHistory': { req: { requestId: string }; res: void }
+  'inbox.clearHistory': { req: void; res: void }
+  'rules.standing.list': {
+    req: { projectId: string; includeRevoked?: boolean }
+    res: PermissionRule[]
+  }
   'rules.standing.revoke': { req: { ruleId: string }; res: void }
+  'rules.standing.restore': { req: { ruleId: string }; res: void }
+  // User-authored allowed command (Allowed list tab): a Bash command-prefix rule.
+  'rules.standing.add': { req: { projectId: string; pattern: string }; res: PermissionRule }
   'rules.risk.list': { req: void; res: RiskClassificationRule[] }
   'rules.risk.save': { req: { rules: RiskClassificationRule[] }; res: RiskClassificationRule[] }
   'rules.risk.restoreDefaults': { req: void; res: RiskClassificationRule[] }
@@ -165,20 +180,8 @@ export type InvokeMethod = keyof InvokeMap
 
 // --- Push surface (main -> renderer) ---
 
-export interface SessionStatusPush {
-  sessionId: string
-  projectId: string
-  status: SessionStatus
-  statusDetail?: string | null
-  branch?: string | null
-  diffAdds?: number | null
-  diffDels?: number | null
-  usageUtilization?: number | null
-  usageResetsAt?: number | null
-  usageLimitType?: string | null
-  endedAt?: string | null
-  endReason?: SessionEndReason | null
-}
+/** The full live session row; the renderer replaces its copy wholesale. */
+export type SessionStatusPush = Session
 
 export interface InboxChangedPush {
   added?: PermissionRequest
@@ -194,7 +197,7 @@ export interface QueueChangedPush {
  * init message, pushed so the composer picks them up without a project switch. */
 export interface ProjectCommandsPush {
   projectId: string
-  commands: string[]
+  commands: ProjectCommand[]
 }
 
 export type FocusRequestPush =
@@ -231,6 +234,11 @@ export const PUSH_CHANNELS: readonly PushChannel[] = [
 export interface SwitchboardApi {
   invoke<M extends InvokeMethod>(method: M, req: InvokeMap[M]['req']): Promise<InvokeMap[M]['res']>
   on<C extends PushChannel>(channel: C, listener: (payload: PushMap[C]) => void): () => void
+  /**
+   * Absolute path of a dragged-in OS file (Electron webUtils; File.path is
+   * gone in modern Electron). Absent under the browser-based e2e mock.
+   */
+  pathForFile?(file: unknown): string
 }
 
 declare global {

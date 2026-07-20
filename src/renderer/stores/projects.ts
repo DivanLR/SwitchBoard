@@ -67,6 +67,23 @@ export const useProjectsStore = defineStore('projects', {
       if (item) item.name = name
     },
 
+    async move(projectId: string, toIndex: number): Promise<void> {
+      await window.switchboard.invoke('projects.move', { projectId, toIndex })
+      await this.refresh()
+    },
+
+    async addRef(projectId: string, target: string): Promise<void> {
+      const refs = await window.switchboard.invoke('projects.refs.add', { projectId, target })
+      const item = this.items.find((p) => p.id === projectId)
+      if (item) item.refs = refs
+    },
+
+    async removeRef(projectId: string, path: string): Promise<void> {
+      const refs = await window.switchboard.invoke('projects.refs.remove', { projectId, path })
+      const item = this.items.find((p) => p.id === projectId)
+      if (item) item.refs = refs
+    },
+
     async startSession(projectId: string, resume = false, bypassPermissions = false): Promise<Session> {
       const session = await window.switchboard.invoke('sessions.start', {
         projectId,
@@ -83,20 +100,7 @@ export const useProjectsStore = defineStore('projects', {
 
     applyStatusPush(push: SessionStatusPush): void {
       const item = this.items.find((p) => p.id === push.projectId)
-      if (!item) return
-      if (!item.session || item.session.id === push.sessionId) {
-        if (!item.session) return
-        item.session.status = push.status
-        item.session.statusDetail = push.statusDetail ?? null
-        if (push.branch !== undefined) item.session.branch = push.branch
-        if (push.diffAdds !== undefined) item.session.diffAdds = push.diffAdds
-        if (push.diffDels !== undefined) item.session.diffDels = push.diffDels
-        if (push.usageUtilization !== undefined) item.session.usageUtilization = push.usageUtilization
-        if (push.usageResetsAt !== undefined) item.session.usageResetsAt = push.usageResetsAt
-        if (push.usageLimitType !== undefined) item.session.usageLimitType = push.usageLimitType
-        if (push.endedAt !== undefined) item.session.endedAt = push.endedAt
-        if (push.endReason !== undefined) item.session.endReason = push.endReason
-      }
+      if (item?.session && item.session.id === push.id) item.session = { ...push }
     },
 
     setCounters(counters: Counters): void {

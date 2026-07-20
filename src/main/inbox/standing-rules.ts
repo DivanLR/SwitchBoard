@@ -50,8 +50,11 @@ function pathOf(input: Record<string, unknown>): string | null {
  */
 export function deriveMatcher(toolName: string, input: Record<string, unknown>): PermissionRuleMatcher {
   if (toolName === 'Bash' && typeof input.command === 'string') {
+    // Flag-aware two-token base (design reference): "git commit -m x" → "git
+    // commit", but "rm -rf dist" → "rm" — a flag as word 2 never widens a rule.
     const words = input.command.trim().split(/\s+/)
-    return { kind: 'command_prefix', value: words.slice(0, 2).join(' ') }
+    const value = words[1] && !words[1].startsWith('-') ? `${words[0]} ${words[1]}` : words[0]
+    return { kind: 'command_prefix', value }
   }
   const path = pathOf(input)
   if (path) {

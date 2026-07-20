@@ -15,6 +15,8 @@ interface ActiveSessionState {
   focusEventId: string | null
   /** Subagent whose chat view is open (Task tool_use id), or null for the session. */
   selectedAgentId: string | null
+  /** Text another component asks the composer to append (e.g. @path from a file drop). */
+  composerInsert: string | null
 }
 
 const PAGE_SIZE = 300
@@ -29,6 +31,7 @@ export const useActiveSessionStore = defineStore('activeSession', {
     hasMoreHistory: false,
     focusEventId: null,
     selectedAgentId: null,
+    composerInsert: null,
   }),
 
   getters: {
@@ -114,13 +117,13 @@ export const useActiveSessionStore = defineStore('activeSession', {
       return window.switchboard.invoke('sessions.interrupt', { sessionId: this.sessionId })
     },
 
-    async stop(): Promise<void> {
-      if (!this.sessionId) return
-      await window.switchboard.invoke('sessions.stop', { sessionId: this.sessionId })
-    },
-
     focusEvent(eventId: string): void {
       this.focusEventId = eventId
+    },
+
+    /** Ask the composer to append text (file drops from the sidebar). */
+    requestComposerInsert(text: string): void {
+      this.composerInsert = text
     },
   },
 })

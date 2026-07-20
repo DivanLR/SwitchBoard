@@ -27,7 +27,10 @@ export interface MockScenario {
 
 export interface MockDriver {
   emitEvent: (sessionId: string, kind: string, payload: Record<string, unknown>) => string
-  setCommands: (projectId: string, commands: string[]) => void
+  setCommands: (
+    projectId: string,
+    commands: (string | { name: string; description?: string })[],
+  ) => void
   endSession: (sessionId: string) => void
   setSpecKit: (projectId: string, state: Record<string, unknown>) => void
   setUsage: (sessionId: string, utilization: number, resetsInMinutes: number, limitType: string) => void
@@ -130,6 +133,7 @@ export function installMockHost(scenario: MockScenario): void {
       source: 'manual',
       createdAt: now(),
       archivedAt: null as string | null,
+      refs: [] as { path: string; label: string }[],
       session,
     }
   })
@@ -139,7 +143,7 @@ export function installMockHost(scenario: MockScenario): void {
   const pending: MockRequest[] = []
   const decisions: MockRequest[] = []
   const markerByRequest = new Map<string, AnyRecord>()
-  const projectCommands = new Map<string, string[]>()
+  const projectCommands = new Map<string, { name: string; description?: string }[]>()
   const specKitByProject = new Map<string, AnyRecord>()
   const standingRules: AnyRecord[] = []
   let costToday = 0
@@ -200,8 +204,10 @@ export function installMockHost(scenario: MockScenario): void {
     timestamps: false,
     autoscroll: true,
     projectModels: {},
-    retentionDecisionDays: 30,
-    retentionSessionsPerProject: 2,
+    autoApproveLow: false,
+    autoApproveMedium: false,
+    dailySpendLimit: 0,
+    disabledCommands: {},
   }
 
   const listeners = new Map<string, Set<(payload: unknown) => void>>()
@@ -278,15 +284,7 @@ export function installMockHost(scenario: MockScenario): void {
     if (!session) return
     session.status = status
     session.statusDetail = detail ?? null
-    push('push.sessionStatus', {
-      sessionId,
-      projectId: session.projectId,
-      status,
-      statusDetail: session.statusDetail,
-      branch: session.branch,
-      endedAt: session.endedAt,
-      endReason: session.endReason,
-    })
+    push('push.sessionStatus', { ...session })
     pushCounters()
   }
 
@@ -373,6 +371,7 @@ export function installMockHost(scenario: MockScenario): void {
         source: 'manual',
         createdAt: now(),
         archivedAt: null as string | null,
+        refs: [] as { path: string; label: string }[],
         session: null,
       }
       projects.push(project)
@@ -381,6 +380,37 @@ export function installMockHost(scenario: MockScenario): void {
     'projects.rename': (req) => {
       const project = projects.find((p) => p.id === req.projectId)
       if (project) project.name = String(req.name).trim()
+    },
+    'projects.move': (req) => {
+      const from = projects.findIndex((p) => p.id === req.projectId)
+      if (from === -1) return
+      const [item] = projects.splice(from, 1)
+      const to = Math.max(0, Math.min(Number(req.toIndex), projects.length))
+      projects.splice(to, 0, item)
+    },
+    'projects.refs.add': (req) => {
+      const project = projects.find((p) => p.id === req.projectId)
+      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
+      const target = String(req.target).trim()
+      const named = projects.find(
+        (p) => p.id !== project.id && (p.name === target || p.path === target),
+      )
+      if (!named && !/[\\/]/.test(target)) {
+        throw { code: 'INVALID_PATH', message: 'The folder does not exist' }
+      }
+      const path = named ? named.path : target
+      if (path === project.path) {
+        throw { code: 'DUPLICATE', message: 'The project already reads its own folder' }
+      }
+      project.refs = project.refs.filter((r) => r.path !== path)
+      project.refs.push({ path, label: named ? named.name : (path.split(/[\\/]/).pop() ?? path) })
+      return [...project.refs]
+    },
+    'projects.refs.remove': (req) => {
+      const project = projects.find((p) => p.id === req.projectId)
+      if (!project) return []
+      project.refs = project.refs.filter((r) => r.path !== req.path)
+      return [...project.refs]
     },
     'projects.archive': (req) => {
       const project = projects.find((p) => p.id === req.projectId)
@@ -528,24 +558,34 @@ export function installMockHost(scenario: MockScenario): void {
     'inbox.decide': (req) =>
       decide(String(req.requestId), String(req.decision), Boolean(req.confirmHighRisk)),
     'inbox.alwaysAllow': (req) => {
-      const request = pending.find((p) => p.id === req.requestId)
+      // History-based (design): a decided Bash entry creates a command rule.
+      const request = decisions.find((d) => d.id === req.requestId)
       if (!request) throw { code: 'NOT_FOUND', message: 'Not found' }
-      if (request.risk === 'high' || request.type === 'plan_approval') {
+      if (request.risk === 'high' || request.type === 'plan_approval' || request.toolName !== 'Bash') {
         throw { code: 'RULE_NOT_ALLOWED', message: 'Not eligible' }
       }
+      // Flag-aware two-token base, as the real host derives server-side.
+      const words = String(request.detail ?? '').trim().split(/\s+/)
+      const base = words[1] && !words[1].startsWith('-') ? `${words[0]} ${words[1]}` : (words[0] ?? '')
+      if (!base) throw { code: 'RULE_NOT_ALLOWED', message: 'No command' }
       const rule = {
         id: nextId('rule'),
         projectId: request.projectId,
-        toolName: request.toolName ?? '',
-        // The real host derives the matcher server-side from the tool input.
-        matcher: { kind: 'tool_only' },
+        toolName: 'Bash',
+        matcher: { kind: 'command_prefix', value: base },
         createdFromRequestId: request.id,
         createdAt: now(),
         revokedAt: null,
       }
       standingRules.push(rule)
-      decide(String(req.requestId), 'approve', false)
       return { rule }
+    },
+    'inbox.deleteHistory': (req) => {
+      const index = decisions.findIndex((d) => d.id === req.requestId)
+      if (index !== -1) decisions.splice(index, 1)
+    },
+    'inbox.clearHistory': () => {
+      decisions.length = 0
     },
     'inbox.approveAllForProject': (req) => {
       const group = pending.filter((p) => p.projectId === req.projectId)
@@ -564,10 +604,27 @@ export function installMockHost(scenario: MockScenario): void {
     'inbox.history': (req) =>
       decisions.filter((d) => !req?.projectId || d.projectId === req.projectId),
     'rules.standing.list': (req) =>
-      standingRules.filter((r) => r.projectId === req.projectId && !r.revokedAt),
+      standingRules.filter((r) => r.projectId === req.projectId && (req.includeRevoked || !r.revokedAt)),
     'rules.standing.revoke': (req) => {
       const rule = standingRules.find((r) => r.id === req.ruleId)
       if (rule) rule.revokedAt = now()
+    },
+    'rules.standing.restore': (req) => {
+      const rule = standingRules.find((r) => r.id === req.ruleId)
+      if (rule) rule.revokedAt = null
+    },
+    'rules.standing.add': (req) => {
+      const rule = {
+        id: nextId('rule'),
+        projectId: String(req.projectId),
+        toolName: 'Bash',
+        matcher: { kind: 'command_prefix', value: String(req.pattern).trim() },
+        createdFromRequestId: 'manual',
+        createdAt: now(),
+        revokedAt: null as string | null,
+      }
+      standingRules.push(rule)
+      return { ...rule }
     },
     'rules.risk.list': () => [...riskRules],
     'rules.risk.save': (req) => {
@@ -613,8 +670,10 @@ export function installMockHost(scenario: MockScenario): void {
     setCommands: (projectId, commands) => {
       // Mirrors the real host: a session's init message stores the commands AND
       // pushes them so a live composer picks them up without a project switch.
-      projectCommands.set(projectId, commands)
-      push('push.projectCommands', { projectId, commands })
+      // String entries mirror description-less init names.
+      const shaped = commands.map((c) => (typeof c === 'string' ? { name: c } : c))
+      projectCommands.set(projectId, shaped)
+      push('push.projectCommands', { projectId, commands: shaped })
     },
     setSpecKit: (projectId, state) => specKitByProject.set(projectId, state),
     setUsage: (sessionId, utilization, resetsInMinutes, limitType) => {
@@ -623,14 +682,7 @@ export function installMockHost(scenario: MockScenario): void {
       s.usageUtilization = utilization
       s.usageResetsAt = Math.floor(Date.now() / 1000) + resetsInMinutes * 60
       s.usageLimitType = limitType
-      push('push.sessionStatus', {
-        sessionId,
-        projectId: s.projectId,
-        status: s.status,
-        usageUtilization: utilization,
-        usageResetsAt: s.usageResetsAt,
-        usageLimitType: limitType,
-      })
+      push('push.sessionStatus', { ...s })
     },
     endSession: (sessionId) => {
       const s = sessions.get(sessionId)

@@ -16,16 +16,37 @@ describe('ProjectCommandsRepo', () => {
     expect(repos.projectCommands.get(projectId)).toEqual([])
   })
 
-  it('stores and returns the command list', () => {
+  it('stores and returns the command list with descriptions', () => {
     const { repos, projectId } = setup()
-    repos.projectCommands.set(projectId, ['ponytail', 'ponytail-review', 'speckit-plan'])
-    expect(repos.projectCommands.get(projectId)).toEqual(['ponytail', 'ponytail-review', 'speckit-plan'])
+    repos.projectCommands.set(projectId, [
+      { name: 'ponytail', description: 'Laziest working solution' },
+      { name: 'speckit-plan' },
+    ])
+    expect(repos.projectCommands.get(projectId)).toEqual([
+      { name: 'ponytail', description: 'Laziest working solution' },
+      { name: 'speckit-plan' },
+    ])
   })
 
   it('upserts (replaces) on the same project', () => {
     const { repos, projectId } = setup()
-    repos.projectCommands.set(projectId, ['old'])
-    repos.projectCommands.set(projectId, ['new-a', 'new-b'])
-    expect(repos.projectCommands.get(projectId)).toEqual(['new-a', 'new-b'])
+    repos.projectCommands.set(projectId, [{ name: 'old' }])
+    repos.projectCommands.set(projectId, [{ name: 'new-a' }, { name: 'new-b' }])
+    expect(repos.projectCommands.get(projectId)).toEqual([{ name: 'new-a' }, { name: 'new-b' }])
+  })
+
+  it('maps legacy rows that stored plain name strings', () => {
+    const { repos, projectId } = setup()
+    repos.projectCommands.set(projectId, [{ name: 'seed' }])
+    // Overwrite the stored JSON with the pre-description format.
+    const db = (repos.projectCommands as unknown as { db: import('@main/store/db').AppDatabase }).db
+    db.prepare('UPDATE project_commands SET commands = ? WHERE projectId = ?').run(
+      JSON.stringify(['ponytail', 'speckit-plan']),
+      projectId,
+    )
+    expect(repos.projectCommands.get(projectId)).toEqual([
+      { name: 'ponytail' },
+      { name: 'speckit-plan' },
+    ])
   })
 })

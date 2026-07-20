@@ -13,9 +13,7 @@ import Sidebar from '@renderer/components/Sidebar.vue'
 import SessionView from '@renderer/views/SessionView.vue'
 import InboxView from '@renderer/views/InboxView.vue'
 import ProjectRegistration from '@renderer/components/ProjectRegistration.vue'
-import RuleEditors from '@renderer/components/RuleEditors.vue'
 import SettingsPanel from '@renderer/components/SettingsPanel.vue'
-import PermissionToasts from '@renderer/components/PermissionToasts.vue'
 
 const projects = useProjectsStore()
 const active = useActiveSessionStore()
@@ -25,11 +23,10 @@ const settingsStore = useSettingsStore()
 const updates = useUpdatesStore()
 
 const showRegistration = ref(false)
-const showRules = ref(false)
 const showSettings = ref(false)
-const settingsTab = ref<'models' | 'proj' | 'term' | 'gen'>('models')
+const settingsTab = ref<'models' | 'proj' | 'allowed' | 'term' | 'gen'>('models')
 
-function openSettings(tab: 'models' | 'proj' | 'term' | 'gen' = 'models'): void {
+function openSettings(tab: 'models' | 'proj' | 'allowed' | 'term' | 'gen' = 'models'): void {
   settingsTab.value = tab
   showSettings.value = true
 }
@@ -38,16 +35,7 @@ const updateDismissed = ref(false)
 
 const unsubscribers: (() => void)[] = []
 
-// Approval toasts only appear while the window is unfocused (the inbox panel
-// covers the focused case); focusing the app clears any showing toast.
-const onWindowFocus = (): void => inbox.setWindowFocused(true)
-const onWindowBlur = (): void => inbox.setWindowFocused(false)
-
 onMounted(async () => {
-  window.addEventListener('focus', onWindowFocus)
-  window.addEventListener('blur', onWindowBlur)
-  inbox.windowFocused = document.hasFocus()
-
   if (!window.switchboard) {
     bridgeMissing.value = true
     return
@@ -80,8 +68,6 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  window.removeEventListener('focus', onWindowFocus)
-  window.removeEventListener('blur', onWindowBlur)
   for (const unsubscribe of unsubscribers) unsubscribe()
 })
 
@@ -118,7 +104,6 @@ const selectedProject = computed(() => projects.selected)
     <div class="panes">
       <Sidebar
         @add-project="showRegistration = true"
-        @open-rules="showRules = true"
         @open-settings="openSettings()"
       />
 
@@ -138,9 +123,7 @@ const selectedProject = computed(() => projects.selected)
     </div>
 
     <ProjectRegistration v-if="showRegistration" @close="showRegistration = false" />
-    <RuleEditors v-if="showRules" @close="showRules = false" />
     <SettingsPanel v-if="showSettings" :initial-tab="settingsTab" @close="showSettings = false" />
-    <PermissionToasts />
   </div>
 </template>
 

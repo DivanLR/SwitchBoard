@@ -3,6 +3,7 @@
 // dropdown, with up-arrow recall. Extracted from SessionView so the view stays
 // focused on rendering the stream.
 import { computed, nextTick, ref, type Ref } from 'vue'
+import type { ProjectCommand } from '@shared/domain'
 
 const MAX_SUGGESTIONS = 6
 // A slash-command search (typing "/") lists every matching skill/command, not
@@ -19,7 +20,9 @@ export interface CommandSuggestions {
   /** Load history + available commands for a project. */
   load: (projectId: string) => Promise<void>
   /** Replace the available slash commands / skills (e.g. from a live push). */
-  setCommands: (commands: string[]) => void
+  setCommands: (commands: ProjectCommand[]) => void
+  /** Small explanation of what a suggested /command does, if known. */
+  hintFor: (text: string) => string
   /** Reset transient recall/dropdown state (on project switch). */
   reset: () => void
   /** Record a just-sent command at the top of history. */
@@ -30,20 +33,37 @@ export function useCommandSuggestions(opts: {
   composer: Ref<string>
   composerEl: Ref<HTMLInputElement | null>
   onSubmit: () => void
+  /** Drops disabled plugin/skill commands (Settings → This project toggles). */
+  filterCommands?: (commands: ProjectCommand[]) => ProjectCommand[]
 }): CommandSuggestions {
   const { composer, composerEl, onSubmit } = opts
 
   const history = ref<string[]>([]) // past composer messages (also drives up-arrow recall)
-  const availableCommands = ref<string[]>([]) // slash commands / skills for this project
+  const availableCommands = ref<ProjectCommand[]>([]) // slash commands / skills for this project
   const histIndex = ref(-1) // up-arrow recall position when the composer is empty
   const suggestIndex = ref(-1) // highlighted dropdown row (-1 = none)
   const suggestDismissed = ref(false)
 
+  const slashName = (name: string): string => (name.startsWith('/') ? name : `/${name}`)
+
   /** Suggestion pool: available /commands (plugins + skills) first, then history. */
   const pool = computed<string[]>(() => {
-    const cmds = availableCommands.value.map((c) => (c.startsWith('/') ? c : `/${c}`))
+    const cmds = availableCommands.value.map((c) => slashName(c.name))
     return [...new Set([...cmds, ...history.value])]
   })
+
+  /** Suggested /command text → its small what-it-does explanation. */
+  const hints = computed<Map<string, string>>(() => {
+    const map = new Map<string, string>()
+    for (const c of availableCommands.value) {
+      if (c.description) map.set(slashName(c.name), c.description)
+    }
+    return map
+  })
+
+  function hintFor(text: string): string {
+    return hints.value.get(text) ?? ''
+  }
 
   /** Case-insensitive prefix matches for the dropdown (excludes the exact text). */
   const suggestions = computed<string[]>(() => {
@@ -177,15 +197,15 @@ export function useCommandSuggestions(opts: {
         window.switchboard.invoke('projects.commands', { projectId }),
       ])
       history.value = past
-      availableCommands.value = commands
+      availableCommands.value = opts.filterCommands?.(commands) ?? commands
     } catch {
       history.value = []
       availableCommands.value = []
     }
   }
 
-  function setCommands(commands: string[]): void {
-    availableCommands.value = commands
+  function setCommands(commands: ProjectCommand[]): void {
+    availableCommands.value = opts.filterCommands?.(commands) ?? commands
   }
 
   function reset(): void {
@@ -208,6 +228,7 @@ export function useCommandSuggestions(opts: {
     onComposerKeydown,
     load,
     setCommands,
+    hintFor,
     reset,
     recordSent,
   }

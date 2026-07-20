@@ -74,9 +74,19 @@ const {
   onComposerKeydown,
   load: loadHistory,
   setCommands: setSuggestionCommands,
+  hintFor,
   reset: resetSuggestions,
   recordSent,
-} = useCommandSuggestions({ composer, composerEl, onSubmit: () => void send() })
+} = useCommandSuggestions({
+  composer,
+  composerEl,
+  onSubmit: () => void send(),
+  // Plugin toggles (Settings → This project) hide a plugin's commands here.
+  filterCommands: (commands) => {
+    const disabled = settingsStore.settings?.disabledCommands?.[props.project.id] ?? []
+    return commands.filter((c) => !disabled.includes(c.name))
+  },
+})
 
 const liveSession = computed(() =>
   props.project.session && !props.project.session.endedAt ? props.project.session : null,
@@ -380,22 +390,18 @@ async function removeQueued(id: string): Promise<void> {
   await queue.remove(props.project.id, id)
 }
 
-async function start(resume: boolean, bypassPermissions = false): Promise<void> {
+async function start(resume: boolean): Promise<void> {
   busy.value = true
   try {
-    await projects.startSession(props.project.id, resume, bypassPermissions)
+    await projects.startSession(props.project.id, resume)
   } finally {
     busy.value = false
   }
 }
 
+// Ctrl+C, like a terminal (the design has no interrupt button).
 async function interrupt(): Promise<void> {
   await active.interrupt()
-}
-
-async function stop(): Promise<void> {
-  await active.stop()
-  await projects.refresh()
 }
 
 function answerQuestion(eventId: string, choice: string): void {
@@ -405,16 +411,107 @@ function answerQuestion(eventId: string, choice: string): void {
 function openInbox(requestId: string): void {
   inbox.focusRequest(requestId)
 }
+
+// A file dropped on this project's sidebar row lands here as @path text.
+watch(
+  () => active.composerInsert,
+  (text) => {
+    if (!text) return
+    composer.value = composer.value ? `${composer.value} ${text}` : text
+    active.composerInsert = null
+    composerEl.value?.focus()
+  },
+)
+
+// --- REFS row (design): folders this project's sessions may read ---
+const addingRef = ref(false)
+const refInput = ref('')
+const refError = ref<string | null>(null)
+
+function focusRefInput(el: unknown): void {
+  if (el instanceof HTMLInputElement && document.activeElement !== el) el.focus()
+}
+
+async function commitRef(): Promise<void> {
+  const target = refInput.value.trim()
+  addingRef.value = false
+  refInput.value = ''
+  if (!target) return
+  try {
+    refError.value = null
+    await projects.addRef(props.project.id, target)
+  } catch (e) {
+    refError.value = e instanceof Error ? e.message : ((e as { message?: string })?.message ?? String(e))
+  }
+}
+
+function cancelRef(): void {
+  addingRef.value = false
+  refInput.value = ''
+}
+
+async function removeRef(path: string): Promise<void> {
+  await projects.removeRef(props.project.id, path)
+}
+
+// --- Drag & drop onto the pane (design): sidebar project → REF chip;
+// OS file → its path inserted into the composer as @path. ---
+const dragKind = ref<null | 'project' | 'file'>(null)
+
+function onPaneDragOver(event: DragEvent): void {
+  const types = event.dataTransfer?.types ?? []
+  const kind = types.includes('text/x-sb-project')
+    ? 'project'
+    : types.includes('Files')
+      ? 'file'
+      : null
+  if (!kind) return
+  event.preventDefault()
+  dragKind.value = kind
+}
+
+function onPaneDragLeave(event: DragEvent): void {
+  const related = event.relatedTarget as Node | null
+  if (!related || !(event.currentTarget as Node).contains(related)) dragKind.value = null
+}
+
+async function onPaneDrop(event: DragEvent): Promise<void> {
+  event.preventDefault()
+  const kind = dragKind.value
+  dragKind.value = null
+  if (kind === 'project') {
+    const path = event.dataTransfer?.getData('text/x-sb-project-path') ?? ''
+    if (path) await projects.addRef(props.project.id, path).catch(() => {})
+  } else if (kind === 'file') {
+    for (const file of [...(event.dataTransfer?.files ?? [])]) {
+      const path = window.switchboard.pathForFile?.(file)
+      if (path) composer.value = composer.value ? `${composer.value} @${path}` : `@${path}`
+    }
+  }
+}
 </script>
 
 <template>
-  <div class="session-view">
+  <div
+    class="session-view"
+    @dragover="onPaneDragOver"
+    @dragleave="onPaneDragLeave"
+    @drop="onPaneDrop"
+  >
     <!-- Header -->
     <header class="head">
       <div class="head-row">
         <span class="h-name mono" data-testid="session-project-name">{{ project.name }}</span>
         <span class="h-path mono" data-testid="session-project-path">{{ project.path }}</span>
         <span style="flex: 1"></span>
+        <span
+          v-if="liveSession?.bypassPermissions"
+          class="pill bypass-pill"
+          data-testid="bypass-pill"
+          title="Started with --dangerously-skip-permissions"
+        >
+          ⚠ Bypass
+        </span>
         <span
           v-if="workingAgents.length > 1"
           class="pill agents-pill"
@@ -457,14 +554,6 @@ function openInbox(requestId: string): void {
             Raw
           </div>
         </div>
-        <template v-if="liveSession">
-          <button class="ctl mono" data-testid="interrupt-btn" title="Interrupt the current activity" @click="interrupt()">
-            Interrupt
-          </button>
-          <button class="ctl ctl-stop mono" data-testid="stop-btn" title="Stop the session" @click="stop()">
-            Stop
-          </button>
-        </template>
       </div>
       <div class="head-meta mono">
         <span style="white-space: nowrap">⎇ {{ liveSession?.branch ?? endedSession?.branch ?? '—' }}</span>
@@ -484,7 +573,60 @@ function openInbox(requestId: string): void {
           <span style="color: var(--text-meta)">${{ usage.cost.toFixed(2) }}</span>
         </span>
       </div>
+      <div class="refs-row mono" data-testid="refs-row">
+        <span class="refs-label">REFS</span>
+        <span
+          v-for="r in project.refs"
+          :key="r.path"
+          class="ref-chip"
+          :title="r.path"
+          :data-testid="`ref-chip-${r.label}`"
+        >
+          <span class="ref-ico">⇗</span>
+          <span class="ref-name">{{ r.label }}</span>
+          <button class="ref-x" :data-testid="`ref-remove-${r.label}`" @click="removeRef(r.path)">
+            ✕
+          </button>
+        </span>
+        <input
+          v-if="addingRef"
+          :ref="focusRefInput"
+          v-model="refInput"
+          class="ref-input"
+          data-testid="ref-input"
+          placeholder="~/path/to/folder or a project name — Enter to add"
+          @keydown.enter="commitRef"
+          @keydown.esc="cancelRef"
+          @blur="cancelRef"
+        />
+        <button
+          v-else
+          class="ref-add"
+          data-testid="ref-add"
+          title="Give this session read access to another folder or project — or drag a project from the sidebar onto this view"
+          @click="addingRef = true"
+        >
+          + reference
+        </button>
+        <span v-if="refError" class="ref-error" data-testid="ref-error">{{ refError }}</span>
+      </div>
     </header>
+
+    <!-- Drag-over overlay (design): dashed frame naming the drop action -->
+    <div v-if="dragKind" class="drop-overlay mono" data-testid="drop-overlay">
+      <div class="drop-box">
+        <div class="drop-title">
+          {{ dragKind === 'project' ? '⇗ Reference this project' : '@ Reference file path' }}
+        </div>
+        <div class="drop-sub">
+          {{
+            dragKind === 'project'
+              ? `Drop to let ${project.name} read it for context`
+              : `Drop to insert its path into the prompt for ${project.name}`
+          }}
+        </div>
+      </div>
+    </div>
 
     <!-- Session / Specs tabs -->
     <div class="main-tabs mono">
@@ -526,23 +668,8 @@ function openInbox(requestId: string): void {
         </div>
 
         <div v-if="!liveSession && !endedSession" class="stream-empty">
-          <div class="mono faint">No session yet for this project.</div>
-          <div class="start-row">
-            <button class="btn-solid" data-testid="start-session" :disabled="busy" @click="start(false)">
-              Start session
-            </button>
-            <button
-              class="btn-quiet"
-              data-testid="start-session-bypass"
-              :disabled="busy"
-              title="Start with all permission checks bypassed — every tool is auto-approved. Use only in trusted projects."
-              @click="start(false, true)"
-            >
-              Start · bypass permissions
-            </button>
-          </div>
-          <div class="bypass-note mono faint">
-            Bypass auto-approves every tool without inbox prompts. Only for folders you fully trust.
+          <div class="mono faint" data-testid="no-session-hint">
+            No session yet — press + in the sidebar and point New session at this folder.
           </div>
         </div>
 
@@ -698,6 +825,7 @@ function openInbox(requestId: string): void {
             >
               <span class="suggest-typed">{{ composer }}</span
               ><span class="suggest-rest">{{ cmd.slice(composer.length) }}</span>
+              <span v-if="hintFor(cmd)" class="suggest-desc">{{ hintFor(cmd) }}</span>
             </div>
           </div>
           <!-- Inline ghost-text completion behind the input -->
@@ -853,14 +981,115 @@ function openInbox(requestId: string): void {
   color: var(--text-body);
 }
 
-.ctl-stop:hover {
-  color: var(--red);
-  border-color: rgba(224, 108, 85, 0.5);
-}
-
 .pill.agents-pill {
   color: var(--blue);
   border: 1px solid rgba(110, 168, 232, 0.3);
+}
+
+.pill.bypass-pill {
+  color: var(--red);
+  border: 1px solid rgba(224, 108, 85, 0.35);
+}
+
+/* REFS row (design): chips + dashed add pill under the meta line. */
+.refs-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 7px;
+  flex-wrap: wrap;
+}
+
+.refs-label {
+  font-size: 9.5px;
+  letter-spacing: 0.13em;
+  color: var(--text-label);
+}
+
+.ref-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  color: var(--text-body);
+  background: var(--bg-chip);
+  border: 1px solid var(--border-strong);
+  padding: 1px 7px;
+}
+
+.ref-ico {
+  color: var(--green);
+}
+
+.ref-x {
+  color: var(--text-tab);
+  font-size: 10px;
+  padding: 0 1px;
+}
+
+.ref-x:hover {
+  color: var(--red);
+}
+
+.ref-add {
+  font-size: 10.5px;
+  color: var(--text-tab);
+  border: 1px dashed var(--border-strong);
+  padding: 1px 8px;
+}
+
+.ref-add:hover {
+  color: var(--green);
+  border-color: var(--green);
+}
+
+.ref-input {
+  flex: 1;
+  min-width: 220px;
+  font-size: 10.5px;
+  background: var(--bg-code);
+  border: 1px solid var(--green);
+  outline: none;
+  color: var(--text-strong);
+  padding: 2px 8px;
+  font-family: var(--mono);
+}
+
+.ref-error {
+  font-size: 10.5px;
+  color: var(--red);
+}
+
+/* Drag-over overlay (design): full-pane dashed frame naming the drop action. */
+.session-view {
+  position: relative;
+}
+
+.drop-overlay {
+  position: absolute;
+  inset: 6px;
+  z-index: 60;
+  border: 1px dashed var(--green);
+  background: rgba(62, 207, 154, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.drop-box {
+  text-align: center;
+}
+
+.drop-title {
+  font-size: 14px;
+  color: var(--green);
+}
+
+.drop-sub {
+  font-size: 11px;
+  color: var(--text-mid);
+  margin-top: 5px;
 }
 
 .head-meta {
@@ -891,17 +1120,6 @@ function openInbox(requestId: string): void {
   padding-top: 80px;
 }
 
-.start-row {
-  display: flex;
-  gap: 8px;
-}
-
-.bypass-note {
-  font-size: 10.5px;
-  max-width: 360px;
-  text-align: center;
-  line-height: 1.5;
-}
 
 .ended {
   background: var(--bg-card);
@@ -1259,6 +1477,18 @@ function openInbox(requestId: string): void {
 
 .suggest-rest {
   color: var(--text-mid);
+}
+
+/* Small what-it-does explanation next to a suggested /command. */
+.suggest-desc {
+  margin-left: 12px;
+  float: right;
+  color: var(--text-faint);
+  font-size: 10.5px;
+  max-width: 55%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .to {

@@ -155,12 +155,12 @@ async function main(): Promise<void> {
 
   const manager = new SessionManager(repos, {
     onEvent: (event) => pusher.event(event),
-    onSessionStatus: (push) => pusher.sessionStatus(push),
+    onSessionStatus: (push) => pusher.push('push.sessionStatus', push),
     onCountersChanged: () => pusher.countersChanged(),
     onSessionExit: (sessionId) => late.broker?.expireForSession(sessionId),
     onQueueChanged: (projectId) =>
-      pusher.queueChanged({ projectId, items: repos.taskQueue.listForProject(projectId) }),
-    onProjectCommands: (projectId, commands) => pusher.projectCommands({ projectId, commands }),
+      pusher.push('push.queueChanged', { projectId, items: repos.taskQueue.listForProject(projectId) }),
+    onProjectCommands: (projectId, commands) => pusher.push('push.projectCommands', { projectId, commands }),
     gate: (context) => {
       if (!late.broker) throw new Error('Broker not initialised')
       return late.broker.handle(context)
@@ -176,13 +176,13 @@ async function main(): Promise<void> {
       mainWindow.isFocused() &&
       !mainWindow.isMinimized(),
     showWindow,
-    pushFocusRequest: (push) => pusher.focusRequest(push),
+    pushFocusRequest: (push) => pusher.push('push.focusRequest', push),
     notificationsEnabled: () => repos.settings.get().notificationsEnabled,
     projectName: (projectId) => repos.projects.byId(projectId)?.name ?? 'A project',
   })
 
   const broker = new PermissionBroker(repos, manager, {
-    onInboxChanged: (push) => pusher.inboxChanged(push),
+    onInboxChanged: (push) => pusher.push('push.inboxChanged', push),
     onCountersChanged: () => pusher.countersChanged(),
     onNeedsYou: (context) => notify(context),
   })
@@ -195,22 +195,23 @@ async function main(): Promise<void> {
   manager.setNoiseClassifier((event, projectId) => classifyNoise(swallowRules, event, projectId))
 
   // switchboard:// deep links from notification buttons. Approve routes through
-  // the broker, so the pending-status check and the high-risk double-confirm
-  // guard hold exactly as they do in the inbox; anything the broker refuses
-  // falls back to opening the inbox on the item.
+  // the broker with confirmHighRisk — the toast already showed exactly what is
+  // being approved, and a Windows toast has no second click to offer, so the
+  // Approve button is the explicit confirmation. Expired/decided items still
+  // fall back to opening the inbox on the item.
   const handleDeepLink = (url: string): void => {
     const link = parseDeepLink(url)
     if (!link) return
     if (link.verb === 'approve') {
       try {
-        broker.decide(link.requestId, 'approve')
+        broker.decide(link.requestId, 'approve', true)
         return // approved in place; no need to raise the window
       } catch {
         // Expired, already decided, or high-risk (needs the in-app confirm).
       }
     }
     showWindow()
-    pusher.focusRequest({ target: 'inbox', requestId: link.requestId })
+    pusher.push('push.focusRequest', { target: 'inbox', requestId: link.requestId })
   }
   const deepLinkIn = (argv: string[]): void => {
     const url = argv.find((arg) => arg.startsWith(`${PROTOCOL_SCHEME}://`))
@@ -221,7 +222,7 @@ async function main(): Promise<void> {
 
   registerIpcHandlers({ repos, manager, broker, refreshSwallowRules, getWindow: () => mainWindow })
   scheduleRetention(() => runRetention(db, repos))
-  initUpdater({ onStatus: (status) => pusher.updateStatus(status) })
+  initUpdater({ onStatus: (status) => pusher.push('push.updateStatus', status) })
 
   createWindow()
   createTray()

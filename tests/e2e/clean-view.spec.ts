@@ -74,21 +74,6 @@ test('errors are never swallowed (FR-017)', async ({ page }) => {
   await expect(page.getByTestId('swallowed-block')).toHaveCount(2)
 })
 
-test('disabling a swallow rule changes behaviour (FR-015a)', async ({ page }) => {
-  await emitBuildNoise(page, 5)
-  await expect(page.getByTestId('swallowed-block')).toHaveCount(1)
-
-  await page.getByTestId('open-rules').click()
-  await page.getByTestId('tab-swallow').click()
-  await page.getByTestId('swallow-enabled-build output').uncheck()
-  await page.getByTestId('swallow-save').click()
-  await page.getByTestId('rule-editors').getByRole('button', { name: 'close' }).click()
-
-  await emitBuildNoise(page, 5)
-  // New lines are no longer classified; they render as plain raw output.
-  await expect(page.getByTestId('stream').getByTestId('stream-event-raw_output')).toHaveCount(5)
-})
-
 test('parallel subagents are listed: stream card, header pill, and sidebar rows', async ({ page }) => {
   await page.evaluate(() => {
     window.__mock.emitEvent('s-alpha', 'tool_activity', {

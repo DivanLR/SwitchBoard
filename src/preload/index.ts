@@ -1,7 +1,7 @@
 // Preload bridge (T009): exposes the typed IPC contract as `window.switchboard`
 // with contextIsolation on and nodeIntegration off. The renderer has no other
 // capability (FR-021b).
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import type {
   InvokeMap,
   InvokeMethod,
@@ -43,6 +43,10 @@ const api: SwitchboardApi = {
         wrapped as (event: IpcRendererEvent, ...args: unknown[]) => void,
       )
     }
+  },
+
+  pathForFile(file: unknown): string {
+    return webUtils.getPathForFile(file as File)
   },
 }
 

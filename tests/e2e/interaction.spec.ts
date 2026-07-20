@@ -46,8 +46,11 @@ test('multiple-choice questions are answered by click, in the stream, never the 
   await expect(page.getByTestId('question-option-Fast')).toBeDisabled()
 })
 
-test('interrupt stops the activity and the session remains usable (FR-019a)', async ({ page }) => {
-  await page.getByTestId('interrupt-btn').click()
+test('Ctrl+C interrupts the activity and the session remains usable (FR-019a)', async ({
+  page,
+}) => {
+  // Terminal-style: the design has no interrupt button, Ctrl+C does it.
+  await page.keyboard.press('Control+c')
   await expect(page.getByTestId('status-badge-alpha')).toHaveAttribute('data-status', 'done')
   expect(await page.evaluate(() => window.__mock.state().interrupts)).toEqual(['s-alpha'])
 
@@ -56,8 +59,8 @@ test('interrupt stops the activity and the session remains usable (FR-019a)', as
   await expect(page.getByTestId('stream-event-prompt').filter({ hasText: 'carry on' })).toBeVisible()
 })
 
-test('stop ends the session and offers a new start (FR-019a)', async ({ page }) => {
-  await page.getByTestId('stop-btn').click()
+test('an ended session shows the banner and offers a new start (FR-019a)', async ({ page }) => {
+  await page.evaluate(() => window.__mock.endSession('s-alpha'))
   await expect(page.getByTestId('ended-banner')).toBeVisible()
   await expect(page.getByTestId('start-session')).toBeVisible()
 })

@@ -15,6 +15,10 @@ export interface RetentionOptions {
   now?: Date
 }
 
+// Fixed in v1 (FR-021a); promote to Settings only when a UI actually sets them.
+const DECISION_DAYS = 30
+const SESSIONS_PER_PROJECT = 2
+
 export function runRetention(
   db: AppDatabase,
   repos: Repositories,
@@ -22,15 +26,14 @@ export function runRetention(
 ): RetentionResult {
   const dryRun = options.dryRun ?? false
   const now = options.now ?? new Date()
-  const settings = repos.settings.get()
 
-  const keepIds = repos.sessions.retainedSessionIds(settings.retentionSessionsPerProject)
+  const keepIds = repos.sessions.retainedSessionIds(SESSIONS_PER_PROJECT)
   const placeholders = keepIds.map(() => '?').join(', ')
   const eventsWhere =
     keepIds.length > 0 ? `WHERE sessionId NOT IN (${placeholders})` : ''
 
   const decisionCutoff = new Date(
-    now.getTime() - settings.retentionDecisionDays * 24 * 60 * 60 * 1000,
+    now.getTime() - DECISION_DAYS * 24 * 60 * 60 * 1000,
   ).toISOString()
 
   let eventsDeleted: number

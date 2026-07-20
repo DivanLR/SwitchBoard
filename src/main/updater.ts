@@ -19,6 +19,9 @@ export function initUpdater(d: UpdaterDeps): void {
   deps = d
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
+  // Releases are published as GitHub pre-releases; without this the updater
+  // silently skips every one of them and always reports "no update".
+  autoUpdater.allowPrerelease = true
 
   autoUpdater.on('checking-for-update', () => emit({ state: 'checking' }))
   autoUpdater.on('update-available', (info) => emit({ state: 'available', version: info.version }))

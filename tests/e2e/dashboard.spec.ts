@@ -30,19 +30,32 @@ test('status pushes update the dot without user action (FR-004)', async ({ page 
   await expect(page.getByTestId('status-badge-beta')).toHaveAttribute('data-status', 'done')
 })
 
-test('registration offers suggestions and validates manual paths (FR-001a)', async ({ page }) => {
+test('the New session dialog fills from suggestions, validates paths, and starts', async ({
+  page,
+}) => {
   await page.getByTestId('add-project').click()
-  await expect(page.getByTestId('suggestion-gamma')).toContainText('C:\\work\\gamma')
-  await page.getByTestId('suggestion-gamma').getByRole('button', { name: 'add' }).click()
-  await expect(page.getByTestId('sidebar-project-gamma')).toBeVisible()
 
-  await page.getByTestId('manual-path').fill('C:\\work\\missing')
-  await page.getByTestId('manual-add').click()
+  // Live session-name preview follows the folder input.
+  await page.getByTestId('folder-input').fill('C:\\work\\gamma')
+  await expect(page.getByTestId('session-name-preview')).toContainText('Session name: gamma')
+
+  // Bad paths and duplicates are refused with clear errors.
+  await page.getByTestId('folder-input').fill('C:\\work\\missing')
+  await page.getByTestId('start-session').click()
   await expect(page.getByTestId('registration-error')).toContainText('does not exist')
 
-  await page.getByTestId('manual-path').fill('C:\\work\\alpha')
-  await page.getByTestId('manual-add').click()
-  await expect(page.getByTestId('registration-error')).toContainText('already registered')
+  // An already-registered folder just opens that project (no error).
+  await page.getByTestId('folder-input').fill('C:\\work\\alpha')
+  await page.getByTestId('start-session').click()
+  await expect(page.getByTestId('registration-dialog')).toHaveCount(0)
+  await expect(page.getByTestId('session-project-name')).toHaveText('alpha')
+
+  // A suggestion click fills the folder; Start registers and opens the session.
+  await page.getByTestId('add-project').click()
+  await expect(page.getByTestId('suggestion-gamma')).toContainText('C:\\work\\gamma')
+  await page.getByTestId('suggestion-gamma').click()
+  await page.getByTestId('start-session').click()
+  await expect(page.getByTestId('sidebar-project-gamma')).toBeVisible()
 })
 
 test('aggregate counters are truthful (FR-005)', async ({ page }) => {

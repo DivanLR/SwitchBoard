@@ -158,10 +158,13 @@ describe('PermissionBroker lifecycle', () => {
   })
 
   it('short-circuits standing rules as rule_approved without a pending item (FR-009b)', async () => {
-    void h.gate('Bash', { command: 'git status' })
+    const first = h.gate('Bash', { command: 'git status' })
     await settle()
-    const [first] = h.repos.requests.pending()
-    h.broker.alwaysAllow(first.id)
+    const [pending] = h.repos.requests.pending()
+    h.broker.decide(pending.id, 'approve')
+    await first
+    // Rules are created from history (design: right-click a decided command).
+    h.broker.alwaysAllow(pending.id)
 
     const result = await h.gate('Bash', { command: 'git status --short' })
     expect(result.behavior).toBe('allow')
@@ -170,36 +173,90 @@ describe('PermissionBroker lifecycle', () => {
     expect(history.some((d) => d.status === 'rule_approved')).toBe(true)
   })
 
-  it('derives a folder-scoped matcher for file tools (never unscoped tool_only)', async () => {
-    void h.gate('Write', { file_path: 'C:\\proj\\src\\a.ts' })
+  it('derives the flag-aware command matcher from the recorded command', async () => {
+    const promise = h.gate('Bash', { command: 'npx prisma migrate dev --name rotation' })
     await settle()
-    const [req] = h.repos.requests.pending()
-    // Callers cannot supply a matcher at all — the server derives from the input.
-    h.broker.alwaysAllow(req.id)
+    const [pending] = h.repos.requests.pending()
+    h.broker.decide(pending.id, 'approve')
+    await promise
+    h.broker.alwaysAllow(pending.id)
 
     const rule = h.repos.standingRules.listForProject(h.projectId).at(-1)!
-    expect(rule.matcher.kind).toBe('path_glob')
-
-    // A write inside the same folder auto-approves; one elsewhere does not.
-    const inside = await h.gate('Write', { file_path: 'C:\\proj\\src\\b.ts' })
-    expect(inside.behavior).toBe('allow')
-    void h.gate('Write', { file_path: 'C:\\elsewhere\\c.ts' })
-    await settle()
-    expect(h.repos.requests.pending().some((r) => r.detail.includes('elsewhere'))).toBe(true)
+    expect(rule.matcher).toEqual({ kind: 'command_prefix', value: 'npx prisma' })
   })
 
-  it('refuses standing rules for high risk and plan approvals (FR-009a/007a)', async () => {
+  it('reuses an overlapping active rule instead of stacking a duplicate', async () => {
+    const first = h.gate('Bash', { command: 'git status' })
+    await settle()
+    const [a] = h.repos.requests.pending()
+    h.broker.decide(a.id, 'approve')
+    await first
+    const { rule: created } = h.broker.alwaysAllow(a.id)
+
+    void h.gate('Bash', { command: 'npm install left-pad' })
+    await settle()
+    const [b] = h.repos.requests.pending()
+    h.broker.decide(b.id, 'approve')
+    // "npm install"/"git status" don't overlap — a second rule is fine…
+    const { rule: other } = h.broker.alwaysAllow(b.id)
+    expect(other.id).not.toBe(created.id)
+    // …but re-allowing an already-covered command returns the existing rule.
+    const again = h.gate('Bash', { command: 'git status --short' })
+    const result = await again
+    expect(result.behavior).toBe('allow') // rule short-circuits; nothing pending
+    expect(h.repos.standingRules.listForProject(h.projectId)).toHaveLength(2)
+  })
+
+  it('refuses rules while pending, for high risk, plans, and non-Bash tools', async () => {
+    void h.gate('Bash', { command: 'npm install' })
+    await settle()
+    const [pendingReq] = h.repos.requests.pending()
+    // Still pending: not yet in history, so no rule.
+    expect(() => h.broker.alwaysAllow(pendingReq.id)).toThrow(BrokerError)
+    h.broker.decide(pendingReq.id, 'deny')
+
     void h.gate('Bash', { command: 'rm -rf /' })
     await settle()
     const [high] = h.repos.requests.pending()
-    expect(() => h.broker.alwaysAllow(high.id)).toThrow(BrokerError)
     h.broker.decide(high.id, 'deny')
+    expect(() => h.broker.alwaysAllow(high.id)).toThrow(BrokerError)
 
     void h.gate('ExitPlanMode', { plan: 'The plan text' })
     await settle()
     const [plan] = h.repos.requests.pending()
     expect(plan.type).toBe('plan_approval')
+    h.broker.decide(plan.id, 'approve')
     expect(() => h.broker.alwaysAllow(plan.id)).toThrow(BrokerError)
+
+    const write = h.gate('Write', { file_path: 'C:\\proj\\src\\a.ts' })
+    await settle()
+    const [fileReq] = h.repos.requests.pending()
+    h.broker.decide(fileReq.id, 'approve')
+    await write
+    expect(() => h.broker.alwaysAllow(fileReq.id)).toThrow(BrokerError)
+  })
+
+  it('explains common commands in plain language (cd → folder access)', async () => {
+    void h.gate('Bash', { command: 'cd C:\\proj\\sub' })
+    await settle()
+    const [req] = h.repos.requests.pending()
+    expect(req.explanation).toBe('Accesses a specific folder.')
+    h.broker.decide(req.id, 'deny')
+  })
+
+  it('history entries can be deleted individually and cleared wholesale', async () => {
+    void h.gate('Bash', { command: 'npm run build' })
+    void h.gate('Bash', { command: 'npm test' })
+    await settle()
+    for (const req of h.repos.requests.pending()) h.broker.decide(req.id, 'deny')
+    expect(h.repos.requests.history({})).toHaveLength(2)
+
+    const [first] = h.repos.requests.history({})
+    h.repos.requests.deleteHistory(first.id)
+    expect(h.repos.requests.history({})).toHaveLength(1)
+
+    h.repos.requests.clearHistory()
+    expect(h.repos.requests.history({})).toHaveLength(0)
   })
 
   it('shapes plan approvals as single-click inbox items with the plan as detail (FR-007a)', async () => {

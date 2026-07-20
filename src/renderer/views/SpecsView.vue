@@ -24,14 +24,17 @@ function runCommand(command: string): void {
 // The phase whose "Start phase" launched the current run (design: ● Running…).
 const runningPhase = ref<string | null>(null)
 
-/** Start implementing a whole spec (the /implement command) with live updates. */
+/**
+ * Start implementing a whole spec with live updates. Uses the
+ * scaffold-and-implement flow: every task lands as a complete, verified slice.
+ */
 function startImplementation(): void {
   if (!detail.value) return
   runningPhase.value = null
   void specs.startPhase(
     props.projectId,
     detail.value.id,
-    `/speckit-implement Work through the remaining tasks in ${detail.value.path}/tasks.md, marking each [X] as it completes.`,
+    `/speckit-implement-scaffold Work through the remaining tasks in ${detail.value.path}/tasks.md, marking each [X] as it completes.`,
   )
 }
 
@@ -47,7 +50,7 @@ function startPhase(phase: SpecPhase): void {
   void specs.startPhase(
     props.projectId,
     detail.value.id,
-    `/speckit-implement Implement "${phase.label}" in ${detail.value.path}` +
+    `/speckit-implement-scaffold Implement "${phase.label}" in ${detail.value.path}` +
       (ids ? ` (tasks ${ids})` : '') +
       `. Complete only that phase's tasks and mark each [X] in tasks.md as you finish.`,
   )
@@ -144,9 +147,9 @@ const suggested = computed(() => {
       why: 'Every task is checked off — generate a review checklist for the finished work',
     }
   return {
-    command: 'speckit-implement',
-    label: '/speckit.implement',
-    why: 'Spec and plan are settled — execute the remaining tasks in tasks.md',
+    command: 'speckit-implement-scaffold',
+    label: '/speckit.implement-scaffold',
+    why: 'Spec and plan are settled — execute the remaining tasks as scaffolded, verified slices',
   }
 })
 

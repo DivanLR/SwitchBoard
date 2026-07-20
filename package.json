@@ -19,8 +19,7 @@
     "test:e2e": "playwright test",
     "prune": "npm run rebuild:node && tsx src/main/store/prune-cli.ts",
     "rebuild:electron": "node scripts/swap-sqlite.mjs electron",
-    "rebuild:node": "node scripts/swap-sqlite.mjs node",
-    "verify:session": "electron scripts/electron-session-probe.mjs"
+    "rebuild:node": "node scripts/swap-sqlite.mjs node"
   },
   "author": "Haefele Software",
   "license": "UNLICENSED",

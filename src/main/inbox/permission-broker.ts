@@ -82,6 +82,38 @@ function baseName(path: string): string {
 }
 
 /**
+ * Short plain-language explanations for common shell commands (design ask:
+ * "cd means accessing a specific folder"). First match wins.
+ */
+const COMMAND_EXPLANATIONS: [RegExp, string][] = [
+  [/^cd(\s|$)/, 'Accesses a specific folder.'],
+  [/^(ls|dir)\b/, 'Lists the files in a folder.'],
+  [/^(cat|type|head|tail)\b/, 'Reads a file and shows its contents.'],
+  [/^(rm|del|rd|rmdir|remove-item)\b/i, 'Deletes files or folders.'],
+  [/^(mkdir|md)\b/, 'Creates a folder.'],
+  [/^(cp|copy)\b/, 'Copies files.'],
+  [/^(mv|move|ren)\b/, 'Moves or renames files.'],
+  [/^git (status|log|diff|show|branch)\b/, 'Checks the repository state — read-only.'],
+  [/^git (add|commit)\b/, 'Saves changes into the repository history.'],
+  [/^git push\b/, 'Uploads commits to the remote repository.'],
+  [/^git (pull|fetch)\b/, 'Downloads changes from the remote repository.'],
+  [/^(npm|pnpm|yarn) i(nstall)?\b/, 'Installs project dependencies.'],
+  [/^(npm|pnpm|yarn) (run|test|ci)\b/, 'Runs a project script or its tests.'],
+  [/^(curl|wget|invoke-webrequest|iwr)\b/i, 'Talks to the internet — downloads or sends data.'],
+  [/^(grep|rg|findstr|select-string)\b/i, 'Searches for text in files.'],
+  [/^echo\b/, 'Prints text.'],
+  [/^(node|npx|tsx|python|py|dotnet)\b/, 'Runs a program or script.'],
+]
+
+function explainCommand(command: string): string | null {
+  const trimmed = command.trim()
+  for (const [pattern, explanation] of COMMAND_EXPLANATIONS) {
+    if (pattern.test(trimmed)) return explanation
+  }
+  return null
+}
+
+/**
  * Produces a clear, human-first title, a plain-language explanation of what the
  * action would do, and the underlying detail (exact command / file / input).
  * Titles are full (never truncated) — the inbox card wraps them.
@@ -98,7 +130,8 @@ function describeTool(toolName: string, input: Record<string, unknown>): {
   if (toolName === 'Bash' && command) {
     return {
       title: `Run a command: ${command}`,
-      explanation: 'Claude wants to run this shell command in the project folder.',
+      explanation:
+        explainCommand(command) ?? 'Claude wants to run this shell command in the project folder.',
       detail: command,
     }
   }
@@ -170,57 +203,43 @@ export class PermissionBroker {
     if (!session) return { behavior: 'deny', message: 'Session is not registered' }
     const projectId = session.projectId
 
-    // 1. Standing rules short-circuit, recorded as rule_approved (FR-009b).
+    // A standing rule or an enabled risk-level auto-approval (Allowed list tab)
+    // short-circuits, recorded as rule_approved (FR-009b); otherwise enqueue.
     const standing = evaluateStandingRules(
       this.repos.standingRules.listForProject(projectId),
       context.toolName,
       context.input,
     )
     const described = describeTool(context.toolName, context.input)
-    const title = context.options.title ?? described.title
-    const explanation = context.options.description ?? described.explanation
-
-    if (standing) {
-      const request: PermissionRequest = {
-        id: newId(),
-        sessionId: context.sessionId,
-        projectId,
-        type: 'tool_permission',
-        toolName: context.toolName,
-        title,
-        explanation,
-        detail: described.detail,
-        risk: classifyRisk(this.repos.riskRules.list(), context.toolName, context.input).risk,
-        status: 'rule_approved',
-        createdAt: nowIso(),
-        resolvedAt: nowIso(),
-        deliveryFailed: false,
-      }
-      this.repos.requests.insert(request)
-      this.appendMarker(context.sessionId, 'permission_marker', request)
-      this.callbacks.onInboxChanged({ resolved: { requestId: request.id, status: 'rule_approved' } })
-      this.callbacks.onCountersChanged()
-      return { behavior: 'allow', updatedInput: context.input }
-    }
-
-    // 2. Classify and enqueue.
     const { risk } = classifyRisk(this.repos.riskRules.list(), context.toolName, context.input)
+    const settings = this.repos.settings.get()
+    const autoApproved =
+      Boolean(standing) ||
+      (risk === 'low' && settings.autoApproveLow) ||
+      (risk === 'medium' && settings.autoApproveMedium)
+
     const request: PermissionRequest = {
       id: newId(),
       sessionId: context.sessionId,
       projectId,
       type: 'tool_permission',
       toolName: context.toolName,
-      title,
-      explanation,
+      title: context.options.title ?? described.title,
+      explanation: context.options.description ?? described.explanation,
       detail: described.detail,
       risk,
-      status: 'pending',
+      status: autoApproved ? 'rule_approved' : 'pending',
       createdAt: nowIso(),
-      resolvedAt: null,
+      resolvedAt: autoApproved ? nowIso() : null,
       deliveryFailed: false,
     }
-    return this.enqueue(context, request, 'permission_marker')
+    if (!autoApproved) return this.enqueue(context, request, 'permission_marker')
+
+    this.repos.requests.insert(request)
+    this.appendMarker(context.sessionId, 'permission_marker', request)
+    this.callbacks.onInboxChanged({ resolved: { requestId: request.id, status: 'rule_approved' } })
+    this.callbacks.onCountersChanged()
+    return { behavior: 'allow', updatedInput: context.input }
   }
 
   private async handlePlanApproval(context: CanUseToolContext): Promise<PermissionResult> {
@@ -381,10 +400,12 @@ export class PermissionBroker {
   }
 
   /**
-   * Approves and saves a standing rule (FR-009a); low or medium risk tools only.
-   * The matcher is DERIVED from the request's real tool input (`deriveMatcher`),
-   * never taken from the caller — a renderer must not be able to widen a rule
-   * (e.g. to an unscoped tool_only) beyond the action shown.
+   * Saves a standing rule from a DECIDED Bash request (design: right-click a
+   * command in history → always allow). The matcher is DERIVED server-side from
+   * the recorded command (`detail` holds it verbatim for Bash), never taken
+   * from the caller — a renderer must not be able to widen a rule beyond the
+   * action shown. Low or medium risk only. An overlapping active rule is
+   * reused instead of stacking a duplicate.
    */
   alwaysAllow(requestId: string) {
     const request = this.repos.requests.byId(requestId)
@@ -395,19 +416,34 @@ export class PermissionBroker {
     if (request.risk === 'high') {
       throw new BrokerError('RULE_NOT_ALLOWED', 'High-risk actions are not eligible for standing rules')
     }
-    if (request.status !== 'pending') {
-      throw new BrokerError('NOT_FOUND', 'The request has already been decided')
+    if (request.status === 'pending') {
+      throw new BrokerError('RULE_NOT_ALLOWED', 'Rules are created from decided history entries')
     }
-    const entry = this.pending.get(requestId)
-    const matcher = deriveMatcher(request.toolName ?? '', entry?.input ?? {})
+    if (request.toolName !== 'Bash') {
+      throw new BrokerError('RULE_NOT_ALLOWED', 'Only shell commands can be always-allowed from history')
+    }
+    const matcher = deriveMatcher('Bash', { command: request.detail })
+    const base = matcher.value ?? ''
+    if (base.length === 0) {
+      throw new BrokerError('RULE_NOT_ALLOWED', 'The history entry has no command to allow')
+    }
+    const existing = this.repos.standingRules
+      .listForProject(request.projectId)
+      .find(
+        (r) =>
+          r.toolName === 'Bash' &&
+          r.matcher.kind === 'command_prefix' &&
+          (r.matcher.value ?? '').length > 0 &&
+          ((r.matcher.value ?? '').startsWith(base) || base.startsWith(r.matcher.value ?? '')),
+      )
+    if (existing) return { rule: existing }
     const rule = this.repos.standingRules.insert({
       projectId: request.projectId,
-      toolName: request.toolName ?? '',
+      toolName: 'Bash',
       matcher,
       createdFromRequestId: request.id,
     })
-    const decision = this.decide(requestId, 'approve')
-    return { rule, delivered: decision.delivered }
+    return { rule }
   }
 
   /** Approves every pending non-high item in one project group (FR-011). */
@@ -570,10 +606,6 @@ export class PermissionBroker {
       group.settled = true
       group.resolve(buildQuestionResult(group.input, group.answers))
     }
-  }
-
-  pendingCount(): number {
-    return this.repos.requests.pending().length
   }
 }
 

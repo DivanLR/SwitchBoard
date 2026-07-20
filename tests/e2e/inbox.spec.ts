@@ -138,6 +138,70 @@ test('history rows expand via an arrow to show the full description', async ({ p
   )
 })
 
+test('right-click a history command offers always-allow with the flag-aware base', async ({
+  page,
+}) => {
+  await page.evaluate(() => {
+    window.__mock.raisePermission({
+      projectId: 'p-alpha',
+      title: 'Run: npx prisma migrate dev',
+      detail: 'npx prisma migrate dev --name rotation',
+      risk: 'medium',
+    })
+  })
+  await page.getByTestId('approve-btn').click()
+  await page.getByTestId('inbox-tab-history').click()
+  await page.getByTestId('history-item').first().click({ button: 'right' })
+
+  const menu = page.getByTestId('hist-ctx-menu')
+  await expect(menu).toContainText('npx prisma migrate dev --name rotation')
+  await expect(menu.getByTestId('hist-ctx-allow')).toContainText('Always allow npx prisma commands')
+  await menu.getByTestId('hist-ctx-allow').click()
+  await expect(menu).toHaveCount(0)
+
+  const rules = await page.evaluate(() =>
+    window.switchboard.invoke('rules.standing.list', { projectId: 'p-alpha' }),
+  )
+  expect(rules).toContainEqual(
+    expect.objectContaining({ matcher: { kind: 'command_prefix', value: 'npx prisma' } }),
+  )
+})
+
+test('history right-click: high risk gets no allow item; entries remove and clear', async ({
+  page,
+}) => {
+  await page.evaluate(() => {
+    window.__mock.raisePermission({ projectId: 'p-alpha', title: 'Run: ls', detail: 'ls -la', risk: 'low' })
+    window.__mock.raisePermission({ projectId: 'p-alpha', title: 'Run: rm', detail: 'rm -rf dist', risk: 'high' })
+  })
+  await page.getByTestId('inbox-item').filter({ hasText: 'Run: ls' }).getByTestId('approve-btn').click()
+  await page.getByTestId('inbox-item').filter({ hasText: 'Run: rm' }).getByTestId('deny-btn').click()
+
+  await page.getByTestId('inbox-tab-history').click()
+  await expect(page.getByTestId('history-count')).toHaveText('DECISIONS · 2')
+
+  // High-risk entry: menu opens, but there is no always-allow item.
+  await page.getByTestId('history-item').filter({ hasText: 'Run: rm' }).click({ button: 'right' })
+  await expect(page.getByTestId('hist-ctx-menu')).toBeVisible()
+  await expect(page.getByTestId('hist-ctx-allow')).toHaveCount(0)
+
+  // Remove just that entry.
+  await page.getByTestId('hist-ctx-remove').click()
+  await expect(page.getByTestId('history-item')).toHaveCount(1)
+  await expect(page.getByTestId('history-count')).toHaveText('DECISIONS · 1')
+
+  // A flag as word two narrows the base to a single word.
+  await page.getByTestId('history-item').first().click({ button: 'right' })
+  await expect(page.getByTestId('hist-ctx-allow')).toContainText('Always allow ls commands')
+  await page.mouse.click(10, 10) // overlay click closes the menu
+  await expect(page.getByTestId('hist-ctx-menu')).toHaveCount(0)
+
+  // Clear the rest.
+  await page.getByTestId('history-clear').click()
+  await expect(page.getByTestId('history-item')).toHaveCount(0)
+  await expect(page.getByTestId('history-count')).toHaveText('DECISIONS · 0')
+})
+
 test('inbox zero state communicates nothing needs attention', async ({ page }) => {
   await expect(page.getByTestId('inbox-zero')).toContainText('Inbox zero')
 })

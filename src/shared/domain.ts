@@ -29,6 +29,12 @@ export type DecisionOutcome = Exclude<PermissionRequestStatus, 'pending'>
 
 export type SwallowScope = 'global' | 'project'
 
+/** A folder a project's sessions may read for context (header REFS chips). */
+export interface ProjectRef {
+  path: string
+  label: string
+}
+
 export interface Project {
   id: string
   name: string
@@ -36,6 +42,8 @@ export interface Project {
   source: ProjectSource
   createdAt: string
   archivedAt: string | null
+  /** Extra folders granted to sessions as additional directories (REFS row). */
+  refs: ProjectRef[]
 }
 
 export interface Session {
@@ -55,6 +63,12 @@ export interface Session {
   startedAt: string
   endedAt: string | null
   endReason: SessionEndReason | null
+  /**
+   * Started with --dangerously-skip-permissions (header "⚠ Bypass" pill).
+   * In-memory only on live session rows; not persisted — a bypass session
+   * never outlives the app process.
+   */
+  bypassPermissions?: boolean
 }
 
 // --- Event payloads (contracts/session-events.md) ---
@@ -291,9 +305,13 @@ export interface Settings {
   autoscroll: boolean
   /** Per-project implementation-model overrides; 'global' or absent follows workModel. */
   projectModels: Record<string, string>
-  /** Fixed in v1 but stored for forward compatibility (FR-021a). */
-  retentionDecisionDays: number
-  retentionSessionsPerProject: number
+  /** Auto-approve requests by risk level (Allowed list tab): recorded as rule_approved. */
+  autoApproveLow: boolean
+  autoApproveMedium: boolean
+  /** Daily spend budget in USD; 0 = off. Sidebar cost turns red when exceeded. */
+  dailySpendLimit: number
+  /** Per-project plugin/skill commands hidden from composer suggestions. */
+  disabledCommands: Record<string, string[]>
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -308,8 +326,17 @@ export const DEFAULT_SETTINGS: Settings = {
   timestamps: false,
   autoscroll: true,
   projectModels: {},
-  retentionDecisionDays: 30,
-  retentionSessionsPerProject: 2,
+  autoApproveLow: false,
+  autoApproveMedium: false,
+  dailySpendLimit: 0,
+  disabledCommands: {},
+}
+
+/** A slash command / skill a project's sessions can run (composer suggestions). */
+export interface ProjectCommand {
+  name: string
+  /** Small explanation of what the command does, shown next to the suggestion. */
+  description?: string
 }
 
 /** Composer message preserved across an application quit and offered on next session start. */

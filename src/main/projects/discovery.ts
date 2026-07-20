@@ -6,7 +6,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, isAbsolute, join, resolve } from 'node:path'
-import type { Project } from '@shared/domain'
+import type { Project, ProjectRef } from '@shared/domain'
 import type { ProjectSuggestion } from '@shared/ipc-types'
 import type { Repositories } from '@main/store/repositories'
 
@@ -23,7 +23,7 @@ export function registerProject(
   repos: Repositories,
   input: { path: string; name?: string; source?: Project['source'] },
 ): Project {
-  const path = resolve(input.path)
+  const path = resolve(input.path.trim().replace(/^~(?=$|[\\/])/, homedir()))
   if (!isAbsolute(path) || !existsSync(path) || !statSync(path).isDirectory()) {
     throw new DiscoveryError('INVALID_PATH', 'The folder does not exist')
   }
@@ -47,6 +47,53 @@ export function registerProject(
   })
   seedFolderAccessRules(repos, project.id, path)
   return project
+}
+
+/**
+ * Adds a REFS entry (design: header chips): `target` is a folder path or the
+ * name of another registered project. Returns the updated ref list.
+ */
+export function addProjectRef(
+  repos: Repositories,
+  projectId: string,
+  target: string,
+): ProjectRef[] {
+  const project = repos.projects.byId(projectId)
+  if (!project) throw new DiscoveryError('INVALID_PATH', 'Project not found')
+  const trimmed = target.trim()
+  if (!trimmed) throw new DiscoveryError('INVALID_PATH', 'Enter a folder path or a project name')
+
+  // A project name wins over a path spelling; otherwise treat it as a folder.
+  const active = repos.projects.listActive()
+  const named = active.find(
+    (p) => p.id !== projectId && p.name.toLowerCase() === trimmed.toLowerCase(),
+  )
+  const path = named ? named.path : resolve(trimmed.replace(/^~(?=$|[\\/])/, homedir()))
+  if (!named && (!isAbsolute(path) || !existsSync(path) || !statSync(path).isDirectory())) {
+    throw new DiscoveryError('INVALID_PATH', 'The folder does not exist')
+  }
+  if (path === project.path) {
+    throw new DiscoveryError('DUPLICATE', 'The project already reads its own folder')
+  }
+  // A path that belongs to a registered project keeps that project's name.
+  const owner = named ?? active.find((p) => p.path === path)
+  const refs = project.refs.filter((r) => r.path !== path)
+  refs.push({ path, label: owner ? owner.name : basename(path) })
+  repos.projects.setRefs(projectId, refs)
+  return refs
+}
+
+/** Removes a REFS entry by path. Returns the updated ref list. */
+export function removeProjectRef(
+  repos: Repositories,
+  projectId: string,
+  path: string,
+): ProjectRef[] {
+  const project = repos.projects.byId(projectId)
+  if (!project) throw new DiscoveryError('INVALID_PATH', 'Project not found')
+  const refs = project.refs.filter((r) => r.path !== path)
+  repos.projects.setRefs(projectId, refs)
+  return refs
 }
 
 /**

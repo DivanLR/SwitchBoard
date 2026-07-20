@@ -13,6 +13,8 @@ import type {
   PermissionRule,
   PermissionRuleMatcher,
   Project,
+  ProjectCommand,
+  ProjectRef,
   ProjectSource,
   RiskClassificationRule,
   QueuedTask,
@@ -42,6 +44,11 @@ interface ProjectRow {
   source: ProjectSource
   createdAt: string
   archivedAt: string | null
+  refs: string | null
+}
+
+function toProject(row: ProjectRow): Project {
+  return { ...row, refs: row.refs ? (JSON.parse(row.refs) as ProjectRef[]) : [] }
 }
 
 interface SessionRow {
@@ -108,30 +115,67 @@ export class ProjectsRepo {
       source: input.source,
       createdAt: nowIso(),
       archivedAt: null,
+      refs: [],
     }
     this.db
       .prepare(
-        `INSERT INTO projects (id, name, path, source, createdAt, archivedAt)
-         VALUES (@id, @name, @path, @source, @createdAt, @archivedAt)`,
+        `INSERT INTO projects (id, name, path, source, createdAt, archivedAt, position)
+         VALUES (@id, @name, @path, @source, @createdAt, @archivedAt,
+                 (SELECT COALESCE(MAX(position), -1) + 1 FROM projects))`,
       )
-      .run(project)
+      .run({
+        id: project.id,
+        name: project.name,
+        path: project.path,
+        source: project.source,
+        createdAt: project.createdAt,
+        archivedAt: project.archivedAt,
+      })
     return project
   }
 
   byId(id: string): Project | undefined {
-    return this.db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as ProjectRow | undefined
+    const row = this.db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as
+      | ProjectRow
+      | undefined
+    return row ? toProject(row) : undefined
   }
 
   byPath(path: string): Project | undefined {
-    return this.db.prepare('SELECT * FROM projects WHERE path = ?').get(path) as
+    const row = this.db.prepare('SELECT * FROM projects WHERE path = ?').get(path) as
       | ProjectRow
       | undefined
+    return row ? toProject(row) : undefined
   }
 
   listActive(): Project[] {
-    return this.db
-      .prepare('SELECT * FROM projects WHERE archivedAt IS NULL ORDER BY createdAt')
-      .all() as ProjectRow[]
+    return (
+      this.db
+        .prepare('SELECT * FROM projects WHERE archivedAt IS NULL ORDER BY position, createdAt')
+        .all() as ProjectRow[]
+    ).map(toProject)
+  }
+
+  setRefs(id: string, refs: ProjectRef[]): void {
+    this.db.prepare('UPDATE projects SET refs = ? WHERE id = ?').run(JSON.stringify(refs), id)
+  }
+
+  /** Reorders an active project to `toIndex` in the sidebar (drag / move up-down). */
+  move(id: string, toIndex: number): void {
+    const run = this.db.transaction(() => {
+      const ids = (
+        this.db
+          .prepare('SELECT id FROM projects WHERE archivedAt IS NULL ORDER BY position, createdAt')
+          .all() as { id: string }[]
+      ).map((r) => r.id)
+      const from = ids.indexOf(id)
+      if (from === -1) return
+      ids.splice(from, 1)
+      ids.splice(Math.max(0, Math.min(toIndex, ids.length)), 0, id)
+      const set = this.db.prepare('UPDATE projects SET position = ? WHERE id = ?')
+      ids.forEach((pid, index) => set.run(index, pid))
+    })
+    run()
   }
 
   archive(id: string): void {
@@ -354,11 +398,21 @@ export class RequestsRepo {
       .run(status, nowIso(), deliveryFailed ? 1 : 0, id)
   }
 
+  /** Removes one decided entry from history; pending rows are never touched. */
+  deleteHistory(id: string): void {
+    this.db.prepare("DELETE FROM permission_requests WHERE id = ? AND status != 'pending'").run(id)
+  }
+
+  /** Clears all decided history across projects; pending rows stay. */
+  clearHistory(): void {
+    this.db.prepare("DELETE FROM permission_requests WHERE status != 'pending'").run()
+  }
+
   history(filter: { projectId?: string; before?: string; limit?: number }): DecisionRecord[] {
     const rows = this.db
       .prepare(
-        `SELECT * FROM decision_history
-         WHERE (? IS NULL OR projectId = ?) AND (? IS NULL OR resolvedAt < ?)
+        `SELECT * FROM permission_requests
+         WHERE status != 'pending' AND (? IS NULL OR projectId = ?) AND (? IS NULL OR resolvedAt < ?)
          ORDER BY resolvedAt DESC LIMIT ?`,
       )
       .all(
@@ -411,6 +465,11 @@ export class StandingRulesRepo {
 
   revoke(ruleId: string): void {
     this.db.prepare('UPDATE permission_rules SET revokedAt = ? WHERE id = ?').run(nowIso(), ruleId)
+  }
+
+  /** Re-activates a revoked rule (Allowed list tab: Ask → Auto). */
+  restore(ruleId: string): void {
+    this.db.prepare('UPDATE permission_rules SET revokedAt = NULL WHERE id = ?').run(ruleId)
   }
 }
 
@@ -613,7 +672,7 @@ export class TaskQueueRepo {
 export class ProjectCommandsRepo {
   constructor(private db: AppDatabase) {}
 
-  set(projectId: string, commands: string[]): void {
+  set(projectId: string, commands: ProjectCommand[]): void {
     this.db
       .prepare(
         `INSERT INTO project_commands (projectId, commands, updatedAt) VALUES (@projectId, @commands, @updatedAt)
@@ -622,11 +681,15 @@ export class ProjectCommandsRepo {
       .run({ projectId, commands: JSON.stringify(commands), updatedAt: nowIso() })
   }
 
-  get(projectId: string): string[] {
+  get(projectId: string): ProjectCommand[] {
     const row = this.db
       .prepare('SELECT commands FROM project_commands WHERE projectId = ?')
       .get(projectId) as { commands: string } | undefined
-    return row ? (JSON.parse(row.commands) as string[]) : []
+    if (!row) return []
+    // Rows written before descriptions existed hold plain name strings.
+    return (JSON.parse(row.commands) as (string | ProjectCommand)[]).map((c) =>
+      typeof c === 'string' ? { name: c } : c,
+    )
   }
 }
 

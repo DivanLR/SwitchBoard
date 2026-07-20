@@ -32,7 +32,6 @@ function openAgent(agentId: string): void {
 }
 const emit = defineEmits<{
   (e: 'add-project'): void
-  (e: 'open-rules'): void
   (e: 'open-settings'): void
 }>()
 
@@ -43,6 +42,45 @@ const modelSummary = computed(() => {
   const choice = MODEL_CHOICES.find((m) => m.id === id)
   return choice ? choice.label.replace(/\s*\(.*\)$/, '') : id
 })
+
+// --- Theme + collapse toggles (design: icon buttons beside the logo) ---
+const collapsed = ref(false)
+const theme = ref<'dark' | 'light'>(localStorage.getItem('sb-theme') === 'light' ? 'light' : 'dark')
+
+function applyTheme(): void {
+  document.documentElement.classList.toggle('sb-light', theme.value === 'light')
+}
+
+function toggleTheme(): void {
+  theme.value = theme.value === 'light' ? 'dark' : 'light'
+  localStorage.setItem('sb-theme', theme.value)
+  applyTheme()
+}
+applyTheme() // restore the persisted choice on startup
+
+/** Compact row label while collapsed: initials of the first two words. */
+function initials(name: string): string {
+  const words = name.split(/[^a-zA-Z0-9]+/).filter(Boolean)
+  return (words.length > 1 ? `${words[0][0]}${words[1][0]}` : name.slice(0, 2)).toLowerCase()
+}
+
+// Stable per-project accent stripe on the row's right edge — identifies the
+// project at a glance, especially in the collapsed rail.
+const ACCENTS = [
+  '#3ecf9a',
+  '#6ea8e8',
+  '#e8b45a',
+  '#e06c55',
+  '#b48ce8',
+  '#5ad4d4',
+  '#e87ab0',
+  '#a8d45a',
+]
+function accentFor(id: string): string {
+  let hash = 0
+  for (const ch of id) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
+  return ACCENTS[hash % ACCENTS.length]
+}
 
 const now = ref(Date.now())
 let timer: ReturnType<typeof setInterval> | undefined
@@ -73,6 +111,12 @@ function pendingFor(projectId: string): number {
 }
 
 const costLabel = computed(() => `$${projects.counters.costTodayUsd.toFixed(2)}`)
+
+// Daily spend limit (General settings): cost turns red once passed.
+const overSpendLimit = computed(() => {
+  const limit = settings.settings?.dailySpendLimit ?? 0
+  return limit > 0 && projects.counters.costTodayUsd >= limit
+})
 
 const tokensLabel = computed(() => {
   const n = projects.counters.tokensToday
@@ -127,10 +171,11 @@ const ctx = ref<{ id: string; name: string; x: number; y: number } | null>(null)
 const renamingId = ref<string | null>(null)
 const renameVal = ref('')
 
-// The rename input only renders (v-if) for the row being renamed, so this
-// function ref receives its element exactly once, on mount — focus it then.
+// Function refs run on every re-render (each keystroke updates renameVal), so
+// only focus+select when the input isn't already focused — otherwise typing
+// gets select()-ed away after every character.
 function focusOnMount(el: unknown): void {
-  if (el instanceof HTMLInputElement) {
+  if (el instanceof HTMLInputElement && document.activeElement !== el) {
     el.focus()
     el.select()
   }
@@ -163,6 +208,82 @@ function ctxDelete(): void {
   if (!ctx.value) return
   askRemove(ctx.value.id)
   ctx.value = null
+}
+
+function ctxMove(delta: number): void {
+  if (!ctx.value) return
+  const index = projects.items.findIndex((p) => p.id === ctx.value?.id)
+  if (index !== -1) void projects.move(ctx.value.id, index + delta)
+  ctx.value = null
+}
+
+// --- Drag & drop (design): drag a row to reorder; drop ONTO a row's middle to
+// add the dragged project as a reference of the target. ---
+const dragId = ref<string | null>(null)
+const rowDrop = ref<{ id: string; zone: 'before' | 'after' | 'ref' } | null>(null)
+
+function onDragStart(item: (typeof projects.items)[number], event: DragEvent): void {
+  dragId.value = item.id
+  event.dataTransfer?.setData('text/x-sb-project', item.id)
+  event.dataTransfer?.setData('text/x-sb-project-path', item.path)
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+}
+
+// Zones from cursor height in the row: top 32% before, bottom 32% after,
+// middle 36% add-as-reference (design reference). OS-file drags always target
+// the whole row (drop → @path into that project's composer).
+function onRowDragOver(item: (typeof projects.items)[number], event: DragEvent): void {
+  const types = event.dataTransfer?.types ?? []
+  if (types.includes('Files')) {
+    event.preventDefault()
+    rowDrop.value = { id: item.id, zone: 'ref' }
+    return
+  }
+  if (!types.includes('text/x-sb-project')) return
+  if (dragId.value === item.id) return
+  event.preventDefault()
+  const el = event.currentTarget as HTMLElement
+  const rect = el.getBoundingClientRect()
+  const y = (event.clientY - rect.top) / Math.max(1, rect.height)
+  rowDrop.value = { id: item.id, zone: y < 0.32 ? 'before' : y > 0.68 ? 'after' : 'ref' }
+}
+
+async function onRowDrop(item: (typeof projects.items)[number], event: DragEvent): Promise<void> {
+  event.preventDefault()
+  const drop = rowDrop.value
+  rowDrop.value = null
+  // An OS file dropped on a project: open it and point the composer at the path.
+  const files = [...(event.dataTransfer?.files ?? [])]
+  if (files.length > 0) {
+    const paths = files
+      .map((f) => window.switchboard.pathForFile?.(f))
+      .filter((p): p is string => Boolean(p))
+      .map((p) => `@${p}`)
+    if (paths.length > 0) {
+      projects.select(item.id)
+      activeSession.requestComposerInsert(paths.join(' '))
+    }
+    dragId.value = null
+    return
+  }
+  const dragged = event.dataTransfer?.getData('text/x-sb-project') || dragId.value
+  dragId.value = null
+  if (!drop || !dragged || dragged === item.id) return
+  const fromIndex = projects.items.findIndex((p) => p.id === dragged)
+  if (fromIndex === -1) return
+  if (drop.zone === 'ref') {
+    await projects.addRef(item.id, projects.items[fromIndex].path).catch(() => {})
+    return
+  }
+  const targetIndex = projects.items.findIndex((p) => p.id === item.id)
+  let toIndex = drop.zone === 'before' ? targetIndex : targetIndex + 1
+  if (fromIndex < toIndex) toIndex -= 1
+  await projects.move(dragged, toIndex)
+}
+
+function onDragEnd(): void {
+  dragId.value = null
+  rowDrop.value = null
 }
 
 // --- Remove (archive) a project, via a confirmation popup ---
@@ -204,15 +325,40 @@ async function confirmRemoveNow(): Promise<void> {
 </script>
 
 <template>
-  <aside class="sidebar">
+  <aside class="sidebar" :class="{ collapsed }">
     <div class="brand">
-      <div class="logo mono"><span style="color: var(--green)">▣</span> switchboard</div>
-      <div class="tagline mono">Claude Code sessions · one inbox</div>
+      <div class="brand-top">
+        <div class="logo mono">
+          <span style="color: var(--green)">▣</span><span v-if="!collapsed"> switchboard</span>
+        </div>
+        <span style="flex: 1"></span>
+        <button
+          class="icon-btn mono"
+          data-testid="theme-toggle"
+          :title="
+            theme === 'light'
+              ? 'Switch to dark mode'
+              : 'Light mode — easier to read in bright rooms'
+          "
+          @click="toggleTheme"
+        >
+          {{ theme === 'light' ? '☾' : '☀' }}
+        </button>
+        <button
+          class="icon-btn mono"
+          data-testid="collapse-toggle"
+          :title="collapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+          @click="collapsed = !collapsed"
+        >
+          {{ collapsed ? '»' : '«' }}
+        </button>
+      </div>
+      <div v-if="!collapsed" class="tagline mono">Claude Code sessions · one inbox</div>
     </div>
 
     <div class="section-row">
-      <span class="section-label mono">PROJECTS</span>
-      <button class="add mono" data-testid="add-project" title="Add a project" @click="emit('add-project')">
+      <span v-if="!collapsed" class="section-label mono">PROJECTS</span>
+      <button class="add mono" data-testid="add-project" title="New session" @click="emit('add-project')">
         +
       </button>
     </div>
@@ -222,12 +368,28 @@ async function confirmRemoveNow(): Promise<void> {
         v-for="item in projects.items"
         :key="item.id"
         class="project"
-        :class="{ active: item.id === projects.selectedProjectId }"
+        :class="{
+          active: item.id === projects.selectedProjectId,
+          'drop-before': rowDrop?.id === item.id && rowDrop.zone === 'before',
+          'drop-after': rowDrop?.id === item.id && rowDrop.zone === 'after',
+          'drop-ref': rowDrop?.id === item.id && rowDrop.zone === 'ref',
+        }"
         :data-testid="`sidebar-project-${item.name}`"
+        :draggable="renamingId !== item.id"
         @click="projects.select(item.id)"
         @contextmenu.prevent="openCtx(item, $event)"
+        @dragstart="onDragStart(item, $event)"
+        @dragover="onRowDragOver(item, $event)"
+        @dragleave="rowDrop = rowDrop?.id === item.id ? null : rowDrop"
+        @drop="onRowDrop(item, $event)"
+        @dragend="onDragEnd"
       >
         <div class="active-bg"></div>
+        <span
+          class="accent"
+          :data-testid="`project-accent-${item.name}`"
+          :style="{ background: accentFor(item.id) }"
+        ></span>
         <div class="content">
           <div class="row">
             <span
@@ -238,35 +400,38 @@ async function confirmRemoveNow(): Promise<void> {
               :data-status="statusOf(item)"
               :title="statusOf(item) === 'needs_you' ? 'Needs you' : statusOf(item)"
             ></span>
-            <input
-              v-if="renamingId === item.id"
-              :ref="focusOnMount"
-              v-model="renameVal"
-              class="rename-input mono"
-              :data-testid="`rename-input-${item.name}`"
-              @click.stop
-              @keydown.enter="commitRename"
-              @keydown.esc="renamingId = null"
-              @blur="commitRename"
-            />
-            <span v-else class="name mono">{{ item.name }}</span>
-            <span
-              v-if="pendingFor(item.id) > 0"
-              class="badge-count"
-              :data-testid="`project-badge-${item.name}`"
-            >
-              {{ pendingFor(item.id) }}
-            </span>
-            <button
-              class="remove mono"
-              :data-testid="`remove-project-${item.name}`"
-              title="Remove this project"
-              @click.stop="askRemove(item.id)"
-            >
-              ✕
-            </button>
+            <span v-if="collapsed" class="initials mono">{{ initials(item.name) }}</span>
+            <template v-else>
+              <input
+                v-if="renamingId === item.id"
+                :ref="focusOnMount"
+                v-model="renameVal"
+                class="rename-input mono"
+                :data-testid="`rename-input-${item.name}`"
+                @click.stop
+                @keydown.enter="commitRename"
+                @keydown.esc="renamingId = null"
+                @blur="commitRename"
+              />
+              <span v-else class="name mono">{{ item.name }}</span>
+              <span
+                v-if="pendingFor(item.id) > 0"
+                class="badge-count"
+                :data-testid="`project-badge-${item.name}`"
+              >
+                {{ pendingFor(item.id) }}
+              </span>
+              <button
+                class="remove mono"
+                :data-testid="`remove-project-${item.name}`"
+                title="Remove this project"
+                @click.stop="askRemove(item.id)"
+              >
+                ✕
+              </button>
+            </template>
           </div>
-          <div class="meta">
+          <div v-if="!collapsed" class="meta">
             <span class="branch mono">⎇ {{ item.session?.branch ?? '—' }}</span>
             <span
               v-if="item.session && !item.session.endedAt"
@@ -276,8 +441,12 @@ async function confirmRemoveNow(): Promise<void> {
               {{ timerOf(item.session.startedAt) }}
             </span>
           </div>
-          <div v-if="collisions.has(item.name)" class="path mono">{{ item.path }}</div>
-          <div v-if="agentsFor(item).length > 0" class="agents" :data-testid="`sidebar-agents-${item.name}`">
+          <div v-if="!collapsed && collisions.has(item.name)" class="path mono">{{ item.path }}</div>
+          <div
+            v-if="!collapsed && agentsFor(item).length > 0"
+            class="agents"
+            :data-testid="`sidebar-agents-${item.name}`"
+          >
             <div
               v-for="agent in agentsFor(item)"
               :key="agent.id"
@@ -303,11 +472,13 @@ async function confirmRemoveNow(): Promise<void> {
 
     <div class="settings-row" data-testid="open-settings" @click="emit('open-settings')">
       <span class="gear mono">⚙</span>
-      <span class="settings-label mono">Settings</span>
-      <span class="model-summary mono" data-testid="model-summary">{{ modelSummary }}</span>
+      <template v-if="!collapsed">
+        <span class="settings-label mono">Settings</span>
+        <span class="model-summary mono" data-testid="model-summary">{{ modelSummary }}</span>
+      </template>
     </div>
 
-    <div class="stats">
+    <div v-if="!collapsed" class="stats">
       <div class="stat mono" data-testid="counter-running">
         <span>Running</span><span class="val" data-testid="counter-running-value">{{ projects.counters.running }}</span>
       </div>
@@ -316,7 +487,13 @@ async function confirmRemoveNow(): Promise<void> {
         ><span class="val amber" data-testid="counter-needsyou-value">{{ projects.counters.needsYou }}</span>
       </div>
       <div class="stat mono" data-testid="counter-cost">
-        <span>Cost today</span><span class="val" data-testid="counter-cost-value">{{ costLabel }}</span>
+        <span>Cost today</span
+        ><span
+          class="val"
+          :style="overSpendLimit ? { color: 'var(--red)' } : undefined"
+          data-testid="counter-cost-value"
+          >{{ costLabel }}</span
+        >
       </div>
       <div class="stat mono" data-testid="counter-tokens">
         <span>Tokens today</span
@@ -324,7 +501,7 @@ async function confirmRemoveNow(): Promise<void> {
       </div>
     </div>
 
-    <div v-if="usagePct !== null" class="usage-card" data-testid="usage-meter">
+    <div v-if="!collapsed && usagePct !== null" class="usage-card" data-testid="usage-meter">
       <div class="usage-head mono">
         <span>Session usage</span>
         <span :style="{ color: usageColor }">{{ usagePct }}% of {{ usageLimitLabel }}</span>
@@ -338,9 +515,6 @@ async function confirmRemoveNow(): Promise<void> {
       </div>
     </div>
 
-    <div class="footer mono">
-      <button class="foot-link" data-testid="open-rules" @click="emit('open-rules')">rules</button>
-    </div>
   </aside>
 
   <!-- Right-click context menu -->
@@ -355,6 +529,12 @@ async function confirmRemoveNow(): Promise<void> {
       <button class="ctx-item mono" data-testid="ctx-rename" @click="startRename">
         <span style="color: var(--green)">✎</span>Rename
       </button>
+      <button class="ctx-item mono" data-testid="ctx-move-up" @click="ctxMove(-1)">
+        <span>↑</span>Move up
+      </button>
+      <button class="ctx-item mono" data-testid="ctx-move-down" @click="ctxMove(1)">
+        <span>↓</span>Move down
+      </button>
       <button class="ctx-item mono danger" data-testid="ctx-remove" @click="ctxDelete">
         <span>🗑</span>Remove from list
       </button>
@@ -364,25 +544,26 @@ async function confirmRemoveNow(): Promise<void> {
   <!-- Remove-project confirmation popup -->
   <div v-if="confirmRemove" class="overlay" @click.self="cancelRemove">
     <div class="dialog remove-dialog" data-testid="remove-dialog">
-      <div class="rd-title mono">Remove project?</div>
+      <div class="rd-icon">🗑</div>
+      <div class="rd-title mono">Remove {{ confirmRemove.name }}?</div>
       <div class="rd-body">
-        <div class="rd-name mono">{{ confirmRemove.name }}</div>
         <div class="rd-path faint mono">{{ confirmRemove.path }}</div>
         <p class="rd-note dim">
-          This removes the project from Switchboard. Its folder and files on disk are not touched.
+          The session and its pending permissions will be removed from switchboard. Your files and
+          git history are untouched.
         </p>
         <p v-if="removeError" class="rd-error mono" data-testid="remove-error">{{ removeError }}</p>
       </div>
       <div class="rd-actions">
-        <button class="btn-outline" data-testid="remove-cancel" @click="cancelRemove">Cancel</button>
         <button
           class="btn-solid danger-solid"
           data-testid="remove-confirm"
           :disabled="busy"
           @click="confirmRemoveNow"
         >
-          Remove
+          Delete
         </button>
+        <button class="btn-outline" data-testid="remove-cancel" @click="cancelRemove">Keep it</button>
       </div>
     </div>
   </div>
@@ -398,8 +579,71 @@ async function confirmRemoveNow(): Promise<void> {
   flex-direction: column;
 }
 
+.sidebar.collapsed {
+  width: 64px;
+  min-width: 64px;
+}
+
 .brand {
   padding: 16px 16px 12px;
+}
+
+.sidebar.collapsed .brand {
+  padding: 16px 8px 12px;
+}
+
+.brand-top {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sidebar.collapsed .brand-top {
+  flex-direction: column;
+  gap: 8px;
+}
+
+.icon-btn {
+  color: var(--text-tab);
+  font-size: 12px;
+  padding: 1px 4px;
+}
+
+.icon-btn:hover {
+  color: var(--text-body);
+}
+
+.sidebar.collapsed .section-row {
+  justify-content: center;
+}
+
+.initials {
+  font-size: 11px;
+  color: var(--text-body);
+}
+
+.sidebar.collapsed .project {
+  text-align: center;
+}
+
+/* Drag-and-drop states: green insertion line for reorder, dashed teal ring
+   for drop-to-reference (design reference). */
+.project.drop-before {
+  box-shadow: inset 0 2px 0 var(--green);
+}
+
+.project.drop-after {
+  box-shadow: inset 0 -2px 0 var(--green);
+}
+
+.project.drop-ref {
+  outline: 1px dashed var(--green);
+  outline-offset: -1px;
+  background: rgba(62, 207, 154, 0.06);
+}
+
+.sidebar.collapsed .row {
+  justify-content: center;
 }
 
 .logo {
@@ -454,6 +698,20 @@ async function confirmRemoveNow(): Promise<void> {
 
 .project:hover {
   background: var(--bg-hover);
+}
+
+/* Per-project color code on the right edge (visible collapsed and expanded). */
+.accent {
+  position: absolute;
+  right: 0;
+  top: 7px;
+  bottom: 7px;
+  width: 3px;
+  opacity: 0.55;
+}
+
+.project.active .accent {
+  opacity: 1;
 }
 
 .active-bg {
@@ -511,6 +769,18 @@ async function confirmRemoveNow(): Promise<void> {
   width: 380px;
 }
 
+.rd-icon {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 17px;
+  background: rgba(224, 108, 85, 0.1);
+  border: 1px solid rgba(224, 108, 85, 0.35);
+  margin-bottom: 10px;
+}
+
 .rd-title {
   font-size: 14px;
   font-weight: 700;
@@ -519,12 +789,6 @@ async function confirmRemoveNow(): Promise<void> {
 
 .rd-body {
   margin: 12px 0 16px;
-}
-
-.rd-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-name);
 }
 
 .rd-path {

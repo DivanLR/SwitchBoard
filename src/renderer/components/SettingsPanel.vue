@@ -4,24 +4,25 @@
 // card + toggle + segmented controls, and a "Changes apply immediately · Done"
 // footer. State and transport live in the settings store.
 import { computed, onMounted, ref, watch } from 'vue'
-import type { Settings, TerseLevel } from '@shared/domain'
+import type { PermissionRule, Settings, TerseLevel } from '@shared/domain'
 import { MODEL_CHOICES } from '@shared/domain'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { useUpdatesStore } from '@renderer/stores/updates'
 
-const props = defineProps<{ initialTab?: 'models' | 'proj' | 'term' | 'gen' }>()
+const props = defineProps<{ initialTab?: 'models' | 'proj' | 'allowed' | 'term' | 'gen' }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 const store = useSettingsStore()
 const projects = useProjectsStore()
 const updates = useUpdatesStore()
 const settings = computed(() => store.settings)
 
-type Tab = 'models' | 'proj' | 'term' | 'gen'
+type Tab = 'models' | 'proj' | 'allowed' | 'term' | 'gen'
 const tab = ref<Tab>(props.initialTab ?? 'models')
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'models', label: 'Models', icon: '✦' },
   { id: 'proj', label: 'This project', icon: '▣' },
+  { id: 'allowed', label: 'Allowed list', icon: '✓' },
   { id: 'term', label: 'Terminals', icon: '❯' },
   { id: 'gen', label: 'General', icon: '⚙' },
 ]
@@ -38,7 +39,9 @@ const plugins = ref<string[]>([])
 watch(
   () => proj.value?.id,
   async (id) => {
-    plugins.value = id ? await window.switchboard.invoke('projects.commands', { projectId: id }) : []
+    plugins.value = id
+      ? (await window.switchboard.invoke('projects.commands', { projectId: id })).map((c) => c.name)
+      : []
   },
   { immediate: true },
 )
@@ -71,6 +74,64 @@ const terseExplain: Record<TerseLevel, string> = {
 
 function modelLabel(id: string): string {
   return MODEL_CHOICES.find((m) => m.id === id)?.label ?? id
+}
+
+// --- Allowed list tab (design): risk auto-approve + per-project command rules ---
+const allowedRules = ref<PermissionRule[]>([])
+const newCmd = ref('')
+
+const MATCHER_KIND_LABEL: Record<string, string> = {
+  command_prefix: 'Commands starting with this',
+  path_glob: 'Files under this folder',
+  exact_input: 'This exact action only',
+  tool_only: 'Any use of this tool',
+}
+
+async function loadAllowedRules(): Promise<void> {
+  allowedRules.value = proj.value
+    ? await window.switchboard.invoke('rules.standing.list', {
+        projectId: proj.value.id,
+        includeRevoked: true,
+      })
+    : []
+}
+
+watch(
+  [() => proj.value?.id, tab],
+  () => {
+    if (tab.value === 'allowed') void loadAllowedRules()
+  },
+  { immediate: true },
+)
+
+async function setRuleMode(rule: PermissionRule, mode: 'ask' | 'auto'): Promise<void> {
+  if (mode === 'ask' && rule.revokedAt === null) {
+    await window.switchboard.invoke('rules.standing.revoke', { ruleId: rule.id })
+  } else if (mode === 'auto' && rule.revokedAt !== null) {
+    await window.switchboard.invoke('rules.standing.restore', { ruleId: rule.id })
+  }
+  await loadAllowedRules()
+}
+
+async function addAllowedCommand(): Promise<void> {
+  const pattern = newCmd.value.trim()
+  if (!pattern || !proj.value) return
+  newCmd.value = ''
+  await window.switchboard.invoke('rules.standing.add', { projectId: proj.value.id, pattern })
+  await loadAllowedRules()
+}
+
+// --- Plugin toggles (design): hide a plugin's commands from suggestions ---
+const disabledPlugins = computed(
+  () => (proj.value && settings.value?.disabledCommands?.[proj.value.id]) || [],
+)
+
+function togglePlugin(name: string): void {
+  if (!proj.value || !settings.value) return
+  const id = proj.value.id
+  const current = settings.value.disabledCommands?.[id] ?? []
+  const next = current.includes(name) ? current.filter((c) => c !== name) : [...current, name]
+  save({ disabledCommands: { ...settings.value.disabledCommands, [id]: next } })
 }
 
 const updateLine = computed(() => {
@@ -260,13 +321,122 @@ const updateLine = computed(() => {
                   <div v-for="p in plugins" :key="p" class="card-opt static">
                     <div class="opt-body">
                       <div class="opt-name mono">{{ p }}</div>
-                      <div class="opt-sub">Available in this project's sessions</div>
+                      <div class="opt-sub">
+                        {{
+                          disabledPlugins.includes(p)
+                            ? 'Hidden from composer suggestions'
+                            : 'Suggested in the composer'
+                        }}
+                      </div>
                     </div>
-                    <span class="plugin-on mono">Loaded</span>
+                    <button
+                      class="toggle"
+                      :class="{ on: !disabledPlugins.includes(p) }"
+                      :data-testid="`plugin-toggle-${p}`"
+                      role="switch"
+                      :aria-checked="!disabledPlugins.includes(p)"
+                      @click="togglePlugin(p)"
+                    >
+                      <span class="knob"></span>
+                    </button>
                   </div>
                 </div>
               </div>
             </template>
+          </template>
+
+          <!-- ALLOWED LIST -->
+          <template v-else-if="tab === 'allowed'">
+            <div class="group-label mono">AUTO-APPROVE BY RISK</div>
+            <div class="group-desc">
+              Requests at these risk levels are approved automatically and land in history as
+              rule-approved. High risk always asks.
+            </div>
+            <div class="setting-row">
+              <div class="sr-text">
+                <div class="sr-label">Low risk</div>
+                <div class="sr-desc">Read-only inspection — file reads, git status, listings</div>
+              </div>
+              <button
+                class="toggle"
+                :class="{ on: settings.autoApproveLow }"
+                data-testid="setting-auto-low"
+                role="switch"
+                :aria-checked="settings.autoApproveLow"
+                @click="save({ autoApproveLow: !settings.autoApproveLow })"
+              >
+                <span class="knob"></span>
+              </button>
+            </div>
+            <div class="setting-row">
+              <div class="sr-text">
+                <div class="sr-label">Medium risk</div>
+                <div class="sr-desc">Routine changes — file edits, package installs, builds</div>
+              </div>
+              <button
+                class="toggle"
+                :class="{ on: settings.autoApproveMedium }"
+                data-testid="setting-auto-medium"
+                role="switch"
+                :aria-checked="settings.autoApproveMedium"
+                @click="save({ autoApproveMedium: !settings.autoApproveMedium })"
+              >
+                <span class="knob"></span>
+              </button>
+            </div>
+
+            <div class="group-label mono" style="margin-top: 8px">ALLOWED COMMANDS</div>
+            <div class="group-desc">
+              Standing rules for
+              <span class="mono proj-name">{{ proj?.name ?? 'this project' }}</span> — created from
+              history (right-click a command) or added here. Auto approves without asking; Ask
+              restores the inbox prompt.
+            </div>
+            <div class="cards" data-testid="allowed-rules">
+              <div v-for="r in allowedRules" :key="r.id" class="card-opt static">
+                <div class="opt-body">
+                  <div class="opt-name mono">{{ r.matcher.value ?? r.toolName }}</div>
+                  <div class="opt-sub">{{ MATCHER_KIND_LABEL[r.matcher.kind] }}</div>
+                </div>
+                <div class="seg mono">
+                  <button
+                    class="seg-opt"
+                    :class="{ on: r.revokedAt !== null }"
+                    :data-testid="`rule-ask-${r.id}`"
+                    @click="setRuleMode(r, 'ask')"
+                  >
+                    Ask
+                  </button>
+                  <button
+                    class="seg-opt"
+                    :class="{ on: r.revokedAt === null }"
+                    :data-testid="`rule-auto-${r.id}`"
+                    @click="setRuleMode(r, 'auto')"
+                  >
+                    Auto
+                  </button>
+                </div>
+              </div>
+              <div class="card-opt static">
+                <div class="opt-body">
+                  <div class="opt-name mono">rm · sudo · git push</div>
+                  <div class="opt-sub">Destructive or irreversible — can never be auto-approved</div>
+                </div>
+                <span class="lock-chip mono">Always ask</span>
+              </div>
+            </div>
+            <div class="add-cmd">
+              <input
+                v-model="newCmd"
+                class="add-cmd-input mono"
+                data-testid="allowed-add-input"
+                placeholder="+ Add a command — e.g. make build"
+                @keydown.enter="addAllowedCommand"
+              />
+              <button class="btn-solid" data-testid="allowed-add-btn" @click="addAllowedCommand">
+                Allow
+              </button>
+            </div>
           </template>
 
           <!-- TERMINALS -->
@@ -439,6 +609,26 @@ const updateLine = computed(() => {
               </button>
             </div>
 
+            <div class="group-label mono" style="margin-top: 8px">APPROVALS &amp; SPEND</div>
+            <div class="setting-row">
+              <div class="sr-text">
+                <div class="sr-label">Daily spend limit</div>
+                <div class="sr-desc">Cost today turns red in the sidebar once passed</div>
+              </div>
+              <div class="seg mono">
+                <button
+                  v-for="[v, label] in ([[0, 'Off'], [5, '$5'], [10, '$10'], [25, '$25'], [50, '$50']] as const)"
+                  :key="v"
+                  class="seg-opt"
+                  :class="{ on: settings.dailySpendLimit === v }"
+                  :data-testid="`spend-limit-${v}`"
+                  @click="save({ dailySpendLimit: v })"
+                >
+                  {{ label }}
+                </button>
+              </div>
+            </div>
+
             <div class="group-label mono" style="margin-top: 8px">APP UPDATES</div>
             <div class="group-desc">
               New versions are published to GitHub releases and downloaded automatically. When one is
@@ -466,7 +656,7 @@ const updateLine = computed(() => {
 
             <div class="note" style="margin-top: 8px">
               Raw output is kept for the current and previous session per project; decision history
-              for {{ settings.retentionDecisionDays }} days. All data stays on this machine.
+              for 30 days. All data stays on this machine.
             </div>
           </template>
         </div>
@@ -689,13 +879,33 @@ const updateLine = computed(() => {
   flex-shrink: 0;
 }
 
-.plugin-on {
+.lock-chip {
   font-size: 10px;
-  color: var(--green);
-  border: 1px solid rgba(62, 207, 154, 0.35);
-  border-radius: 4px;
+  color: var(--amber);
+  border: 1px solid rgba(232, 180, 90, 0.35);
   padding: 1px 7px;
   flex-shrink: 0;
+}
+
+.add-cmd {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.add-cmd-input {
+  flex: 1;
+  font-size: 11.5px;
+  padding: 8px 12px;
+  background: var(--bg-code);
+  border: 1px dashed var(--border-strong);
+  color: var(--text-body);
+  outline: none;
+}
+
+.add-cmd-input:focus {
+  border-color: var(--green);
+  border-style: solid;
 }
 
 .proj-card {

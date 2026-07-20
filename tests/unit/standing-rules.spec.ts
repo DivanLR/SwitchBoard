@@ -24,6 +24,17 @@ describe('deriveMatcher', () => {
     })
   })
 
+  it('drops a flag as word two — a flag never widens the base command', () => {
+    expect(deriveMatcher('Bash', { command: 'rm -rf dist' })).toEqual({
+      kind: 'command_prefix',
+      value: 'rm',
+    })
+    expect(deriveMatcher('Bash', { command: 'ls' })).toEqual({
+      kind: 'command_prefix',
+      value: 'ls',
+    })
+  })
+
   it('derives a directory glob for file tools', () => {
     const matcher = deriveMatcher('Write', { file_path: 'C:\\proj\\src\\a.ts' })
     expect(matcher.kind).toBe('path_glob')

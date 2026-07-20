@@ -6,23 +6,24 @@ import { ipcMain, type BrowserWindow } from 'electron'
 import type { SessionEvent } from '@shared/domain'
 import type {
   Counters,
-  FocusRequestPush,
-  InboxChangedPush,
   InvokeMap,
   InvokeMethod,
   IpcError,
-  ProjectCommandsPush,
   ProjectListItem,
-  QueueChangedPush,
-  SessionStatusPush,
-  UpdateStatus,
+  PushChannel,
+  PushMap,
   WireResult,
 } from '@shared/ipc-types'
 import { isIpcError } from '@shared/ipc-types'
 import type { Repositories } from '@main/store/repositories'
 import type { SessionManager } from '@main/sessions/session-manager'
 import type { PermissionBroker } from '@main/inbox/permission-broker'
-import { registerProject, suggestProjects } from '@main/projects/discovery'
+import {
+  addProjectRef,
+  registerProject,
+  removeProjectRef,
+  suggestProjects,
+} from '@main/projects/discovery'
 import { defaultRiskRules } from '@main/inbox/risk-rules'
 import { defaultSwallowRules } from '@main/stream/swallow-rules'
 import { installSpecKit, readSpecDetail, readSpecKitState } from '@main/specs/spec-kit'
@@ -59,10 +60,6 @@ export class RendererPush {
     this.send('push.event', batch)
   }
 
-  sessionStatus(push: SessionStatusPush): void {
-    this.send('push.sessionStatus', push)
-  }
-
   countersChanged(): void {
     if (this.counterTimer) return
     this.counterTimer = setTimeout(() => {
@@ -71,24 +68,9 @@ export class RendererPush {
     }, COUNTER_DEBOUNCE_MS)
   }
 
-  inboxChanged(push: InboxChangedPush): void {
-    this.send('push.inboxChanged', push)
-  }
-
-  queueChanged(push: QueueChangedPush): void {
-    this.send('push.queueChanged', push)
-  }
-
-  projectCommands(push: ProjectCommandsPush): void {
-    this.send('push.projectCommands', push)
-  }
-
-  focusRequest(push: FocusRequestPush): void {
-    this.send('push.focusRequest', push)
-  }
-
-  updateStatus(status: UpdateStatus): void {
-    this.send('push.updateStatus', status)
+  /** Typed pass-through for every other push channel. */
+  push<C extends PushChannel>(channel: C, payload: PushMap[C]): void {
+    this.send(channel, payload)
   }
 
   private send(channel: string, payload: unknown): void {
@@ -177,6 +159,11 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       if (name.length === 0) throw { code: 'INVALID_PATH', message: 'Name cannot be empty' }
       repos.projects.rename(req.projectId, name)
     },
+    'projects.move': (req) => {
+      repos.projects.move(req.projectId, req.toIndex)
+    },
+    'projects.refs.add': (req) => addProjectRef(repos, req.projectId, req.target),
+    'projects.refs.remove': (req) => removeProjectRef(repos, req.projectId, req.path),
     'projects.archive': (req) => {
       const active = repos.sessions.activeForProject(req.projectId)
       if (active) {
@@ -247,9 +234,29 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     },
     'inbox.approveAllForProject': (req) => broker.approveAllForProject(req.projectId),
     'inbox.history': (req) => repos.requests.history(req),
-    'rules.standing.list': (req) => repos.standingRules.listForProject(req.projectId),
+    'inbox.deleteHistory': (req) => {
+      repos.requests.deleteHistory(req.requestId)
+    },
+    'inbox.clearHistory': () => {
+      repos.requests.clearHistory()
+    },
+    'rules.standing.list': (req) =>
+      repos.standingRules.listForProject(req.projectId, req.includeRevoked ?? false),
     'rules.standing.revoke': (req) => {
       repos.standingRules.revoke(req.ruleId)
+    },
+    'rules.standing.restore': (req) => {
+      repos.standingRules.restore(req.ruleId)
+    },
+    'rules.standing.add': (req) => {
+      const pattern = req.pattern.trim()
+      if (!pattern) throw { code: 'INVALID_PATH', message: 'Enter a command' }
+      return repos.standingRules.insert({
+        projectId: req.projectId,
+        toolName: 'Bash',
+        matcher: { kind: 'command_prefix', value: pattern },
+        createdFromRequestId: 'manual',
+      })
     },
     'rules.risk.list': () => repos.riskRules.list(),
     'rules.risk.save': (req) => {

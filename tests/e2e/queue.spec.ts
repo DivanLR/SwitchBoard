@@ -1,4 +1,4 @@
-// Planned task queue (FR-023) and in-app permission approval toasts.
+// Planned task queue (FR-023).
 import { expect, test } from '@playwright/test'
 import { installMockHost, twoProjectScenario } from './mock-host'
 
@@ -47,75 +47,4 @@ test('a queued goal can be removed before it runs', async ({ page }) => {
 
   await page.getByTestId('queue-remove-0').click()
   await expect(page.getByTestId('task-queue')).toHaveCount(0)
-})
-
-test('a focused app shows no toast; blurring enables it and refocusing clears it', async ({
-  page,
-}) => {
-  // Focused (default): the inbox panel is visible, so no popup.
-  await page.evaluate(() => {
-    window.__mock.raisePermission({ projectId: 'p-alpha', title: 'Run: ls', risk: 'low' })
-  })
-  await expect(page.getByTestId('permission-toasts')).toHaveCount(0)
-
-  // Unfocused: the toast appears for the next request.
-  await page.evaluate(() => window.dispatchEvent(new Event('blur')))
-  await page.evaluate(() => {
-    window.__mock.raisePermission({ projectId: 'p-alpha', title: 'Run: pwd', risk: 'low' })
-  })
-  await expect(page.getByTestId('permission-toasts')).toBeVisible()
-
-  // Refocusing the app clears it — the inbox already shows the request.
-  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
-  await expect(page.getByTestId('permission-toasts')).toHaveCount(0)
-})
-
-test('a permission request surfaces an approval toast that decides without opening the inbox', async ({
-  page,
-}) => {
-  // Toasts only appear while the window is unfocused.
-  await page.evaluate(() => window.dispatchEvent(new Event('blur')))
-  await page.evaluate(() => {
-    window.__mock.raisePermission({
-      projectId: 'p-alpha',
-      title: 'Run a command: npm test',
-      explanation: 'Claude wants to run this shell command in the project folder.',
-      risk: 'medium',
-    })
-  })
-
-  const toast = page.getByTestId('permission-toasts')
-  await expect(toast).toContainText('Run a command: npm test')
-  await expect(toast.getByTestId('toast-risk').first()).toHaveText('Medium')
-
-  await toast.getByTestId('toast-view').first().click() // dismiss path is separate; approve below
-
-  // Re-raise and approve straight from the toast.
-  await page.evaluate(() => {
-    window.__mock.raisePermission({ projectId: 'p-alpha', title: 'Run: npm build', risk: 'medium' })
-  })
-  await page
-    .getByTestId('permission-toasts')
-    .locator('[data-testid^="toast-approve-"]')
-    .first()
-    .click()
-
-  const decisions = await page.evaluate(() => window.__mock.state().decisions)
-  expect(decisions).toContainEqual({ requestId: expect.any(String), decision: 'approve' })
-})
-
-test('a high-risk toast requires an explicit confirm before approving', async ({ page }) => {
-  await page.evaluate(() => window.dispatchEvent(new Event('blur')))
-  await page.evaluate(() => {
-    window.__mock.raisePermission({ projectId: 'p-alpha', title: 'Run: rm -rf dist', risk: 'high' })
-  })
-
-  const toasts = page.getByTestId('permission-toasts')
-  await toasts.locator('[data-testid^="toast-approve-"]').first().click()
-  // First click only arms the confirm; no decision yet.
-  expect(await page.evaluate(() => window.__mock.state().decisions)).toHaveLength(0)
-  await toasts.locator('[data-testid^="toast-confirm-"]').first().click()
-  expect(await page.evaluate(() => window.__mock.state().decisions)).toEqual([
-    { requestId: expect.any(String), decision: 'approve' },
-  ])
 })

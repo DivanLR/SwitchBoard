@@ -5,6 +5,7 @@ import { execFile, execFileSync } from 'node:child_process'
 import type {
   EventKind,
   EventPayloadMap,
+  ProjectCommand,
   QueuedTask,
   Session,
   SessionEvent,
@@ -39,7 +40,7 @@ export interface SessionManagerCallbacks {
   /** Fired when a project's planned task queue changes (add/remove/auto-run). */
   onQueueChanged: (projectId: string) => void
   /** Fired when a session reports its available slash commands / skills (init message). */
-  onProjectCommands: (projectId: string, commands: string[]) => void
+  onProjectCommands: (projectId: string, commands: ProjectCommand[]) => void
   gate: PermissionGate
 }
 
@@ -160,6 +161,9 @@ export class SessionManager {
       endReason: null,
     }
     this.repos.sessions.insert(row)
+    // In-memory only (never bound into the INSERT): surfaces the "⚠ Bypass"
+    // header pill through liveSessionRow snapshots for the session's lifetime.
+    row.bypassPermissions = bypassPermissions
 
     const entry: HostedEntry = {
       row,
@@ -177,6 +181,8 @@ export class SessionManager {
     entry.session = new HostedSession({
       sessionId: row.id,
       projectPath: project.path,
+      // ponytail: refs added mid-session apply from the next session start.
+      refDirs: project.refs.map((r) => r.path),
       resumeSdkSessionId,
       systemPromptAppend:
         terseSystemPromptAppend({
@@ -445,19 +451,6 @@ export class SessionManager {
   }
 
   private pushStatus(entry: HostedEntry): void {
-    this.callbacks.onSessionStatus({
-      sessionId: entry.row.id,
-      projectId: entry.row.projectId,
-      status: entry.row.status,
-      statusDetail: entry.row.statusDetail,
-      branch: entry.row.branch,
-      diffAdds: entry.row.diffAdds,
-      diffDels: entry.row.diffDels,
-      usageUtilization: entry.row.usageUtilization,
-      usageResetsAt: entry.row.usageResetsAt,
-      usageLimitType: entry.row.usageLimitType,
-      endedAt: entry.row.endedAt,
-      endReason: entry.row.endReason,
-    })
+    this.callbacks.onSessionStatus({ ...entry.row })
   }
 }

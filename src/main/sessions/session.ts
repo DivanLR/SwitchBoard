@@ -9,7 +9,7 @@ import {
   type SDKMessage,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
-import type { SessionStatus } from '@shared/domain'
+import type { ProjectCommand, SessionStatus } from '@shared/domain'
 import { MessageMapper, type EventSink } from './message-mapper'
 
 /** Streaming input queue the SDK consumes; `end()` closes the session gracefully. */
@@ -62,6 +62,8 @@ export interface HostedSessionOptions {
   /** Switchboard session id (not the SDK session id). */
   sessionId: string
   projectPath: string
+  /** Referenced folders (REFS chips) granted as additional directories. */
+  refDirs?: string[]
   /** SDK session id of a prior conversation to resume (R2). */
   resumeSdkSessionId?: string
   /** Terse-mode instruction appended to the Claude Code system prompt, if enabled. */
@@ -79,7 +81,7 @@ export interface HostedSessionOptions {
   onStatusChange: (status: SessionStatus, detail?: string | null) => void
   onSdkSessionId: (sdkSessionId: string) => void
   /** Available slash commands / skills reported in the session init message. */
-  onCommands?: (commands: string[]) => void
+  onCommands?: (commands: ProjectCommand[]) => void
   /** Subscription rate-limit usage from rate_limit_event (session usage meter). */
   onUsage?: (usage: { utilization: number | null; resetsAt: number | null; limitType: string | null }) => void
   /** Fired after every completed turn (branch observation, counters). */
@@ -123,8 +125,13 @@ export class HostedSession {
         includePartialMessages: true,
         resume: this.options.resumeSdkSessionId,
         pathToClaudeCodeExecutable: this.options.claudeExecutablePath,
-        // Grant read/write within the project's own folder without prompting.
-        additionalDirectories: [this.options.projectPath],
+        // Load user (~/.claude), project, and local settings — without this the
+        // SDK loads NO filesystem settings, so global skills and commands
+        // never appear in the CLI's command list.
+        settingSources: ['user', 'project', 'local'],
+        // Grant read/write within the project's own folder without prompting,
+        // plus read access to any referenced folders (REFS chips).
+        additionalDirectories: [this.options.projectPath, ...(this.options.refDirs ?? [])],
         // Work model for normal turns; 'default'/undefined uses the account default.
         model:
           this.options.workModel && this.options.workModel !== 'default'
@@ -155,8 +162,12 @@ export class HostedSession {
     void this.q
       .supportedCommands()
       .then((commands) => {
-        const names = [...new Set(commands.map((c) => c.name))].sort()
-        if (names.length > 0) this.options.onCommands?.(names)
+        this.emitCommands(
+          commands.map((c) => ({
+            name: c.name,
+            description: (c as { description?: string }).description || undefined,
+          })),
+        )
       })
       .catch(() => {
         // Older CLI without the control request — the init message still covers it.
@@ -228,6 +239,24 @@ export class HostedSession {
     })
   }
 
+  /** Descriptions seen so far, by command name — an init message only carries
+   * names, and must not wipe the hints supportedCommands() already gave us. */
+  private commandDescriptions = new Map<string, string>()
+
+  private emitCommands(commands: ProjectCommand[]): void {
+    const byName = new Map<string, ProjectCommand>()
+    for (const c of commands) {
+      if (!c.name || byName.has(c.name)) continue
+      if (c.description) this.commandDescriptions.set(c.name, c.description)
+      byName.set(c.name, {
+        name: c.name,
+        description: c.description ?? this.commandDescriptions.get(c.name),
+      })
+    }
+    const list = [...byName.values()].sort((a, b) => a.name.localeCompare(b.name))
+    if (list.length > 0) this.options.onCommands?.(list)
+  }
+
   private captureInitCommands(message: SDKMessage): void {
     if (!this.options.onCommands) return
     const msg = message as {
@@ -235,18 +264,18 @@ export class HostedSession {
       subtype?: string
       slash_commands?: string[]
       skills?: string[]
-      commands?: { name: string }[]
+      commands?: { name: string; description?: string }[]
     }
     if (msg.type !== 'system') return
     // Mid-session change (skills discovered while working): REPLACE semantics.
     if (msg.subtype === 'commands_changed' && msg.commands) {
-      const names = [...new Set(msg.commands.map((c) => c.name))].sort()
-      if (names.length > 0) this.options.onCommands(names)
+      this.emitCommands(msg.commands)
       return
     }
     if (msg.subtype !== 'init') return
-    const commands = [...new Set([...(msg.slash_commands ?? []), ...(msg.skills ?? [])])].sort()
-    if (commands.length > 0) this.options.onCommands(commands)
+    this.emitCommands(
+      [...(msg.slash_commands ?? []), ...(msg.skills ?? [])].map((name) => ({ name })),
+    )
   }
 
   /** Composer input (FR-019). Returns queued=true when the send awaits turn completion. */
