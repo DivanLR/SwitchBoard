@@ -248,11 +248,6 @@ button {
   font-family: var(--sans);
 }
 
-/* Opt back into the monospace face for code/terminal text. */
-.code {
-  font-family: var(--mono);
-}
-
 .dim {
   color: var(--text-mid);
 }

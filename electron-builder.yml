@@ -19,15 +19,17 @@ files:
   - '!tests/**'
   - '!scripts/**'
   - '!docs/**'
+  # Do NOT bundle the Agent SDK's standalone Claude Code CLI (~245 MB per
+  # platform). The app drives the user's own installed `claude` (which every
+  # Switchboard user has); resolveClaudeExecutable prefers it, and startSession
+  # errors clearly if it is missing. This roughly halves the packaged size.
+  - '!**/node_modules/@anthropic-ai/claude-agent-sdk-*/**'
 
 # better-sqlite3 is a native module: its .node binary cannot be loaded from
 # inside the asar archive, so unpack it. The binary must already be built for
 # the Electron ABI (the package script runs rebuild:electron first).
 asarUnpack:
   - '**/node_modules/better-sqlite3/**'
-  # The Agent SDK spawns a bundled standalone executable; it and its sibling
-  # files must be real on-disk files, not inside the asar archive.
-  - '**/node_modules/@anthropic-ai/**'
 
 # Do not let electron-builder rebuild native modules from source; use the
 # prebuilt Electron-ABI binary that rebuild:electron placed in the tree.

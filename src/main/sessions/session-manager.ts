@@ -137,6 +137,17 @@ export class SessionManager {
     if (active) {
       throw new SessionManagerError('ALREADY_ACTIVE', 'The project already has an active session')
     }
+    // The app drives the user's own Claude Code CLI and no longer bundles a copy
+    // (that binary is ~245 MB). Every Switchboard user has Claude Code, so this
+    // is normally present; if not, fail with a clear message rather than letting
+    // the SDK spawn the wrong runtime and crash under Electron.
+    const claudeExecutablePath = resolveClaudeExecutable()
+    if (!claudeExecutablePath) {
+      throw new SessionManagerError(
+        'NOT_FOUND',
+        'Claude Code was not found. Install it from https://claude.com/claude-code, then start a session.',
+      )
+    }
 
     let resumeSdkSessionId: string | undefined
     if (resume) {
@@ -189,7 +200,7 @@ export class SessionManager {
           terseMode: settings.terseMode,
           terseLevel: settings.terseLevel,
         }) ?? undefined,
-      claudeExecutablePath: resolveClaudeExecutable() ?? undefined,
+      claudeExecutablePath,
       workModel,
       planModel: settings.planModel,
       bypassPermissions,
