@@ -31,7 +31,6 @@ interface PendingEntry {
 }
 
 interface PendingQuestion {
-  sessionId: string
   eventId: string
   questionIndex: number
   answered: boolean
@@ -424,7 +423,7 @@ export class PermissionBroker {
     if (isDangerousCommand(request.detail)) {
       throw new BrokerError('RULE_NOT_ALLOWED', 'Destructive commands can never be auto-approved')
     }
-    const matcher = deriveMatcher('Bash', { command: request.detail })
+    const matcher = deriveMatcher(request.detail)
     const base = matcher.value ?? ''
     if (base.length === 0) {
       throw new BrokerError('RULE_NOT_ALLOWED', 'The history entry has no command to allow')
@@ -537,7 +536,6 @@ export class PermissionBroker {
           answered: false,
         })
         group.questions.push({
-          sessionId: context.sessionId,
           eventId: event.id,
           questionIndex: index,
           answered: false,

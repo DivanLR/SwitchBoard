@@ -207,9 +207,6 @@ const markerChipLabel: Record<string, string> = {
   color: var(--text-body);
 }
 
-.blink {
-  animation: sbBlink 1.1s steps(1) infinite;
-}
 
 .summary-card {
   background: var(--bg-card);
@@ -232,6 +229,7 @@ const markerChipLabel: Record<string, string> = {
 }
 
 .tool {
+  font-family: var(--mono);
   font-size: 11.5px;
   line-height: 1.7;
   color: var(--text-noise);
@@ -295,6 +293,7 @@ const markerChipLabel: Record<string, string> = {
 }
 
 .raw {
+  font-family: var(--mono);
   font-size: 11.5px;
   line-height: 1.7;
   color: var(--text-noise);

@@ -44,27 +44,17 @@ function pathOf(input: Record<string, unknown>): string | null {
 }
 
 /**
- * Derives the matcher offered to the developer before saving (data-model.md):
- * command prefix for shell commands, a directory glob for file tools, and an
- * exact-input match otherwise.
+ * Derives the always-allow matcher for a decided Bash command (the only tool the
+ * broker ever derives a rule from — see permission-broker `alwaysAllow`): a
+ * flag-aware two-token prefix, "git commit -m x" → "git commit", but "rm -rf
+ * dist" → "rm" (a flag as word 2 never widens a rule). Folder-access rules are
+ * seeded with their `path_glob` matcher directly, so no path derivation is
+ * needed here.
  */
-export function deriveMatcher(toolName: string, input: Record<string, unknown>): PermissionRuleMatcher {
-  if (toolName === 'Bash' && typeof input.command === 'string') {
-    // Flag-aware two-token base (design reference): "git commit -m x" → "git
-    // commit", but "rm -rf dist" → "rm" — a flag as word 2 never widens a rule.
-    const words = input.command.trim().split(/\s+/)
-    const value = words[1] && !words[1].startsWith('-') ? `${words[0]} ${words[1]}` : words[0]
-    return { kind: 'command_prefix', value }
-  }
-  const path = pathOf(input)
-  if (path) {
-    const dir = path.replace(/[/\\][^/\\]*$/, '')
-    return { kind: 'path_glob', value: `${dir}${dir.includes('\\') ? '\\' : '/'}**` }
-  }
-  if (Object.keys(input).length === 0) {
-    return { kind: 'tool_only' }
-  }
-  return { kind: 'exact_input', value: JSON.stringify(input) }
+export function deriveMatcher(command: string): PermissionRuleMatcher {
+  const words = command.trim().split(/\s+/)
+  const value = words[1] && !words[1].startsWith('-') ? `${words[0]} ${words[1]}` : words[0]
+  return { kind: 'command_prefix', value }
 }
 
 export function matchesRule(

@@ -13,10 +13,7 @@ export function displayTextOf(event: SessionEvent): string {
       return [p.toolName, p.inputPreview, p.resultPreview ?? ''].join(' ')
     }
     case 'assistant_text':
-    case 'raw_output':
-    case 'error':
-    case 'summary':
-    case 'prompt': {
+    case 'raw_output': {
       const p = event.payload as { text?: string }
       return p.text ?? ''
     }

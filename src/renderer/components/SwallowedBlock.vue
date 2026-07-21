@@ -63,6 +63,7 @@ function textOf(event: SessionEvent): string {
 }
 
 .line {
+  font-family: var(--mono);
   font-size: 11.5px;
   line-height: 1.7;
   color: var(--text-noise);

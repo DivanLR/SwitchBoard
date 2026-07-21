@@ -10,6 +10,7 @@ import { useProjectsStore } from '@renderer/stores/projects'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useInboxStore } from '@renderer/stores/inbox'
 import { useSettingsStore } from '@renderer/stores/settings'
+import { accentFor } from '@renderer/project-accent'
 
 const projects = useProjectsStore()
 const activeSession = useActiveSessionStore()
@@ -64,15 +65,8 @@ function initials(name: string): string {
   return (words.length > 1 ? `${words[0][0]}${words[1][0]}` : name.slice(0, 2)).toLowerCase()
 }
 
-// Stable per-project accent stripe on the row's right edge — identifies the
-// project at a glance, especially in the collapsed rail.
-const ACCENTS = ['#3a6291', '#9a6f2a', '#6f4d8f', '#1e7a5c', '#8f3b2c', '#457a7a']
-function accentFor(id: string): string {
-  let hash = 0
-  for (const ch of id) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
-  return ACCENTS[hash % ACCENTS.length]
-}
-
+// Stable per-project accent stripe on the row's right edge (shared with the
+// session header dot) — identifies the project at a glance in the collapsed rail.
 const now = ref(Date.now())
 let timer: ReturnType<typeof setInterval> | undefined
 onMounted(() => {
@@ -158,9 +152,14 @@ const usageReset = computed(() => {
 })
 
 // --- MCP servers reported by the selected project's live session (design) ---
+// A session typically exposes many MCP servers; when the developer has
+// designated a database MCP (Settings → General), show only that one so the
+// section stays a single, purposeful row. Otherwise list them all.
 const mcpServers = computed(() => {
   const s = projects.selected?.session
-  return s && !s.endedAt ? (s.mcpServers ?? []) : []
+  const all = s && !s.endedAt ? (s.mcpServers ?? []) : []
+  const db = settings.settings?.databaseMcpServer
+  return db ? all.filter((m) => m.name === db) : all
 })
 function mcpDot(status: string): string {
   const st = status.toLowerCase()
@@ -220,10 +219,12 @@ function ctxMove(delta: number): void {
   ctx.value = null
 }
 
-// --- Drag & drop (design): drag a row to reorder; drop ONTO a row's middle to
-// add the dragged project as a reference of the target. ---
+// --- Drag & drop (design): drag a row to REORDER only. Referencing another
+// project is done by dragging it into the session pane (the chat), never by
+// dropping one project onto another. OS files dropped on a row insert their
+// @path into that project's composer. ---
 const dragId = ref<string | null>(null)
-const rowDrop = ref<{ id: string; zone: 'before' | 'after' | 'ref' } | null>(null)
+const rowDrop = ref<{ id: string; zone: 'before' | 'after' | 'file' } | null>(null)
 
 function onDragStart(item: (typeof projects.items)[number], event: DragEvent): void {
   dragId.value = item.id
@@ -232,14 +233,13 @@ function onDragStart(item: (typeof projects.items)[number], event: DragEvent): v
   if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
 }
 
-// Zones from cursor height in the row: top 32% before, bottom 32% after,
-// middle 36% add-as-reference (design reference). OS-file drags always target
-// the whole row (drop → @path into that project's composer).
+// Project drags reorder: top half inserts before, bottom half after — no
+// drop-onto-reference zone. OS-file drags highlight the whole row.
 function onRowDragOver(item: (typeof projects.items)[number], event: DragEvent): void {
   const types = event.dataTransfer?.types ?? []
   if (types.includes('Files')) {
     event.preventDefault()
-    rowDrop.value = { id: item.id, zone: 'ref' }
+    rowDrop.value = { id: item.id, zone: 'file' }
     return
   }
   if (!types.includes('text/x-sb-project')) return
@@ -248,7 +248,7 @@ function onRowDragOver(item: (typeof projects.items)[number], event: DragEvent):
   const el = event.currentTarget as HTMLElement
   const rect = el.getBoundingClientRect()
   const y = (event.clientY - rect.top) / Math.max(1, rect.height)
-  rowDrop.value = { id: item.id, zone: y < 0.32 ? 'before' : y > 0.68 ? 'after' : 'ref' }
+  rowDrop.value = { id: item.id, zone: y < 0.5 ? 'before' : 'after' }
 }
 
 async function onRowDrop(item: (typeof projects.items)[number], event: DragEvent): Promise<void> {
@@ -274,10 +274,6 @@ async function onRowDrop(item: (typeof projects.items)[number], event: DragEvent
   if (!drop || !dragged || dragged === item.id) return
   const fromIndex = projects.items.findIndex((p) => p.id === dragged)
   if (fromIndex === -1) return
-  if (drop.zone === 'ref') {
-    await projects.addRef(item.id, projects.items[fromIndex].path).catch(() => {})
-    return
-  }
   const targetIndex = projects.items.findIndex((p) => p.id === item.id)
   let toIndex = drop.zone === 'before' ? targetIndex : targetIndex + 1
   if (fromIndex < toIndex) toIndex -= 1
@@ -375,7 +371,7 @@ async function confirmRemoveNow(): Promise<void> {
           active: item.id === projects.selectedProjectId,
           'drop-before': rowDrop?.id === item.id && rowDrop.zone === 'before',
           'drop-after': rowDrop?.id === item.id && rowDrop.zone === 'after',
-          'drop-ref': rowDrop?.id === item.id && rowDrop.zone === 'ref',
+          'drop-file': rowDrop?.id === item.id && rowDrop.zone === 'file',
         }"
         :data-testid="`sidebar-project-${item.name}`"
         :draggable="renamingId !== item.id"
@@ -599,6 +595,9 @@ async function confirmRemoveNow(): Promise<void> {
   width: 252px;
   min-width: 252px;
   background: var(--bg-panel);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -661,10 +660,12 @@ async function confirmRemoveNow(): Promise<void> {
   box-shadow: inset 0 -2px 0 var(--green);
 }
 
-.project.drop-ref {
+/* Whole-row highlight while dragging an OS file onto a project (→ @path into
+   its composer). Project drags only ever reorder, never reference. */
+.project.drop-file {
   outline: 1px dashed var(--green);
   outline-offset: -1px;
-  background: rgba(30, 122, 92, 0.06);
+  background: rgba(52, 211, 153, 0.06);
 }
 
 .sidebar.collapsed .row {
@@ -995,7 +996,7 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .mcp-item.open {
-  border-color: #457a7a;
+  border-color: #2dd4bf;
   background: var(--bg-active);
 }
 
@@ -1005,7 +1006,7 @@ async function confirmRemoveNow(): Promise<void> {
 
 .mcp-ico {
   font-size: 13px;
-  color: #457a7a;
+  color: #2dd4bf;
   flex-shrink: 0;
 }
 
@@ -1045,7 +1046,7 @@ async function confirmRemoveNow(): Promise<void> {
   top: 7px;
   bottom: 7px;
   width: 3px;
-  background: #457a7a;
+  background: #2dd4bf;
 }
 
 .ctx-overlay {
@@ -1159,27 +1160,5 @@ async function confirmRemoveNow(): Promise<void> {
 
 .stat .val.amber {
   color: var(--amber);
-}
-
-.footer {
-  padding: 0 12px 10px;
-  font-size: 10.5px;
-  color: var(--text-faint);
-  display: flex;
-  gap: 6px;
-}
-
-.foot-link {
-  color: var(--text-faint);
-  font-size: 10.5px;
-  font-family: var(--mono);
-}
-
-.foot-link:hover {
-  color: var(--text-body);
-}
-
-.sep {
-  color: var(--text-ghost);
 }
 </style>

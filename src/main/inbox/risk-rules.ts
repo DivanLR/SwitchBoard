@@ -42,17 +42,10 @@ function inputValue(input: Record<string, unknown>, field: string): string {
 
 export function matchesInput(matcher: RiskInputMatcher, input: Record<string, unknown>): boolean {
   const value = inputValue(input, matcher.field)
-  switch (matcher.match) {
-    case 'prefix':
-      return value.startsWith(matcher.pattern)
-    case 'glob':
-      return globToRegExp(matcher.pattern).test(value)
-    case 'regex':
-      try {
-        return new RegExp(matcher.pattern).test(value)
-      } catch {
-        return false
-      }
+  try {
+    return new RegExp(matcher.pattern).test(value)
+  } catch {
+    return false
   }
 }
 

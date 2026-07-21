@@ -4,7 +4,6 @@
 // `window.__mock` test-driver API for scripting sessions and permissions.
 // The function must stay self-contained: it is serialised into the browser
 // context, so it may not reference imports at runtime.
-import type { SessionEvent } from '../../src/shared/domain'
 
 export interface MockSessionSeed {
   id: string
@@ -813,7 +812,13 @@ export function twoProjectScenario(): MockScenario {
           id: 's-alpha',
           status: 'working',
           branch: 'main',
-          mcpServers: [{ name: 'postgres — production', status: 'connected' }],
+          mcpServers: [
+            { name: 'postgres — production', status: 'connected' },
+            { name: 'github', status: 'connected' },
+            { name: 'filesystem', status: 'connected' },
+            { name: 'playwright', status: 'connected' },
+            { name: 'context7', status: 'connected' },
+          ],
         },
       },
       {
@@ -826,6 +831,3 @@ export function twoProjectScenario(): MockScenario {
     suggestions: [{ path: 'C:\\work\\gamma', name: 'gamma' }],
   }
 }
-
-// Type-only usage keeps the SessionEvent import from being dead code in strict builds.
-export type MockEvent = SessionEvent

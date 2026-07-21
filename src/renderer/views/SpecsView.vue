@@ -583,8 +583,8 @@ const partTabs: { id: Part; label: string }[] = [
 
 .sc-status.complete {
   color: var(--green);
-  border-color: rgba(30, 122, 92, 0.35);
-  background: rgba(30, 122, 92, 0.06);
+  border-color: rgba(52, 211, 153, 0.35);
+  background: rgba(52, 211, 153, 0.06);
 }
 
 .sc-path {
@@ -850,8 +850,8 @@ const partTabs: { id: Part; label: string }[] = [
   align-items: center;
   gap: 12px;
   padding: 13px 15px;
-  background: rgba(30, 122, 92, 0.05);
-  border: 1px solid rgba(30, 122, 92, 0.35);
+  background: rgba(52, 211, 153, 0.05);
+  border: 1px solid rgba(52, 211, 153, 0.35);
   flex-wrap: wrap;
 }
 
@@ -971,7 +971,7 @@ const partTabs: { id: Part; label: string }[] = [
 .phase-start {
   font-size: 10.5px;
   color: var(--green);
-  border: 1px solid rgba(30, 122, 92, 0.35);
+  border: 1px solid rgba(52, 211, 153, 0.35);
   padding: 2px 9px;
   cursor: pointer;
   user-select: none;
@@ -979,7 +979,7 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .phase-start:hover {
-  background: rgba(30, 122, 92, 0.08);
+  background: rgba(52, 211, 153, 0.08);
 }
 
 .phase-tasks {
@@ -1071,8 +1071,8 @@ const partTabs: { id: Part; label: string }[] = [
   gap: 7px;
   font-size: 10.5px;
   color: var(--green);
-  background: rgba(30, 122, 92, 0.07);
-  border: 1px solid rgba(30, 122, 92, 0.35);
+  background: rgba(52, 211, 153, 0.07);
+  border: 1px solid rgba(52, 211, 153, 0.35);
   padding: 3px 9px;
   white-space: nowrap;
 }

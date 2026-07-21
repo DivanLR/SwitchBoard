@@ -12,6 +12,22 @@ test.beforeEach(async ({ page }) => {
 
 const mcpRow = '[data-testid^="mcp-server-"]'
 
+test('designating a database MCP in settings collapses the sidebar to only that server', async ({
+  page,
+}) => {
+  // The alpha session reports several MCP servers — all show before designation.
+  await expect(page.locator(mcpRow)).toHaveCount(5)
+
+  await page.getByTestId('open-settings').click()
+  await page.getByTestId('settings-tab-gen').click()
+  await page.getByTestId('db-mcp-postgres — production').click()
+  await page.getByTestId('settings-done').click()
+
+  // Now only the designated database MCP remains in the sidebar section.
+  await expect(page.locator(mcpRow)).toHaveCount(1)
+  await expect(page.getByTestId('mcp-server-postgres — production')).toBeVisible()
+})
+
 test('the sidebar MCP row opens the Database MCP view and scans to db-schema.md', async ({
   page,
 }) => {

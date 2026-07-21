@@ -149,8 +149,8 @@ watch(() => selectedProject.value?.id, () => active.openMcp(null))
   align-items: center;
   gap: 10px;
   padding: 8px 16px;
-  background: rgba(30, 122, 92, 0.08);
-  border-bottom: 1px solid rgba(30, 122, 92, 0.3);
+  background: rgba(52, 211, 153, 0.08);
+  border-bottom: 1px solid rgba(52, 211, 153, 0.3);
   font-size: 12px;
   color: var(--text-body);
 }
@@ -172,7 +172,7 @@ watch(() => selectedProject.value?.id, () => active.openMcp(null))
   color: var(--green-ink);
   font-weight: 600;
   font-size: 11px;
-  font-family: var(--mono);
+  font-family: var(--sans);
   padding: 4px 12px;
   border-radius: 10px;
   cursor: pointer;

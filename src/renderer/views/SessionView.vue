@@ -14,6 +14,7 @@ import { useQueueStore } from '@renderer/stores/queue'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { useCommandSuggestions } from '@renderer/composables/useCommandSuggestions'
 import { useSpecsStore } from '@renderer/stores/specs'
+import { accentFor } from '@renderer/project-accent'
 import StreamEvent from '@renderer/components/StreamEvent.vue'
 import SwallowedBlock from '@renderer/components/SwallowedBlock.vue'
 import QuestionEvent from '@renderer/components/QuestionEvent.vue'
@@ -32,12 +33,7 @@ const specs = useSpecsStore()
 const queuedTasks = computed(() => queue.forProject(props.project.id))
 
 // Per-project accent square before the name (design), matching the sidebar row.
-const PROJECT_ACCENTS = ['#3a6291', '#9a6f2a', '#6f4d8f', '#1e7a5c', '#8f3b2c', '#457a7a']
-const headerColor = computed(() => {
-  let hash = 0
-  for (const ch of props.project.id) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
-  return PROJECT_ACCENTS[hash % PROJECT_ACCENTS.length]
-})
+const headerColor = computed(() => accentFor(props.project.id))
 
 // Output settings (Terminals tab): font size, tool rows, timestamps, autoscroll.
 const outputPrefs = computed(() => ({
@@ -436,10 +432,6 @@ const addingRef = ref(false)
 const refInput = ref('')
 const refError = ref<string | null>(null)
 
-function focusRefInput(el: unknown): void {
-  if (el instanceof HTMLInputElement && document.activeElement !== el) el.focus()
-}
-
 async function commitRef(): Promise<void> {
   const target = refInput.value.trim()
   addingRef.value = false
@@ -775,10 +767,10 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
         </span>
         <input
           v-if="addingRef"
-          :ref="focusRefInput"
           v-model="refInput"
           class="ref-input"
           data-testid="ref-input"
+          autofocus
           placeholder="~/path/to/folder or a project name — Enter to add"
           @keydown.enter="commitRef"
           @keydown.esc="cancelRef"
@@ -1081,7 +1073,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   outline: none;
   color: var(--text-strong);
   padding: 3px 9px;
-  font-family: var(--mono);
+  font-family: var(--sans);
   pointer-events: auto;
 }
 
@@ -1101,7 +1093,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   inset: 6px;
   z-index: 60;
   border: 1px dashed var(--green);
-  background: rgba(30, 122, 92, 0.06);
+  background: rgba(52, 211, 153, 0.06);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1131,16 +1123,6 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   font-size: 11.5px;
   color: var(--text-meta);
   flex-wrap: wrap;
-}
-
-.stream {
-  flex: 1;
-  overflow-y: auto;
-  padding: 18px 22px;
-}
-
-.stream-inner {
-  max-width: 840px;
 }
 
 .stream-empty {
@@ -1176,12 +1158,6 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 
 .load-earlier:hover {
   color: var(--text-mid);
-}
-
-.live {
-  font-size: 12.5px;
-  color: var(--text-meta);
-  margin-top: 4px;
 }
 
 /* Agent chat banner (design: ← project │ ● name · subagent). */
@@ -1309,10 +1285,6 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   color: var(--amber);
 }
 
-.blink {
-  animation: sbBlink 1.1s steps(1) infinite;
-}
-
 .raw-view {
   flex: 1;
   overflow-y: auto;
@@ -1321,6 +1293,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 }
 
 .raw-line {
+  font-family: var(--mono);
   font-size: 11.8px;
   line-height: 1.75;
   color: #969ca8;
@@ -1328,11 +1301,9 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   word-break: break-word;
 }
 
+/* Positioning context for the floating REFS row; base composer chrome is global. */
 .composer {
   position: relative;
-  border-top: 1px solid var(--border);
-  background: var(--bg-panel);
-  padding: 11px 18px;
 }
 
 .draft-note {
@@ -1413,12 +1384,6 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   cursor: default;
 }
 
-.composer-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
 .caret {
   flex-shrink: 0;
   color: var(--green);
@@ -1432,21 +1397,10 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   display: flex;
 }
 
+/* Sits above the ghost-text overlay; base composer-input chrome is global. */
 .composer-input {
-  flex: 1;
-  min-width: 60px;
   position: relative;
   z-index: 1;
-  background: transparent;
-  border: none;
-  outline: none;
-  color: var(--text);
-  font-size: 13px;
-  padding: 0;
-}
-
-.composer-input:focus {
-  outline: none;
 }
 
 /* Inline ghost text: mirrors the input box exactly, typed part transparent,
@@ -1523,31 +1477,4 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   text-overflow: ellipsis;
 }
 
-.to {
-  flex-shrink: 0;
-  white-space: nowrap;
-  font-size: 10.5px;
-  color: var(--text-faint);
-}
-
-.send-btn {
-  flex-shrink: 0;
-  white-space: nowrap;
-  background: var(--green);
-  color: var(--green-ink);
-  font-weight: 600;
-  font-size: 11.5px;
-  padding: 7px 16px;
-  border-radius: 10px;
-  user-select: none;
-}
-
-.send-btn:hover:not(:disabled) {
-  background: var(--green-hover);
-}
-
-.send-btn:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
 </style>

@@ -106,7 +106,7 @@ async function startSession(): Promise<void> {
           </div>
         </div>
         <button
-          class="toggle"
+          class="switch danger"
           :class="{ on: bypass }"
           data-testid="bypass-toggle"
           role="switch"
@@ -246,38 +246,6 @@ async function startSession(): Promise<void> {
   color: var(--red);
   border: 1px solid rgba(143, 59, 44, 0.35);
   background: rgba(143, 59, 44, 0.07);
-}
-
-.toggle {
-  width: 38px;
-  min-width: 38px;
-  height: 21px;
-  border-radius: 99px;
-  background: var(--border-strong);
-  position: relative;
-  cursor: pointer;
-  border: none;
-}
-
-.toggle.on {
-  background: var(--red);
-}
-
-.knob {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 17px;
-  height: 17px;
-  border-radius: 99px;
-  background: var(--text-faint);
-  transition: all 0.15s ease;
-}
-
-.toggle.on .knob {
-  left: auto;
-  right: 2px;
-  background: var(--bg);
 }
 
 .suggestion {

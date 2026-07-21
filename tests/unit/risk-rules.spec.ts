@@ -23,7 +23,7 @@ describe('classifyRisk', () => {
       rule({
         position: 0,
         toolMatcher: 'Bash',
-        inputMatcher: { field: 'command', match: 'prefix', pattern: 'rm ' },
+        inputMatcher: { field: 'command', match: 'regex', pattern: '^rm ' },
         risk: 'high',
       }),
     ]
@@ -42,7 +42,7 @@ describe('classifyRisk', () => {
     expect(classifyRisk(rules, 'Anything', {}).risk).toBe('low')
   })
 
-  it('supports regex, prefix and glob input matchers', () => {
+  it('matches regex input matchers', () => {
     const regexRule = rule({
       toolMatcher: 'Bash',
       inputMatcher: { field: 'command', match: 'regex', pattern: '^git (status|log)' },
@@ -51,13 +51,13 @@ describe('classifyRisk', () => {
     expect(classifyRisk([regexRule], 'Bash', { command: 'git status' }).risk).toBe('low')
     expect(classifyRisk([regexRule], 'Bash', { command: 'git push' }).risk).toBe('high')
 
-    const globRule = rule({
+    const pathRule = rule({
       toolMatcher: 'Write',
-      inputMatcher: { field: 'file_path', match: 'glob', pattern: 'C:/project/**' },
+      inputMatcher: { field: 'file_path', match: 'regex', pattern: '^C:/project/' },
       risk: 'medium',
     })
-    expect(classifyRisk([globRule], 'Write', { file_path: 'C:/project/src/a.ts' }).risk).toBe('medium')
-    expect(classifyRisk([globRule], 'Write', { file_path: 'D:/other/a.ts' }).risk).toBe('high')
+    expect(classifyRisk([pathRule], 'Write', { file_path: 'C:/project/src/a.ts' }).risk).toBe('medium')
+    expect(classifyRisk([pathRule], 'Write', { file_path: 'D:/other/a.ts' }).risk).toBe('high')
   })
 
   it('treats invalid regular expressions as non-matching', () => {

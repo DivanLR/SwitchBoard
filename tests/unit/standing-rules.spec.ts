@@ -17,33 +17,16 @@ function makeRule(partial: Partial<PermissionRule>): PermissionRule {
 }
 
 describe('deriveMatcher', () => {
-  it('derives a two-word command prefix for Bash', () => {
-    expect(deriveMatcher('Bash', { command: 'git status --short' })).toEqual({
+  it('derives a two-word command prefix for a Bash command', () => {
+    expect(deriveMatcher('git status --short')).toEqual({
       kind: 'command_prefix',
       value: 'git status',
     })
   })
 
   it('drops a flag as word two — a flag never widens the base command', () => {
-    expect(deriveMatcher('Bash', { command: 'rm -rf dist' })).toEqual({
-      kind: 'command_prefix',
-      value: 'rm',
-    })
-    expect(deriveMatcher('Bash', { command: 'ls' })).toEqual({
-      kind: 'command_prefix',
-      value: 'ls',
-    })
-  })
-
-  it('derives a directory glob for file tools', () => {
-    const matcher = deriveMatcher('Write', { file_path: 'C:\\proj\\src\\a.ts' })
-    expect(matcher.kind).toBe('path_glob')
-    expect(matcher.value).toContain('C:\\proj\\src')
-  })
-
-  it('falls back to tool_only for empty input and exact_input otherwise', () => {
-    expect(deriveMatcher('SomeTool', {}).kind).toBe('tool_only')
-    expect(deriveMatcher('SomeTool', { q: 1 }).kind).toBe('exact_input')
+    expect(deriveMatcher('rm -rf dist')).toEqual({ kind: 'command_prefix', value: 'rm' })
+    expect(deriveMatcher('ls')).toEqual({ kind: 'command_prefix', value: 'ls' })
   })
 })
 

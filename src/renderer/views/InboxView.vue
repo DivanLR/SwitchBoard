@@ -16,10 +16,10 @@ const confirmingId = ref<string | null>(null)
 const expandedHistory = ref(new Set<string>())
 
 function toggleHistory(id: string): void {
-  const next = new Set(expandedHistory.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
-  expandedHistory.value = next
+  // Vue 3 tracks mutations on a reactive Set, so toggle in place — no clone.
+  const set = expandedHistory.value
+  if (set.has(id)) set.delete(id)
+  else set.add(id)
 }
 
 const now = ref(Date.now())
@@ -288,35 +288,39 @@ const historyItems = computed(() => inbox.history)
       </div>
     </div>
 
-    <!-- History right-click context menu -->
-    <div
-      v-if="histCtx"
-      class="hctx-overlay"
-      @click="histCtx = null"
-      @contextmenu.prevent="histCtx = null"
-    >
+    <!-- History right-click context menu. Teleported to <body> so its fixed
+         overlay covers the viewport: the .inbox pane uses backdrop-filter, which
+         would otherwise make it the containing block for position:fixed. -->
+    <Teleport to="body">
       <div
-        class="hctx-menu"
-        data-testid="hist-ctx-menu"
-        :style="{ left: `${histCtx.x}px`, top: `${histCtx.y}px` }"
-        @click.stop
+        v-if="histCtx"
+        class="hctx-overlay"
+        @click="histCtx = null"
+        @contextmenu.prevent="histCtx = null"
       >
-        <div class="hctx-detail mono">{{ histCtx.detail }}</div>
-        <button
-          v-if="histCtx.allowBase"
-          class="hctx-item mono"
-          data-testid="hist-ctx-allow"
-          @click="allowFromHist"
+        <div
+          class="hctx-menu"
+          data-testid="hist-ctx-menu"
+          :style="{ left: `${histCtx.x}px`, top: `${histCtx.y}px` }"
+          @click.stop
         >
-          <span style="color: var(--green)">✓</span>
-          <span>Always allow <span class="hctx-base">{{ histCtx.allowBase }}</span> commands</span>
-        </button>
-        <button class="hctx-item mono danger" data-testid="hist-ctx-remove" @click="removeHist">
-          <span>✕</span>
-          <span>Remove this entry</span>
-        </button>
+          <div class="hctx-detail mono">{{ histCtx.detail }}</div>
+          <button
+            v-if="histCtx.allowBase"
+            class="hctx-item mono"
+            data-testid="hist-ctx-allow"
+            @click="allowFromHist"
+          >
+            <span style="color: var(--green)">✓</span>
+            <span>Always allow <span class="hctx-base">{{ histCtx.allowBase }}</span> commands</span>
+          </button>
+          <button class="hctx-item mono danger" data-testid="hist-ctx-remove" @click="removeHist">
+            <span>✕</span>
+            <span>Remove this entry</span>
+          </button>
+        </div>
       </div>
-    </div>
+    </Teleport>
   </aside>
 </template>
 
@@ -325,6 +329,9 @@ const historyItems = computed(() => inbox.history)
   width: 332px;
   min-width: 332px;
   background: var(--bg-panel);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -338,7 +345,7 @@ const historyItems = computed(() => inbox.history)
 
 .tab {
   padding: 11px 12px;
-  font-family: var(--mono);
+  font-family: var(--sans);
   font-size: 12px;
   color: var(--text-tab);
   cursor: pointer;
@@ -375,7 +382,7 @@ const historyItems = computed(() => inbox.history)
   display: block;
   margin-top: 5px;
   color: var(--amber);
-  font-family: var(--mono);
+  font-family: var(--sans);
   font-size: 10.5px;
   text-decoration: underline;
 }

@@ -254,7 +254,7 @@ function answer(eventId: string, choice: string): void {
 
 .db-ico {
   font-size: 15px;
-  color: #457a7a;
+  color: #2dd4bf;
 }
 
 .db-name {
@@ -280,8 +280,8 @@ function answer(eventId: string, choice: string): void {
 
 .conn.on {
   color: var(--green);
-  background: rgba(30, 122, 92, 0.08);
-  border: 1px solid rgba(30, 122, 92, 0.32);
+  background: rgba(52, 211, 153, 0.08);
+  border: 1px solid rgba(52, 211, 153, 0.32);
 }
 
 .back {
@@ -318,7 +318,7 @@ function answer(eventId: string, choice: string): void {
 
 .tab.sel {
   color: var(--text-strong);
-  box-shadow: inset 0 -2px 0 #457a7a;
+  box-shadow: inset 0 -2px 0 #2dd4bf;
 }
 
 .rescan {
@@ -353,7 +353,7 @@ function answer(eventId: string, choice: string): void {
 
 .empty-ico {
   font-size: 26px;
-  color: #457a7a;
+  color: #2dd4bf;
 }
 
 .empty-title {
@@ -376,17 +376,7 @@ function answer(eventId: string, choice: string): void {
 }
 
 .teal {
-  color: #457a7a;
-}
-
-.stream {
-  flex: 1;
-  overflow-y: auto;
-  padding: 18px 22px;
-}
-
-.stream-inner {
-  max-width: 840px;
+  color: #2dd4bf;
 }
 
 .scan-banner {
@@ -397,16 +387,6 @@ function answer(eventId: string, choice: string): void {
   border-radius: 10px;
   padding: 9px 12px;
   margin-bottom: 14px;
-}
-
-.live {
-  font-size: 12.5px;
-  color: var(--text-meta);
-  margin-top: 4px;
-}
-
-.blink {
-  animation: sbBlink 1.1s steps(1) infinite;
 }
 
 .doc {
@@ -427,60 +407,10 @@ function answer(eventId: string, choice: string): void {
   color: var(--text-faint);
 }
 
-.composer {
-  border-top: 1px solid var(--border);
-  background: var(--bg-panel);
-  padding: 11px 18px;
-}
-
-.composer-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
+/* Composer caret is teal here (vs green in the session composer). */
 .caret {
   flex-shrink: 0;
-  color: #457a7a;
+  color: #2dd4bf;
   font-weight: 700;
-}
-
-.composer-input {
-  flex: 1;
-  min-width: 60px;
-  background: transparent;
-  border: none;
-  outline: none;
-  color: var(--text);
-  font-size: 13px;
-  padding: 0;
-}
-
-.to {
-  flex-shrink: 0;
-  white-space: nowrap;
-  font-size: 10.5px;
-  color: var(--text-faint);
-}
-
-.send-btn {
-  flex-shrink: 0;
-  white-space: nowrap;
-  background: var(--green);
-  color: var(--green-ink);
-  font-weight: 600;
-  font-size: 11.5px;
-  padding: 7px 16px;
-  border-radius: 10px;
-  user-select: none;
-}
-
-.send-btn:hover:not(:disabled) {
-  background: var(--green-hover);
-}
-
-.send-btn:disabled {
-  opacity: 0.45;
-  cursor: default;
 }
 </style>

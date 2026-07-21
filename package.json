@@ -1,6 +1,6 @@
 {
   "name": "terminal-switchboard",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Switchboard: one desktop window hosting every Claude Code session, with a central permission inbox, clean output views, and per-project context.",
   "private": true,
   "type": "module",

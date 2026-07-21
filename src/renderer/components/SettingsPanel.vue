@@ -76,6 +76,27 @@ function modelLabel(id: string): string {
   return MODEL_CHOICES.find((m) => m.id === id)?.label ?? id
 }
 
+// The Planning and Implementation model pickers are the same card list bound to
+// a different Settings field — render both from one loop.
+const MODEL_SECTIONS = [
+  {
+    key: 'planModel',
+    testid: 'plan-model',
+    label: 'PLANNING MODEL',
+    desc: 'Reads the codebase, weighs approaches, and writes the plan — before any code is touched.',
+  },
+  {
+    key: 'workModel',
+    testid: 'work-model',
+    label: 'IMPLEMENTATION MODEL',
+    desc: 'Executes the plan — edits files, runs commands, writes tests.',
+  },
+] as const
+
+function setModel(key: 'planModel' | 'workModel', id: string): void {
+  save(key === 'planModel' ? { planModel: id } : { workModel: id })
+}
+
 // --- Allowed list tab (design): risk auto-approve + per-project command rules ---
 const allowedRules = ref<PermissionRule[]>([])
 const newCmd = ref('')
@@ -119,6 +140,33 @@ async function addAllowedCommand(): Promise<void> {
   newCmd.value = ''
   await window.switchboard.invoke('rules.standing.add', { projectId: proj.value.id, pattern })
   await loadAllowedRules()
+}
+
+// --- Database MCP (General tab): designate which reported MCP server is the DB.
+// Options are the union of MCP servers reported by any live session, plus the
+// current designation so it stays visible even when no session reports it. ---
+const dbMcpInput = ref('')
+const mcpServerNames = computed(() => {
+  const names = new Set<string>()
+  for (const p of projects.items) {
+    if (p.session && !p.session.endedAt) {
+      for (const m of p.session.mcpServers ?? []) names.add(m.name)
+    }
+  }
+  const current = settings.value?.databaseMcpServer
+  if (current) names.add(current)
+  return [...names].sort()
+})
+
+function setDatabaseMcp(name: string | null): void {
+  save({ databaseMcpServer: name })
+}
+
+function addDatabaseMcp(): void {
+  const name = dbMcpInput.value.trim()
+  if (!name) return
+  dbMcpInput.value = ''
+  setDatabaseMcp(name)
 }
 
 // --- Plugin toggles (design): hide a plugin's commands from suggestions ---
@@ -190,44 +238,19 @@ const updateLine = computed(() => {
         <div v-if="settings" class="s-body">
           <!-- MODELS -->
           <template v-if="tab === 'models'">
-            <div class="group">
-              <div class="group-label mono">PLANNING MODEL</div>
-              <div class="group-desc">
-                Reads the codebase, weighs approaches, and writes the plan — before any code is
-                touched.
-              </div>
+            <div v-for="section in MODEL_SECTIONS" :key="section.key" class="group">
+              <div class="group-label mono">{{ section.label }}</div>
+              <div class="group-desc">{{ section.desc }}</div>
               <div class="cards">
                 <button
                   v-for="m in MODEL_CHOICES"
                   :key="m.id"
                   class="card-opt"
-                  :class="{ sel: settings.planModel === m.id }"
-                  :data-testid="`plan-model-${m.id}`"
-                  @click="save({ planModel: m.id })"
+                  :class="{ sel: settings[section.key] === m.id }"
+                  :data-testid="`${section.testid}-${m.id}`"
+                  @click="setModel(section.key, m.id)"
                 >
-                  <span class="opt-dot" :class="{ on: settings.planModel === m.id }"></span>
-                  <div class="opt-body">
-                    <div class="opt-name mono">{{ m.label }}</div>
-                    <div class="opt-sub">{{ m.desc }}</div>
-                  </div>
-                  <span class="opt-price mono">{{ m.price }}</span>
-                </button>
-              </div>
-            </div>
-
-            <div class="group">
-              <div class="group-label mono">IMPLEMENTATION MODEL</div>
-              <div class="group-desc">Executes the plan — edits files, runs commands, writes tests.</div>
-              <div class="cards">
-                <button
-                  v-for="m in MODEL_CHOICES"
-                  :key="m.id"
-                  class="card-opt"
-                  :class="{ sel: settings.workModel === m.id }"
-                  :data-testid="`work-model-${m.id}`"
-                  @click="save({ workModel: m.id })"
-                >
-                  <span class="opt-dot" :class="{ on: settings.workModel === m.id }"></span>
+                  <span class="opt-dot" :class="{ on: settings[section.key] === m.id }"></span>
                   <div class="opt-body">
                     <div class="opt-name mono">{{ m.label }}</div>
                     <div class="opt-sub">{{ m.desc }}</div>
@@ -330,7 +353,7 @@ const updateLine = computed(() => {
                       </div>
                     </div>
                     <button
-                      class="toggle"
+                      class="switch"
                       :class="{ on: !disabledPlugins.includes(p) }"
                       :data-testid="`plugin-toggle-${p}`"
                       role="switch"
@@ -358,7 +381,7 @@ const updateLine = computed(() => {
                 <div class="sr-desc">Read-only inspection — file reads, git status, listings</div>
               </div>
               <button
-                class="toggle"
+                class="switch"
                 :class="{ on: settings.autoApproveLow }"
                 data-testid="setting-auto-low"
                 role="switch"
@@ -374,7 +397,7 @@ const updateLine = computed(() => {
                 <div class="sr-desc">Routine changes — file edits, package installs, builds</div>
               </div>
               <button
-                class="toggle"
+                class="switch"
                 :class="{ on: settings.autoApproveMedium }"
                 data-testid="setting-auto-medium"
                 role="switch"
@@ -497,7 +520,7 @@ const updateLine = computed(() => {
                 </div>
               </div>
               <button
-                class="toggle"
+                class="switch"
                 :class="{ on: settings.showToolRows }"
                 data-testid="setting-tool-rows"
                 role="switch"
@@ -514,7 +537,7 @@ const updateLine = computed(() => {
                 <div class="sr-desc">Show the time next to every event in the Clean view</div>
               </div>
               <button
-                class="toggle"
+                class="switch"
                 :class="{ on: settings.timestamps }"
                 data-testid="setting-timestamps"
                 role="switch"
@@ -531,7 +554,7 @@ const updateLine = computed(() => {
                 <div class="sr-desc">Keep the view pinned to the newest line while Claude works</div>
               </div>
               <button
-                class="toggle"
+                class="switch"
                 :class="{ on: settings.autoscroll }"
                 data-testid="setting-autoscroll"
                 role="switch"
@@ -552,7 +575,7 @@ const updateLine = computed(() => {
                 </div>
               </div>
               <button
-                class="toggle"
+                class="switch"
                 :class="{ on: settings.terseMode }"
                 data-testid="setting-terse-mode"
                 role="switch"
@@ -598,7 +621,7 @@ const updateLine = computed(() => {
                 </div>
               </div>
               <button
-                class="toggle"
+                class="switch"
                 :class="{ on: settings.notificationsEnabled }"
                 data-testid="setting-notifications"
                 role="switch"
@@ -607,6 +630,55 @@ const updateLine = computed(() => {
               >
                 <span class="knob"></span>
               </button>
+            </div>
+
+            <div class="group-label mono" style="margin-top: 8px">DATABASE MCP</div>
+            <div class="group-desc">
+              Sessions expose every configured MCP server. Pick the one that is your database: only
+              it shows in the sidebar MCP section and powers the schema scan and chat. The rest stay
+              hidden so they no longer clutter the view.
+            </div>
+            <div class="cards" data-testid="db-mcp-options">
+              <button
+                class="card-opt"
+                :class="{ sel: !settings.databaseMcpServer }"
+                data-testid="db-mcp-none"
+                @click="setDatabaseMcp(null)"
+              >
+                <span class="opt-dot" :class="{ on: !settings.databaseMcpServer }"></span>
+                <div class="opt-body">
+                  <div class="opt-name mono">Show all servers</div>
+                  <div class="opt-sub">No designation — every reported MCP server is listed</div>
+                </div>
+              </button>
+              <button
+                v-for="name in mcpServerNames"
+                :key="name"
+                class="card-opt"
+                :class="{ sel: settings.databaseMcpServer === name }"
+                :data-testid="`db-mcp-${name}`"
+                @click="setDatabaseMcp(name)"
+              >
+                <span class="opt-dot" :class="{ on: settings.databaseMcpServer === name }"></span>
+                <div class="opt-body">
+                  <div class="opt-name mono">{{ name }}</div>
+                  <div class="opt-sub">Use this server as the database MCP</div>
+                </div>
+              </button>
+            </div>
+            <div v-if="mcpServerNames.length === 0" class="note">
+              No MCP servers reported yet — start a session and its servers appear here to choose
+              from. You can also type the exact server name below.
+            </div>
+            <div class="add-cmd">
+              <input
+                v-model="dbMcpInput"
+                class="add-cmd-input mono"
+                data-testid="db-mcp-input"
+                placeholder="+ Or type the server name exactly — e.g. postgres"
+                @keydown.enter="addDatabaseMcp"
+              />
+              <button class="btn-solid" data-testid="db-mcp-set" @click="addDatabaseMcp">Set</button>
             </div>
 
             <div class="group-label mono" style="margin-top: 8px">APPROVALS &amp; SPEND</div>
@@ -831,8 +903,8 @@ const updateLine = computed(() => {
 }
 
 .card-opt.sel {
-  background: rgba(30, 122, 92, 0.06);
-  border-color: rgba(30, 122, 92, 0.4);
+  background: rgba(52, 211, 153, 0.06);
+  border-color: rgba(52, 211, 153, 0.4);
 }
 
 .card-opt.static {
@@ -989,7 +1061,7 @@ const updateLine = computed(() => {
 }
 
 .dd-item.sel {
-  background: rgba(30, 122, 92, 0.07);
+  background: rgba(52, 211, 153, 0.07);
   color: var(--text-strong);
 }
 
@@ -1037,38 +1109,6 @@ const updateLine = computed(() => {
   margin-top: 2px;
   line-height: 1.5;
   text-wrap: pretty;
-}
-
-.toggle {
-  width: 38px;
-  min-width: 38px;
-  height: 21px;
-  border-radius: 99px;
-  background: var(--border-strong);
-  position: relative;
-  cursor: pointer;
-  border: none;
-}
-
-.toggle.on {
-  background: var(--green);
-}
-
-.knob {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 17px;
-  height: 17px;
-  border-radius: 99px;
-  background: var(--text-faint);
-  transition: all 0.15s ease;
-}
-
-.toggle.on .knob {
-  left: auto;
-  right: 2px;
-  background: var(--bg);
 }
 
 .seg {

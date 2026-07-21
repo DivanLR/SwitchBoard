@@ -254,7 +254,7 @@ export function isDangerousCommand(command: string): boolean {
 export interface RiskInputMatcher {
   /** Tool input property the pattern applies to, for example `command` or `file_path`. */
   field: string
-  match: 'regex' | 'prefix' | 'glob'
+  match: 'regex'
   pattern: string
 }
 
@@ -337,6 +337,13 @@ export interface Settings {
   dailySpendLimit: number
   /** Per-project plugin/skill commands hidden from composer suggestions. */
   disabledCommands: Record<string, string[]>
+  /**
+   * Name of the MCP server designated as the database MCP. Sessions typically
+   * expose many MCP servers; only this one is surfaced in the sidebar MCP
+   * section and drives the scan / chat view. Null = none designated (the
+   * sidebar then lists every reported server, the pre-designation behaviour).
+   */
+  databaseMcpServer: string | null
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -355,6 +362,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoApproveMedium: false,
   dailySpendLimit: 0,
   disabledCommands: {},
+  databaseMcpServer: null,
 }
 
 /** A slash command / skill a project's sessions can run (composer suggestions). */

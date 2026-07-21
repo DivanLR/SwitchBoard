@@ -7,7 +7,6 @@ import type { InboxChangedPush } from '@shared/ipc-types'
 interface InboxState {
   pending: PermissionRequest[]
   history: DecisionRecord[]
-  historyProjectId: string | null
   focusRequestId: string | null
   /** Banner shown when a decision could not reach its session (SC-004). */
   undeliverableNotice: string | null
@@ -17,7 +16,6 @@ export const useInboxStore = defineStore('inbox', {
   state: (): InboxState => ({
     pending: [],
     history: [],
-    historyProjectId: null,
     focusRequestId: null,
     undeliverableNotice: null,
   }),
@@ -85,7 +83,6 @@ export const useInboxStore = defineStore('inbox', {
     },
 
     async loadHistory(projectId?: string): Promise<void> {
-      this.historyProjectId = projectId ?? null
       this.history = await window.switchboard.invoke('inbox.history', { projectId })
     },
 
