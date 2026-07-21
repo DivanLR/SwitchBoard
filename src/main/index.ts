@@ -4,6 +4,7 @@
 // store, session manager, permission broker, notifier, and IPC layer.
 import { app, BrowserWindow, dialog, Menu, nativeImage, session, Tray } from 'electron'
 import { join, resolve } from 'node:path'
+import { mkdirSync } from 'node:fs'
 import { openDatabase } from './store/db'
 import { createRepositories, type Repositories } from './store/repositories'
 import { runRetention, scheduleRetention } from './store/retention'
@@ -12,6 +13,7 @@ import { PermissionBroker } from './inbox/permission-broker'
 import { classifyNoise } from './stream/swallow-rules'
 import { createNotifier } from './notifications'
 import { parseDeepLink, PROTOCOL_SCHEME } from './deep-link'
+import { registerProject } from './projects/discovery'
 import { computeCounters, registerIpcHandlers, RendererPush, seedDefaultRules } from './ipc/handlers'
 import { initUpdater } from './updater'
 import type { SwallowRule } from '@shared/domain'
@@ -143,10 +145,13 @@ async function main(): Promise<void> {
 
   const db = openDatabase(join(app.getPath('userData'), 'switchboard.db'))
   const repos: Repositories = createRepositories(db)
+  // References are ephemeral: every launch starts with none (they persist only
+  // within a run so they survive project switches, never across a restart).
+  repos.projects.clearAllRefs()
   seedDefaultRules(repos)
 
   // Late-bound so the manager's gate can reference the broker (composition root).
-  const late: { broker: PermissionBroker | null } = { broker: null }
+  let broker: PermissionBroker | null = null
 
   const pusher = new RendererPush(
     () => mainWindow,
@@ -157,13 +162,13 @@ async function main(): Promise<void> {
     onEvent: (event) => pusher.event(event),
     onSessionStatus: (push) => pusher.push('push.sessionStatus', push),
     onCountersChanged: () => pusher.countersChanged(),
-    onSessionExit: (sessionId) => late.broker?.expireForSession(sessionId),
+    onSessionExit: (sessionId) => broker?.expireForSession(sessionId),
     onQueueChanged: (projectId) =>
       pusher.push('push.queueChanged', { projectId, items: repos.taskQueue.listForProject(projectId) }),
     onProjectCommands: (projectId, commands) => pusher.push('push.projectCommands', { projectId, commands }),
     gate: (context) => {
-      if (!late.broker) throw new Error('Broker not initialised')
-      return late.broker.handle(context)
+      if (!broker) throw new Error('Broker not initialised')
+      return broker.handle(context)
     },
   })
   manager.reconcileOnStartup()
@@ -181,18 +186,43 @@ async function main(): Promise<void> {
     projectName: (projectId) => repos.projects.byId(projectId)?.name ?? 'A project',
   })
 
-  const broker = new PermissionBroker(repos, manager, {
+  broker = new PermissionBroker(repos, manager, {
     onInboxChanged: (push) => pusher.push('push.inboxChanged', push),
     onCountersChanged: () => pusher.countersChanged(),
     onNeedsYou: (context) => notify(context),
   })
-  late.broker = broker
 
   let swallowRules: SwallowRule[] = repos.swallowRules.list()
   const refreshSwallowRules = (): void => {
     swallowRules = repos.swallowRules.list()
   }
   manager.setNoiseClassifier((event, projectId) => classifyNoise(swallowRules, event, projectId))
+
+  // Database MCP (global, project-less session): a reserved project row gives
+  // it cwd/permissions/history through the existing per-project machinery.
+  // ipc/handlers.ts marks it `reserved` so the sidebar never lists it as a
+  // normal project; Sidebar.vue renders it as the single "Database" row.
+  const dbProjectPath = join(app.getPath('userData'), 'database-mcp')
+  mkdirSync(dbProjectPath, { recursive: true })
+  const dbProject =
+    repos.projects.byPath(dbProjectPath) ??
+    registerProject(repos, { path: dbProjectPath, name: 'Database', source: 'manual' })
+
+  // Auto-start only when a database MCP is designated. Any startup failure (a
+  // missing Claude executable, an already-active session) throws a
+  // SessionManagerError that is caught and ignored — the "Database" row's
+  // manual start button covers retry.
+  const startupSettings = repos.settings.get()
+  if (startupSettings.databaseMcpServer) {
+    const denied = (startupSettings.knownMcpServers ?? []).filter(
+      (name) => name !== startupSettings.databaseMcpServer,
+    )
+    try {
+      manager.startSession(dbProject.id, true, false, denied)
+    } catch {
+      // Non-fatal; see comment above.
+    }
+  }
 
   // switchboard:// deep links from notification buttons. Approve routes through
   // the broker with confirmHighRisk — the toast already showed exactly what is
@@ -213,14 +243,23 @@ async function main(): Promise<void> {
     showWindow()
     pusher.push('push.focusRequest', { target: 'inbox', requestId: link.requestId })
   }
+  const findDeepLinkUrl = (argv: string[]): string | undefined =>
+    argv.find((arg) => arg.startsWith(`${PROTOCOL_SCHEME}://`))
   const deepLinkIn = (argv: string[]): void => {
-    const url = argv.find((arg) => arg.startsWith(`${PROTOCOL_SCHEME}://`))
+    const url = findDeepLinkUrl(argv)
     if (url) handleDeepLink(url)
   }
   // Cold start via a notification button while the app was not running.
   deepLinkIn(process.argv)
 
-  registerIpcHandlers({ repos, manager, broker, refreshSwallowRules, getWindow: () => mainWindow })
+  registerIpcHandlers({
+    repos,
+    manager,
+    broker,
+    refreshSwallowRules,
+    getWindow: () => mainWindow,
+    dbProjectId: dbProject.id,
+  })
   scheduleRetention(() => runRetention(db, repos))
   initUpdater({ onStatus: (status) => pusher.push('push.updateStatus', status) })
 
@@ -232,7 +271,7 @@ async function main(): Promise<void> {
 
   app.on('second-instance', (_event, argv) => {
     // A protocol activation launches a second instance carrying the URL.
-    const url = argv.find((arg) => arg.startsWith(`${PROTOCOL_SCHEME}://`))
+    const url = findDeepLinkUrl(argv)
     if (url) {
       handleDeepLink(url)
       return

@@ -2,7 +2,7 @@
 // Application shell — 1:1 with the Switchboard design reference: sidebar
 // (252px) | session stream | inbox panel (332px, always visible). Push
 // subscriptions and notification click routing (FR-013a) live here.
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useInboxStore } from '@renderer/stores/inbox'
@@ -73,9 +73,9 @@ onUnmounted(() => {
 })
 
 const selectedProject = computed(() => projects.selected)
-
-// Switching projects closes any open Database MCP view (it is project-scoped).
-watch(() => selectedProject.value?.id, () => active.openMcp(null))
+// The Database MCP view is global (bound to the reserved project), so it must
+// survive switching between regular projects — no watch resets it here.
+const dbProject = computed(() => projects.dbProject)
 </script>
 
 <template>
@@ -90,18 +90,36 @@ watch(() => selectedProject.value?.id, () => active.openMcp(null))
 
   <div v-else class="shell">
     <div
-      v-if="updates.available && !updateDismissed"
+      v-if="updates.active && !updateDismissed"
       class="update-banner mono"
       data-testid="update-banner"
     >
       <span class="ub-dot"></span>
       <span class="ub-text">
-        A new version{{ updates.status.version ? ` (${updates.status.version})` : '' }} is available.
+        <template v-if="updates.downloading">
+          Downloading update{{ updates.status.version ? ` (${updates.status.version})` : '' }}… {{ updates.percent }}%
+        </template>
+        <template v-else-if="updates.ready">
+          Update downloaded — the installer is opening. The app will close.
+        </template>
+        <template v-else>
+          A new version{{ updates.status.version ? ` (${updates.status.version})` : '' }} is available.
+        </template>
       </span>
-      <button class="ub-install" data-testid="update-banner-install" @click="updates.install()">
-        download
+      <button
+        v-if="updates.available"
+        class="ub-install"
+        data-testid="update-banner-install"
+        @click="updates.install()"
+      >
+        download &amp; install
       </button>
-      <button class="ub-dismiss" data-testid="update-banner-dismiss" @click="updateDismissed = true">
+      <button
+        v-if="!updates.ready"
+        class="ub-dismiss"
+        data-testid="update-banner-dismiss"
+        @click="updateDismissed = true"
+      >
         ✕
       </button>
     </div>
@@ -113,8 +131,8 @@ watch(() => selectedProject.value?.id, () => active.openMcp(null))
 
       <main class="main">
         <McpView
-          v-if="selectedProject && active.mcpTarget"
-          :project="selectedProject"
+          v-if="dbProject && active.mcpTarget"
+          :project="dbProject"
         />
         <SessionView
           v-else-if="selectedProject"

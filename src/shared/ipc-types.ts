@@ -66,12 +66,15 @@ export interface ProjectListItem extends Project {
   session: Session | null
   /** Pending composer drafts preserved from a previous run, if any. */
   drafts: Draft[]
+  /** True only for the single reserved, project-less row backing the global
+   *  Database MCP session; excluded from the sidebar's project list and never
+   *  independently selectable as `selectedProjectId`. */
+  reserved: boolean
 }
 
 export interface Counters {
   running: number
   needsYou: number
-  pendingInbox: number
   costTodayUsd: number
   tokensToday: number
 }
@@ -96,7 +99,13 @@ export interface InvokeMap {
   'projects.refs.remove': { req: { projectId: string; path: string }; res: ProjectRef[] }
   'projects.archive': { req: { projectId: string }; res: void }
   'sessions.start': {
-    req: { projectId: string; resume?: boolean; bypassPermissions?: boolean }
+    req: {
+      projectId: string
+      resume?: boolean
+      bypassPermissions?: boolean
+      /** Deny these MCP servers so the session runs with only the DB MCP active. */
+      deniedMcpServers?: string[]
+    }
     res: Session
   }
   'sessions.stop': { req: { sessionId: string }; res: void }
@@ -143,11 +152,19 @@ export interface InvokeMap {
     req: { requestId: string }
     res: { rule: PermissionRule }
   }
+  'inbox.approveAlways': {
+    // From a PENDING inbox item ("Always allow similar"): derives and inserts
+    // the standing rule server-side exactly as inbox.alwaysAllow does, then
+    // approves this request. Refused for non-Bash, plan, high-risk, or
+    // destructive commands (RULE_NOT_ALLOWED).
+    req: { requestId: string }
+    res: { delivered: boolean; rule: PermissionRule }
+  }
   'inbox.approveAllForProject': {
     req: { projectId: string }
     res: { approved: number; skippedHighRisk: number }
   }
-  'inbox.history': { req: { projectId?: string; before?: string; limit?: number }; res: DecisionRecord[] }
+  'inbox.history': { req: { projectId?: string; limit?: number }; res: DecisionRecord[] }
   'inbox.deleteHistory': { req: { requestId: string }; res: void }
   'inbox.clearHistory': { req: void; res: void }
   'rules.standing.list': {
@@ -176,8 +193,6 @@ export interface UpdateStatus {
   version?: string
   percent?: number
   message?: string
-  /** Release page URL to open for a manual installer download (state 'available'). */
-  url?: string
 }
 
 export type InvokeMethod = keyof InvokeMap

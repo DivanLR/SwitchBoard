@@ -10,6 +10,9 @@ Stop alt-tabbing between four PowerShell windows to find the one session that's 
 Switchboard hosts all of your Claude Code sessions in a single desktop app — with a central
 permission inbox, per-project context, and output views that only show you what matters.
 
+> This is a purely vibecoded app. The only intention was to make my daily workflow easier and
+> better to work with.
+
 [![Electron](https://img.shields.io/badge/Electron-42-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![Vue 3](https://img.shields.io/badge/Vue-3.5-42B883?logo=vuedotjs&logoColor=white)](https://vuejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)

@@ -13,6 +13,8 @@ const MAX_SLASH_SUGGESTIONS = 50
 export interface CommandSuggestions {
   suggestions: Ref<string[]>
   ghostRest: Ref<string>
+  /** True when the composer text exactly matches a known slash command. */
+  isCommandMatch: Ref<boolean>
   suggestIndex: Ref<number>
   acceptSuggestion: (text: string) => void
   onComposerInput: () => void
@@ -31,7 +33,7 @@ export interface CommandSuggestions {
 
 export function useCommandSuggestions(opts: {
   composer: Ref<string>
-  composerEl: Ref<HTMLInputElement | null>
+  composerEl: Ref<HTMLTextAreaElement | null>
   onSubmit: () => void
   /** Drops disabled plugin/skill commands (Settings → This project toggles). */
   filterCommands?: (commands: ProjectCommand[]) => ProjectCommand[]
@@ -72,17 +74,9 @@ export function useCommandSuggestions(opts: {
     const lower = typed.toLowerCase()
     // Typing "/" is a command palette: show all matching skills/commands.
     const cap = typed.startsWith('/') ? MAX_SLASH_SUGGESTIONS : MAX_SUGGESTIONS
-    const seen = new Set<string>()
-    const out: string[] = []
-    for (const cmd of pool.value) {
-      if (cmd === composer.value) continue
-      if (!cmd.toLowerCase().startsWith(lower)) continue
-      if (seen.has(cmd)) continue
-      seen.add(cmd)
-      out.push(cmd)
-      if (out.length >= cap) break
-    }
-    return out
+    return pool.value
+      .filter((cmd) => cmd !== composer.value && cmd.toLowerCase().startsWith(lower))
+      .slice(0, cap)
   })
 
   /** The single best case-sensitive continuation, rendered inline as ghost text. */
@@ -94,6 +88,12 @@ export function useCommandSuggestions(opts: {
   const ghostRest = computed(() =>
     ghostMatch.value ? ghostMatch.value.slice(composer.value.length) : '',
   )
+
+  /** The typed text is exactly one of the available slash commands. */
+  const isCommandMatch = computed(() => {
+    const typed = composer.value.trim()
+    return typed.length > 0 && availableCommands.value.some((c) => slashName(c.name) === typed)
+  })
 
   function acceptGhost(): boolean {
     if (!ghostMatch.value) return false
@@ -170,6 +170,8 @@ export function useCommandSuggestions(opts: {
         }
         return
       case 'Enter':
+        // Shift+Enter inserts a newline in the multi-line composer.
+        if (event.shiftKey) return
         if (suggestIndex.value >= 0 && list[suggestIndex.value]) {
           event.preventDefault()
           acceptSuggestion(list[suggestIndex.value])
@@ -222,6 +224,7 @@ export function useCommandSuggestions(opts: {
   return {
     suggestions,
     ghostRest,
+    isCommandMatch,
     suggestIndex,
     acceptSuggestion,
     onComposerInput,

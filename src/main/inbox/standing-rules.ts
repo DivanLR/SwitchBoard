@@ -17,30 +17,53 @@ function globBaseDir(glob: string): string {
 }
 
 /**
+ * True when `candidate`'s RESOLVED path is `dir` itself or nested under it.
+ * Resolving first collapses `.`/`..`, closing the directory-traversal bypass.
+ * Windows paths are case-insensitive, so compare case-folded there — otherwise a
+ * rule (or cwd) whose casing differs from the tool's reported path silently
+ * fails to match.
+ */
+export function isWithinDir(dir: string, candidate: string): boolean {
+  const resolvedDir = resolve(dir).replace(/[/\\]+$/, '')
+  const resolvedCandidate = isAbsolute(candidate)
+    ? resolve(candidate)
+    : resolve(resolvedDir, candidate)
+  const fold = (p: string): string => (process.platform === 'win32' ? p.toLowerCase() : p)
+  return (
+    fold(resolvedCandidate) === fold(resolvedDir) ||
+    fold(resolvedCandidate).startsWith(`${fold(resolvedDir)}${sep}`)
+  )
+}
+
+/**
  * True when `candidate` matches the glob AND its RESOLVED path stays inside the
- * glob's base directory. Resolving first collapses `.`/`..`, so a path like
- * `C:\proj\..\..\secret` can no longer match a `C:\proj\**` rule by string
- * coincidence (directory-traversal bypass).
+ * glob's base directory (directory-traversal-safe via isWithinDir).
  */
 function withinGlob(glob: string, candidate: string): boolean {
   const base = globBaseDir(glob)
-  if (!base) return false
-  const resolvedBase = resolve(base).replace(/[/\\]+$/, '')
+  if (!base || !isWithinDir(base, candidate)) return false
   const resolvedCandidate = isAbsolute(candidate)
     ? resolve(candidate)
-    : resolve(resolvedBase, candidate)
-  if (resolvedCandidate !== resolvedBase && !resolvedCandidate.startsWith(resolvedBase + sep)) {
-    return false
-  }
+    : resolve(resolve(base), candidate)
   return globToRegExp(glob.replace(/\\/g, '/')).test(resolvedCandidate.replace(/\\/g, '/'))
 }
 
-function pathOf(input: Record<string, unknown>): string | null {
+export function pathOf(input: Record<string, unknown>): string | null {
   for (const field of PATH_FIELDS) {
     const value = input[field]
     if (typeof value === 'string' && value.length > 0) return value
   }
   return null
+}
+
+/** True when the tool input's path field resolves inside `projectPath` — the
+ *  cwd-containment auto-approve for in-folder Read/Write/Edit. */
+export function isPathWithinProject(
+  projectPath: string,
+  input: Record<string, unknown>,
+): boolean {
+  const path = pathOf(input)
+  return path !== null && isWithinDir(projectPath, path)
 }
 
 /**
@@ -88,8 +111,5 @@ export function evaluateStandingRules(
   toolName: string,
   input: Record<string, unknown>,
 ): PermissionRule | null {
-  for (const rule of rules) {
-    if (matchesRule(rule, toolName, input)) return rule
-  }
-  return null
+  return rules.find((rule) => matchesRule(rule, toolName, input)) ?? null
 }

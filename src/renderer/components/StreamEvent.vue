@@ -70,7 +70,7 @@ const hasContent = computed(() => {
 function resultLabel(payload: ResultPayload): string {
   const parts: string[] = ['turn complete']
   if (payload.durationMs > 0) parts.push(`${(payload.durationMs / 1000).toFixed(1)}s`)
-  if (payload.totalCostUsd > 0) parts.push(`$${payload.totalCostUsd.toFixed(4)}`)
+  if (payload.totalCostUsd > 0) parts.push(`$${payload.totalCostUsd.toFixed(2)}`)
   const usage = payload.usage
   if (usage.inputTokens || usage.outputTokens) {
     parts.push(`${(usage.inputTokens ?? 0) + (usage.outputTokens ?? 0)} tok`)

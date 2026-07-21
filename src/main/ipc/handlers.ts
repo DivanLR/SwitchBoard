@@ -3,8 +3,6 @@
 // error codes survive Electron's error serialisation. Push channels batch
 // stream events at >= 30 Hz flushes (SC-007).
 import { ipcMain, type BrowserWindow } from 'electron'
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import type { SessionEvent } from '@shared/domain'
 import type {
   Counters,
@@ -28,6 +26,7 @@ import {
 } from '@main/projects/discovery'
 import { defaultRiskRules } from '@main/inbox/risk-rules'
 import { defaultSwallowRules } from '@main/stream/swallow-rules'
+import { readSchemaDoc } from '@main/mcp/schema-doc'
 import { installSpecKit, readSpecDetail, readSpecKitState } from '@main/specs/spec-kit'
 import { check as checkForUpdates, installNow } from '@main/updater'
 
@@ -90,6 +89,9 @@ export interface HandlerDeps {
   refreshSwallowRules: () => void
   /** The trusted main window; IPC is accepted only from its webContents (A17). */
   getWindow: () => BrowserWindow | null
+  /** Reserved project id backing the global Database MCP session; marked
+   *  `reserved` in projectList so the sidebar never lists it as a real project. */
+  dbProjectId: string
 }
 
 function localMidnightIso(): string {
@@ -103,7 +105,6 @@ export function computeCounters(repos: Repositories): Counters {
   return {
     running: live.filter((s) => s.status === 'working').length,
     needsYou: live.filter((s) => s.status === 'needs_you').length,
-    pendingInbox: repos.requests.pending().length,
     costTodayUsd: repos.events.costSince(midnight),
     tokensToday: repos.events.tokensSince(midnight),
   }
@@ -125,7 +126,7 @@ function toIpcError(error: unknown): IpcError {
 }
 
 export function registerIpcHandlers(deps: HandlerDeps): void {
-  const { repos, manager, broker } = deps
+  const { repos, manager, broker, dbProjectId } = deps
 
   const projectList = (): ProjectListItem[] =>
     repos.projects.listActive().map((project) => ({
@@ -138,6 +139,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         repos.sessions.latestForProject(project.id) ??
         null,
       drafts: repos.drafts.listForProject(project.id),
+      reserved: project.id === dbProjectId,
     }))
 
   const handlers: Handlers = {
@@ -177,7 +179,12 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       repos.projects.archive(req.projectId)
     },
     'sessions.start': (req) =>
-      manager.startSession(req.projectId, req.resume ?? false, req.bypassPermissions ?? false),
+      manager.startSession(
+        req.projectId,
+        req.resume ?? false,
+        req.bypassPermissions ?? false,
+        req.deniedMcpServers,
+      ),
     'sessions.stop': (req) => manager.stopSession(req.sessionId),
     'sessions.interrupt': (req) => manager.interruptSession(req.sessionId),
     'sessions.send': (req) => {
@@ -216,8 +223,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'mcp.readSchema': (req) => {
       const project = repos.projects.byId(req.projectId)
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
-      const path = join(project.path, '.switchboard', 'db-schema.md')
-      return { content: existsSync(path) ? readFileSync(path, 'utf8') : null }
+      return { content: readSchemaDoc(project.path) }
     },
     'specs.runInSession': (req) => {
       let session = repos.sessions.activeForProject(req.projectId)
@@ -240,6 +246,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       const { rule } = broker.alwaysAllow(req.requestId)
       return { rule }
     },
+    'inbox.approveAlways': (req) => broker.approveAlways(req.requestId),
     'inbox.approveAllForProject': (req) => broker.approveAllForProject(req.projectId),
     'inbox.history': (req) => repos.requests.history(req),
     'inbox.deleteHistory': (req) => {

@@ -21,6 +21,8 @@ export interface MockProjectSeed {
   name: string
   path: string
   session?: MockSessionSeed
+  /** The reserved, project-less row backing the global Database MCP session. */
+  reserved?: boolean
 }
 
 export interface MockScenario {
@@ -58,6 +60,7 @@ export interface MockDriver {
     interrupts: string[]
     answers: { eventId: string; choice: string }[]
     decisions: { requestId: string; decision: string }[]
+    starts: { projectId: string; deniedMcpServers?: string[] }[]
     eventCounts: Record<string, number>
   }
 }
@@ -140,6 +143,7 @@ export function installMockHost(scenario: MockScenario): void {
       createdAt: now(),
       archivedAt: null as string | null,
       refs: [] as { path: string; label: string }[],
+      reserved: !!p.reserved,
       session,
     }
   })
@@ -276,7 +280,6 @@ export function installMockHost(scenario: MockScenario): void {
     return {
       running: all.filter((s) => s.status === 'working').length,
       needsYou: all.filter((s) => s.status === 'needs_you').length,
-      pendingInbox: pending.length,
       costTodayUsd: costToday,
       tokensToday: tokensToday,
     }
@@ -297,6 +300,7 @@ export function installMockHost(scenario: MockScenario): void {
 
   const sends: { sessionId: string; text: string }[] = []
   const interrupts: string[] = []
+  const starts: { projectId: string; deniedMcpServers?: string[] }[] = []
   const answers: { eventId: string; choice: string }[] = []
   const decisionLog: { requestId: string; decision: string }[] = []
   const queuedBySession = new Map<string, { eventId: string; text: string }[]>()
@@ -357,7 +361,12 @@ export function installMockHost(scenario: MockScenario): void {
     'projects.list': () => ({
       projects: projects
         .filter((p) => !p.archivedAt)
-        .map((p) => ({ ...p, session: p.session ? { ...p.session } : null, drafts: [] })),
+        .map((p) => ({
+          ...p,
+          reserved: !!p.reserved,
+          session: p.session ? { ...p.session } : null,
+          drafts: [],
+        })),
       counters: counters(),
     }),
     'projects.suggestions': () => scenario.suggestions ?? [],
@@ -379,6 +388,7 @@ export function installMockHost(scenario: MockScenario): void {
         createdAt: now(),
         archivedAt: null as string | null,
         refs: [] as { path: string; label: string }[],
+        reserved: false,
         session: null,
       }
       projects.push(project)
@@ -461,6 +471,10 @@ export function installMockHost(scenario: MockScenario): void {
       if (project.session && !project.session.endedAt) {
         throw { code: 'ALREADY_ACTIVE', message: 'Already active' }
       }
+      starts.push({
+        projectId: String(req.projectId),
+        deniedMcpServers: req.deniedMcpServers as string[] | undefined,
+      })
       const session: MockSession = {
         id: nextId('sess'),
         projectId: project.id,
@@ -595,6 +609,34 @@ export function installMockHost(scenario: MockScenario): void {
       }
       standingRules.push(rule)
       return { rule }
+    },
+    'inbox.approveAlways': (req) => {
+      // Pending-based: derive+insert the rule, then approve in one step.
+      const request = pending.find((p) => p.id === req.requestId)
+      if (!request) throw { code: 'NOT_FOUND', message: 'Not found' }
+      const dangerous = /\b(rm|rmdir|del|rd|format|mkfs|dd|sudo|doas)\b|Remove-Item|git\s+(push|reset\s+--hard|clean)\b/i
+      if (
+        request.type !== 'tool_permission' ||
+        request.toolName !== 'Bash' ||
+        request.risk === 'high' ||
+        dangerous.test(String(request.detail ?? ''))
+      ) {
+        throw { code: 'RULE_NOT_ALLOWED', message: 'Not eligible' }
+      }
+      const words = String(request.detail ?? '').trim().split(/\s+/)
+      const base = words[1] && !words[1].startsWith('-') ? `${words[0]} ${words[1]}` : (words[0] ?? '')
+      if (!base) throw { code: 'RULE_NOT_ALLOWED', message: 'No command' }
+      const rule = {
+        id: nextId('rule'),
+        projectId: request.projectId,
+        toolName: 'Bash',
+        matcher: { kind: 'command_prefix', value: base },
+        createdFromRequestId: request.id,
+        createdAt: now(),
+        revokedAt: null,
+      }
+      standingRules.push(rule)
+      return { ...decide(String(req.requestId), 'approve', false), rule }
     },
     'inbox.deleteHistory': (req) => {
       const index = decisions.findIndex((d) => d.id === req.requestId)
@@ -793,6 +835,7 @@ export function installMockHost(scenario: MockScenario): void {
       interrupts: [...interrupts],
       answers: [...answers],
       decisions: [...decisionLog],
+      starts: [...starts],
       eventCounts: Object.fromEntries(
         [...eventsBySession.entries()].map(([id, list]) => [id, list.length]),
       ),

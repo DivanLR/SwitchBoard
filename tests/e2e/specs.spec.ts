@@ -70,9 +70,9 @@ test('a project with specs shows chips, progress, and tasks', async ({ page }) =
   await expect(page.getByTestId('spec-sections')).toContainText('Version cart state')
 })
 
-test('the session tab still shows the stream and composer', async ({ page }) => {
+test('the composer stays visible on the Specs tab (chat is always reachable)', async ({ page }) => {
   await page.getByTestId('tab-specs').click()
-  await expect(page.getByTestId('composer-input')).toHaveCount(0)
+  await expect(page.getByTestId('composer-input')).toBeVisible()
   await page.getByTestId('tab-session').click()
   await expect(page.getByTestId('composer-input')).toBeVisible()
 })

@@ -7,8 +7,13 @@ export const useUpdatesStore = defineStore('updates', {
   state: (): { status: UpdateStatus } => ({ status: { state: 'idle' } }),
 
   getters: {
-    // A newer release exists; "install" opens its download page (no auto-update).
+    // A newer release exists (download not yet started).
     available: (s) => s.status.state === 'available',
+    // The banner stays up through the whole download/install flow.
+    active: (s) => ['available', 'downloading', 'ready'].includes(s.status.state),
+    downloading: (s) => s.status.state === 'downloading',
+    ready: (s) => s.status.state === 'ready',
+    percent: (s) => s.status.percent ?? 0,
     busy: (s) => s.status.state === 'checking',
   },
 
@@ -19,7 +24,8 @@ export const useUpdatesStore = defineStore('updates', {
     async check(): Promise<void> {
       await window.switchboard.invoke('updates.check', undefined)
     },
-    /** Opens the latest release page in the browser to download the installer. */
+    /** Downloads the installer inside the app and launches it (the app quits so
+     *  the installer can replace files). Falls back to the browser if no asset. */
     async install(): Promise<void> {
       await window.switchboard.invoke('updates.install', undefined)
     },

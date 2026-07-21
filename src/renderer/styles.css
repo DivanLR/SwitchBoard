@@ -56,7 +56,6 @@ html.sb-light {
   --amber-hover: #f2c574;
   --amber-ink: #201505;
   --red: #8f3b2c;
-  --teal: #2dd4bf;
   --detail: #8fa8bd;
   /* Figtree for body/UI text; JetBrains Mono for code, commands and terminal. */
   --sans: 'Figtree', system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -192,7 +191,8 @@ button {
   background: var(--amber-hover);
 }
 
-.btn-outline {
+.btn-outline,
+.btn-quiet {
   color: var(--text-mid);
   border: 1px solid var(--border-strong);
   font-size: 11.5px;
@@ -207,18 +207,6 @@ button {
 .btn-outline:hover {
   border-color: rgba(143, 59, 44, 0.5);
   color: var(--red);
-}
-
-.btn-quiet {
-  color: var(--text-mid);
-  border: 1px solid var(--border-strong);
-  font-size: 11.5px;
-  font-family: var(--mono);
-  padding: 6px 14px;
-  border-radius: 10px;
-  cursor: pointer;
-  user-select: none;
-  background: transparent;
 }
 
 .btn-quiet:hover {
@@ -306,9 +294,11 @@ button {
   display: inline-block;
 }
 
+/* Busy/working dot: a vivid blue with a pulsing halo so it reads clearly at a
+   glance on the dark theme (the muted --blue alone was too faint). */
 .dot.working {
-  background: var(--blue);
-  animation: sbFade 2.2s ease infinite;
+  background: #5b9df9;
+  animation: sbGlow 1.4s ease-in-out infinite;
 }
 
 .dot.needs_you {
@@ -570,6 +560,17 @@ button {
   }
   50% {
     opacity: 0.35;
+  }
+}
+
+/* Distinct pulsing halo for the busy dot. */
+@keyframes sbGlow {
+  0%,
+  100% {
+    box-shadow: 0 0 4px 1px rgba(91, 157, 249, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 11px 3px rgba(91, 157, 249, 1);
   }
 }
 

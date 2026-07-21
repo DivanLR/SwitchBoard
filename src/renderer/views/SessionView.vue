@@ -62,16 +62,23 @@ const mainTab = ref<'session' | 'specs'>('session')
 const specCount = computed(() => specs.stateFor(props.project.id).specs.length)
 
 const composer = ref('')
+// Spec-edit target (design ✎ chip): when set, the composer rewrites this spec
+// file/section instead of chatting. Set by SpecsView's Refine actions.
+const editTarget = ref<string | null>(null)
 const draftRestored = ref(false)
 const busy = ref(false)
+// Ended-banner restart option: start the next session with all permissions
+// bypassed (--dangerously-skip-permissions), mirroring the New session dialog.
+const bypassRestart = ref(false)
 const streamEl = ref<HTMLElement | null>(null)
-const composerEl = ref<HTMLInputElement | null>(null)
+const composerEl = ref<HTMLTextAreaElement | null>(null)
 
 // Terminal-style composer suggestions (history + plugin/skill commands, ghost
 // text, dropdown, up-arrow recall) live in a dedicated composable.
 const {
   suggestions,
   ghostRest,
+  isCommandMatch,
   suggestIndex,
   acceptSuggestion,
   onComposerInput,
@@ -219,6 +226,7 @@ watch(
     composer.value = ''
     draftRestored.value = false
     mainTab.value = 'session'
+    editTarget.value = null
     resetSuggestions()
     void loadHistory(projectId)
     void specs.loadState(projectId)
@@ -363,11 +371,28 @@ watch(
 )
 
 // --- Actions ---
+// A Refine action in SpecsView sets a spec-edit target; jump back to the session
+// so the reply stream is visible while the composer targets that spec file.
+function onSetTarget(label: string): void {
+  editTarget.value = label
+  mainTab.value = 'session'
+}
+
 async function send(): Promise<void> {
   const text = composer.value.trim()
-  if (!text || !liveSession.value) return
+  if (!text) return
   busy.value = true
   try {
+    // Spec-edit target: the message rewrites the referenced spec via the session.
+    if (editTarget.value) {
+      const target = editTarget.value
+      composer.value = ''
+      editTarget.value = null
+      await specs.runInSession(props.project.id, `✎ Spec edit → ${target}: ${text}`)
+      scrollToBottom()
+      return
+    }
+    if (!liveSession.value) return
     const agent = selectedAgent.value
     // Agent chat: the message goes to the session addressed at the subagent
     // (the SDK has no direct subagent input channel; the main loop relays).
@@ -397,7 +422,7 @@ async function removeQueued(id: string): Promise<void> {
 async function start(resume: boolean): Promise<void> {
   busy.value = true
   try {
-    await projects.startSession(props.project.id, resume)
+    await projects.startSession(props.project.id, resume, bypassRestart.value)
   } finally {
     busy.value = false
   }
@@ -483,9 +508,18 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
     const path = event.dataTransfer?.getData('text/x-sb-project-path') ?? ''
     if (path) await projects.addRef(props.project.id, path).catch(() => {})
   } else if (kind === 'file') {
-    for (const file of [...(event.dataTransfer?.files ?? [])]) {
-      const path = window.switchboard.pathForFile?.(file)
-      if (path) composer.value = composer.value ? `${composer.value} @${path}` : `@${path}`
+    // A dropped FOLDER becomes a reference; a dropped FILE inserts its @path.
+    for (const item of [...(event.dataTransfer?.items ?? [])]) {
+      if (item.kind !== 'file') continue
+      const isDir = item.webkitGetAsEntry?.()?.isDirectory ?? false
+      const file = item.getAsFile()
+      const path = file ? window.switchboard.pathForFile?.(file) : undefined
+      if (!path) continue
+      if (isDir) {
+        await projects.addRef(props.project.id, path).catch(() => {})
+      } else {
+        composer.value = composer.value ? `${composer.value} @${path}` : `@${path}`
+      }
     }
   }
 }
@@ -608,7 +642,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
       </button>
     </div>
 
-    <SpecsView v-if="mainTab === 'specs'" :project-id="project.id" />
+    <SpecsView v-if="mainTab === 'specs'" :project-id="project.id" @set-target="onSetTarget" />
 
     <!-- Clean stream (an open agent chat always renders clean) -->
     <div
@@ -656,6 +690,20 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
             >
               Resume previous conversation
             </button>
+            <span class="bypass-inline mono">
+              <button
+                class="switch danger"
+                :class="{ on: bypassRestart }"
+                data-testid="bypass-restart-toggle"
+                role="switch"
+                :aria-checked="bypassRestart"
+                title="Start with all permissions bypassed (--dangerously-skip-permissions)"
+                @click="bypassRestart = !bypassRestart"
+              >
+                <span class="knob"></span>
+              </button>
+              <span :class="{ armed: bypassRestart }">Bypass permissions</span>
+            </span>
           </div>
         </div>
 
@@ -747,7 +795,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
     </div>
 
     <!-- Composer -->
-    <footer v-if="mainTab === 'session'" class="composer">
+    <footer class="composer">
       <!-- REFS (design): folders this session may read — floats just above the
            composer, overlapping the bottom of the stream. -->
       <div class="refs-row mono" data-testid="refs-row">
@@ -813,7 +861,19 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
         Restored draft from the previous run — send to deliver it.
       </div>
       <div class="composer-row">
-        <span class="caret mono">❯</span>
+        <span v-if="editTarget" class="caret target mono">✎</span>
+        <span v-else class="caret mono">❯</span>
+        <span
+          v-if="editTarget"
+          class="target-chip mono"
+          data-testid="composer-target"
+          title="Spec edit target — your message rewrites this file"
+        >
+          → {{ editTarget }}
+          <button class="target-x" data-testid="composer-target-clear" @click="editTarget = null">
+            ✕
+          </button>
+        </span>
         <div class="input-wrap">
           <!-- Suggestion dropdown (terminal-style), above the input -->
           <div v-if="suggestions.length > 0" class="suggest-list mono" data-testid="suggest-list">
@@ -836,21 +896,30 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
             <span class="ghost-typed">{{ composer }}</span
             ><span class="ghost-rest" data-testid="ghost-suggestion">{{ ghostRest }}</span>
           </div>
-          <input
+          <textarea
             ref="composerEl"
             v-model="composer"
             class="composer-input mono"
+            :class="{ 'is-command': isCommandMatch }"
             data-testid="composer-input"
-            :placeholder="liveSession ? `Send a message to ${sendTo}…` : 'Start a session first'"
-            :disabled="!liveSession"
+            rows="1"
+            :placeholder="
+              editTarget
+                ? `Describe the change for ${editTarget}…`
+                : liveSession
+                  ? `Send a message to ${sendTo}…`
+                  : 'Start a session first'
+            "
+            :disabled="!liveSession && !editTarget"
             spellcheck="false"
             autocomplete="off"
             @input="onComposerInput"
             @keydown="onComposerKeydown"
-          />
+          ></textarea>
         </div>
         <span class="to mono" data-testid="composer-to">to {{ sendTo }}</span>
         <button
+          v-if="!editTarget"
           class="queue-btn mono"
           data-testid="composer-queue"
           title="Add to the queue — runs after the current goal finishes"
@@ -862,7 +931,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
         <button
           class="send-btn mono"
           data-testid="composer-send"
-          :disabled="!liveSession || busy || composer.trim().length === 0"
+          :disabled="(!liveSession && !editTarget) || busy || composer.trim().length === 0"
           @click="send()"
         >
           Send ⏎
@@ -1144,8 +1213,22 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 
 .ended-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
   margin-top: 10px;
+}
+
+.bypass-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.bypass-inline .armed {
+  color: var(--red);
 }
 
 .load-earlier {
@@ -1390,6 +1473,35 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   font-weight: 700;
 }
 
+.caret.target {
+  color: var(--amber);
+}
+
+/* Spec-edit target chip in the composer (design ✎ → file). */
+.target-chip {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10.5px;
+  color: var(--green);
+  background: rgba(52, 211, 153, 0.07);
+  border: 1px solid rgba(52, 211, 153, 0.35);
+  border-radius: 10px;
+  padding: 3px 9px;
+  white-space: nowrap;
+}
+
+.target-x {
+  cursor: pointer;
+  color: var(--text-faint);
+  background: transparent;
+}
+
+.target-x:hover {
+  color: var(--red);
+}
+
 .input-wrap {
   position: relative;
   flex: 1;
@@ -1398,9 +1510,32 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 }
 
 /* Sits above the ghost-text overlay; base composer-input chrome is global. */
+/* Auto-growing multi-line composer (base transparent/borderless chrome is
+   global). CSS field-sizing grows it with content up to max-height, then it
+   scrolls. */
 .composer-input {
   position: relative;
   z-index: 1;
+  display: block;
+  width: 100%;
+  resize: none;
+  overflow-y: auto;
+  field-sizing: content;
+  max-height: 160px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Typed text exactly matches a known /command — tint it so the match is clear. */
+.composer-input.is-command {
+  color: var(--green);
+  font-weight: 600;
+}
+
+/* Extra bottom room so the live "working" line clears the floating REFS row. */
+.stream {
+  padding-bottom: 46px;
 }
 
 /* Inline ghost text: mirrors the input box exactly, typed part transparent,
@@ -1410,10 +1545,9 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   inset: 0;
   z-index: 0;
   font-size: 13px;
-  line-height: normal;
-  display: flex;
-  align-items: center;
-  white-space: pre;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
   overflow: hidden;
   pointer-events: none;
 }

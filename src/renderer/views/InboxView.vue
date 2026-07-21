@@ -32,8 +32,19 @@ onMounted(() => {
 })
 onUnmounted(() => clearInterval(timer))
 
-watch(tab, (value) => {
-  if (value === 'history') void inbox.loadHistory()
+// Covered bases are needed on BOTH tabs now: history for the right-click menu,
+// inbox for the "Always allow similar" button. Reload whenever the pending
+// project set changes; the history tab additionally reloads on switch.
+watch(
+  () => inbox.groups.map((g) => g.projectId).join(','),
+  () => void loadCoveredBases(),
+  { immediate: true },
+)
+watch(tab, async (value) => {
+  if (value === 'history') {
+    await inbox.loadHistory()
+    await loadCoveredBases()
+  }
 })
 
 watch(
@@ -91,16 +102,58 @@ function baseCmd(detail: string): string {
   return words[1] && !words[1].startsWith('-') ? `${words[0]} ${words[1]}` : (words[0] ?? '')
 }
 
+// Bash command-prefixes already always-allowed, per project — loaded when the
+// history tab opens so the menu can hide "Always allow" for covered commands.
+const coveredBases = ref<Record<string, string[]>>({})
+
+async function loadCoveredBases(): Promise<void> {
+  const projectIds = [
+    ...new Set([...inbox.groups.map((g) => g.projectId), ...inbox.history.map((h) => h.projectId)]),
+  ]
+  const entries = await Promise.all(
+    projectIds.map(async (id) => [id, await inbox.allowedCommandBases(id)] as const),
+  )
+  coveredBases.value = Object.fromEntries(entries)
+}
+
+/** A command is already covered when an active rule prefix matches its base. */
+function alreadyAllowed(projectId: string, base: string): boolean {
+  return (coveredBases.value[projectId] ?? []).some(
+    (v) => base === v || base.startsWith(`${v} `),
+  )
+}
+
+/** Same eligibility as the history "Always allow" menu, plus: never for high
+ *  risk — one click must not both widen a rule and skip the high-risk confirm. */
+function canAlwaysAllow(item: PermissionRequest): boolean {
+  if (item.type !== 'tool_permission' || item.toolName !== 'Bash' || item.risk === 'high') {
+    return false
+  }
+  if (isDangerousCommand(item.detail)) return false
+  return !alreadyAllowed(item.projectId, baseCmd(item.detail))
+}
+
+async function alwaysAllowSimilar(item: PermissionRequest): Promise<void> {
+  confirmingId.value = null
+  await inbox.approveAlways(item.id)
+  await loadCoveredBases()
+}
+
 function openHistCtx(h: DecisionRecord, event: MouseEvent): void {
   // Any approved shell command can be always-allowed except the destructive set
   // — the risk classifier fails safe to `high` for ordinary unmatched commands,
-  // so gating on risk would hide the option for most vetted commands.
+  // so gating on risk would hide the option for most vetted commands. Hide it
+  // too once an active standing rule already covers the command.
+  const base = baseCmd(h.detail)
   const eligible =
-    h.type === 'tool_permission' && h.toolName === 'Bash' && !isDangerousCommand(h.detail)
+    h.type === 'tool_permission' &&
+    h.toolName === 'Bash' &&
+    !isDangerousCommand(h.detail) &&
+    !alreadyAllowed(h.projectId, base)
   histCtx.value = {
     id: h.id,
     detail: h.detail,
-    allowBase: eligible ? baseCmd(h.detail) || null : null,
+    allowBase: eligible ? base || null : null,
     // Clamped to the viewport so the menu never opens off-screen.
     x: Math.min(event.clientX, window.innerWidth - 345),
     y: Math.min(event.clientY, window.innerHeight - 130),
@@ -110,7 +163,10 @@ function openHistCtx(h: DecisionRecord, event: MouseEvent): void {
 async function allowFromHist(): Promise<void> {
   const ctx = histCtx.value
   histCtx.value = null
-  if (ctx?.allowBase) await inbox.alwaysAllow(ctx.id)
+  if (ctx?.allowBase) {
+    await inbox.alwaysAllow(ctx.id)
+    await loadCoveredBases() // so re-opening the menu now hides the option
+  }
 }
 
 async function removeHist(): Promise<void> {
@@ -223,6 +279,15 @@ const historyItems = computed(() => inbox.history)
             </template>
             <template v-else>
               <button class="btn-solid" data-testid="approve-btn" @click="approve(item)">Approve</button>
+              <button
+                v-if="canAlwaysAllow(item)"
+                class="btn-outline"
+                data-testid="always-allow-btn"
+                title="Creates a standing rule for this command and approves it now"
+                @click="alwaysAllowSimilar(item)"
+              >
+                Always allow similar
+              </button>
               <button class="btn-outline" data-testid="deny-btn" @click="deny(item)">Deny</button>
             </template>
           </div>

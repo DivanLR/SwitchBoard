@@ -23,7 +23,7 @@ describe('classifyRisk', () => {
       rule({
         position: 0,
         toolMatcher: 'Bash',
-        inputMatcher: { field: 'command', match: 'regex', pattern: '^rm ' },
+        inputMatcher: { field: 'command', pattern: '^rm ' },
         risk: 'high',
       }),
     ]
@@ -34,7 +34,6 @@ describe('classifyRisk', () => {
   it('classifies unmatched actions as high (fail-safe, FR-008a)', () => {
     const evaluation = classifyRisk([], 'SomeExoticTool', {})
     expect(evaluation.risk).toBe('high')
-    expect(evaluation.matchedRuleId).toBeNull()
   })
 
   it('matches tool wildcard and specific tools', () => {
@@ -45,7 +44,7 @@ describe('classifyRisk', () => {
   it('matches regex input matchers', () => {
     const regexRule = rule({
       toolMatcher: 'Bash',
-      inputMatcher: { field: 'command', match: 'regex', pattern: '^git (status|log)' },
+      inputMatcher: { field: 'command', pattern: '^git (status|log)' },
       risk: 'low',
     })
     expect(classifyRisk([regexRule], 'Bash', { command: 'git status' }).risk).toBe('low')
@@ -53,7 +52,7 @@ describe('classifyRisk', () => {
 
     const pathRule = rule({
       toolMatcher: 'Write',
-      inputMatcher: { field: 'file_path', match: 'regex', pattern: '^C:/project/' },
+      inputMatcher: { field: 'file_path', pattern: '^C:/project/' },
       risk: 'medium',
     })
     expect(classifyRisk([pathRule], 'Write', { file_path: 'C:/project/src/a.ts' }).risk).toBe('medium')
@@ -63,7 +62,7 @@ describe('classifyRisk', () => {
   it('treats invalid regular expressions as non-matching', () => {
     const bad = rule({
       toolMatcher: 'Bash',
-      inputMatcher: { field: 'command', match: 'regex', pattern: '([' },
+      inputMatcher: { field: 'command', pattern: '([' },
       risk: 'low',
     })
     expect(classifyRisk([bad], 'Bash', { command: 'anything' }).risk).toBe('high')

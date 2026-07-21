@@ -11,14 +11,6 @@ directories:
 files:
   - out/**
   - '!**/*.map'
-  - '!**/{.eslintrc.cjs,.prettierrc,.prettierignore,eslint.config.mjs}'
-  - '!**/{tsconfig*.json,vite.config.ts,electron.vite.config.ts,vitest.config.ts,playwright.config.ts}'
-  - '!**/{.env,.env.*,.npmrc}'
-  - '!src/**'
-  - '!specs/**'
-  - '!tests/**'
-  - '!scripts/**'
-  - '!docs/**'
   # Do NOT bundle the Agent SDK's standalone Claude Code CLI (~245 MB per
   # platform). The app drives the user's own installed `claude` (which every
   # Switchboard user has); resolveClaudeExecutable prefers it, and startSession

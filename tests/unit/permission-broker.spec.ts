@@ -249,6 +249,64 @@ describe('PermissionBroker lifecycle', () => {
     expect(rule.matcher).toEqual({ kind: 'command_prefix', value: 'make build' })
   })
 
+  it('approveAlways creates the rule from a pending item and approves it in one step', async () => {
+    const first = h.gate('Bash', { command: 'git status' })
+    await settle()
+    const [pending] = h.repos.requests.pending()
+    const { delivered, rule } = h.broker.approveAlways(pending.id)
+    expect(delivered).toBe(true)
+    expect(rule.matcher).toEqual({ kind: 'command_prefix', value: 'git status' })
+    expect((await first).behavior).toBe('allow')
+    expect(h.repos.requests.byId(pending.id)?.status).toBe('approved')
+
+    // The rule short-circuits the next matching command with no pending item.
+    const again = await h.gate('Bash', { command: 'git status --short' })
+    expect(again.behavior).toBe('allow')
+    expect(h.repos.requests.pending()).toHaveLength(0)
+  })
+
+  it('approveAlways refuses pending high risk, non-Bash, and already-decided items', async () => {
+    void h.gate('Bash', { command: 'make build --release' }) // fail-safe to high, not dangerous
+    await settle()
+    const [high] = h.repos.requests.pending()
+    expect(high.risk).toBe('high')
+    expect(() => h.broker.approveAlways(high.id)).toThrow(BrokerError)
+    h.broker.decide(high.id, 'deny')
+    expect(() => h.broker.approveAlways(high.id)).toThrow(BrokerError) // already decided
+
+    void h.gate('Bash', { command: 'rm -rf dist' })
+    await settle()
+    const [dangerous] = h.repos.requests.pending()
+    expect(() => h.broker.approveAlways(dangerous.id)).toThrow(BrokerError)
+    h.broker.decide(dangerous.id, 'deny')
+
+    // Outside the project folder, so task #17's in-folder auto-approve does not
+    // fire and it stays pending for the non-Bash refusal check.
+    const write = h.gate('Write', { file_path: 'C:\\other\\a.ts' })
+    await settle()
+    const [fileReq] = h.repos.requests.pending()
+    expect(() => h.broker.approveAlways(fileReq.id)).toThrow(BrokerError)
+    h.broker.decide(fileReq.id, 'approve')
+    await write
+  })
+
+  it('auto-approves file tools inside the session folder, prompts outside it', async () => {
+    // Inside the project: resolves allow immediately, no pending item.
+    const inside = await h.gate('Read', { file_path: 'C:\\proj\\alpha\\src\\main.ts' })
+    expect(inside.behavior).toBe('allow')
+    expect(h.repos.requests.pending()).toHaveLength(0)
+
+    // A relative path resolves against the project cwd → still inside.
+    expect((await h.gate('Write', { file_path: 'notes.md' })).behavior).toBe('allow')
+
+    // Traversal escaping the folder resolves outside → NOT auto-approved.
+    void h.gate('Edit', { file_path: 'C:\\proj\\alpha\\..\\escape.ts' })
+    // A path outside the folder → pending too.
+    void h.gate('Read', { file_path: 'C:\\elsewhere\\x.ts' })
+    await settle()
+    expect(h.repos.requests.pending()).toHaveLength(2)
+  })
+
   it('explains common commands in plain language (cd → folder access)', async () => {
     void h.gate('Bash', { command: 'cd C:\\proj\\sub' })
     await settle()
@@ -286,7 +344,7 @@ describe('PermissionBroker lifecycle', () => {
 
   it('approve-all approves pending non-high items only (FR-011)', async () => {
     void h.gate('Bash', { command: 'git status' }) // low
-    void h.gate('Edit', { file_path: 'a.ts' }) // medium
+    void h.gate('Edit', { file_path: 'C:\\other\\a.ts' }) // medium (outside project: not in-folder auto-approved)
     void h.gate('Bash', { command: 'rm -rf x' }) // high
     await settle()
     const outcome = h.broker.approveAllForProject(h.projectId)

@@ -19,8 +19,10 @@ onMounted(() => {
   void projects.loadSuggestions()
 })
 
+const stripSlash = (p: string): string => p.replace(/[\\/]+$/, '')
+
 const sessionName = computed(() => {
-  const trimmed = folder.value.trim().replace(/[\\/]+$/, '')
+  const trimmed = stripSlash(folder.value.trim())
   return trimmed.split(/[\\/]/).pop() || '—'
 })
 
@@ -40,7 +42,7 @@ async function startSession(): Promise<void> {
       // Pointing New session at an already-registered folder just opens it —
       // and starts a session if none is live.
       await projects.refresh()
-      const norm = (p: string): string => p.replace(/[\\/]+$/, '').toLowerCase()
+      const norm = (p: string): string => stripSlash(p).toLowerCase()
       const existing = projects.items.find((p) => norm(p.path) === norm(path))
       if (existing) {
         projects.select(existing.id)

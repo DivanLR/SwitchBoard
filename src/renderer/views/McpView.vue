@@ -5,15 +5,17 @@
 // chat drive the project's live Agent SDK session — which already has the MCP
 // tools — so every answer is a real query, not a mock.
 import { computed, nextTick, ref, watch } from 'vue'
-import type { ProjectListItem } from '@shared/ipc-types'
+import { isIpcError, type ProjectListItem } from '@shared/ipc-types'
 import type { SessionEvent } from '@shared/domain'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
+import { useProjectsStore } from '@renderer/stores/projects'
 import StreamEvent from '@renderer/components/StreamEvent.vue'
 import QuestionEvent from '@renderer/components/QuestionEvent.vue'
 import MarkdownText from '@renderer/components/MarkdownText.vue'
 
 const props = defineProps<{ project: ProjectListItem }>()
 const active = useActiveSessionStore()
+const projects = useProjectsStore()
 
 const name = computed(() => active.mcpTarget ?? '')
 const server = computed(
@@ -26,6 +28,15 @@ const liveSession = computed(() =>
   props.project.session && !props.project.session.endedAt ? props.project.session : null,
 )
 const working = computed(() => liveSession.value?.status === 'working')
+
+// This view's project (the reserved Database project) is no longer always the
+// selected project, so the active-session store may hold a different project's
+// conversation. Load this project's own session, mirroring SessionView.
+watch(
+  () => liveSession.value?.id ?? null,
+  (sessionId) => void active.open(sessionId),
+  { immediate: true },
+)
 
 const subtab = ref<'chat' | 'md'>('chat')
 const schemaDoc = ref<string | null>(null)
@@ -87,6 +98,28 @@ function askPrompt(n: string, q: string): string {
   )
 }
 
+// Every other MCP server this project has reported — denied when starting the
+// database-only session so only the chosen one is active.
+const otherServers = computed(() =>
+  (props.project.session?.mcpServers ?? []).map((s) => s.name).filter((n) => n !== name.value),
+)
+
+const sessionError = ref<string | null>(null)
+
+/** Start a session scoped to ONLY this MCP server (all others denied). */
+async function startDbSession(): Promise<void> {
+  sessionError.value = null
+  try {
+    await projects.startSession(props.project.id, false, false, otherServers.value)
+  } catch (e) {
+    sessionError.value = isIpcError(e)
+      ? e.code === 'ALREADY_ACTIVE'
+        ? 'Stop the current session first, then start the database-only session.'
+        : e.message
+      : String(e)
+  }
+}
+
 async function scan(): Promise<void> {
   if (!liveSession.value) return
   subtab.value = 'chat'
@@ -123,7 +156,7 @@ function answer(eventId: string, choice: string): void {
           ● {{ connected ? 'Connected' : status }}
         </span>
         <button class="back mono" data-testid="mcp-close" @click="active.openMcp(null)">
-          ← {{ project.name }}
+          ← {{ projects.selected?.name ?? 'back' }}
         </button>
       </div>
       <div class="tabs mono">
@@ -155,16 +188,27 @@ function answer(eventId: string, choice: string): void {
     <!-- No schema yet: prompt a scan -->
     <div v-if="showEmpty" class="empty" data-testid="mcp-empty">
       <div class="empty-ico">⛁</div>
-      <div class="empty-title">No schema map yet</div>
-      <div class="empty-sub">
-        Run a scan first — it walks the whole MCP (schemas, tables, relations, indexes) and writes
-        <span class="mono teal">db-schema.md</span>. Chatting then consults the map instead of
-        re-scanning.
-      </div>
-      <button class="btn-solid" data-testid="mcp-scan" :disabled="!liveSession" @click="scan()">
-        ▶ Scan database
-      </button>
-      <div v-if="!liveSession" class="empty-hint mono">Start a session for {{ project.name }} first.</div>
+      <template v-if="!liveSession">
+        <div class="empty-title">Start a database-only session</div>
+        <div class="empty-sub">
+          Opens a Claude Code session scoped to only <span class="mono teal">{{ name }}</span> — every
+          other MCP server is disabled. Then scan it to build
+          <span class="mono teal">db-schema.md</span> and chat with your database.
+        </div>
+        <button class="btn-solid" data-testid="mcp-start-session" @click="startDbSession()">
+          ▶ Start database session
+        </button>
+      </template>
+      <template v-else>
+        <div class="empty-title">No schema map yet</div>
+        <div class="empty-sub">
+          Run a scan first — it walks the whole MCP (schemas, tables, relations, indexes) and writes
+          <span class="mono teal">db-schema.md</span>. Chatting then consults the map instead of
+          re-scanning.
+        </div>
+        <button class="btn-solid" data-testid="mcp-scan" @click="scan()">▶ Scan database</button>
+      </template>
+      <div v-if="sessionError" class="empty-hint mono">{{ sessionError }}</div>
     </div>
 
     <!-- db-schema.md -->

@@ -4,13 +4,23 @@
 // whose promise resolves when the developer decides. Plan approvals are inbox
 // items shaped by FR-007a; AskUserQuestion routes to the stream, never the
 // inbox (FR-020).
+import { win32 } from 'node:path'
 import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk'
-import { isDangerousCommand, type PermissionRequest, type QuestionOption } from '@shared/domain'
+import {
+  isDangerousCommand,
+  type PermissionRequest,
+  type PermissionRule,
+  type QuestionOption,
+} from '@shared/domain'
 import type { InboxChangedPush } from '@shared/ipc-types'
 import { newId, nowIso, type Repositories } from '@main/store/repositories'
 import type { SessionManager } from '@main/sessions/session-manager'
 import { classifyRisk } from './risk-rules'
-import { deriveMatcher, evaluateStandingRules } from './standing-rules'
+import { deriveMatcher, evaluateStandingRules, isPathWithinProject, pathOf } from './standing-rules'
+
+/** File tools auto-approved without a prompt when their target is inside the
+ *  session's own project folder. */
+const CWD_AUTO_APPROVE_TOOLS = new Set(['Read', 'Write', 'Edit', 'NotebookEdit'])
 
 export class BrokerError extends Error {
   constructor(
@@ -67,18 +77,10 @@ interface CanUseToolContext {
     signal: AbortSignal
     title?: string
     description?: string
-    decisionReason?: string
-    toolUseID?: string
   }
 }
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v.length > 0 ? v : null)
-
-/** File name (last path segment) for a concise title. */
-function baseName(path: string): string {
-  const seg = path.split(/[/\\]/).filter(Boolean)
-  return seg[seg.length - 1] ?? path
-}
 
 /**
  * Short plain-language explanations for common shell commands (design ask:
@@ -123,7 +125,7 @@ function describeTool(toolName: string, input: Record<string, unknown>): {
   detail: string
 } {
   const command = str(input.command)
-  const path = str(input.file_path) ?? str(input.path) ?? str(input.notebook_path)
+  const path = pathOf(input)
   const url = str(input.url)
 
   if (toolName === 'Bash' && command) {
@@ -136,7 +138,7 @@ function describeTool(toolName: string, input: Record<string, unknown>): {
   }
   if (toolName === 'Write' && path) {
     return {
-      title: `Create or overwrite ${baseName(path)}`,
+      title: `Create or overwrite ${win32.basename(path)}`,
       explanation: `Claude wants to write the file ${path}.`,
       detail: str(input.content) ? `${path}\n\n${String(input.content).slice(0, 4000)}` : path,
     }
@@ -145,7 +147,7 @@ function describeTool(toolName: string, input: Record<string, unknown>): {
     const oldStr = str(input.old_string)
     const newStr = str(input.new_string)
     return {
-      title: `Edit ${baseName(path)}`,
+      title: `Edit ${win32.basename(path)}`,
       explanation: `Claude wants to change the file ${path}.`,
       detail:
         oldStr && newStr
@@ -155,7 +157,7 @@ function describeTool(toolName: string, input: Record<string, unknown>): {
   }
   if (toolName === 'Read' && path) {
     return {
-      title: `Read ${baseName(path)}`,
+      title: `Read ${win32.basename(path)}`,
       explanation: `Claude wants to read the file ${path}.`,
       detail: path,
     }
@@ -201,6 +203,7 @@ export class PermissionBroker {
     const session = this.repos.sessions.byId(context.sessionId)
     if (!session) return { behavior: 'deny', message: 'Session is not registered' }
     const projectId = session.projectId
+    const project = this.repos.projects.byId(projectId)
 
     // A standing rule or an enabled risk-level auto-approval (Allowed list tab)
     // short-circuits, recorded as rule_approved (FR-009b); otherwise enqueue.
@@ -209,11 +212,18 @@ export class PermissionBroker {
       context.toolName,
       context.input,
     )
+    // File tools targeting the session's OWN folder need no prompt — the session
+    // already owns read/write inside its working directory.
+    const withinOwnFolder =
+      CWD_AUTO_APPROVE_TOOLS.has(context.toolName) &&
+      project !== undefined &&
+      isPathWithinProject(project.path, context.input)
     const described = describeTool(context.toolName, context.input)
     const { risk } = classifyRisk(this.repos.riskRules.list(), context.toolName, context.input)
     const settings = this.repos.settings.get()
     const autoApproved =
       Boolean(standing) ||
+      withinOwnFolder ||
       (risk === 'low' && settings.autoApproveLow) ||
       (risk === 'medium' && settings.autoApproveMedium)
 
@@ -423,10 +433,45 @@ export class PermissionBroker {
     if (isDangerousCommand(request.detail)) {
       throw new BrokerError('RULE_NOT_ALLOWED', 'Destructive commands can never be auto-approved')
     }
+    return this.insertRuleForBashCommand(request)
+  }
+
+  /**
+   * From a PENDING inbox item ("Always allow similar"): derives and inserts the
+   * standing rule exactly as `alwaysAllow` does, then approves the request via
+   * the normal `decide()` path (marker, push, resolution — no duplicated
+   * settlement). Both calls are synchronous, so rule-then-approve is atomic
+   * within the event loop. Refuses high risk in addition to the
+   * dangerous/non-Bash/plan checks: one click both widens future auto-approval
+   * AND approves now, so it must not skip the explicit high-risk confirm step a
+   * plain Approve requires.
+   */
+  approveAlways(requestId: string): { delivered: boolean; rule: PermissionRule } {
+    const request = this.repos.requests.byId(requestId)
+    if (!request) throw new BrokerError('NOT_FOUND', 'Permission request not found')
+    if (request.status !== 'pending') {
+      throw new BrokerError('NOT_FOUND', 'The request has already been decided')
+    }
+    if (request.type !== 'tool_permission' || request.toolName !== 'Bash') {
+      throw new BrokerError('RULE_NOT_ALLOWED', 'Only pending shell commands can be always-allowed')
+    }
+    if (request.risk === 'high') {
+      throw new BrokerError('RULE_NOT_ALLOWED', 'High-risk commands require individual approval')
+    }
+    if (isDangerousCommand(request.detail)) {
+      throw new BrokerError('RULE_NOT_ALLOWED', 'Destructive commands can never be auto-approved')
+    }
+    const { rule } = this.insertRuleForBashCommand(request)
+    const { delivered } = this.decide(requestId, 'approve')
+    return { delivered, rule }
+  }
+
+  /** Shared matcher-derivation + dedupe-insert for `alwaysAllow`/`approveAlways`. */
+  private insertRuleForBashCommand(request: PermissionRequest): { rule: PermissionRule } {
     const matcher = deriveMatcher(request.detail)
     const base = matcher.value ?? ''
     if (base.length === 0) {
-      throw new BrokerError('RULE_NOT_ALLOWED', 'The history entry has no command to allow')
+      throw new BrokerError('RULE_NOT_ALLOWED', 'The request has no command to allow')
     }
     const existing = this.repos.standingRules
       .listForProject(request.projectId)

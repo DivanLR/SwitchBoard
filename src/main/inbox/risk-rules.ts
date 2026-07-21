@@ -7,7 +7,6 @@ import { newId } from '@main/store/repositories'
 
 export interface RiskEvaluation {
   risk: RiskLevel
-  matchedRuleId: string | null
 }
 
 const REGEX_SPECIALS = new Set(['.', '+', '^', '$', '{', '}', '(', ')', '|', '[', ']', '\\'])
@@ -58,10 +57,10 @@ export function classifyRisk(
   for (const rule of ordered) {
     if (rule.toolMatcher !== '*' && rule.toolMatcher !== toolName) continue
     if (rule.inputMatcher && !matchesInput(rule.inputMatcher, input)) continue
-    return { risk: rule.risk, matchedRuleId: rule.id }
+    return { risk: rule.risk }
   }
   // Fail-safe: anything not matched by a rule is high risk (FR-008a).
-  return { risk: 'high', matchedRuleId: null }
+  return { risk: 'high' }
 }
 
 interface DefaultRuleSeed {
@@ -76,7 +75,6 @@ const DEFAULT_RULE_SEEDS: DefaultRuleSeed[] = [
     toolMatcher: 'Bash',
     inputMatcher: {
       field: 'command',
-      match: 'regex',
       pattern:
         '\\b(rm|rmdir|del|rd|format|mkfs|dd)\\b|Remove-Item|git\\s+(push\\s+.*--force|reset\\s+--hard|clean)',
     },
@@ -87,7 +85,6 @@ const DEFAULT_RULE_SEEDS: DefaultRuleSeed[] = [
     toolMatcher: 'Bash',
     inputMatcher: {
       field: 'command',
-      match: 'regex',
       pattern:
         '^(git\\s+(status|log|diff|show|branch)|ls|dir|cat|type|pwd|node\\s+--version|npm\\s+(ls|view))\\b',
     },
@@ -98,7 +95,6 @@ const DEFAULT_RULE_SEEDS: DefaultRuleSeed[] = [
     toolMatcher: 'Bash',
     inputMatcher: {
       field: 'command',
-      match: 'regex',
       pattern:
         '^(npm\\s+(install|run|test|ci)|npx\\s+|dotnet\\s+(build|test|run)|git\\s+(add|commit|fetch|pull))\\b',
     },

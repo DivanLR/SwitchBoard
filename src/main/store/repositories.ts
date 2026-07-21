@@ -160,6 +160,13 @@ export class ProjectsRepo {
     this.db.prepare('UPDATE projects SET refs = ? WHERE id = ?').run(JSON.stringify(refs), id)
   }
 
+  /** Clears every project's references. Called once at startup so references are
+   *  ephemeral — a fresh app launch always starts with no refs (they survive
+   *  project switches within a run, but never across a restart). */
+  clearAllRefs(): void {
+    this.db.prepare('UPDATE projects SET refs = NULL').run()
+  }
+
   /** Reorders an active project to `toIndex` in the sidebar (drag / move up-down). */
   move(id: string, toIndex: number): void {
     const run = this.db.transaction(() => {
@@ -298,14 +305,14 @@ export class EventsRepo {
    * Contract-sanctioned in-place update (contracts/session-events.md): marker
    * and question status changes, tool result pairing, and final partial text.
    */
-  updatePayload<K extends EventKind>(id: string, payload: EventPayloadMap[K]): void {
-    this.db.prepare('UPDATE events SET payload = ? WHERE id = ?').run(JSON.stringify(payload), id)
-  }
-
-  updateKindAndPayload<K extends EventKind>(id: string, kind: K, payload: EventPayloadMap[K]): void {
-    this.db
-      .prepare('UPDATE events SET kind = ?, payload = ? WHERE id = ?')
-      .run(kind, JSON.stringify(payload), id)
+  updatePayload<K extends EventKind>(id: string, payload: EventPayloadMap[K], kind?: K): void {
+    if (kind !== undefined) {
+      this.db
+        .prepare('UPDATE events SET kind = ?, payload = ? WHERE id = ?')
+        .run(kind, JSON.stringify(payload), id)
+    } else {
+      this.db.prepare('UPDATE events SET payload = ? WHERE id = ?').run(JSON.stringify(payload), id)
+    }
   }
 
   setNoiseKind(id: string, noiseKind: string | null): void {
@@ -408,20 +415,14 @@ export class RequestsRepo {
     this.db.prepare("DELETE FROM permission_requests WHERE status != 'pending'").run()
   }
 
-  history(filter: { projectId?: string; before?: string; limit?: number }): DecisionRecord[] {
+  history(filter: { projectId?: string; limit?: number }): DecisionRecord[] {
     const rows = this.db
       .prepare(
         `SELECT * FROM permission_requests
-         WHERE status != 'pending' AND (? IS NULL OR projectId = ?) AND (? IS NULL OR resolvedAt < ?)
+         WHERE status != 'pending' AND (? IS NULL OR projectId = ?)
          ORDER BY resolvedAt DESC LIMIT ?`,
       )
-      .all(
-        filter.projectId ?? null,
-        filter.projectId ?? null,
-        filter.before ?? null,
-        filter.before ?? null,
-        filter.limit ?? 100,
-      ) as RequestRow[]
+      .all(filter.projectId ?? null, filter.projectId ?? null, filter.limit ?? 100) as RequestRow[]
     return rows.map(toRequest) as DecisionRecord[]
   }
 }

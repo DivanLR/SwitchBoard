@@ -100,14 +100,15 @@ const progressPct = computed(() => {
   return Math.round((d.tasksDone / d.tasksTotal) * 100)
 })
 
+const STATUS_DOT: Record<SpecStatus, string> = {
+  draft: 'var(--text-meta)',
+  ready: 'var(--amber)',
+  in_progress: 'var(--blue)',
+  complete: 'var(--green)',
+}
+
 function statusDot(status: SpecStatus): string {
-  return status === 'complete'
-    ? 'var(--green)'
-    : status === 'in_progress'
-      ? 'var(--blue)'
-      : status === 'ready'
-        ? 'var(--amber)'
-        : 'var(--text-meta)'
+  return STATUS_DOT[status]
 }
 
 // Sections for the docs parts: spec.md or plan.md (design: partDocs).
@@ -153,27 +154,12 @@ const suggested = computed(() => {
   }
 })
 
-// SUGGEST AN EDIT: free-text change request, optionally targeted via ✎.
-const editTarget = ref<string | null>(null)
-const specEdit = ref('')
+// ✎ Refine on a section/task/question sets a spec-edit target on the shared
+// composer (which stays visible under this view) — the reply lands in the chat.
+const emit = defineEmits<{ (e: 'set-target', label: string): void }>()
 
 function setTarget(label: string): void {
-  editTarget.value = label
-}
-
-const editPlaceholder = computed(() =>
-  editTarget.value
-    ? 'Describe the change for this part…'
-    : 'Describe a change to this spec — or hit ✎ on a section, task, or question to target it…',
-)
-
-function sendSpecEdit(): void {
-  const text = specEdit.value.trim()
-  if (!text || !detail.value) return
-  const where = editTarget.value ?? `specs/${detail.value.id}`
-  specEdit.value = ''
-  editTarget.value = null
-  void specs.runInSession(props.projectId, `✎ Spec edit → ${where}: ${text}`)
+  emit('set-target', label)
 }
 
 const partTabs: { id: Part; label: string }[] = [
@@ -436,25 +422,6 @@ const partTabs: { id: Part; label: string }[] = [
           </div>
         </div>
 
-        <!-- SUGGEST AN EDIT -->
-        <div class="edit-label mono">SUGGEST AN EDIT</div>
-        <div class="edit-bar">
-          <span class="edit-pen mono">✎</span>
-          <span v-if="editTarget" class="edit-target mono" data-testid="edit-target">
-            → {{ editTarget }}
-            <button class="edit-target-x" title="Clear target" @click="editTarget = null">✕</button>
-          </span>
-          <input
-            v-model="specEdit"
-            class="edit-input mono"
-            data-testid="spec-edit-input"
-            :placeholder="editPlaceholder"
-            @keydown.enter="sendSpecEdit"
-          />
-          <button class="edit-send mono" data-testid="spec-edit-send" @click="sendSpecEdit">
-            Send to project
-          </button>
-        </div>
       </template>
     </div>
   </div>
@@ -1041,82 +1008,6 @@ const partTabs: { id: Part; label: string }[] = [
 
 .task-refine:hover {
   color: var(--green);
-}
-
-/* SUGGEST AN EDIT */
-.edit-label {
-  font-size: 10px;
-  letter-spacing: 0.15em;
-  color: var(--text-faint);
-  margin: 18px 2px 8px;
-}
-
-.edit-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  background: var(--bg-card);
-  border: 1px solid #232937;
-  flex-wrap: wrap;
-}
-
-.edit-pen {
-  color: var(--amber);
-}
-
-.edit-target {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 10.5px;
-  color: var(--green);
-  background: rgba(52, 211, 153, 0.07);
-  border: 1px solid rgba(52, 211, 153, 0.35);
-  padding: 3px 9px;
-  white-space: nowrap;
-}
-
-.edit-target-x {
-  cursor: pointer;
-  color: var(--text-faint);
-  background: transparent;
-}
-
-.edit-target-x:hover {
-  color: var(--red);
-}
-
-.edit-input {
-  flex: 1;
-  min-width: 60px;
-  background: transparent;
-  border: none;
-  outline: none;
-  color: var(--text);
-  font-size: 12.5px;
-  padding: 0;
-}
-
-.edit-input:focus {
-  outline: none;
-}
-
-.edit-send {
-  flex-shrink: 0;
-  background: #1c2230;
-  border: 1px solid #3b4456;
-  color: var(--text-body);
-  font-weight: 600;
-  font-size: 11px;
-  padding: 6px 14px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.edit-send:hover {
-  border-color: var(--green);
-  color: var(--text-strong);
 }
 
 .muted {

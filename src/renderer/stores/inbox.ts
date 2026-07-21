@@ -66,6 +66,28 @@ export const useInboxStore = defineStore('inbox', {
       await window.switchboard.invoke('inbox.alwaysAllow', { requestId })
     },
 
+    /** From a pending item: server-side derives+inserts the rule, then approves. */
+    async approveAlways(requestId: string): Promise<boolean> {
+      const result = await window.switchboard.invoke('inbox.approveAlways', { requestId })
+      if (!result.delivered) {
+        this.undeliverableNotice =
+          'The decision could not be delivered: the originating session has ended. The item was marked expired.'
+      }
+      return result.delivered
+    },
+
+    /** Active Bash command-prefix values already allowed for a project (so the
+     *  history menu can hide "Always allow" for commands a rule already covers). */
+    async allowedCommandBases(projectId: string): Promise<string[]> {
+      const rules = await window.switchboard.invoke('rules.standing.list', {
+        projectId,
+        includeRevoked: false,
+      })
+      return rules
+        .filter((r) => r.toolName === 'Bash' && r.matcher.kind === 'command_prefix' && r.matcher.value)
+        .map((r) => r.matcher.value as string)
+    },
+
     async deleteHistory(requestId: string): Promise<void> {
       await window.switchboard.invoke('inbox.deleteHistory', { requestId })
       this.history = this.history.filter((h) => h.id !== requestId)

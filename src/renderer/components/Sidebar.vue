@@ -41,7 +41,7 @@ const modelSummary = computed(() => {
   const id = settings.settings?.workModel ?? 'default'
   if (id === 'default') return 'default model'
   const choice = MODEL_CHOICES.find((m) => m.id === id)
-  return choice ? choice.label.replace(/\s*\(.*\)$/, '') : id
+  return choice ? choice.label : id
 })
 
 // --- Theme + collapse toggles (design: icon buttons beside the logo) ---
@@ -151,15 +151,15 @@ const usageReset = computed(() => {
   return h > 0 ? `${h}h ${m}m` : `${m}m`
 })
 
-// --- MCP servers reported by the selected project's live session (design) ---
-// A session typically exposes many MCP servers; when the developer has
-// designated a database MCP (Settings → General), show only that one so the
-// section stays a single, purposeful row. Otherwise list them all.
-const mcpServers = computed(() => {
-  const s = projects.selected?.session
-  const all = s && !s.endedAt ? (s.mcpServers ?? []) : []
-  const db = settings.settings?.databaseMcpServer
-  return db ? all.filter((m) => m.name === db) : all
+// --- Global database session (design: one project-less MCP chat, bound to the
+// reserved "Database" project the main process auto-starts at launch — see
+// main/index.ts — rather than to whichever project happens to be selected). ---
+const dbProject = computed(() => projects.dbProject)
+const dbServerName = computed(() => settings.settings?.databaseMcpServer ?? null)
+const dbMcpStatus = computed(() => {
+  const session = dbProject.value?.session
+  if (!session || session.endedAt) return 'not started'
+  return session.mcpServers?.find((m) => m.name === dbServerName.value)?.status ?? 'connecting'
 })
 function mcpDot(status: string): string {
   const st = status.toLowerCase()
@@ -364,7 +364,7 @@ async function confirmRemoveNow(): Promise<void> {
 
     <div class="project-list">
       <div
-        v-for="item in projects.items"
+        v-for="item in projects.visibleItems"
         :key="item.id"
         class="project"
         :class="{
@@ -464,32 +464,31 @@ async function confirmRemoveNow(): Promise<void> {
           </div>
         </div>
       </div>
-      <div v-if="projects.loaded && projects.items.length === 0" class="empty mono">
+      <div v-if="projects.loaded && projects.visibleItems.length === 0" class="empty mono">
         No projects yet — press + to add one.
       </div>
     </div>
 
-    <!-- MCP servers this session can reach (design): database/tool over MCP -->
-    <template v-if="mcpServers.length > 0">
+    <!-- Global database MCP (design): a single project-less row, always present
+         once a database MCP is designated, opening its own chat/scan view. -->
+    <template v-if="dbServerName && dbProject">
       <div v-if="!collapsed" class="section-row">
         <span class="section-label mono">MCP</span>
       </div>
       <div
-        v-for="server in mcpServers"
-        :key="server.name"
         class="mcp-item"
-        :class="{ open: activeSession.mcpTarget === server.name }"
-        :title="`${server.name} — chat with it or scan its schema over MCP`"
-        :data-testid="`mcp-server-${server.name}`"
-        @click="activeSession.openMcp(server.name)"
+        :class="{ open: activeSession.mcpTarget === dbServerName }"
+        :title="`${dbServerName} — chat with it or scan its schema over MCP`"
+        :data-testid="`mcp-server-${dbServerName}`"
+        @click="activeSession.openMcp(dbServerName)"
       >
         <span class="mcp-ico">⛁</span>
         <template v-if="!collapsed">
           <div class="mcp-main">
-            <div class="mcp-name mono">{{ server.name }}</div>
-            <div class="mcp-sub mono">{{ server.status }}</div>
+            <div class="mcp-name mono">{{ dbServerName }}</div>
+            <div class="mcp-sub mono">{{ dbMcpStatus }}</div>
           </div>
-          <span class="mcp-dot" :style="{ background: mcpDot(server.status) }"></span>
+          <span class="mcp-dot" :style="{ background: mcpDot(dbMcpStatus) }"></span>
         </template>
         <span class="mcp-accent"></span>
       </div>
@@ -519,6 +518,10 @@ async function confirmRemoveNow(): Promise<void> {
           data-testid="counter-cost-value"
           >{{ costLabel }}</span
         >
+      </div>
+      <div class="stat mono" data-testid="counter-tokens">
+        <span>Tokens today</span
+        ><span class="val" data-testid="counter-tokens-value">{{ tokensLabel }}</span>
       </div>
     </div>
 
@@ -775,11 +778,16 @@ async function confirmRemoveNow(): Promise<void> {
 
 /* Remove control: hidden until the row is hovered, like a close affordance. */
 .remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
   font-size: 12px;
   line-height: 1;
   color: var(--text-faint);
   opacity: 0;
-  padding: 0 2px;
+  padding: 0;
 }
 
 .project:hover .remove {

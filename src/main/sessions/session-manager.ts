@@ -2,9 +2,13 @@
 // event persistence with per-session seq, and the fan-out hook the IPC layer
 // subscribes to (T012). Also owns git branch observation (FR-003).
 import { execFile, execFileSync } from 'node:child_process'
+import { promisify } from 'node:util'
+
+const execFileAsync = promisify(execFile)
 import type {
   EventKind,
   EventPayloadMap,
+  McpServer,
   ProjectCommand,
   QueuedTask,
   Session,
@@ -14,10 +18,19 @@ import type {
 import { SWALLOWABLE_KINDS } from '@shared/domain'
 import type { SessionStatusPush } from '@shared/ipc-types'
 import { newId, nowIso, type Repositories } from '@main/store/repositories'
+import { readSchemaDoc } from '@main/mcp/schema-doc'
 import { HostedSession, type PermissionGate } from './session'
 import type { EventSink } from './message-mapper'
 import { terseSystemPromptAppend } from './terse-mode'
 import { resolveClaudeExecutable } from './claude-executable'
+
+/** Set-union of known MCP server names with a session's reported roster, sorted
+ *  and de-duplicated. Never shrinks the known set. Pure/exported for unit test. */
+export function unionMcpServerNames(known: string[], servers: McpServer[]): string[] {
+  const set = new Set(known)
+  for (const s of servers) set.add(s.name)
+  return [...set].sort()
+}
 
 export class SessionManagerError extends Error {
   constructor(
@@ -83,30 +96,28 @@ export function readGitBranch(projectPath: string): string | null {
 }
 
 /** Working-tree line changes (git diff --shortstat), shown in the header (design reference). */
-export function readGitDiffStat(projectPath: string): Promise<{ adds: number; dels: number } | null> {
-  return new Promise((resolve) => {
-    execFile(
-      'git',
-      ['-C', projectPath, 'diff', '--numstat'],
-      { timeout: 4000, windowsHide: true },
-      (error, stdout) => {
-        if (error) {
-          resolve(null)
-          return
-        }
-        let adds = 0
-        let dels = 0
-        for (const line of stdout.split('\n')) {
-          const [a, d] = line.split('\t')
-          if (a === undefined || d === undefined) continue
-          // Binary files report "-" for both counts.
-          adds += Number.parseInt(a, 10) || 0
-          dels += Number.parseInt(d, 10) || 0
-        }
-        resolve({ adds, dels })
-      },
-    )
-  })
+export async function readGitDiffStat(
+  projectPath: string,
+): Promise<{ adds: number; dels: number } | null> {
+  let stdout: string
+  try {
+    ;({ stdout } = await execFileAsync('git', ['-C', projectPath, 'diff', '--numstat'], {
+      timeout: 4000,
+      windowsHide: true,
+    }))
+  } catch {
+    return null
+  }
+  let adds = 0
+  let dels = 0
+  for (const line of stdout.split('\n')) {
+    const [a, d] = line.split('\t')
+    if (a === undefined || d === undefined) continue
+    // Binary files report "-" for both counts.
+    adds += Number.parseInt(a, 10) || 0
+    dels += Number.parseInt(d, 10) || 0
+  }
+  return { adds, dels }
 }
 
 export class SessionManager {
@@ -130,7 +141,12 @@ export class SessionManager {
     }
   }
 
-  startSession(projectId: string, resume = false, bypassPermissions = false): Session {
+  startSession(
+    projectId: string,
+    resume = false,
+    bypassPermissions = false,
+    deniedMcpServers?: string[],
+  ): Session {
     const project = this.repos.projects.byId(projectId)
     if (!project) throw new SessionManagerError('NOT_FOUND', 'Project not found')
     const active = this.repos.sessions.activeForProject(projectId)
@@ -189,6 +205,16 @@ export class SessionManager {
     // 'global' or absent follows the global work model.
     const override = settings.projectModels?.[projectId]
     const workModel = override && override !== 'global' ? override : settings.workModel
+    // Any project that has previously run an MCP scan gets its schema map
+    // injected as context on every session start (no-op when never scanned).
+    const terseAppend = terseSystemPromptAppend({
+      terseMode: settings.terseMode,
+      terseLevel: settings.terseLevel,
+    })
+    const schemaDoc = readSchemaDoc(project.path)?.trim()
+    const schemaAppend = schemaDoc
+      ? `## Database schema (from a previous MCP scan)\n\n${schemaDoc}`
+      : null
     entry.session = new HostedSession({
       sessionId: row.id,
       projectPath: project.path,
@@ -196,14 +222,12 @@ export class SessionManager {
       refDirs: project.refs.map((r) => r.path),
       resumeSdkSessionId,
       systemPromptAppend:
-        terseSystemPromptAppend({
-          terseMode: settings.terseMode,
-          terseLevel: settings.terseLevel,
-        }) ?? undefined,
+        [terseAppend, schemaAppend].filter((s): s is string => Boolean(s)).join('\n\n') || undefined,
       claudeExecutablePath,
       workModel,
       planModel: settings.planModel,
       bypassPermissions,
+      deniedMcpServers,
       sink: this.makeSink(entry),
       gate: this.callbacks.gate,
       onStatusChange: (status, detail) => this.handleStatusChange(entry, status, detail),
@@ -229,6 +253,7 @@ export class SessionManager {
       // MCP servers from the init message — in-memory only, pushed to the sidebar.
       onMcpServers: (servers) => {
         entry.row.mcpServers = servers
+        this.rememberKnownMcpServers(servers)
         this.pushStatus(entry)
       },
       onTurnComplete: () => {
@@ -400,7 +425,7 @@ export class SessionManager {
         if (options?.persist) {
           if (liveEntry.persisted) {
             if (options.kind) {
-              this.repos.events.updateKindAndPayload(eventId, liveEntry.event.kind, payload)
+              this.repos.events.updatePayload(eventId, payload, liveEntry.event.kind)
             } else {
               this.repos.events.updatePayload(eventId, payload)
             }
@@ -468,5 +493,14 @@ export class SessionManager {
 
   private pushStatus(entry: HostedEntry): void {
     this.callbacks.onSessionStatus({ ...entry.row })
+  }
+
+  /** Persist the set-union of MCP server names, so the global database session
+   *  can derive its denylist at launch without a prior session this run. */
+  private rememberKnownMcpServers(servers: McpServer[]): void {
+    if (servers.length === 0) return
+    const current = this.repos.settings.get().knownMcpServers ?? []
+    const next = unionMcpServerNames(current, servers)
+    if (next.length !== current.length) this.repos.settings.set({ knownMcpServers: next })
   }
 }

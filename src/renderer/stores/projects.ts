@@ -17,7 +17,7 @@ export const useProjectsStore = defineStore('projects', {
     items: [],
     suggestions: [],
     selectedProjectId: null,
-    counters: { running: 0, needsYou: 0, pendingInbox: 0, costTodayUsd: 0, tokensToday: 0 },
+    counters: { running: 0, needsYou: 0, costTodayUsd: 0, tokensToday: 0 },
     loaded: false,
   }),
 
@@ -25,9 +25,18 @@ export const useProjectsStore = defineStore('projects', {
     selected(state): ProjectListItem | null {
       return state.items.find((p) => p.id === state.selectedProjectId) ?? null
     },
+    /** Real, user-registered projects (the reserved Database row excluded). */
+    visibleItems(state): ProjectListItem[] {
+      return state.items.filter((p) => !p.reserved)
+    },
+    /** The single reserved row backing the global Database MCP session. */
+    dbProject(state): ProjectListItem | null {
+      return state.items.find((p) => p.reserved) ?? null
+    },
     nameCollisions(state): Set<string> {
       const seen = new Map<string, number>()
       for (const item of state.items) {
+        if (item.reserved) continue // never collides with a user project named "Database"
         seen.set(item.name, (seen.get(item.name) ?? 0) + 1)
       }
       return new Set([...seen.entries()].filter(([, n]) => n > 1).map(([name]) => name))
@@ -40,8 +49,9 @@ export const useProjectsStore = defineStore('projects', {
       this.items = snapshot.projects
       this.counters = snapshot.counters
       this.loaded = true
-      if (!this.selectedProjectId && this.items.length > 0) {
-        this.selectedProjectId = this.items[0].id
+      // The reserved Database row must never become the default selection.
+      if (!this.selectedProjectId) {
+        this.selectedProjectId = this.items.find((p) => !p.reserved)?.id ?? null
       }
     },
 
@@ -84,11 +94,17 @@ export const useProjectsStore = defineStore('projects', {
       if (item) item.refs = refs
     },
 
-    async startSession(projectId: string, resume = false, bypassPermissions = false): Promise<Session> {
+    async startSession(
+      projectId: string,
+      resume = false,
+      bypassPermissions = false,
+      deniedMcpServers?: string[],
+    ): Promise<Session> {
       const session = await window.switchboard.invoke('sessions.start', {
         projectId,
         resume,
         bypassPermissions,
+        deniedMcpServers,
       })
       await this.refresh()
       return session

@@ -76,6 +76,9 @@ export interface HostedSessionOptions {
   planModel?: string
   /** Bypass all permission checks for this session (auto-approve every tool). */
   bypassPermissions?: boolean
+  /** MCP server names to DENY for this session, so a database-MCP session runs
+   *  with only its one server active (SDK settings.deniedMcpServers). */
+  deniedMcpServers?: string[]
   sink: EventSink
   gate: PermissionGate
   onStatusChange: (status: SessionStatus, detail?: string | null) => void
@@ -131,6 +134,11 @@ export class HostedSession {
         // SDK loads NO filesystem settings, so global skills and commands
         // never appear in the CLI's command list.
         settingSources: ['user', 'project', 'local'],
+        // Database-MCP session: deny every other MCP server so only the chosen
+        // one is active. Names come from what the session previously reported.
+        settings: this.options.deniedMcpServers?.length
+          ? { deniedMcpServers: this.options.deniedMcpServers.map((serverName) => ({ serverName })) }
+          : undefined,
         // Grant read/write within the project's own folder without prompting,
         // plus read access to any referenced folders (REFS chips).
         additionalDirectories: [this.options.projectPath, ...(this.options.refDirs ?? [])],
