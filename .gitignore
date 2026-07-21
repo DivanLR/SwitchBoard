@@ -9,6 +9,22 @@ dist/
 
 # --- Packaged executables / releases (published to GitHub manually) ---
 release/
+# Belt-and-suspenders: never commit build artifacts even if they land elsewhere.
+# Only the installer is attached to a GitHub release; nothing goes in git.
+*.exe
+*.blockmap
+latest*.yml
+*.nupkg
+
+# --- Secrets / signing material (never commit) ---
+*.pem
+*.key
+*.p12
+*.pfx
+*.local
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
 # --- Test and coverage artifacts (temporary) ---
 coverage/

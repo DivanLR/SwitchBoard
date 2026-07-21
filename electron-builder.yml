@@ -36,10 +36,10 @@ npmRebuild: false
 # Harden the packaged binary: disable ELECTRON_RUN_AS_NODE / node CLI inspect.
 afterPack: scripts/after-pack.mjs
 
-# GitHub-releases auto-update feed. electron-builder writes this into
-# app-update.yml; electron-updater reads it to find newer releases. Publishing a
-# release with `electron-builder --publish always` (needs GH_TOKEN) uploads the
-# installer + latest.yml so installed apps can upgrade themselves.
+# Identifies the GitHub repo for builds (writes app-update.yml). NOTE: releases
+# are published manually with ONLY the installer attached — no latest.yml — so
+# electron-updater's auto-update will not resolve newer versions. Re-attach
+# latest.yml (build with `electron-builder --publish always`) to re-enable it.
 publish:
   provider: github
   owner: DivanLR
@@ -52,9 +52,9 @@ protocols:
       - switchboard
 
 win:
+  # Only the NSIS installer is shipped — no portable build.
   target:
     - target: nsis
-    - target: portable
   icon: build/icon.ico
   # The application is not code-signed; Windows SmartScreen will warn on first
   # run until a signing certificate is configured.
@@ -65,6 +65,5 @@ nsis:
   allowToChangeInstallationDirectory: true
   artifactName: ${productName}-Setup-${version}.${ext}
   shortcutName: Switchboard
-
-portable:
-  artifactName: ${productName}-${version}-portable.${ext}
+  # Releases carry only the installer, so skip the differential .blockmap.
+  differentialPackage: false
