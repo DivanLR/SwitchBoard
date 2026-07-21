@@ -188,7 +188,7 @@ const updateLine = computed(() => {
     case 'checking':
       return 'Checking for updates…'
     case 'available':
-      return `Update ${s.version ?? ''} available — downloading…`
+      return `Update ${s.version ?? ''} available — click Download to get the installer.`
     case 'downloading':
       return `Downloading update… ${s.percent ?? 0}%`
     case 'ready':
@@ -703,8 +703,8 @@ const updateLine = computed(() => {
 
             <div class="group-label mono" style="margin-top: 8px">APP UPDATES</div>
             <div class="group-desc">
-              New versions are published to GitHub releases and downloaded automatically. When one is
-              ready, restart to apply it.
+              New versions are published to GitHub releases. Switchboard checks for a newer release
+              and, when one exists, opens its download page so you can run the installer.
             </div>
             <div class="update-status mono" data-testid="update-status">{{ updateLine }}</div>
             <div class="update-actions">
@@ -717,12 +717,12 @@ const updateLine = computed(() => {
                 Check for updates
               </button>
               <button
-                v-if="updates.ready"
+                v-if="updates.available"
                 class="btn-solid"
                 data-testid="update-install"
                 @click="updates.install()"
               >
-                Restart &amp; update
+                Download update
               </button>
             </div>
 

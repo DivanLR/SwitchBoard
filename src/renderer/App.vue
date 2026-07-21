@@ -59,7 +59,7 @@ onMounted(async () => {
     }),
     window.switchboard.on('push.updateStatus', (status) => {
       updates.apply(status)
-      if (status.state === 'available' || status.state === 'ready') updateDismissed.value = false
+      if (status.state === 'available') updateDismissed.value = false
     }),
   )
 
@@ -90,16 +90,16 @@ watch(() => selectedProject.value?.id, () => active.openMcp(null))
 
   <div v-else class="shell">
     <div
-      v-if="updates.ready && !updateDismissed"
+      v-if="updates.available && !updateDismissed"
       class="update-banner mono"
       data-testid="update-banner"
     >
       <span class="ub-dot"></span>
       <span class="ub-text">
-        A new version{{ updates.status.version ? ` (${updates.status.version})` : '' }} is ready.
+        A new version{{ updates.status.version ? ` (${updates.status.version})` : '' }} is available.
       </span>
       <button class="ub-install" data-testid="update-banner-install" @click="updates.install()">
-        restart &amp; update
+        download
       </button>
       <button class="ub-dismiss" data-testid="update-banner-dismiss" @click="updateDismissed = true">
         ✕

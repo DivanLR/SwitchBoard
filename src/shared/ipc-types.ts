@@ -176,6 +176,8 @@ export interface UpdateStatus {
   version?: string
   percent?: number
   message?: string
+  /** Release page URL to open for a manual installer download (state 'available'). */
+  url?: string
 }
 
 export type InvokeMethod = keyof InvokeMap

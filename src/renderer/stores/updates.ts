@@ -7,8 +7,9 @@ export const useUpdatesStore = defineStore('updates', {
   state: (): { status: UpdateStatus } => ({ status: { state: 'idle' } }),
 
   getters: {
-    ready: (s) => s.status.state === 'ready',
-    busy: (s) => s.status.state === 'checking' || s.status.state === 'downloading',
+    // A newer release exists; "install" opens its download page (no auto-update).
+    available: (s) => s.status.state === 'available',
+    busy: (s) => s.status.state === 'checking',
   },
 
   actions: {
@@ -18,6 +19,7 @@ export const useUpdatesStore = defineStore('updates', {
     async check(): Promise<void> {
       await window.switchboard.invoke('updates.check', undefined)
     },
+    /** Opens the latest release page in the browser to download the installer. */
     async install(): Promise<void> {
       await window.switchboard.invoke('updates.install', undefined)
     },

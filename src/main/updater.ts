@@ -1,38 +1,25 @@
-// GitHub-releases auto-update via electron-updater. On startup (packaged builds
-// only) it checks the configured GitHub repo for a newer release, downloads it
-// in the background, and signals the renderer so the user can restart to apply.
-// electron-builder writes the feed URL into app-update.yml from the `publish`
-// config, so no URL is hard-coded here.
-import { app } from 'electron'
-import electronUpdater from 'electron-updater'
+// Update check via the GitHub Releases API. Releases ship the installer only
+// (no electron-updater `latest.yml` feed), so instead of a silent background
+// download this asks GitHub for the latest release, compares its tag to the
+// running version, and — when newer — points the user at the release page to
+// download and run the installer. No latest.yml means no YAML parse errors.
+import { app, shell } from 'electron'
 import type { UpdateStatus } from '@shared/ipc-types'
 
-const { autoUpdater } = electronUpdater
+const REPO = 'DivanLR/SwitchBoard'
+const RELEASES_PAGE = `https://github.com/${REPO}/releases/latest`
 
 export interface UpdaterDeps {
   onStatus: (status: UpdateStatus) => void
 }
 
 let deps: UpdaterDeps | null = null
+/** Release page for the newest version seen by the last check (for installNow). */
+let latestUrl: string = RELEASES_PAGE
 
 export function initUpdater(d: UpdaterDeps): void {
   deps = d
-  autoUpdater.autoDownload = true
-  autoUpdater.autoInstallOnAppQuit = true
-  // Releases are published as GitHub pre-releases; without this the updater
-  // silently skips every one of them and always reports "no update".
-  autoUpdater.allowPrerelease = true
-
-  autoUpdater.on('checking-for-update', () => emit({ state: 'checking' }))
-  autoUpdater.on('update-available', (info) => emit({ state: 'available', version: info.version }))
-  autoUpdater.on('update-not-available', () => emit({ state: 'none' }))
-  autoUpdater.on('download-progress', (p) =>
-    emit({ state: 'downloading', percent: Math.round(p.percent) }),
-  )
-  autoUpdater.on('update-downloaded', (info) => emit({ state: 'ready', version: info.version }))
-  autoUpdater.on('error', (err) => emit({ state: 'error', message: err?.message ?? String(err) }))
-
-  // Only meaningful in a packaged build with an update feed.
+  // Check once on startup in packaged builds; dev builds check only on demand.
   if (app.isPackaged) void check()
 }
 
@@ -40,21 +27,40 @@ function emit(status: UpdateStatus): void {
   deps?.onStatus(status)
 }
 
+/** True when semver-ish string `a` is strictly newer than `b` (numeric compare). */
+function isNewer(a: string, b: string): boolean {
+  const pa = a.split('.').map((n) => parseInt(n, 10) || 0)
+  const pb = b.split('.').map((n) => parseInt(n, 10) || 0)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0)
+    if (diff !== 0) return diff > 0
+  }
+  return false
+}
+
 export async function check(): Promise<UpdateStatus['state']> {
-  if (!app.isPackaged) {
+  emit({ state: 'checking' })
+  try {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Switchboard-Updater' },
+    })
+    if (!res.ok) throw new Error(`GitHub API returned ${res.status}`)
+    const release = (await res.json()) as { tag_name?: string; html_url?: string }
+    const latest = (release.tag_name ?? '').replace(/^v/i, '').trim()
+    if (latest && isNewer(latest, app.getVersion())) {
+      latestUrl = release.html_url ?? RELEASES_PAGE
+      emit({ state: 'available', version: latest, url: latestUrl })
+      return 'available'
+    }
     emit({ state: 'none' })
     return 'none'
-  }
-  try {
-    await autoUpdater.checkForUpdates()
-    return 'checking'
   } catch (err) {
     emit({ state: 'error', message: err instanceof Error ? err.message : String(err) })
     return 'error'
   }
 }
 
-/** Quit and install a downloaded update (no-op if none is ready). */
+/** Open the release page in the browser so the user can download the installer. */
 export function installNow(): void {
-  autoUpdater.quitAndInstall()
+  void shell.openExternal(latestUrl)
 }
