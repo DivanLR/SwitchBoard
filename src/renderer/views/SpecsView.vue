@@ -571,20 +571,20 @@ const partTabs: { id: Part; label: string }[] = [
 
 .sc-status.ready {
   color: var(--amber);
-  border-color: rgba(232, 180, 90, 0.4);
-  background: rgba(232, 180, 90, 0.07);
+  border-color: rgba(154, 111, 42, 0.4);
+  background: rgba(154, 111, 42, 0.07);
 }
 
 .sc-status.in_progress {
   color: var(--blue);
-  border-color: rgba(110, 168, 232, 0.4);
-  background: rgba(110, 168, 232, 0.07);
+  border-color: rgba(58, 98, 145, 0.4);
+  background: rgba(58, 98, 145, 0.07);
 }
 
 .sc-status.complete {
   color: var(--green);
-  border-color: rgba(62, 207, 154, 0.35);
-  background: rgba(62, 207, 154, 0.06);
+  border-color: rgba(30, 122, 92, 0.35);
+  background: rgba(30, 122, 92, 0.06);
 }
 
 .sc-path {
@@ -676,8 +676,8 @@ const partTabs: { id: Part; label: string }[] = [
 .pt-badge {
   font-size: 10px;
   color: var(--amber);
-  background: rgba(232, 180, 90, 0.13);
-  border: 1px solid rgba(232, 180, 90, 0.35);
+  background: rgba(154, 111, 42, 0.13);
+  border: 1px solid rgba(154, 111, 42, 0.35);
   padding: 0 6px;
   line-height: 15px;
 }
@@ -760,7 +760,7 @@ const partTabs: { id: Part; label: string }[] = [
 
 .q-card.open {
   background: var(--bg-card);
-  border: 1px solid rgba(232, 180, 90, 0.3);
+  border: 1px solid rgba(154, 111, 42, 0.3);
 }
 
 .q-card.resolved {
@@ -850,8 +850,8 @@ const partTabs: { id: Part; label: string }[] = [
   align-items: center;
   gap: 12px;
   padding: 13px 15px;
-  background: rgba(62, 207, 154, 0.05);
-  border: 1px solid rgba(62, 207, 154, 0.35);
+  background: rgba(30, 122, 92, 0.05);
+  border: 1px solid rgba(30, 122, 92, 0.35);
   flex-wrap: wrap;
 }
 
@@ -971,7 +971,7 @@ const partTabs: { id: Part; label: string }[] = [
 .phase-start {
   font-size: 10.5px;
   color: var(--green);
-  border: 1px solid rgba(62, 207, 154, 0.35);
+  border: 1px solid rgba(30, 122, 92, 0.35);
   padding: 2px 9px;
   cursor: pointer;
   user-select: none;
@@ -979,7 +979,7 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .phase-start:hover {
-  background: rgba(62, 207, 154, 0.08);
+  background: rgba(30, 122, 92, 0.08);
 }
 
 .phase-tasks {
@@ -1071,8 +1071,8 @@ const partTabs: { id: Part; label: string }[] = [
   gap: 7px;
   font-size: 10.5px;
   color: var(--green);
-  background: rgba(62, 207, 154, 0.07);
-  border: 1px solid rgba(62, 207, 154, 0.35);
+  background: rgba(30, 122, 92, 0.07);
+  border: 1px solid rgba(30, 122, 92, 0.35);
   padding: 3px 9px;
   white-space: nowrap;
 }

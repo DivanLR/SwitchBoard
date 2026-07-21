@@ -17,6 +17,8 @@ interface ActiveSessionState {
   selectedAgentId: string | null
   /** Text another component asks the composer to append (e.g. @path from a file drop). */
   composerInsert: string | null
+  /** MCP server name whose Database MCP view is open, or null for the session. */
+  mcpTarget: string | null
 }
 
 const PAGE_SIZE = 300
@@ -32,6 +34,7 @@ export const useActiveSessionStore = defineStore('activeSession', {
     focusEventId: null,
     selectedAgentId: null,
     composerInsert: null,
+    mcpTarget: null,
   }),
 
   getters: {
@@ -101,6 +104,12 @@ export const useActiveSessionStore = defineStore('activeSession', {
     /** Open (or close, with null) a subagent's chat view. */
     selectAgent(agentId: string | null): void {
       this.selectedAgentId = agentId
+    },
+
+    /** Open (or close, with null) the Database MCP view for a server. */
+    openMcp(name: string | null): void {
+      this.mcpTarget = name
+      if (name) this.selectedAgentId = null
     },
 
     async answerQuestion(eventId: string, choice: string): Promise<void> {

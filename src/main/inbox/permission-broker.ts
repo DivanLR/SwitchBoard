@@ -5,7 +5,7 @@
 // items shaped by FR-007a; AskUserQuestion routes to the stream, never the
 // inbox (FR-020).
 import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk'
-import type { PermissionRequest, QuestionOption } from '@shared/domain'
+import { isDangerousCommand, type PermissionRequest, type QuestionOption } from '@shared/domain'
 import type { InboxChangedPush } from '@shared/ipc-types'
 import { newId, nowIso, type Repositories } from '@main/store/repositories'
 import type { SessionManager } from '@main/sessions/session-manager'
@@ -404,8 +404,10 @@ export class PermissionBroker {
    * command in history → always allow). The matcher is DERIVED server-side from
    * the recorded command (`detail` holds it verbatim for Bash), never taken
    * from the caller — a renderer must not be able to widen a rule beyond the
-   * action shown. Low or medium risk only. An overlapping active rule is
-   * reused instead of stacking a duplicate.
+   * action shown. Any approved command is eligible EXCEPT the destructive set
+   * (`isDangerousCommand`); the risk classifier's fail-safe-to-high must not bar
+   * ordinary vetted commands. An overlapping active rule is reused instead of
+   * stacking a duplicate.
    */
   alwaysAllow(requestId: string) {
     const request = this.repos.requests.byId(requestId)
@@ -413,14 +415,14 @@ export class PermissionBroker {
     if (request.type === 'plan_approval') {
       throw new BrokerError('RULE_NOT_ALLOWED', 'Plan approvals never create standing rules')
     }
-    if (request.risk === 'high') {
-      throw new BrokerError('RULE_NOT_ALLOWED', 'High-risk actions are not eligible for standing rules')
-    }
     if (request.status === 'pending') {
       throw new BrokerError('RULE_NOT_ALLOWED', 'Rules are created from decided history entries')
     }
     if (request.toolName !== 'Bash') {
       throw new BrokerError('RULE_NOT_ALLOWED', 'Only shell commands can be always-allowed from history')
+    }
+    if (isDangerousCommand(request.detail)) {
+      throw new BrokerError('RULE_NOT_ALLOWED', 'Destructive commands can never be auto-approved')
     }
     const matcher = deriveMatcher('Bash', { command: request.detail })
     const base = matcher.value ?? ''

@@ -9,11 +9,16 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
 })
 
-test('tokens today appears and increases after a completed turn', async ({ page }) => {
-  await expect(page.getByTestId('counter-tokens')).toContainText('Tokens today')
-  await expect(page.getByTestId('counter-tokens-value')).toHaveText('0')
+test('session usage meter shows token spend and increases after a completed turn', async ({
+  page,
+}) => {
+  // The design moved token spend out of the stats card into the session-usage
+  // meter, which shows once a session reports rate-limit utilization.
+  await page.evaluate(() => window.__mock.setUsage('s-alpha', 40, 120, 'five_hour'))
+  const tokens = page.getByTestId('usage-tokens')
+  await expect(tokens).toHaveText('0 tok')
   await page.evaluate(() => window.__mock.completeTurn('s-alpha'))
-  await expect(page.getByTestId('counter-tokens-value')).not.toHaveText('0')
+  await expect(tokens).not.toHaveText('0 tok')
 })
 
 test('settings exposes planning and work model cards', async ({ page }) => {
@@ -57,7 +62,7 @@ test('the session usage meter shows when a session reports rate-limit usage', as
   const meter = page.getByTestId('usage-meter')
   await expect(meter).toBeVisible()
   await expect(meter).toContainText('72% of 5h limit')
-  await expect(meter).toContainText('resets')
+  await expect(meter).toContainText('Resets in')
 })
 
 test('typing "/" lists many available skill commands (not just 6)', async ({ page }) => {

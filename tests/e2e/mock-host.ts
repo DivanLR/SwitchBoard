@@ -11,6 +11,10 @@ export interface MockSessionSeed {
   status: 'working' | 'needs_you' | 'done' | 'error'
   branch?: string
   startedAt?: string
+  usageUtilization?: number
+  usageResetsAt?: number
+  usageLimitType?: string
+  mcpServers?: { name: string; status: string }[]
 }
 
 export interface MockProjectSeed {
@@ -33,6 +37,7 @@ export interface MockDriver {
   ) => void
   endSession: (sessionId: string) => void
   setSpecKit: (projectId: string, state: Record<string, unknown>) => void
+  setMcpSchema: (projectId: string, content: string) => void
   setUsage: (sessionId: string, utilization: number, resetsInMinutes: number, limitType: string) => void
   emitLines: (sessionId: string, lines: string[]) => void
   raisePermission: (options: {
@@ -79,6 +84,7 @@ export function installMockHost(scenario: MockScenario): void {
     usageUtilization: number | null
     usageResetsAt: number | null
     usageLimitType: string | null
+    mcpServers: { name: string; status: string }[]
     startedAt: string
     endedAt: string | null
     endReason: string | null
@@ -117,9 +123,10 @@ export function installMockHost(scenario: MockScenario): void {
         branch: p.session.branch ?? 'main',
         diffAdds: 12,
         diffDels: 4,
-        usageUtilization: null,
-        usageResetsAt: null,
-        usageLimitType: null,
+        usageUtilization: p.session.usageUtilization ?? null,
+        usageResetsAt: p.session.usageResetsAt ?? null,
+        usageLimitType: p.session.usageLimitType ?? null,
+        mcpServers: p.session.mcpServers ?? [],
         startedAt: p.session.startedAt ?? now(),
         endedAt: null,
         endReason: null,
@@ -145,6 +152,7 @@ export function installMockHost(scenario: MockScenario): void {
   const markerByRequest = new Map<string, AnyRecord>()
   const projectCommands = new Map<string, { name: string; description?: string }[]>()
   const specKitByProject = new Map<string, AnyRecord>()
+  const mcpSchemaByProject = new Map<string, string>()
   const standingRules: AnyRecord[] = []
   let costToday = 0
   let tokensToday = 0
@@ -436,6 +444,7 @@ export function installMockHost(scenario: MockScenario): void {
       specKitByProject.set(String(req.projectId), installed)
       return installed
     },
+    'mcp.readSchema': (req) => ({ content: mcpSchemaByProject.get(String(req.projectId)) ?? null }),
     'specs.runInSession': (req) => {
       let session = [...sessions.values()].find(
         (s) => s.projectId === req.projectId && !s.endedAt,
@@ -465,6 +474,7 @@ export function installMockHost(scenario: MockScenario): void {
         usageUtilization: null,
         usageResetsAt: null,
         usageLimitType: null,
+        mcpServers: [],
         startedAt: now(),
         endedAt: null,
         endReason: null,
@@ -561,7 +571,14 @@ export function installMockHost(scenario: MockScenario): void {
       // History-based (design): a decided Bash entry creates a command rule.
       const request = decisions.find((d) => d.id === req.requestId)
       if (!request) throw { code: 'NOT_FOUND', message: 'Not found' }
-      if (request.risk === 'high' || request.type === 'plan_approval' || request.toolName !== 'Bash') {
+      // Mirrors @shared/domain isDangerousCommand — inlined because this host is
+      // serialised into the page (addInitScript), so it can't call an import.
+      const dangerous = /\b(rm|rmdir|del|rd|format|mkfs|dd|sudo|doas)\b|Remove-Item|git\s+(push|reset\s+--hard|clean)\b/i
+      if (
+        request.type === 'plan_approval' ||
+        request.toolName !== 'Bash' ||
+        dangerous.test(String(request.detail ?? ''))
+      ) {
         throw { code: 'RULE_NOT_ALLOWED', message: 'Not eligible' }
       }
       // Flag-aware two-token base, as the real host derives server-side.
@@ -676,6 +693,7 @@ export function installMockHost(scenario: MockScenario): void {
       push('push.projectCommands', { projectId, commands: shaped })
     },
     setSpecKit: (projectId, state) => specKitByProject.set(projectId, state),
+    setMcpSchema: (projectId, content) => mcpSchemaByProject.set(projectId, content),
     setUsage: (sessionId, utilization, resetsInMinutes, limitType) => {
       const s = sessions.get(sessionId)
       if (!s) return
@@ -791,7 +809,12 @@ export function twoProjectScenario(): MockScenario {
         id: 'p-alpha',
         name: 'alpha',
         path: 'C:\\work\\alpha',
-        session: { id: 's-alpha', status: 'working', branch: 'main' },
+        session: {
+          id: 's-alpha',
+          status: 'working',
+          branch: 'main',
+          mcpServers: [{ name: 'postgres — production', status: 'connected' }],
+        },
       },
       {
         id: 'p-beta',

@@ -4,7 +4,7 @@
 // "approve all"), item cards with risk chip / explanation / detail box /
 // approve+deny, and the history list of ✓/✗ rows (FR-007..013, SC-004).
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import type { DecisionRecord, PermissionRequest } from '@shared/domain'
+import { isDangerousCommand, type DecisionRecord, type PermissionRequest } from '@shared/domain'
 import { useInboxStore } from '@renderer/stores/inbox'
 import { useProjectsStore } from '@renderer/stores/projects'
 
@@ -92,7 +92,11 @@ function baseCmd(detail: string): string {
 }
 
 function openHistCtx(h: DecisionRecord, event: MouseEvent): void {
-  const eligible = h.type === 'tool_permission' && h.toolName === 'Bash' && h.risk !== 'high'
+  // Any approved shell command can be always-allowed except the destructive set
+  // — the risk classifier fails safe to `high` for ordinary unmatched commands,
+  // so gating on risk would hide the option for most vetted commands.
+  const eligible =
+    h.type === 'tool_permission' && h.toolName === 'Bash' && !isDangerousCommand(h.detail)
   histCtx.value = {
     id: h.id,
     detail: h.detail,
@@ -360,8 +364,8 @@ const historyItems = computed(() => inbox.history)
 .notice {
   margin: 10px 12px 0;
   padding: 8px 10px;
-  border: 1px solid rgba(232, 180, 90, 0.4);
-  border-radius: 6px;
+  border: 1px solid rgba(154, 111, 42, 0.4);
+  border-radius: 10px;
   color: var(--amber);
   font-size: 10.5px;
   line-height: 1.5;
@@ -429,7 +433,7 @@ const historyItems = computed(() => inbox.history)
 .item {
   background: var(--bg-card);
   border: 1px solid var(--border-card);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 11px 12px;
   margin-bottom: 8px;
   animation: sbIn 0.25s ease;
@@ -459,7 +463,7 @@ const historyItems = computed(() => inbox.history)
   color: var(--text-tab);
   background: var(--bg-chip);
   border: 1px solid var(--border-strong);
-  border-radius: 4px;
+  border-radius: 10px;
   padding: 1px 6px;
   white-space: nowrap;
 }
@@ -487,7 +491,7 @@ const historyItems = computed(() => inbox.history)
   color: var(--detail);
   background: var(--bg-code);
   border: 1px solid var(--border-code);
-  border-radius: 5px;
+  border-radius: 10px;
   padding: 6px 9px;
   margin-top: 8px;
   white-space: pre-wrap;
@@ -646,7 +650,7 @@ const historyItems = computed(() => inbox.history)
   color: var(--detail);
   background: var(--bg-code);
   border: 1px solid var(--border-code);
-  border-radius: 6px;
+  border-radius: 10px;
   padding: 6px 9px;
   white-space: pre-wrap;
   word-break: break-word;

@@ -215,6 +215,11 @@ export class SessionManager {
         })
         this.pushStatus(entry)
       },
+      // MCP servers from the init message — in-memory only, pushed to the sidebar.
+      onMcpServers: (servers) => {
+        entry.row.mcpServers = servers
+        this.pushStatus(entry)
+      },
       onTurnComplete: () => {
         this.observeBranch(entry)
         // A completed turn that left the session idle pulls the next planned task.

@@ -66,16 +66,7 @@ function initials(name: string): string {
 
 // Stable per-project accent stripe on the row's right edge — identifies the
 // project at a glance, especially in the collapsed rail.
-const ACCENTS = [
-  '#3ecf9a',
-  '#6ea8e8',
-  '#e8b45a',
-  '#e06c55',
-  '#b48ce8',
-  '#5ad4d4',
-  '#e87ab0',
-  '#a8d45a',
-]
+const ACCENTS = ['#3a6291', '#9a6f2a', '#6f4d8f', '#1e7a5c', '#8f3b2c', '#457a7a']
 function accentFor(id: string): string {
   let hash = 0
   for (const ch of id) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
@@ -165,6 +156,18 @@ const usageReset = computed(() => {
   const m = mins % 60
   return h > 0 ? `${h}h ${m}m` : `${m}m`
 })
+
+// --- MCP servers reported by the selected project's live session (design) ---
+const mcpServers = computed(() => {
+  const s = projects.selected?.session
+  return s && !s.endedAt ? (s.mcpServers ?? []) : []
+})
+function mcpDot(status: string): string {
+  const st = status.toLowerCase()
+  if (st === 'connected') return 'var(--green)'
+  if (st === 'failed' || st === 'error') return 'var(--red)'
+  return 'var(--amber)'
+}
 
 // --- Context menu (right-click) + inline rename ---
 const ctx = ref<{ id: string; name: string; x: number; y: number } | null>(null)
@@ -470,6 +473,32 @@ async function confirmRemoveNow(): Promise<void> {
       </div>
     </div>
 
+    <!-- MCP servers this session can reach (design): database/tool over MCP -->
+    <template v-if="mcpServers.length > 0">
+      <div v-if="!collapsed" class="section-row">
+        <span class="section-label mono">MCP</span>
+      </div>
+      <div
+        v-for="server in mcpServers"
+        :key="server.name"
+        class="mcp-item"
+        :class="{ open: activeSession.mcpTarget === server.name }"
+        :title="`${server.name} — chat with it or scan its schema over MCP`"
+        :data-testid="`mcp-server-${server.name}`"
+        @click="activeSession.openMcp(server.name)"
+      >
+        <span class="mcp-ico">⛁</span>
+        <template v-if="!collapsed">
+          <div class="mcp-main">
+            <div class="mcp-name mono">{{ server.name }}</div>
+            <div class="mcp-sub mono">{{ server.status }}</div>
+          </div>
+          <span class="mcp-dot" :style="{ background: mcpDot(server.status) }"></span>
+        </template>
+        <span class="mcp-accent"></span>
+      </div>
+    </template>
+
     <div class="settings-row" data-testid="open-settings" @click="emit('open-settings')">
       <span class="gear mono">⚙</span>
       <template v-if="!collapsed">
@@ -495,10 +524,6 @@ async function confirmRemoveNow(): Promise<void> {
           >{{ costLabel }}</span
         >
       </div>
-      <div class="stat mono" data-testid="counter-tokens">
-        <span>Tokens today</span
-        ><span class="val" data-testid="counter-tokens-value">{{ tokensLabel }}</span>
-      </div>
     </div>
 
     <div v-if="!collapsed && usagePct !== null" class="usage-card" data-testid="usage-meter">
@@ -510,8 +535,8 @@ async function confirmRemoveNow(): Promise<void> {
         <div class="usage-fill" :style="{ width: `${usagePct}%`, background: usageColor }"></div>
       </div>
       <div class="usage-foot mono">
-        <span>{{ tokensLabel }} tok</span>
-        <span v-if="usageReset">resets {{ usageReset }}</span>
+        <span data-testid="usage-tokens">{{ tokensLabel }} tok</span>
+        <span v-if="usageReset">Resets in {{ usageReset }}</span>
       </div>
     </div>
 
@@ -639,7 +664,7 @@ async function confirmRemoveNow(): Promise<void> {
 .project.drop-ref {
   outline: 1px dashed var(--green);
   outline-offset: -1px;
-  background: rgba(62, 207, 154, 0.06);
+  background: rgba(30, 122, 92, 0.06);
 }
 
 .sidebar.collapsed .row {
@@ -692,7 +717,7 @@ async function confirmRemoveNow(): Promise<void> {
   position: relative;
   margin: 0 8px 2px;
   padding: 9px 10px;
-  border-radius: 6px;
+  border-radius: 10px;
   cursor: pointer;
 }
 
@@ -724,7 +749,7 @@ async function confirmRemoveNow(): Promise<void> {
   inset: 0;
   background: var(--bg-active);
   border: 1px solid var(--border-strong);
-  border-radius: 6px;
+  border-radius: 10px;
 }
 
 .content {
@@ -776,8 +801,8 @@ async function confirmRemoveNow(): Promise<void> {
   align-items: center;
   justify-content: center;
   font-size: 17px;
-  background: rgba(224, 108, 85, 0.1);
-  border: 1px solid rgba(224, 108, 85, 0.35);
+  background: rgba(143, 59, 44, 0.1);
+  border: 1px solid rgba(143, 59, 44, 0.35);
   margin-bottom: 10px;
 }
 
@@ -907,7 +932,7 @@ async function confirmRemoveNow(): Promise<void> {
   min-width: 40px;
   background: var(--bg);
   border: 1px solid var(--green);
-  border-radius: 6px;
+  border-radius: 10px;
   outline: none;
   color: var(--text-strong);
   font-size: 12px;
@@ -918,7 +943,7 @@ async function confirmRemoveNow(): Promise<void> {
   margin: 8px 10px 0;
   padding: 9px 12px;
   border: 1px solid var(--border-card-alt);
-  border-radius: 12px;
+  border-radius: 10px;
 }
 
 .usage-head {
@@ -932,7 +957,7 @@ async function confirmRemoveNow(): Promise<void> {
 .usage-bar {
   height: 5px;
   border-radius: 99px;
-  background: var(--bg-code);
+  background: #1b202c;
   overflow: hidden;
 }
 
@@ -948,6 +973,79 @@ async function confirmRemoveNow(): Promise<void> {
   font-size: 10px;
   color: var(--text-faint);
   margin-top: 6px;
+}
+
+/* MCP server row (design): ⛁ teal icon, name + status, connection dot, teal
+   right stripe. */
+.mcp-item {
+  position: relative;
+  margin: 4px 8px 0;
+  padding: 9px 10px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid var(--border-card-alt);
+  background: var(--bg-card-alt);
+  cursor: pointer;
+  user-select: none;
+}
+
+.mcp-item:hover {
+  border-color: var(--border-strong);
+}
+
+.mcp-item.open {
+  border-color: #457a7a;
+  background: var(--bg-active);
+}
+
+.sidebar.collapsed .mcp-item {
+  justify-content: center;
+}
+
+.mcp-ico {
+  font-size: 13px;
+  color: #457a7a;
+  flex-shrink: 0;
+}
+
+.mcp-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.mcp-name {
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mcp-sub {
+  font-size: 10px;
+  color: var(--text-faint);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mcp-dot {
+  width: 7px;
+  height: 7px;
+  /* Round, unlike the square status dots — overrides the global corner reset. */
+  border-radius: 50% !important;
+  flex-shrink: 0;
+}
+
+.mcp-accent {
+  position: absolute;
+  right: 3px;
+  top: 7px;
+  bottom: 7px;
+  width: 3px;
+  background: #457a7a;
 }
 
 .ctx-overlay {
@@ -996,7 +1094,7 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .ctx-item.danger:hover {
-  background: rgba(224, 108, 85, 0.08);
+  background: rgba(143, 59, 44, 0.08);
   color: var(--red);
 }
 
@@ -1007,7 +1105,7 @@ async function confirmRemoveNow(): Promise<void> {
   align-items: center;
   gap: 9px;
   border: 1px solid var(--border-card-alt);
-  border-radius: 12px;
+  border-radius: 10px;
   cursor: pointer;
   user-select: none;
 }
@@ -1042,7 +1140,7 @@ async function confirmRemoveNow(): Promise<void> {
   padding: 10px 12px;
   background: var(--bg-card-alt);
   border: 1px solid var(--border-card-alt);
-  border-radius: 12px;
+  border-radius: 10px;
   display: flex;
   flex-direction: column;
   gap: 6px;

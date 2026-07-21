@@ -707,7 +707,7 @@ const updateLine = computed(() => {
   font-size: 13px;
   color: var(--text-tab);
   padding: 2px 8px;
-  border-radius: 7px;
+  border-radius: 10px;
   background: transparent;
 }
 
@@ -738,7 +738,7 @@ const updateLine = computed(() => {
   align-items: center;
   gap: 9px;
   padding: 9px 11px;
-  border-radius: 9px;
+  border-radius: 10px;
   border: 1px solid transparent;
   cursor: pointer;
   background: transparent;
@@ -821,7 +821,7 @@ const updateLine = computed(() => {
   padding: 10px 13px;
   background: var(--bg-card);
   border: 1px solid var(--border-card);
-  border-radius: 12px;
+  border-radius: 10px;
   cursor: pointer;
   text-align: left;
 }
@@ -831,8 +831,8 @@ const updateLine = computed(() => {
 }
 
 .card-opt.sel {
-  background: rgba(62, 207, 154, 0.06);
-  border-color: rgba(62, 207, 154, 0.4);
+  background: rgba(30, 122, 92, 0.06);
+  border-color: rgba(30, 122, 92, 0.4);
 }
 
 .card-opt.static {
@@ -882,7 +882,7 @@ const updateLine = computed(() => {
 .lock-chip {
   font-size: 10px;
   color: var(--amber);
-  border: 1px solid rgba(232, 180, 90, 0.35);
+  border: 1px solid rgba(154, 111, 42, 0.35);
   padding: 1px 7px;
   flex-shrink: 0;
 }
@@ -912,7 +912,7 @@ const updateLine = computed(() => {
   padding: 11px 12px;
   background: var(--bg-card-alt);
   border: 1px solid var(--border-card-alt);
-  border-radius: 12px;
+  border-radius: 10px;
   margin-bottom: 10px;
 }
 
@@ -928,7 +928,7 @@ const updateLine = computed(() => {
   padding: 9px 13px;
   background: var(--bg-chip);
   border: 1px solid var(--border-strong);
-  border-radius: 8px;
+  border-radius: 10px;
   cursor: pointer;
   text-align: left;
 }
@@ -964,7 +964,7 @@ const updateLine = computed(() => {
   right: 0;
   background: var(--bg-card);
   border: 1px solid var(--border-strong);
-  border-radius: 8px;
+  border-radius: 10px;
   overflow: hidden;
   z-index: 10;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
@@ -989,7 +989,7 @@ const updateLine = computed(() => {
 }
 
 .dd-item.sel {
-  background: rgba(62, 207, 154, 0.07);
+  background: rgba(30, 122, 92, 0.07);
   color: var(--text-strong);
 }
 
@@ -1017,7 +1017,7 @@ const updateLine = computed(() => {
   padding: 10px 13px;
   background: var(--bg-card);
   border: 1px solid var(--border-card);
-  border-radius: 12px;
+  border-radius: 10px;
 }
 
 .sr-text {
@@ -1075,7 +1075,7 @@ const updateLine = computed(() => {
   display: flex;
   flex-shrink: 0;
   border: 1px solid var(--border-seg);
-  border-radius: 8px;
+  border-radius: 99px;
   overflow: hidden;
 }
 
@@ -1100,7 +1100,7 @@ const updateLine = computed(() => {
   padding: 10px 13px;
   background: var(--bg-card-alt);
   border: 1px solid var(--border-card-alt);
-  border-radius: 12px;
+  border-radius: 10px;
   font-size: 11.5px;
   line-height: 1.55;
   color: var(--text-meta);
@@ -1112,7 +1112,7 @@ const updateLine = computed(() => {
   padding: 10px 13px;
   background: var(--bg-card-alt);
   border: 1px solid var(--border-card-alt);
-  border-radius: 12px;
+  border-radius: 10px;
   margin-bottom: 12px;
 }
 

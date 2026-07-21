@@ -120,6 +120,8 @@ export interface InvokeMap {
   'specs.detail': { req: { projectId: string; specId: string }; res: SpecDetail | null }
   /** Install Spec Kit into the project (ephemeral uvx; never global). */
   'specs.install': { req: { projectId: string }; res: SpecKitState }
+  /** The cached MCP schema map (.switchboard/db-schema.md), or null if unscanned. */
+  'mcp.readSchema': { req: { projectId: string }; res: { content: string | null } }
   /**
    * Run text in the project's session (a spec-kit command or a start-phase
    * prompt), starting a session first if none is live. Returns its id.

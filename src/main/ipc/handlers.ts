@@ -3,6 +3,8 @@
 // error codes survive Electron's error serialisation. Push channels batch
 // stream events at >= 30 Hz flushes (SC-007).
 import { ipcMain, type BrowserWindow } from 'electron'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { SessionEvent } from '@shared/domain'
 import type {
   Counters,
@@ -210,6 +212,12 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
       await installSpecKit(project.path)
       return readSpecKitState(project.path)
+    },
+    'mcp.readSchema': (req) => {
+      const project = repos.projects.byId(req.projectId)
+      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
+      const path = join(project.path, '.switchboard', 'db-schema.md')
+      return { content: existsSync(path) ? readFileSync(path, 'utf8') : null }
     },
     'specs.runInSession': (req) => {
       let session = repos.sessions.activeForProject(req.projectId)

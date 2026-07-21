@@ -236,6 +236,19 @@ describe('PermissionBroker lifecycle', () => {
     expect(() => h.broker.alwaysAllow(fileReq.id)).toThrow(BrokerError)
   })
 
+  it('allows rules for approved commands the classifier failed safe to high', async () => {
+    // `make build` matches no risk rule, so it lands at high via the fail-safe —
+    // but it is not destructive, so an approved entry is still always-allowable.
+    const promise = h.gate('Bash', { command: 'make build --release' })
+    await settle()
+    const [req] = h.repos.requests.pending()
+    expect(req.risk).toBe('high')
+    h.broker.decide(req.id, 'approve', true)
+    await promise
+    const { rule } = h.broker.alwaysAllow(req.id)
+    expect(rule.matcher).toEqual({ kind: 'command_prefix', value: 'make build' })
+  })
+
   it('explains common commands in plain language (cd → folder access)', async () => {
     void h.gate('Bash', { command: 'cd C:\\proj\\sub' })
     await settle()

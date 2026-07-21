@@ -9,7 +9,7 @@ import {
   type SDKMessage,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
-import type { ProjectCommand, SessionStatus } from '@shared/domain'
+import type { McpServer, ProjectCommand, SessionStatus } from '@shared/domain'
 import { MessageMapper, type EventSink } from './message-mapper'
 
 /** Streaming input queue the SDK consumes; `end()` closes the session gracefully. */
@@ -84,6 +84,8 @@ export interface HostedSessionOptions {
   onCommands?: (commands: ProjectCommand[]) => void
   /** Subscription rate-limit usage from rate_limit_event (session usage meter). */
   onUsage?: (usage: { utilization: number | null; resetsAt: number | null; limitType: string | null }) => void
+  /** MCP servers reported in the init message (sidebar MCP section). */
+  onMcpServers?: (servers: McpServer[]) => void
   /** Fired after every completed turn (branch observation, counters). */
   onTurnComplete: () => void
   onExit: (reason: 'completed' | 'stopped' | 'crashed', detail?: string) => void
@@ -197,6 +199,7 @@ export class HostedSession {
 
   private handleMessage(message: SDKMessage): void {
     this.captureInitCommands(message)
+    this.captureInitMcp(message)
     this.applyModelForMode(message)
     this.captureUsage(message)
     this.mapper.handle(message)
@@ -255,6 +258,21 @@ export class HostedSession {
     }
     const list = [...byName.values()].sort((a, b) => a.name.localeCompare(b.name))
     if (list.length > 0) this.options.onCommands?.(list)
+  }
+
+  /** MCP servers arrive in the same 'system'/'init' frame as slash commands. */
+  private captureInitMcp(message: SDKMessage): void {
+    if (!this.options.onMcpServers) return
+    const msg = message as {
+      type?: string
+      subtype?: string
+      mcp_servers?: { name?: string; status?: string }[]
+    }
+    if (msg.type !== 'system' || msg.subtype !== 'init' || !Array.isArray(msg.mcp_servers)) return
+    const servers: McpServer[] = msg.mcp_servers
+      .filter((s): s is { name: string; status?: string } => typeof s?.name === 'string')
+      .map((s) => ({ name: s.name, status: s.status ?? 'unknown' }))
+    this.options.onMcpServers(servers)
   }
 
   private captureInitCommands(message: SDKMessage): void {

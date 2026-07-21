@@ -2,7 +2,7 @@
 // Application shell — 1:1 with the Switchboard design reference: sidebar
 // (252px) | session stream | inbox panel (332px, always visible). Push
 // subscriptions and notification click routing (FR-013a) live here.
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useInboxStore } from '@renderer/stores/inbox'
@@ -11,6 +11,7 @@ import { useSettingsStore } from '@renderer/stores/settings'
 import { useUpdatesStore } from '@renderer/stores/updates'
 import Sidebar from '@renderer/components/Sidebar.vue'
 import SessionView from '@renderer/views/SessionView.vue'
+import McpView from '@renderer/views/McpView.vue'
 import InboxView from '@renderer/views/InboxView.vue'
 import ProjectRegistration from '@renderer/components/ProjectRegistration.vue'
 import SettingsPanel from '@renderer/components/SettingsPanel.vue'
@@ -72,6 +73,9 @@ onUnmounted(() => {
 })
 
 const selectedProject = computed(() => projects.selected)
+
+// Switching projects closes any open Database MCP view (it is project-scoped).
+watch(() => selectedProject.value?.id, () => active.openMcp(null))
 </script>
 
 <template>
@@ -108,8 +112,12 @@ const selectedProject = computed(() => projects.selected)
       />
 
       <main class="main">
+        <McpView
+          v-if="selectedProject && active.mcpTarget"
+          :project="selectedProject"
+        />
         <SessionView
-          v-if="selectedProject"
+          v-else-if="selectedProject"
           :project="selectedProject"
           @open-proj-settings="openSettings('proj')"
         />
@@ -141,8 +149,8 @@ const selectedProject = computed(() => projects.selected)
   align-items: center;
   gap: 10px;
   padding: 8px 16px;
-  background: rgba(62, 207, 154, 0.08);
-  border-bottom: 1px solid rgba(62, 207, 154, 0.3);
+  background: rgba(30, 122, 92, 0.08);
+  border-bottom: 1px solid rgba(30, 122, 92, 0.3);
   font-size: 12px;
   color: var(--text-body);
 }
@@ -166,7 +174,7 @@ const selectedProject = computed(() => projects.selected)
   font-size: 11px;
   font-family: var(--mono);
   padding: 4px 12px;
-  border-radius: 8px;
+  border-radius: 10px;
   cursor: pointer;
 }
 

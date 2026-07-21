@@ -55,7 +55,7 @@ function textOf(event: SessionEvent): string {
 .box {
   background: var(--bg-code);
   border: 1px solid var(--border-code);
-  border-radius: 6px;
+  border-radius: 10px;
   padding: 9px 12px;
   margin-top: 6px;
   max-height: 400px;

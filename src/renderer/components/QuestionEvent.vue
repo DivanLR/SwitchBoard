@@ -39,9 +39,9 @@ function choose(label: string): void {
 
 <style scoped>
 .question {
-  border: 1px solid rgba(232, 180, 90, 0.35);
-  background: rgba(232, 180, 90, 0.04);
-  border-radius: 8px;
+  border: 1px solid rgba(154, 111, 42, 0.35);
+  background: rgba(154, 111, 42, 0.04);
+  border-radius: 10px;
   padding: 11px 13px;
   margin-bottom: 13px;
 }
@@ -72,7 +72,7 @@ function choose(label: string): void {
   color: var(--text-body);
   background: var(--bg-chip);
   border: 1px solid var(--border-strong);
-  border-radius: 6px;
+  border-radius: 10px;
   padding: 5px 11px;
   cursor: pointer;
 }

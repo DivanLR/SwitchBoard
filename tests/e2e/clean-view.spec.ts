@@ -32,6 +32,18 @@ test('heavy build output collapses into a labelled swallowed block (FR-015)', as
   await expect(page.getByTestId('stream').getByTestId('stream-event-raw_output')).toHaveCount(0)
 })
 
+test('empty assistant text renders nothing — no orphan timestamp row', async ({ page }) => {
+  await page.evaluate(() => {
+    // The SDK can emit an empty text block; it must not render as a bare row
+    // (which, with timestamps on, showed a stamp beside blank space).
+    window.__mock.emitEvent('s-alpha', 'assistant_text', { text: '', partial: false })
+    window.__mock.emitEvent('s-alpha', 'assistant_text', { text: 'Real narrative.', partial: false })
+  })
+  const events = page.getByTestId('stream-event-assistant_text')
+  await expect(events).toHaveCount(1)
+  await expect(events).toContainText('Real narrative.')
+})
+
 test('a swallowed block expands in place (FR-016)', async ({ page }) => {
   await emitBuildNoise(page, 12)
   const block = page.getByTestId('swallowed-block')

@@ -75,7 +75,7 @@ const html = computed(() => renderMarkdown(props.text))
   font-size: 12px;
   background: var(--bg-chip);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 10px;
   padding: 0 4px;
   color: var(--text-body);
 }
@@ -85,7 +85,7 @@ const html = computed(() => renderMarkdown(props.text))
 .md :deep(pre.md-pre) {
   background: var(--bg-code);
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 10px 12px;
   margin: 0 0 8px;
   overflow-x: auto;

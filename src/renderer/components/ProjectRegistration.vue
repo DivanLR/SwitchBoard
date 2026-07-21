@@ -244,8 +244,8 @@ async function startSession(): Promise<void> {
   padding: 8px 10px;
   font-size: 11px;
   color: var(--red);
-  border: 1px solid rgba(224, 108, 85, 0.35);
-  background: rgba(224, 108, 85, 0.07);
+  border: 1px solid rgba(143, 59, 44, 0.35);
+  background: rgba(143, 59, 44, 0.07);
 }
 
 .toggle {

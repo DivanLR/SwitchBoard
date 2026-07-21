@@ -56,6 +56,17 @@ const result = computed(() =>
 )
 const rawText = computed(() => (props.event.payload as { text?: string }).text ?? '')
 
+// The SDK can emit empty text blocks (message-mapper), producing events with no
+// visible content. Rendering one leaves an orphan timestamp beside blank space,
+// so such events are dropped from the clean stream — and with them, the stamp.
+const hasContent = computed(() => {
+  if (prompt.value) return Boolean(prompt.value.text?.trim())
+  if (assistant.value) return Boolean(assistant.value.text?.trim())
+  if (summary.value) return Boolean(summary.value.text?.trim())
+  if (tool.value || marker.value || errorPayload.value || result.value) return true
+  return Boolean(rawText.value.trim())
+})
+
 function resultLabel(payload: ResultPayload): string {
   const parts: string[] = ['turn complete']
   if (payload.durationMs > 0) parts.push(`${(payload.durationMs / 1000).toFixed(1)}s`)
@@ -79,7 +90,7 @@ const markerChipLabel: Record<string, string> = {
 </script>
 
 <template>
-  <div class="event" :class="{ stamped: stamp }" :data-testid="`stream-event-${kind}`" :data-event-id="event.id">
+  <div v-if="hasContent" class="event" :class="{ stamped: stamp }" :data-testid="`stream-event-${kind}`" :data-event-id="event.id">
     <span v-if="stamp" class="stamp mono" data-testid="event-stamp">{{ stamp }}</span>
     <!-- ❯ prompt -->
     <div v-if="prompt" class="prompt mono">
@@ -185,8 +196,8 @@ const markerChipLabel: Record<string, string> = {
 .pending {
   font-size: 10px;
   color: var(--amber);
-  border: 1px solid rgba(232, 180, 90, 0.4);
-  border-radius: 4px;
+  border: 1px solid rgba(154, 111, 42, 0.4);
+  border-radius: 10px;
   padding: 0 6px;
 }
 
@@ -203,7 +214,7 @@ const markerChipLabel: Record<string, string> = {
 .summary-card {
   background: var(--bg-card);
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 11px 13px;
 }
 
@@ -260,9 +271,9 @@ const markerChipLabel: Record<string, string> = {
 }
 
 .error-card {
-  border: 1px solid rgba(224, 108, 85, 0.4);
-  background: rgba(224, 108, 85, 0.05);
-  border-radius: 8px;
+  border: 1px solid rgba(143, 59, 44, 0.4);
+  background: rgba(143, 59, 44, 0.05);
+  border-radius: 10px;
   padding: 11px 13px;
 }
 

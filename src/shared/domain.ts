@@ -46,6 +46,13 @@ export interface Project {
   refs: ProjectRef[]
 }
 
+/** An MCP server the session reported in its init message (sidebar MCP row). */
+export interface McpServer {
+  name: string
+  /** SDK-reported connection status, e.g. 'connected' | 'failed' | 'pending'. */
+  status: string
+}
+
 export interface Session {
   id: string
   projectId: string
@@ -69,6 +76,8 @@ export interface Session {
    * never outlives the app process.
    */
   bypassPermissions?: boolean
+  /** MCP servers reported in the session init message (in-memory only). */
+  mcpServers?: McpServer[]
 }
 
 // --- Event payloads (contracts/session-events.md) ---
@@ -224,6 +233,22 @@ export interface PermissionRule {
   createdFromRequestId: string
   createdAt: string
   revokedAt: string | null
+}
+
+/**
+ * Shell commands that can never become a standing auto-approve rule — even from
+ * a history entry the developer approved once — because they are destructive or
+ * irreversible/outward-facing (the design's locked "rm · sudo · git push" row).
+ * This is deliberately NARROWER than the risk classifier's fail-safe-to-high:
+ * ordinary vetted commands (`mkdir`, `make build`, `python x`) are unmatched by
+ * the classifier and land at `high`, but must still be eligible for "always
+ * allow". Only the genuinely dangerous set below is ever barred.
+ */
+const DANGEROUS_COMMAND =
+  /\b(rm|rmdir|del|rd|format|mkfs|dd|sudo|doas)\b|Remove-Item|git\s+(push|reset\s+--hard|clean)\b/i
+
+export function isDangerousCommand(command: string): boolean {
+  return DANGEROUS_COMMAND.test(command)
 }
 
 export interface RiskInputMatcher {

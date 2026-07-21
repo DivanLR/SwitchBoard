@@ -31,6 +31,14 @@ const specs = useSpecsStore()
 
 const queuedTasks = computed(() => queue.forProject(props.project.id))
 
+// Per-project accent square before the name (design), matching the sidebar row.
+const PROJECT_ACCENTS = ['#3a6291', '#9a6f2a', '#6f4d8f', '#1e7a5c', '#8f3b2c', '#457a7a']
+const headerColor = computed(() => {
+  let hash = 0
+  for (const ch of props.project.id) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
+  return PROJECT_ACCENTS[hash % PROJECT_ACCENTS.length]
+})
+
 // Output settings (Terminals tab): font size, tool rows, timestamps, autoscroll.
 const outputPrefs = computed(() => ({
   fontSize: settingsStore.settings?.fontSize ?? 'md',
@@ -501,6 +509,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
     <!-- Header -->
     <header class="head">
       <div class="head-row">
+        <span class="h-dot" :style="{ background: headerColor }"></span>
         <span class="h-name mono" data-testid="session-project-name">{{ project.name }}</span>
         <span class="h-path mono" data-testid="session-project-path">{{ project.path }}</span>
         <span style="flex: 1"></span>
@@ -572,43 +581,6 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
           {{ Math.round(usage.tokens / 1000) }}k tok ·
           <span style="color: var(--text-meta)">${{ usage.cost.toFixed(2) }}</span>
         </span>
-      </div>
-      <div class="refs-row mono" data-testid="refs-row">
-        <span class="refs-label">REFS</span>
-        <span
-          v-for="r in project.refs"
-          :key="r.path"
-          class="ref-chip"
-          :title="r.path"
-          :data-testid="`ref-chip-${r.label}`"
-        >
-          <span class="ref-ico">⇗</span>
-          <span class="ref-name">{{ r.label }}</span>
-          <button class="ref-x" :data-testid="`ref-remove-${r.label}`" @click="removeRef(r.path)">
-            ✕
-          </button>
-        </span>
-        <input
-          v-if="addingRef"
-          :ref="focusRefInput"
-          v-model="refInput"
-          class="ref-input"
-          data-testid="ref-input"
-          placeholder="~/path/to/folder or a project name — Enter to add"
-          @keydown.enter="commitRef"
-          @keydown.esc="cancelRef"
-          @blur="cancelRef"
-        />
-        <button
-          v-else
-          class="ref-add"
-          data-testid="ref-add"
-          title="Give this session read access to another folder or project — or drag a project from the sidebar onto this view"
-          @click="addingRef = true"
-        >
-          + reference
-        </button>
-        <span v-if="refError" class="ref-error" data-testid="ref-error">{{ refError }}</span>
       </div>
     </header>
 
@@ -784,6 +756,45 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 
     <!-- Composer -->
     <footer v-if="mainTab === 'session'" class="composer">
+      <!-- REFS (design): folders this session may read — floats just above the
+           composer, overlapping the bottom of the stream. -->
+      <div class="refs-row mono" data-testid="refs-row">
+        <span class="refs-label">REFS</span>
+        <span
+          v-for="r in project.refs"
+          :key="r.path"
+          class="ref-chip"
+          :title="r.path"
+          :data-testid="`ref-chip-${r.label}`"
+        >
+          <span class="ref-ico">⇗</span>
+          <span class="ref-name">{{ r.label }}</span>
+          <button class="ref-x" :data-testid="`ref-remove-${r.label}`" @click="removeRef(r.path)">
+            ✕
+          </button>
+        </span>
+        <input
+          v-if="addingRef"
+          :ref="focusRefInput"
+          v-model="refInput"
+          class="ref-input"
+          data-testid="ref-input"
+          placeholder="~/path/to/folder or a project name — Enter to add"
+          @keydown.enter="commitRef"
+          @keydown.esc="cancelRef"
+          @blur="cancelRef"
+        />
+        <button
+          v-else
+          class="ref-add"
+          data-testid="ref-add"
+          title="Give this session read access to another folder or project — or drag a project from the sidebar onto this view"
+          @click="addingRef = true"
+        >
+          + reference
+        </button>
+        <span v-if="refError" class="ref-error" data-testid="ref-error">{{ refError }}</span>
+      </div>
       <!-- Planned task queue ("UP NEXT"): runs each item in order as the session goes idle -->
       <div v-if="queuedTasks.length > 0" class="queue" data-testid="task-queue">
         <span class="queue-label mono">UP NEXT</span>
@@ -927,6 +938,12 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   gap: 12px;
 }
 
+.h-dot {
+  width: 10px;
+  min-width: 10px;
+  height: 10px;
+}
+
 .h-name {
   font-size: 15px;
   font-weight: 700;
@@ -947,7 +964,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   flex-shrink: 0;
   white-space: nowrap;
   border: 1px solid var(--border-seg);
-  border-radius: 6px;
+  border-radius: 99px;
   overflow: hidden;
   font-size: 11px;
 }
@@ -973,7 +990,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   font-size: 11px;
   color: var(--text-tab);
   border: 1px solid var(--border-seg);
-  border-radius: 6px;
+  border-radius: 99px;
   padding: 5px 12px;
 }
 
@@ -983,38 +1000,48 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 
 .pill.agents-pill {
   color: var(--blue);
-  border: 1px solid rgba(110, 168, 232, 0.3);
+  border: 1px solid rgba(58, 98, 145, 0.3);
 }
 
 .pill.bypass-pill {
   color: var(--red);
-  border: 1px solid rgba(224, 108, 85, 0.35);
+  border: 1px solid rgba(143, 59, 44, 0.35);
 }
 
 /* REFS row (design): chips + dashed add pill under the meta line. */
+/* REFS row (design): floats just above the composer, overlapping the bottom of
+   the stream. The container ignores pointer events so the stream stays usable;
+   the chips/buttons re-enable them. */
 .refs-row {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
   display: flex;
   align-items: center;
   gap: 7px;
-  margin-top: 7px;
+  padding: 0 18px 10px;
   flex-wrap: wrap;
+  pointer-events: none;
 }
 
 .refs-label {
-  font-size: 9.5px;
-  letter-spacing: 0.13em;
-  color: var(--text-label);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--text-faint);
 }
 
 .ref-chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 7px;
   font-size: 10.5px;
   color: var(--text-body);
-  background: var(--bg-chip);
-  border: 1px solid var(--border-strong);
-  padding: 1px 7px;
+  background: var(--bg-card);
+  border: 1px solid #232937;
+  padding: 3px 9px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
+  pointer-events: auto;
 }
 
 .ref-ico {
@@ -1022,7 +1049,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 }
 
 .ref-x {
-  color: var(--text-tab);
+  color: var(--text-faint);
   font-size: 10px;
   padding: 0 1px;
 }
@@ -1033,9 +1060,12 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 
 .ref-add {
   font-size: 10.5px;
-  color: var(--text-tab);
+  color: var(--text-faint);
   border: 1px dashed var(--border-strong);
-  padding: 1px 8px;
+  padding: 2px 10px;
+  background: var(--bg-panel);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
+  pointer-events: auto;
 }
 
 .ref-add:hover {
@@ -1044,20 +1074,21 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 }
 
 .ref-input {
-  flex: 1;
-  min-width: 220px;
-  font-size: 10.5px;
-  background: var(--bg-code);
+  width: 300px;
+  font-size: 11px;
+  background: var(--bg);
   border: 1px solid var(--green);
   outline: none;
   color: var(--text-strong);
-  padding: 2px 8px;
+  padding: 3px 9px;
   font-family: var(--mono);
+  pointer-events: auto;
 }
 
 .ref-error {
   font-size: 10.5px;
   color: var(--red);
+  pointer-events: auto;
 }
 
 /* Drag-over overlay (design): full-pane dashed frame naming the drop action. */
@@ -1070,7 +1101,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   inset: 6px;
   z-index: 60;
   border: 1px dashed var(--green);
-  background: rgba(62, 207, 154, 0.06);
+  background: rgba(30, 122, 92, 0.06);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1124,7 +1155,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 .ended {
   background: var(--bg-card);
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 11px 13px;
   margin-bottom: 13px;
 }
@@ -1298,6 +1329,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 }
 
 .composer {
+  position: relative;
   border-top: 1px solid var(--border);
   background: var(--bg-panel);
   padding: 11px 18px;
@@ -1332,7 +1364,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   color: var(--text-body);
   background: var(--bg-card);
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 4px 10px;
   max-width: 280px;
 }
@@ -1369,7 +1401,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   color: var(--text-tab);
   font-size: 11px;
   padding: 7px 12px;
-  border-radius: 6px;
+  border-radius: 10px;
 }
 
 .queue-btn:hover:not(:disabled) {
@@ -1450,7 +1482,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   overflow-y: auto;
   background: var(--bg-card);
   border: 1px solid var(--border-strong);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 4px;
   z-index: 5;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
@@ -1459,7 +1491,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 .suggest-item {
   font-size: 12.5px;
   padding: 5px 8px;
-  border-radius: 5px;
+  border-radius: 10px;
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
@@ -1506,7 +1538,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   font-weight: 600;
   font-size: 11.5px;
   padding: 7px 16px;
-  border-radius: 6px;
+  border-radius: 10px;
   user-select: none;
 }
 

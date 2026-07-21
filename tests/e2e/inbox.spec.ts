@@ -167,7 +167,7 @@ test('right-click a history command offers always-allow with the flag-aware base
   )
 })
 
-test('history right-click: high risk gets no allow item; entries remove and clear', async ({
+test('history right-click: destructive command gets no allow item; entries remove and clear', async ({
   page,
 }) => {
   await page.evaluate(() => {
@@ -180,7 +180,7 @@ test('history right-click: high risk gets no allow item; entries remove and clea
   await page.getByTestId('inbox-tab-history').click()
   await expect(page.getByTestId('history-count')).toHaveText('DECISIONS · 2')
 
-  // High-risk entry: menu opens, but there is no always-allow item.
+  // Destructive entry (rm): menu opens, but there is no always-allow item.
   await page.getByTestId('history-item').filter({ hasText: 'Run: rm' }).click({ button: 'right' })
   await expect(page.getByTestId('hist-ctx-menu')).toBeVisible()
   await expect(page.getByTestId('hist-ctx-allow')).toHaveCount(0)
