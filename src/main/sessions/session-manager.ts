@@ -224,6 +224,7 @@ export class SessionManager {
       planModel: settings.planModel,
       autoModelRouting: settings.autoModelRouting,
       bypassPermissions,
+      summaries: settings.summaries,
       sink: this.makeSink(entry),
       gate: this.callbacks.gate,
       onStatusChange: (status, detail) => this.handleStatusChange(entry, status, detail),

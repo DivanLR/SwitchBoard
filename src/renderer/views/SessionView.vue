@@ -103,6 +103,16 @@ const {
   },
 })
 
+// Split the composer into the leading command token and the rest, so the ghost
+// mirror can colour only the command green while the arguments stay normal.
+const commandParts = computed(() => {
+  const text = composer.value
+  const lead = text.length - text.trimStart().length
+  const first = text.trim().split(/\s+/)[0] ?? ''
+  const end = lead + first.length
+  return { cmd: text.slice(0, end), rest: text.slice(end) }
+})
+
 const liveSession = computed(() =>
   props.project.session && !props.project.session.endedAt ? props.project.session : null,
 )
@@ -204,7 +214,25 @@ const usageLimitLabel = computed(() => {
   const t = liveSession.value?.usageLimitType
   if (t === 'five_hour') return '5h limit'
   if (t?.startsWith('seven_day')) return '7d limit'
-  return 'limit'
+  // Before the SDK reports a window, show the primary (5h) label as a placeholder.
+  return '5h limit'
+})
+
+// Prompt-cache hit rate for the latest completed turn: cache_read /
+// (cache_read + cache_creation + fresh input). A high number means the
+// conversation prefix is being reused instead of re-billed at full price.
+const cacheHitPct = computed(() => {
+  for (let i = active.events.length - 1; i >= 0; i -= 1) {
+    const event = active.events[i]
+    if (event.kind !== 'result') continue
+    const usage = (event.payload as { usage?: Record<string, unknown> }).usage ?? {}
+    const num = (key: string): number => (typeof usage[key] === 'number' ? (usage[key] as number) : 0)
+    const read = num('cache_read_input_tokens')
+    const total = read + num('cache_creation_input_tokens') + num('input_tokens')
+    if (total === 0) return null
+    return Math.round((read / total) * 100)
+  }
+  return null
 })
 
 // The model the SDK reported for the latest turn (reflects intent routing live).
@@ -392,6 +420,13 @@ function scrollToBottom(): void {
   void nextTick(() => {
     if (streamEl.value) streamEl.value.scrollTop = streamEl.value.scrollHeight
   })
+}
+
+// Clean/Raw toggle re-pins to the newest line — the two views have separate
+// scroll containers, so switching would otherwise land wherever the other was.
+function switchView(view: 'clean' | 'raw'): void {
+  active.setView(view)
+  scrollToBottom()
 }
 
 watch(
@@ -667,7 +702,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
             class="seg"
             :class="{ on: active.view === 'clean' }"
             data-testid="view-clean"
-            @click="active.setView('clean')"
+            @click="switchView('clean')"
           >
             Clean
           </div>
@@ -675,7 +710,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
             class="seg"
             :class="{ on: active.view === 'raw' }"
             data-testid="view-raw"
-            @click="active.setView('raw')"
+            @click="switchView('raw')"
           >
             Raw
           </div>
@@ -702,11 +737,22 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
           session <span style="color: var(--text-meta)">{{ sessionTimer }}</span>
         </span>
         <span
-          v-if="usagePct != null"
+          v-if="liveSession"
           data-testid="session-usage"
           style="color: var(--text-faint); white-space: nowrap"
         >
-          <span :style="{ color: usageColor }">{{ usagePct }}%</span> {{ usageLimitLabel }}
+          <span v-if="usagePct != null" :style="{ color: usageColor }">{{ usagePct }}%</span>
+          <span v-else>—</span>
+          {{ usageLimitLabel }}
+        </span>
+        <span
+          v-if="cacheHitPct != null"
+          data-testid="session-cache"
+          style="color: var(--text-faint); white-space: nowrap"
+          title="Prompt-cache hit rate for the latest turn (cached prefix reused vs. re-billed)"
+        >
+          cache
+          <span :style="{ color: cacheHitPct > 50 ? 'var(--green)' : 'var(--amber)' }">{{ cacheHitPct }}%</span>
         </span>
       </div>
     </header>
@@ -1014,9 +1060,14 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
               <span v-if="hintFor(cmd)" class="suggest-desc">{{ hintFor(cmd) }}</span>
             </div>
           </div>
-          <!-- Inline ghost-text completion behind the input -->
+          <!-- Inline ghost-text completion behind the input. When the first token
+               is a command, the input text is transparent and this mirror colours
+               only the command green, leaving the arguments normal. -->
           <div class="ghost mono" aria-hidden="true">
-            <span class="ghost-typed">{{ composer }}</span
+            <template v-if="isCommandMatch"
+              ><span class="ghost-cmd">{{ commandParts.cmd }}</span
+              ><span class="ghost-args">{{ commandParts.rest }}</span></template
+            ><span v-else class="ghost-typed">{{ composer }}</span
             ><span class="ghost-rest" data-testid="ghost-suggestion">{{ ghostRest }}</span>
           </div>
           <textarea
@@ -1664,9 +1715,19 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 }
 
 /* Typed text exactly matches a known /command — tint it so the match is clear. */
+/* First token is a command: hide the input's own text (keep the caret) and let
+   the ghost mirror colour the command green while the arguments stay normal. */
 .composer-input.is-command {
+  color: transparent;
+  caret-color: var(--text);
+}
+
+.ghost-cmd {
   color: var(--green);
-  font-weight: 600;
+}
+
+.ghost-args {
+  color: var(--text);
 }
 
 /* Extra bottom room so the live "working" line clears the floating REFS row. */

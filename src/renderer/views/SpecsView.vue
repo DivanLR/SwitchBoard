@@ -4,21 +4,70 @@
 // tabs (spec.md / plan.md / tasks.md / Clarify / Commands), the Commands tab
 // with SUGGESTED NEXT + ALL COMMANDS, and the SUGGEST AN EDIT bar. When Spec
 // Kit is not installed, an install button scaffolds it per-project.
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import type { SpecPhase, SpecStatus } from '@shared/domain'
 import { SPEC_KIT_COMMANDS } from '@shared/domain'
 import { useSpecsStore } from '@renderer/stores/specs'
-import { useActiveSessionStore } from '@renderer/stores/activeSession'
+import MarkdownText from '@renderer/components/MarkdownText.vue'
 
 const props = defineProps<{ projectId: string }>()
 const specs = useSpecsStore()
-const active = useActiveSessionStore()
 
-// Start a brand-new spec: prefill the composer with /speckit-specify so the
-// developer types the feature description, then sends it to scaffold the spec.
+// New spec: a small popup collects a short description, then /speckit-specify
+// runs it in the background session (output streams into the Session tab).
+const showNewSpec = ref(false)
+const newSpecDesc = ref('')
+
 function newSpec(): void {
-  active.requestComposerInsert('/speckit-specify ')
+  newSpecDesc.value = ''
+  showNewSpec.value = true
 }
+
+async function submitNewSpec(): Promise<void> {
+  const desc = newSpecDesc.value.trim()
+  if (!desc) return // empty Enter is a no-op, matching the disabled Create button
+  showNewSpec.value = false
+  await specs.runInSession(props.projectId, `/speckit-specify ${desc}`)
+}
+
+function cancelNewSpec(): void {
+  showNewSpec.value = false
+  newSpecDesc.value = ''
+}
+
+// Read the spec aloud (design: "listen in on a spec") via the native Web Speech
+// API — title, description, then each section. Click again to stop.
+const speaking = ref(false)
+
+function listen(): void {
+  const synth = window.speechSynthesis
+  if (speaking.value) {
+    synth.cancel()
+    speaking.value = false
+    return
+  }
+  const d = detail.value
+  if (!d) return
+  const text = [d.title, d.description, ...d.sections.map((s) => `${s.title}. ${s.body}`)]
+    .filter(Boolean)
+    .join('. ')
+  const utter = new SpeechSynthesisUtterance(text)
+  utter.onend = () => (speaking.value = false)
+  utter.onerror = () => (speaking.value = false)
+  synth.cancel()
+  speaking.value = true
+  synth.speak(utter)
+}
+
+onUnmounted(() => window.speechSynthesis.cancel())
+
+// The spec/project can change out from under a running narration (chip click or
+// project switch reuse this same component instance) — stop it so the audio
+// never drifts out of sync with what's on screen.
+watch([() => props.projectId, () => specs.selectedSpecId], () => {
+  window.speechSynthesis.cancel()
+  speaking.value = false
+})
 
 type Part = 'spec' | 'plan' | 'tasks' | 'clarify' | 'cmds'
 const part = ref<Part>('tasks')
@@ -131,34 +180,54 @@ const openQs = computed(() =>
 )
 const closedQs = computed(() => detail.value?.resolvedClarifications ?? [])
 
-// SUGGESTED NEXT (design logic): open clarifications → clarify; implementing →
-// analyze; done → checklist; otherwise implement.
+// SUGGESTED NEXT: the genuine next stage of the Spec Kit pipeline, derived from
+// which artifacts actually exist (specify → clarify → plan → tasks → implement →
+// checklist), not just the coarse status. This makes the suggestion true — it
+// won't tell you to implement before there's a plan or a tasks list.
 const suggested = computed(() => {
   const d = detail.value
   if (!d) return null
   const open = openQs.value.length
+  // 1. Unresolved clarifications block everything downstream.
   if (open > 0)
     return {
       command: 'speckit-clarify',
       label: '/speckit.clarify',
-      why: `${open} open clarification${open > 1 ? 's' : ''} on this spec — resolve the ambiguity before more code gets written`,
+      why: `${open} open clarification${open > 1 ? 's' : ''} on this spec — resolve the ambiguity before planning or code`,
     }
-  if (running.value || d.status === 'in_progress')
+  // 2. Spec written but no plan.md yet.
+  if (!d.plan || d.plan.length === 0)
     return {
-      command: 'speckit-analyze',
-      label: '/speckit.analyze',
-      why: 'Implementation is running — cross-check spec, plan, and tasks for drift',
+      command: 'speckit-plan',
+      label: '/speckit.plan',
+      why: 'Spec is written but there is no plan.md yet — generate the implementation plan',
     }
-  if (d.status === 'complete')
+  // 3. Plan exists but no tasks yet.
+  if (d.tasksTotal === 0)
+    return {
+      command: 'speckit-tasks',
+      label: '/speckit.tasks',
+      why: 'Plan is in place but tasks.md is empty — break the plan into actionable tasks',
+    }
+  // 4. Every task ticked off — review the finished work.
+  if (d.tasksDone >= d.tasksTotal)
     return {
       command: 'speckit-checklist',
       label: '/speckit.checklist',
       why: 'Every task is checked off — generate a review checklist for the finished work',
     }
+  // 5. Mid-implementation — cross-check for drift while work is underway.
+  if (running.value || d.status === 'in_progress')
+    return {
+      command: 'speckit-analyze',
+      label: '/speckit.analyze',
+      why: 'Implementation is underway — cross-check spec, plan, and tasks for drift',
+    }
+  // 6. Spec, plan, and tasks are settled and nothing is running — build.
   return {
     command: 'speckit-implement-scaffold',
     label: '/speckit.implement-scaffold',
-    why: 'Spec and plan are settled — execute the remaining tasks as scaffolded, verified slices',
+    why: 'Spec, plan, and tasks are settled — execute the remaining tasks as scaffolded, verified slices',
   }
 })
 
@@ -242,6 +311,15 @@ const partTabs: { id: Part; label: string }[] = [
               statusLabel[detail.status]
             }}</span>
             <span style="flex: 1"></span>
+            <button
+              class="sc-listen mono"
+              :class="{ on: speaking }"
+              data-testid="spec-listen"
+              :title="speaking ? 'Stop reading' : 'Read this spec aloud'"
+              @click="listen"
+            >
+              {{ speaking ? '■ Stop' : '🔊 Listen' }}
+            </button>
             <span class="sc-path mono">{{ detail.path }}/</span>
           </div>
           <div v-if="detail.description" class="sc-desc">{{ detail.description }}</div>
@@ -299,7 +377,7 @@ const partTabs: { id: Part; label: string }[] = [
                 ✎ Refine
               </button>
             </div>
-            <div class="sec-body">{{ sec.body }}</div>
+            <MarkdownText class="sec-body" :text="sec.body" />
           </div>
         </div>
 
@@ -434,6 +512,38 @@ const partTabs: { id: Part; label: string }[] = [
         </div>
 
       </template>
+    </div>
+
+    <!-- New-spec popup: a short description, then /speckit-specify runs it -->
+    <div v-if="showNewSpec" class="ns-overlay" data-testid="new-spec-popup" @click.self="cancelNewSpec">
+      <div class="ns-box">
+        <div class="ns-title mono">New spec</div>
+        <div class="ns-sub">
+          Describe the feature in a sentence — <span class="mono">/speckit.specify</span> scaffolds it
+          in the background.
+        </div>
+        <textarea
+          v-model="newSpecDesc"
+          class="ns-input mono"
+          data-testid="new-spec-input"
+          rows="3"
+          autofocus
+          placeholder="e.g. A per-domain container that isolates each client's config, databases, and MCP state…"
+          @keydown.enter.exact.prevent="submitNewSpec"
+          @keydown.esc="cancelNewSpec"
+        ></textarea>
+        <div class="ns-actions">
+          <button class="btn-quiet" data-testid="new-spec-cancel" @click="cancelNewSpec">Cancel</button>
+          <button
+            class="btn-solid"
+            data-testid="new-spec-submit"
+            :disabled="newSpecDesc.trim().length === 0"
+            @click="submitNewSpec"
+          >
+            Create spec
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -579,6 +689,90 @@ const partTabs: { id: Part; label: string }[] = [
 .sc-path {
   font-size: 10.5px;
   color: var(--text-faint);
+}
+
+.sc-listen {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  color: var(--text-tab);
+  border: 1px solid var(--border-seg);
+  border-radius: 99px;
+  padding: 3px 10px;
+  cursor: pointer;
+  background: transparent;
+  user-select: none;
+}
+
+.sc-listen:hover {
+  color: var(--text-body);
+  border-color: var(--border-strong);
+}
+
+.sc-listen.on {
+  color: var(--green);
+  border-color: var(--green);
+}
+
+/* New-spec popup — fixed so it centres over the window regardless of scroll. */
+.ns-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.ns-box {
+  width: min(520px, 90%);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  padding: 18px 20px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+.ns-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-bright);
+}
+
+.ns-sub {
+  font-size: 12px;
+  color: var(--text-faint);
+  line-height: 1.55;
+  margin-top: 6px;
+}
+
+.ns-sub .mono {
+  color: var(--text-meta);
+}
+
+.ns-input {
+  width: 100%;
+  margin-top: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text-strong);
+  font-size: 12.5px;
+  line-height: 1.5;
+  padding: 8px 10px;
+  outline: none;
+  resize: vertical;
+}
+
+.ns-input:focus {
+  border-color: var(--green);
+}
+
+.ns-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
 }
 
 .sc-desc {

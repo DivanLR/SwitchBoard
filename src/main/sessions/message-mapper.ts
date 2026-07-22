@@ -66,11 +66,15 @@ export interface MessageMapperOptions {
   sink: EventSink
   /** Fired once when the SDK reports its session id (used for resume). */
   onSdkSessionId?: (sdkSessionId: string) => void
+  /** Relabel a turn's closing message as ✦ SUMMARY. Off keeps it plain
+   *  assistant text (the raw response). Defaults to on. */
+  summaries?: boolean
 }
 
 export class MessageMapper {
   private sink: EventSink
   private onSdkSessionId?: (id: string) => void
+  private readonly summaries: boolean
   private sdkSessionIdSeen = false
   /** Live streaming assistant text per producer ('' = main loop, else the subagent's tool_use id). */
   private partials = new Map<string, { eventId: string; text: string }>()
@@ -89,6 +93,7 @@ export class MessageMapper {
   constructor(options: MessageMapperOptions) {
     this.sink = options.sink
     this.onSdkSessionId = options.onSdkSessionId
+    this.summaries = options.summaries !== false
   }
 
   handle(message: SDKMessage): void {
@@ -305,9 +310,14 @@ export class MessageMapper {
       if (text) {
         if (this.lastAssistantText && this.lastAssistantText.text === text) {
           // The turn's closing assistant message is the summary (design: ✦ SUMMARY).
-          this.sink.update(this.lastAssistantText.eventId, { text }, { persist: true, kind: 'summary' })
+          // Summaries off: leave it as the plain assistant text already streamed.
+          if (this.summaries) {
+            this.sink.update(this.lastAssistantText.eventId, { text }, { persist: true, kind: 'summary' })
+          }
         } else {
-          this.sink.append('summary', { text })
+          // No streamed twin (e.g. a /usage report): show the raw text, styled as
+          // a summary only when summaries are on.
+          this.sink.append(this.summaries ? 'summary' : 'assistant_text', { text })
         }
       }
       this.sink.append('result', {

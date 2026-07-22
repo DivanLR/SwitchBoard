@@ -691,6 +691,27 @@ const updateLine = computed(() => {
 
             <div class="setting-row">
               <div class="sr-text">
+                <div class="sr-label">Turn summaries</div>
+                <div class="sr-desc">
+                  Style each turn's closing message as a ✦ SUMMARY. Off shows it as the raw response —
+                  e.g. the full <span class="mono">/usage</span> report instead of a summary. Display
+                  only; no extra model call.
+                </div>
+              </div>
+              <button
+                class="switch"
+                :class="{ on: settings.summaries }"
+                data-testid="setting-summaries"
+                role="switch"
+                :aria-checked="settings.summaries"
+                @click="save({ summaries: !settings.summaries })"
+              >
+                <span class="knob"></span>
+              </button>
+            </div>
+
+            <div class="setting-row">
+              <div class="sr-text">
                 <div class="sr-label">Terse mode</div>
                 <div class="sr-desc">
                   Compresses only Claude's replies to you (output tokens), saving cost and time. Your

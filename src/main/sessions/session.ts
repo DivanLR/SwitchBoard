@@ -83,6 +83,8 @@ export interface HostedSessionOptions {
   autoModelRouting?: boolean
   /** Bypass all permission checks for this session (auto-approve every tool). */
   bypassPermissions?: boolean
+  /** Relabel a turn's closing message as ✦ SUMMARY (off = raw response). */
+  summaries?: boolean
   sink: EventSink
   gate: PermissionGate
   onStatusChange: (status: SessionStatus, detail?: string | null) => void
@@ -129,6 +131,7 @@ export class HostedSession {
     this.mapper = new MessageMapper({
       sink: options.sink,
       onSdkSessionId: options.onSdkSessionId,
+      summaries: options.summaries,
     })
   }
 

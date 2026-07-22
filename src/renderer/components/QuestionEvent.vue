@@ -1,11 +1,23 @@
 <script setup lang="ts">
 // ? QUESTION card — 1:1 with the design reference: amber-tinted card with
 // clickable option chips; answers submit to the session (FR-020).
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import type { QuestionPayload } from '@shared/domain'
 
 const props = defineProps<{ payload: QuestionPayload; eventId: string }>()
 const emit = defineEmits<{ (e: 'answer', eventId: string, choice: string): void }>()
+
+// The session marks its recommended option by appending "(Recommended)" to the
+// label (the AskUserQuestion convention). Surface that as a badge and show a
+// clean label, but keep the original label as the value sent back so it matches.
+const options = computed(() =>
+  props.payload.options.map((o) => ({
+    label: o.label,
+    display: cleanLabel(o.label),
+    description: o.description,
+    recommended: /\s*\(recommended\)\s*$/i.test(o.label),
+  })),
+)
 
 // A free-text answer is always allowed alongside the offered options; the
 // broker stores whatever string is sent, no need to match a listed choice.
@@ -29,24 +41,31 @@ function cancelCustom(): void {
   addingCustom.value = false
   customText.value = ''
 }
+
+// Drop the "(Recommended)" marker for display (the confirmation line and chips
+// show the clean label; the raw value with the marker is what's stored/sent).
+function cleanLabel(label: string): string {
+  return label.replace(/\s*\(recommended\)\s*$/i, '')
+}
 </script>
 
 <template>
   <div class="question" data-testid="question-event">
     <div class="q-label mono">? QUESTION</div>
     <div class="q-text">{{ payload.text }}</div>
-    <div v-if="payload.options.length > 0" class="chips">
+    <div v-if="options.length > 0" class="chips">
       <button
-        v-for="option in payload.options"
+        v-for="option in options"
         :key="option.label"
         class="chip mono"
-        :class="{ chosen: payload.answered && payload.answer === option.label }"
+        :class="{ chosen: payload.answered && payload.answer === option.label, recommended: option.recommended }"
         :disabled="payload.answered"
-        :data-testid="`question-option-${option.label}`"
+        :data-testid="`question-option-${option.display}`"
         :title="option.description"
         @click="choose(option.label)"
       >
-        {{ option.label }}
+        <span v-if="option.recommended" class="rec-badge">★ Recommended</span>
+        {{ option.display }}
       </button>
       <template v-if="!payload.answered">
         <input
@@ -72,7 +91,7 @@ function cancelCustom(): void {
     </div>
     <div v-else class="open-hint mono">Answer through the composer below.</div>
     <div v-if="payload.answered" class="answered mono" data-testid="question-answered">
-      ✓ Answered: {{ payload.answer }}
+      ✓ Answered: {{ cleanLabel(payload.answer ?? '') }}
     </div>
   </div>
 </template>
@@ -131,6 +150,20 @@ function cancelCustom(): void {
   border-color: var(--green);
   color: var(--green);
   opacity: 1;
+}
+
+/* Recommended option: greener chrome + a small star badge. */
+.chip.recommended {
+  border-color: var(--green);
+}
+
+.rec-badge {
+  display: inline-block;
+  margin-right: 7px;
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  color: var(--green);
+  text-transform: uppercase;
 }
 
 .chip-other {

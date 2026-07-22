@@ -331,6 +331,12 @@ export interface Settings {
    */
   terseMode: boolean
   terseLevel: TerseLevel
+  /**
+   * Relabel each turn's closing message as a ✦ SUMMARY. Off shows that message
+   * as ordinary assistant text — the raw response (e.g. the full /usage report)
+   * with no summary styling. A display choice only; no extra model call.
+   */
+  summaries: boolean
   /** Output display (design reference, Terminals tab). */
   fontSize: 'sm' | 'md' | 'lg'
   /** Clean view shows tool activity as collapsible rows instead of hiding it. */
@@ -372,6 +378,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoModelRouting: true,
   terseMode: true,
   terseLevel: 'full',
+  summaries: true,
   fontSize: 'md',
   showToolRows: true,
   timestamps: false,

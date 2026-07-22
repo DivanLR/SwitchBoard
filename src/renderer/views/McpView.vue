@@ -19,15 +19,31 @@ const active = useActiveSessionStore()
 const projects = useProjectsStore()
 const settings = useSettingsStore()
 
-// The servers combined into this chat (Settings → databaseMcpServers), each
-// paired with the live connection status the session reports for it.
+// The servers combined into this chat (Settings → databaseMcpServers).
 const dbServers = computed(() => settings.settings?.databaseMcpServers ?? [])
-const servers = computed(() =>
-  dbServers.value.map((n) => ({
-    name: n,
-    status: props.project.session?.mcpServers?.find((s) => s.name === n)?.status ?? 'unknown',
-  })),
-)
+
+// Every MCP server this project's session exposes, unioned with any already
+// designated — tick one to include it in the combined MCP workspace (design:
+// tickable MCPs), with its live connection status.
+const allServers = computed(() => {
+  const names = new Set<string>(dbServers.value)
+  for (const s of props.project.session?.mcpServers ?? []) names.add(s.name)
+  return [...names].sort().map((name) => ({
+    name,
+    on: dbServers.value.includes(name),
+    status: props.project.session?.mcpServers?.find((s) => s.name === name)?.status ?? 'unknown',
+  }))
+})
+
+function toggleServer(name: string): void {
+  if (!settings.settings) return
+  const current = settings.settings.databaseMcpServers
+  const next = current.includes(name) ? current.filter((n) => n !== name) : [...current, name]
+  // Apply locally at once so a second quick click reads this array rather than
+  // the pre-save snapshot — otherwise the later save would drop the first toggle.
+  settings.settings.databaseMcpServers = next
+  void settings.save({ databaseMcpServers: next })
+}
 
 function dotColor(status: string): string {
   const st = status.toLowerCase()
@@ -177,20 +193,22 @@ async function interrupt(): Promise<void> {
         >
           ■
         </button>
-        <button class="back mono" data-testid="mcp-close" @click="active.openMcp(false)">
-          ← {{ projects.selected?.name ?? 'back' }}
-        </button>
       </div>
-      <div v-if="servers.length > 0" class="mcp-servers mono" data-testid="mcp-servers">
-        <span
-          v-for="s in servers"
+      <div v-if="allServers.length > 0" class="mcp-servers mono" data-testid="mcp-servers">
+        <button
+          v-for="s in allServers"
           :key="s.name"
           class="mcp-chip"
+          :class="{ on: s.on }"
+          role="switch"
+          :aria-checked="s.on"
           :data-testid="`mcp-chip-${s.name}`"
-          :title="s.status"
+          :title="s.on ? 'In the combined MCP workspace — click to remove' : 'Click to add to the combined MCP workspace'"
+          @click="toggleServer(s.name)"
         >
+          <span class="mcp-tick">{{ s.on ? '☑' : '☐' }}</span>
           <span class="mcp-chip-dot" :style="{ background: dotColor(s.status) }"></span>{{ s.name }}
-        </span>
+        </button>
       </div>
       <div class="tabs mono">
         <button class="tab" :class="{ sel: subtab === 'chat' }" data-testid="mcp-tab-chat" @click="subtab = 'chat'">
@@ -362,26 +380,29 @@ async function interrupt(): Promise<void> {
   padding: 2px 10px;
   border: 1px solid var(--border-seg);
   border-radius: 99px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.mcp-chip:hover {
+  color: var(--text-body);
+  border-color: var(--border-strong);
+}
+
+.mcp-chip.on {
+  color: var(--teal);
+  border-color: var(--teal);
+}
+
+.mcp-tick {
+  font-size: 11px;
+  line-height: 1;
 }
 
 .mcp-chip-dot {
   width: 7px;
   height: 7px;
   border-radius: 99px;
-}
-
-.back {
-  flex-shrink: 0;
-  font-size: 11px;
-  color: var(--text-meta);
-  border: 1px solid var(--border-seg);
-  border-radius: 99px;
-  padding: 3px 9px;
-}
-
-.back:hover {
-  color: var(--text-strong);
-  border-color: var(--border-strong);
 }
 
 .tabs {

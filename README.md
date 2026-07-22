@@ -155,19 +155,29 @@ isolation, no Node integration, a strict CSP, and a structured error envelope. S
 
 ## Releasing
 
-Installed builds auto-update from GitHub releases via `electron-updater`:
+Installed builds check for updates through the GitHub Releases API and install the
+attached NSIS installer in-app (see `src/main/updater.ts`). Each release carries the
+installer only — no `electron-updater` `latest.yml` feed.
 
 1. Bump `version` in `package.json`.
-2. Point `publish` in `electron-builder.yml` at your `owner`/`repo`.
-3. With a `GH_TOKEN` that can create releases:
+2. Build the installer:
 
    ```powershell
-   npm run build
-   npx electron-builder --win --publish always
+   npm run package
    ```
 
-Auto-update requires the NSIS installer target (the portable exe cannot self-update).
-Unsigned builds still update, but SmartScreen warns until a signing certificate is configured.
+   This produces `release/Switchboard-Setup-<version>.exe`.
+3. Publish a GitHub release, attaching only that installer:
+
+   ```powershell
+   gh release create v<version> "release/Switchboard-Setup-<version>.exe" --title "..." --notes "..."
+   ```
+
+The updater compares the release tag to the running version and downloads the `.exe`
+asset. Do not run `electron-builder --publish always` (it re-attaches `latest.yml`,
+which the in-app updater does not use). Unsigned builds still install, but the updater
+verifies the Authenticode signature before launching — until a signing certificate is
+configured it falls back to opening the release page, and SmartScreen warns on first run.
 
 ---
 
