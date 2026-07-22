@@ -326,7 +326,7 @@ const partTabs: { id: Part; label: string }[] = [
           <div class="q-list">
             <div
               v-for="(c, i) in closedQs"
-              :key="`resolved-${i}`"
+              :key="`${c.question}:${c.answer}`"
               class="q-card resolved"
               data-testid="resolved-clarification"
             >
@@ -493,7 +493,7 @@ const partTabs: { id: Part; label: string }[] = [
   font-size: 11.5px;
   color: var(--text-meta);
   background: var(--bg-card);
-  border: 1px solid #232937;
+  border: 1px solid var(--surface-line);
   padding: 6px 12px;
   cursor: pointer;
 }
@@ -505,14 +505,14 @@ const partTabs: { id: Part; label: string }[] = [
 
 .chip.sel {
   color: var(--text-bright);
-  background: #1c2230;
-  border-color: #3b4456;
+  background: var(--surface-hover);
+  border-color: var(--surface-hover-line);
 }
 
 /* Spec card */
 .spec-card {
   background: var(--bg-card);
-  border: 1px solid #232937;
+  border: 1px solid var(--surface-line);
   padding: 16px 18px;
 }
 
@@ -601,7 +601,7 @@ const partTabs: { id: Part; label: string }[] = [
 
 .sc-bar {
   height: 4px;
-  background: #1b202c;
+  background: var(--surface-raised);
   margin-top: 10px;
   overflow: hidden;
 }
@@ -679,7 +679,7 @@ const partTabs: { id: Part; label: string }[] = [
   font-size: 10.5px;
   color: var(--text-faint);
   cursor: pointer;
-  border: 1px solid #232937;
+  border: 1px solid var(--surface-line);
   padding: 2px 8px;
   user-select: none;
   background: transparent;
@@ -731,7 +731,7 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .q-card.resolved {
-  background: #10141d;
+  background: var(--surface-sunken);
   border: 1px solid var(--border-card-alt);
 }
 
@@ -868,7 +868,7 @@ const partTabs: { id: Part; label: string }[] = [
 .cmd-card {
   padding: 10px 13px;
   background: var(--bg-card);
-  border: 1px solid #232937;
+  border: 1px solid var(--surface-line);
   cursor: pointer;
   user-select: none;
   text-align: left;
@@ -1000,7 +1000,7 @@ const partTabs: { id: Part; label: string }[] = [
 
 .task-refine {
   font-size: 10.5px;
-  color: #454e60;
+  color: var(--text-ghost);
   cursor: pointer;
   padding: 0 3px;
   background: transparent;

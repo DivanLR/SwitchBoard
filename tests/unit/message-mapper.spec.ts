@@ -3,7 +3,9 @@
 import { describe, expect, it } from 'vitest'
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { EventKind, EventPayloadMap, SessionEvent } from '@shared/domain'
+import { SWALLOWABLE_KINDS } from '@shared/domain'
 import { MessageMapper, previewOf, type EventSink } from '@main/sessions/message-mapper'
+import { classifyNoise, defaultSwallowRules } from '@main/stream/swallow-rules'
 
 interface RecordedUpdate {
   eventId: string
@@ -353,5 +355,66 @@ describe('subagent attribution (parent_tool_use_id)', () => {
     expect(mainEvent?.payload).toMatchObject({ text: 'Main done' })
     expect(agentEvent?.payload).toMatchObject({ text: 'agent says hi', partial: false })
     expect(agentEvent?.kind).toBe('assistant_text')
+  })
+})
+
+// A sink that tags swallowable events with the real classifier, then carries
+// the tag through the mapper's assistant_text -> summary upgrade (as the old
+// code did) WITHOUT clearing it. This deliberately isolates the progress-rule
+// fix: if the rule regressed to matching assistant_text, the upgraded summary
+// would carry a noiseKind and this test would fail. A truthy noiseKind is what
+// the clean view swallows.
+class ClassifyingSink implements EventSink {
+  seq = 0
+  byId = new Map<string, SessionEvent>()
+  rules = defaultSwallowRules()
+  private classify(event: SessionEvent): void {
+    if (SWALLOWABLE_KINDS.includes(event.kind)) {
+      event.noiseKind = classifyNoise(this.rules, event, 'p1')
+    }
+  }
+  append<K extends EventKind>(kind: K, payload: EventPayloadMap[K]): SessionEvent<K> {
+    this.seq += 1
+    const event: SessionEvent = {
+      id: `e${this.seq}`, sessionId: 's1', seq: this.seq, kind, payload,
+      noiseKind: null, createdAt: new Date().toISOString(),
+    }
+    this.classify(event)
+    this.byId.set(event.id, event)
+    return event as SessionEvent<K>
+  }
+  update<K extends EventKind>(eventId: string, payload: EventPayloadMap[K], options?: { kind?: K }): void {
+    const event = this.byId.get(eventId)
+    if (!event) return
+    event.payload = payload
+    if (options?.kind) event.kind = options.kind
+    this.classify(event)
+  }
+}
+
+describe('the /usage response is not hidden by the clean view (regression)', () => {
+  // The real response captured from a session: a summary event, dominated by
+  // percentages, that the old bare-percentage progress rule tagged as noise.
+  const USAGE_RESPONSE = [
+    'You are currently using your subscription to power your Claude Code usage',
+    '',
+    'Current session: 48% used · resets Jul 22, 12:39pm',
+    'Current week (all models): 20% used · resets Jul 27, 6:59pm',
+    'Current week (Fable): 0% used',
+    '  88% of your usage came from subagent-heavy sessions',
+  ].join('\n')
+
+  it('classifies the upgraded summary as visible (noiseKind null)', () => {
+    const sink = new ClassifyingSink()
+    const mapper = new MessageMapper({ sink })
+    // Same sequence the CLI emits for /usage: the text arrives as assistant
+    // output, then the success result (identical text) upgrades it to a summary.
+    mapper.handle(assistantText(USAGE_RESPONSE))
+    mapper.handle(resultSuccess({ result: USAGE_RESPONSE }))
+
+    const summary = [...sink.byId.values()].find((e) => e.kind === 'summary')
+    expect(summary).toBeDefined()
+    // A truthy noiseKind would collapse it into a swallowed block; null renders.
+    expect(summary?.noiseKind).toBeNull()
   })
 })

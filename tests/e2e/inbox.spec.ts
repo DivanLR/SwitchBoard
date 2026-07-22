@@ -89,7 +89,10 @@ test('approve-all approves the group but skips high-risk items (FR-011)', async 
   })
 
   // No toast appears while the window is focused, so the group controls are clear.
+  // A group containing a high-risk item asks for confirmation before bulk
+  // approval sweeps it in, so approve-all is a two-step click.
   await page.getByTestId('inbox-group-alpha').getByTestId('approve-all').click()
+  await page.getByTestId('inbox-group-alpha').getByTestId('approve-all-confirm').click()
 
   // The high-risk item stays, as does the other project's group.
   const remaining = page.getByTestId('inbox-item')

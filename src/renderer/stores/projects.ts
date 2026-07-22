@@ -1,7 +1,7 @@
 // Sidebar state (FR-003/004/005): projects with live sessions, selection,
 // suggestions, and aggregate counters.
 import { defineStore } from 'pinia'
-import type { Session } from '@shared/domain'
+import type { Project, ProjectCommand, Session } from '@shared/domain'
 import type { Counters, ProjectListItem, ProjectSuggestion, SessionStatusPush } from '@shared/ipc-types'
 import { useActiveSessionStore } from './activeSession'
 
@@ -60,10 +60,27 @@ export const useProjectsStore = defineStore('projects', {
       this.suggestions = await window.switchboard.invoke('projects.suggestions', undefined)
     },
 
-    async register(path: string, name?: string): Promise<void> {
-      await window.switchboard.invoke('projects.register', { path, name })
+    async register(path: string, name?: string): Promise<Project> {
+      const project = await window.switchboard.invoke('projects.register', { path, name })
       await this.refresh()
       await this.loadSuggestions()
+      return project
+    },
+
+    /** A project's available slash commands / skills (composer + settings). */
+    async commands(projectId: string): Promise<ProjectCommand[]> {
+      return window.switchboard.invoke('projects.commands', { projectId })
+    },
+
+    /** Recent composer prompts for a project (command history / up-arrow recall). */
+    async promptHistory(projectId: string): Promise<string[]> {
+      return window.switchboard.invoke('sessions.promptHistory', { projectId })
+    },
+
+    /** Cached Database-MCP schema document for a project, or null if never scanned. */
+    async readMcpSchema(projectId: string): Promise<string | null> {
+      const res = await window.switchboard.invoke('mcp.readSchema', { projectId })
+      return res.content
     },
 
     async archive(projectId: string): Promise<void> {

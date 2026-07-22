@@ -15,6 +15,11 @@ interface SpecsState {
   pollTimer: ReturnType<typeof setInterval> | null
 }
 
+// Monotonic token guarding the shared, un-keyed detail/selectedSpecId state:
+// switching projects while a load is in flight must not let the older response
+// overwrite the newer project's spec detail (mirrors activeSession.open).
+let specRequestToken = 0
+
 export const useSpecsStore = defineStore('specs', {
   state: (): SpecsState => ({
     byProject: {},
@@ -40,27 +45,38 @@ export const useSpecsStore = defineStore('specs', {
 
   actions: {
     async loadState(projectId: string): Promise<void> {
+      const token = ++specRequestToken
       this.loading = true
       try {
         const state = await window.switchboard.invoke('specs.state', { projectId })
+        if (token !== specRequestToken) return // a newer project load superseded this
         this.byProject[projectId] = state
         // Auto-select the first spec if none chosen or the current one is gone.
         if (state.specs.length > 0) {
           if (!this.selectedSpecId || !state.specs.some((s) => s.id === this.selectedSpecId)) {
-            await this.selectSpec(projectId, state.specs[0].id)
+            this.selectedSpecId = state.specs[0].id
+            const detail = await window.switchboard.invoke('specs.detail', {
+              projectId,
+              specId: state.specs[0].id,
+            })
+            if (token !== specRequestToken) return
+            this.detail = detail
           }
         } else {
           this.selectedSpecId = null
           this.detail = null
         }
       } finally {
-        this.loading = false
+        if (token === specRequestToken) this.loading = false
       }
     },
 
     async selectSpec(projectId: string, specId: string): Promise<void> {
+      const token = ++specRequestToken
       this.selectedSpecId = specId
-      this.detail = await window.switchboard.invoke('specs.detail', { projectId, specId })
+      const detail = await window.switchboard.invoke('specs.detail', { projectId, specId })
+      if (token !== specRequestToken) return // a newer selection superseded this
+      this.detail = detail
     },
 
     /** Send a spec-kit command / prompt to the project's session. */

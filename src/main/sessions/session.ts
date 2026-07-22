@@ -107,6 +107,10 @@ export class HostedSession {
   private attentionCount = 0
   private queuedSends: QueuedSend[] = []
   private status: SessionStatus = 'working'
+  private statusDetail: string | null = null
+  /** Live background tasks (deep-research workflows, backgrounded subagents/bash)
+   * from the SDK's background_tasks_changed level signal — REPLACE semantics. */
+  private backgroundTasks: { taskId: string; description: string }[] = []
   private stopping = false
   private fatal = false
 
@@ -200,6 +204,7 @@ export class HostedSession {
   private handleMessage(message: SDKMessage): void {
     this.captureInitCommands(message)
     this.captureInitMcp(message)
+    this.captureBackgroundTasks(message)
     this.applyModelForMode(message)
     this.captureUsage(message)
     this.mapper.handle(message)
@@ -240,6 +245,27 @@ export class HostedSession {
       resetsAt: typeof info.resetsAt === 'number' ? info.resetsAt : null,
       limitType: info.rateLimitType ?? null,
     })
+  }
+
+  /**
+   * Track live background work (a /deep-research workflow, a backgrounded
+   * subagent or bash) so a finished foreground turn does not read as an idle
+   * session while that work is still running. Level signal, REPLACE semantics.
+   */
+  private captureBackgroundTasks(message: SDKMessage): void {
+    const msg = message as {
+      type?: string
+      subtype?: string
+      tasks?: { task_id?: string; description?: string }[]
+    }
+    if (msg.type !== 'system' || msg.subtype !== 'background_tasks_changed' || !Array.isArray(msg.tasks)) {
+      return
+    }
+    this.backgroundTasks = msg.tasks.map((t) => ({
+      taskId: t.task_id ?? '',
+      description: t.description ?? '',
+    }))
+    this.recomputeStatus()
   }
 
   /** Descriptions seen so far, by command name — an init message only carries
@@ -379,14 +405,27 @@ export class HostedSession {
 
   private recomputeStatus(): void {
     if (this.fatal) return
-    const next: SessionStatus =
-      this.attentionCount > 0 ? 'needs_you' : this.turnInFlight ? 'working' : 'done'
-    this.setStatus(next)
+    if (this.attentionCount > 0) return this.setStatus('needs_you')
+    if (this.turnInFlight) return this.setStatus('working')
+    // The foreground turn is idle, but background work keeps the session busy:
+    // stay 'working' (with an honest detail) rather than reporting 'done'.
+    if (this.backgroundTasks.length > 0) return this.setStatus('working', this.backgroundDetail())
+    this.setStatus('done')
   }
 
-  private setStatus(status: SessionStatus, detail?: string | null): void {
-    if (this.status === status) return
+  private backgroundDetail(): string {
+    const count = this.backgroundTasks.length
+    if (count === 1) {
+      const description = this.backgroundTasks[0].description.trim()
+      return description ? `Running in background: ${description}` : 'Running a background task…'
+    }
+    return `${count} background tasks running…`
+  }
+
+  private setStatus(status: SessionStatus, detail: string | null = null): void {
+    if (this.status === status && this.statusDetail === detail) return
     this.status = status
-    this.options.onStatusChange(status, detail ?? null)
+    this.statusDetail = detail
+    this.options.onStatusChange(status, detail)
   }
 }

@@ -202,6 +202,37 @@ const MIGRATIONS: Migration[] = [
       db.exec(`ALTER TABLE projects ADD COLUMN refs TEXT;`)
     },
   },
+  {
+    // The seeded 'progress' rule matched a bare percentage on ANY event kind
+    // (eventKindMatcher '*'), so a response containing a % — e.g. /usage — was
+    // hidden from the clean view. Re-scope the untouched default to raw_output
+    // and drop the bare-percentage alternative. Rules a user has edited (any
+    // other matcher or pattern) are left untouched. The pattern here must match
+    // the seed in swallow-rules.ts so seeded and migrated databases agree.
+    name: '009-progress-rule-scope',
+    up: (db) => {
+      db.prepare(
+        `UPDATE swallow_rules
+            SET eventKindMatcher = 'raw_output', pattern = ?
+          WHERE scope = 'global' AND noiseKind = 'progress' AND eventKindMatcher = '*'`,
+      ).run('(\\.{4,}|Downloading|Installing|Fetching|Receiving objects|Progress:)')
+    },
+  },
+  {
+    // Retroactive fix for the same bug: a noiseKind is only ever valid on a
+    // swallowable kind. Events upgraded to a non-swallowable kind (e.g. a
+    // /usage response, assistant_text upgraded to a summary) kept the stale tag
+    // and stayed hidden in the clean view. Clear it so those responses show.
+    // The insert/update path no longer produces such rows (session-manager).
+    name: '010-clear-stale-noisekind',
+    up: (db) => {
+      db.prepare(
+        `UPDATE events SET noiseKind = NULL
+          WHERE noiseKind IS NOT NULL
+            AND kind NOT IN ('tool_activity', 'raw_output', 'assistant_text')`,
+      ).run()
+    },
+  },
 ]
 
 export function openDatabase(dbPath: string): AppDatabase {

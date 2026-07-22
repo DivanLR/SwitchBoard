@@ -145,8 +145,8 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
   const handlers: Handlers = {
     'projects.list': () => ({ projects: projectList(), counters: computeCounters(repos) }),
     'projects.suggestions': () => suggestProjects(repos),
-    'projects.register': (req) => {
-      const suggested = suggestProjects(repos).some(
+    'projects.register': async (req) => {
+      const suggested = (await suggestProjects(repos)).some(
         (s) => s.path.toLowerCase() === req.path.toLowerCase(),
       )
       return registerProject(repos, {

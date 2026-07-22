@@ -8,6 +8,8 @@ import { isDangerousCommand, type DecisionRecord, type PermissionRequest } from 
 import { useInboxStore } from '@renderer/stores/inbox'
 import { useProjectsStore } from '@renderer/stores/projects'
 
+const RISK_LABEL: Record<'low' | 'medium' | 'high', string> = { low: 'Low', medium: 'Medium', high: 'High' }
+
 const inbox = useInboxStore()
 const projects = useProjectsStore()
 
@@ -324,7 +326,7 @@ const historyItems = computed(() => inbox.history)
               >Plan</span
             >
             <span v-else class="chip-risk" :class="item.risk" data-testid="item-risk">
-              {{ item.risk === 'high' ? 'High' : item.risk === 'medium' ? 'Medium' : 'Low' }}
+              {{ RISK_LABEL[item.risk] }}
             </span>
           </div>
           <div class="item-explain">{{ item.explanation }}</div>
@@ -725,7 +727,7 @@ const historyItems = computed(() => inbox.history)
   position: fixed;
   min-width: 240px;
   max-width: 330px;
-  background: var(--bg-panel-2, #12161f);
+  background: var(--bg-panel-2);
   border: 1px solid var(--border-strong);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
   padding: 4px;

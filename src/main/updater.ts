@@ -4,10 +4,13 @@
 // version; on install it downloads that release's installer asset inside the
 // app, reporting progress, then launches it and quits so it can replace files.
 import { app, shell } from 'electron'
-import { spawn } from 'node:child_process'
-import { writeFileSync } from 'node:fs'
+import { execFile, spawn } from 'node:child_process'
+import { promisify } from 'node:util'
+import { rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { UpdateStatus } from '@shared/ipc-types'
+
+const execFileAsync = promisify(execFile)
 
 const REPO = 'DivanLR/SwitchBoard'
 const RELEASES_PAGE = `https://github.com/${REPO}/releases/latest`
@@ -93,10 +96,38 @@ export async function check(): Promise<UpdateStatus['state']> {
 }
 
 /**
- * Download the release installer inside the app (reporting progress), then
- * launch it and quit so it can replace the running files. Falls back to opening
- * the release page in the browser when no installer asset was found on the last
- * check (e.g. a release that attached only source archives).
+ * Refuse to launch an installer that is not carrying a valid Authenticode
+ * signature. TLS + the origin-validated download guard the transport; this
+ * guards the authenticity of what actually executes (Electron A15/D). When the
+ * build is not yet code-signed (see electron-builder.yml) the status is not
+ * 'Valid', so the caller falls back to the browser download rather than running
+ * an unverified binary. Windows-only, matching the sole packaged target.
+ */
+async function hasValidSignature(filePath: string): Promise<boolean> {
+  const psPath = `'${filePath.replace(/'/g, "''")}'`
+  try {
+    const { stdout } = await execFileAsync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `(Get-AuthenticodeSignature -LiteralPath ${psPath}).Status`,
+      ],
+      { timeout: 15000, windowsHide: true },
+    )
+    return stdout.trim() === 'Valid'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Download the release installer inside the app (reporting progress), verify its
+ * signature, then launch it and quit so it can replace the running files. Falls
+ * back to opening the release page in the browser when no installer asset was
+ * found on the last check (e.g. a release that attached only source archives),
+ * or when the downloaded installer fails signature verification.
  */
 export async function installNow(): Promise<void> {
   if (!latestAssetUrl) {
@@ -127,8 +158,22 @@ export async function installNow(): Promise<void> {
         }
       }
     }
-    const dest = join(app.getPath('temp'), `Switchboard-Setup-${latestVersion || 'latest'}.exe`)
+    // Version comes from a GitHub tag; keep only digits/dots so it can never
+    // steer the temp write/launch path outside the temp directory.
+    const safeVersion = latestVersion.replace(/[^0-9.]/g, '') || 'latest'
+    const dest = join(app.getPath('temp'), `Switchboard-Setup-${safeVersion}.exe`)
     writeFileSync(dest, Buffer.concat(chunks))
+    // Never execute an unverified binary. An unsigned build fails this and falls
+    // back to the browser download rather than running unverified code.
+    if (!(await hasValidSignature(dest))) {
+      rmSync(dest, { force: true })
+      emit({
+        state: 'error',
+        message: 'The downloaded update could not be verified; opened the release page instead.',
+      })
+      await shell.openExternal(latestUrl)
+      return
+    }
     emit({ state: 'ready', version: latestVersion })
     // Detach the installer so it survives our exit, then quit to unlock files.
     spawn(dest, { detached: true, stdio: 'ignore' }).unref()

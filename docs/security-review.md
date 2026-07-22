@@ -47,3 +47,10 @@ the renderer or main process otherwise.
   preload bridge; `contextIsolation` remains the isolation boundary.
 - Dev mode (`npm run dev`) relaxes CSP for Vite hot module replacement; the
   packaged application always applies the strict policy.
+- The packaged renderer is loaded from `file://` (`mainWindow.loadFile`) rather
+  than a custom `protocol.handle()` scheme. The Electron checklist prefers a
+  custom scheme (A18), but here the path passed to `loadFile` is a fixed
+  build-time constant (never user- or attacker-influenced), so there is no
+  path-traversal surface, and the strict CSP plus `contextIsolation` remain the
+  boundaries. Migrating to an `app://` scheme is a possible future hardening
+  step, not a fix for a live vulnerability.

@@ -4,7 +4,7 @@
 // blocks and a live status line, dark raw log, and the ❯ composer bar
 // (FR-014..019a, R2 resume).
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import type { ResultPayload, SessionEvent } from '@shared/domain'
+import type { AgentScopedPayload, ResultPayload, SessionEvent } from '@shared/domain'
 import { activeAgents } from '@shared/agents'
 import type { ProjectListItem } from '@shared/ipc-types'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
@@ -181,7 +181,7 @@ watch(
 const sendTo = computed(() => selectedAgent.value?.name ?? props.project.name)
 
 function agentIdOf(event: SessionEvent): string | undefined {
-  return (event.payload as { agentId?: string }).agentId
+  return (event.payload as AgentScopedPayload).agentId
 }
 
 const usage = computed(() => {
@@ -303,7 +303,17 @@ function showEarlier(): void {
 
 // --- Raw view: complete session output as mono lines (FR-018) ---
 function rawLinesOf(event: SessionEvent): string[] {
-  const p = event.payload as unknown as Record<string, unknown>
+  // The payload is the EventPayloadMap union; this raw-view formatter reads a
+  // fixed set of optional string fields across kinds, so type it as exactly that
+  // rather than an untyped `unknown` cast.
+  const p = event.payload as Partial<{
+    text: string
+    toolName: string
+    inputPreview: string
+    resultPreview: string
+    status: string
+    title: string
+  }>
   switch (event.kind) {
     case 'prompt':
       return [`❯ ${p.text}`]
@@ -1108,7 +1118,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   font-size: 10.5px;
   color: var(--text-body);
   background: var(--bg-card);
-  border: 1px solid #232937;
+  border: 1px solid var(--surface-line);
   padding: 3px 9px;
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
   pointer-events: auto;
@@ -1259,8 +1269,8 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   gap: 10px;
   margin-bottom: 16px;
   padding: 9px 12px;
-  background: #0d1017;
-  border: 1px solid #253044;
+  background: var(--surface-inset);
+  border: 1px solid var(--surface-inset-line);
   flex-wrap: wrap;
 }
 
@@ -1303,7 +1313,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 /* Parallel-agents card (design: ⑂ AGENTS · N working in parallel). */
 .agents {
   border: 1px solid var(--border-card-alt);
-  background: #0d1017;
+  background: var(--surface-inset);
   padding: 11px 13px;
   margin-top: 6px;
 }
@@ -1388,7 +1398,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   font-family: var(--mono);
   font-size: 11.8px;
   line-height: 1.75;
-  color: #969ca8;
+  color: var(--text-mid);
   white-space: pre-wrap;
   word-break: break-word;
 }

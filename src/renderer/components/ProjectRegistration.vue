@@ -32,8 +32,7 @@ async function startSession(): Promise<void> {
   error.value = null
   busy.value = true
   try {
-    const project = await window.switchboard.invoke('projects.register', { path })
-    await projects.refresh()
+    const project = await projects.register(path)
     projects.select(project.id)
     await projects.startSession(project.id, false, bypass.value)
     emit('close')

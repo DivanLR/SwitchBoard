@@ -112,6 +112,15 @@ describe('default swallow rules', () => {
     expect(classifyNoise(defaults, event('raw_output', { text: 'Downloading 45%' }), 'p1')).toBe('progress')
   })
 
+  it('never hides a response that merely contains a percentage (e.g. /usage)', () => {
+    // A bare percentage is not progress: the model's narrative and command
+    // responses must stay visible in the clean view.
+    expect(
+      classifyNoise(defaults, event('assistant_text', { text: 'Current 5-hour usage: 45%', partial: false }), 'p1'),
+    ).toBeNull()
+    expect(classifyNoise(defaults, event('raw_output', { text: 'Weekly limit: 85% used' }), 'p1')).toBeNull()
+  })
+
   it('never tag errors', () => {
     expect(classifyNoise(defaults, event('error', { text: 'Compiling failed', fatal: false }), 'p1')).toBeNull()
   })

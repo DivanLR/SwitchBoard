@@ -21,10 +21,12 @@ const settings = useSettingsStore()
 // one opens its chat view in the session pane.
 // ponytail: events exist client-side only for the selected project's session,
 // so other rows stay plain; push agent names via sessionStatus if that matters.
+const parallelAgents = computed(() => activeAgents(activeSession.events))
+
 function agentsFor(item: (typeof projects.items)[number]): { id: string; name: string }[] {
   if (item.id !== projects.selectedProjectId) return []
   if (statusOf(item) !== 'working') return []
-  const agents = activeAgents(activeSession.events)
+  const agents = parallelAgents.value
   return agents.length > 1 ? agents : []
 }
 
@@ -855,11 +857,11 @@ async function confirmRemoveNow(): Promise<void> {
 .danger-solid {
   background: var(--red);
   border-color: var(--red);
-  color: #1a0e0c;
+  color: var(--red-ink);
 }
 
 .danger-solid:hover:not(:disabled) {
-  background: #ef8573;
+  background: var(--red-hover);
 }
 
 .meta {
@@ -908,7 +910,7 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .agent-line:hover {
-  background: #1a1f2b;
+  background: var(--surface-raised);
 }
 
 .agent-name.sel {
@@ -925,7 +927,7 @@ async function confirmRemoveNow(): Promise<void> {
 
 .agent-name {
   font-size: 10px;
-  color: #7e8698;
+  color: var(--text-tab);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -968,7 +970,7 @@ async function confirmRemoveNow(): Promise<void> {
 .usage-bar {
   height: 5px;
   border-radius: 99px;
-  background: #1b202c;
+  background: var(--surface-raised);
   overflow: hidden;
 }
 
@@ -1006,7 +1008,7 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .mcp-item.open {
-  border-color: #2dd4bf;
+  border-color: var(--teal);
   background: var(--bg-active);
 }
 
@@ -1016,7 +1018,7 @@ async function confirmRemoveNow(): Promise<void> {
 
 .mcp-ico {
   font-size: 13px;
-  color: #2dd4bf;
+  color: var(--teal);
   flex-shrink: 0;
 }
 
@@ -1056,7 +1058,7 @@ async function confirmRemoveNow(): Promise<void> {
   top: 7px;
   bottom: 7px;
   width: 3px;
-  background: #2dd4bf;
+  background: var(--teal);
 }
 
 .ctx-overlay {

@@ -4,6 +4,7 @@
 // focused on rendering the stream.
 import { computed, nextTick, ref, type Ref } from 'vue'
 import type { ProjectCommand } from '@shared/domain'
+import { useProjectsStore } from '@renderer/stores/projects'
 
 const MAX_SUGGESTIONS = 6
 // A slash-command search (typing "/") lists every matching skill/command, not
@@ -39,6 +40,10 @@ export function useCommandSuggestions(opts: {
   filterCommands?: (commands: ProjectCommand[]) => ProjectCommand[]
 }): CommandSuggestions {
   const { composer, composerEl, onSubmit } = opts
+  const projects = useProjectsStore()
+  // Guards against out-of-order responses: a rapid project switch must not leave
+  // a previous project's history/commands showing for the new one.
+  let latestLoad = ''
 
   const history = ref<string[]>([]) // past composer messages (also drives up-arrow recall)
   const availableCommands = ref<ProjectCommand[]>([]) // slash commands / skills for this project
@@ -193,14 +198,17 @@ export function useCommandSuggestions(opts: {
   }
 
   async function load(projectId: string): Promise<void> {
+    latestLoad = projectId
     try {
       const [past, commands] = await Promise.all([
-        window.switchboard.invoke('sessions.promptHistory', { projectId }),
-        window.switchboard.invoke('projects.commands', { projectId }),
+        projects.promptHistory(projectId),
+        projects.commands(projectId),
       ])
+      if (latestLoad !== projectId) return // superseded by a newer project switch
       history.value = past
       availableCommands.value = opts.filterCommands?.(commands) ?? commands
     } catch {
+      if (latestLoad !== projectId) return
       history.value = []
       availableCommands.value = []
     }

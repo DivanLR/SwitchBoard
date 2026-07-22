@@ -51,7 +51,20 @@ html.sb-light {
   --amber-hover: #d97706;
   --amber-ink: #fff7ed;
   --red: #dc2626;
+  --red-hover: #b91c1c;
+  --red-ink: #ffffff;
   --detail: #475569;
+  /* Database/MCP accent, and opaque surface/line tokens for view chrome (light
+     values; the dark originals stay byte-identical in :root below). */
+  --teal: #0d9488;
+  --surface-inset: #e9edf4;
+  --surface-inset-line: #d3dae5;
+  --surface-line: #d7dde6;
+  --surface-raised: #e9edf4;
+  --surface-hover: #dde3ec;
+  --surface-hover-line: #c3ccd8;
+  --surface-sunken: #eef1f6;
+  --bg-panel-2: #eef1f6;
   /* Soft elevation + subtle top gloss for glass panes/cards; wider radius. */
   --elev: inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 1px 2px rgba(15, 23, 42, 0.03),
     0 10px 28px -10px rgba(15, 23, 42, 0.12);
@@ -115,7 +128,22 @@ html.sb-light body {
   --amber-hover: #f2c574;
   --amber-ink: #201505;
   --red: #8f3b2c;
+  --red-hover: #ef8573;
+  --red-ink: #1a0e0c;
   --detail: #8fa8bd;
+  /* Database/MCP accent (teal, distinct from the emerald green). */
+  --teal: #2dd4bf;
+  /* Opaque surface + line tokens for view chrome (agent cards, spec panels,
+     sidebar rows). These dark values are the originals the components hardcoded,
+     so the dark view stays byte-identical; html.sb-light redefines them above. */
+  --surface-inset: #0d1017;
+  --surface-inset-line: #253044;
+  --surface-line: #232937;
+  --surface-raised: #1b202c;
+  --surface-hover: #1c2230;
+  --surface-hover-line: #3b4456;
+  --surface-sunken: #10141d;
+  --bg-panel-2: #12161f;
   /* Figtree for body/UI text; JetBrains Mono for code, commands and terminal. */
   --sans: 'Figtree', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', monospace;

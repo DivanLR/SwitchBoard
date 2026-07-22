@@ -98,7 +98,7 @@ const html = computed(() => renderMarkdown(props.text))
   border: none;
   border-radius: 0;
   padding: 0;
-  color: #c7ccd6;
+  color: var(--text-body);
   white-space: pre;
 }
 </style>

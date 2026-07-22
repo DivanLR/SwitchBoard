@@ -46,7 +46,12 @@ export function classifyNoise(
     ...applicable.filter((r) => r.scope === 'project').sort((a, b) => a.position - b.position),
     ...applicable.filter((r) => r.scope === 'global').sort((a, b) => a.position - b.position),
   ]
-  const text = displayTextOf(event)
+  // These rules run on the main thread for every streamed event, so bound the
+  // tested length: a pathological user pattern against a very long line (a
+  // flooded build log) is the realistic freeze vector. This caps that case; a
+  // catastrophic pattern on short input would still need RE2 or a worker, which
+  // is deferred until a user actually reports a freeze.
+  const text = displayTextOf(event).slice(0, 5000)
   for (const rule of ordered) {
     try {
       if (new RegExp(rule.pattern, 'im').test(text)) return rule.noiseKind
@@ -71,8 +76,13 @@ const DEFAULT_SWALLOW_SEEDS: DefaultSwallowSeed[] = [
     noiseKind: 'build output',
   },
   {
-    eventKindMatcher: '*',
-    pattern: '(\\d{1,3}\\s?%|\\.{4,}|Downloading|Installing|Fetching|Receiving objects|Progress:)',
+    // raw_output only: progress spam is a property of process/terminal output,
+    // never of the model's narrative. A bare "45%" is NOT progress — matching it
+    // on any kind hid genuine responses (e.g. /usage) from the clean view. Kept
+    // to keyword-anchored indicators; see migration 009-progress-rule-scope,
+    // which must stay in step with this pattern for existing databases.
+    eventKindMatcher: 'raw_output',
+    pattern: '(\\.{4,}|Downloading|Installing|Fetching|Receiving objects|Progress:)',
     noiseKind: 'progress',
   },
   {

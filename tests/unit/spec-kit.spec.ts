@@ -17,16 +17,16 @@ function makeProject(): string {
 }
 
 describe('isSpecKitInstalled', () => {
-  it('is false without .specify, true with it', () => {
+  it('is false without .specify, true with it', async () => {
     const p = makeProject()
-    expect(isSpecKitInstalled(p)).toBe(false)
+    expect(await isSpecKitInstalled(p)).toBe(false)
     mkdirSync(join(p, '.specify'))
-    expect(isSpecKitInstalled(p)).toBe(true)
+    expect(await isSpecKitInstalled(p)).toBe(true)
   })
 })
 
 describe('readSpecKitState + readSpecDetail', () => {
-  it('lists specs and parses title, tasks, sections, clarifications', () => {
+  it('lists specs and parses title, tasks, sections, clarifications', async () => {
     const p = makeProject()
     mkdirSync(join(p, '.specify'))
     const specDir = join(p, 'specs', '001-feature-x')
@@ -60,7 +60,7 @@ describe('readSpecKitState + readSpecDetail', () => {
       ].join('\n'),
     )
 
-    const state = readSpecKitState(p)
+    const state = await readSpecKitState(p)
     expect(state.installed).toBe(true)
     expect(state.specs).toHaveLength(1)
     expect(state.specs[0].title).toBe('Feature X')
@@ -68,7 +68,7 @@ describe('readSpecKitState + readSpecDetail', () => {
     expect(state.specs[0].tasksDone).toBe(1)
     expect(state.specs[0].status).toBe('in_progress')
 
-    const detail = readSpecDetail(p, '001-feature-x')
+    const detail = await readSpecDetail(p, '001-feature-x')
     expect(detail).not.toBeNull()
     expect(detail!.description).toContain('Does the X thing')
     expect(detail!.sections.map((s) => s.title)).toEqual(['Summary', 'Requirements', 'Assumptions'])
@@ -79,7 +79,7 @@ describe('readSpecKitState + readSpecDetail', () => {
     expect(detail!.clarifications).toEqual(['which X?'])
   })
 
-  it('parses already-answered clarifications from the ## Clarifications section', () => {
+  it('parses already-answered clarifications from the ## Clarifications section', async () => {
     const p = makeProject()
     mkdirSync(join(p, '.specify'))
     const specDir = join(p, 'specs', '003-clar')
@@ -100,14 +100,14 @@ describe('readSpecKitState + readSpecDetail', () => {
         '- FR-001: MUST connect',
       ].join('\n'),
     )
-    const detail = readSpecDetail(p, '003-clar')
+    const detail = await readSpecDetail(p, '003-clar')
     expect(detail!.resolvedClarifications).toEqual([
       { question: 'How should it connect?', answer: 'In-app hosting only.' },
       { question: 'One session per project?', answer: 'Yes, exactly one.' },
     ])
   })
 
-  it('reports ready when tasks exist but none are done', () => {
+  it('reports ready when tasks exist but none are done', async () => {
     const p = makeProject()
     mkdirSync(join(p, '.specify'))
     const specDir = join(p, 'specs', '004-ready')
@@ -115,28 +115,28 @@ describe('readSpecKitState + readSpecDetail', () => {
     writeFileSync(join(specDir, 'spec.md'), '# Feature Specification: Ready Feature\n')
     writeFileSync(join(specDir, 'plan.md'), '# Plan\n\n## Approach\nDo the thing.\n')
     writeFileSync(join(specDir, 'tasks.md'), '## Phase 1\n- [ ] T001 A\n')
-    const state = readSpecKitState(p)
+    const state = await readSpecKitState(p)
     expect(state.specs[0].status).toBe('ready')
-    const detail = readSpecDetail(p, '004-ready')
+    const detail = await readSpecDetail(p, '004-ready')
     expect(detail!.plan).toEqual([{ title: 'Approach', body: 'Do the thing.' }])
   })
 
-  it('reports complete when all tasks are done', () => {
+  it('reports complete when all tasks are done', async () => {
     const p = makeProject()
     mkdirSync(join(p, '.specify'))
     const specDir = join(p, 'specs', '002-done')
     mkdirSync(specDir, { recursive: true })
     writeFileSync(join(specDir, 'spec.md'), '# Feature Specification: Done Feature\n')
     writeFileSync(join(specDir, 'tasks.md'), '## Phase 1\n- [X] T001 A\n- [x] T002 B\n')
-    const state = readSpecKitState(p)
+    const state = await readSpecKitState(p)
     expect(state.specs[0].status).toBe('complete')
     expect(state.specs[0].tasksDone).toBe(2)
   })
 
-  it('returns empty state when specs/ is absent', () => {
+  it('returns empty state when specs/ is absent', async () => {
     const p = makeProject()
     mkdirSync(join(p, '.specify'))
-    const state = readSpecKitState(p)
+    const state = await readSpecKitState(p)
     expect(state.installed).toBe(true)
     expect(state.specs).toEqual([])
   })

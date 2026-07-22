@@ -1,7 +1,7 @@
 // Central permission inbox state (FR-007..013): pending items grouped by
 // project, decisions, history, and undeliverable-decision surfacing (SC-004).
 import { defineStore } from 'pinia'
-import type { DecisionRecord, PermissionRequest } from '@shared/domain'
+import type { DecisionRecord, PermissionRequest, PermissionRule } from '@shared/domain'
 import type { InboxChangedPush } from '@shared/ipc-types'
 
 interface InboxState {
@@ -83,13 +83,27 @@ export const useInboxStore = defineStore('inbox', {
     /** Active Bash command-prefix values already allowed for a project (so the
      *  history menu can hide "Always allow" for commands a rule already covers). */
     async allowedCommandBases(projectId: string): Promise<string[]> {
-      const rules = await window.switchboard.invoke('rules.standing.list', {
-        projectId,
-        includeRevoked: false,
-      })
+      const rules = await this.listStandingRules(projectId, false)
       return rules
         .filter((r) => r.toolName === 'Bash' && r.matcher.kind === 'command_prefix' && r.matcher.value)
         .map((r) => r.matcher.value as string)
+    },
+
+    /** Standing (always-allow) command rules for a project — Allowed-list tab. */
+    async listStandingRules(projectId: string, includeRevoked = false): Promise<PermissionRule[]> {
+      return window.switchboard.invoke('rules.standing.list', { projectId, includeRevoked })
+    },
+
+    async revokeStandingRule(ruleId: string): Promise<void> {
+      await window.switchboard.invoke('rules.standing.revoke', { ruleId })
+    },
+
+    async restoreStandingRule(ruleId: string): Promise<void> {
+      await window.switchboard.invoke('rules.standing.restore', { ruleId })
+    },
+
+    async addStandingRule(projectId: string, pattern: string): Promise<PermissionRule> {
+      return window.switchboard.invoke('rules.standing.add', { projectId, pattern })
     },
 
     async deleteHistory(requestId: string): Promise<void> {

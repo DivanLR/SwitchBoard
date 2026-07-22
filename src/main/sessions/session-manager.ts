@@ -1,7 +1,7 @@
 // Session registry (one hosted session per project, clarified invariant),
 // event persistence with per-session seq, and the fan-out hook the IPC layer
 // subscribes to (T012). Also owns git branch observation (FR-003).
-import { execFile, execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
@@ -71,15 +71,17 @@ const UPDATABLE_KINDS: ReadonlySet<EventKind> = new Set([
   'plan_marker',
 ])
 
-export function readGitBranch(projectPath: string): string | null {
+export async function readGitBranch(projectPath: string): Promise<string | null> {
   try {
     // --show-current returns the branch even on an unborn branch (no commits)
-    // and empty on detached HEAD, unlike rev-parse --abbrev-ref.
-    const branch = execFileSync('git', ['-C', projectPath, 'branch', '--show-current'], {
+    // and empty on detached HEAD, unlike rev-parse --abbrev-ref. Async
+    // (execFile + promisify) so it never blocks the main-process event loop —
+    // this runs on every session start and after every completed turn.
+    const { stdout } = await execFileAsync('git', ['-C', projectPath, 'branch', '--show-current'], {
       timeout: 4000,
       windowsHide: true,
-      encoding: 'utf8',
-    }).trim()
+    })
+    const branch = stdout.trim()
     return branch.length > 0 ? branch : null
   } catch {
     return null
@@ -163,7 +165,9 @@ export class SessionManager {
       sdkSessionId: null,
       status: 'working',
       statusDetail: null,
-      branch: readGitBranch(project.path),
+      // Filled asynchronously by refreshBranch() just after start, so the git
+      // read never blocks session creation on the main thread.
+      branch: null,
       diffAdds: null,
       diffDels: null,
       usageUtilization: null,
@@ -250,6 +254,8 @@ export class SessionManager {
 
     this.hosted.set(row.id, entry)
     entry.session.start()
+    // Read the git branch off the hot path and push it in when it resolves.
+    void this.refreshBranch(entry)
     this.callbacks.onCountersChanged()
     // A freshly-started idle session runs any tasks already planned for it.
     this.maybeDrainQueue(projectId)
@@ -400,11 +406,16 @@ export class SessionManager {
         if (!liveEntry) return
         liveEntry.event.payload = payload
         if (options?.kind) liveEntry.event.kind = options.kind
-        if (SWALLOWABLE_KINDS.includes(liveEntry.event.kind) && this.classifier) {
-          liveEntry.event.noiseKind = this.classifier(liveEntry.event, entry.row.projectId)
-          if (liveEntry.persisted) {
-            this.repos.events.setNoiseKind(eventId, liveEntry.event.noiseKind)
-          }
+        // A kind change can move an event out of the swallowable set (e.g. an
+        // assistant_text upgraded to a summary): recompute while it can still
+        // be noise, otherwise clear any tag its earlier kind was given so a
+        // now-non-swallowable event is never hidden by a stale noiseKind.
+        liveEntry.event.noiseKind =
+          SWALLOWABLE_KINDS.includes(liveEntry.event.kind) && this.classifier
+            ? this.classifier(liveEntry.event, entry.row.projectId)
+            : null
+        if (liveEntry.persisted) {
+          this.repos.events.setNoiseKind(eventId, liveEntry.event.noiseKind)
         }
         if (options?.persist) {
           if (liveEntry.persisted) {
@@ -431,14 +442,18 @@ export class SessionManager {
     this.callbacks.onCountersChanged()
   }
 
+  /** Read the git branch asynchronously; push only when it actually changed. */
+  private async refreshBranch(entry: HostedEntry): Promise<void> {
+    const branch = await readGitBranch(entry.projectPath)
+    if (branch === entry.row.branch) return
+    entry.row.branch = branch
+    this.repos.sessions.update(entry.row.id, { branch })
+    this.pushStatus(entry)
+  }
+
   private observeBranch(entry: HostedEntry): void {
-    const branch = readGitBranch(entry.projectPath)
-    let changed = false
-    if (branch !== entry.row.branch) {
-      entry.row.branch = branch
-      this.repos.sessions.update(entry.row.id, { branch })
-      changed = true
-    }
+    // Both git reads are async so a completed turn never blocks the main loop.
+    void this.refreshBranch(entry)
     void readGitDiffStat(entry.projectPath).then((diff) => {
       const adds = diff?.adds ?? null
       const dels = diff?.dels ?? null
@@ -448,7 +463,6 @@ export class SessionManager {
       this.repos.sessions.update(entry.row.id, { diffAdds: adds, diffDels: dels })
       this.pushStatus(entry)
     })
-    if (changed) this.pushStatus(entry)
     this.callbacks.onCountersChanged()
   }
 

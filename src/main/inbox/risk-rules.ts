@@ -40,7 +40,10 @@ function inputValue(input: Record<string, unknown>, field: string): string {
 }
 
 export function matchesInput(matcher: RiskInputMatcher, input: Record<string, unknown>): boolean {
-  const value = inputValue(input, matcher.field)
+  // Bound the tested length: this runs on the main thread on every permission
+  // check, so a pathological user pattern against a long tool input cannot hang
+  // the app. (See the note in swallow-rules for the residual short-input case.)
+  const value = inputValue(input, matcher.field).slice(0, 5000)
   try {
     return new RegExp(matcher.pattern).test(value)
   } catch {

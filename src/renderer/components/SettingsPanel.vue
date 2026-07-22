@@ -8,12 +8,14 @@ import type { PermissionRule, Settings, TerseLevel } from '@shared/domain'
 import { MODEL_CHOICES } from '@shared/domain'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { useProjectsStore } from '@renderer/stores/projects'
+import { useInboxStore } from '@renderer/stores/inbox'
 import { useUpdatesStore } from '@renderer/stores/updates'
 
 const props = defineProps<{ initialTab?: 'models' | 'proj' | 'allowed' | 'term' | 'gen' }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 const store = useSettingsStore()
 const projects = useProjectsStore()
+const inbox = useInboxStore()
 const updates = useUpdatesStore()
 const settings = computed(() => store.settings)
 
@@ -39,9 +41,7 @@ const plugins = ref<string[]>([])
 watch(
   () => proj.value?.id,
   async (id) => {
-    plugins.value = id
-      ? (await window.switchboard.invoke('projects.commands', { projectId: id })).map((c) => c.name)
-      : []
+    plugins.value = id ? (await projects.commands(id)).map((c) => c.name) : []
   },
   { immediate: true },
 )
@@ -109,12 +109,7 @@ const MATCHER_KIND_LABEL: Record<string, string> = {
 }
 
 async function loadAllowedRules(): Promise<void> {
-  allowedRules.value = proj.value
-    ? await window.switchboard.invoke('rules.standing.list', {
-        projectId: proj.value.id,
-        includeRevoked: true,
-      })
-    : []
+  allowedRules.value = proj.value ? await inbox.listStandingRules(proj.value.id, true) : []
 }
 
 watch(
@@ -127,9 +122,9 @@ watch(
 
 async function setRuleMode(rule: PermissionRule, mode: 'ask' | 'auto'): Promise<void> {
   if (mode === 'ask' && rule.revokedAt === null) {
-    await window.switchboard.invoke('rules.standing.revoke', { ruleId: rule.id })
+    await inbox.revokeStandingRule(rule.id)
   } else if (mode === 'auto' && rule.revokedAt !== null) {
-    await window.switchboard.invoke('rules.standing.restore', { ruleId: rule.id })
+    await inbox.restoreStandingRule(rule.id)
   }
   await loadAllowedRules()
 }
@@ -138,7 +133,7 @@ async function addAllowedCommand(): Promise<void> {
   const pattern = newCmd.value.trim()
   if (!pattern || !proj.value) return
   newCmd.value = ''
-  await window.switchboard.invoke('rules.standing.add', { projectId: proj.value.id, pattern })
+  await inbox.addStandingRule(proj.value.id, pattern)
   await loadAllowedRules()
 }
 

@@ -3,7 +3,8 @@
 // are ambiguous (path separators and colons both become '-'), so the reliable
 // source is the `cwd` field carried in each session's JSONL lines. Verified
 // against the installed Claude Code version on 2026-07-19.
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
+import { open, readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, isAbsolute, join, resolve } from 'node:path'
 import type { Project, ProjectRef } from '@shared/domain'
@@ -113,57 +114,79 @@ function seedFolderAccessRules(repos: Repositories, projectId: string, path: str
   }
 }
 
-const CWD_SCAN_LINES = 50
+// Only the head of each JSONL needs scanning — the `cwd` field is on the first
+// line. Bounding the read keeps a large session log from being slurped whole.
+const CWD_SCAN_BYTES = 64 * 1024
 
-function cwdFromJsonl(filePath: string): string | null {
+async function cwdFromJsonl(filePath: string): Promise<string | null> {
+  let handle: Awaited<ReturnType<typeof open>> | undefined
   try {
-    const lines = readFileSync(filePath, 'utf8').split('\n', CWD_SCAN_LINES)
-    for (const line of lines) {
+    handle = await open(filePath, 'r')
+    const { buffer, bytesRead } = await handle.read(Buffer.alloc(CWD_SCAN_BYTES), 0, CWD_SCAN_BYTES, 0)
+    for (const line of buffer.toString('utf8', 0, bytesRead).split('\n')) {
       if (!line.includes('"cwd"')) continue
       try {
         const parsed = JSON.parse(line) as { cwd?: unknown }
         if (typeof parsed.cwd === 'string' && parsed.cwd.length > 0) return parsed.cwd
       } catch {
-        // Malformed line; keep scanning.
+        // Malformed (or truncated tail) line; keep scanning.
       }
     }
   } catch {
     // Unreadable file; no suggestion from this entry.
+  } finally {
+    await handle?.close()
   }
   return null
 }
 
-export function suggestProjects(
+/**
+ * Suggest Claude Code project folders from ~/.claude/projects. Fully async
+ * (fs/promises) so this multi-directory scan never blocks the main-process
+ * event loop, however many projects or how large their logs.
+ */
+export async function suggestProjects(
   repos: Repositories,
   claudeProjectsDir = join(homedir(), '.claude', 'projects'),
-): ProjectSuggestion[] {
-  if (!existsSync(claudeProjectsDir)) return []
+): Promise<ProjectSuggestion[]> {
   const registered = new Set(repos.projects.listActive().map((p) => p.path.toLowerCase()))
   const suggestions = new Map<string, ProjectSuggestion>()
 
-  for (const entry of readdirSync(claudeProjectsDir, { withFileTypes: true })) {
+  let dirents
+  try {
+    dirents = await readdir(claudeProjectsDir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+
+  for (const entry of dirents) {
     if (!entry.isDirectory()) continue
     const dir = join(claudeProjectsDir, entry.name)
     let jsonlFiles: { path: string; mtime: number }[]
     try {
-      jsonlFiles = readdirSync(dir)
-        .filter((f) => f.endsWith('.jsonl'))
-        .map((f) => {
-          const full = join(dir, f)
-          return { path: full, mtime: statSync(full).mtimeMs }
-        })
-        .sort((a, b) => b.mtime - a.mtime)
+      const names = (await readdir(dir)).filter((f) => f.endsWith('.jsonl'))
+      jsonlFiles = (
+        await Promise.all(
+          names.map(async (f) => {
+            const full = join(dir, f)
+            return { path: full, mtime: (await stat(full)).mtimeMs }
+          }),
+        )
+      ).sort((a, b) => b.mtime - a.mtime)
     } catch {
       continue
     }
 
     for (const file of jsonlFiles.slice(0, 3)) {
-      const cwd = cwdFromJsonl(file.path)
+      const cwd = await cwdFromJsonl(file.path)
       if (!cwd) continue
       const path = resolve(cwd)
       const key = path.toLowerCase()
       if (registered.has(key) || suggestions.has(key)) break
-      if (!existsSync(path) || !statSync(path).isDirectory()) break
+      const isDir = await stat(path)
+        .then((s) => s.isDirectory())
+        .catch(() => false)
+      if (!isDir) break
       suggestions.set(key, { path, name: basename(path) })
       break
     }

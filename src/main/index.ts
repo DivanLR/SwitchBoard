@@ -131,6 +131,10 @@ function applyContentSecurityPolicy(): void {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
+        // script-src stays strict ('self', no unsafe-inline/eval). style-src
+        // carries 'unsafe-inline' because the renderer uses inline :style
+        // bindings (e.g. project accent colour, stream zoom) and Vue injects
+        // scoped-style tags at runtime; this permits styles only, never script.
         'Content-Security-Policy': [
           "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'",
         ],
@@ -141,6 +145,10 @@ function applyContentSecurityPolicy(): void {
 
 async function main(): Promise<void> {
   await app.whenReady()
+  // No menu-driven UI: drop the default application menu so its accelerators
+  // (Ctrl+R reload, Ctrl+Shift+I DevTools, zoom) are not registered. The tray
+  // context menu is separate and unaffected. (autoHideMenuBar only hid the bar.)
+  Menu.setApplicationMenu(null)
   applyContentSecurityPolicy()
 
   const db = openDatabase(join(app.getPath('userData'), 'switchboard.db'))

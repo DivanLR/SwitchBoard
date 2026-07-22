@@ -6,7 +6,7 @@
 // tools — so every answer is a real query, not a mock.
 import { computed, nextTick, ref, watch } from 'vue'
 import { isIpcError, type ProjectListItem } from '@shared/ipc-types'
-import type { SessionEvent } from '@shared/domain'
+import type { AgentScopedPayload, QuestionPayload, SessionEvent } from '@shared/domain'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useProjectsStore } from '@renderer/stores/projects'
 import StreamEvent from '@renderer/components/StreamEvent.vue'
@@ -49,7 +49,7 @@ const scanned = computed(() => schemaDoc.value !== null)
 // Main-loop events only — subagent internals stay folded into the parent stream,
 // exactly like the session view.
 const dbEvents = computed<SessionEvent[]>(() =>
-  active.events.filter((e) => (e.payload as { agentId?: string }).agentId === undefined),
+  active.events.filter((e) => (e.payload as AgentScopedPayload).agentId === undefined),
 )
 const hasEvents = computed(() => dbEvents.value.length > 0)
 const showEmpty = computed(
@@ -57,8 +57,7 @@ const showEmpty = computed(
 )
 
 async function loadSchema(): Promise<void> {
-  const res = await window.switchboard.invoke('mcp.readSchema', { projectId: props.project.id })
-  schemaDoc.value = res.content
+  schemaDoc.value = await projects.readMcpSchema(props.project.id)
 }
 watch([() => props.project.id, name], () => void loadSchema(), { immediate: true })
 
@@ -243,7 +242,7 @@ async function interrupt(): Promise<void> {
           <QuestionEvent
             v-if="event.kind === 'question'"
             :event-id="event.id"
-            :payload="event.payload as never"
+            :payload="event.payload as QuestionPayload"
             @answer="answer"
           />
           <StreamEvent v-else :event="event" />
@@ -306,7 +305,7 @@ async function interrupt(): Promise<void> {
 
 .db-ico {
   font-size: 15px;
-  color: #2dd4bf;
+  color: var(--teal);
 }
 
 .db-name {
@@ -370,7 +369,7 @@ async function interrupt(): Promise<void> {
 
 .tab.sel {
   color: var(--text-strong);
-  box-shadow: inset 0 -2px 0 #2dd4bf;
+  box-shadow: inset 0 -2px 0 var(--teal);
 }
 
 .rescan {
@@ -405,7 +404,7 @@ async function interrupt(): Promise<void> {
 
 .empty-ico {
   font-size: 26px;
-  color: #2dd4bf;
+  color: var(--teal);
 }
 
 .empty-title {
@@ -428,7 +427,7 @@ async function interrupt(): Promise<void> {
 }
 
 .teal {
-  color: #2dd4bf;
+  color: var(--teal);
 }
 
 .scan-banner {
@@ -462,7 +461,7 @@ async function interrupt(): Promise<void> {
 /* Composer caret is teal here (vs green in the session composer). */
 .caret {
   flex-shrink: 0;
-  color: #2dd4bf;
+  color: var(--teal);
   font-weight: 700;
 }
 </style>
