@@ -10,6 +10,22 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
 })
 
+test('the inbox panel can be dragged wider and the new width persists', async ({ page }) => {
+  const inbox = page.getByTestId('inbox-view')
+  const before = (await inbox.boundingBox())!.width
+  const handle = page.getByTestId('inbox-resize')
+  const hb = (await handle.boundingBox())!
+  // Drag the left-edge handle 120px to the left → the inbox grows.
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(hb.x - 120, hb.y + hb.height / 2, { steps: 8 })
+  await page.mouse.up()
+  const after = (await inbox.boundingBox())!.width
+  expect(after).toBeGreaterThan(before + 80)
+  // The width is remembered for the next launch.
+  expect(await page.evaluate(() => localStorage.getItem('sb-inbox-w'))).toBeTruthy()
+})
+
 test('requests from two projects land in one inbox, grouped, with risk and explanation', async ({
   page,
 }) => {

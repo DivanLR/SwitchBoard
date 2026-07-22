@@ -191,6 +191,9 @@ const markerChipLabel: Record<string, string> = {
 
 .prompt-text {
   color: var(--text-prompt);
+  /* Show the message with the spacing/newlines the developer typed. */
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .pending {

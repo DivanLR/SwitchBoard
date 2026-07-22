@@ -11,7 +11,7 @@ import { useProjectsStore } from '@renderer/stores/projects'
 import { useInboxStore } from '@renderer/stores/inbox'
 import { useUpdatesStore } from '@renderer/stores/updates'
 
-const props = defineProps<{ initialTab?: 'models' | 'proj' | 'allowed' | 'term' | 'gen' }>()
+const props = defineProps<{ initialTab?: 'models' | 'proj' | 'mcp' | 'allowed' | 'term' | 'gen' }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 const store = useSettingsStore()
 const projects = useProjectsStore()
@@ -19,11 +19,12 @@ const inbox = useInboxStore()
 const updates = useUpdatesStore()
 const settings = computed(() => store.settings)
 
-type Tab = 'models' | 'proj' | 'allowed' | 'term' | 'gen'
+type Tab = 'models' | 'proj' | 'mcp' | 'allowed' | 'term' | 'gen'
 const tab = ref<Tab>(props.initialTab ?? 'models')
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'models', label: 'Models', icon: '✦' },
   { id: 'proj', label: 'This project', icon: '▣' },
+  { id: 'mcp', label: 'MCP', icon: '⛁' },
   { id: 'allowed', label: 'Allowed list', icon: '✓' },
   { id: 'term', label: 'Terminals', icon: '❯' },
   { id: 'gen', label: 'General', icon: '⚙' },
@@ -64,6 +65,17 @@ const projModel = computed(() => {
 function saveProjModel(modelId: string): void {
   if (!proj.value || !settings.value) return
   save({ projectModels: { ...settings.value.projectModels, [proj.value.id]: modelId } })
+}
+
+/** Per-project worker model (cheaper, for mechanical work turns); 'global' follows impl. */
+const projWorkerModel = computed(() => {
+  const id = proj.value?.id
+  return (id && settings.value?.projectWorkerModels?.[id]) || 'global'
+})
+
+function saveProjWorkerModel(modelId: string): void {
+  if (!proj.value || !settings.value) return
+  save({ projectWorkerModels: { ...settings.value.projectWorkerModels, [proj.value.id]: modelId } })
 }
 
 const terseExplain: Record<TerseLevel, string> = {
@@ -148,21 +160,33 @@ const mcpServerNames = computed(() => {
       for (const m of p.session.mcpServers ?? []) names.add(m.name)
     }
   }
-  const current = settings.value?.databaseMcpServer
-  if (current) names.add(current)
+  for (const n of settings.value?.databaseMcpServers ?? []) names.add(n)
   return [...names].sort()
 })
 
-function setDatabaseMcp(name: string | null): void {
-  save({ databaseMcpServer: name })
+function isDbMcp(name: string): boolean {
+  return (settings.value?.databaseMcpServers ?? []).includes(name)
+}
+
+function toggleDatabaseMcp(name: string): void {
+  const current = settings.value?.databaseMcpServers ?? []
+  const next = current.includes(name) ? current.filter((n) => n !== name) : [...current, name]
+  save({ databaseMcpServers: next })
 }
 
 function addDatabaseMcp(): void {
   const name = dbMcpInput.value.trim()
   if (!name) return
   dbMcpInput.value = ''
-  setDatabaseMcp(name)
+  if (!isDbMcp(name)) toggleDatabaseMcp(name)
 }
+
+const mcpSelSummary = computed(() => {
+  const n = (settings.value?.databaseMcpServers ?? []).length
+  if (n === 0) return 'None selected — sessions still expose every server individually.'
+  if (n === 1) return '1 server in the combined workspace.'
+  return `${n} servers combined into one workspace.`
+})
 
 // --- Plugin toggles (design): hide a plugin's commands from suggestions ---
 const disabledPlugins = computed(
@@ -255,6 +279,26 @@ const updateLine = computed(() => {
               </div>
             </div>
 
+            <div class="setting-row">
+              <div class="sr-text">
+                <div class="sr-label">Route by message intent</div>
+                <div class="sr-desc">
+                  Questions and discussion use the planning model; requests to change code or run
+                  scripts use the implementation model. When off, the model follows Plan/Build mode.
+                </div>
+              </div>
+              <button
+                class="switch"
+                :class="{ on: settings.autoModelRouting }"
+                data-testid="setting-auto-routing"
+                role="switch"
+                :aria-checked="settings.autoModelRouting"
+                @click="save({ autoModelRouting: !settings.autoModelRouting })"
+              >
+                <span class="knob"></span>
+              </button>
+            </div>
+
             <div class="note">
               These apply to every project. New sessions pick them up immediately; running sessions
               switch on their next turn. Override per project in the "This project" tab.
@@ -329,6 +373,45 @@ const updateLine = computed(() => {
               </div>
 
               <div class="group">
+                <div class="group-label mono">WORKER MODEL</div>
+                <div class="group-desc">
+                  A cheaper model for mechanical line-level edits — renames, imports, small diffs —
+                  so the main model stays on the hard parts. Applies to work turns when auto model
+                  routing is on.
+                </div>
+                <div class="cards">
+                  <button
+                    class="card-opt"
+                    :class="{ sel: projWorkerModel === 'global' }"
+                    data-testid="proj-worker-global"
+                    @click="saveProjWorkerModel('global')"
+                  >
+                    <span class="opt-dot" :class="{ on: projWorkerModel === 'global' }"></span>
+                    <div class="opt-body">
+                      <div class="opt-name mono">Use implementation model</div>
+                      <div class="opt-sub">Follows the implementation model above</div>
+                    </div>
+                    <span class="opt-price mono">—</span>
+                  </button>
+                  <button
+                    v-for="m in MODEL_CHOICES"
+                    :key="m.id"
+                    class="card-opt"
+                    :class="{ sel: projWorkerModel === m.id }"
+                    :data-testid="`proj-worker-${m.id}`"
+                    @click="saveProjWorkerModel(m.id)"
+                  >
+                    <span class="opt-dot" :class="{ on: projWorkerModel === m.id }"></span>
+                    <div class="opt-body">
+                      <div class="opt-name mono">{{ m.label }}</div>
+                      <div class="opt-sub">{{ m.desc }}</div>
+                    </div>
+                    <span class="opt-price mono">{{ m.price }}</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="group">
                 <div class="group-label mono">PLUGINS</div>
                 <div class="group-desc">Tools Claude can load in this project's sessions.</div>
                 <div v-if="plugins.length === 0" class="note">
@@ -361,6 +444,52 @@ const updateLine = computed(() => {
                 </div>
               </div>
             </template>
+          </template>
+
+          <!-- MCP -->
+          <template v-else-if="tab === 'mcp'">
+            <div class="group-label mono">MCP SERVERS</div>
+            <div class="group-desc">
+              Sessions expose every configured MCP server. Select the ones to combine into a single
+              chat — they show in the sidebar MCP section and are used together in the schema scan
+              and chat (e.g. a database plus a code-search server in one conversation).
+            </div>
+            <div class="cards" data-testid="db-mcp-options">
+              <button
+                v-for="name in mcpServerNames"
+                :key="name"
+                class="card-opt mcp-opt"
+                :class="{ sel: isDbMcp(name) }"
+                :data-testid="`db-mcp-${name}`"
+                @click="toggleDatabaseMcp(name)"
+              >
+                <span class="mcp-check" :class="{ on: isDbMcp(name) }">{{ isDbMcp(name) ? '✓' : '' }}</span>
+                <span class="mcp-ico">⛁</span>
+                <div class="opt-body">
+                  <div class="opt-name mono">{{ name }}</div>
+                  <div class="opt-sub">
+                    {{ isDbMcp(name) ? 'In the combined MCP chat' : 'Add to the combined MCP chat' }}
+                  </div>
+                </div>
+              </button>
+            </div>
+            <div v-if="mcpServerNames.length === 0" class="note">
+              No MCP servers reported yet — start a session and its servers appear here to choose
+              from. You can also type the exact server name below.
+            </div>
+            <div class="add-cmd">
+              <input
+                v-model="dbMcpInput"
+                class="add-cmd-input mono"
+                data-testid="db-mcp-input"
+                placeholder="+ Or type the server name exactly — e.g. postgres"
+                @keydown.enter="addDatabaseMcp"
+              />
+              <button class="btn-solid" data-testid="db-mcp-set" @click="addDatabaseMcp">Add</button>
+            </div>
+            <div class="group-desc" style="margin-top: 12px">
+              {{ mcpSelSummary }}
+            </div>
           </template>
 
           <!-- ALLOWED LIST -->
@@ -625,55 +754,6 @@ const updateLine = computed(() => {
               >
                 <span class="knob"></span>
               </button>
-            </div>
-
-            <div class="group-label mono" style="margin-top: 8px">DATABASE MCP</div>
-            <div class="group-desc">
-              Sessions expose every configured MCP server. Pick the one that is your database: only
-              it shows in the sidebar MCP section and powers the schema scan and chat. The rest stay
-              hidden so they no longer clutter the view.
-            </div>
-            <div class="cards" data-testid="db-mcp-options">
-              <button
-                class="card-opt"
-                :class="{ sel: !settings.databaseMcpServer }"
-                data-testid="db-mcp-none"
-                @click="setDatabaseMcp(null)"
-              >
-                <span class="opt-dot" :class="{ on: !settings.databaseMcpServer }"></span>
-                <div class="opt-body">
-                  <div class="opt-name mono">Show all servers</div>
-                  <div class="opt-sub">No designation — every reported MCP server is listed</div>
-                </div>
-              </button>
-              <button
-                v-for="name in mcpServerNames"
-                :key="name"
-                class="card-opt"
-                :class="{ sel: settings.databaseMcpServer === name }"
-                :data-testid="`db-mcp-${name}`"
-                @click="setDatabaseMcp(name)"
-              >
-                <span class="opt-dot" :class="{ on: settings.databaseMcpServer === name }"></span>
-                <div class="opt-body">
-                  <div class="opt-name mono">{{ name }}</div>
-                  <div class="opt-sub">Use this server as the database MCP</div>
-                </div>
-              </button>
-            </div>
-            <div v-if="mcpServerNames.length === 0" class="note">
-              No MCP servers reported yet — start a session and its servers appear here to choose
-              from. You can also type the exact server name below.
-            </div>
-            <div class="add-cmd">
-              <input
-                v-model="dbMcpInput"
-                class="add-cmd-input mono"
-                data-testid="db-mcp-input"
-                placeholder="+ Or type the server name exactly — e.g. postgres"
-                @keydown.enter="addDatabaseMcp"
-              />
-              <button class="btn-solid" data-testid="db-mcp-set" @click="addDatabaseMcp">Set</button>
             </div>
 
             <div class="group-label mono" style="margin-top: 8px">APPROVALS &amp; SPEND</div>
@@ -944,6 +1024,32 @@ const updateLine = computed(() => {
   font-size: 10.5px;
   color: var(--text-faint);
   flex-shrink: 0;
+}
+
+/* MCP tab: a checkbox + database icon before the server name (design). */
+.mcp-check {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  border: 1.5px solid var(--border-strong);
+  color: var(--green-ink);
+  font-size: 11px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mcp-check.on {
+  border-color: var(--green);
+  background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
+}
+
+.mcp-ico {
+  flex-shrink: 0;
+  font-size: 15px;
+  color: var(--teal);
 }
 
 .lock-chip {

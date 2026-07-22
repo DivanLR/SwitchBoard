@@ -8,9 +8,17 @@ import { computed, ref, watch } from 'vue'
 import type { SpecPhase, SpecStatus } from '@shared/domain'
 import { SPEC_KIT_COMMANDS } from '@shared/domain'
 import { useSpecsStore } from '@renderer/stores/specs'
+import { useActiveSessionStore } from '@renderer/stores/activeSession'
 
 const props = defineProps<{ projectId: string }>()
 const specs = useSpecsStore()
+const active = useActiveSessionStore()
+
+// Start a brand-new spec: prefill the composer with /speckit-specify so the
+// developer types the feature description, then sends it to scaffold the spec.
+function newSpec(): void {
+  active.requestComposerInsert('/speckit-specify ')
+}
 
 type Part = 'spec' | 'plan' | 'tasks' | 'clarify' | 'cmds'
 const part = ref<Part>('tasks')
@@ -201,9 +209,11 @@ const partTabs: { id: Part; label: string }[] = [
       <div class="ni-icon mono">◇</div>
       <div class="ni-title">No specs in this project</div>
       <div class="ni-sub">
-        Run <span class="mono">/speckit.specify</span> in the session to scaffold one with
-        spec-kit.
+        Describe a feature and <span class="mono">/speckit.specify</span> scaffolds a spec for it.
       </div>
+      <button class="btn-solid ni-btn" data-testid="specs-new-empty" @click="newSpec">
+        + New spec
+      </button>
     </div>
 
     <!-- Specs present -->
@@ -220,6 +230,7 @@ const partTabs: { id: Part; label: string }[] = [
         >
           <span class="chip-dot" :style="{ color: statusDot(s.status) }">●</span>{{ s.id }}
         </button>
+        <button class="chip chip-new mono" data-testid="spec-new" @click="newSpec">+ New spec</button>
       </div>
 
       <template v-if="detail">
@@ -509,6 +520,17 @@ const partTabs: { id: Part; label: string }[] = [
   border-color: var(--surface-hover-line);
 }
 
+.chip-new {
+  border-style: dashed;
+  color: var(--text-faint);
+  background: transparent;
+}
+
+.chip-new:hover {
+  color: var(--green);
+  border-color: var(--green);
+}
+
 /* Spec card */
 .spec-card {
   background: var(--bg-card);
@@ -575,13 +597,14 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .impl-btn {
-  background: var(--green);
+  background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
   color: var(--green-ink);
   font-weight: 600;
   font-size: 11.5px;
   padding: 7px 16px;
   cursor: pointer;
   user-select: none;
+  box-shadow: var(--green-glow);
 }
 
 .impl-btn:hover {
@@ -840,13 +863,14 @@ const partTabs: { id: Part; label: string }[] = [
 
 .sug-run {
   flex-shrink: 0;
-  background: var(--green);
+  background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
   color: var(--green-ink);
   font-weight: 600;
   font-size: 11.5px;
   padding: 7px 16px;
   cursor: pointer;
   user-select: none;
+  box-shadow: var(--green-glow);
 }
 
 .sug-run:hover {

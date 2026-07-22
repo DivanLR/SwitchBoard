@@ -4,7 +4,8 @@
 // blocks and a live status line, dark raw log, and the ❯ composer bar
 // (FR-014..019a, R2 resume).
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import type { AgentScopedPayload, ResultPayload, SessionEvent } from '@shared/domain'
+import { MODEL_CHOICES } from '@shared/domain'
+import type { AgentScopedPayload, SessionEvent, CleanupGroup } from '@shared/domain'
 import { activeAgents } from '@shared/agents'
 import type { ProjectListItem } from '@shared/ipc-types'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
@@ -19,6 +20,7 @@ import StreamEvent from '@renderer/components/StreamEvent.vue'
 import SwallowedBlock from '@renderer/components/SwallowedBlock.vue'
 import QuestionEvent from '@renderer/components/QuestionEvent.vue'
 import SpecsView from '@renderer/views/SpecsView.vue'
+import CleanupView from '@renderer/views/CleanupView.vue'
 
 const props = defineProps<{ project: ProjectListItem }>()
 const emit = defineEmits<{ (e: 'open-proj-settings'): void }>()
@@ -57,8 +59,9 @@ function pillLabel(status: string): string {
   return PILL_LABELS[status] ?? status
 }
 
-// Main-area tab: the live session stream, or the project's Spec Kit specs.
-const mainTab = ref<'session' | 'specs'>('session')
+// Main-area tab: the live session stream, the project's Spec Kit specs, or the
+// review/cleanup command launcher.
+const mainTab = ref<'session' | 'specs' | 'cleanup'>('session')
 const specCount = computed(() => specs.stateFor(props.project.id).specs.length)
 
 const composer = ref('')
@@ -77,6 +80,7 @@ const composerEl = ref<HTMLTextAreaElement | null>(null)
 // text, dropdown, up-arrow recall) live in a dedicated composable.
 const {
   suggestions,
+  availableCommandNames,
   ghostRest,
   isCommandMatch,
   suggestIndex,
@@ -178,22 +182,36 @@ watch(
   },
 )
 
-const sendTo = computed(() => selectedAgent.value?.name ?? props.project.name)
+const sendTo = computed(
+  () => selectedAgent.value?.task || selectedAgent.value?.name || props.project.name,
+)
 
 function agentIdOf(event: SessionEvent): string | undefined {
   return (event.payload as AgentScopedPayload).agentId
 }
 
-const usage = computed(() => {
-  let cost = 0
-  let tokens = 0
-  for (const event of active.events) {
-    if (event.kind !== 'result') continue
-    const payload = event.payload as ResultPayload
-    cost += payload.totalCostUsd ?? 0
-    tokens += (payload.usage.inputTokens ?? 0) + (payload.usage.outputTokens ?? 0)
-  }
-  return { cost, tokens }
+// Subscription rate-limit usage (the same signal the sidebar meter shows) — a
+// truer picture of "current session usage" than a per-run token/cost estimate.
+const usagePct = computed(() => {
+  const u = liveSession.value?.usageUtilization
+  return u != null ? Math.max(0, Math.min(100, Math.round(u))) : null
+})
+const usageColor = computed(() => {
+  const p = usagePct.value ?? 0
+  return p > 85 ? 'var(--red)' : p > 60 ? 'var(--amber)' : 'var(--green)'
+})
+const usageLimitLabel = computed(() => {
+  const t = liveSession.value?.usageLimitType
+  if (t === 'five_hour') return '5h limit'
+  if (t?.startsWith('seven_day')) return '7d limit'
+  return 'limit'
+})
+
+// The model the SDK reported for the latest turn (reflects intent routing live).
+const modelLabel = computed(() => {
+  const id = liveSession.value?.currentModel
+  if (!id) return null
+  return MODEL_CHOICES.find((m) => m.id === id)?.label ?? id
 })
 
 watch(
@@ -262,10 +280,14 @@ const items = computed<StreamItem[]>(() => {
   const result: StreamItem[] = []
   let block: { noiseKind: string; events: SessionEvent[] } | null = null
   for (const event of scopedEvents.value) {
-    // Clean view is a readable narrative: tool activity (commands being run)
-    // is hidden unless the "Show tool activity" setting is on, in which case
-    // it collapses into "worked quietly" rows. The raw view keeps everything.
-    if (event.kind === 'tool_activity' && !outputPrefs.value.showToolRows) continue
+    // Clean view narrative: subagents are represented by the AGENTS card, never
+    // as raw tool rows; other tool activity (commands being run) shows unless the
+    // "Show tool activity" setting is off. The raw view always keeps everything.
+    if (event.kind === 'tool_activity') {
+      const toolName = (event.payload as { toolName?: string }).toolName
+      if (toolName === 'Task' || toolName === 'Agent') continue
+      if (!outputPrefs.value.showToolRows) continue
+    }
     if (event.noiseKind) {
       if (block && block.noiseKind === event.noiseKind) {
         block.events.push(event)
@@ -345,13 +367,26 @@ function rawLinesOf(event: SessionEvent): string[] {
   }
 }
 
+function hhmm(iso: string): string {
+  const d = new Date(iso)
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 // Stable keys per raw line (event id + line offset) so streaming updates key
-// correctly rather than by array index.
-const rawLines = computed(() =>
-  active.events.flatMap((event) =>
-    rawLinesOf(event).map((text, i) => ({ key: `${event.id}:${i}`, text })),
-  ),
-)
+// correctly rather than by array index. When Timestamps is on, the event's HH:MM
+// sits in a gutter on its first line (matching the clean view).
+const rawLines = computed(() => {
+  const stamps = outputPrefs.value.timestamps
+  return active.events.flatMap((event) => {
+    const stamp = stamps ? hhmm(event.createdAt) : null
+    return rawLinesOf(event).map((text, i) => ({
+      key: `${event.id}:${i}`,
+      text,
+      stamp: i === 0 ? stamp : '',
+    }))
+  })
+})
 
 function scrollToBottom(): void {
   void nextTick(() => {
@@ -381,11 +416,27 @@ watch(
 )
 
 // --- Actions ---
-// A Refine action in SpecsView sets a spec-edit target; jump back to the session
-// so the reply stream is visible while the composer targets that spec file.
+// A Refine action in SpecsView sets a spec-edit target. Stay on the Specs tab
+// (the composer footer is shared across tabs) and focus it, so the developer can
+// type the change in place instead of being pulled back to the session stream.
 function onSetTarget(label: string): void {
   editTarget.value = label
+  void nextTick(() => composerEl.value?.focus())
+}
+
+// A Cleanup card sends its slash command straight to the session; output lands
+// in the Session tab, so switch there to watch it run.
+function runCleanup(command: string): void {
   mainTab.value = 'session'
+  void specs.runInSession(props.project.id, command)
+}
+
+// "Download to project" adds the plugin's marketplace then installs it — two
+// slash commands run in order in the session.
+async function installCleanup(group: CleanupGroup): Promise<void> {
+  mainTab.value = 'session'
+  await specs.runInSession(props.project.id, group.marketplace)
+  await specs.runInSession(props.project.id, group.pkg)
 }
 
 async function send(): Promise<void> {
@@ -404,10 +455,17 @@ async function send(): Promise<void> {
     }
     if (!liveSession.value) return
     const agent = selectedAgent.value
+    // Attach any REFS as @path mentions so the model reads them this turn. The
+    // chips stay (they also grant the session folder access) — user setting.
+    const refs = props.project.refs
+    // One @path per line so multiple refs (and paths containing spaces) stay
+    // unambiguous rather than running together on one space-delimited line.
+    const withRefs =
+      refs.length > 0 ? `${text}\n\n${refs.map((r) => `@${r.path}`).join('\n')}` : text
     // Agent chat: the message goes to the session addressed at the subagent
     // (the SDK has no direct subagent input channel; the main loop relays).
-    if (agent) await active.send(`[to ${agent.name}] ${text}`, agent.id)
-    else await active.send(text)
+    if (agent) await active.send(`[to ${agent.name}] ${withRefs}`, agent.id)
+    else await active.send(withRefs)
     composer.value = ''
     // Surface the just-sent command at the top of the suggestion history at once.
     recordSent(text)
@@ -441,6 +499,11 @@ async function start(resume: boolean): Promise<void> {
 // Ctrl+C, like a terminal (the design has no interrupt button).
 async function interrupt(): Promise<void> {
   await active.interrupt()
+}
+
+// End the session outright (distinct from Ctrl+C, which only interrupts the turn).
+async function stop(): Promise<void> {
+  await active.stop()
 }
 
 function answerQuestion(eventId: string, choice: string): void {
@@ -577,10 +640,19 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
           v-if="liveSession?.status === 'working'"
           class="stop-btn mono"
           data-testid="stop-session"
-          title="Stop the session (Ctrl+C)"
+          title="Interrupt the current turn (Ctrl+C)"
           @click="interrupt()"
         >
           ■
+        </button>
+        <button
+          v-if="liveSession"
+          class="ctl mono"
+          data-testid="end-session"
+          title="End the session (resumable later)"
+          @click="stop()"
+        >
+          End
         </button>
         <button
           class="ctl mono"
@@ -612,6 +684,13 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
       <div class="head-meta mono">
         <span style="white-space: nowrap">⎇ {{ liveSession?.branch ?? endedSession?.branch ?? '—' }}</span>
         <span
+          v-if="modelLabel"
+          data-testid="session-model"
+          style="color: var(--text-faint); white-space: nowrap"
+        >
+          {{ modelLabel }}
+        </span>
+        <span
           v-if="liveSession && liveSession.diffAdds != null"
           data-testid="diff-stats"
           style="white-space: nowrap"
@@ -622,9 +701,12 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
         <span v-if="sessionTimer" style="color: var(--text-faint); white-space: nowrap">
           session <span style="color: var(--text-meta)">{{ sessionTimer }}</span>
         </span>
-        <span v-if="usage.tokens > 0 || usage.cost > 0" style="color: var(--text-faint); white-space: nowrap">
-          {{ Math.round(usage.tokens / 1000) }}k tok ·
-          <span style="color: var(--text-meta)">${{ usage.cost.toFixed(2) }}</span>
+        <span
+          v-if="usagePct != null"
+          data-testid="session-usage"
+          style="color: var(--text-faint); white-space: nowrap"
+        >
+          <span :style="{ color: usageColor }">{{ usagePct }}%</span> {{ usageLimitLabel }}
         </span>
       </div>
     </header>
@@ -645,7 +727,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
       </div>
     </div>
 
-    <!-- Session / Specs tabs -->
+    <!-- Session / Specs / Cleanup tabs -->
     <div class="main-tabs mono">
       <button
         class="mt"
@@ -659,9 +741,24 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
         Specs
         <span v-if="specCount > 0" class="mt-badge">{{ specCount }}</span>
       </button>
+      <button
+        class="mt"
+        :class="{ sel: mainTab === 'cleanup' }"
+        data-testid="tab-cleanup"
+        @click="mainTab = 'cleanup'"
+      >
+        Cleanup
+      </button>
     </div>
 
     <SpecsView v-if="mainTab === 'specs'" :project-id="project.id" @set-target="onSetTarget" />
+    <CleanupView
+      v-else-if="mainTab === 'cleanup'"
+      :project-name="project.name"
+      :available="availableCommandNames"
+      @run="runCleanup"
+      @install="installCleanup"
+    />
 
     <!-- Clean stream (an open agent chat always renders clean) -->
     <div
@@ -679,7 +776,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
           </span>
           <span class="ab-sep">│</span>
           <span class="ab-dot">●</span>
-          <span class="ab-name">{{ selectedAgent.name }}</span>
+          <span class="ab-name">{{ selectedAgent.task || selectedAgent.name }}</span>
           <span class="ab-chip">subagent</span>
           <span style="flex: 1"></span>
         </div>
@@ -808,8 +905,15 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 
     <!-- Raw view -->
     <div v-else ref="streamEl" class="raw-view" data-testid="stream" :style="{ zoom: streamZoom }">
-      <div v-for="line in rawLines" :key="line.key" class="raw-line mono" data-testid="raw-line">
-        {{ line.text }}
+      <div
+        v-for="line in rawLines"
+        :key="line.key"
+        class="raw-line mono"
+        :class="{ stamped: outputPrefs.timestamps }"
+        data-testid="raw-line"
+      >
+        <span v-if="outputPrefs.timestamps" class="raw-stamp" data-testid="raw-stamp">{{ line.stamp }}</span>
+        <span>{{ line.text }}</span>
       </div>
     </div>
 
@@ -1401,6 +1505,19 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   color: var(--text-mid);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* Timestamps setting: dim HH:MM gutter to the left of each raw line. */
+.raw-line.stamped {
+  display: grid;
+  grid-template-columns: 38px 1fr;
+  gap: 8px;
+}
+
+.raw-stamp {
+  font-size: 10px;
+  color: var(--text-ghost);
+  white-space: nowrap;
 }
 
 /* Positioning context for the floating REFS row; base composer chrome is global. */

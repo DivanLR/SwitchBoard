@@ -211,14 +211,17 @@ export function installMockHost(scenario: MockScenario): void {
     terseMode: true,
     terseLevel: 'full',
     fontSize: 'md',
-    showToolRows: false,
+    showToolRows: true,
     timestamps: false,
     autoscroll: true,
     projectModels: {},
+    projectWorkerModels: {},
+    autoModelRouting: true,
     autoApproveLow: false,
     autoApproveMedium: false,
     dailySpendLimit: 0,
     disabledCommands: {},
+    databaseMcpServers: [],
   }
 
   const listeners = new Map<string, Set<(payload: unknown) => void>>()

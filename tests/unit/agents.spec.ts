@@ -50,4 +50,28 @@ describe('activeAgents', () => {
     ]
     expect(activeAgents(events).map((a) => a.label)).toEqual(['agent'])
   })
+
+  it('keeps an unresolved background (task-channel) agent visible across a result', () => {
+    const events: SessionEvent[] = [
+      event('tool_activity', {
+        toolName: 'Task',
+        inputPreview: '{"description":"Research pricing"}',
+        background: true,
+      }),
+      // The orchestrating turn finishes while the background agent runs on.
+      event('result', { totalCostUsd: 0, usage: {}, durationMs: 1 }),
+    ]
+    expect(activeAgents(events).map((a) => a.task)).toEqual(['Research pricing'])
+    // Once its close signal lands (resultPreview set), it drops off.
+    const closed: SessionEvent[] = [
+      event('tool_activity', {
+        toolName: 'Task',
+        inputPreview: '{"description":"Research pricing"}',
+        background: true,
+        resultPreview: 'done',
+      }),
+      event('result', { totalCostUsd: 0, usage: {}, durationMs: 1 }),
+    ]
+    expect(activeAgents(closed)).toEqual([])
+  })
 })

@@ -1,14 +1,33 @@
 <script setup lang="ts">
 // ? QUESTION card — 1:1 with the design reference: amber-tinted card with
 // clickable option chips; answers submit to the session (FR-020).
+import { ref } from 'vue'
 import type { QuestionPayload } from '@shared/domain'
 
 const props = defineProps<{ payload: QuestionPayload; eventId: string }>()
 const emit = defineEmits<{ (e: 'answer', eventId: string, choice: string): void }>()
 
+// A free-text answer is always allowed alongside the offered options; the
+// broker stores whatever string is sent, no need to match a listed choice.
+const addingCustom = ref(false)
+const customText = ref('')
+
 function choose(label: string): void {
   if (props.payload.answered) return
   emit('answer', props.eventId, label)
+}
+
+function submitCustom(): void {
+  const text = customText.value.trim()
+  if (!text) return
+  emit('answer', props.eventId, text)
+  addingCustom.value = false
+  customText.value = ''
+}
+
+function cancelCustom(): void {
+  addingCustom.value = false
+  customText.value = ''
 }
 </script>
 
@@ -29,6 +48,27 @@ function choose(label: string): void {
       >
         {{ option.label }}
       </button>
+      <template v-if="!payload.answered">
+        <input
+          v-if="addingCustom"
+          v-model="customText"
+          class="custom-input mono"
+          data-testid="question-custom-input"
+          autofocus
+          placeholder="Type your own answer…"
+          @keydown.enter="submitCustom"
+          @keydown.esc="cancelCustom"
+          @blur="cancelCustom"
+        />
+        <button
+          v-else
+          class="chip chip-other mono"
+          data-testid="question-custom"
+          @click="addingCustom = true"
+        >
+          + Other
+        </button>
+      </template>
     </div>
     <div v-else class="open-hint mono">Answer through the composer below.</div>
     <div v-if="payload.answered" class="answered mono" data-testid="question-answered">
@@ -91,6 +131,22 @@ function choose(label: string): void {
   border-color: var(--green);
   color: var(--green);
   opacity: 1;
+}
+
+.chip-other {
+  border-style: dashed;
+  color: var(--text-faint);
+}
+
+.custom-input {
+  font-size: 11.5px;
+  color: var(--text-strong);
+  background: var(--bg);
+  border: 1px solid var(--green);
+  border-radius: 10px;
+  padding: 5px 11px;
+  outline: none;
+  min-width: 180px;
 }
 
 .open-hint {

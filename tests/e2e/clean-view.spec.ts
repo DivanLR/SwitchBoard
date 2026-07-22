@@ -61,17 +61,34 @@ test('the raw view retains 100% of the output (FR-018)', async ({ page }) => {
   await expect(page.getByTestId('swallowed-block')).toHaveCount(1)
 })
 
-test('clean view hides commands being run; raw view shows them', async ({ page }) => {
+test('clean view shows commands being run by default; raw view shows them too', async ({ page }) => {
   await page.evaluate(() => {
     window.__mock.emitEvent('s-alpha', 'tool_activity', { toolName: 'Bash', inputPreview: 'npm test' })
     window.__mock.emitEvent('s-alpha', 'assistant_text', { text: 'Tests pass.', partial: false })
   })
-  // Clean view: the command is not shown, the narrative is.
-  await expect(page.getByTestId('stream').getByTestId('stream-event-tool_activity')).toHaveCount(0)
+  // Clean view now shows tool activity too (showToolRows defaults on).
+  await expect(page.getByTestId('stream').getByTestId('stream-event-tool_activity')).toContainText(
+    'npm test',
+  )
   await expect(page.getByTestId('stream-event-assistant_text')).toContainText('Tests pass.')
-  // Raw view: the command line is present.
+  // Raw view: the command line is present too.
   await page.getByTestId('view-raw').click()
   await expect(page.getByTestId('stream')).toContainText('npm test')
+})
+
+test('the raw view shows timestamps when the Timestamps setting is on', async ({ page }) => {
+  await page.evaluate(() =>
+    window.__mock.emitEvent('s-alpha', 'assistant_text', { text: 'Line one.', partial: false }),
+  )
+  await page.getByTestId('view-raw').click()
+  await expect(page.getByTestId('raw-stamp')).toHaveCount(0)
+  // Turn on Timestamps in Settings → Terminals.
+  await page.getByTestId('open-settings').click()
+  await page.getByTestId('settings-tab-term').click()
+  await page.getByTestId('setting-timestamps').click()
+  await page.getByTestId('settings-done').click()
+  // Raw lines now carry an HH:MM gutter.
+  await expect(page.getByTestId('raw-stamp').first()).toHaveText(/^\d{2}:\d{2}$/)
 })
 
 test('errors are never swallowed (FR-017)', async ({ page }) => {
@@ -104,7 +121,7 @@ test('parallel subagents are listed: stream card, header pill, and sidebar rows'
   await expect(card).toContainText('test-writer')
   await expect(card).toContainText('Implement family revoke')
   await expect(page.getByTestId('agents-pill')).toContainText('2 agents')
-  await expect(page.getByTestId('sidebar-agents-alpha')).toContainText('reuse-guard')
+  await expect(page.getByTestId('sidebar-agents-alpha')).toContainText('Implement family revoke')
 })
 
 test('clicking an agent opens its chat: banner, scoped stream, addressed composer', async ({ page }) => {
@@ -140,7 +157,7 @@ test('clicking an agent opens its chat: banner, scoped stream, addressed compose
   await page.getByTestId('agent-row').first().click()
 
   await expect(page.getByTestId('agent-banner')).toContainText('← alpha')
-  await expect(page.getByTestId('agent-banner')).toContainText('test-writer')
+  await expect(page.getByTestId('agent-banner')).toContainText('Write rotation tests')
   await expect(page.getByTestId('agent-banner')).toContainText('subagent')
   // Scoped stream: the delegating prompt opens the chat, agent output follows,
   // main-loop text is gone.
@@ -149,8 +166,8 @@ test('clicking an agent opens its chat: banner, scoped stream, addressed compose
   await expect(stream).not.toContainText('Main loop narrative.')
 
   // The sidebar marks the open agent; the composer addresses it.
-  await expect(page.getByTestId('sidebar-agent-test-writer')).toContainText('test-writer ←')
-  await expect(page.getByTestId('composer-to')).toContainText('to test-writer')
+  await expect(page.getByTestId('sidebar-agent-test-writer')).toContainText('Write rotation tests ←')
+  await expect(page.getByTestId('composer-to')).toContainText('to Write rotation tests')
   await page.getByTestId('composer-input').fill('prioritise the replay case')
   await page.getByTestId('composer-send').click()
   const sends = await page.evaluate(() => window.__mock.state().sends)

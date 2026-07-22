@@ -11,8 +11,17 @@ const MAX_SUGGESTIONS = 6
 // just the top few — the dropdown scrolls.
 const MAX_SLASH_SUGGESTIONS = 50
 
+/** Case- and separator-insensitive key for command matching: "CI/CD" and
+ *  "/dotnet-claude-kit:ci-cd" both reduce to comparable letter runs, so typing
+ *  one surfaces the other regardless of the namespace, slash, colon or dash. */
+export function normalizeForMatch(s: string): string {
+  return s.toLowerCase().replace(/[-_:/\s]/g, '')
+}
+
 export interface CommandSuggestions {
   suggestions: Ref<string[]>
+  /** All available slash-command names for this project (for install detection). */
+  availableCommandNames: Ref<string[]>
   ghostRest: Ref<string>
   /** True when the composer text exactly matches a known slash command. */
   isCommandMatch: Ref<boolean>
@@ -72,16 +81,27 @@ export function useCommandSuggestions(opts: {
     return hints.value.get(text) ?? ''
   }
 
-  /** Case-insensitive prefix matches for the dropdown (excludes the exact text). */
+  /** Dropdown matches: commands by separator-insensitive substring (so "CI/CD"
+   *  finds "/dotnet-claude-kit:ci-cd"); history stays prefix-only. Commands first. */
   const suggestions = computed<string[]>(() => {
     const typed = composer.value.trim()
     if (typed.length === 0 || suggestDismissed.value) return []
     const lower = typed.toLowerCase()
+    const key = normalizeForMatch(typed)
     // Typing "/" is a command palette: show all matching skills/commands.
     const cap = typed.startsWith('/') ? MAX_SLASH_SUGGESTIONS : MAX_SUGGESTIONS
-    return pool.value
-      .filter((cmd) => cmd !== composer.value && cmd.toLowerCase().startsWith(lower))
-      .slice(0, cap)
+    const cmds = availableCommands.value
+      .map((c) => slashName(c.name))
+      .filter((cmd) =>
+        cmd !== composer.value &&
+        // Empty key (typing only separators like "/") falls back to prefix so the
+        // palette still lists commands rather than matching everything.
+        (key.length === 0 ? cmd.toLowerCase().startsWith(lower) : normalizeForMatch(cmd).includes(key)),
+      )
+    const hist = history.value.filter(
+      (h) => h !== composer.value && h.toLowerCase().startsWith(lower),
+    )
+    return [...new Set([...cmds, ...hist])].slice(0, cap)
   })
 
   /** The single best case-sensitive continuation, rendered inline as ghost text. */
@@ -94,10 +114,11 @@ export function useCommandSuggestions(opts: {
     ghostMatch.value ? ghostMatch.value.slice(composer.value.length) : '',
   )
 
-  /** The typed text is exactly one of the available slash commands. */
+  /** The first token is a known slash command — stays true once arguments follow
+   *  (e.g. "/foo do the thing"), so the command highlight persists past the space. */
   const isCommandMatch = computed(() => {
-    const typed = composer.value.trim()
-    return typed.length > 0 && availableCommands.value.some((c) => slashName(c.name) === typed)
+    const first = composer.value.trim().split(/\s+/)[0]
+    return first.length > 0 && availableCommands.value.some((c) => slashName(c.name) === first)
   })
 
   function acceptGhost(): boolean {
@@ -229,8 +250,13 @@ export function useCommandSuggestions(opts: {
     reset()
   }
 
+  const availableCommandNames = computed<string[]>(() =>
+    availableCommands.value.map((c) => slashName(c.name)),
+  )
+
   return {
     suggestions,
+    availableCommandNames,
     ghostRest,
     isCommandMatch,
     suggestIndex,

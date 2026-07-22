@@ -34,6 +34,35 @@ function openSettings(tab: 'models' | 'proj' | 'allowed' | 'term' | 'gen' = 'mod
 const bridgeMissing = ref(false)
 const updateDismissed = ref(false)
 
+// The inbox panel is drag-resizable; its width persists across launches.
+const INBOX_MIN = 280
+const INBOX_MAX = 680
+function clampInbox(w: number): number {
+  return Math.min(INBOX_MAX, Math.max(INBOX_MIN, w))
+}
+const inboxWidth = ref(clampInbox(Number(localStorage.getItem('sb-inbox-w')) || 332))
+
+function startInboxResize(event: MouseEvent): void {
+  event.preventDefault()
+  const startX = event.clientX
+  const startW = inboxWidth.value
+  document.body.style.userSelect = 'none'
+  document.body.style.cursor = 'col-resize'
+  const onMove = (e: MouseEvent): void => {
+    // The handle sits on the inbox's left edge, so dragging left widens it.
+    inboxWidth.value = clampInbox(startW - (e.clientX - startX))
+  }
+  const onUp = (): void => {
+    window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('mouseup', onUp)
+    document.body.style.userSelect = ''
+    document.body.style.cursor = ''
+    localStorage.setItem('sb-inbox-w', String(inboxWidth.value))
+  }
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', onUp)
+}
+
 const unsubscribers: (() => void)[] = []
 
 onMounted(async () => {
@@ -124,7 +153,7 @@ const dbProject = computed(() => projects.dbProject)
         ✕
       </button>
     </div>
-    <div class="panes">
+    <div class="panes" :style="{ '--inbox-w': `${inboxWidth}px` }">
       <Sidebar
         @add-project="showRegistration = true"
         @open-settings="openSettings()"
@@ -132,7 +161,7 @@ const dbProject = computed(() => projects.dbProject)
 
       <main class="main">
         <McpView
-          v-if="dbProject && active.mcpTarget"
+          v-if="dbProject && active.mcpOpen"
           :project="dbProject"
         />
         <SessionView
@@ -146,6 +175,12 @@ const dbProject = computed(() => projects.dbProject)
         </div>
       </main>
 
+      <div
+        class="inbox-resize"
+        data-testid="inbox-resize"
+        title="Drag to resize the inbox"
+        @mousedown="startInboxResize"
+      ></div>
       <InboxView />
     </div>
 
@@ -187,14 +222,15 @@ const dbProject = computed(() => projects.dbProject)
 }
 
 .ub-install {
-  background: var(--green);
+  background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
   color: var(--green-ink);
   font-weight: 600;
   font-size: 11px;
   font-family: var(--sans);
   padding: 4px 12px;
-  border-radius: 10px;
+  border-radius: var(--rc);
   cursor: pointer;
+  box-shadow: var(--green-glow);
 }
 
 .ub-dismiss {
@@ -221,6 +257,21 @@ const dbProject = computed(() => projects.dbProject)
   display: flex;
   flex-direction: column;
   background: var(--bg);
+}
+
+/* Drag handle on the inbox's left edge (design seam sits on the inbox border). */
+.inbox-resize {
+  position: relative;
+  flex-shrink: 0;
+  width: 6px;
+  margin-right: -6px;
+  z-index: 2;
+  cursor: col-resize;
+  background: transparent;
+}
+
+.inbox-resize:hover {
+  background: var(--border);
 }
 
 .no-project {

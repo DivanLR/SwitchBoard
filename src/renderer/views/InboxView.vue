@@ -230,7 +230,7 @@ const historyItems = computed(() => inbox.history)
 </script>
 
 <template>
-  <aside class="inbox">
+  <aside class="inbox" data-testid="inbox-view">
     <!-- Tabs -->
     <div class="tabs">
       <div
@@ -468,8 +468,9 @@ const historyItems = computed(() => inbox.history)
 
 <style scoped>
 .inbox {
-  width: 332px;
-  min-width: 332px;
+  /* Width is user-resizable (App sets --inbox-w on the panes container). */
+  width: var(--inbox-w, 332px);
+  min-width: var(--inbox-w, 332px);
   background: var(--gloss), var(--bg-panel);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);

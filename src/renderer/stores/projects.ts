@@ -131,7 +131,7 @@ export const useProjectsStore = defineStore('projects', {
       // Selecting a project leaves the global Database MCP view, so the chat
       // swaps to that project's session — same as switching between projects.
       // The reserved MCP session stays alive; the MCP row reopens its view.
-      useActiveSessionStore().openMcp(null)
+      useActiveSessionStore().openMcp(false)
     },
 
     applyStatusPush(push: SessionStatusPush): void {

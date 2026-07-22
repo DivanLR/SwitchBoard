@@ -43,12 +43,16 @@ export function activeAgents(events: SessionEvent[]): ActiveAgent[] {
     }
   }
   const agents: ActiveAgent[] = []
-  for (const event of events.slice(turnStart)) {
+  for (let i = 0; i < events.length; i++) {
+    const event = events[i]
     if (event.kind !== 'tool_activity') continue
     const payload = event.payload as ToolActivityPayload
-    if (AGENT_TOOLS.has(payload.toolName) && payload.resultPreview === undefined) {
-      agents.push(agentOf(payload.toolUseId ?? event.id, payload.inputPreview))
-    }
+    if (!AGENT_TOOLS.has(payload.toolName) || payload.resultPreview !== undefined) continue
+    // In-band agents only count within the current turn, so ones orphaned by an
+    // interrupt never linger. Backgrounded agents (task channel) carry their own
+    // close signal, so they stay active across a turn's result until it arrives.
+    if (!payload.background && i < turnStart) continue
+    agents.push(agentOf(payload.toolUseId ?? event.id, payload.inputPreview))
   }
   return agents
 }

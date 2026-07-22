@@ -171,3 +171,11 @@ test('Ctrl+C interrupts the running session, like a terminal', async ({ page }) 
     .toBeGreaterThan(0)
   expect(await page.evaluate(() => window.__mock.state().interrupts)).toContain('s-alpha')
 })
+
+test('End ends the session (distinct from Ctrl+C interrupt)', async ({ page }) => {
+  await page.getByTestId('sidebar-project-alpha').click()
+  await page.getByTestId('end-session').click()
+  await expect(page.getByTestId('ended-banner')).toContainText('stopped')
+  // The live-only controls are gone once the session has ended.
+  await expect(page.getByTestId('end-session')).toHaveCount(0)
+})

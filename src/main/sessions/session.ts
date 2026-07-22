@@ -11,6 +11,7 @@ import {
 } from '@anthropic-ai/claude-agent-sdk'
 import type { McpServer, ProjectCommand, SessionStatus } from '@shared/domain'
 import { MessageMapper, type EventSink } from './message-mapper'
+import { classifyIntent } from './model-routing'
 
 /** Streaming input queue the SDK consumes; `end()` closes the session gracefully. */
 class AsyncPushQueue<T> implements AsyncIterable<T> {
@@ -72,8 +73,14 @@ export interface HostedSessionOptions {
   claudeExecutablePath?: string
   /** Model id for work turns; omitted/'default' uses the account default. */
   workModel?: string
+  /** Cheaper model id for work-classified turns under auto routing; falls back
+   *  to workModel when unset. */
+  workerModel?: string
   /** Model id for plan-mode turns; applied via setModel when entering plan mode. */
   planModel?: string
+  /** Route each message by intent (question→planModel, code→workModel) instead
+   *  of by the plan-mode toggle. */
+  autoModelRouting?: boolean
   /** Bypass all permission checks for this session (auto-approve every tool). */
   bypassPermissions?: boolean
   sink: EventSink
@@ -86,6 +93,8 @@ export interface HostedSessionOptions {
   onUsage?: (usage: { utilization: number | null; resetsAt: number | null; limitType: string | null }) => void
   /** MCP servers reported in the init message (sidebar MCP section). */
   onMcpServers?: (servers: McpServer[]) => void
+  /** Model the SDK reports for each main-loop turn (header display). */
+  onModel?: (model: string) => void
   /** Fired after every completed turn (branch observation, counters). */
   onTurnComplete: () => void
   onExit: (reason: 'completed' | 'stopped' | 'crashed', detail?: string) => void
@@ -205,7 +214,10 @@ export class HostedSession {
     this.captureInitCommands(message)
     this.captureInitMcp(message)
     this.captureBackgroundTasks(message)
-    this.applyModelForMode(message)
+    // Intent routing owns the model per message (see deliverNow); the mode-based
+    // switch would otherwise fight it, so run only one of the two.
+    if (!this.options.autoModelRouting) this.applyModelForMode(message)
+    this.captureModel(message)
     this.captureUsage(message)
     this.mapper.handle(message)
     if (message.type === 'result') {
@@ -230,6 +242,43 @@ export class HostedSession {
     void this.q?.setModel(wanted).catch(() => {
       // Best-effort: an older CLI may not support runtime model switching.
     })
+  }
+
+  /** Pick the model for the turn about to start from the message's intent.
+   *  Fire-and-forget (best-effort), exactly like applyModelForMode, so the send
+   *  path stays synchronous — no await window for a stop/interrupt to race. */
+  private applyModelForIntent(text: string): void {
+    if (!this.options.autoModelRouting) return
+    const norm = (m?: string): string | undefined => (m && m !== 'default' ? m : undefined)
+    const intent = classifyIntent(text)
+    // Work-classified turns prefer the cheaper per-project worker model when set.
+    const wanted =
+      intent === 'plan'
+        ? norm(this.options.planModel)
+        : (norm(this.options.workerModel) ?? norm(this.options.workModel))
+    const target = wanted ?? '__default__'
+    if (this.appliedModel === target) return
+    this.appliedModel = target
+    void this.q?.setModel(wanted).catch(() => {
+      // Best-effort: an older CLI may not support runtime model switching.
+    })
+  }
+
+  /** Report the model the SDK actually used for the latest MAIN-LOOP turn
+   *  (subagent turns carry parent_tool_use_id and must not overwrite it). */
+  private lastModel: string | null = null
+  private captureModel(message: SDKMessage): void {
+    if (!this.options.onModel) return
+    const msg = message as {
+      type?: string
+      parent_tool_use_id?: string | null
+      message?: { model?: string }
+    }
+    if (msg.type !== 'assistant' || msg.parent_tool_use_id) return
+    const model = msg.message?.model
+    if (!model || model === this.lastModel) return
+    this.lastModel = model
+    this.options.onModel(model)
   }
 
   private captureUsage(message: SDKMessage): void {
@@ -338,6 +387,9 @@ export class HostedSession {
   }
 
   private deliverNow(eventId: string, text: string): void {
+    // Route the model for this turn's intent before the message enters the
+    // stream (best-effort setModel, not awaited — keeps this synchronous).
+    this.applyModelForIntent(text)
     this.options.sink.update(eventId, { text, pending: false }, { persist: true })
     this.input.push({
       type: 'user',

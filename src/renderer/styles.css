@@ -11,76 +11,84 @@ html:not(.sb-light) {
 /* Light theme: the design's explicit light palette. Dark values above are left
    untouched, so the default dark view is byte-identical; only .sb-light flips. */
 html.sb-light {
-  --bg: #eef2f7;
+  /* Switchboard (standalone) (2).html light theme: a REAL cool-blue theme —
+     white translucent glass panes/cards over a pale sky-blue radial base,
+     blue-grey hairlines and shadows, dark-slate text, forest-green + sky-blue
+     accents, an Inter face and a wider 14px corner radius. Every value below is
+     the design's explicit light override; the dark :root stays byte-identical. */
+  --bg: #e9f1fb;
   --bg-panel: rgba(255, 255, 255, 0.72);
-  --bg-card: rgba(255, 255, 255, 0.62);
+  --bg-card: rgba(255, 255, 255, 0.55);
   --bg-card-alt: rgba(255, 255, 255, 0.5);
-  --bg-code: #e6ecf3;
-  --bg-hover: rgba(15, 23, 42, 0.05);
-  --bg-active: rgba(15, 23, 42, 0.06);
-  --bg-seg: rgba(15, 23, 42, 0.08);
-  --bg-chip: rgba(15, 23, 42, 0.05);
-  --border: rgba(15, 23, 42, 0.1);
-  --border-card: rgba(15, 23, 42, 0.1);
-  --border-card-alt: rgba(15, 23, 42, 0.09);
-  --border-soft: rgba(15, 23, 42, 0.08);
-  --border-code: rgba(15, 23, 42, 0.08);
-  --border-strong: rgba(15, 23, 42, 0.14);
-  --border-seg: rgba(15, 23, 42, 0.12);
-  --border-hist: rgba(15, 23, 42, 0.07);
-  --text-bright: #0f172a;
-  --text-strong: #0f172a;
-  --text-title: #0f172a;
-  --text: #0f172a;
-  --text-body: #334155;
-  --text-name: #0f172a;
-  --text-prompt: #1e293b;
-  --text-mid: #475569;
-  --text-meta: #475569;
-  --text-tab: #64748b;
-  --text-noise: #64748b;
-  --text-label: #64748b;
-  --text-faint: #556274;
-  --text-ghost: #94a3b8;
-  --green: #059669;
-  --green-hover: #10b981;
-  --green-ink: #ffffff;
-  --green-glow: 0 6px 18px -8px rgba(5, 150, 105, 0.45);
-  --blue: #2563eb;
+  --bg-code: #edf3fb;
+  --bg-hover: rgba(255, 255, 255, 0.55);
+  --bg-active: #e4f6ec;
+  --bg-seg: rgba(96, 125, 160, 0.14);
+  --bg-chip: rgba(96, 125, 160, 0.08);
+  --border: rgba(96, 125, 160, 0.28);
+  --border-card: rgba(96, 125, 160, 0.28);
+  --border-card-alt: rgba(96, 125, 160, 0.24);
+  --border-soft: rgba(96, 125, 160, 0.2);
+  --border-code: rgba(96, 125, 160, 0.18);
+  --border-strong: rgba(96, 125, 160, 0.38);
+  --border-seg: rgba(96, 125, 160, 0.28);
+  --border-hist: rgba(96, 125, 160, 0.18);
+  --text-bright: #102532;
+  --text-strong: #102532;
+  --text-title: #102532;
+  --text: #102532;
+  --text-body: #274050;
+  --text-name: #102532;
+  --text-prompt: #274050;
+  --text-mid: #3c5566;
+  --text-meta: #3c5566;
+  --text-tab: #516778;
+  --text-noise: #516778;
+  --text-label: #5f7688;
+  --text-faint: #5f7688;
+  --text-ghost: #6d8394;
+  --green: #167c3a;
+  --green-hover: #16a34a;
+  --green2: #136a33;
+  --green-ink: #f5faff;
+  --green-glow: 0 6px 18px -6px rgba(22, 163, 74, 0.6);
+  --blue: #0284c7;
   --amber: #b45309;
   --amber-hover: #d97706;
-  --amber-ink: #fff7ed;
+  --amber-ink: #fffbeb;
   --red: #dc2626;
-  --red-hover: #b91c1c;
-  --red-ink: #ffffff;
-  --detail: #475569;
-  /* Database/MCP accent, and opaque surface/line tokens for view chrome (light
-     values; the dark originals stay byte-identical in :root below). */
-  --teal: #0d9488;
-  --surface-inset: #e9edf4;
-  --surface-inset-line: #d3dae5;
-  --surface-line: #d7dde6;
-  --surface-raised: #e9edf4;
-  --surface-hover: #dde3ec;
-  --surface-hover-line: #c3ccd8;
-  --surface-sunken: #eef1f6;
-  --bg-panel-2: #eef1f6;
+  --red-hover: #ef4444;
+  --red-ink: #fff7ed;
+  --detail: #516778;
+  /* Database/MCP accent (design light: sky-blue, not teal). */
+  --teal: #0ea5e9;
+  --surface-inset: #edf3fb;
+  --surface-inset-line: #cbdaea;
+  --surface-line: #d3e0ee;
+  --surface-raised: #eef4fb;
+  --surface-hover: #e2ecf7;
+  --surface-hover-line: #c3d3e4;
+  --surface-sunken: #edf3fb;
+  --bg-panel-2: #e9f1fb;
   /* Soft elevation + subtle top gloss for glass panes/cards; wider radius. */
-  --elev: inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 1px 2px rgba(15, 23, 42, 0.03),
-    0 10px 28px -10px rgba(15, 23, 42, 0.12);
-  --gloss: linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0) 55%);
-  --rc: 12px;
+  --elev: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 1px 2px rgba(20, 40, 70, 0.04),
+    0 12px 30px -12px rgba(20, 40, 70, 0.16);
+  --gloss: linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 54%);
+  --rc: 14px;
+  /* Design light uses Inter; we keep the already-bundled Figtree (visually
+     near-identical) rather than ship a second webfont for a subtle change.
+     ponytail: swap in Inter woff2 only if the face difference is ever flagged. */
 }
 
-/* Light-mode app background: soft emerald/teal/blue glows over a pale base
-   (the design's light --app-bg), replacing the dark gradient below. */
+/* Light-mode app background: the design's light --app-bg — soft sky-blue and
+   emerald glows over a pale blue base, replacing the dark gradient below. */
 html.sb-light body {
-  background-color: #f5f6f0;
+  background-color: #eef4fb;
   background-image:
-    radial-gradient(1200px 820px at 14% -12%, rgba(5, 150, 105, 0.11), transparent 55%),
-    radial-gradient(1100px 820px at 110% 6%, rgba(16, 185, 129, 0.07), transparent 52%),
-    radial-gradient(900px 700px at 50% 120%, rgba(217, 119, 6, 0.05), transparent 60%),
-    linear-gradient(160deg, #f7f7f1, #eef0e7);
+    radial-gradient(1100px 720px at 12% -12%, rgba(56, 189, 248, 0.14), transparent 55%),
+    radial-gradient(1000px 780px at 112% 4%, rgba(2, 132, 199, 0.08), transparent 55%),
+    radial-gradient(900px 700px at 50% 120%, rgba(22, 163, 74, 0.05), transparent 60%),
+    linear-gradient(180deg, #f5faff, #e5eff9);
 }
 
 :root {
@@ -121,6 +129,10 @@ html.sb-light body {
   --text-ghost: #454d5e;
   --green: #34d399;
   --green-hover: #6ee7b7;
+  /* Darker gradient stop for the primary-button fill (design: 135deg emerald→
+     green with a top gloss). --gloss is transparent in dark, so the dark button
+     is just the two-stop green gradient; light adds the white gloss sheen. */
+  --green2: #10b981;
   --green-ink: #0a0f1e;
   --green-glow: 0 6px 18px -6px rgba(52, 211, 153, 0.6);
   --blue: #3a6291;
@@ -248,15 +260,17 @@ button {
   cursor: pointer;
 }
 
-/* Shared button idioms from the reference */
+/* Shared button idioms from the reference. The primary fill is the design's
+   135deg green gradient under a top gloss (transparent in dark), with a green
+   glow; hover flips to the flat brighter green. */
 .btn-solid {
-  background: var(--green);
+  background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
   color: var(--green-ink);
   font-weight: 600;
   font-size: 11.5px;
   font-family: var(--mono);
   padding: 6px 14px;
-  border-radius: 10px;
+  border-radius: var(--rc);
   cursor: pointer;
   user-select: none;
   box-shadow: var(--green-glow);
@@ -267,13 +281,13 @@ button {
 }
 
 .btn-armed {
-  background: var(--amber);
+  background: var(--gloss), var(--amber);
   color: var(--amber-ink);
   font-weight: 600;
   font-size: 11.5px;
   font-family: var(--mono);
   padding: 6px 14px;
-  border-radius: 10px;
+  border-radius: var(--rc);
   cursor: pointer;
   user-select: none;
   animation: sbIn 0.2s ease;
@@ -290,7 +304,7 @@ button {
   font-size: 11.5px;
   font-family: var(--mono);
   padding: 6px 14px;
-  border-radius: 10px;
+  border-radius: var(--rc);
   cursor: pointer;
   user-select: none;
   background: transparent;
@@ -550,6 +564,9 @@ button {
   min-width: 60px;
   background: transparent;
   border: none;
+  /* No radius: with overflow-y:auto and padding:0 the inherited base-reset
+     border-radius clips glyphs at the corners even though no border shows. */
+  border-radius: 0;
   outline: none;
   color: var(--text);
   font-size: 13px;
@@ -570,13 +587,14 @@ button {
 .send-btn {
   flex-shrink: 0;
   white-space: nowrap;
-  background: var(--green);
+  background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
   color: var(--green-ink);
   font-weight: 600;
   font-size: 11.5px;
   padding: 7px 16px;
-  border-radius: 10px;
+  border-radius: var(--rc);
   user-select: none;
+  box-shadow: var(--green-glow);
 }
 
 .send-btn:hover:not(:disabled) {

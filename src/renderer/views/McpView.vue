@@ -9,6 +9,7 @@ import { isIpcError, type ProjectListItem } from '@shared/ipc-types'
 import type { AgentScopedPayload, QuestionPayload, SessionEvent } from '@shared/domain'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useProjectsStore } from '@renderer/stores/projects'
+import { useSettingsStore } from '@renderer/stores/settings'
 import StreamEvent from '@renderer/components/StreamEvent.vue'
 import QuestionEvent from '@renderer/components/QuestionEvent.vue'
 import MarkdownText from '@renderer/components/MarkdownText.vue'
@@ -16,13 +17,24 @@ import MarkdownText from '@renderer/components/MarkdownText.vue'
 const props = defineProps<{ project: ProjectListItem }>()
 const active = useActiveSessionStore()
 const projects = useProjectsStore()
+const settings = useSettingsStore()
 
-const name = computed(() => active.mcpTarget ?? '')
-const server = computed(
-  () => props.project.session?.mcpServers?.find((s) => s.name === name.value) ?? null,
+// The servers combined into this chat (Settings → databaseMcpServers), each
+// paired with the live connection status the session reports for it.
+const dbServers = computed(() => settings.settings?.databaseMcpServers ?? [])
+const servers = computed(() =>
+  dbServers.value.map((n) => ({
+    name: n,
+    status: props.project.session?.mcpServers?.find((s) => s.name === n)?.status ?? 'unknown',
+  })),
 )
-const status = computed(() => server.value?.status ?? 'unknown')
-const connected = computed(() => status.value.toLowerCase() === 'connected')
+
+function dotColor(status: string): string {
+  const st = status.toLowerCase()
+  if (st === 'connected') return 'var(--green)'
+  if (st === 'failed' || st === 'error') return 'var(--red)'
+  return 'var(--amber)'
+}
 
 const liveSession = computed(() =>
   props.project.session && !props.project.session.endedAt ? props.project.session : null,
@@ -52,14 +64,20 @@ const dbEvents = computed<SessionEvent[]>(() =>
   active.events.filter((e) => (e.payload as AgentScopedPayload).agentId === undefined),
 )
 const hasEvents = computed(() => dbEvents.value.length > 0)
+// Show the hero (with its Start-session / Scan buttons) whenever there is no
+// live session, even after a schema has been scanned — otherwise the only way
+// to start a session from this view disappears on every return visit.
 const showEmpty = computed(
-  () => subtab.value === 'chat' && !scanned.value && !hasEvents.value && !scanning.value,
+  () =>
+    subtab.value === 'chat' &&
+    !scanning.value &&
+    (!liveSession.value || (!scanned.value && !hasEvents.value)),
 )
 
 async function loadSchema(): Promise<void> {
   schemaDoc.value = await projects.readMcpSchema(props.project.id)
 }
-watch([() => props.project.id, name], () => void loadSchema(), { immediate: true })
+watch(() => props.project.id, () => void loadSchema(), { immediate: true })
 
 // A scan finishes when the session returns to idle — re-read the doc to unlock
 // the db-schema.md tab.
@@ -78,22 +96,25 @@ watch(
     }),
 )
 
-function scanPrompt(n: string): string {
+function scanPrompt(names: string[]): string {
+  const list = names.map((n) => `"${n}"`).join(', ')
   return (
-    `Scan the "${n}" database through its MCP tools and build a schema map. Use subagents ` +
-    `(the Task tool) to parallelise across schemas where it helps. Enumerate every schema, ` +
-    `table, column with its type, primary and foreign keys, indexes, and approximate row ` +
-    `counts, then write a concise "db-schema.md" (under ~200 lines) to ".switchboard/db-schema.md" ` +
-    `in the project root documenting all of it, so future questions consult it instead of ` +
-    `re-scanning. Reply with a one-line summary when done.`
+    `Scan these MCP servers through their tools and build one combined map: ${list}. Use subagents ` +
+    `(the Task tool) to parallelise where it helps. For each server enumerate its structure — for a ` +
+    `database: schemas, tables, columns with types, primary and foreign keys, indexes, and ` +
+    `approximate row counts; for a search or index service: indexes, fields and types. Then write a ` +
+    `concise "db-schema.md" (under ~250 lines) to ".switchboard/db-schema.md" in the project root ` +
+    `with a section per server, so future questions consult it instead of re-scanning. Reply with a ` +
+    `one-line summary when done.`
   )
 }
 
-function askPrompt(n: string, q: string): string {
+function askPrompt(names: string[], q: string): string {
+  const list = names.map((n) => `"${n}"`).join(', ')
   return (
-    `[Database: ${n}] ${q}\n\n` +
-    `Answer by querying the "${n}" database via its MCP tools. Consult ".switchboard/db-schema.md" ` +
-    `for structure so you don't need to re-scan.`
+    `[MCP: ${list}] ${q}\n\n` +
+    `Answer by querying these MCP servers via their tools: ${list}. Consult ` +
+    `".switchboard/db-schema.md" for structure so you don't need to re-scan.`
   )
 }
 
@@ -118,14 +139,14 @@ async function scan(): Promise<void> {
   if (!liveSession.value) return
   subtab.value = 'chat'
   scanning.value = true
-  await active.send(scanPrompt(name.value))
+  await active.send(scanPrompt(dbServers.value))
 }
 
 async function ask(): Promise<void> {
   const text = composer.value.trim()
   if (!text || !liveSession.value) return
   composer.value = ''
-  await active.send(askPrompt(name.value, text))
+  await active.send(askPrompt(dbServers.value, text))
 }
 
 function answer(eventId: string, choice: string): void {
@@ -144,16 +165,9 @@ async function interrupt(): Promise<void> {
     <header class="head">
       <div class="head-row">
         <span class="db-ico">⛁</span>
-        <span class="db-name mono">{{ name }}</span>
-        <span class="db-sub mono">{{ project.name }} · MCP</span>
+        <span class="db-name mono">MCP chat</span>
+        <span class="db-sub mono">{{ project.name }}</span>
         <span style="flex: 1"></span>
-        <span
-          class="conn mono"
-          :class="{ on: connected }"
-          data-testid="mcp-conn"
-        >
-          ● {{ connected ? 'Connected' : status }}
-        </span>
         <button
           v-if="working"
           class="stop-btn mono"
@@ -163,9 +177,20 @@ async function interrupt(): Promise<void> {
         >
           ■
         </button>
-        <button class="back mono" data-testid="mcp-close" @click="active.openMcp(null)">
+        <button class="back mono" data-testid="mcp-close" @click="active.openMcp(false)">
           ← {{ projects.selected?.name ?? 'back' }}
         </button>
+      </div>
+      <div v-if="servers.length > 0" class="mcp-servers mono" data-testid="mcp-servers">
+        <span
+          v-for="s in servers"
+          :key="s.name"
+          class="mcp-chip"
+          :data-testid="`mcp-chip-${s.name}`"
+          :title="s.status"
+        >
+          <span class="mcp-chip-dot" :style="{ background: dotColor(s.status) }"></span>{{ s.name }}
+        </span>
       </div>
       <div class="tabs mono">
         <button class="tab" :class="{ sel: subtab === 'chat' }" data-testid="mcp-tab-chat" @click="subtab = 'chat'">
@@ -197,23 +222,24 @@ async function interrupt(): Promise<void> {
     <div v-if="showEmpty" class="empty" data-testid="mcp-empty">
       <div class="empty-ico">⛁</div>
       <template v-if="!liveSession">
-        <div class="empty-title">Start the database session</div>
+        <div class="empty-title">Start the MCP session</div>
         <div class="empty-sub">
-          Opens a Claude Code session for <span class="mono teal">{{ name }}</span>. Then scan it to
-          build <span class="mono teal">db-schema.md</span> and chat with your database.
+          Opens a Claude Code session for <span class="mono teal">{{ project.name }}</span> with your
+          MCP servers. Then scan them to build <span class="mono teal">db-schema.md</span> and chat
+          across them.
         </div>
         <button class="btn-solid" data-testid="mcp-start-session" @click="startDbSession()">
-          ▶ Start database session
+          ▶ Start MCP session
         </button>
       </template>
       <template v-else>
         <div class="empty-title">No schema map yet</div>
         <div class="empty-sub">
-          Run a scan first — it walks the whole MCP (schemas, tables, relations, indexes) and writes
+          Run a scan first — it walks every designated MCP server and writes
           <span class="mono teal">db-schema.md</span>. Chatting then consults the map instead of
           re-scanning.
         </div>
-        <button class="btn-solid" data-testid="mcp-scan" @click="scan()">▶ Scan database</button>
+        <button class="btn-solid" data-testid="mcp-scan" @click="scan()">▶ Scan servers</button>
       </template>
       <div v-if="sessionError" class="empty-hint mono">{{ sessionError }}</div>
     </div>
@@ -222,7 +248,7 @@ async function interrupt(): Promise<void> {
     <div v-else-if="subtab === 'md'" class="doc" data-testid="mcp-doc">
       <div class="doc-head mono">
         <span class="teal">db-schema.md</span>
-        <span class="faint">generated by the {{ name }} scan</span>
+        <span class="faint">from the MCP scan</span>
         <span style="flex: 1"></span>
         <button class="rescan mono" data-testid="mcp-doc-rescan" :disabled="!liveSession || working" @click="scan()">
           ↻ Re-scan
@@ -235,8 +261,8 @@ async function interrupt(): Promise<void> {
     <div v-else ref="streamEl" class="stream" data-testid="mcp-stream">
       <div class="stream-inner">
         <div v-if="scanning" class="scan-banner mono" data-testid="mcp-scanning">
-          <span class="blink teal">▊</span> Scanning {{ name }} — walking schemas, tables and
-          relations, then writing db-schema.md…
+          <span class="blink teal">▊</span> Scanning your MCP servers — walking their structure,
+          then writing db-schema.md…
         </div>
         <template v-for="event in dbEvents" :key="event.id">
           <QuestionEvent
@@ -248,7 +274,7 @@ async function interrupt(): Promise<void> {
           <StreamEvent v-else :event="event" />
         </template>
         <div v-if="working && !scanning" class="live mono">
-          <span class="blink teal">▊</span> Querying {{ name }}…
+          <span class="blink teal">▊</span> Querying your MCP servers…
         </div>
       </div>
     </div>
@@ -261,13 +287,13 @@ async function interrupt(): Promise<void> {
           v-model="composer"
           class="composer-input mono"
           data-testid="mcp-composer"
-          :placeholder="`Ask your database — every question becomes a live query…`"
+          placeholder="Ask across your MCP servers — every question becomes a live query…"
           :disabled="!liveSession"
           spellcheck="false"
           autocomplete="off"
           @keydown.enter="ask()"
         />
-        <span class="to mono">to {{ name }}</span>
+        <span class="to mono">to MCP</span>
         <button
           class="send-btn mono"
           data-testid="mcp-send"
@@ -319,20 +345,29 @@ async function interrupt(): Promise<void> {
   color: var(--text-faint);
 }
 
-.conn {
-  flex-shrink: 0;
-  white-space: nowrap;
+/* Combined MCP servers: a chip per designated server with its live status. */
+.mcp-servers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 12px;
+}
+
+.mcp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 10.5px;
-  padding: 2px 10px;
   color: var(--text-tab);
+  padding: 2px 10px;
   border: 1px solid var(--border-seg);
   border-radius: 99px;
 }
 
-.conn.on {
-  color: var(--green);
-  background: rgba(52, 211, 153, 0.08);
-  border: 1px solid rgba(52, 211, 153, 0.32);
+.mcp-chip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 99px;
 }
 
 .back {

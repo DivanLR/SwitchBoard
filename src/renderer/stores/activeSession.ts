@@ -17,8 +17,8 @@ interface ActiveSessionState {
   selectedAgentId: string | null
   /** Text another component asks the composer to append (e.g. @path from a file drop). */
   composerInsert: string | null
-  /** MCP server name whose Database MCP view is open, or null for the session. */
-  mcpTarget: string | null
+  /** Whether the combined Database MCP view is open (vs. the session view). */
+  mcpOpen: boolean
 }
 
 const PAGE_SIZE = 300
@@ -34,7 +34,7 @@ export const useActiveSessionStore = defineStore('activeSession', {
     focusEventId: null,
     selectedAgentId: null,
     composerInsert: null,
-    mcpTarget: null,
+    mcpOpen: false,
   }),
 
   getters: {
@@ -106,10 +106,10 @@ export const useActiveSessionStore = defineStore('activeSession', {
       this.selectedAgentId = agentId
     },
 
-    /** Open (or close, with null) the Database MCP view for a server. */
-    openMcp(name: string | null): void {
-      this.mcpTarget = name
-      if (name) this.selectedAgentId = null
+    /** Open or close the combined Database MCP view. */
+    openMcp(open: boolean): void {
+      this.mcpOpen = open
+      if (open) this.selectedAgentId = null
     },
 
     async answerQuestion(eventId: string, choice: string): Promise<void> {
@@ -124,6 +124,12 @@ export const useActiveSessionStore = defineStore('activeSession', {
     async interrupt(): Promise<{ stillQueued: number }> {
       if (!this.sessionId) return { stillQueued: 0 }
       return window.switchboard.invoke('sessions.interrupt', { sessionId: this.sessionId })
+    },
+
+    /** End the session for good (resumable later); queued sends survive as drafts. */
+    async stop(): Promise<void> {
+      if (!this.sessionId) return
+      await window.switchboard.invoke('sessions.stop', { sessionId: this.sessionId })
     },
 
     focusEvent(eventId: string): void {

@@ -47,10 +47,10 @@ test.beforeEach(async ({ page }) => {
 
 const mcpRow = '[data-testid^="mcp-server-"]'
 
-/** Designate the DB MCP via Settings → General (the sidebar row is hidden until one is chosen). */
+/** Designate the DB MCP via Settings → MCP (the sidebar row is hidden until one is chosen). */
 async function designateDbMcp(page: import('@playwright/test').Page): Promise<void> {
   await page.getByTestId('open-settings').click()
-  await page.getByTestId('settings-tab-gen').click()
+  await page.getByTestId('settings-tab-mcp').click()
   await page.getByTestId('db-mcp-postgres — production').click()
   await page.getByTestId('settings-done').click()
 }
@@ -72,15 +72,16 @@ test('the global MCP row opens the Database view and scans to db-schema.md', asy
   await page.locator(mcpRow).first().click()
   const view = page.getByTestId('mcp-view')
   await expect(view).toBeVisible()
-  await expect(view).toContainText('postgres — production')
-  await expect(page.getByTestId('mcp-conn')).toContainText('Connected')
+  await expect(page.getByTestId('mcp-chip-postgres — production')).toBeVisible()
   // Unscanned → the scan call-to-action (a live session already exists).
   await expect(page.getByTestId('mcp-empty')).toContainText('No schema map yet')
 
   await page.getByTestId('mcp-scan').click()
   const sends = await page.evaluate(() => window.__mock.state().sends.map((s) => s.text))
   expect(
-    sends.some((t) => /scan the "postgres — production"/i.test(t) && t.includes('db-schema.md')),
+    sends.some(
+      (t) => /scan these mcp servers/i.test(t) && t.includes('"postgres — production"') && t.includes('db-schema.md'),
+    ),
   ).toBe(true)
 })
 
@@ -102,7 +103,7 @@ test('a completed scan unlocks db-schema.md and chat runs a DB-targeted query', 
   const sends = await page.evaluate(() => window.__mock.state().sends.map((s) => s.text))
   expect(
     sends.some(
-      (t) => t.includes('[Database: postgres — production]') && t.includes('signed up this month'),
+      (t) => t.includes('[MCP: "postgres — production"]') && t.includes('signed up this month'),
     ),
   ).toBe(true)
 
@@ -110,6 +111,38 @@ test('a completed scan unlocks db-schema.md and chat runs a DB-targeted query', 
   await page.getByTestId('mcp-close').click()
   await expect(page.getByTestId('mcp-view')).toHaveCount(0)
   await expect(page.getByTestId('stream')).toBeVisible()
+})
+
+test('two designated servers combine into one chat and one scan', async ({ page }) => {
+  // Designate a database MCP and a code-search MCP together.
+  await page.getByTestId('open-settings').click()
+  await page.getByTestId('settings-tab-mcp').click()
+  await page.getByTestId('db-mcp-postgres — production').click()
+  await page.getByTestId('db-mcp-github').click()
+  await page.getByTestId('settings-done').click()
+
+  // Both show as sidebar MCP rows; each opens the same combined view.
+  await expect(page.locator(mcpRow)).toHaveCount(2)
+  await page.getByTestId('mcp-server-github').click()
+  await expect(page.getByTestId('mcp-chip-postgres — production')).toBeVisible()
+  await expect(page.getByTestId('mcp-chip-github')).toBeVisible()
+
+  // A scan and a question both span both servers in one prompt.
+  await page.getByTestId('mcp-scan').click()
+  await page.getByTestId('mcp-tab-chat').click()
+  await page.getByTestId('mcp-composer').fill('cross-reference the users table with the repo')
+  await page.getByTestId('mcp-send').click()
+  const sends = await page.evaluate(() => window.__mock.state().sends.map((s) => s.text))
+  expect(
+    sends.some(
+      (t) => t.includes('"postgres — production"') && t.includes('"github"') && t.includes('db-schema.md'),
+    ),
+  ).toBe(true)
+  expect(
+    sends.some(
+      (t) => t.startsWith('[MCP:') && t.includes('"postgres — production"') && t.includes('"github"'),
+    ),
+  ).toBe(true)
 })
 
 test('the manual start runs a normal session with no MCP server denied', async ({ page }) => {

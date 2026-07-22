@@ -554,7 +554,13 @@ export class SettingsRepo {
       | { value: string }
       | undefined
     if (!row) return { ...DEFAULT_SETTINGS }
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(row.value) }
+    const stored = JSON.parse(row.value) as Record<string, unknown>
+    // Migrate the legacy single-server designation to the multi-server list.
+    if (typeof stored.databaseMcpServer === 'string' && !stored.databaseMcpServers) {
+      stored.databaseMcpServers = [stored.databaseMcpServer]
+    }
+    delete stored.databaseMcpServer
+    return { ...DEFAULT_SETTINGS, ...stored }
   }
 
   set(patch: Partial<Settings>): Settings {

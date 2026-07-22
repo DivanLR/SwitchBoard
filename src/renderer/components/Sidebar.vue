@@ -23,7 +23,9 @@ const settings = useSettingsStore()
 // so other rows stay plain; push agent names via sessionStatus if that matters.
 const parallelAgents = computed(() => activeAgents(activeSession.events))
 
-function agentsFor(item: (typeof projects.items)[number]): { id: string; name: string }[] {
+function agentsFor(
+  item: (typeof projects.items)[number],
+): { id: string; name: string; task: string }[] {
   if (item.id !== projects.selectedProjectId) return []
   if (statusOf(item) !== 'working') return []
   const agents = parallelAgents.value
@@ -158,12 +160,12 @@ const usageReset = computed(() => {
 // project happens to be selected. It starts on demand from the DB view, like
 // any project; there is no launch auto-start. ---
 const dbProject = computed(() => projects.dbProject)
-const dbServerName = computed(() => settings.settings?.databaseMcpServer ?? null)
-const dbMcpStatus = computed(() => {
+const dbServers = computed(() => settings.settings?.databaseMcpServers ?? [])
+function mcpStatusOf(name: string): string {
   const session = dbProject.value?.session
   if (!session || session.endedAt) return 'not started'
-  return session.mcpServers?.find((m) => m.name === dbServerName.value)?.status ?? 'connecting'
-})
+  return session.mcpServers?.find((m) => m.name === name)?.status ?? 'connecting'
+}
 function mcpDot(status: string): string {
   const st = status.toLowerCase()
   if (st === 'connected') return 'var(--green)'
@@ -461,7 +463,8 @@ async function confirmRemoveNow(): Promise<void> {
                 class="agent-name mono"
                 :class="{ sel: activeSession.selectedAgentId === agent.id }"
               >
-                {{ agent.name }}{{ activeSession.selectedAgentId === agent.id ? ' ←' : '' }}
+                {{ agent.task || agent.name
+                }}{{ activeSession.selectedAgentId === agent.id ? ' ←' : '' }}
               </span>
             </div>
           </div>
@@ -472,26 +475,28 @@ async function confirmRemoveNow(): Promise<void> {
       </div>
     </div>
 
-    <!-- Global database MCP (design): a single project-less row, always present
-         once a database MCP is designated, opening its own chat/scan view. -->
-    <template v-if="dbServerName && dbProject">
+    <!-- Global MCP (design): one project-less row per designated server. They
+         all open the same combined chat/scan view (see McpView). -->
+    <template v-if="dbServers.length > 0 && dbProject">
       <div v-if="!collapsed" class="section-row">
         <span class="section-label mono">MCP</span>
       </div>
       <div
+        v-for="s in dbServers"
+        :key="s"
         class="mcp-item"
-        :class="{ open: activeSession.mcpTarget === dbServerName }"
-        :title="`${dbServerName} — chat with it or scan its schema over MCP`"
-        :data-testid="`mcp-server-${dbServerName}`"
-        @click="activeSession.openMcp(dbServerName)"
+        :class="{ open: activeSession.mcpOpen }"
+        :title="`${s} — part of the combined MCP chat`"
+        :data-testid="`mcp-server-${s}`"
+        @click="activeSession.openMcp(true)"
       >
         <span class="mcp-ico">⛁</span>
         <template v-if="!collapsed">
           <div class="mcp-main">
-            <div class="mcp-name mono">{{ dbServerName }}</div>
-            <div class="mcp-sub mono">{{ dbMcpStatus }}</div>
+            <div class="mcp-name mono">{{ s }}</div>
+            <div class="mcp-sub mono">{{ mcpStatusOf(s) }}</div>
           </div>
-          <span class="mcp-dot" :style="{ background: mcpDot(dbMcpStatus) }"></span>
+          <span class="mcp-dot" :style="{ background: mcpDot(mcpStatusOf(s)) }"></span>
         </template>
         <span class="mcp-accent"></span>
       </div>

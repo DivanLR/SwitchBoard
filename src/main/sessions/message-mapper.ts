@@ -76,6 +76,13 @@ export class MessageMapper {
   private partials = new Map<string, { eventId: string; text: string }>()
   /** tool_use id -> tool_activity event id awaiting its result half. */
   private openToolUses = new Map<string, { eventId: string; payload: EventPayloadMap['tool_activity'] }>()
+  /** task_id -> tool_activity event id for subagents reported via the SDK task
+   *  channel (backgrounded / parallel fan-outs like /deep-research), which never
+   *  appear as ordinary in-band Task tool_use/tool_result pairs. */
+  private openTasks = new Map<string, { eventId: string; payload: EventPayloadMap['tool_activity'] }>()
+  /** Task/Agent tool_use ids ever seen in-band, so a late task_started for the
+   *  same id is deduped even after its in-band tool_result already closed it. */
+  private seenAgentToolUses = new Set<string>()
   /** Final MAIN-LOOP assistant text of the current turn, candidate for the summary upgrade. */
   private lastAssistantText: { eventId: string; text: string } | null = null
 
@@ -100,7 +107,9 @@ export class MessageMapper {
         this.handleResult(message)
         return
       case 'system':
-        // init and other control frames carry no stream content
+        // init/status frames carry no stream content, but the task_* subtypes
+        // report subagents (deep-research fan-out) that must show in the stream.
+        this.handleTaskMessage(message)
         return
       default:
         this.handleUnclassified(message)
@@ -150,7 +159,12 @@ export class MessageMapper {
           agentId,
         }
         const event = this.sink.append('tool_activity', payload)
-        if (block.id) this.openToolUses.set(block.id, { eventId: event.id, payload })
+        if (block.id) {
+          this.openToolUses.set(block.id, { eventId: event.id, payload })
+          // Remember agent invocations so a later task_started for the same id
+          // is recognised as a duplicate even after its tool_result closes it.
+          if (block.name === 'Task' || block.name === 'Agent') this.seenAgentToolUses.add(block.id)
+        }
       } else if (block.type === 'thinking' && typeof block.thinking === 'string') {
         // Not part of the narrative kinds; retained for raw-view completeness (FR-018).
         this.sink.append('raw_output', { text: block.thinking, agentId })
@@ -176,6 +190,78 @@ export class MessageMapper {
         this.sink.update(open.eventId, updated, { persist: true })
       }
     }
+  }
+
+  /**
+   * SDK task channel (task_started/task_updated/task_notification): surfaces
+   * subagents that run backgrounded or in parallel (e.g. a /deep-research
+   * fan-out) and so never arrive as ordinary in-band Task tool_use blocks. Each
+   * becomes a Task tool_activity event, exactly the shape activeAgents() reads,
+   * so no new agent concept or renderer change is needed.
+   */
+  private handleTaskMessage(message: SDKMessage): void {
+    const msg = message as {
+      subtype?: string
+      task_id?: string
+      tool_use_id?: string
+      description?: string
+      subagent_type?: string
+      prompt?: string
+      skip_transcript?: boolean
+      status?: string
+      summary?: string
+      patch?: { status?: string; description?: string; error?: string }
+    }
+    const taskId = msg.task_id
+    if (!taskId) return
+    switch (msg.subtype) {
+      case 'task_started': {
+        if (msg.skip_transcript) return // ambient/housekeeping — hide per the SDK
+        // A foreground Task already shown via its in-band tool_use block (open or
+        // already closed), or an already-open task — don't list it twice.
+        if (msg.tool_use_id && this.seenAgentToolUses.has(msg.tool_use_id)) return
+        if (this.openTasks.has(taskId)) return
+        const payload: EventPayloadMap['tool_activity'] = {
+          toolName: 'Task',
+          // Same JSON shape agentOf() parses for name/task/prompt.
+          inputPreview: previewOf({
+            subagent_type: msg.subagent_type,
+            description: msg.description,
+            prompt: msg.prompt,
+          }),
+          toolUseId: msg.tool_use_id ?? taskId,
+          // Stays visible across a turn's result until its close signal arrives.
+          background: true,
+        }
+        const event = this.sink.append('tool_activity', payload)
+        this.openTasks.set(taskId, { eventId: event.id, payload })
+        return
+      }
+      case 'task_updated': {
+        const status = msg.patch?.status
+        if (status === 'completed' || status === 'failed' || status === 'killed') {
+          this.closeTask(taskId, msg.patch?.error ?? status)
+        }
+        return
+      }
+      case 'task_notification':
+        this.closeTask(taskId, msg.summary || msg.status || 'done')
+        return
+      default:
+        return // task_progress and others: no per-agent state change needed
+    }
+  }
+
+  /** Mark a task-channel subagent finished so activeAgents() stops listing it. */
+  private closeTask(taskId: string, resultPreview: string): void {
+    const open = this.openTasks.get(taskId)
+    if (!open) return
+    this.openTasks.delete(taskId)
+    this.sink.update(
+      open.eventId,
+      { ...open.payload, resultPreview: previewOf(resultPreview) },
+      { persist: true },
+    )
   }
 
   private handleStreamEvent(message: Extract<SDKMessage, { type: 'stream_event' }>): void {

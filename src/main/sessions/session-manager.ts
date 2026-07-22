@@ -195,6 +195,11 @@ export class SessionManager {
     // 'global' or absent follows the global work model.
     const override = settings.projectModels?.[projectId]
     const workModel = override && override !== 'global' ? override : settings.workModel
+    // Per-project worker-model override ("This project" tab): the cheaper model
+    // for work-classified turns under auto routing; 'global'/absent follows the
+    // project's implementation model above.
+    const workerOverride = settings.projectWorkerModels?.[projectId]
+    const workerModel = workerOverride && workerOverride !== 'global' ? workerOverride : workModel
     // Any project that has previously run an MCP scan gets its schema map
     // injected as context on every session start (no-op when never scanned).
     const terseAppend = terseSystemPromptAppend({
@@ -215,7 +220,9 @@ export class SessionManager {
         [terseAppend, schemaAppend].filter((s): s is string => Boolean(s)).join('\n\n') || undefined,
       claudeExecutablePath,
       workModel,
+      workerModel,
       planModel: settings.planModel,
+      autoModelRouting: settings.autoModelRouting,
       bypassPermissions,
       sink: this.makeSink(entry),
       gate: this.callbacks.gate,
@@ -242,6 +249,11 @@ export class SessionManager {
       // MCP servers from the init message — in-memory only, pushed to the sidebar.
       onMcpServers: (servers) => {
         entry.row.mcpServers = servers
+        this.pushStatus(entry)
+      },
+      // Model reported per main-loop turn — in-memory only, shown in the header.
+      onModel: (model) => {
+        entry.row.currentModel = model
         this.pushStatus(entry)
       },
       onTurnComplete: () => {
@@ -313,6 +325,10 @@ export class SessionManager {
 
   async stopSession(sessionId: string): Promise<void> {
     const entry = this.requireLive(sessionId)
+    // Same as app exit (FR-022): undelivered composer sends survive as drafts.
+    for (const queued of entry.session.takeQueuedSends()) {
+      this.repos.drafts.insert(entry.row.projectId, queued.text)
+    }
     await entry.session.stop()
   }
 

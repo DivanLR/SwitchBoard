@@ -77,6 +77,12 @@ test('the composer stays visible on the Specs tab (chat is always reachable)', a
   await expect(page.getByTestId('composer-input')).toBeVisible()
 })
 
+test('+ New spec prefills the composer with the specify command', async ({ page }) => {
+  await seedSpec(page)
+  await page.getByTestId('spec-new').click()
+  await expect(page.getByTestId('composer-input')).toHaveValue('/speckit-specify ')
+})
+
 async function seedSpec(page: import('@playwright/test').Page): Promise<void> {
   await page.evaluate(() =>
     window.__mock.setSpecKit('p-alpha', {
