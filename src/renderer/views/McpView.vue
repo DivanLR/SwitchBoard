@@ -132,6 +132,11 @@ async function ask(): Promise<void> {
 function answer(eventId: string, choice: string): void {
   void active.answerQuestion(eventId, choice)
 }
+
+// Stop a running scan/query (same interrupt path as the session view / Ctrl+C).
+async function interrupt(): Promise<void> {
+  await active.interrupt()
+}
 </script>
 
 <template>
@@ -150,6 +155,15 @@ function answer(eventId: string, choice: string): void {
         >
           ● {{ connected ? 'Connected' : status }}
         </span>
+        <button
+          v-if="working"
+          class="stop-btn mono"
+          data-testid="mcp-stop"
+          title="Stop (Ctrl+C)"
+          @click="interrupt()"
+        >
+          ■
+        </button>
         <button class="back mono" data-testid="mcp-close" @click="active.openMcp(null)">
           ← {{ projects.selected?.name ?? 'back' }}
         </button>

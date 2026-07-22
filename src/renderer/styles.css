@@ -1,14 +1,73 @@
 /* Switchboard theme — 1:1 with the supplied Switchboard.html design reference. */
 @import './assets/fonts.css';
 
-/* Theme toggle: the dark base gets a slight lift; light mode is the mockup's
-   filter flip, toggled via html.sb-light. */
+/* Theme toggle (design "standalone.html"): the dark base gets a slight lift;
+   light mode is a REAL theme — every token below is redefined with the design's
+   explicit light values (no invert-filter hack), toggled via html.sb-light. */
 html:not(.sb-light) {
   filter: brightness(1.05) saturate(1.06);
 }
 
+/* Light theme: the design's explicit light palette. Dark values above are left
+   untouched, so the default dark view is byte-identical; only .sb-light flips. */
 html.sb-light {
-  filter: invert(1) hue-rotate(180deg) saturate(1.02) brightness(1.11) contrast(0.96);
+  --bg: #eef2f7;
+  --bg-panel: rgba(255, 255, 255, 0.72);
+  --bg-card: rgba(255, 255, 255, 0.62);
+  --bg-card-alt: rgba(255, 255, 255, 0.5);
+  --bg-code: #e6ecf3;
+  --bg-hover: rgba(15, 23, 42, 0.05);
+  --bg-active: rgba(15, 23, 42, 0.06);
+  --bg-seg: rgba(15, 23, 42, 0.08);
+  --bg-chip: rgba(15, 23, 42, 0.05);
+  --border: rgba(15, 23, 42, 0.1);
+  --border-card: rgba(15, 23, 42, 0.1);
+  --border-card-alt: rgba(15, 23, 42, 0.09);
+  --border-soft: rgba(15, 23, 42, 0.08);
+  --border-code: rgba(15, 23, 42, 0.08);
+  --border-strong: rgba(15, 23, 42, 0.14);
+  --border-seg: rgba(15, 23, 42, 0.12);
+  --border-hist: rgba(15, 23, 42, 0.07);
+  --text-bright: #0f172a;
+  --text-strong: #0f172a;
+  --text-title: #0f172a;
+  --text: #0f172a;
+  --text-body: #334155;
+  --text-name: #0f172a;
+  --text-prompt: #1e293b;
+  --text-mid: #475569;
+  --text-meta: #475569;
+  --text-tab: #64748b;
+  --text-noise: #64748b;
+  --text-label: #64748b;
+  --text-faint: #556274;
+  --text-ghost: #94a3b8;
+  --green: #059669;
+  --green-hover: #10b981;
+  --green-ink: #ffffff;
+  --green-glow: 0 6px 18px -8px rgba(5, 150, 105, 0.45);
+  --blue: #2563eb;
+  --amber: #b45309;
+  --amber-hover: #d97706;
+  --amber-ink: #fff7ed;
+  --red: #dc2626;
+  --detail: #475569;
+  /* Soft elevation + subtle top gloss for glass panes/cards; wider radius. */
+  --elev: inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 1px 2px rgba(15, 23, 42, 0.03),
+    0 10px 28px -10px rgba(15, 23, 42, 0.12);
+  --gloss: linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0) 55%);
+  --rc: 12px;
+}
+
+/* Light-mode app background: soft emerald/teal/blue glows over a pale base
+   (the design's light --app-bg), replacing the dark gradient below. */
+html.sb-light body {
+  background-color: #f5f6f0;
+  background-image:
+    radial-gradient(1200px 820px at 14% -12%, rgba(5, 150, 105, 0.11), transparent 55%),
+    radial-gradient(1100px 820px at 110% 6%, rgba(16, 185, 129, 0.07), transparent 52%),
+    radial-gradient(900px 700px at 50% 120%, rgba(217, 119, 6, 0.05), transparent 60%),
+    linear-gradient(160deg, #f7f7f1, #eef0e7);
 }
 
 :root {
@@ -60,6 +119,11 @@ html.sb-light {
   /* Figtree for body/UI text; JetBrains Mono for code, commands and terminal. */
   --sans: 'Figtree', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', monospace;
+  /* Surface tokens (design "standalone.html"): soft elevation + top gloss on
+     glass panes and cards, and a shared corner radius. Dark = flat/none. */
+  --elev: none;
+  --gloss: linear-gradient(rgba(255, 255, 255, 0), rgba(255, 255, 255, 0));
+  --rc: 10px;
 }
 
 * {
@@ -226,6 +290,29 @@ button {
 
 .link-green:hover {
   text-decoration: underline;
+}
+
+/* Stop control: a small square ■ button shown while a session is working, so a
+   run can be interrupted with one click (same action as Ctrl+C). Theme-aware —
+   fills red on hover in both light and dark. */
+.stop-btn {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  color: var(--red);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.stop-btn:hover {
+  color: #fff;
+  background: var(--red);
+  border-color: var(--red);
 }
 
 /* The updated design uses the Figtree sans face for all UI chrome; only genuine
@@ -524,10 +611,11 @@ button {
 }
 
 .dialog {
-  background: var(--bg-panel);
+  background: var(--gloss), var(--bg-panel);
   border: 1px solid var(--border-strong);
-  border-radius: 10px;
+  border-radius: var(--rc);
   padding: 16px;
+  box-shadow: var(--elev);
 }
 
 @keyframes sbPulse {

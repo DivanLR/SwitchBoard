@@ -468,7 +468,7 @@ const historyItems = computed(() => inbox.history)
 .inbox {
   width: 332px;
   min-width: 332px;
-  background: var(--bg-panel);
+  background: var(--gloss), var(--bg-panel);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
@@ -608,12 +608,13 @@ const historyItems = computed(() => inbox.history)
 }
 
 .item {
-  background: var(--bg-card);
+  background: var(--gloss), var(--bg-card);
   border: 1px solid var(--border-card);
-  border-radius: 10px;
+  border-radius: var(--rc);
   padding: 11px 12px;
   margin-bottom: 8px;
   animation: sbIn 0.25s ease;
+  box-shadow: var(--elev);
 }
 
 .item-head {

@@ -564,6 +564,15 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
         </span>
         <span v-else-if="endedSession" class="pill ended">Ended</span>
         <button
+          v-if="liveSession?.status === 'working'"
+          class="stop-btn mono"
+          data-testid="stop-session"
+          title="Stop the session (Ctrl+C)"
+          @click="interrupt()"
+        >
+          ■
+        </button>
+        <button
           class="ctl mono"
           data-testid="open-proj-settings"
           title="Project settings"

@@ -209,10 +209,11 @@ const markerChipLabel: Record<string, string> = {
 
 
 .summary-card {
-  background: var(--bg-card);
+  background: var(--gloss), var(--bg-card);
   border: 1px solid var(--border-soft);
-  border-radius: 10px;
+  border-radius: var(--rc);
   padding: 11px 13px;
+  box-shadow: var(--elev);
 }
 
 .card-label {

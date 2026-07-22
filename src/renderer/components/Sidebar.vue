@@ -598,7 +598,7 @@ async function confirmRemoveNow(): Promise<void> {
 .sidebar {
   width: 252px;
   min-width: 252px;
-  background: var(--bg-panel);
+  background: var(--gloss), var(--bg-panel);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
@@ -953,7 +953,8 @@ async function confirmRemoveNow(): Promise<void> {
   margin: 8px 10px 0;
   padding: 9px 12px;
   border: 1px solid var(--border-card-alt);
-  border-radius: 10px;
+  border-radius: var(--rc);
+  box-shadow: var(--elev);
 }
 
 .usage-head {
@@ -995,7 +996,7 @@ async function confirmRemoveNow(): Promise<void> {
   align-items: center;
   gap: 9px;
   border: 1px solid var(--border-card-alt);
-  background: var(--bg-card-alt);
+  background: var(--gloss), var(--bg-card-alt);
   cursor: pointer;
   user-select: none;
 }
@@ -1115,9 +1116,10 @@ async function confirmRemoveNow(): Promise<void> {
   align-items: center;
   gap: 9px;
   border: 1px solid var(--border-card-alt);
-  border-radius: 10px;
+  border-radius: var(--rc);
   cursor: pointer;
   user-select: none;
+  box-shadow: var(--elev);
 }
 
 .settings-row:hover {
@@ -1148,12 +1150,13 @@ async function confirmRemoveNow(): Promise<void> {
 .stats {
   margin: 10px;
   padding: 10px 12px;
-  background: var(--bg-card-alt);
+  background: var(--gloss), var(--bg-card-alt);
   border: 1px solid var(--border-card-alt);
-  border-radius: 10px;
+  border-radius: var(--rc);
   display: flex;
   flex-direction: column;
   gap: 6px;
+  box-shadow: var(--elev);
 }
 
 .stat {
