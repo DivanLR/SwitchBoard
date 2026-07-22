@@ -66,9 +66,13 @@ export const useInboxStore = defineStore('inbox', {
       await window.switchboard.invoke('inbox.alwaysAllow', { requestId })
     },
 
-    /** From a pending item: server-side derives+inserts the rule, then approves. */
-    async approveAlways(requestId: string): Promise<boolean> {
-      const result = await window.switchboard.invoke('inbox.approveAlways', { requestId })
+    /** From a pending item: server-side inserts the rule, then approves.
+     *  confirmHighRisk gates the broad MCP tool_only grant (high by fail-safe). */
+    async approveAlways(requestId: string, confirmHighRisk = false): Promise<boolean> {
+      const result = await window.switchboard.invoke('inbox.approveAlways', {
+        requestId,
+        confirmHighRisk,
+      })
       if (!result.delivered) {
         this.undeliverableNotice =
           'The decision could not be delivered: the originating session has ended. The item was marked expired.'
@@ -100,8 +104,9 @@ export const useInboxStore = defineStore('inbox', {
 
     async approveAllForProject(
       projectId: string,
+      includeHighRisk = false,
     ): Promise<{ approved: number; skippedHighRisk: number }> {
-      return window.switchboard.invoke('inbox.approveAllForProject', { projectId })
+      return window.switchboard.invoke('inbox.approveAllForProject', { projectId, includeHighRisk })
     },
 
     async loadHistory(projectId?: string): Promise<void> {

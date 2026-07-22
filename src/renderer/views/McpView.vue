@@ -98,23 +98,18 @@ function askPrompt(n: string, q: string): string {
   )
 }
 
-// Every other MCP server this project has reported — denied when starting the
-// database-only session so only the chosen one is active.
-const otherServers = computed(() =>
-  (props.project.session?.mcpServers ?? []).map((s) => s.name).filter((n) => n !== name.value),
-)
-
 const sessionError = ref<string | null>(null)
 
-/** Start a session scoped to ONLY this MCP server (all others denied). */
+/** Start the Database project's session (a normal session; MCP servers are
+ *  scoped by the project's own .mcp.json, not by an app-level deny-list). */
 async function startDbSession(): Promise<void> {
   sessionError.value = null
   try {
-    await projects.startSession(props.project.id, false, false, otherServers.value)
+    await projects.startSession(props.project.id, false, false)
   } catch (e) {
     sessionError.value = isIpcError(e)
       ? e.code === 'ALREADY_ACTIVE'
-        ? 'Stop the current session first, then start the database-only session.'
+        ? 'Stop the current session first, then start the database session.'
         : e.message
       : String(e)
   }
@@ -189,11 +184,10 @@ function answer(eventId: string, choice: string): void {
     <div v-if="showEmpty" class="empty" data-testid="mcp-empty">
       <div class="empty-ico">⛁</div>
       <template v-if="!liveSession">
-        <div class="empty-title">Start a database-only session</div>
+        <div class="empty-title">Start the database session</div>
         <div class="empty-sub">
-          Opens a Claude Code session scoped to only <span class="mono teal">{{ name }}</span> — every
-          other MCP server is disabled. Then scan it to build
-          <span class="mono teal">db-schema.md</span> and chat with your database.
+          Opens a Claude Code session for <span class="mono teal">{{ name }}</span>. Then scan it to
+          build <span class="mono teal">db-schema.md</span> and chat with your database.
         </div>
         <button class="btn-solid" data-testid="mcp-start-session" @click="startDbSession()">
           ▶ Start database session

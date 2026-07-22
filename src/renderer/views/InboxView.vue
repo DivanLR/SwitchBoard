@@ -13,6 +13,9 @@ const projects = useProjectsStore()
 
 const tab = ref<'inbox' | 'history'>('inbox')
 const confirmingId = ref<string | null>(null)
+// Separate confirm state for the broad "Always allow <tool>" grant so it never
+// gets conflated with the one-time high-risk Approve confirm.
+const alwaysConfirmId = ref<string | null>(null)
 const expandedHistory = ref(new Set<string>())
 
 function toggleHistory(id: string): void {
@@ -73,6 +76,7 @@ function age(createdAt: string): string {
 async function approve(item: PermissionRequest): Promise<void> {
   if (item.risk === 'high' && item.type === 'tool_permission' && confirmingId.value !== item.id) {
     confirmingId.value = item.id
+    alwaysConfirmId.value = null
     return
   }
   confirmingId.value = null
@@ -81,7 +85,20 @@ async function approve(item: PermissionRequest): Promise<void> {
 
 async function deny(item: PermissionRequest): Promise<void> {
   confirmingId.value = null
+  alwaysConfirmId.value = null
   await inbox.decide(item.id, 'deny')
+}
+
+/** An MCP server tool, e.g. `mcp__oracle-sqlcl__sql_run`. */
+function isMcpItem(item: PermissionRequest): boolean {
+  return item.toolName?.startsWith('mcp__') ?? false
+}
+
+/** `mcp__oracle-sqlcl__sql_run` → `sql_run` for a compact button label. */
+function toolShortName(item: PermissionRequest): string {
+  const name = item.toolName ?? ''
+  const parts = name.split('__')
+  return parts.length >= 3 ? parts.slice(2).join('__') : name
 }
 
 // --- History right-click menu (design: always allow a command from history) ---
@@ -123,19 +140,32 @@ function alreadyAllowed(projectId: string, base: string): boolean {
   )
 }
 
-/** Same eligibility as the history "Always allow" menu, plus: never for high
- *  risk — one click must not both widen a rule and skip the high-risk confirm. */
+/**
+ * Whether to offer an "Always allow" button on a pending item.
+ * - MCP tools: always — a pending item proves no tool_only rule covers it yet
+ *   (one would have auto-approved it). The broad grant is gated by a confirm.
+ * - Bash: same eligibility as the history menu, but never for high risk — one
+ *   click must not both widen a rule and skip the high-risk confirm.
+ */
 function canAlwaysAllow(item: PermissionRequest): boolean {
-  if (item.type !== 'tool_permission' || item.toolName !== 'Bash' || item.risk === 'high') {
-    return false
-  }
+  if (item.type !== 'tool_permission') return false
+  if (isMcpItem(item)) return true
+  if (item.toolName !== 'Bash' || item.risk === 'high') return false
   if (isDangerousCommand(item.detail)) return false
   return !alreadyAllowed(item.projectId, baseCmd(item.detail))
 }
 
 async function alwaysAllowSimilar(item: PermissionRequest): Promise<void> {
+  // A broad MCP tool_only grant on a high-risk item (high by fail-safe) gets the
+  // same deliberate two-step confirm as a high-risk Approve.
+  if (isMcpItem(item) && item.risk === 'high' && alwaysConfirmId.value !== item.id) {
+    alwaysConfirmId.value = item.id
+    confirmingId.value = null
+    return
+  }
+  alwaysConfirmId.value = null
   confirmingId.value = null
-  await inbox.approveAlways(item.id)
+  await inbox.approveAlways(item.id, item.risk === 'high')
   await loadCoveredBases()
 }
 
@@ -175,8 +205,23 @@ async function removeHist(): Promise<void> {
   if (ctx) await inbox.deleteHistory(ctx.id)
 }
 
-async function approveAll(projectId: string): Promise<void> {
-  await inbox.approveAllForProject(projectId)
+// Project group whose "Approve all" is awaiting the high-risk "are you sure".
+const approveAllConfirmId = ref<string | null>(null)
+
+function groupHighRiskCount(items: PermissionRequest[]): number {
+  return items.filter((i) => i.risk === 'high' && i.type === 'tool_permission').length
+}
+
+async function approveAll(group: { projectId: string; items: PermissionRequest[] }): Promise<void> {
+  const highRisk = groupHighRiskCount(group.items)
+  // Groups with high-risk items get one "are you sure" before bulk approval
+  // sweeps them in; safe-only groups approve straight away as before.
+  if (highRisk > 0 && approveAllConfirmId.value !== group.projectId) {
+    approveAllConfirmId.value = group.projectId
+    return
+  }
+  approveAllConfirmId.value = null
+  await inbox.approveAllForProject(group.projectId, highRisk > 0)
 }
 
 const historyItems = computed(() => inbox.history)
@@ -231,12 +276,27 @@ const historyItems = computed(() => inbox.history)
           <span class="group-name mono">{{ projectName(group.projectId) }}</span>
           <span class="group-count mono">· {{ group.items.length }} pending</span>
           <span style="flex: 1"></span>
+          <template v-if="approveAllConfirmId === group.projectId">
+            <span class="approve-all-warn mono" data-testid="approve-all-warn">
+              Includes {{ groupHighRiskCount(group.items) }} high-risk. Sure?
+            </span>
+            <button
+              class="link-armed"
+              data-testid="approve-all-confirm"
+              @click="approveAll(group)"
+            >
+              Approve all
+            </button>
+            <button class="link-quiet" data-testid="approve-all-cancel" @click="approveAllConfirmId = null">
+              Cancel
+            </button>
+          </template>
           <button
-            v-if="group.items.length > 1"
+            v-else-if="group.items.length > 1"
             class="link-green"
             data-testid="approve-all"
-            title="Approves all pending non-high-risk items in this group"
-            @click="approveAll(group.projectId)"
+            title="Approves all pending items; high-risk items ask for confirmation first"
+            @click="approveAll(group)"
           >
             Approve all
           </button>
@@ -277,16 +337,31 @@ const historyItems = computed(() => inbox.history)
               </button>
               <button class="btn-outline" @click="confirmingId = null">Back</button>
             </template>
+            <template v-else-if="alwaysConfirmId === item.id">
+              <button
+                class="btn-armed"
+                data-testid="confirm-always-allow"
+                :title="`Auto-approve every ${item.toolName} call in this project from now on`"
+                @click="alwaysAllowSimilar(item)"
+              >
+                Confirm — always allow {{ toolShortName(item) }}
+              </button>
+              <button class="btn-outline" @click="alwaysConfirmId = null">Back</button>
+            </template>
             <template v-else>
               <button class="btn-solid" data-testid="approve-btn" @click="approve(item)">Approve</button>
               <button
                 v-if="canAlwaysAllow(item)"
                 class="btn-outline"
                 data-testid="always-allow-btn"
-                title="Creates a standing rule for this command and approves it now"
+                :title="
+                  isMcpItem(item)
+                    ? `Auto-approve every ${item.toolName} call in this project from now on`
+                    : 'Creates a standing rule for this command and approves it now'
+                "
                 @click="alwaysAllowSimilar(item)"
               >
-                Always allow similar
+                {{ isMcpItem(item) ? `Always allow ${toolShortName(item)}` : 'Always allow similar' }}
               </button>
               <button class="btn-outline" data-testid="deny-btn" @click="deny(item)">Deny</button>
             </template>
@@ -500,6 +575,36 @@ const historyItems = computed(() => inbox.history)
 .group-count {
   font-size: 10.5px;
   color: var(--text-faint);
+}
+
+/* "Approve all" high-risk confirm row (mono links, matching .link-green). */
+.approve-all-warn {
+  font-size: 10px;
+  color: var(--amber);
+}
+
+.link-armed,
+.link-quiet {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.link-armed {
+  color: var(--amber);
+  font-weight: 600;
+}
+
+.link-quiet {
+  color: var(--text-faint);
+}
+
+.link-armed:hover,
+.link-quiet:hover {
+  text-decoration: underline;
 }
 
 .item {

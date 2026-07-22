@@ -103,8 +103,6 @@ export interface InvokeMap {
       projectId: string
       resume?: boolean
       bypassPermissions?: boolean
-      /** Deny these MCP servers so the session runs with only the DB MCP active. */
-      deniedMcpServers?: string[]
     }
     res: Session
   }
@@ -153,15 +151,18 @@ export interface InvokeMap {
     res: { rule: PermissionRule }
   }
   'inbox.approveAlways': {
-    // From a PENDING inbox item ("Always allow similar"): derives and inserts
-    // the standing rule server-side exactly as inbox.alwaysAllow does, then
-    // approves this request. Refused for non-Bash, plan, high-risk, or
-    // destructive commands (RULE_NOT_ALLOWED).
-    req: { requestId: string }
+    // From a PENDING inbox item ("Always allow …"): inserts the standing rule
+    // server-side, then approves this request. Bash → command-prefix rule
+    // (refused for high-risk/destructive). MCP tools → tool_only rule
+    // allow-listing the whole tool; high only by fail-safe, so confirmHighRisk
+    // must be true to proceed. Refused for plans and other tools.
+    req: { requestId: string; confirmHighRisk?: boolean }
     res: { delivered: boolean; rule: PermissionRule }
   }
   'inbox.approveAllForProject': {
-    req: { projectId: string }
+    // includeHighRisk approves high-risk items too; the UI sets it only after an
+    // explicit confirmation.
+    req: { projectId: string; includeHighRisk?: boolean }
     res: { approved: number; skippedHighRisk: number }
   }
   'inbox.history': { req: { projectId?: string; limit?: number }; res: DecisionRecord[] }

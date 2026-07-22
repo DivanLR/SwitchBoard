@@ -152,8 +152,9 @@ const usageReset = computed(() => {
 })
 
 // --- Global database session (design: one project-less MCP chat, bound to the
-// reserved "Database" project the main process auto-starts at launch — see
-// main/index.ts — rather than to whichever project happens to be selected). ---
+// reserved "Database" project — see main/index.ts — rather than to whichever
+// project happens to be selected. It starts on demand from the DB view, like
+// any project; there is no launch auto-start. ---
 const dbProject = computed(() => projects.dbProject)
 const dbServerName = computed(() => settings.settings?.databaseMcpServer ?? null)
 const dbMcpStatus = computed(() => {

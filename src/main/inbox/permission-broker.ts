@@ -437,23 +437,47 @@ export class PermissionBroker {
   }
 
   /**
-   * From a PENDING inbox item ("Always allow similar"): derives and inserts the
-   * standing rule exactly as `alwaysAllow` does, then approves the request via
-   * the normal `decide()` path (marker, push, resolution — no duplicated
-   * settlement). Both calls are synchronous, so rule-then-approve is atomic
-   * within the event loop. Refuses high risk in addition to the
-   * dangerous/non-Bash/plan checks: one click both widens future auto-approval
-   * AND approves now, so it must not skip the explicit high-risk confirm step a
-   * plain Approve requires.
+   * From a PENDING inbox item ("Always allow …"): inserts the standing rule then
+   * approves the request via the normal `decide()` path (marker, push,
+   * resolution — no duplicated settlement). Both calls are synchronous, so
+   * rule-then-approve is atomic within the event loop.
+   *
+   * Two shapes:
+   * - Bash: a flag-aware command-prefix rule. Refused for high risk (one click
+   *   must not both widen future auto-approval AND skip the high-risk confirm a
+   *   plain Approve requires) and for the destructive set.
+   * - MCP tools (`mcp__…`): a `tool_only` rule allow-listing every future call
+   *   to that exact tool for the project. These are high only by the risk
+   *   classifier's fail-safe (no rule matches an MCP tool), so the gate is the
+   *   developer's explicit confirm (`confirmHighRisk`), not a command check —
+   *   there is no command to vet. ponytail: per-project like every standing
+   *   rule; a narrower per-session scope would need a whole new mechanism.
    */
-  approveAlways(requestId: string): { delivered: boolean; rule: PermissionRule } {
+  approveAlways(
+    requestId: string,
+    confirmHighRisk = false,
+  ): { delivered: boolean; rule: PermissionRule } {
     const request = this.repos.requests.byId(requestId)
     if (!request) throw new BrokerError('NOT_FOUND', 'Permission request not found')
     if (request.status !== 'pending') {
       throw new BrokerError('NOT_FOUND', 'The request has already been decided')
     }
-    if (request.type !== 'tool_permission' || request.toolName !== 'Bash') {
-      throw new BrokerError('RULE_NOT_ALLOWED', 'Only pending shell commands can be always-allowed')
+    if (request.type !== 'tool_permission' || !request.toolName) {
+      throw new BrokerError('RULE_NOT_ALLOWED', 'Only pending tool permissions can be always-allowed')
+    }
+
+    if (request.toolName.startsWith('mcp__')) {
+      if (request.risk === 'high' && !confirmHighRisk) {
+        throw new BrokerError('CONFIRM_REQUIRED', 'Allowing every call to this tool requires confirmation')
+      }
+      const { rule } = this.insertRuleForMcpTool(request)
+      // Already confirmed (or not high) — bypass decide()'s own high-risk gate.
+      const { delivered } = this.decide(requestId, 'approve', true)
+      return { delivered, rule }
+    }
+
+    if (request.toolName !== 'Bash') {
+      throw new BrokerError('RULE_NOT_ALLOWED', 'Only shell or MCP tools can be always-allowed')
     }
     if (request.risk === 'high') {
       throw new BrokerError('RULE_NOT_ALLOWED', 'High-risk commands require individual approval')
@@ -464,6 +488,22 @@ export class PermissionBroker {
     const { rule } = this.insertRuleForBashCommand(request)
     const { delivered } = this.decide(requestId, 'approve')
     return { delivered, rule }
+  }
+
+  /** Dedupe-insert of a `tool_only` rule allow-listing an MCP tool by name. */
+  private insertRuleForMcpTool(request: PermissionRequest): { rule: PermissionRule } {
+    const toolName = request.toolName as string
+    const existing = this.repos.standingRules
+      .listForProject(request.projectId)
+      .find((r) => r.toolName === toolName && r.matcher.kind === 'tool_only')
+    if (existing) return { rule: existing }
+    const rule = this.repos.standingRules.insert({
+      projectId: request.projectId,
+      toolName,
+      matcher: { kind: 'tool_only' },
+      createdFromRequestId: request.id,
+    })
+    return { rule }
   }
 
   /** Shared matcher-derivation + dedupe-insert for `alwaysAllow`/`approveAlways`. */
@@ -492,17 +532,27 @@ export class PermissionBroker {
     return { rule }
   }
 
-  /** Approves every pending non-high item in one project group (FR-011). */
-  approveAllForProject(projectId: string): { approved: number; skippedHighRisk: number } {
+  /**
+   * Approves every pending item in one project group (FR-011). High-risk tool
+   * permissions are skipped unless `includeHighRisk` is set — the UI passes it
+   * only after an explicit "are you sure" confirm, so bulk approval never
+   * silently clears a destructive action.
+   */
+  approveAllForProject(
+    projectId: string,
+    includeHighRisk = false,
+  ): { approved: number; skippedHighRisk: number } {
     const pending = this.repos.requests.pendingForProject(projectId)
     let approved = 0
     let skippedHighRisk = 0
     for (const request of pending) {
-      if (request.risk === 'high' && request.type === 'tool_permission') {
+      const isHighRisk = request.risk === 'high' && request.type === 'tool_permission'
+      if (isHighRisk && !includeHighRisk) {
         skippedHighRisk += 1
         continue
       }
-      this.decide(request.id, 'approve')
+      // decide() re-checks the high-risk gate, so pass the confirm through.
+      this.decide(request.id, 'approve', isHighRisk)
       approved += 1
     }
     return { approved, skippedHighRisk }

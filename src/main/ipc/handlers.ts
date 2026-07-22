@@ -179,12 +179,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       repos.projects.archive(req.projectId)
     },
     'sessions.start': (req) =>
-      manager.startSession(
-        req.projectId,
-        req.resume ?? false,
-        req.bypassPermissions ?? false,
-        req.deniedMcpServers,
-      ),
+      manager.startSession(req.projectId, req.resume ?? false, req.bypassPermissions ?? false),
     'sessions.stop': (req) => manager.stopSession(req.sessionId),
     'sessions.interrupt': (req) => manager.interruptSession(req.sessionId),
     'sessions.send': (req) => {
@@ -246,8 +241,9 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       const { rule } = broker.alwaysAllow(req.requestId)
       return { rule }
     },
-    'inbox.approveAlways': (req) => broker.approveAlways(req.requestId),
-    'inbox.approveAllForProject': (req) => broker.approveAllForProject(req.projectId),
+    'inbox.approveAlways': (req) => broker.approveAlways(req.requestId, req.confirmHighRisk ?? false),
+    'inbox.approveAllForProject': (req) =>
+      broker.approveAllForProject(req.projectId, req.includeHighRisk ?? false),
     'inbox.history': (req) => repos.requests.history(req),
     'inbox.deleteHistory': (req) => {
       repos.requests.deleteHistory(req.requestId)

@@ -73,8 +73,9 @@ onUnmounted(() => {
 })
 
 const selectedProject = computed(() => projects.selected)
-// The Database MCP view is global (bound to the reserved project), so it must
-// survive switching between regular projects — no watch resets it here.
+// The Database MCP view is global (bound to the reserved project). Its session
+// outlives view switches; selecting a project just closes the view (see
+// projects.select → openMcp(null)) so the chat swaps like any project switch.
 const dbProject = computed(() => projects.dbProject)
 </script>
 

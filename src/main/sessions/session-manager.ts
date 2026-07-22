@@ -8,7 +8,6 @@ const execFileAsync = promisify(execFile)
 import type {
   EventKind,
   EventPayloadMap,
-  McpServer,
   ProjectCommand,
   QueuedTask,
   Session,
@@ -23,14 +22,6 @@ import { HostedSession, type PermissionGate } from './session'
 import type { EventSink } from './message-mapper'
 import { terseSystemPromptAppend } from './terse-mode'
 import { resolveClaudeExecutable } from './claude-executable'
-
-/** Set-union of known MCP server names with a session's reported roster, sorted
- *  and de-duplicated. Never shrinks the known set. Pure/exported for unit test. */
-export function unionMcpServerNames(known: string[], servers: McpServer[]): string[] {
-  const set = new Set(known)
-  for (const s of servers) set.add(s.name)
-  return [...set].sort()
-}
 
 export class SessionManagerError extends Error {
   constructor(
@@ -141,12 +132,7 @@ export class SessionManager {
     }
   }
 
-  startSession(
-    projectId: string,
-    resume = false,
-    bypassPermissions = false,
-    deniedMcpServers?: string[],
-  ): Session {
+  startSession(projectId: string, resume = false, bypassPermissions = false): Session {
     const project = this.repos.projects.byId(projectId)
     if (!project) throw new SessionManagerError('NOT_FOUND', 'Project not found')
     const active = this.repos.sessions.activeForProject(projectId)
@@ -227,7 +213,6 @@ export class SessionManager {
       workModel,
       planModel: settings.planModel,
       bypassPermissions,
-      deniedMcpServers,
       sink: this.makeSink(entry),
       gate: this.callbacks.gate,
       onStatusChange: (status, detail) => this.handleStatusChange(entry, status, detail),
@@ -253,7 +238,6 @@ export class SessionManager {
       // MCP servers from the init message — in-memory only, pushed to the sidebar.
       onMcpServers: (servers) => {
         entry.row.mcpServers = servers
-        this.rememberKnownMcpServers(servers)
         this.pushStatus(entry)
       },
       onTurnComplete: () => {
@@ -495,12 +479,4 @@ export class SessionManager {
     this.callbacks.onSessionStatus({ ...entry.row })
   }
 
-  /** Persist the set-union of MCP server names, so the global database session
-   *  can derive its denylist at launch without a prior session this run. */
-  private rememberKnownMcpServers(servers: McpServer[]): void {
-    if (servers.length === 0) return
-    const current = this.repos.settings.get().knownMcpServers ?? []
-    const next = unionMcpServerNames(current, servers)
-    if (next.length !== current.length) this.repos.settings.set({ knownMcpServers: next })
-  }
 }

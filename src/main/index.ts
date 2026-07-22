@@ -198,31 +198,16 @@ async function main(): Promise<void> {
   }
   manager.setNoiseClassifier((event, projectId) => classifyNoise(swallowRules, event, projectId))
 
-  // Database MCP (global, project-less session): a reserved project row gives
-  // it cwd/permissions/history through the existing per-project machinery.
-  // ipc/handlers.ts marks it `reserved` so the sidebar never lists it as a
-  // normal project; Sidebar.vue renders it as the single "Database" row.
+  // Database MCP: a reserved project row gives it cwd/permissions/history
+  // through the existing per-project machinery. ipc/handlers.ts marks it
+  // `reserved` so the sidebar renders it as its own "Database" row rather than
+  // a normal project. It starts on demand like any project (the DB view's start
+  // button) — no launch auto-start and no MCP-server isolation.
   const dbProjectPath = join(app.getPath('userData'), 'database-mcp')
   mkdirSync(dbProjectPath, { recursive: true })
   const dbProject =
     repos.projects.byPath(dbProjectPath) ??
     registerProject(repos, { path: dbProjectPath, name: 'Database', source: 'manual' })
-
-  // Auto-start only when a database MCP is designated. Any startup failure (a
-  // missing Claude executable, an already-active session) throws a
-  // SessionManagerError that is caught and ignored — the "Database" row's
-  // manual start button covers retry.
-  const startupSettings = repos.settings.get()
-  if (startupSettings.databaseMcpServer) {
-    const denied = (startupSettings.knownMcpServers ?? []).filter(
-      (name) => name !== startupSettings.databaseMcpServer,
-    )
-    try {
-      manager.startSession(dbProject.id, true, false, denied)
-    } catch {
-      // Non-fatal; see comment above.
-    }
-  }
 
   // switchboard:// deep links from notification buttons. Approve routes through
   // the broker with confirmHighRisk — the toast already showed exactly what is

@@ -343,13 +343,6 @@ export interface Settings {
    * sidebar then lists every reported server, the pre-designation behaviour).
    */
   databaseMcpServer: string | null
-  /**
-   * Every MCP server name any session has ever reported (set-union, never
-   * shrinks). Lets the global database session compute its denylist (deny
-   * everything except the designated server) from launch, without needing a
-   * prior unscoped session in the same run to harvest the roster from.
-   */
-  knownMcpServers: string[]
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -369,7 +362,6 @@ export const DEFAULT_SETTINGS: Settings = {
   dailySpendLimit: 0,
   disabledCommands: {},
   databaseMcpServer: null,
-  knownMcpServers: [],
 }
 
 /** A slash command / skill a project's sessions can run (composer suggestions). */

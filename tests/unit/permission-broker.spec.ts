@@ -290,6 +290,32 @@ describe('PermissionBroker lifecycle', () => {
     await write
   })
 
+  it('approveAlways allow-lists an MCP tool by name, gated by confirm', async () => {
+    const first = h.gate('mcp__oracle-sqlcl__sql_run', { sql: 'SELECT 1 FROM dual' })
+    await settle()
+    const [pending] = h.repos.requests.pending()
+    // No risk rule matches an MCP tool → fail-safe to high.
+    expect(pending.risk).toBe('high')
+    // The broad grant needs explicit confirmation.
+    expect(() => h.broker.approveAlways(pending.id)).toThrow(BrokerError)
+
+    const { delivered, rule } = h.broker.approveAlways(pending.id, true)
+    expect(delivered).toBe(true)
+    expect(rule.matcher).toEqual({ kind: 'tool_only' })
+    expect(rule.toolName).toBe('mcp__oracle-sqlcl__sql_run')
+    expect((await first).behavior).toBe('allow')
+
+    // Every later call to that exact tool short-circuits with nothing pending,
+    // regardless of input.
+    const again = await h.gate('mcp__oracle-sqlcl__sql_run', { sql: 'DROP TABLE t' })
+    expect(again.behavior).toBe('allow')
+    expect(h.repos.requests.pending()).toHaveLength(0)
+    // A different MCP tool is still gated.
+    void h.gate('mcp__oracle-sqlcl__connect', { name: 'db' })
+    await settle()
+    expect(h.repos.requests.pending()).toHaveLength(1)
+  })
+
   it('auto-approves file tools inside the session folder, prompts outside it', async () => {
     // Inside the project: resolves allow immediately, no pending item.
     const inside = await h.gate('Read', { file_path: 'C:\\proj\\alpha\\src\\main.ts' })
@@ -351,6 +377,17 @@ describe('PermissionBroker lifecycle', () => {
     expect(outcome.approved).toBe(2)
     expect(outcome.skippedHighRisk).toBe(1)
     expect(h.repos.requests.pending()).toHaveLength(1)
+  })
+
+  it('approve-all with confirmation includes high-risk items (FR-011)', async () => {
+    void h.gate('Bash', { command: 'git status' }) // low
+    void h.gate('Edit', { file_path: 'C:\\other\\a.ts' }) // medium
+    void h.gate('Bash', { command: 'rm -rf x' }) // high
+    await settle()
+    const outcome = h.broker.approveAllForProject(h.projectId, true)
+    expect(outcome.approved).toBe(3)
+    expect(outcome.skippedHighRisk).toBe(0)
+    expect(h.repos.requests.pending()).toHaveLength(0)
   })
 
   it('expires items when the abort signal fires (session moved on)', async () => {

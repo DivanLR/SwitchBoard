@@ -1,12 +1,13 @@
 // Database MCP as a GLOBAL, project-less session: the reserved "Database"
-// project (auto-started by the main process) backs a single sidebar MCP row
-// that is not gated on selecting a regular project. Opening it runs a
-// multi-agent scan to db-schema.md and chats with the DB as live queries.
+// project backs a single sidebar MCP row that is not gated on selecting a
+// regular project. It starts on demand (the DB view's start button), not at
+// launch. Opening it runs a multi-agent scan to db-schema.md and chats with
+// the DB as live queries.
 import { expect, test } from '@playwright/test'
 import { installMockHost, type MockScenario } from './mock-host'
 
 /** alpha is an ordinary selected project; the reserved row hosts the DB session
- *  reporting the full MCP roster (so the denylist can be derived from it). */
+ *  reporting its MCP roster (surfaced as the connection pill). */
 function dbScenario(): MockScenario {
   return {
     projects: [
@@ -111,20 +112,18 @@ test('a completed scan unlocks db-schema.md and chat runs a DB-targeted query', 
   await expect(page.getByTestId('stream')).toBeVisible()
 })
 
-test('the manual database-only start denies every other reported MCP server', async ({ page }) => {
+test('the manual start runs a normal session with no MCP server denied', async ({ page }) => {
   await designateDbMcp(page)
   await page.locator(mcpRow).first().click()
   await expect(page.getByTestId('mcp-view')).toBeVisible()
 
-  // End the reserved session so the view offers a fresh database-only start.
+  // End the reserved session so the view offers a fresh start.
   await page.evaluate(() => window.__mock.endSession('s-db'))
   await page.getByTestId('mcp-start-session').click()
 
+  // The database session starts like any project session — no deny-list.
   const starts = await page.evaluate(() => window.__mock.state().starts)
-  const dbStart = starts.find((s) => (s.deniedMcpServers ?? []).length > 0)
+  const dbStart = starts.find((s) => s.projectId === 'p-db')
   expect(dbStart).toBeTruthy()
-  expect(dbStart?.deniedMcpServers).toEqual(
-    expect.arrayContaining(['github', 'filesystem', 'playwright', 'context7']),
-  )
-  expect(dbStart?.deniedMcpServers).not.toContain('postgres — production')
+  expect(dbStart?.deniedMcpServers ?? []).toEqual([])
 })

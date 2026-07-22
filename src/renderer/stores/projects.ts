@@ -3,6 +3,7 @@
 import { defineStore } from 'pinia'
 import type { Session } from '@shared/domain'
 import type { Counters, ProjectListItem, ProjectSuggestion, SessionStatusPush } from '@shared/ipc-types'
+import { useActiveSessionStore } from './activeSession'
 
 interface ProjectsState {
   items: ProjectListItem[]
@@ -98,13 +99,11 @@ export const useProjectsStore = defineStore('projects', {
       projectId: string,
       resume = false,
       bypassPermissions = false,
-      deniedMcpServers?: string[],
     ): Promise<Session> {
       const session = await window.switchboard.invoke('sessions.start', {
         projectId,
         resume,
         bypassPermissions,
-        deniedMcpServers,
       })
       await this.refresh()
       return session
@@ -112,6 +111,10 @@ export const useProjectsStore = defineStore('projects', {
 
     select(projectId: string): void {
       this.selectedProjectId = projectId
+      // Selecting a project leaves the global Database MCP view, so the chat
+      // swaps to that project's session — same as switching between projects.
+      // The reserved MCP session stays alive; the MCP row reopens its view.
+      useActiveSessionStore().openMcp(null)
     },
 
     applyStatusPush(push: SessionStatusPush): void {
