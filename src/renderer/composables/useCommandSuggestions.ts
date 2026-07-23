@@ -6,7 +6,6 @@ import { computed, nextTick, ref, type Ref } from 'vue'
 import type { ProjectCommand } from '@shared/domain'
 import { useProjectsStore } from '@renderer/stores/projects'
 
-const MAX_SUGGESTIONS = 6
 // A slash-command search (typing "/") lists every matching skill/command, not
 // just the top few — the dropdown scrolls.
 const MAX_SLASH_SUGGESTIONS = 50
@@ -63,10 +62,9 @@ export function useCommandSuggestions(opts: {
   const slashName = (name: string): string => (name.startsWith('/') ? name : `/${name}`)
 
   /** Suggestion pool: available /commands (plugins + skills) first, then history. */
-  const pool = computed<string[]>(() => {
-    const cmds = availableCommands.value.map((c) => slashName(c.name))
-    return [...new Set([...cmds, ...history.value])]
-  })
+  // Ghost-completion pool is COMMANDS ONLY — never past prompts. (History is
+  // still kept for explicit up-arrow recall, just never auto-suggested.)
+  const pool = computed<string[]>(() => availableCommands.value.map((c) => slashName(c.name)))
 
   /** Suggested /command text → its small what-it-does explanation. */
   const hints = computed<Map<string, string>>(() => {
@@ -81,27 +79,37 @@ export function useCommandSuggestions(opts: {
     return hints.value.get(text) ?? ''
   }
 
-  /** Dropdown matches: commands by separator-insensitive substring (so "CI/CD"
-   *  finds "/dotnet-claude-kit:ci-cd"); history stays prefix-only. Commands first. */
+  /** The slash token being typed: the trailing token when it starts with "/"
+   *  and sits at the start of the input or right after whitespace. Command
+   *  suggestions ONLY appear for such a token — plain prose never triggers
+   *  them (typing "c" must not offer "/claude-api"). */
+  function activeSlashToken(): { token: string; start: number } | null {
+    const text = composer.value
+    const m = /(^|\s)(\/\S*)$/.exec(text)
+    if (!m) return null
+    return { token: m[2], start: m.index + m[1].length }
+  }
+
+  /** Dropdown matches: commands (separator-insensitive substring, so "/cicd"
+   *  finds "/dotnet-claude-kit:ci-cd") only for an active slash token;
+   *  history stays prefix-only on the whole input. Commands first. */
   const suggestions = computed<string[]>(() => {
     const typed = composer.value.trim()
     if (typed.length === 0 || suggestDismissed.value) return []
-    const lower = typed.toLowerCase()
-    const key = normalizeForMatch(typed)
-    // Typing "/" is a command palette: show all matching skills/commands.
-    const cap = typed.startsWith('/') ? MAX_SLASH_SUGGESTIONS : MAX_SUGGESTIONS
-    const cmds = availableCommands.value
-      .map((c) => slashName(c.name))
-      .filter((cmd) =>
-        cmd !== composer.value &&
-        // Empty key (typing only separators like "/") falls back to prefix so the
-        // palette still lists commands rather than matching everything.
-        (key.length === 0 ? cmd.toLowerCase().startsWith(lower) : normalizeForMatch(cmd).includes(key)),
-      )
-    const hist = history.value.filter(
-      (h) => h !== composer.value && h.toLowerCase().startsWith(lower),
-    )
-    return [...new Set([...cmds, ...hist])].slice(0, cap)
+    const slash = activeSlashToken()
+    let cmds: string[] = []
+    if (slash) {
+      const key = normalizeForMatch(slash.token)
+      cmds = availableCommands.value
+        .map((c) => slashName(c.name))
+        .filter((cmd) =>
+          cmd !== slash.token &&
+          // Empty key (typing only "/") lists the whole palette.
+          (key.length === 0 ? true : normalizeForMatch(cmd).includes(key)),
+        )
+    }
+    // Commands only — never past prompts in the dropdown.
+    return [...new Set(cmds)].slice(0, MAX_SLASH_SUGGESTIONS)
   })
 
   /** The single best case-sensitive continuation, rendered inline as ghost text. */
@@ -129,7 +137,15 @@ export function useCommandSuggestions(opts: {
   }
 
   function acceptSuggestion(text: string): void {
-    composer.value = text
+    // Accepting a command for a mid-sentence slash token replaces just that
+    // token ("run /spec…" → "run /speckit-plan "); everything else (history,
+    // a command typed from the start) replaces the whole input.
+    const slash = activeSlashToken()
+    if (text.startsWith('/') && slash && slash.start > 0) {
+      composer.value = `${composer.value.slice(0, slash.start)}${text} `
+    } else {
+      composer.value = text
+    }
     suggestIndex.value = -1
     suggestDismissed.value = true
     void nextTick(() => composerEl.value?.focus())

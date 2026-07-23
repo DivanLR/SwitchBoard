@@ -1,7 +1,7 @@
 // Sidebar state (FR-003/004/005): projects with live sessions, selection,
 // suggestions, and aggregate counters.
 import { defineStore } from 'pinia'
-import type { Project, ProjectCommand, Session } from '@shared/domain'
+import type { McpScan, Project, ProjectCommand, Session } from '@shared/domain'
 import type { Counters, ProjectListItem, ProjectSuggestion, SessionStatusPush } from '@shared/ipc-types'
 import { useActiveSessionStore } from './activeSession'
 
@@ -77,10 +77,20 @@ export const useProjectsStore = defineStore('projects', {
       return window.switchboard.invoke('sessions.promptHistory', { projectId })
     },
 
-    /** Cached Database-MCP schema document for a project, or null if never scanned. */
-    async readMcpSchema(projectId: string): Promise<string | null> {
-      const res = await window.switchboard.invoke('mcp.readSchema', { projectId })
+    /** Cached MCP schema doc — a combination's own scan when servers given. */
+    async readMcpSchema(projectId: string, servers?: string[]): Promise<string | null> {
+      const res = await window.switchboard.invoke('mcp.readSchema', { projectId, servers })
       return res.content
+    },
+
+    /** Scanned-combination history for the MCP view, newest first. */
+    async mcpScanHistory(projectId: string): Promise<McpScan[]> {
+      return window.switchboard.invoke('mcp.scanHistory', { projectId })
+    },
+
+    /** Record a finished scan for the active combination (null if no doc). */
+    async mcpRecordScan(projectId: string, servers: string[]): Promise<McpScan | null> {
+      return window.switchboard.invoke('mcp.recordScan', { projectId, servers })
     },
 
     async archive(projectId: string): Promise<void> {

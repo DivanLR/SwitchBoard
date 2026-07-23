@@ -20,3 +20,32 @@ export function classifyIntent(text: string): 'plan' | 'work' {
   // Default: questions and basic requests stay on the plan model.
   return 'plan'
 }
+
+export type Workload = 'plan' | 'advisor' | 'orchestrator'
+
+// Signals that a work request is BROAD (many files / multi-step / research-
+// shaped), which pays for the orchestrator pattern: strong model plans and
+// delegates, cheap workers execute in parallel.
+const BROAD_SCOPE =
+  /\b(all|every|each|entire|whole|across)\b[\s\S]{0,40}\b(files?|tests?|modules?|components?|views?|routes?|endpoints?|pages?|screens?|repo|repositor\w*|codebase|project|app)\b/i
+const HEAVY_WORK =
+  /\b(audit|research|investigate|comprehensive|thorough(?:ly)?|end[- ]to[- ]end|overhaul|redesign|restyle|re-?architect|migrat\w+|in parallel|fan[- ]?out|orchestrat\w+|multi[- ]?step|sweep|whole app|entire app)\b/i
+
+/**
+ * Workload classification for the Advisor/Orchestrator modes ('auto'):
+ * questions stay 'plan'; broad multi-step work → 'orchestrator' (strong model
+ * runs the loop and delegates); everything else → 'advisor' (cheap executor
+ * runs the loop, strong model consulted rarely).
+ */
+export function classifyWorkload(text: string): Workload {
+  const t = text.trim()
+  // A multi-item request (3+ bullets or numbered points) is a decomposable goal.
+  const listItems = (t.match(/^\s*(?:[-*]|\d+[.)])\s+\S/gm) ?? []).length
+  // Long prose briefs read as goals rather than single edits or questions.
+  const broad = BROAD_SCOPE.test(t) || HEAVY_WORK.test(t) || listItems >= 3 || t.length > 600
+  // Broad signals outrank the question gate: audits/research/deep-dives are
+  // the orchestrator's home turf (parallel multi-source work) even when
+  // phrased as a question rather than an imperative.
+  if (broad) return 'orchestrator'
+  return classifyIntent(text) === 'plan' ? 'plan' : 'advisor'
+}

@@ -42,7 +42,7 @@ const emit = defineEmits<{
 
 // Short label of the current work model for the settings row (design).
 const modelSummary = computed(() => {
-  const id = settings.settings?.workModel ?? 'default'
+  const id = settings.settings?.intelligentModel ?? 'default'
   if (id === 'default') return 'default model'
   const choice = MODEL_CHOICES.find((m) => m.id === id)
   return choice ? choice.label : id
@@ -115,14 +115,17 @@ const tokensLabel = computed(() => {
 })
 
 // --- Session usage meter (subscription rate limit from the SDK) ---
+// Shown for ANY live session; the % fills in once the SDK reports a
+// rate_limit_event (until then the meter shows a — placeholder).
 const usageSession = computed(() => {
   const selected = projects.selected?.session
   if (selected && !selected.endedAt && selected.usageUtilization != null) return selected
-  // Fall back to any live session reporting usage.
+  const live = projects.items.map((p) => p.session).filter((s) => s && !s.endedAt)
   return (
-    projects.items
-      .map((p) => p.session)
-      .find((s) => s && !s.endedAt && s.usageUtilization != null) ?? null
+    live.find((s) => s!.usageUtilization != null) ??
+    (selected && !selected.endedAt ? selected : null) ??
+    live[0] ??
+    null
   )
 })
 
@@ -141,7 +144,8 @@ const usageLimitLabel = computed(() => {
   const t = usageSession.value?.usageLimitType
   if (t === 'five_hour') return '5h limit'
   if (t?.startsWith('seven_day')) return '7d limit'
-  return 'limit'
+  // Before the SDK reports a window, show the primary (5h) label as a placeholder.
+  return '5h limit'
 })
 
 const usageReset = computed(() => {
@@ -337,6 +341,7 @@ async function confirmRemoveNow(): Promise<void> {
         </div>
         <span style="flex: 1"></span>
         <button
+          v-if="!collapsed"
           class="icon-btn mono"
           data-testid="theme-toggle"
           :title="
@@ -362,9 +367,9 @@ async function confirmRemoveNow(): Promise<void> {
 
     <div class="section-row">
       <span v-if="!collapsed" class="section-label mono">PROJECTS</span>
-      <button class="add mono" data-testid="add-project" title="New session" @click="emit('add-project')">
-        +
-      </button>
+      <!-- Single line, no surrounding whitespace: a text node around the glyph
+           becomes a flex text run with trailing space that shifts + off-centre. -->
+      <button class="add mono" data-testid="add-project" title="New session" @click="emit('add-project')">+</button>
     </div>
 
     <div class="project-list">
@@ -404,7 +409,18 @@ async function confirmRemoveNow(): Promise<void> {
               :data-status="statusOf(item)"
               :title="statusOf(item) === 'needs_you' ? 'Needs you' : statusOf(item)"
             ></span>
-            <span v-if="collapsed" class="initials mono">{{ initials(item.name) }}</span>
+            <!-- Collapsed rail: initials (+ pending badge). One template so the
+                 v-else below always pairs with the collapsed check itself. -->
+            <template v-if="collapsed">
+              <span class="initials mono">{{ initials(item.name) }}</span>
+              <span
+                v-if="pendingFor(item.id) > 0"
+                class="badge-count collapsed-badge"
+                :data-testid="`project-badge-${item.name}`"
+              >
+                {{ pendingFor(item.id) }}
+              </span>
+            </template>
             <template v-else>
               <input
                 v-if="renamingId === item.id"
@@ -478,7 +494,7 @@ async function confirmRemoveNow(): Promise<void> {
     <!-- Global MCP (design): one project-less row per designated server. They
          all open the same combined chat/scan view (see McpView). -->
     <template v-if="dbServers.length > 0 && dbProject">
-      <div v-if="!collapsed" class="section-row">
+      <div v-if="!collapsed" class="section-row mcp-section">
         <span class="section-label mono">MCP</span>
       </div>
       <div
@@ -502,6 +518,17 @@ async function confirmRemoveNow(): Promise<void> {
       </div>
     </template>
 
+    <button
+      v-if="collapsed"
+      class="icon-btn mono theme-collapsed"
+      data-testid="theme-toggle"
+      :title="
+        theme === 'light' ? 'Switch to dark mode' : 'Light mode — easier to read in bright rooms'
+      "
+      @click="toggleTheme"
+    >
+      {{ theme === 'light' ? '☾' : '☀' }}
+    </button>
     <div class="settings-row" data-testid="open-settings" @click="emit('open-settings')">
       <span class="gear mono">⚙</span>
       <template v-if="!collapsed">
@@ -533,13 +560,16 @@ async function confirmRemoveNow(): Promise<void> {
       </div>
     </div>
 
-    <div v-if="!collapsed && usagePct !== null" class="usage-card" data-testid="usage-meter">
+    <div v-if="!collapsed && usageSession" class="usage-card" data-testid="usage-meter">
       <div class="usage-head mono">
         <span>Session usage</span>
-        <span :style="{ color: usageColor }">{{ usagePct }}% of {{ usageLimitLabel }}</span>
+        <span v-if="usagePct !== null" :style="{ color: usageColor }">
+          {{ usagePct }}% of {{ usageLimitLabel }}
+        </span>
+        <span v-else>— of {{ usageLimitLabel }}</span>
       </div>
       <div class="usage-bar">
-        <div class="usage-fill" :style="{ width: `${usagePct}%`, background: usageColor }"></div>
+        <div class="usage-fill" :style="{ width: `${usagePct ?? 0}%`, background: usageColor }"></div>
       </div>
       <div class="usage-foot mono">
         <span data-testid="usage-tokens">{{ tokensLabel }} tok</span>
@@ -605,13 +635,16 @@ async function confirmRemoveNow(): Promise<void> {
 .sidebar {
   width: 252px;
   min-width: 252px;
-  background: var(--gloss), var(--bg-panel);
+  background: var(--bg-panel);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
+  /* Breathing room so the last footer section (usage/stats) never hugs the
+     window edge. */
+  padding-bottom: 8px;
 }
 
 .sidebar.collapsed {
@@ -620,36 +653,64 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .brand {
-  padding: 16px 16px 12px;
+  padding: 16px 12px 12px 16px;
 }
 
 .sidebar.collapsed .brand {
-  padding: 16px 8px 12px;
+  padding: 14px 0 10px;
 }
 
 .brand-top {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 
 .sidebar.collapsed .brand-top {
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+}
+
+.sidebar.collapsed .logo {
+  font-size: 15px;
 }
 
 .icon-btn {
-  color: var(--text-tab);
-  font-size: 12px;
-  padding: 1px 4px;
+  color: var(--text-faint);
+  font-size: 11px;
+  padding: 1px 6px;
+  line-height: 17px;
+  border: 1px solid var(--border-card-alt);
 }
 
-.icon-btn:hover {
-  color: var(--text-body);
+.icon-btn[data-testid='theme-toggle']:hover,
+.theme-collapsed:hover {
+  color: var(--amber);
+  border-color: var(--amber);
+}
+
+.icon-btn[data-testid='collapse-toggle']:hover {
+  color: var(--green);
+  border-color: var(--green);
+}
+
+/* Collapsed-rail theme toggle: bare icon (design's bottom footer), no chip. */
+.theme-collapsed {
+  border: none;
+  padding: 0;
+  line-height: normal;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  margin-top: 10px;
 }
 
 .sidebar.collapsed .section-row {
   justify-content: center;
+}
+
+.section-row.mcp-section {
+  padding: 10px 16px 2px;
 }
 
 .initials {
@@ -659,6 +720,33 @@ async function confirmRemoveNow(): Promise<void> {
 
 .sidebar.collapsed .project {
   text-align: center;
+}
+
+.sidebar.collapsed .content {
+  padding: 1px 0;
+}
+
+.sidebar.collapsed .row {
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+}
+
+/* Design: collapsed status dots are small squares, not the round 8px dot. */
+.sidebar.collapsed .dot {
+  width: 7px;
+  min-width: 7px;
+  height: 7px;
+  border-radius: 0;
+}
+
+.collapsed-badge {
+  font-size: 9px;
+  background: rgba(154, 111, 42, 0.15);
+  border-color: rgba(154, 111, 42, 0.4);
+  border-radius: 0;
+  padding: 0 4px;
+  line-height: 12px;
 }
 
 /* Drag-and-drop states: green insertion line for reorder, dashed teal ring
@@ -677,10 +765,6 @@ async function confirmRemoveNow(): Promise<void> {
   outline: 1px dashed var(--green);
   outline-offset: -1px;
   background: rgba(52, 211, 153, 0.06);
-}
-
-.sidebar.collapsed .row {
-  justify-content: center;
 }
 
 .logo {
@@ -710,13 +794,24 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .add {
+  /* Flex-center the + glyph in a fixed square — line-height boxes leave it
+     sitting low/left of the visual middle. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
   font-size: 13px;
   color: var(--text-faint);
   line-height: 1;
+  padding: 0;
+  border: 1px solid var(--border-card-alt);
+  border-radius: var(--rc);
 }
 
 .add:hover {
   color: var(--green);
+  border-color: var(--green);
 }
 
 .project-list {
@@ -728,19 +823,22 @@ async function confirmRemoveNow(): Promise<void> {
 .project {
   position: relative;
   margin: 0 8px 2px;
-  padding: 9px 10px;
-  border-radius: 10px;
+  padding: 9px 12px 9px 10px;
+  border-radius: var(--rc);
   cursor: pointer;
 }
 
 .project:hover {
   background: var(--bg-hover);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: var(--elev);
 }
 
 /* Per-project color code on the right edge (visible collapsed and expanded). */
 .accent {
   position: absolute;
-  right: 0;
+  right: 3px;
   top: 7px;
   bottom: 7px;
   width: 3px;
@@ -761,7 +859,7 @@ async function confirmRemoveNow(): Promise<void> {
   inset: 0;
   background: var(--bg-active);
   border: 1px solid var(--border-strong);
-  border-radius: 10px;
+  border-radius: var(--rc);
 }
 
 .content {
@@ -806,9 +904,19 @@ async function confirmRemoveNow(): Promise<void> {
   color: var(--red);
 }
 
-/* Remove-project confirmation popup */
+/* Remove-project confirmation popup: the design renders this as its own
+   glass pane (not the shared .dialog card look) — wide, pill-cornered, with a
+   heavier drop shadow, so every box-model property is overridden here. The
+   scrim itself comes from the shared .overlay (var(--scrim) + blur). */
 .remove-dialog {
-  width: 380px;
+  width: 400px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-card);
+  /* A card, not a pill — 99px bows the corners in and clips the text. */
+  border-radius: var(--rc);
+  padding: 24px;
+  box-shadow: var(--shadow-dlg);
+  animation: sbIn 0.18s ease;
 }
 
 .rd-icon {
@@ -820,17 +928,18 @@ async function confirmRemoveNow(): Promise<void> {
   font-size: 17px;
   background: rgba(143, 59, 44, 0.1);
   border: 1px solid rgba(143, 59, 44, 0.35);
-  margin-bottom: 10px;
+  border-radius: var(--rc);
 }
 
 .rd-title {
-  font-size: 14px;
-  font-weight: 700;
+  font-size: 15.5px;
+  font-weight: 600;
   color: var(--text-bright);
+  margin-top: 14px;
 }
 
 .rd-body {
-  margin: 12px 0 16px;
+  margin: 6px 0 0;
 }
 
 .rd-path {
@@ -842,9 +951,10 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .rd-note {
-  font-size: 11.5px;
-  line-height: 1.5;
-  margin: 10px 0 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-meta);
+  margin: 0;
 }
 
 .rd-error {
@@ -856,7 +966,28 @@ async function confirmRemoveNow(): Promise<void> {
 .rd-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 9px;
+  margin-top: 20px;
+}
+
+/* The design sizes these as equal-width, sans-serif, centered buttons —
+   distinct from the shared .btn-solid/.btn-outline (mono, auto-width) look. */
+.rd-actions .btn-solid,
+.rd-actions .btn-outline {
+  flex: 1;
+  text-align: center;
+  font-family: var(--sans);
+  font-size: 12px;
+  padding: 9px 0;
+}
+
+.rd-actions .btn-outline {
+  color: var(--text-body);
+}
+
+.rd-actions .btn-outline:hover {
+  border-color: var(--border-strong);
+  color: var(--text-strong);
 }
 
 .danger-solid {
@@ -915,7 +1046,7 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .agent-line:hover {
-  background: var(--surface-raised);
+  background: rgba(52, 211, 153, 0.1);
 }
 
 .agent-name.sel {
@@ -949,7 +1080,7 @@ async function confirmRemoveNow(): Promise<void> {
   min-width: 40px;
   background: var(--bg);
   border: 1px solid var(--green);
-  border-radius: 10px;
+  border-radius: var(--rc);
   outline: none;
   color: var(--text-strong);
   font-size: 12px;
@@ -957,11 +1088,11 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .usage-card {
-  margin: 8px 10px 0;
+  margin: 8px 10px 10px;
   padding: 9px 12px;
-  border: 1px solid var(--border-card-alt);
+  border: 1px solid var(--border-card);
   border-radius: var(--rc);
-  box-shadow: var(--elev);
+  box-shadow: 0 1px 3px rgba(90, 98, 116, 0.16);
 }
 
 .usage-head {
@@ -975,7 +1106,7 @@ async function confirmRemoveNow(): Promise<void> {
 .usage-bar {
   height: 5px;
   border-radius: 99px;
-  background: var(--surface-raised);
+  background: rgba(255, 255, 255, 0.07);
   overflow: hidden;
 }
 
@@ -998,12 +1129,13 @@ async function confirmRemoveNow(): Promise<void> {
 .mcp-item {
   position: relative;
   margin: 4px 8px 0;
-  padding: 9px 10px;
+  padding: 8px 10px;
   display: flex;
   align-items: center;
   gap: 9px;
   border: 1px solid var(--border-card-alt);
   background: var(--gloss), var(--bg-card-alt);
+  border-radius: var(--rc);
   cursor: pointer;
   user-select: none;
 }
@@ -1075,11 +1207,13 @@ async function confirmRemoveNow(): Promise<void> {
 .ctx-menu {
   position: fixed;
   min-width: 180px;
-  background: var(--bg-card);
+  background: var(--bg-hover);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--border-strong);
-  border-radius: 10px;
+  border-radius: var(--rc);
   overflow: hidden;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+  box-shadow: var(--shadow-menu);
   animation: sbIn 0.12s ease;
 }
 
@@ -1088,7 +1222,7 @@ async function confirmRemoveNow(): Promise<void> {
   font-size: 10px;
   letter-spacing: 0.12em;
   color: var(--text-faint);
-  border-bottom: 1px solid var(--border-card-alt);
+  border-bottom: 1px solid rgba(52, 211, 153, 0.18);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1107,7 +1241,7 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .ctx-item:hover {
-  background: var(--bg-chip);
+  background: rgba(52, 211, 153, 0.1);
   color: var(--text-strong);
 }
 
@@ -1122,16 +1256,36 @@ async function confirmRemoveNow(): Promise<void> {
   display: flex;
   align-items: center;
   gap: 9px;
-  border: 1px solid var(--border-card-alt);
+  border: 1px solid var(--border-card);
   border-radius: var(--rc);
   cursor: pointer;
   user-select: none;
-  box-shadow: var(--elev);
+  box-shadow: 0 1px 3px rgba(90, 98, 116, 0.16);
 }
 
 .settings-row:hover {
   background: var(--bg-hover);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: var(--elev);
   border-color: var(--border-strong);
+}
+
+/* Design collapses this to a bare centered gear, no card chrome. */
+.sidebar.collapsed .settings-row {
+  margin: 10px 0 12px;
+  padding: 0;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+  justify-content: center;
+}
+
+.sidebar.collapsed .settings-row:hover {
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
 }
 
 .gear {
@@ -1155,15 +1309,17 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .stats {
-  margin: 10px;
+  margin: 10px 10px 0;
   padding: 10px 12px;
-  background: var(--gloss), var(--bg-card-alt);
-  border: 1px solid var(--border-card-alt);
+  background: var(--bg-card);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-card);
   border-radius: var(--rc);
   display: flex;
   flex-direction: column;
   gap: 6px;
-  box-shadow: var(--elev);
+  box-shadow: 0 1px 3px rgba(90, 98, 116, 0.16);
 }
 
 .stat {

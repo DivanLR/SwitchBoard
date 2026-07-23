@@ -12,6 +12,7 @@ const RISK_LABEL: Record<'low' | 'medium' | 'high', string> = { low: 'Low', medi
 
 const inbox = useInboxStore()
 const projects = useProjectsStore()
+const emit = defineEmits<{ (e: 'collapse'): void }>()
 
 const tab = ref<'inbox' | 'history'>('inbox')
 const confirmingId = ref<string | null>(null)
@@ -252,6 +253,15 @@ const historyItems = computed(() => inbox.history)
       >
         History
       </div>
+      <span style="flex: 1"></span>
+      <button
+        class="inbox-collapse"
+        data-testid="inbox-collapse"
+        title="Collapse the inbox"
+        @click="emit('collapse')"
+      >
+        ›
+      </button>
     </div>
 
     <div v-if="inbox.undeliverableNotice" class="notice mono" data-testid="undeliverable-notice">
@@ -274,7 +284,7 @@ const historyItems = computed(() => inbox.history)
         :data-testid="`inbox-group-${projectName(group.projectId)}`"
       >
         <div class="group-head">
-          <span class="dot needs_you"></span>
+          <span class="group-dot"></span>
           <span class="group-name mono">{{ projectName(group.projectId) }}</span>
           <span class="group-count mono">· {{ group.items.length }} pending</span>
           <span style="flex: 1"></span>
@@ -330,7 +340,7 @@ const historyItems = computed(() => inbox.history)
             </span>
           </div>
           <div class="item-explain">{{ item.explanation }}</div>
-          <div class="item-detail mono" data-testid="item-detail">{{ item.detail }}</div>
+          <div class="item-detail detail-box mono" data-testid="item-detail">{{ item.detail }}</div>
 
           <div class="item-actions">
             <template v-if="confirmingId === item.id">
@@ -379,12 +389,17 @@ const historyItems = computed(() => inbox.history)
           DECISIONS · {{ historyItems.length }}
         </span>
         <span style="flex: 1"></span>
-        <button class="hist-clear mono" data-testid="history-clear" @click="inbox.clearHistory()">
-          Clear history
+        <button
+          v-if="historyItems.length > 0"
+          class="hist-clear mono"
+          data-testid="history-clear"
+          @click="inbox.clearHistory()"
+        >
+          <span class="hist-clear-x">✕</span>Clear history
         </button>
       </div>
-      <div v-if="historyItems.length === 0" class="empty-sub" style="padding: 24px 4px">
-        No decisions recorded yet.
+      <div v-if="historyItems.length === 0" class="hist-empty">
+        History cleared.<br />New approvals and denials will land here.
       </div>
       <div
         v-for="h in historyItems"
@@ -425,7 +440,7 @@ const historyItems = computed(() => inbox.history)
         </div>
         <div v-if="expandedHistory.has(h.id)" class="hist-detail" data-testid="history-detail" @click.stop>
           <div v-if="h.explanation" class="hd-explain">{{ h.explanation }}</div>
-          <pre class="hd-detail mono">{{ h.detail }}</pre>
+          <pre class="hd-detail detail-box mono">{{ h.detail }}</pre>
         </div>
       </div>
     </div>
@@ -482,8 +497,31 @@ const historyItems = computed(() => inbox.history)
 
 .tabs {
   display: flex;
+  align-items: center;
   border-bottom: 1px solid var(--border);
   padding: 0 8px;
+}
+
+/* Collapse chevron on the tab row's right edge. */
+.inbox-collapse {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--text-faint);
+  border: 1px solid var(--border-seg);
+  border-radius: 99px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.inbox-collapse:hover {
+  color: var(--text-strong);
+  border-color: var(--border-strong);
 }
 
 .tab {
@@ -507,7 +545,7 @@ const historyItems = computed(() => inbox.history)
   cursor: default;
 }
 
-.tab.on .badge-count {
+.tab .badge-count {
   line-height: 15px;
 }
 
@@ -515,7 +553,7 @@ const historyItems = computed(() => inbox.history)
   margin: 10px 12px 0;
   padding: 8px 10px;
   border: 1px solid rgba(154, 111, 42, 0.4);
-  border-radius: 10px;
+  border-radius: var(--rc);
   color: var(--amber);
   font-size: 10.5px;
   line-height: 1.5;
@@ -534,6 +572,10 @@ const historyItems = computed(() => inbox.history)
   flex: 1;
   overflow-y: auto;
   padding: 12px;
+}
+
+.body.history {
+  padding: 8px 14px;
 }
 
 .empty {
@@ -580,6 +622,20 @@ const historyItems = computed(() => inbox.history)
   color: var(--text-faint);
 }
 
+/* Pulsing amber status dot before the project name (design: 7x7, var(--rc)
+   radius — resolves to a full circle since --rc > half the box size). Kept
+   local rather than reusing the shared .dot class, whose sizes/colors serve
+   other views. */
+.group-dot {
+  width: 7px;
+  min-width: 7px;
+  height: 7px;
+  border-radius: var(--rc);
+  background: var(--amber);
+  animation: sbPulse 1.8s ease infinite;
+  flex-shrink: 0;
+}
+
 /* "Approve all" high-risk confirm row (mono links, matching .link-green). */
 .approve-all-warn {
   font-size: 10px;
@@ -588,12 +644,19 @@ const historyItems = computed(() => inbox.history)
 
 .link-armed,
 .link-quiet {
-  font-family: var(--mono);
+  font-family: var(--sans);
   font-size: 10.5px;
   cursor: pointer;
   background: transparent;
   border: none;
   padding: 0;
+}
+
+/* .link-green is a shared class (styles.css); scoped here so the override
+   only reaches elements this component renders. Design uses the UI (sans)
+   face for this control, not the shared class's mono default. */
+.link-green {
+  font-family: var(--sans);
 }
 
 .link-armed {
@@ -611,8 +674,11 @@ const historyItems = computed(() => inbox.history)
 }
 
 .item {
-  background: var(--gloss), var(--bg-card);
-  border: 1px solid var(--border-card);
+  /* Design fills this card from --bg-hover (not --bg-card) with a glass blur. */
+  background: var(--gloss), var(--bg-hover);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-card-alt);
   border-radius: var(--rc);
   padding: 11px 12px;
   margin-bottom: 8px;
@@ -641,11 +707,10 @@ const historyItems = computed(() => inbox.history)
 
 .item-tool {
   font-size: 10px;
-  color: var(--text-tab);
-  background: var(--bg-chip);
-  border: 1px solid var(--border-strong);
-  border-radius: 10px;
-  padding: 1px 6px;
+  color: var(--detail);
+  border: 1px solid var(--surface-inset-line);
+  border-radius: var(--rc);
+  padding: 1px 7px;
   white-space: nowrap;
 }
 
@@ -662,22 +727,37 @@ const historyItems = computed(() => inbox.history)
   font-size: 12.2px;
   line-height: 1.5;
   color: var(--text-mid);
-  margin-top: 5px;
+  margin-top: 8px;
   text-wrap: pretty;
   overflow-wrap: anywhere;
 }
 
-.item-detail {
-  font-size: 11px;
+/* Shared "glass detail box" chrome (item detail + history detail): a
+   translucent near-black pane with a blur, matching the design's inline
+   rgba(--rgb-8-11-24) fill. No app token covers this exact translucent value,
+   so it's kept literal per the brief's "no token → match design exactly"
+   rule, with an explicit light-theme swap. */
+.detail-box {
   color: var(--detail);
-  background: var(--bg-code);
-  border: 1px solid var(--border-code);
-  border-radius: 10px;
-  padding: 6px 9px;
-  margin-top: 8px;
+  background: rgba(8, 11, 24, 0.5);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: var(--rc);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+html.sb-light .detail-box {
+  background: rgba(236, 243, 251, 0.5);
+  border-color: rgba(96, 125, 160, 0.07);
+}
+
+.item-detail {
+  font-size: 11px;
+  padding: 6px 9px;
+  margin-top: 8px;
   max-height: 160px;
   overflow-y: auto;
 }
@@ -690,6 +770,35 @@ const historyItems = computed(() => inbox.history)
   flex-wrap: wrap;
 }
 
+/* Risk chips are a shared class (styles.css) whose radius/padding are still
+   hardcoded there; scoped here so the fix reaches this file's usage without
+   touching the shared stylesheet. */
+.item-head .chip-risk {
+  border-radius: var(--rc);
+  padding: 1px 7px;
+}
+
+/* Design gives Approve / Confirm high-risk / Deny a sans face (the shared
+   .btn-* classes default to mono) and a subtle press/lift on hover+active. */
+.item-actions .btn-solid,
+.item-actions .btn-armed,
+.item-actions .btn-outline {
+  font-family: var(--sans);
+  transition: transform 0.13s cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+.item-actions .btn-solid:hover,
+.item-actions .btn-armed:hover,
+.item-actions .btn-outline:hover {
+  transform: translateY(-1px);
+}
+
+.item-actions .btn-solid:active,
+.item-actions .btn-armed:active,
+.item-actions .btn-outline:active {
+  transform: scale(0.975);
+}
+
 .item-ago {
   font-size: 10.5px;
   color: var(--text-faint);
@@ -698,24 +807,51 @@ const historyItems = computed(() => inbox.history)
 .hist-header {
   display: flex;
   align-items: center;
-  margin-bottom: 8px;
-  padding: 0 2px;
+  gap: 8px;
+  padding: 4px 2px 10px;
+  border-bottom: 1px solid var(--border);
 }
 
 .hist-count {
   font-size: 10px;
-  letter-spacing: 0.13em;
+  letter-spacing: 0.14em;
   color: var(--text-faint);
 }
 
+/* Design renders "Clear history" as a chip button (glass fill, border,
+   elevation), not a bare underlined link. */
 .hist-clear {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 10.5px;
+  color: var(--text-body);
+  background: var(--gloss), var(--bg-hover);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: var(--elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--rc);
+  padding: 4px 11px;
+  user-select: none;
+}
+
+.hist-clear-x {
   color: var(--text-faint);
 }
 
 .hist-clear:hover {
-  color: var(--red);
-  text-decoration: underline;
+  color: var(--text-strong);
+  border-color: rgba(143, 59, 44, 0.6);
+  background: rgba(143, 59, 44, 0.1);
+}
+
+.hist-empty {
+  padding: 36px 16px;
+  text-align: center;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-faint);
 }
 
 .hctx-overlay {
@@ -730,7 +866,7 @@ const historyItems = computed(() => inbox.history)
   max-width: 330px;
   background: var(--bg-panel-2);
   border: 1px solid var(--border-strong);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--shadow-menu);
   padding: 4px;
 }
 
@@ -769,22 +905,34 @@ const historyItems = computed(() => inbox.history)
 }
 
 .hist-row {
-  padding: 3px 2px;
+  padding: 9px 2px;
   border-bottom: 1px solid var(--border-hist);
   cursor: pointer;
 }
 
 .hist-head {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
-  padding: 6px 0;
+  margin: 0 -4px;
+  padding: 0 4px;
+  border-radius: var(--rc);
+}
+
+.hist-row:hover .hist-head {
+  background: var(--bg-panel-2);
 }
 
 .hist-arrow {
   font-size: 10px;
-  color: var(--text-faint);
-  width: 10px;
+  color: var(--text-tab);
+  width: 14px;
+  min-width: 14px;
+  height: 16px;
+  line-height: 14px;
+  text-align: center;
+  border: 1px solid var(--border-card);
+  border-radius: 99px;
   transition: transform 0.12s ease;
 }
 
@@ -799,6 +947,7 @@ const historyItems = computed(() => inbox.history)
 .hist-mark {
   font-size: 12px;
   width: 14px;
+  min-width: 14px;
 }
 
 .hist-main {
@@ -815,26 +964,20 @@ const historyItems = computed(() => inbox.history)
 }
 
 .hist-detail {
-  margin: 2px 0 8px 32px;
+  margin: 8px 0 3px 48px;
 }
 
 .hd-explain {
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.55;
   color: var(--text-mid);
   margin-bottom: 6px;
   text-wrap: pretty;
 }
 
 .hd-detail {
-  font-size: 11px;
-  color: var(--detail);
-  background: var(--bg-code);
-  border: 1px solid var(--border-code);
-  border-radius: 10px;
-  padding: 6px 9px;
-  white-space: pre-wrap;
-  word-break: break-word;
+  font-size: 10.5px;
+  padding: 5px 9px;
   margin: 0;
   max-height: 200px;
   overflow: auto;

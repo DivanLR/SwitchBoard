@@ -49,7 +49,12 @@ test('multiple-choice questions are answered by click, in the stream, never the 
 test('Ctrl+C interrupts the activity and the session remains usable (FR-019a)', async ({
   page,
 }) => {
-  // Terminal-style: the design has no interrupt button, Ctrl+C does it.
+  // Terminal-style: Ctrl+C in the composer opens a confirm; a second Ctrl+C
+  // confirms and interrupts.
+  const input = page.getByTestId('composer-input')
+  await input.focus()
+  await page.keyboard.press('Control+c')
+  await expect(page.getByTestId('stop-confirm')).toBeVisible()
   await page.keyboard.press('Control+c')
   await expect(page.getByTestId('status-badge-alpha')).toHaveAttribute('data-status', 'done')
   expect(await page.evaluate(() => window.__mock.state().interrupts)).toEqual(['s-alpha'])

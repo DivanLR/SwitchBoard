@@ -61,17 +61,15 @@ test('the raw view retains 100% of the output (FR-018)', async ({ page }) => {
   await expect(page.getByTestId('swallowed-block')).toHaveCount(1)
 })
 
-test('clean view shows commands being run by default; raw view shows them too', async ({ page }) => {
+test('clean view hides tool rows by default; raw view keeps them', async ({ page }) => {
   await page.evaluate(() => {
     window.__mock.emitEvent('s-alpha', 'tool_activity', { toolName: 'Bash', inputPreview: 'npm test' })
     window.__mock.emitEvent('s-alpha', 'assistant_text', { text: 'Tests pass.', partial: false })
   })
-  // Clean view now shows tool activity too (showToolRows defaults on).
-  await expect(page.getByTestId('stream').getByTestId('stream-event-tool_activity')).toContainText(
-    'npm test',
-  )
+  // Clean view is narrative + approvals only (showToolRows defaults off).
+  await expect(page.getByTestId('stream').getByTestId('stream-event-tool_activity')).toHaveCount(0)
   await expect(page.getByTestId('stream-event-assistant_text')).toContainText('Tests pass.')
-  // Raw view: the command line is present too.
+  // Raw view: the command line is present.
   await page.getByTestId('view-raw').click()
   await expect(page.getByTestId('stream')).toContainText('npm test')
 })
@@ -177,4 +175,53 @@ test('clicking an agent opens its chat: banner, scoped stream, addressed compose
   await page.getByTestId('agent-back').click()
   await expect(stream).toContainText('Main loop narrative.')
   await expect(stream).not.toContainText('Planned 9 cases')
+})
+
+test('clean view shows only the action + status for a command, never the full command', async ({
+  page,
+}) => {
+  await page.evaluate(() =>
+    window.__mock.raisePermission({
+      projectId: 'p-alpha',
+      toolName: 'Bash',
+      title: 'Run a command: rm -rf node_modules && npm ci',
+      risk: 'medium',
+    }),
+  )
+  const marker = page.getByTestId('permission-marker')
+  await expect(marker).toBeVisible()
+  // Generic action + status, and NOT the actual command text.
+  await expect(marker).toContainText('Ran a command')
+  await expect(marker).toContainText('Needs approval')
+  await expect(marker).not.toContainText('rm -rf')
+  await expect(marker).not.toContainText('npm ci')
+})
+
+test('clean view tool rows are command-free — description only, no command or output', async ({
+  page,
+}) => {
+  // Turn on "Show tool activity" (off by default).
+  await page.getByTestId('open-settings').click()
+  await page.getByTestId('settings-tab-term').click()
+  await page.getByTestId('setting-tool-rows').click()
+  await page.getByTestId('settings-done').click()
+
+  await page.evaluate(() => {
+    window.__mock.emitEvent('s-alpha', 'tool_activity', {
+      toolName: 'Bash',
+      inputPreview: JSON.stringify({
+        command: 'rm -rf dist && npm ci',
+        description: 'Reinstall dependencies',
+      }),
+      resultPreview: 'added 400 packages in 12s',
+    })
+  })
+  const row = page.getByTestId('stream').getByTestId('stream-event-tool_activity')
+  await expect(row).toContainText('Reinstall dependencies')
+  await expect(row).not.toContainText('rm -rf')
+  await expect(row).not.toContainText('added 400 packages')
+
+  // The raw view keeps the full command and output.
+  await page.getByTestId('view-raw').click()
+  await expect(page.getByTestId('stream')).toContainText('rm -rf dist')
 })

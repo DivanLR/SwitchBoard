@@ -12,16 +12,37 @@ import type {
 } from '@shared/ipc-types'
 import { PUSH_CHANNELS } from '@shared/ipc-types'
 
+// In-flight invoke tracking so the renderer can show a global loading spinner
+// whenever anything is loading — one chokepoint covers every IPC call.
+let pending = 0
+const loadingListeners = new Set<(n: number) => void>()
+function notifyLoading(): void {
+  for (const listener of loadingListeners) listener(pending)
+}
+
 const api: SwitchboardApi = {
   async invoke<M extends InvokeMethod>(
     method: M,
     req: InvokeMap[M]['req'],
   ): Promise<InvokeMap[M]['res']> {
-    const result = (await ipcRenderer.invoke('switchboard:invoke', method, req)) as WireResult<
-      InvokeMap[M]['res']
-    >
-    if (result.ok) return result.value
-    throw result.error
+    pending += 1
+    notifyLoading()
+    try {
+      const result = (await ipcRenderer.invoke('switchboard:invoke', method, req)) as WireResult<
+        InvokeMap[M]['res']
+      >
+      if (result.ok) return result.value
+      throw result.error
+    } finally {
+      pending -= 1
+      notifyLoading()
+    }
+  },
+
+  onLoading(listener: (pending: number) => void): () => void {
+    loadingListeners.add(listener)
+    listener(pending)
+    return () => loadingListeners.delete(listener)
   },
 
   on<C extends PushChannel>(channel: C, listener: (payload: PushMap[C]) => void): () => void {

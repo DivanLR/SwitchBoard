@@ -28,6 +28,7 @@ async function submitNewSpec(): Promise<void> {
   if (!desc) return // empty Enter is a no-op, matching the disabled Create button
   showNewSpec.value = false
   await specs.runInSession(props.projectId, `/speckit-specify ${desc}`)
+  emit('ran') // jump to the Session tab so the run is visible
 }
 
 function cancelNewSpec(): void {
@@ -39,6 +40,26 @@ function cancelNewSpec(): void {
 // API — title, description, then each section. Click again to stop.
 const speaking = ref(false)
 
+// Strip markdown + symbols so the synthesiser speaks prose, not "hashtag
+// hashtag" / "right arrow" / "asterisk". Structural symbols are dropped or
+// turned into sentence breaks; a few common arrows become words.
+function speakable(md: string): string {
+  return md
+    .replace(/```[\s\S]*?```/g, '. code block omitted. ') // fenced code
+    .replace(/`([^`]+)`/g, '$1') // inline code
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '') // heading hashes
+    .replace(/\*\*([^*]+)\*\*/g, '$1') // bold
+    .replace(/\*([^*]+)\*/g, '$1') // italic
+    .replace(/^\s*\|.*\|\s*$/gm, '') // table rows
+    .replace(/^\s*[-*]\s+/gm, '') // bullet markers
+    .replace(/[→⇒]/g, ' to ')
+    .replace(/[←⇐]/g, ' from ')
+    .replace(/[✦✎⏺⎿■▊●◇✓✗⚖⧉↻▶]/g, ' ') // UI glyphs
+    .replace(/[#*_`>|~]/g, ' ') // any stray markdown punctuation
+    .replace(/\s{2,}/g, ' ') // collapse whitespace
+    .trim()
+}
+
 function listen(): void {
   const synth = window.speechSynthesis
   if (speaking.value) {
@@ -48,9 +69,11 @@ function listen(): void {
   }
   const d = detail.value
   if (!d) return
-  const text = [d.title, d.description, ...d.sections.map((s) => `${s.title}. ${s.body}`)]
-    .filter(Boolean)
-    .join('. ')
+  const text = speakable(
+    [d.title, d.description, ...d.sections.map((s) => `${s.title}. ${s.body}`)]
+      .filter(Boolean)
+      .join('. '),
+  )
   const utter = new SpeechSynthesisUtterance(text)
   utter.onend = () => (speaking.value = false)
   utter.onerror = () => (speaking.value = false)
@@ -76,6 +99,7 @@ const part = ref<Part>('tasks')
 function runCommand(command: string): void {
   const suffix = detail.value ? ` ${detail.value.id}` : ''
   void specs.runInSession(props.projectId, `/${command}${suffix}`)
+  emit('ran') // jump to the Session tab so the run is visible
 }
 
 // The phase whose "Start phase" launched the current run (design: ● Running…).
@@ -88,6 +112,7 @@ const runningPhase = ref<string | null>(null)
 function startImplementation(): void {
   if (!detail.value) return
   runningPhase.value = null
+  emit('ran') // jump to the Session tab so the run is visible
   void specs.startPhase(
     props.projectId,
     detail.value.id,
@@ -99,6 +124,7 @@ function startImplementation(): void {
 function startPhase(phase: SpecPhase): void {
   if (!detail.value) return
   runningPhase.value = phase.label
+  emit('ran') // jump to the Session tab so the run is visible
   const ids = phase.tasks
     .filter((t) => !t.done)
     .map((t) => t.id)
@@ -129,13 +155,19 @@ function phaseRunning(phase: SpecPhase): boolean {
   return current?.label === phase.label
 }
 
-watch(
-  () => props.projectId,
-  (projectId) => {
-    void specs.loadState(projectId)
-  },
-  { immediate: true },
-)
+// Opening the Specs view (mount) or switching project jumps to the LATEST spec
+// (highest id — Spec Kit zero-pads, so lexicographic desc = newest), regardless
+// of what was selected before. Clicking a chip afterwards still works.
+async function goToLatestSpec(projectId: string): Promise<void> {
+  await specs.loadState(projectId)
+  if (projectId !== props.projectId) return // superseded by a newer switch
+  const list = specs.stateFor(projectId).specs
+  if (list.length === 0) return
+  const latest = [...list].sort((a, b) => b.id.localeCompare(a.id))[0]
+  if (specs.selectedSpecId !== latest.id) await specs.selectSpec(projectId, latest.id)
+}
+
+watch(() => props.projectId, (projectId) => void goToLatestSpec(projectId), { immediate: true })
 
 const state = computed(() => specs.stateFor(props.projectId))
 const detail = computed(() => specs.detail)
@@ -233,7 +265,7 @@ const suggested = computed(() => {
 
 // ✎ Refine on a section/task/question sets a spec-edit target on the shared
 // composer (which stays visible under this view) — the reply lands in the chat.
-const emit = defineEmits<{ (e: 'set-target', label: string): void }>()
+const emit = defineEmits<{ (e: 'set-target', label: string): void; (e: 'ran'): void }>()
 
 function setTarget(label: string): void {
   emit('set-target', label)
@@ -721,16 +753,18 @@ const partTabs: { id: Part; label: string }[] = [
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--scrim);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
 }
 
 .ns-box {
   width: min(520px, 90%);
-  background: var(--bg-panel);
+  background: var(--gloss), var(--bg-panel);
   border: 1px solid var(--border-strong);
-  border-radius: 12px;
+  border-radius: var(--rc);
   padding: 18px 20px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--elev);
 }
 
 .ns-title {
@@ -755,7 +789,7 @@ const partTabs: { id: Part; label: string }[] = [
   margin-top: 12px;
   background: var(--bg);
   border: 1px solid var(--border-strong);
-  border-radius: 8px;
+  border-radius: var(--rc);
   color: var(--text-strong);
   font-size: 12.5px;
   line-height: 1.5;

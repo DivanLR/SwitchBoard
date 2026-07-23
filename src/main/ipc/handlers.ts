@@ -26,7 +26,9 @@ import {
 } from '@main/projects/discovery'
 import { defaultRiskRules } from '@main/inbox/risk-rules'
 import { defaultSwallowRules } from '@main/stream/swallow-rules'
-import { readSchemaDoc } from '@main/mcp/schema-doc'
+import { existsSync, statSync } from 'node:fs'
+import { comboDocPath, readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
+import { comboKey } from '@shared/mcp-combo'
 import { installSpecKit, readSpecDetail, readSpecKitState } from '@main/specs/spec-kit'
 import { check as checkForUpdates, installNow } from '@main/updater'
 
@@ -218,7 +220,23 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'mcp.readSchema': (req) => {
       const project = repos.projects.byId(req.projectId)
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
-      return { content: readSchemaDoc(project.path) }
+      const content = req.servers?.length
+        ? readComboDoc(project.path, req.servers)
+        : readSchemaDoc(project.path)
+      return { content }
+    },
+    'mcp.scanHistory': (req) => repos.mcpScans.listForProject(req.projectId),
+    'mcp.recordScan': (req) => {
+      const project = repos.projects.byId(req.projectId)
+      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
+      // Only record when the scan actually produced the combination's doc, and
+      // date the row from the doc's mtime — a re-scan that wrote nothing keeps
+      // the honest older timestamp instead of passing itself off as fresh.
+      if (!req.servers.length) return null
+      const docPath = comboDocPath(project.path, req.servers)
+      if (!existsSync(docPath)) return null
+      const scannedAt = statSync(docPath).mtime.toISOString()
+      return repos.mcpScans.upsert(req.projectId, comboKey(req.servers), req.servers, scannedAt)
     },
     'specs.runInSession': (req) => {
       let session = repos.sessions.activeForProject(req.projectId)

@@ -15,6 +15,7 @@ import McpView from '@renderer/views/McpView.vue'
 import InboxView from '@renderer/views/InboxView.vue'
 import ProjectRegistration from '@renderer/components/ProjectRegistration.vue'
 import SettingsPanel from '@renderer/components/SettingsPanel.vue'
+import GlobalSpinner from '@renderer/components/GlobalSpinner.vue'
 
 const projects = useProjectsStore()
 const active = useActiveSessionStore()
@@ -41,6 +42,14 @@ function clampInbox(w: number): number {
   return Math.min(INBOX_MAX, Math.max(INBOX_MIN, w))
 }
 const inboxWidth = ref(clampInbox(Number(localStorage.getItem('sb-inbox-w')) || 332))
+
+// The inbox can be collapsed to reclaim width; a glowing badge in the top-right
+// reopens it and shows the pending count.
+const inboxCollapsed = ref(localStorage.getItem('sb-inbox-collapsed') === '1')
+function setInboxCollapsed(v: boolean): void {
+  inboxCollapsed.value = v
+  localStorage.setItem('sb-inbox-collapsed', v ? '1' : '0')
+}
 
 function startInboxResize(event: MouseEvent): void {
   event.preventDefault()
@@ -175,18 +184,39 @@ const dbProject = computed(() => projects.dbProject)
         </div>
       </main>
 
-      <div
-        class="inbox-resize"
-        data-testid="inbox-resize"
-        title="Drag to resize the inbox"
-        @mousedown="startInboxResize"
-      ></div>
-      <InboxView />
+      <template v-if="!inboxCollapsed">
+        <div
+          class="inbox-resize"
+          data-testid="inbox-resize"
+          title="Drag to resize the inbox"
+          @mousedown="startInboxResize"
+        ></div>
+        <InboxView @collapse="setInboxCollapsed(true)" />
+      </template>
+
+      <!-- Collapsed: a thin right rail. The glowing count at its top reopens the
+           inbox and makes pending items impossible to miss. -->
+      <div v-if="inboxCollapsed" class="inbox-rail" data-testid="inbox-rail">
+        <button
+          class="inbox-peek"
+          :class="{ glow: inbox.pendingCount > 0 }"
+          data-testid="inbox-peek"
+          :title="inbox.pendingCount > 0 ? `${inbox.pendingCount} waiting — open inbox` : 'Open inbox'"
+          @click="setInboxCollapsed(false)"
+        >
+          <span v-if="inbox.pendingCount > 0" data-testid="inbox-peek-count">{{ inbox.pendingCount }}</span>
+          <span v-else class="inbox-peek-icon">‹</span>
+        </button>
+        <span class="inbox-rail-label mono">INBOX</span>
+      </div>
     </div>
 
     <ProjectRegistration v-if="showRegistration" @close="showRegistration = false" />
     <SettingsPanel v-if="showSettings" :initial-tab="settingsTab" @close="showSettings = false" />
   </div>
+
+  <!-- Global loading spinner — shows while any IPC call is in flight. -->
+  <GlobalSpinner />
 </template>
 
 <style scoped>
@@ -194,7 +224,10 @@ const dbProject = computed(() => projects.dbProject)
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: var(--bg);
+  /* Design's outer wrapper is transparent so the body's glow gradient
+     shows through the glass sidebar/panels; the main pane stays opaque
+     (see .main below) and covers it where the design does too. */
+  background: transparent;
   overflow: auto;
 }
 
@@ -249,6 +282,70 @@ const dbProject = computed(() => projects.dbProject)
   min-width: 1080px;
   min-height: 560px;
   overflow: hidden;
+}
+
+/* Collapsed inbox: a thin rail on the right with the reopen control at its top. */
+.inbox-rail {
+  flex-shrink: 0;
+  width: 44px;
+  min-width: 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding-top: 12px;
+  background: var(--gloss), var(--bg-panel);
+  border-left: 1px solid var(--border);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.inbox-peek {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 99px;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-tab);
+  font-family: var(--mono);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.inbox-peek:hover {
+  color: var(--text-strong);
+  border-color: var(--border-seg);
+}
+
+/* Pending items: amber pill that pulses so it draws the eye. */
+.inbox-peek.glow {
+  color: var(--amber-ink);
+  background: var(--gloss), var(--amber);
+  border-color: var(--amber);
+  font-weight: 700;
+  animation: inboxPeekGlow 1.8s ease-in-out infinite;
+}
+
+/* Vertical "INBOX" label down the rail. */
+.inbox-rail-label {
+  writing-mode: vertical-rl;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--text-faint);
+  user-select: none;
+}
+
+@keyframes inboxPeekGlow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(154, 111, 42, 0.55);
+  }
+  50% {
+    box-shadow: 0 0 10px 3px rgba(154, 111, 42, 0.75);
+  }
 }
 
 .main {

@@ -163,9 +163,12 @@ test('a reference can be added by project name and removed from the REFS row', a
   await expect(page.getByTestId('ref-chip-beta')).toHaveCount(0)
 })
 
-test('Ctrl+C interrupts the running session, like a terminal', async ({ page }) => {
+test('Ctrl+C interrupts the running session, like a terminal (confirm first)', async ({ page }) => {
   await page.getByTestId('sidebar-project-alpha').click()
-  await page.getByTestId('composer-input').press('Control+c')
+  const input = page.getByTestId('composer-input')
+  await input.press('Control+c') // opens the confirm
+  await expect(page.getByTestId('stop-confirm')).toBeVisible()
+  await input.press('Control+c') // confirms → interrupt
   await expect
     .poll(async () => (await page.evaluate(() => window.__mock.state().interrupts)).length)
     .toBeGreaterThan(0)

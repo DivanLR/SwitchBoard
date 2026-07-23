@@ -100,7 +100,7 @@ function cleanLabel(label: string): string {
 .question {
   border: 1px solid rgba(154, 111, 42, 0.35);
   background: rgba(154, 111, 42, 0.04);
-  border-radius: 10px;
+  border-radius: var(--rc);
   padding: 11px 13px;
   margin-bottom: 13px;
 }
@@ -129,9 +129,9 @@ function cleanLabel(label: string): string {
 .chip {
   font-size: 11.5px;
   color: var(--text-body);
-  background: var(--bg-chip);
+  background: rgba(52, 211, 153, 0.1);
   border: 1px solid var(--border-strong);
-  border-radius: 10px;
+  border-radius: var(--rc);
   padding: 5px 11px;
   cursor: pointer;
 }
@@ -139,6 +139,11 @@ function cleanLabel(label: string): string {
 .chip:hover:not(:disabled) {
   border-color: var(--green);
   color: var(--text-strong);
+}
+
+.chip.chip-other:hover {
+  border-color: var(--border-strong);
+  color: var(--text-mid);
 }
 
 .chip:disabled {
@@ -176,7 +181,7 @@ function cleanLabel(label: string): string {
   color: var(--text-strong);
   background: var(--bg);
   border: 1px solid var(--green);
-  border-radius: 10px;
+  border-radius: var(--rc);
   padding: 5px 11px;
   outline: none;
   min-width: 180px;

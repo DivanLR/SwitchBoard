@@ -49,3 +49,44 @@ describe('renderMarkdown', () => {
     expect(html).toContain('0 plain')
   })
 })
+
+describe('renderMarkdown tables', () => {
+  it('renders a GFM table with header + body (speckit-analyze shape)', () => {
+    const html = renderMarkdown(
+      [
+        '| ID | Category | Severity |',
+        '|----|----------|----------|',
+        '| C1 | Coverage gap | MEDIUM |',
+        '| C2 | Coverage gap | MEDIUM |',
+      ].join('\n'),
+    )
+    expect(html).toContain('<div class="md-table-wrap"><table class="md-table">')
+    expect(html).toContain('<thead><tr><th>ID</th><th>Category</th><th>Severity</th></tr></thead>')
+    expect(html).toContain('<td>C1</td>')
+    expect(html).toContain('<td>MEDIUM</td>')
+    // The separator row never renders as content.
+    expect(html).not.toContain('----')
+  })
+
+  it('renders a separator-less table as body-only rows', () => {
+    const html = renderMarkdown('| a | b |\n| c | d |')
+    expect(html).not.toContain('<thead>')
+    expect(html).toContain('<td>a</td>')
+    expect(html).toContain('<td>d</td>')
+  })
+
+  it('escapes HTML and applies inline formatting inside cells', () => {
+    const html = renderMarkdown('| x |\n|---|\n| <img src=x> **bold** `code` |')
+    expect(html).not.toContain('<img')
+    expect(html).toContain('&lt;img src=x&gt;')
+    expect(html).toContain('<strong>bold</strong>')
+    expect(html).toContain('<code>code</code>')
+  })
+
+  it('keeps surrounding prose and lists intact around a table', () => {
+    const html = renderMarkdown('Intro line\n\n| h |\n|---|\n| v |\n\n- item')
+    expect(html).toContain('<p>Intro line</p>')
+    expect(html).toContain('<td>v</td>')
+    expect(html).toContain('<li>item</li>')
+  })
+})

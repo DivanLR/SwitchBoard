@@ -233,6 +233,23 @@ const MIGRATIONS: Migration[] = [
       ).run()
     },
   },
+  {
+    // Scanned MCP combinations: one row per distinct set of active servers, so
+    // the MCP view can answer "have I scanned this combination before?".
+    name: '011-mcp-scan-history',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS mcp_scans (
+          id TEXT PRIMARY KEY,
+          projectId TEXT NOT NULL,
+          comboKey TEXT NOT NULL,
+          servers TEXT NOT NULL,
+          scannedAt TEXT NOT NULL,
+          UNIQUE (projectId, comboKey)
+        );
+      `)
+    },
+  },
 ]
 
 export function openDatabase(dbPath: string): AppDatabase {

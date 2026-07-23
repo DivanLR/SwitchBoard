@@ -3,6 +3,7 @@
 // an EventSink so it is unit-testable without the SDK or a database.
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { EventKind, EventPayloadMap, ResultUsage, SessionEvent } from '@shared/domain'
+import { isInteractiveQuestion } from '@shared/inline-question'
 
 /**
  * Materialises mapper output. `persist: false` appends/updates are pushed to
@@ -69,11 +70,23 @@ export interface MessageMapperOptions {
   /** Relabel a turn's closing message as ✦ SUMMARY. Off keeps it plain
    *  assistant text (the raw response). Defaults to on. */
   summaries?: boolean
+  /** Per-model usage for the finished turn (the SDK result's modelUsage). */
+  onModelUsage?: (modelUsage: Record<string, ModelTurnUsage>) => void
+}
+
+/** The slice of the SDK's per-model usage the app aggregates. */
+export interface ModelTurnUsage {
+  inputTokens: number
+  outputTokens: number
+  cacheReadInputTokens: number
+  cacheCreationInputTokens: number
+  costUSD: number
 }
 
 export class MessageMapper {
   private sink: EventSink
   private onSdkSessionId?: (id: string) => void
+  private onModelUsage?: (modelUsage: Record<string, ModelTurnUsage>) => void
   private readonly summaries: boolean
   private sdkSessionIdSeen = false
   /** Live streaming assistant text per producer ('' = main loop, else the subagent's tool_use id). */
@@ -94,6 +107,7 @@ export class MessageMapper {
     this.sink = options.sink
     this.onSdkSessionId = options.onSdkSessionId
     this.summaries = options.summaries !== false
+    this.onModelUsage = options.onModelUsage
   }
 
   handle(message: SDKMessage): void {
@@ -297,6 +311,10 @@ export class MessageMapper {
   }
 
   private handleResult(message: Extract<SDKMessage, { type: 'result' }>): void {
+    // Per-model usage for the turn (session totals + the header's top models).
+    const modelUsage = (message as { modelUsage?: Record<string, ModelTurnUsage> }).modelUsage
+    if (modelUsage && this.onModelUsage) this.onModelUsage(modelUsage)
+
     // Dangling partials at turn end are finalised as-is so nothing is lost.
     for (const [key, partial] of this.partials) {
       const agentId = key || undefined
@@ -308,16 +326,20 @@ export class MessageMapper {
     if (message.subtype === 'success') {
       const text = message.result ?? ''
       if (text) {
+        // A closing message that ASKS the user something (e.g. /speckit-clarify's
+        // "Question N of M" with an options table) is not a summary of work —
+        // keep it plain assistant text so the answer card renders under it.
+        const asSummary = this.summaries && !isInteractiveQuestion(text)
         if (this.lastAssistantText && this.lastAssistantText.text === text) {
           // The turn's closing assistant message is the summary (design: ✦ SUMMARY).
           // Summaries off: leave it as the plain assistant text already streamed.
-          if (this.summaries) {
+          if (asSummary) {
             this.sink.update(this.lastAssistantText.eventId, { text }, { persist: true, kind: 'summary' })
           }
         } else {
           // No streamed twin (e.g. a /usage report): show the raw text, styled as
           // a summary only when summaries are on.
-          this.sink.append(this.summaries ? 'summary' : 'assistant_text', { text })
+          this.sink.append(asSummary ? 'summary' : 'assistant_text', { text })
         }
       }
       this.sink.append('result', {

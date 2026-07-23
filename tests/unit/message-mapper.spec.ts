@@ -417,4 +417,40 @@ describe('the /usage response is not hidden by the clean view (regression)', () 
     // A truthy noiseKind would collapse it into a swallowed block; null renders.
     expect(summary?.noiseKind).toBeNull()
   })
+
+  it('surfaces the result message per-model usage through onModelUsage', () => {
+    const sink = new FakeSink()
+    const seen: Record<string, unknown>[] = []
+    const mapper = new MessageMapper({
+      sink,
+      onModelUsage: (mu) => seen.push(mu),
+    })
+    mapper.handle(
+      resultSuccess({
+        modelUsage: {
+          'claude-opus-4-8': {
+            inputTokens: 100,
+            outputTokens: 50,
+            cacheReadInputTokens: 1000,
+            cacheCreationInputTokens: 200,
+            costUSD: 0.02,
+          },
+        },
+      }),
+    )
+    expect(seen).toHaveLength(1)
+    expect(seen[0]['claude-opus-4-8']).toMatchObject({ inputTokens: 100, costUSD: 0.02 })
+  })
+
+  it('keeps interactive-question closings as plain assistant text, not summary', () => {
+    const { mapper, sink } = makeMapper()
+    mapper.handle(
+      resultSuccess({
+        result:
+          'Question 1 of 2\n\nWhich option?\n\n| Option | Description |\n| A | First |\n| B | Second |\n\nYou can reply with the option letter.',
+      }),
+    )
+    expect(sink.appended.some((e) => e.kind === 'summary')).toBe(false)
+    expect(sink.appended.some((e) => e.kind === 'assistant_text')).toBe(true)
+  })
 })

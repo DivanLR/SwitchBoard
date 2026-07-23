@@ -4,6 +4,8 @@
 // mono tool/raw lines (FR-014).
 import { computed } from 'vue'
 import MarkdownText from '@renderer/components/MarkdownText.vue'
+import UsageCard from '@renderer/components/UsageCard.vue'
+import { parseUsageReport } from '@shared/usage-report'
 import type {
   AssistantTextPayload,
   ErrorPayload,
@@ -40,6 +42,13 @@ const assistant = computed(() =>
 const summary = computed(() =>
   props.event.kind === 'summary' ? (props.event.payload as SummaryPayload) : null,
 )
+
+// A /usage response (whichever kind it landed as) renders as a structured card
+// with limit meters and dotted lists. Skip while still streaming in.
+const usage = computed(() => {
+  const text = assistant.value?.partial ? null : (assistant.value?.text ?? summary.value?.text)
+  return text ? parseUsageReport(text) : null
+})
 const tool = computed(() =>
   props.event.kind === 'tool_activity' ? (props.event.payload as ToolActivityPayload) : null,
 )
@@ -87,6 +96,46 @@ const markerChipLabel: Record<string, string> = {
   expired: 'Expired',
   rule_approved: 'Auto-approved',
 }
+
+// Clean view shows only the ACTION + status — never the full command or path
+// (those live in the inbox / raw view). Map the tool to a generic verb.
+const TOOL_ACTION: Record<string, string> = {
+  Bash: 'Ran a command',
+  Write: 'Wrote a file',
+  Edit: 'Edited a file',
+  NotebookEdit: 'Edited a notebook',
+  Read: 'Read a file',
+  WebFetch: 'Fetched a URL',
+  WebSearch: 'Searched the web',
+}
+function actionVerb(tool: string | undefined | null): string {
+  return TOOL_ACTION[tool ?? ''] ?? (tool ? `Used ${tool}` : 'Took an action')
+}
+
+const markerLabel = computed(() => {
+  const m = marker.value
+  if (!m) return ''
+  // Plan markers have no tool — keep their (already generic) title.
+  if (props.event.kind === 'plan_marker') return m.title
+  return actionVerb((m as PermissionMarkerPayload).toolName)
+})
+
+// Clean-view tool row: a command-free line — the model's own description if it
+// gave one (a human summary, never the command), else a generic verb. The raw
+// command and its output live in the raw view only.
+const toolLabel = computed(() => {
+  const t = tool.value
+  if (!t) return ''
+  // Bash carries a human `description` alongside the command — surface that
+  // (command-free) via a regex (inputPreview is JSON.stringify, possibly
+  // truncated, so avoid a fragile JSON.parse). Other tools just get a verb, so
+  // a "description" buried in file content can never leak through.
+  if (t.toolName === 'Bash') {
+    const match = /"description"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(t.inputPreview ?? '')
+    if (match) return match[1].replace(/\\(["\\/])/g, '$1')
+  }
+  return actionVerb(t.toolName)
+})
 </script>
 
 <template>
@@ -98,6 +147,9 @@ const markerChipLabel: Record<string, string> = {
       <span class="prompt-text">{{ prompt.text }}</span>
       <span v-if="prompt.pending" class="pending mono" data-testid="prompt-pending"> queued </span>
     </div>
+
+    <!-- /usage response: structured meters + dotted lists instead of prose -->
+    <UsageCard v-else-if="usage" :report="usage" />
 
     <!-- assistant narrative (Markdown-formatted) -->
     <div v-else-if="assistant" class="assistant">
@@ -111,10 +163,12 @@ const markerChipLabel: Record<string, string> = {
       <div class="card-body"><MarkdownText :text="summary.text" /></div>
     </div>
 
-    <!-- tool activity (unswallowed) -->
+    <!-- tool activity (unswallowed): command-free — action only, no command or
+         output dump (the raw view keeps the full ⏺ Bash(cmd) + ⎿ result). -->
     <div v-else-if="tool" class="tool mono">
-      <div :class="{ 'tool-error': tool.isError }">⏺ {{ tool.toolName }} {{ tool.inputPreview }}</div>
-      <div v-if="tool.resultPreview" class="tool-result">⎿ {{ tool.resultPreview }}</div>
+      <div :class="{ 'tool-error': tool.isError }">
+        ⏺ {{ toolLabel }}<span v-if="tool.isError" class="tool-failed"> · failed</span>
+      </div>
     </div>
 
     <!-- permission / plan markers -->
@@ -130,7 +184,7 @@ const markerChipLabel: Record<string, string> = {
             : markerChipLabel[markerStatus ?? '']
         }}
       </span>
-      <span class="marker-title">{{ marker.title }}</span>
+      <span class="marker-title">{{ markerLabel }}</span>
       <button
         v-if="markerStatus === 'pending'"
         class="review-link mono"
@@ -176,17 +230,29 @@ const markerChipLabel: Record<string, string> = {
   white-space: nowrap;
 }
 
+/* Your own messages stand out from the narrative: a green-tinted card with an
+   accent edge, so scanning back up the stream finds them at a glance. */
 .prompt {
   display: flex;
   gap: 9px;
-  align-items: baseline;
+  align-items: flex-start;
   font-size: 12.5px;
   margin-top: 6px;
+  padding: 8px 11px;
+  background: rgba(52, 211, 153, 0.06);
+  border-left: 2px solid var(--green);
+  border-radius: var(--rc);
+}
+
+/* Light theme uses the remapped forest-green tint. */
+html.sb-light .prompt {
+  background: rgba(22, 163, 74, 0.06);
 }
 
 .caret {
   color: var(--green);
-  font-weight: 700;
+  font-weight: 600;
+  line-height: 1.5;
 }
 
 .prompt-text {
@@ -200,7 +266,7 @@ const markerChipLabel: Record<string, string> = {
   font-size: 10px;
   color: var(--amber);
   border: 1px solid rgba(154, 111, 42, 0.4);
-  border-radius: 10px;
+  border-radius: var(--rc);
   padding: 0 6px;
 }
 
@@ -212,8 +278,10 @@ const markerChipLabel: Record<string, string> = {
 
 
 .summary-card {
-  background: var(--gloss), var(--bg-card);
-  border: 1px solid var(--border-soft);
+  background: var(--gloss), var(--bg-hover);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-card-alt);
   border-radius: var(--rc);
   padding: 11px 13px;
   box-shadow: var(--elev);
@@ -242,6 +310,10 @@ const markerChipLabel: Record<string, string> = {
 }
 
 .tool-error {
+  color: var(--red);
+}
+
+.tool-failed {
   color: var(--red);
 }
 
@@ -275,7 +347,7 @@ const markerChipLabel: Record<string, string> = {
 .error-card {
   border: 1px solid rgba(143, 59, 44, 0.4);
   background: rgba(143, 59, 44, 0.05);
-  border-radius: 10px;
+  border-radius: var(--rc);
   padding: 11px 13px;
 }
 

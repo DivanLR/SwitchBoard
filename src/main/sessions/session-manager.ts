@@ -17,10 +17,11 @@ import type {
 import { SWALLOWABLE_KINDS } from '@shared/domain'
 import type { SessionStatusPush } from '@shared/ipc-types'
 import { newId, nowIso, type Repositories } from '@main/store/repositories'
-import { readSchemaDoc } from '@main/mcp/schema-doc'
+import { readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
 import { HostedSession, type PermissionGate } from './session'
 import type { EventSink } from './message-mapper'
 import { terseSystemPromptAppend } from './terse-mode'
+import { modesSystemPromptAppend } from './modes'
 import { resolveClaudeExecutable } from './claude-executable'
 
 export class SessionManagerError extends Error {
@@ -191,25 +192,34 @@ export class SessionManager {
     }
 
     const settings = this.repos.settings.get()
-    // Per-project implementation-model override ("This project" settings tab);
-    // 'global' or absent follows the global work model.
+    // INTELLIGENT model (plans, questions, orchestrator loops, the advisor);
+    // per-project override from the "This project" tab, else global.
     const override = settings.projectModels?.[projectId]
-    const workModel = override && override !== 'global' ? override : settings.workModel
-    // Per-project worker-model override ("This project" tab): the cheaper model
-    // for work-classified turns under auto routing; 'global'/absent follows the
-    // project's implementation model above.
+    const intelligentModel =
+      override && override !== 'global' ? override : settings.intelligentModel
+    // WORKER model (the cheaper one: advisor-mode executor + orchestrator
+    // workers); per-project override, else the global worker model.
     const workerOverride = settings.projectWorkerModels?.[projectId]
-    const workerModel = workerOverride && workerOverride !== 'global' ? workerOverride : workModel
+    const workerModel =
+      workerOverride && workerOverride !== 'global' ? workerOverride : settings.workerModel
     // Any project that has previously run an MCP scan gets its schema map
     // injected as context on every session start (no-op when never scanned).
+    // Scans are per-combination now: prefer the ACTIVE combination's doc and
+    // fall back to the legacy single db-schema.md from before the split.
     const terseAppend = terseSystemPromptAppend({
       terseMode: settings.terseMode,
       terseLevel: settings.terseLevel,
     })
-    const schemaDoc = readSchemaDoc(project.path)?.trim()
+    const activeCombo = settings.mcpActiveServers ?? []
+    const schemaDoc = (
+      (activeCombo.length > 0 ? readComboDoc(project.path, activeCombo) : null) ??
+      readSchemaDoc(project.path)
+    )?.trim()
     const schemaAppend = schemaDoc
       ? `## Database schema (from a previous MCP scan)\n\n${schemaDoc}`
       : null
+    // Advisor/Orchestrator protocol (static text — prompt-cache friendly).
+    const modesAppend = modesSystemPromptAppend(settings.modelMode ?? 'auto')
     entry.session = new HostedSession({
       sessionId: row.id,
       projectPath: project.path,
@@ -217,12 +227,22 @@ export class SessionManager {
       refDirs: project.refs.map((r) => r.path),
       resumeSdkSessionId,
       systemPromptAppend:
-        [terseAppend, schemaAppend].filter((s): s is string => Boolean(s)).join('\n\n') || undefined,
+        [terseAppend, modesAppend, schemaAppend].filter((s): s is string => Boolean(s)).join('\n\n') ||
+        undefined,
       claudeExecutablePath,
-      workModel,
+      // The hosted session's plan/work slots both take the intelligent model;
+      // the pairing modes decide when the worker runs the loop instead.
+      workModel: intelligentModel,
       workerModel,
-      planModel: settings.planModel,
+      planModel: intelligentModel,
       autoModelRouting: settings.autoModelRouting,
+      modelMode: settings.modelMode,
+      // Pairing mode per work turn — in-memory only, shown as a header chip.
+      onTurnMode: (mode) => {
+        if (entry.row.currentMode === mode) return
+        entry.row.currentMode = mode
+        this.pushStatus(entry)
+      },
       bypassPermissions,
       summaries: settings.summaries,
       sink: this.makeSink(entry),
@@ -255,6 +275,30 @@ export class SessionManager {
       // Model reported per main-loop turn — in-memory only, shown in the header.
       onModel: (model) => {
         entry.row.currentModel = model
+        this.pushStatus(entry)
+      },
+      // Live background tasks — in-memory only, shown as a card + header pill.
+      onBackgroundTasks: (tasks) => {
+        entry.row.backgroundTasks = tasks
+        this.pushStatus(entry)
+      },
+      // Cumulative per-model usage — in-memory only, drives the header's
+      // session-total + top-model chips.
+      onModelUsage: (modelUsage) => {
+        const totals = entry.row.modelTotals ?? {}
+        for (const [model, u] of Object.entries(modelUsage)) {
+          const prev = totals[model] ?? { tokens: 0, costUsd: 0 }
+          totals[model] = {
+            tokens:
+              prev.tokens +
+              u.inputTokens +
+              u.outputTokens +
+              u.cacheReadInputTokens +
+              u.cacheCreationInputTokens,
+            costUsd: prev.costUsd + u.costUSD,
+          }
+        }
+        entry.row.modelTotals = totals
         this.pushStatus(entry)
       },
       onTurnComplete: () => {

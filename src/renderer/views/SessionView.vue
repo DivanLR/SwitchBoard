@@ -7,6 +7,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { MODEL_CHOICES } from '@shared/domain'
 import type { AgentScopedPayload, SessionEvent, CleanupGroup } from '@shared/domain'
 import { activeAgents } from '@shared/agents'
+import { parseInlineQuestion } from '@shared/inline-question'
 import type { ProjectListItem } from '@shared/ipc-types'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useProjectsStore } from '@renderer/stores/projects'
@@ -129,17 +130,43 @@ const pendingCount = computed(
 const now = ref(Date.now())
 let tick: ReturnType<typeof setInterval> | undefined
 
-// Ctrl+C interrupts the running session, like a terminal. If text is selected,
-// let the browser copy it instead (matching modern terminal behaviour).
+// Ctrl+C stop-confirm: the first Ctrl+C (composer focused, session working)
+// shows a confirmation above the input; a second Ctrl+C (or the Stop button)
+// actually interrupts. Auto-dismisses so a stray press never lingers.
+const stopConfirm = ref(false)
+let stopConfirmTimer: ReturnType<typeof setTimeout> | undefined
+
+function askStop(): void {
+  stopConfirm.value = true
+  clearTimeout(stopConfirmTimer)
+  stopConfirmTimer = setTimeout(() => (stopConfirm.value = false), 4000)
+}
+function cancelStop(): void {
+  stopConfirm.value = false
+  clearTimeout(stopConfirmTimer)
+}
+async function confirmStop(): Promise<void> {
+  cancelStop()
+  await interrupt()
+}
+
+// Ctrl+C only acts when the COMPOSER is focused (elsewhere it's a normal copy).
+// If text is selected it copies as usual; otherwise it opens the stop-confirm.
 function onGlobalKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape' && stopConfirm.value) {
+    cancelStop()
+    return
+  }
   if (!event.ctrlKey || (event.key !== 'c' && event.key !== 'C') || event.altKey || event.metaKey) {
     return
   }
+  if (document.activeElement !== composerEl.value) return // must be in the text box
   const selection = window.getSelection()?.toString() ?? ''
-  if (selection.length > 0) return // preserve copy
-  if (!liveSession.value) return
+  if (selection.length > 0) return // preserve copy of a selection
+  if (!liveSession.value || liveSession.value.status !== 'working') return
   event.preventDefault()
-  void interrupt()
+  if (stopConfirm.value) void confirmStop()
+  else askStop()
 }
 
 let unsubscribeCommands: (() => void) | undefined
@@ -172,6 +199,35 @@ const sessionTimer = computed(() => {
 // the agents when multiple are running).
 const workingAgents = computed(() =>
   liveSession.value?.status === 'working' ? activeAgents(active.events) : [],
+)
+
+// Live background tasks (deep-research workflows, backgrounded subagents/bash).
+const backgroundTasks = computed(() => liveSession.value?.backgroundTasks ?? [])
+
+// Summaries produced WHILE background work runs are interim noise — record their
+// ids so they stay hidden even after the tasks drain (only the final,
+// post-settle summary renders). Cleared when the session changes.
+const interimSummaries = ref<Set<string>>(new Set())
+watch(
+  [() => active.events.length, backgroundTasks],
+  () => {
+    if (backgroundTasks.value.length === 0) return
+    for (const event of active.events) {
+      if (event.kind === 'summary') interimSummaries.value.add(event.id)
+    }
+  },
+)
+
+// Cap how many parallel agents / background tasks are shown at once so a big
+// fan-out doesn't fill the pane; a toggle expands to all and collapses back.
+const SHOW_LIMIT = 6
+const agentsExpanded = ref(false)
+const tasksExpanded = ref(false)
+const shownAgents = computed(() =>
+  agentsExpanded.value ? workingAgents.value : workingAgents.value.slice(0, SHOW_LIMIT),
+)
+const shownTasks = computed(() =>
+  tasksExpanded.value ? backgroundTasks.value : backgroundTasks.value.slice(0, SHOW_LIMIT),
 )
 
 // --- Subagent chat view (design: click an agent → its own conversation) ---
@@ -242,9 +298,47 @@ const modelLabel = computed(() => {
   return MODEL_CHOICES.find((m) => m.id === id)?.label ?? id
 })
 
+// --- Session usage widget: total tokens + the 2 most-used models, clickable
+// for the full picture (runs /usage in the session → the ✦ USAGE card). ---
+function fmtTok(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${Math.round(n / 1_000)}k`
+  return String(n)
+}
+
+function shortModel(id: string): string {
+  const label = MODEL_CHOICES.find((m) => m.id === id)?.label
+  if (label) return label
+  // Unlisted ids: strip the vendor prefix/date suffix for a compact chip.
+  return id.replace(/^claude-/, '').replace(/-\d{8}$/, '')
+}
+
+const sessionUsage = computed(() => {
+  const totals = liveSession.value?.modelTotals
+  if (!totals) return null
+  const models = Object.entries(totals).sort((a, b) => b[1].tokens - a[1].tokens)
+  if (models.length === 0) return null
+  const total = models.reduce((sum, [, u]) => sum + u.tokens, 0)
+  const cost = models.reduce((sum, [, u]) => sum + u.costUsd, 0)
+  return {
+    total,
+    cost,
+    top: models.slice(0, 2).map(([id, u]) => ({ id, label: shortModel(id), tokens: u.tokens })),
+  }
+})
+
+/** The full view = exactly what /usage reports, rendered as the ✦ USAGE card. */
+async function openFullUsage(): Promise<void> {
+  if (!liveSession.value) return
+  mainTab.value = 'session'
+  await active.send('/usage')
+  scrollToBottom()
+}
+
 watch(
   () => liveSession.value?.id ?? null,
   async (sessionId) => {
+    interimSummaries.value = new Set() // reset per session
     await active.open(sessionId)
     if (!draftRestored.value && props.project.drafts.length > 0 && composer.value === '') {
       composer.value = props.project.drafts.map((d) => d.text).join('\n')
@@ -316,6 +410,10 @@ const items = computed<StreamItem[]>(() => {
       if (toolName === 'Task' || toolName === 'Agent') continue
       if (!outputPrefs.value.showToolRows) continue
     }
+    // Interim summaries (posted while background work ran) stay hidden in the
+    // clean view — only turn-complete lines show during a run, then the single
+    // consolidated summary after it settles. The raw view keeps everything.
+    if (event.kind === 'summary' && interimSummaries.value.has(event.id)) continue
     if (event.noiseKind) {
       if (block && block.noiseKind === event.noiseKind) {
         block.events.push(event)
@@ -485,6 +583,7 @@ async function send(): Promise<void> {
       composer.value = ''
       editTarget.value = null
       await specs.runInSession(props.project.id, `✎ Spec edit → ${target}: ${text}`)
+      mainTab.value = 'session' // watch the edit run
       scrollToBottom()
       return
     }
@@ -543,6 +642,41 @@ async function stop(): Promise<void> {
 
 function answerQuestion(eventId: string, choice: string): void {
   void active.answerQuestion(eventId, choice)
+}
+
+// Inline question card: when the LATEST message is a plain-text question with
+// an options table (Spec Kit's /speckit-clarify idiom), offer clickable chips
+// + a type-your-own input. Answering sends a normal message; the card vanishes
+// once a newer prompt lands.
+// Locally retires a just-answered card so a double-click can't send twice
+// before the echoed prompt event lands and hides it for good.
+const inlineAnswered = ref<string | null>(null)
+
+const inlineQuestion = computed(() => {
+  if (!liveSession.value || liveSession.value.status === 'working') return null
+  const events = scopedEvents.value
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i]
+    if (event.kind === 'prompt') return null // already answered
+    if (event.kind === 'assistant_text' || event.kind === 'summary') {
+      if (event.id === inlineAnswered.value) return null
+      const text = (event.payload as { text?: string }).text ?? ''
+      const payload = parseInlineQuestion(text)
+      return payload ? { eventId: event.id, payload } : null
+    }
+    // tool rows / markers / results between the question and now don't matter
+  }
+  return null
+})
+
+function onInlineAnswer(eventId: string, choice: string): void {
+  inlineAnswered.value = eventId
+  // The ★ Recommended marker is display convention — send the bare option.
+  const text = choice.replace(/\s*\(recommended\)\s*$/i, '')
+  // In a subagent's chat view the answer goes to that agent, like the composer.
+  const agent = selectedAgent.value
+  if (agent) void active.send(`[to ${agent.name}] ${text}`, agent.id)
+  else void active.send(text)
 }
 
 function openInbox(requestId: string): void {
@@ -663,6 +797,14 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
           ⑂ {{ workingAgents.length }} agents
         </span>
         <span
+          v-if="backgroundTasks.length > 0"
+          class="pill bg-pill"
+          data-testid="bg-pill"
+          title="Background tasks running"
+        >
+          ⧗ {{ backgroundTasks.length }} background
+        </span>
+        <span
           v-if="liveSession"
           class="pill"
           :class="liveSession.status"
@@ -726,6 +868,18 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
           {{ modelLabel }}
         </span>
         <span
+          v-if="liveSession?.currentMode"
+          class="mode-chip"
+          data-testid="session-mode"
+          :title="
+            liveSession.currentMode === 'advisor'
+              ? 'Advisor mode: cheap model executing, strong model consulted at decision points'
+              : 'Orchestrator mode: strong model planning, cheap workers executing in parallel'
+          "
+        >
+          {{ liveSession.currentMode === 'advisor' ? '⚖ Advisor' : '⧉ Orchestrator' }}
+        </span>
+        <span
           v-if="liveSession && liveSession.diffAdds != null"
           data-testid="diff-stats"
           style="white-space: nowrap"
@@ -754,6 +908,19 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
           cache
           <span :style="{ color: cacheHitPct > 50 ? 'var(--green)' : 'var(--amber)' }">{{ cacheHitPct }}%</span>
         </span>
+        <button
+          v-if="sessionUsage"
+          class="usage-widget mono"
+          data-testid="session-model-usage"
+          title="Session usage by model — click for the full /usage picture"
+          @click="openFullUsage()"
+        >
+          <span class="uw-total">{{ fmtTok(sessionUsage.total) }} tok</span>
+          <span v-if="sessionUsage.cost > 0" class="uw-cost">${{ sessionUsage.cost.toFixed(2) }}</span>
+          <span v-for="m in sessionUsage.top" :key="m.id" class="uw-model">
+            {{ m.label }} <span class="uw-model-tok">{{ fmtTok(m.tokens) }}</span>
+          </span>
+        </button>
       </div>
     </header>
 
@@ -797,7 +964,12 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
       </button>
     </div>
 
-    <SpecsView v-if="mainTab === 'specs'" :project-id="project.id" @set-target="onSetTarget" />
+    <SpecsView
+      v-if="mainTab === 'specs'"
+      :project-id="project.id"
+      @set-target="onSetTarget"
+      @ran="((mainTab = 'session'), scrollToBottom())"
+    />
     <CleanupView
       v-else-if="mainTab === 'cleanup'"
       :project-name="project.name"
@@ -901,6 +1073,15 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
           />
         </template>
 
+        <!-- Inline question card: clarify-style options asked in plain text -->
+        <QuestionEvent
+          v-if="inlineQuestion"
+          :event-id="inlineQuestion.eventId"
+          :payload="inlineQuestion.payload"
+          data-testid="inline-question"
+          @answer="onInlineAnswer"
+        />
+
         <!-- Agent chat: the live line is the agent's task -->
         <div v-if="selectedAgent" class="live mono" data-testid="live-line">
           <span class="blink" style="color: var(--green)">▊</span>
@@ -912,10 +1093,19 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
           <div class="agents-head">
             <span class="agents-label">⑂ AGENTS</span>
             <span class="agents-count">{{ workingAgents.length }} working in parallel</span>
+            <span style="flex: 1"></span>
+            <button
+              v-if="workingAgents.length > SHOW_LIMIT"
+              class="agents-toggle"
+              data-testid="agents-toggle"
+              @click="agentsExpanded = !agentsExpanded"
+            >
+              {{ agentsExpanded ? 'show fewer' : `show all ${workingAgents.length}` }}
+            </button>
           </div>
           <div class="agents-rows">
             <div
-              v-for="agent in workingAgents"
+              v-for="agent in shownAgents"
               :key="agent.id"
               class="agent-row"
               data-testid="agent-row"
@@ -925,6 +1115,14 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
               <span class="agent-name">{{ agent.name }}</span>
               <span class="agent-task">{{ agent.task || agent.label }}</span>
               <span class="agent-chat">chat →</span>
+            </div>
+            <div
+              v-if="!agentsExpanded && workingAgents.length > SHOW_LIMIT"
+              class="agents-more"
+              data-testid="agents-more"
+              @click="agentsExpanded = true"
+            >
+              + {{ workingAgents.length - SHOW_LIMIT }} more
             </div>
           </div>
         </div>
@@ -945,6 +1143,48 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
         >
           <span class="blink">▊</span>
           Blocked — {{ pendingCount > 0 ? `${pendingCount} pending` : 'needs your answer' }}
+        </div>
+
+        <!-- Background tasks: deep-research workflows / backgrounded work still
+             running while the main loop continues. Independent of the live-line
+             chain so it can show alongside any status. -->
+        <div
+          v-if="backgroundTasks.length > 0"
+          class="agents bg-tasks mono"
+          data-testid="bg-task-list"
+        >
+          <div class="agents-head">
+            <span class="agents-label bg">⧗ BACKGROUND</span>
+            <span class="agents-count">{{ backgroundTasks.length }} running</span>
+            <span style="flex: 1"></span>
+            <button
+              v-if="backgroundTasks.length > SHOW_LIMIT"
+              class="agents-toggle"
+              data-testid="bg-task-toggle"
+              @click="tasksExpanded = !tasksExpanded"
+            >
+              {{ tasksExpanded ? 'show fewer' : `show all ${backgroundTasks.length}` }}
+            </button>
+          </div>
+          <div class="agents-rows">
+            <div
+              v-for="task in shownTasks"
+              :key="task.taskId"
+              class="agent-row bg-row"
+              data-testid="bg-task-row"
+            >
+              <span class="agent-dot bg">◷</span>
+              <span class="agent-task">{{ task.description || task.taskId }}</span>
+            </div>
+            <div
+              v-if="!tasksExpanded && backgroundTasks.length > SHOW_LIMIT"
+              class="agents-more"
+              data-testid="bg-task-more"
+              @click="tasksExpanded = true"
+            >
+              + {{ backgroundTasks.length - SHOW_LIMIT }} more
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1029,6 +1269,14 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
       <div v-if="draftRestored && composer" class="draft-note mono" data-testid="draft-note">
         Restored draft from the previous run — send to deliver it.
       </div>
+
+      <!-- Ctrl+C stop confirmation, floating just above the input. -->
+      <div v-if="stopConfirm" class="stop-confirm mono" data-testid="stop-confirm">
+        <span class="sc-text">⏹ Ctrl+C again to stop the chat — are you sure?</span>
+        <button class="sc-stop" data-testid="stop-confirm-yes" @click="confirmStop()">Stop</button>
+        <button class="sc-cancel" data-testid="stop-confirm-no" @click="cancelStop()">Cancel</button>
+      </div>
+
       <div class="composer-row">
         <span v-if="editTarget" class="caret target mono">✎</span>
         <span v-else class="caret mono">❯</span>
@@ -1055,8 +1303,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
               @mousedown.prevent="acceptSuggestion(cmd)"
               @mouseenter="suggestIndex = index"
             >
-              <span class="suggest-typed">{{ composer }}</span
-              ><span class="suggest-rest">{{ cmd.slice(composer.length) }}</span>
+              <span class="suggest-typed">{{ cmd }}</span>
               <span v-if="hintFor(cmd)" class="suggest-desc">{{ hintFor(cmd) }}</span>
             </div>
           </div>
@@ -1127,6 +1374,9 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   padding: 14px 22px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .main-tabs {
@@ -1135,6 +1385,9 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   padding: 0 16px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .mt {
@@ -1160,7 +1413,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 .mt-badge {
   font-size: 10px;
   color: var(--text-meta);
-  background: var(--bg-chip);
+  background: rgba(52, 211, 153, 0.1);
   border: 1px solid var(--border-strong);
   border-radius: 99px;
   padding: 0 6px;
@@ -1181,7 +1434,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 
 .h-name {
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-bright);
   white-space: nowrap;
 }
@@ -1215,22 +1468,23 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 }
 
 .seg.on {
-  background: var(--bg-seg);
+  background: rgba(52, 211, 153, 0.24);
   color: var(--text-strong);
   cursor: default;
 }
 
 .ctl {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-tab);
   border: 1px solid var(--border-seg);
   border-radius: 99px;
-  padding: 5px 12px;
+  padding: 3px 9px;
 }
 
 .ctl:hover {
-  color: var(--text-body);
+  color: var(--text-strong);
+  border-color: var(--border-strong);
 }
 
 .pill.agents-pill {
@@ -1238,9 +1492,15 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   border: 1px solid rgba(58, 98, 145, 0.3);
 }
 
+.pill.bg-pill {
+  color: var(--amber);
+  border: 1px solid rgba(154, 111, 42, 0.35);
+}
+
 .pill.bypass-pill {
   color: var(--red);
-  border: 1px solid rgba(143, 59, 44, 0.35);
+  background: rgba(143, 59, 44, 0.09);
+  border: 1px solid rgba(143, 59, 44, 0.4);
 }
 
 /* REFS row (design): chips + dashed add pill under the meta line. */
@@ -1272,10 +1532,13 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   gap: 7px;
   font-size: 10.5px;
   color: var(--text-body);
-  background: var(--bg-card);
-  border: 1px solid var(--surface-line);
+  background: var(--bg-hover);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-card-alt);
+  border-radius: var(--rc);
   padding: 3px 9px;
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--elev);
   pointer-events: auto;
 }
 
@@ -1297,9 +1560,12 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   font-size: 10.5px;
   color: var(--text-faint);
   border: 1px dashed var(--border-strong);
+  border-radius: var(--rc);
   padding: 2px 10px;
   background: var(--bg-panel);
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: var(--elev);
   pointer-events: auto;
 }
 
@@ -1313,6 +1579,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   font-size: 11px;
   background: var(--bg);
   border: 1px solid var(--green);
+  border-radius: var(--rc);
   outline: none;
   color: var(--text-strong);
   padding: 3px 9px;
@@ -1333,10 +1600,10 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 
 .drop-overlay {
   position: absolute;
-  inset: 6px;
-  z-index: 60;
+  inset: 8px;
+  z-index: 40;
   border: 1px dashed var(--green);
-  background: rgba(52, 211, 153, 0.06);
+  background: color-mix(in srgb, var(--surface-sunken) 88%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1348,14 +1615,14 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 }
 
 .drop-title {
-  font-size: 14px;
+  font-size: 13.5px;
   color: var(--green);
 }
 
 .drop-sub {
-  font-size: 11px;
-  color: var(--text-mid);
-  margin-top: 5px;
+  font-size: 11.5px;
+  color: var(--text-meta);
+  margin-top: 6px;
 }
 
 .head-meta {
@@ -1366,6 +1633,53 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   font-size: 11.5px;
   color: var(--text-meta);
   flex-wrap: wrap;
+}
+
+/* Pairing-mode chip (Advisor/Orchestrator) for the latest work turn. */
+.mode-chip {
+  font-size: 10px;
+  color: var(--blue);
+  border: 1px solid rgba(58, 98, 145, 0.35);
+  border-radius: 99px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
+/* Session usage widget: total tokens + top-2 model chips; click = full /usage. */
+.usage-widget {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 10.5px;
+  color: var(--text-meta);
+  border: 1px solid var(--border-seg);
+  border-radius: 99px;
+  padding: 2px 10px;
+  cursor: pointer;
+  background: transparent;
+  white-space: nowrap;
+}
+
+.usage-widget:hover {
+  color: var(--text-body);
+  border-color: var(--border-strong);
+}
+
+.uw-total {
+  color: var(--text-body);
+  font-weight: 600;
+}
+
+.uw-cost {
+  color: var(--text-faint);
+}
+
+.uw-model {
+  color: var(--text-tab);
+}
+
+.uw-model-tok {
+  color: var(--green);
 }
 
 .stream-empty {
@@ -1380,7 +1694,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 .ended {
   background: var(--bg-card);
   border: 1px solid var(--border-soft);
-  border-radius: 10px;
+  border-radius: var(--rc);
   padding: 11px 13px;
   margin-bottom: 13px;
 }
@@ -1424,7 +1738,9 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   gap: 10px;
   margin-bottom: 16px;
   padding: 9px 12px;
-  background: var(--surface-inset);
+  background: color-mix(in srgb, var(--surface-inset) 55%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--surface-inset-line);
   flex-wrap: wrap;
 }
@@ -1453,7 +1769,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 
 .ab-name {
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-strong);
 }
 
@@ -1461,14 +1777,18 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   font-size: 10px;
   color: var(--text-faint);
   border: 1px solid var(--border-seg);
+  border-radius: 99px;
   padding: 1px 7px;
   white-space: nowrap;
 }
 
 /* Parallel-agents card (design: ⑂ AGENTS · N working in parallel). */
 .agents {
-  border: 1px solid var(--border-card-alt);
-  background: var(--surface-inset);
+  border: 1px solid rgba(52, 211, 153, 0.18);
+  background: color-mix(in srgb, var(--surface-inset) 55%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-radius: var(--rc);
   padding: 11px 13px;
   margin-top: 6px;
 }
@@ -1491,6 +1811,51 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   color: var(--text-faint);
 }
 
+/* Cap-toggle + "+N more" row for large fan-outs. */
+.agents-toggle {
+  font-size: 10px;
+  color: var(--text-tab);
+  border: 1px solid var(--border-seg);
+  border-radius: 99px;
+  padding: 1px 9px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.agents-toggle:hover {
+  color: var(--text-body);
+  border-color: var(--border-strong);
+}
+
+.agents-more {
+  font-size: 11px;
+  color: var(--text-faint);
+  cursor: pointer;
+  padding: 3px 6px;
+}
+
+.agents-more:hover {
+  color: var(--green);
+}
+
+/* Background-tasks card: amber accent to distinguish from blue subagents. */
+.bg-tasks {
+  margin-top: 8px;
+}
+
+.agents-label.bg {
+  color: var(--amber);
+}
+
+.agent-dot.bg {
+  color: var(--amber);
+  animation: sbFade 1.6s ease infinite;
+}
+
+.bg-row {
+  cursor: default;
+}
+
 .agents-rows {
   display: flex;
   flex-direction: column;
@@ -1507,7 +1872,10 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 }
 
 .agent-row:hover {
-  background: var(--bg-card);
+  background: var(--bg-hover);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: var(--elev);
 }
 
 .agent-chat {
@@ -1545,8 +1913,10 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 .raw-view {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 22px;
-  background: var(--bg-code);
+  padding: 16px 22px 52px;
+  background: color-mix(in srgb, var(--bg-code) 50%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 
 .raw-line {
@@ -1562,11 +1932,11 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 .raw-line.stamped {
   display: grid;
   grid-template-columns: 38px 1fr;
-  gap: 8px;
+  gap: 12px;
+  align-items: baseline;
 }
 
 .raw-stamp {
-  font-size: 10px;
   color: var(--text-ghost);
   white-space: nowrap;
 }
@@ -1574,6 +1944,52 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 /* Positioning context for the floating REFS row; base composer chrome is global. */
 .composer {
   position: relative;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.composer-row {
+  align-items: flex-end;
+}
+
+/* Ctrl+C stop confirmation bubble above the composer. */
+.stop-confirm {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  padding: 6px 11px;
+  font-size: 11.5px;
+  color: var(--amber);
+  background: rgba(154, 111, 42, 0.08);
+  border: 1px solid rgba(154, 111, 42, 0.4);
+  border-radius: var(--rc);
+  animation: sbIn 0.15s ease;
+}
+
+.sc-text {
+  flex: 1;
+}
+
+.sc-stop {
+  font-size: 11px;
+  color: #fff;
+  background: var(--red);
+  border: none;
+  border-radius: 8px;
+  padding: 3px 12px;
+  cursor: pointer;
+}
+
+.sc-cancel {
+  font-size: 11px;
+  color: var(--text-tab);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 3px 12px;
+  background: transparent;
+  cursor: pointer;
 }
 
 .draft-note {
@@ -1603,9 +2019,12 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   gap: 7px;
   font-size: 11px;
   color: var(--text-body);
-  background: var(--bg-card);
-  border: 1px solid var(--border-soft);
-  border-radius: 10px;
+  background: var(--bg-hover);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: var(--elev);
+  border: 1px solid var(--border-card-alt);
+  border-radius: var(--rc);
   padding: 4px 10px;
   max-width: 280px;
 }
@@ -1638,15 +2057,17 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 .queue-btn {
   flex-shrink: 0;
   white-space: nowrap;
-  border: 1px solid var(--border-seg);
-  color: var(--text-tab);
-  font-size: 11px;
-  padding: 7px 12px;
-  border-radius: 10px;
+  border: 1px solid var(--border-strong);
+  color: var(--text-mid);
+  font-weight: 600;
+  font-size: 11.5px;
+  padding: 6px 13px;
+  border-radius: var(--rc);
 }
 
 .queue-btn:hover:not(:disabled) {
-  color: var(--text-body);
+  border-color: var(--green);
+  color: var(--text-strong);
 }
 
 .queue-btn:disabled {
@@ -1657,11 +2078,16 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 .caret {
   flex-shrink: 0;
   color: var(--green);
-  font-weight: 700;
+  font-weight: 600;
+  /* Bottom-pinned row: lift the caret to the buttons' text line. */
+  padding-bottom: 6px;
 }
 
 .caret.target {
+  /* ✎ (a dingbat) renders higher in its line box than ❯, so it needs less
+     bottom lift to land on the composer's baseline. */
   color: var(--amber);
+  padding-bottom: 1px;
 }
 
 /* Spec-edit target chip in the composer (design ✎ → file). */
@@ -1674,7 +2100,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   color: var(--green);
   background: rgba(52, 211, 153, 0.07);
   border: 1px solid rgba(52, 211, 153, 0.35);
-  border-radius: 10px;
+  border-radius: var(--rc);
   padding: 3px 9px;
   white-space: nowrap;
 }
@@ -1708,10 +2134,14 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   resize: none;
   overflow-y: auto;
   field-sizing: content;
-  max-height: 160px;
+  min-height: 20px;
+  max-height: 168px;
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+  /* Bottom-pinned row: sit the text line level with the buttons' text. The
+     ghost mirror below must keep the identical padding. */
+  padding-bottom: 6px;
 }
 
 /* Typed text exactly matches a known /command — tint it so the match is clear. */
@@ -1747,6 +2177,8 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   word-break: break-word;
   overflow: hidden;
   pointer-events: none;
+  /* Mirrors .composer-input exactly — keep the paddings in lockstep. */
+  padding-bottom: 6px;
 }
 
 .ghost-typed {
@@ -1765,22 +2197,30 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   right: 0;
   max-height: 190px;
   overflow-y: auto;
-  background: var(--bg-card);
+  /* Opaque — a translucent dropdown lets the stream bleed through the rows. */
+  background: var(--bg-panel-2);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--border-strong);
-  border-radius: 10px;
+  border-radius: var(--rc);
   padding: 4px;
   z-index: 5;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--elev);
 }
 
 .suggest-item {
   font-size: 12.5px;
   padding: 5px 8px;
-  border-radius: 10px;
+  border-radius: var(--rc);
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Light theme: a solid white sheet (the pale-blue panel tone read as see-through). */
+html.sb-light .suggest-list {
+  background: #fff;
 }
 
 .suggest-item.active {

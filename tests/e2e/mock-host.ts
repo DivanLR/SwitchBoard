@@ -38,8 +38,9 @@ export interface MockDriver {
   ) => void
   endSession: (sessionId: string) => void
   setSpecKit: (projectId: string, state: Record<string, unknown>) => void
-  setMcpSchema: (projectId: string, content: string) => void
+  setMcpSchema: (projectId: string, content: string, servers?: string[]) => void
   setUsage: (sessionId: string, utilization: number, resetsInMinutes: number, limitType: string) => void
+  setBackgroundTasks: (sessionId: string, tasks: { taskId: string; description: string }[]) => void
   emitLines: (sessionId: string, lines: string[]) => void
   raisePermission: (options: {
     projectId: string
@@ -155,7 +156,9 @@ export function installMockHost(scenario: MockScenario): void {
   const markerByRequest = new Map<string, AnyRecord>()
   const projectCommands = new Map<string, { name: string; description?: string }[]>()
   const specKitByProject = new Map<string, AnyRecord>()
+  // Keyed by projectId (legacy single doc) or `projectId|comboKey` (per-combination).
   const mcpSchemaByProject = new Map<string, string>()
+  const mcpScans: { id: string; projectId: string; comboKey: string; servers: string[]; scannedAt: string }[] = []
   const standingRules: AnyRecord[] = []
   let costToday = 0
   let tokensToday = 0
@@ -206,12 +209,12 @@ export function installMockHost(scenario: MockScenario): void {
   let settings: AnyRecord = {
     defaultView: 'clean',
     notificationsEnabled: true,
-    planModel: 'default',
-    workModel: 'default',
+    intelligentModel: 'default',
+    workerModel: 'claude-sonnet-5',
     terseMode: true,
     terseLevel: 'full',
     fontSize: 'md',
-    showToolRows: true,
+    showToolRows: false,
     timestamps: false,
     autoscroll: true,
     projectModels: {},
@@ -222,6 +225,8 @@ export function installMockHost(scenario: MockScenario): void {
     dailySpendLimit: 0,
     disabledCommands: {},
     databaseMcpServers: [],
+    mcpActiveServers: [],
+    modelMode: 'auto',
   }
 
   const listeners = new Map<string, Set<(payload: unknown) => void>>()
@@ -456,7 +461,27 @@ export function installMockHost(scenario: MockScenario): void {
       specKitByProject.set(String(req.projectId), installed)
       return installed
     },
-    'mcp.readSchema': (req) => ({ content: mcpSchemaByProject.get(String(req.projectId)) ?? null }),
+    'mcp.readSchema': (req) => {
+      const servers = req.servers as string[] | undefined
+      const key = servers?.length
+        ? `${String(req.projectId)}|${[...servers].sort().join(' + ')}`
+        : String(req.projectId)
+      return { content: mcpSchemaByProject.get(key) ?? null }
+    },
+    'mcp.scanHistory': (req) => mcpScans.filter((s) => s.projectId === String(req.projectId)),
+    'mcp.recordScan': (req) => {
+      const servers = [...(req.servers as string[])].sort()
+      const comboKey = servers.join(' + ')
+      // Mirror main: only record when the combination's doc exists.
+      if (!mcpSchemaByProject.has(`${String(req.projectId)}|${comboKey}`)) return null
+      let row = mcpScans.find((s) => s.projectId === String(req.projectId) && s.comboKey === comboKey)
+      if (!row) {
+        row = { id: `scan-${mcpScans.length + 1}`, projectId: String(req.projectId), comboKey, servers, scannedAt: '' }
+        mcpScans.unshift(row)
+      }
+      row.scannedAt = new Date().toISOString()
+      return row
+    },
     'specs.runInSession': (req) => {
       let session = [...sessions.values()].find(
         (s) => s.projectId === req.projectId && !s.endedAt,
@@ -737,13 +762,23 @@ export function installMockHost(scenario: MockScenario): void {
       push('push.projectCommands', { projectId, commands: shaped })
     },
     setSpecKit: (projectId, state) => specKitByProject.set(projectId, state),
-    setMcpSchema: (projectId, content) => mcpSchemaByProject.set(projectId, content),
+    setMcpSchema: (projectId, content, servers) =>
+      mcpSchemaByProject.set(
+        servers?.length ? `${projectId}|${[...servers].sort().join(' + ')}` : projectId,
+        content,
+      ),
     setUsage: (sessionId, utilization, resetsInMinutes, limitType) => {
       const s = sessions.get(sessionId)
       if (!s) return
       s.usageUtilization = utilization
       s.usageResetsAt = Math.floor(Date.now() / 1000) + resetsInMinutes * 60
       s.usageLimitType = limitType
+      push('push.sessionStatus', { ...s })
+    },
+    setBackgroundTasks: (sessionId, tasks) => {
+      const s = sessions.get(sessionId)
+      if (!s) return
+      ;(s as unknown as AnyRecord).backgroundTasks = tasks
       push('push.sessionStatus', { ...s })
     },
     endSession: (sessionId) => {
@@ -782,6 +817,7 @@ export function installMockHost(scenario: MockScenario): void {
         title: request.title,
         risk: request.risk,
         status: 'pending',
+        toolName: request.toolName,
       })
       markerByRequest.set(request.id, marker)
       setStatus(sessionId, 'needs_you')

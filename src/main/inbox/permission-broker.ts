@@ -328,6 +328,7 @@ export class PermissionBroker {
           title: request.title,
           risk: request.risk,
           status: request.status,
+          toolName: request.toolName,
         }).id
       }
       return sink.append('plan_marker', {

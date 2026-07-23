@@ -5,6 +5,7 @@
 import type {
   DecisionRecord,
   Draft,
+  McpScan,
   PermissionRequest,
   PermissionRequestStatus,
   PermissionRule,
@@ -127,8 +128,14 @@ export interface InvokeMap {
   'specs.detail': { req: { projectId: string; specId: string }; res: SpecDetail | null }
   /** Install Spec Kit into the project (ephemeral uvx; never global). */
   'specs.install': { req: { projectId: string }; res: SpecKitState }
-  /** The cached MCP schema map (.switchboard/db-schema.md), or null if unscanned. */
-  'mcp.readSchema': { req: { projectId: string }; res: { content: string | null } }
+  /** The cached MCP schema map, or null if unscanned. With `servers`, reads the
+   *  combination's own scan doc (.switchboard/scans/<combo>.md); without, the
+   *  legacy single db-schema.md. */
+  'mcp.readSchema': { req: { projectId: string; servers?: string[] }; res: { content: string | null } }
+  /** Scanned-combination history, newest first ("have I scanned this set before?"). */
+  'mcp.scanHistory': { req: { projectId: string }; res: McpScan[] }
+  /** Record a completed scan for a combination (verifies the doc exists first). */
+  'mcp.recordScan': { req: { projectId: string; servers: string[] }; res: McpScan | null }
   /**
    * Run text in the project's session (a spec-kit command or a start-phase
    * prompt), starting a session first if none is live. Returns its id.
@@ -259,6 +266,12 @@ export interface SwitchboardApi {
    * gone in modern Electron). Absent under the browser-based e2e mock.
    */
   pathForFile?(file: unknown): string
+  /**
+   * Subscribe to the number of in-flight `invoke` calls (drives the global
+   * loading spinner). Fires immediately with the current count. Returns an
+   * unsubscribe. Absent under the browser-based e2e mock.
+   */
+  onLoading?(listener: (pending: number) => void): () => void
 }
 
 declare global {

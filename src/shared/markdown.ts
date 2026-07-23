@@ -36,6 +36,19 @@ function renderInline(escaped: string): string {
   return out
 }
 
+// A GFM table separator row: cells of dashes with optional alignment colons.
+const TABLE_SEPARATOR = /^:?-{3,}:?$/
+
+// Cells of a `| a | b |` row (outer pipes optional on malformed rows).
+// ponytail: escaped \| inside a cell still splits — fine for model output.
+function tableCells(row: string): string[] {
+  return row
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((c) => c.trim())
+}
+
 // Block-level pass over a non-code text segment.
 function renderBlocks(text: string): string {
   const inline = (raw: string): string => renderInline(escapeHtml(raw))
@@ -44,6 +57,7 @@ function renderBlocks(text: string): string {
   let paragraph: string[] = []
   let listType: 'ul' | 'ol' | null = null
   let listItems: string[] = []
+  let tableRows: string[] = []
 
   const flushParagraph = (): void => {
     if (paragraph.length === 0) return
@@ -56,9 +70,30 @@ function renderBlocks(text: string): string {
     listItems = []
     listType = null
   }
+  const flushTable = (): void => {
+    if (tableRows.length === 0) return
+    const rows = tableRows.map(tableCells)
+    tableRows = []
+    // GFM shape: header row, separator row, body. Without a separator, render
+    // every row as body so nothing masquerades as a header.
+    const hasHeader = rows.length > 1 && rows[1].every((c) => TABLE_SEPARATOR.test(c))
+    const cellsToRow = (cells: string[], tag: 'th' | 'td'): string =>
+      `<tr>${cells.map((c) => `<${tag}>${inline(c)}</${tag}>`).join('')}</tr>`
+    const head = hasHeader ? `<thead>${cellsToRow(rows[0], 'th')}</thead>` : ''
+    const body = (hasHeader ? rows.slice(2) : rows).map((r) => cellsToRow(r, 'td')).join('')
+    html += `<div class="md-table-wrap"><table class="md-table">${head}<tbody>${body}</tbody></table></div>`
+  }
 
   for (const line of lines) {
     const trimmed = line.trim()
+    // Table rows: consecutive `| … |` lines accumulate into one table.
+    if (/^\|.*\|$/.test(trimmed)) {
+      flushParagraph()
+      flushList()
+      tableRows.push(trimmed)
+      continue
+    }
+    flushTable()
     if (trimmed === '') {
       flushParagraph()
       flushList()
@@ -93,6 +128,7 @@ function renderBlocks(text: string): string {
   }
   flushParagraph()
   flushList()
+  flushTable()
   return html
 }
 

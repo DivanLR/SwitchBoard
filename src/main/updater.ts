@@ -5,6 +5,7 @@
 // app, reporting progress, then launches it and quits so it can replace files.
 import { app, shell } from 'electron'
 import { execFile, spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { promisify } from 'node:util'
 import { rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -24,6 +25,8 @@ let deps: UpdaterDeps | null = null
 let latestUrl: string = RELEASES_PAGE
 /** Direct installer-asset download URL from the last check, if one was found. */
 let latestAssetUrl: string | null = null
+/** GitHub's SHA-256 for that asset (hex, no prefix), for download verification. */
+let latestAssetDigest: string | null = null
 let latestVersion = ''
 
 export function initUpdater(d: UpdaterDeps): void {
@@ -62,6 +65,8 @@ function isNewer(a: string, b: string): boolean {
 interface GithubAsset {
   name?: string
   browser_download_url?: string
+  /** GitHub-computed content digest, e.g. "sha256:abc…" (all uploaded assets). */
+  digest?: string
 }
 
 export async function check(): Promise<UpdateStatus['state']> {
@@ -84,6 +89,9 @@ export async function check(): Promise<UpdateStatus['state']> {
       // in-app download; if absent, install falls back to the browser page.
       const installer = (release.assets ?? []).find((a) => /\.exe$/i.test(a.name ?? ''))
       latestAssetUrl = safeGithubUrl(installer?.browser_download_url)
+      latestAssetDigest = /^sha256:[0-9a-f]{64}$/i.test(installer?.digest ?? '')
+        ? installer!.digest!.slice('sha256:'.length).toLowerCase()
+        : null
       emit({ state: 'available', version: latest })
       return 'available'
     }
@@ -162,10 +170,18 @@ export async function installNow(): Promise<void> {
     // steer the temp write/launch path outside the temp directory.
     const safeVersion = latestVersion.replace(/[^0-9.]/g, '') || 'latest'
     const dest = join(app.getPath('temp'), `Switchboard-Setup-${safeVersion}.exe`)
-    writeFileSync(dest, Buffer.concat(chunks))
-    // Never execute an unverified binary. An unsigned build fails this and falls
-    // back to the browser download rather than running unverified code.
-    if (!(await hasValidSignature(dest))) {
+    const payload = Buffer.concat(chunks)
+    writeFileSync(dest, payload)
+    // Never execute an unverified binary. Two accepted proofs, either suffices:
+    // a valid Authenticode signature (once the build is code-signed), or a
+    // SHA-256 match against the digest GitHub computed for the release asset
+    // (integrity: the bytes are exactly what the release carries, over TLS with
+    // an origin-validated URL). Unsigned builds previously ALWAYS failed here,
+    // making in-app update a guaranteed dead end.
+    const digestOk =
+      latestAssetDigest !== null &&
+      createHash('sha256').update(payload).digest('hex') === latestAssetDigest
+    if (!digestOk && !(await hasValidSignature(dest))) {
       rmSync(dest, { force: true })
       emit({
         state: 'error',

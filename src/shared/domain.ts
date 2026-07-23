@@ -80,6 +80,15 @@ export interface Session {
   mcpServers?: McpServer[]
   /** Model the SDK reported for the latest main-loop turn (in-memory only). */
   currentModel?: string | null
+  /** Pairing mode chosen for the latest work turn (in-memory only): advisor,
+   *  orchestrator, or null for plan/question turns. */
+  currentMode?: 'advisor' | 'orchestrator' | null
+  /** Live background tasks (deep-research workflows, backgrounded subagents/bash)
+   *  the SDK reports for this session (in-memory only). */
+  backgroundTasks?: { taskId: string; description: string }[]
+  /** Cumulative per-model usage for this session (in-memory only): total
+   *  processed tokens (input + output + cache) and cost, keyed by model id. */
+  modelTotals?: Record<string, { tokens: number; costUsd: number }>
 }
 
 // --- Event payloads (contracts/session-events.md) ---
@@ -138,6 +147,9 @@ export interface PermissionMarkerPayload {
   title: string
   risk: RiskLevel
   status: PermissionRequestStatus
+  /** The tool the marker is for — the clean view shows a generic action label
+   *  ("Ran a command") from this instead of the full command in `title`. */
+  toolName?: string | null
 }
 
 export interface PlanMarkerPayload {
@@ -311,19 +323,35 @@ export const MODEL_CHOICES: readonly ModelChoice[] = [
   { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', desc: 'Fastest and cheapest — simple, mechanical edits', price: '$' },
 ]
 
+/** Advisor/Orchestrator pairing mode; 'auto' picks per message by workload. */
+export type ModelMode = 'auto' | 'advisor' | 'orchestrator'
+
 export interface Settings {
   defaultView: 'clean' | 'raw'
   notificationsEnabled: boolean
-  /** Model for planning turns (plan mode); 'default' uses the account default. */
-  planModel: string
-  /** Model for normal work turns; 'default' uses the account default. */
-  workModel: string
+  /**
+   * The INTELLIGENT model: plans, answers questions, runs Orchestrator loops,
+   * and advises in Advisor mode. 'default' uses the account default.
+   */
+  intelligentModel: string
+  /**
+   * The WORKER model: always the cheaper one. Runs Advisor-mode executor turns
+   * and Orchestrator worker subagents.
+   */
+  workerModel: string
   /**
    * Route each message by intent instead of by plan/build mode: question-shaped
-   * messages use planModel, code/script requests use workModel. When off, the
-   * model follows the plan-mode toggle (the original behaviour).
+   * messages use the intelligent model; work routes by the pairing mode below.
    */
   autoModelRouting: boolean
+  /**
+   * Advisor/Orchestrator pairing mode (the Fable-5 era cost patterns).
+   * 'auto' lets the app pick per message from the workload: scoped mechanical
+   * work runs Advisor (cheap executor + rare strong-model consults); broad
+   * multi-step work runs Orchestrator (strong planner + cheap parallel
+   * workers). Forcing a mode pins every work turn to that pattern.
+   */
+  modelMode: ModelMode
   /**
    * Terse (caveman-style) output mode: appends a concise-style instruction to
    * every hosted session's system prompt so the model generates fewer output
@@ -345,13 +373,11 @@ export interface Settings {
   timestamps: boolean
   /** Keep the view pinned to the newest line while the session works. */
   autoscroll: boolean
-  /** Per-project implementation-model overrides; 'global' or absent follows workModel. */
+  /** Per-project INTELLIGENT-model overrides; 'global'/absent follows the global one. */
   projectModels: Record<string, string>
   /**
-   * Per-project worker-model overrides — a cheaper model for the mechanical,
-   * work-classified turns (renames, imports, small diffs) when auto model
-   * routing is on, so the main model stays on the hard parts. 'global' or absent
-   * follows the project's implementation model.
+   * Per-project WORKER-model overrides — 'global' or absent follows the global
+   * worker model.
    */
   projectWorkerModels: Record<string, string>
   /** Auto-approve requests by risk level (Allowed list tab): recorded as rule_approved. */
@@ -362,25 +388,42 @@ export interface Settings {
   /** Per-project plugin/skill commands hidden from composer suggestions. */
   disabledCommands: Record<string, string[]>
   /**
-   * MCP servers combined into one Database chat. Sessions expose every
-   * configured MCP server; these are the ones surfaced in the sidebar and used
-   * together in the scan / chat view (e.g. a database MCP plus a code-search
-   * MCP in a single conversation). Empty = none designated.
+   * MCP servers shown in the MCP view (Settings → MCP toggles the roster).
+   * Sessions still expose every configured server; this only controls which
+   * appear as checkboxes in the combined MCP view and the sidebar.
    */
   databaseMcpServers: string[]
+  /**
+   * The subset of the roster currently ACTIVE in the MCP chat — the working
+   * combination. Each distinct combination gets its own scan doc + history row.
+   */
+  mcpActiveServers: string[]
+}
+
+/** One scanned MCP combination (history row for "have I scanned this before?"). */
+export interface McpScan {
+  id: string
+  projectId: string
+  /** Order-independent display key, e.g. "github + postgres". */
+  comboKey: string
+  servers: string[]
+  scannedAt: string
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   defaultView: 'clean',
   notificationsEnabled: true,
-  planModel: 'default',
-  workModel: 'default',
+  intelligentModel: 'default',
+  // The worker defaults to the cheaper everyday model, per the pairing modes.
+  workerModel: 'claude-sonnet-5',
   autoModelRouting: true,
+  modelMode: 'auto',
   terseMode: true,
   terseLevel: 'full',
   summaries: true,
   fontSize: 'md',
-  showToolRows: true,
+  // Clean view is narrative + approvals by default; tool rows live in Raw.
+  showToolRows: false,
   timestamps: false,
   autoscroll: true,
   projectModels: {},
@@ -390,6 +433,7 @@ export const DEFAULT_SETTINGS: Settings = {
   dailySpendLimit: 0,
   disabledCommands: {},
   databaseMcpServers: [],
+  mcpActiveServers: [],
 }
 
 /** A slash command / skill a project's sessions can run (composer suggestions). */

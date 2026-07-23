@@ -4,6 +4,7 @@
 // context) read the same path without duplicating the convention.
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { comboDocRelPath } from '@shared/mcp-combo'
 
 export function schemaDocPath(projectPath: string): string {
   return join(projectPath, '.switchboard', 'db-schema.md')
@@ -11,5 +12,15 @@ export function schemaDocPath(projectPath: string): string {
 
 export function readSchemaDoc(projectPath: string): string | null {
   const path = schemaDocPath(projectPath)
+  return existsSync(path) ? readFileSync(path, 'utf8') : null
+}
+
+/** A combination's own scan doc (.switchboard/scans/<combo-slug>.md). */
+export function comboDocPath(projectPath: string, servers: string[]): string {
+  return join(projectPath, ...comboDocRelPath(servers).split('/'))
+}
+
+export function readComboDoc(projectPath: string, servers: string[]): string | null {
+  const path = comboDocPath(projectPath, servers)
   return existsSync(path) ? readFileSync(path, 'utf8') : null
 }

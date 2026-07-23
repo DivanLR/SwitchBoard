@@ -77,10 +77,15 @@ test('the composer stays visible on the Specs tab (chat is always reachable)', a
   await expect(page.getByTestId('composer-input')).toBeVisible()
 })
 
-test('+ New spec prefills the composer with the specify command', async ({ page }) => {
+test('+ New spec opens a description popup that runs /speckit-specify', async ({ page }) => {
   await seedSpec(page)
   await page.getByTestId('spec-new').click()
-  await expect(page.getByTestId('composer-input')).toHaveValue('/speckit-specify ')
+  await expect(page.getByTestId('new-spec-popup')).toBeVisible()
+  await page.getByTestId('new-spec-input').fill('A per-domain container')
+  await page.getByTestId('new-spec-submit').click()
+  await expect(page.getByTestId('new-spec-popup')).toHaveCount(0)
+  const sends = await page.evaluate(() => window.__mock.state().sends.map((s) => s.text))
+  expect(sends).toContain('/speckit-specify A per-domain container')
 })
 
 async function seedSpec(page: import('@playwright/test').Page): Promise<void> {
@@ -128,11 +133,15 @@ test('clarify part shows both open and already-resolved clarifications', async (
   await expect(page.getByTestId('resolved-clarification')).toContainText('SQLite.')
 })
 
-test('start phase sends an implement command and shows the implementing state', async ({ page }) => {
+test('start phase sends an implement command, jumps to the session, and shows the implementing state', async ({ page }) => {
   await seedSpec(page)
   await page.getByTestId('part-tasks').click()
   await page.getByTestId('start-phase-Phase 1: Core').click()
   const sends = await page.evaluate(() => window.__mock.state().sends)
   expect(sends.some((s) => s.text.includes('Phase 1: Core'))).toBe(true)
+  // Running a command jumps to the Session tab so the run is visible…
+  await expect(page.getByTestId('stream')).toBeVisible()
+  // …and tabbing back to Specs still shows the implementing state.
+  await page.getByTestId('tab-specs').click()
   await expect(page.getByTestId('implementing')).toBeVisible()
 })

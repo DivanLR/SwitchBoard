@@ -56,7 +56,7 @@ function save(patch: Partial<Settings>): void {
   void store.save(patch)
 }
 
-/** Per-project implementation model: 'global' follows the Models tab. */
+/** Per-project intelligent model: 'global' follows the Models tab. */
 const projModel = computed(() => {
   const id = proj.value?.id
   return (id && settings.value?.projectModels?.[id]) || 'global'
@@ -67,7 +67,7 @@ function saveProjModel(modelId: string): void {
   save({ projectModels: { ...settings.value.projectModels, [proj.value.id]: modelId } })
 }
 
-/** Per-project worker model (cheaper, for mechanical work turns); 'global' follows impl. */
+/** Per-project worker model (always the cheaper one); 'global' follows the Models tab. */
 const projWorkerModel = computed(() => {
   const id = proj.value?.id
   return (id && settings.value?.projectWorkerModels?.[id]) || 'global'
@@ -88,25 +88,44 @@ function modelLabel(id: string): string {
   return MODEL_CHOICES.find((m) => m.id === id)?.label ?? id
 }
 
-// The Planning and Implementation model pickers are the same card list bound to
+// Advisor/Orchestrator pairing modes (see src/main/sessions/modes.ts).
+const MODE_CHOICES: { id: Settings['modelMode']; label: string; desc: string }[] = [
+  {
+    id: 'auto',
+    label: 'Auto (Recommended)',
+    desc: 'Picks per message: scoped work runs Advisor, broad multi-step work runs Orchestrator.',
+  },
+  {
+    id: 'advisor',
+    label: 'Advisor',
+    desc: 'Cheap model executes; the strong model is consulted rarely for the approach, unsticking, and review.',
+  },
+  {
+    id: 'orchestrator',
+    label: 'Orchestrator',
+    desc: 'Strong model plans and reviews; well-scoped chunks are delegated to cheap parallel workers.',
+  },
+]
+
+// The Intelligent and Worker model pickers are the same card list bound to
 // a different Settings field — render both from one loop.
 const MODEL_SECTIONS = [
   {
-    key: 'planModel',
-    testid: 'plan-model',
-    label: 'PLANNING MODEL',
-    desc: 'Reads the codebase, weighs approaches, and writes the plan — before any code is touched.',
+    key: 'intelligentModel',
+    testid: 'intelligent-model',
+    label: 'INTELLIGENT MODEL',
+    desc: 'The strong one: plans, answers questions, orchestrates broad work, and advises the worker.',
   },
   {
-    key: 'workModel',
-    testid: 'work-model',
-    label: 'IMPLEMENTATION MODEL',
-    desc: 'Executes the plan — edits files, runs commands, writes tests.',
+    key: 'workerModel',
+    testid: 'worker-model',
+    label: 'WORKER MODEL',
+    desc: 'Always the cheaper one: executes Advisor-mode turns and runs Orchestrator worker subagents.',
   },
 ] as const
 
-function setModel(key: 'planModel' | 'workModel', id: string): void {
-  save(key === 'planModel' ? { planModel: id } : { workModel: id })
+function setModel(key: 'intelligentModel' | 'workerModel', id: string): void {
+  save(key === 'intelligentModel' ? { intelligentModel: id } : { workerModel: id })
 }
 
 // --- Allowed list tab (design): risk auto-approve + per-project command rules ---
@@ -169,9 +188,21 @@ function isDbMcp(name: string): boolean {
 }
 
 function toggleDatabaseMcp(name: string): void {
-  const current = settings.value?.databaseMcpServers ?? []
-  const next = current.includes(name) ? current.filter((n) => n !== name) : [...current, name]
-  save({ databaseMcpServers: next })
+  if (!settings.value) return
+  const current = settings.value.databaseMcpServers
+  const activeNow = settings.value.mcpActiveServers
+  const adding = !current.includes(name)
+  const next = adding ? [...current, name] : current.filter((n) => n !== name)
+  // A server added to the view defaults to active in the chat combination; a
+  // removed one leaves the combination too (it is no longer tickable).
+  const nextActive = adding
+    ? [...new Set([...activeNow, name])]
+    : activeNow.filter((n) => n !== name)
+  // Apply locally first so a second quick click computes from this state, not
+  // the pre-save snapshot (the save round-trip would otherwise drop a toggle).
+  settings.value.databaseMcpServers = next
+  settings.value.mcpActiveServers = nextActive
+  save({ databaseMcpServers: next, mcpActiveServers: nextActive })
 }
 
 function addDatabaseMcp(): void {
@@ -184,8 +215,8 @@ function addDatabaseMcp(): void {
 const mcpSelSummary = computed(() => {
   const n = (settings.value?.databaseMcpServers ?? []).length
   if (n === 0) return 'None selected — sessions still expose every server individually.'
-  if (n === 1) return '1 server in the combined workspace.'
-  return `${n} servers combined into one workspace.`
+  if (n === 1) return '1 server on the MCP view.'
+  return `${n} servers on the MCP view — tick a combination there to chat.`
 })
 
 // --- Plugin toggles (design): hide a plugin's commands from suggestions ---
@@ -215,7 +246,8 @@ const updateLine = computed(() => {
     case 'none':
       return 'You are on the latest version.'
     case 'error':
-      return `Update check failed: ${s.message ?? 'unknown error'}`
+      // Not always a *check* failure — the message says what actually failed.
+      return `Update problem: ${s.message ?? 'unknown error'}`
     default:
       return 'Updates are delivered from GitHub releases.'
   }
@@ -249,7 +281,7 @@ const updateLine = computed(() => {
           </button>
           <span style="flex: 1"></span>
           <div v-if="settings" class="rail-foot mono">
-            Plan {{ modelLabel(settings.planModel) }}<br />Build {{ modelLabel(settings.workModel) }}
+            Smart {{ modelLabel(settings.intelligentModel) }}<br />Worker {{ modelLabel(settings.workerModel) }}
           </div>
         </div>
 
@@ -257,6 +289,30 @@ const updateLine = computed(() => {
         <div v-if="settings" class="s-body">
           <!-- MODELS -->
           <template v-if="tab === 'models'">
+            <div class="group">
+              <div class="group-label mono">MODE</div>
+              <div class="group-desc">
+                How the strong and cheap models pair up on work. Auto picks per message from the
+                workload; both patterns keep most tokens on the cheaper model.
+              </div>
+              <div class="cards">
+                <button
+                  v-for="m in MODE_CHOICES"
+                  :key="m.id"
+                  class="card-opt"
+                  :class="{ sel: (settings?.modelMode ?? 'auto') === m.id }"
+                  :data-testid="`mode-${m.id}`"
+                  @click="save({ modelMode: m.id })"
+                >
+                  <span class="opt-dot" :class="{ on: (settings?.modelMode ?? 'auto') === m.id }"></span>
+                  <div class="opt-body">
+                    <div class="opt-name mono">{{ m.label }}</div>
+                    <div class="opt-sub">{{ m.desc }}</div>
+                  </div>
+                </button>
+              </div>
+            </div>
+
             <div v-for="section in MODEL_SECTIONS" :key="section.key" class="group">
               <div class="group-label mono">{{ section.label }}</div>
               <div class="group-desc">{{ section.desc }}</div>
@@ -283,8 +339,8 @@ const updateLine = computed(() => {
               <div class="sr-text">
                 <div class="sr-label">Route by message intent</div>
                 <div class="sr-desc">
-                  Questions and discussion use the planning model; requests to change code or run
-                  scripts use the implementation model. When off, the model follows Plan/Build mode.
+                  Questions and discussion use the intelligent model; requests to change code or run
+                  scripts pair the models by mode (Advisor or Orchestrator). Off pins the intelligent model.
                 </div>
               </div>
               <button
@@ -336,9 +392,10 @@ const updateLine = computed(() => {
               </div>
 
               <div class="group">
-                <div class="group-label mono">IMPLEMENTATION MODEL</div>
+                <div class="group-label mono">INTELLIGENT MODEL</div>
                 <div class="group-desc">
-                  Overrides the global default — writes code and runs commands in this project only.
+                  Overrides the global default for this project only — plans, answers, orchestrates
+                  broad work, and advises the worker.
                 </div>
                 <div class="cards">
                   <button
@@ -350,7 +407,7 @@ const updateLine = computed(() => {
                     <span class="opt-dot" :class="{ on: projModel === 'global' }"></span>
                     <div class="opt-body">
                       <div class="opt-name mono">Use global default</div>
-                      <div class="opt-sub">Follows the Models tab ({{ modelLabel(settings.workModel) }})</div>
+                      <div class="opt-sub">Follows the Models tab ({{ modelLabel(settings.intelligentModel) }})</div>
                     </div>
                     <span class="opt-price mono">—</span>
                   </button>
@@ -375,9 +432,8 @@ const updateLine = computed(() => {
               <div class="group">
                 <div class="group-label mono">WORKER MODEL</div>
                 <div class="group-desc">
-                  A cheaper model for mechanical line-level edits — renames, imports, small diffs —
-                  so the main model stays on the hard parts. Applies to work turns when auto model
-                  routing is on.
+                  Overrides the global worker for this project only — the cheaper model that runs
+                  Advisor-mode turns and Orchestrator worker subagents here.
                 </div>
                 <div class="cards">
                   <button
@@ -388,8 +444,8 @@ const updateLine = computed(() => {
                   >
                     <span class="opt-dot" :class="{ on: projWorkerModel === 'global' }"></span>
                     <div class="opt-body">
-                      <div class="opt-name mono">Use implementation model</div>
-                      <div class="opt-sub">Follows the implementation model above</div>
+                      <div class="opt-name mono">Use global default</div>
+                      <div class="opt-sub">Follows the Models tab ({{ modelLabel(settings.workerModel) }})</div>
                     </div>
                     <span class="opt-price mono">—</span>
                   </button>
@@ -468,7 +524,7 @@ const updateLine = computed(() => {
                 <div class="opt-body">
                   <div class="opt-name mono">{{ name }}</div>
                   <div class="opt-sub">
-                    {{ isDbMcp(name) ? 'In the combined MCP chat' : 'Add to the combined MCP chat' }}
+                    {{ isDbMcp(name) ? 'Shown in the MCP view' : 'Add to the MCP view' }}
                   </div>
                 </div>
               </button>
@@ -478,14 +534,15 @@ const updateLine = computed(() => {
               from. You can also type the exact server name below.
             </div>
             <div class="add-cmd">
+              <span class="add-cmd-plus mono">＋</span>
               <input
                 v-model="dbMcpInput"
                 class="add-cmd-input mono"
                 data-testid="db-mcp-input"
-                placeholder="+ Or type the server name exactly — e.g. postgres"
+                placeholder="Or type the server name exactly — e.g. postgres"
                 @keydown.enter="addDatabaseMcp"
               />
-              <button class="btn-solid" data-testid="db-mcp-set" @click="addDatabaseMcp">Add</button>
+              <button class="add-cmd-btn mono" data-testid="db-mcp-set" @click="addDatabaseMcp">Add</button>
             </div>
             <div class="group-desc" style="margin-top: 12px">
               {{ mcpSelSummary }}
@@ -555,7 +612,7 @@ const updateLine = computed(() => {
                     Ask
                   </button>
                   <button
-                    class="seg-opt"
+                    class="seg-opt seg-auto"
                     :class="{ on: r.revokedAt === null }"
                     :data-testid="`rule-auto-${r.id}`"
                     @click="setRuleMode(r, 'auto')"
@@ -573,14 +630,15 @@ const updateLine = computed(() => {
               </div>
             </div>
             <div class="add-cmd">
+              <span class="add-cmd-plus mono">＋</span>
               <input
                 v-model="newCmd"
                 class="add-cmd-input mono"
                 data-testid="allowed-add-input"
-                placeholder="+ Add a command — e.g. make build"
+                placeholder="Add a command — e.g. make build"
                 @keydown.enter="addAllowedCommand"
               />
-              <button class="btn-solid" data-testid="allowed-add-btn" @click="addAllowedCommand">
+              <button class="add-cmd-btn mono" data-testid="allowed-add-btn" @click="addAllowedCommand">
                 Allow
               </button>
             </div>
@@ -842,6 +900,11 @@ const updateLine = computed(() => {
 
 <style scoped>
 .settings {
+  /* Local aliases for design rgba steps with no shared app token (rule 5) —
+     themed for light via the html.sb-light override below. Dialog/dropdown
+     shadows come from the shared --shadow-dlg/--shadow-dd tokens. */
+  --hi09: rgba(255, 255, 255, 0.09);
+  --hi22: rgba(255, 255, 255, 0.22);
   width: 730px;
   max-width: 94vw;
   height: 580px;
@@ -850,6 +913,26 @@ const updateLine = computed(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: var(--shadow-dlg);
+}
+
+html.sb-light .settings {
+  --hi09: rgba(96, 125, 160, 0.09);
+  --hi22: rgba(96, 125, 160, 0.22);
+}
+
+/* This dialog's own overlay tint/blur (design: separate from other dialogs') —
+   scoped so it only touches the overlay this component renders. */
+.overlay {
+  background: rgba(6, 7, 8, 0.62);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+html.sb-light .overlay {
+  background: rgba(236, 243, 251, 0.62);
 }
 
 .s-head {
@@ -867,7 +950,7 @@ const updateLine = computed(() => {
 
 .s-title {
   font-size: 13.5px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-bright);
 }
 
@@ -875,13 +958,13 @@ const updateLine = computed(() => {
   font-size: 13px;
   color: var(--text-tab);
   padding: 2px 8px;
-  border-radius: 10px;
+  border-radius: var(--rc);
   background: transparent;
 }
 
 .s-x:hover {
   color: var(--text-strong);
-  background: var(--bg-chip);
+  background: rgba(52, 211, 153, 0.1);
 }
 
 .s-main {
@@ -906,7 +989,7 @@ const updateLine = computed(() => {
   align-items: center;
   gap: 9px;
   padding: 9px 11px;
-  border-radius: 10px;
+  border-radius: var(--rc);
   border: 1px solid transparent;
   cursor: pointer;
   background: transparent;
@@ -914,7 +997,10 @@ const updateLine = computed(() => {
 }
 
 .rail-tab:hover {
-  background: var(--bg-card);
+  background: var(--bg-hover);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: var(--elev);
 }
 
 .rail-tab.sel {
@@ -959,7 +1045,7 @@ const updateLine = computed(() => {
 }
 
 .group {
-  margin-bottom: 8px;
+  margin-bottom: 20px;
 }
 
 .group-label {
@@ -987,15 +1073,18 @@ const updateLine = computed(() => {
   align-items: center;
   gap: 11px;
   padding: 10px 13px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-card);
-  border-radius: 10px;
+  background: var(--bg-hover);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: var(--elev);
+  border: 1px solid var(--hi09);
+  border-radius: var(--rc);
   cursor: pointer;
   text-align: left;
 }
 
 .card-opt:hover:not(.static) {
-  border-color: var(--border-strong);
+  border-color: var(--hi22);
 }
 
 .card-opt.sel {
@@ -1007,12 +1096,21 @@ const updateLine = computed(() => {
   cursor: default;
 }
 
+.card-opt.static .opt-name {
+  font-size: 13px;
+  color: var(--text-title);
+}
+
+.card-opt:not(.sel) .opt-sub {
+  color: var(--text-tab);
+}
+
 .opt-dot {
   width: 8px;
   min-width: 8px;
   height: 8px;
   border-radius: 99px;
-  border: 1.5px solid var(--border-strong);
+  border: 1.5px solid var(--hi22);
 }
 
 .opt-dot.on {
@@ -1073,40 +1171,70 @@ const updateLine = computed(() => {
   color: var(--teal);
 }
 
+.mcp-opt {
+  padding: 11px 13px;
+  gap: 12px;
+}
+
 .lock-chip {
   font-size: 10px;
-  color: var(--amber);
-  border: 1px solid rgba(154, 111, 42, 0.35);
-  padding: 1px 7px;
+  color: var(--red);
+  border: 1px solid rgba(143, 59, 44, 0.4);
+  border-radius: var(--rc);
+  padding: 2px 9px;
+  white-space: nowrap;
   flex-shrink: 0;
 }
 
 .add-cmd {
   display: flex;
-  gap: 8px;
+  align-items: center;
+  gap: 10px;
   margin-top: 8px;
+  padding: 10px 13px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--rc);
+}
+
+.add-cmd-plus {
+  flex-shrink: 0;
+  color: var(--green);
 }
 
 .add-cmd-input {
   flex: 1;
-  font-size: 11.5px;
-  padding: 8px 12px;
-  background: var(--bg-code);
-  border: 1px dashed var(--border-strong);
-  color: var(--text-body);
+  min-width: 60px;
+  font-size: 12px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-name);
   outline: none;
 }
 
-.add-cmd-input:focus {
+.add-cmd-btn {
+  flex-shrink: 0;
+  color: var(--text-mid);
+  border: 1px solid var(--border-strong);
+  font-size: 11px;
+  padding: 5px 12px;
+  border-radius: var(--rc);
+  cursor: pointer;
+  background: transparent;
+}
+
+.add-cmd-btn:hover {
   border-color: var(--green);
-  border-style: solid;
+  color: var(--text-strong);
 }
 
 .proj-card {
   padding: 11px 12px;
-  background: var(--bg-card-alt);
-  border: 1px solid var(--border-card-alt);
-  border-radius: 10px;
+  background: var(--bg-card);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(52, 211, 153, 0.18);
+  border-radius: var(--rc);
   margin-bottom: 10px;
 }
 
@@ -1120,15 +1248,15 @@ const updateLine = computed(() => {
   gap: 10px;
   width: 100%;
   padding: 9px 13px;
-  background: var(--bg-chip);
+  background: rgba(52, 211, 153, 0.1);
   border: 1px solid var(--border-strong);
-  border-radius: 10px;
+  border-radius: var(--rc);
   cursor: pointer;
   text-align: left;
 }
 
 .dd:hover {
-  border-color: var(--border-seg);
+  border-color: var(--hi22);
 }
 
 .dd-dot {
@@ -1156,12 +1284,14 @@ const updateLine = computed(() => {
   top: calc(100% + 5px);
   left: 0;
   right: 0;
-  background: var(--bg-card);
+  background: var(--bg-hover);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--border-strong);
-  border-radius: 10px;
+  border-radius: var(--rc);
   overflow: hidden;
   z-index: 10;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-dd);
   animation: sbIn 0.15s ease;
 }
 
@@ -1179,7 +1309,7 @@ const updateLine = computed(() => {
 }
 
 .dd-item:hover {
-  background: var(--bg-chip);
+  background: rgba(52, 211, 153, 0.1);
 }
 
 .dd-item.sel {
@@ -1209,9 +1339,12 @@ const updateLine = computed(() => {
   align-items: center;
   gap: 12px;
   padding: 10px 13px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-card);
-  border-radius: 10px;
+  background: var(--bg-hover);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: var(--elev);
+  border: 1px solid var(--hi09);
+  border-radius: var(--rc);
 }
 
 .sr-text {
@@ -1254,15 +1387,24 @@ const updateLine = computed(() => {
 }
 
 .seg-opt.on {
-  background: var(--bg-seg);
+  background: rgba(52, 211, 153, 0.24);
   color: var(--text-strong);
+}
+
+/* Allowed-list rows (design): the Auto pill, once active, gets its own
+   lower-emphasis green treatment distinct from the generic seg selection. */
+.seg-auto.on {
+  background: rgba(52, 211, 153, 0.15);
+  color: var(--green);
 }
 
 .note {
   padding: 10px 13px;
-  background: var(--bg-card-alt);
-  border: 1px solid var(--border-card-alt);
-  border-radius: 10px;
+  background: var(--bg-card);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(52, 211, 153, 0.18);
+  border-radius: var(--rc);
   font-size: 11.5px;
   line-height: 1.55;
   color: var(--text-meta);
@@ -1272,9 +1414,11 @@ const updateLine = computed(() => {
   font-size: 12px;
   color: var(--text-body);
   padding: 10px 13px;
-  background: var(--bg-card-alt);
-  border: 1px solid var(--border-card-alt);
-  border-radius: 10px;
+  background: var(--bg-card);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(52, 211, 153, 0.18);
+  border-radius: var(--rc);
   margin-bottom: 12px;
 }
 
@@ -1291,5 +1435,15 @@ const updateLine = computed(() => {
   border-top: 1px solid var(--border);
   font-size: 10.5px;
   color: var(--text-faint);
+}
+
+/* Design's toggle track/knob are rounded rects (var(--rc)), not a pill — scoped
+   here so it only reshapes the switches this dialog renders. */
+.switch {
+  border-radius: var(--rc);
+}
+
+.switch .knob {
+  border-radius: var(--rc);
 }
 </style>

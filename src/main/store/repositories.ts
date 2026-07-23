@@ -8,6 +8,7 @@ import type {
   Draft,
   EventKind,
   EventPayloadMap,
+  McpScan,
   PermissionRequest,
   PermissionRequestStatus,
   PermissionRule,
@@ -350,11 +351,18 @@ export class EventsRepo {
   }
 
   tokensSince(sinceIso: string): number {
+    // Total processed tokens = fresh input + output + BOTH cache tiers. On
+    // Claude Code turns the cache tiers dominate (inputTokens is only the
+    // uncached remainder), so omitting them made "Tokens today" undercount by
+    // orders of magnitude. Cache keys are snake_case (spread from the raw SDK
+    // usage), the input/output keys are the camelCase ones usageOf maps.
     const row = this.db
       .prepare(
         `SELECT COALESCE(SUM(
            COALESCE(json_extract(payload, '$.usage.inputTokens'), 0) +
-           COALESCE(json_extract(payload, '$.usage.outputTokens'), 0)
+           COALESCE(json_extract(payload, '$.usage.outputTokens'), 0) +
+           COALESCE(json_extract(payload, '$.usage.cache_read_input_tokens'), 0) +
+           COALESCE(json_extract(payload, '$.usage.cache_creation_input_tokens'), 0)
          ), 0) AS total
          FROM events WHERE kind = 'result' AND createdAt >= ?`,
       )
@@ -560,6 +568,21 @@ export class SettingsRepo {
       stored.databaseMcpServers = [stored.databaseMcpServer]
     }
     delete stored.databaseMcpServer
+    // Migrate to the roster/active split: before mcpActiveServers existed, the
+    // roster WAS the active combination — seed it so an upgrade keeps working.
+    if (!('mcpActiveServers' in stored) && Array.isArray(stored.databaseMcpServers)) {
+      stored.mcpActiveServers = [...stored.databaseMcpServers]
+    }
+    // Migrate plan/work models to the intelligent/worker split: the chosen
+    // implementation model (or failing that the planning model) becomes the
+    // intelligent model; the worker default comes from DEFAULT_SETTINGS.
+    if (!('intelligentModel' in stored)) {
+      const work = typeof stored.workModel === 'string' ? stored.workModel : 'default'
+      const plan = typeof stored.planModel === 'string' ? stored.planModel : 'default'
+      stored.intelligentModel = work !== 'default' ? work : plan
+    }
+    delete stored.planModel
+    delete stored.workModel
     return { ...DEFAULT_SETTINGS, ...stored }
   }
 
@@ -700,6 +723,35 @@ export class ProjectCommandsRepo {
   }
 }
 
+export class McpScansRepo {
+  constructor(private db: AppDatabase) {}
+
+  /** All scanned combinations for a project, newest first. */
+  listForProject(projectId: string): McpScan[] {
+    const rows = this.db
+      .prepare('SELECT * FROM mcp_scans WHERE projectId = ? ORDER BY scannedAt DESC')
+      .all(projectId) as (Omit<McpScan, 'servers'> & { servers: string })[]
+    return rows.map((r) => ({ ...r, servers: JSON.parse(r.servers) as string[] }))
+  }
+
+  /** Record (or refresh) a completed scan for a combination. `scannedAt`
+   *  should be when the doc was actually written (its mtime), so a re-scan
+   *  that produced nothing does not pass itself off as fresh. */
+  upsert(projectId: string, key: string, servers: string[], scannedAt = nowIso()): McpScan {
+    this.db
+      .prepare(
+        `INSERT INTO mcp_scans (id, projectId, comboKey, servers, scannedAt)
+         VALUES (@id, @projectId, @comboKey, @servers, @scannedAt)
+         ON CONFLICT(projectId, comboKey) DO UPDATE SET servers = @servers, scannedAt = @scannedAt`,
+      )
+      .run({ id: newId(), projectId, comboKey: key, servers: JSON.stringify(servers), scannedAt })
+    const row = this.db
+      .prepare('SELECT * FROM mcp_scans WHERE projectId = ? AND comboKey = ?')
+      .get(projectId, key) as Omit<McpScan, 'servers'> & { servers: string }
+    return { ...row, servers: JSON.parse(row.servers) as string[] }
+  }
+}
+
 export interface Repositories {
   projects: ProjectsRepo
   sessions: SessionsRepo
@@ -713,6 +765,7 @@ export interface Repositories {
   commandHistory: CommandHistoryRepo
   projectCommands: ProjectCommandsRepo
   taskQueue: TaskQueueRepo
+  mcpScans: McpScansRepo
 }
 
 export function createRepositories(db: AppDatabase): Repositories {
@@ -729,5 +782,6 @@ export function createRepositories(db: AppDatabase): Repositories {
     commandHistory: new CommandHistoryRepo(db),
     projectCommands: new ProjectCommandsRepo(db),
     taskQueue: new TaskQueueRepo(db),
+    mcpScans: new McpScansRepo(db),
   }
 }

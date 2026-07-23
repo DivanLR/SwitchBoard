@@ -21,7 +21,7 @@ html.sb-light {
   --bg-card: rgba(255, 255, 255, 0.55);
   --bg-card-alt: rgba(255, 255, 255, 0.5);
   --bg-code: #edf3fb;
-  --bg-hover: rgba(255, 255, 255, 0.55);
+  --bg-hover: rgba(255, 255, 255, 0.42);
   --bg-active: #e4f6ec;
   --bg-seg: rgba(96, 125, 160, 0.14);
   --bg-chip: rgba(96, 125, 160, 0.08);
@@ -39,12 +39,12 @@ html.sb-light {
   --text: #102532;
   --text-body: #274050;
   --text-name: #102532;
-  --text-prompt: #274050;
+  --text-prompt: #102532;
   --text-mid: #3c5566;
   --text-meta: #3c5566;
   --text-tab: #516778;
   --text-noise: #516778;
-  --text-label: #5f7688;
+  --text-label: #516778;
   --text-faint: #5f7688;
   --text-ghost: #6d8394;
   --green: #167c3a;
@@ -75,9 +75,15 @@ html.sb-light {
     0 12px 30px -12px rgba(20, 40, 70, 0.16);
   --gloss: linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 54%);
   --rc: 14px;
-  /* Design light uses Inter; we keep the already-bundled Figtree (visually
-     near-identical) rather than ship a second webfont for a subtle change.
-     ponytail: swap in Inter woff2 only if the face difference is ever flagged. */
+  /* Design light uses Inter; fall back to the OS UI face (Segoe UI on
+     Windows) rather than bundling a second webfont just for this face. */
+  --sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /* Light scrim + shadows: the design remaps --rgb-0-0-0 → 20,40,70 and
+     --rgb-5-6-9 → 236,243,251, so overlays lighten and shadows go blue-grey. */
+  --scrim: rgba(236, 243, 251, 0.66);
+  --shadow-dlg: 0 32px 80px rgba(20, 40, 70, 0.6), 0 0 0 1px rgba(96, 125, 160, 0.03) inset;
+  --shadow-dd: 0 16px 40px rgba(20, 40, 70, 0.5);
+  --shadow-menu: 0 16px 40px rgba(20, 40, 70, 0.55);
 }
 
 /* Light-mode app background: the design's light --app-bg — soft sky-blue and
@@ -119,14 +125,14 @@ html.sb-light body {
   --text: #e3e7f4;
   --text-body: #c3cad8;
   --text-name: #d2d8e4;
-  --text-prompt: #ccd2df;
-  --text-mid: #9aa2b3;
+  --text-prompt: #cdd1d8;
+  --text-mid: #9aa2b4;
   --text-meta: #8f97a9;
   --text-tab: #7e8698;
-  --text-noise: #6a7284;
-  --text-label: #5f6779;
+  --text-noise: #6a707b;
+  --text-label: #5f6570;
   --text-faint: #5a6274;
-  --text-ghost: #454d5e;
+  --text-ghost: #454e60;
   --green: #34d399;
   --green-hover: #6ee7b7;
   /* Darker gradient stop for the primary-button fill (design: 135deg emerald→
@@ -140,8 +146,8 @@ html.sb-light body {
   --amber-hover: #f2c574;
   --amber-ink: #201505;
   --red: #8f3b2c;
-  --red-hover: #ef8573;
-  --red-ink: #1a0e0c;
+  --red-hover: #ea8266;
+  --red-ink: #1c0b07;
   --detail: #8fa8bd;
   /* Database/MCP accent (teal, distinct from the emerald green). */
   --teal: #2dd4bf;
@@ -164,6 +170,12 @@ html.sb-light body {
   --elev: none;
   --gloss: linear-gradient(rgba(255, 255, 255, 0), rgba(255, 255, 255, 0));
   --rc: 10px;
+  /* Overlay scrim + dialog/menu drop shadows (design: rgba over themed rgb
+     triplets — near-black in dark, pale blue-grey in light). */
+  --scrim: rgba(5, 6, 9, 0.66);
+  --shadow-dlg: 0 32px 80px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+  --shadow-dd: 0 16px 40px rgba(0, 0, 0, 0.5);
+  --shadow-menu: 0 16px 40px rgba(0, 0, 0, 0.55);
 }
 
 * {
@@ -215,6 +227,10 @@ a:hover {
   background: rgba(52, 211, 153, 0.28);
 }
 
+html.sb-light ::selection {
+  background: rgba(22, 163, 74, 0.28);
+}
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -222,7 +238,7 @@ a:hover {
 
 ::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.1);
-  border: 2px solid #070a14;
+  border: 2px solid var(--bg);
   border-radius: 99px;
 }
 
@@ -241,7 +257,7 @@ select {
   color: var(--text);
   background: var(--bg-code);
   border: 1px solid var(--border-strong);
-  border-radius: 10px;
+  border-radius: var(--rc);
   padding: 6px 10px;
 }
 
@@ -451,7 +467,7 @@ button {
 .chip-risk {
   font-family: var(--mono);
   font-size: 10px;
-  border-radius: 10px;
+  border-radius: var(--rc);
   padding: 1px 6px;
   white-space: nowrap;
   flex-shrink: 0;
@@ -480,7 +496,7 @@ button {
 
 /* Stream marker chips */
 .chip-marker {
-  border-radius: 10px;
+  border-radius: var(--rc);
   padding: 1px 7px;
   font-size: 10.5px;
   white-space: nowrap;
@@ -534,7 +550,9 @@ button {
 }
 
 .stream-inner {
-  max-width: 840px;
+  /* Full-width session area: fill the pane rather than capping at 840px, which
+     left a wide right-hand gap on large/fullscreen windows. */
+  max-width: none;
 }
 
 .live {
@@ -553,9 +571,12 @@ button {
   padding: 11px 18px;
 }
 
+/* Bottom-pinned like the design: the multi-line input grows upward while the
+   caret, to-label and buttons stay on the bottom line (center made them float
+   mid-height against the taller buttons). */
 .composer-row {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 10px;
 }
 
@@ -582,6 +603,8 @@ button {
   white-space: nowrap;
   font-size: 10.5px;
   color: var(--text-faint);
+  /* Bottom-pinned row: lift the small label to the buttons' text line. */
+  padding-bottom: 8px;
 }
 
 .send-btn {
@@ -645,11 +668,14 @@ button {
   background: var(--bg);
 }
 
-/* Overlay dialogs (registration, rules, settings) */
+/* Overlay dialogs (registration, rules, settings) — design scrim: themed
+   near-black (light: pale blue) at .66 with a 4px backdrop blur. */
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--scrim);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;

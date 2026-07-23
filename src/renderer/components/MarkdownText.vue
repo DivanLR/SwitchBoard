@@ -75,7 +75,7 @@ const html = computed(() => renderMarkdown(props.text))
   font-size: 12px;
   background: var(--bg-chip);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--rc);
   padding: 0 4px;
   color: var(--text-body);
 }
@@ -85,7 +85,7 @@ const html = computed(() => renderMarkdown(props.text))
 .md :deep(pre.md-pre) {
   background: var(--bg-code);
   border: 1px solid var(--border-soft);
-  border-radius: 10px;
+  border-radius: var(--rc);
   padding: 10px 12px;
   margin: 0 0 8px;
   overflow-x: auto;
@@ -100,5 +100,45 @@ const html = computed(() => renderMarkdown(props.text))
   padding: 0;
   color: var(--text-body);
   white-space: pre;
+}
+
+/* Tables (analysis reports, comparisons): card chrome, hairline rows, and a
+   horizontal scroll wrapper so wide tables never stretch the stream. */
+.md :deep(.md-table-wrap) {
+  overflow-x: auto;
+  margin: 0 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--rc);
+}
+
+.md :deep(table.md-table) {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.md :deep(.md-table th) {
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-meta);
+  background: var(--bg-chip);
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-strong);
+  white-space: nowrap;
+}
+
+.md :deep(.md-table td) {
+  padding: 6px 10px;
+  vertical-align: top;
+  color: var(--text-body);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.md :deep(.md-table tbody tr:last-child td) {
+  border-bottom: none;
 }
 </style>

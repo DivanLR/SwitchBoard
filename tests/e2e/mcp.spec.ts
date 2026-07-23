@@ -80,14 +80,19 @@ test('the global MCP row opens the Database view and scans to db-schema.md', asy
   const sends = await page.evaluate(() => window.__mock.state().sends.map((s) => s.text))
   expect(
     sends.some(
-      (t) => /scan these mcp servers/i.test(t) && t.includes('"postgres — production"') && t.includes('db-schema.md'),
+      (t) =>
+        /scan these mcp servers/i.test(t) &&
+        t.includes('"postgres — production"') &&
+        t.includes('.switchboard/scans/'),
     ),
   ).toBe(true)
 })
 
 test('a completed scan unlocks db-schema.md and chat runs a DB-targeted query', async ({ page }) => {
   await page.evaluate(() =>
-    window.__mock.setMcpSchema('p-db', '# db-schema.md\n\n## public.users\n\n- `id` uuid PK\n'),
+    window.__mock.setMcpSchema('p-db', '# db-schema.md\n\n## public.users\n\n- `id` uuid PK\n', [
+      'postgres — production',
+    ]),
   )
   await designateDbMcp(page)
   await page.locator(mcpRow).first().click()
@@ -107,8 +112,9 @@ test('a completed scan unlocks db-schema.md and chat runs a DB-targeted query', 
     ),
   ).toBe(true)
 
-  // Back closes the view and returns to the selected project's session.
-  await page.getByTestId('mcp-close').click()
+  // There is no back button (design) — selecting a project in the sidebar
+  // leaves the MCP view and returns to that project's session.
+  await page.getByTestId('sidebar-project-alpha').click()
   await expect(page.getByTestId('mcp-view')).toHaveCount(0)
   await expect(page.getByTestId('stream')).toBeVisible()
 })
@@ -135,7 +141,10 @@ test('two designated servers combine into one chat and one scan', async ({ page 
   const sends = await page.evaluate(() => window.__mock.state().sends.map((s) => s.text))
   expect(
     sends.some(
-      (t) => t.includes('"postgres — production"') && t.includes('"github"') && t.includes('db-schema.md'),
+      (t) =>
+        t.includes('"postgres — production"') &&
+        t.includes('"github"') &&
+        t.includes('.switchboard/scans/'),
     ),
   ).toBe(true)
   expect(
@@ -159,4 +168,63 @@ test('the manual start runs a normal session with no MCP server denied', async (
   const dbStart = starts.find((s) => s.projectId === 'p-db')
   expect(dbStart).toBeTruthy()
   expect(dbStart?.deniedMcpServers ?? []).toEqual([])
+})
+
+test('unticking a server drops it from the combination; each combo keeps its own doc', async ({
+  page,
+}) => {
+  // Both combos have distinct pre-seeded scan docs.
+  await page.evaluate(() => {
+    window.__mock.setMcpSchema('p-db', '# combined map\n', ['github', 'postgres — production'])
+    window.__mock.setMcpSchema('p-db', '# postgres-only map\n', ['postgres — production'])
+  })
+  await page.getByTestId('open-settings').click()
+  await page.getByTestId('settings-tab-mcp').click()
+  await page.getByTestId('db-mcp-postgres — production').click()
+  await page.getByTestId('db-mcp-github').click()
+  await page.getByTestId('settings-done').click()
+  await page.locator(mcpRow).first().click()
+
+  // Both start active (adding to the view defaults to active).
+  await expect(page.getByTestId('mcp-combo-name')).toHaveText('github + postgres — production')
+  await page.getByTestId('mcp-tab-md').click()
+  await expect(page.getByTestId('mcp-doc')).toContainText('combined map')
+
+  // Untick github → the postgres-only combination and ITS doc take over.
+  await page.getByTestId('mcp-chip-github').click()
+  await expect(page.getByTestId('mcp-combo-name')).toHaveText('postgres — production')
+  await expect(page.getByTestId('mcp-doc')).toContainText('postgres-only map')
+
+  // Untick everything → the hero takes over and the scan button is gated
+  // until a server is ticked again.
+  await page.getByTestId('mcp-tab-chat').click()
+  await page.getByTestId('mcp-chip-postgres — production').click()
+  await expect(page.getByTestId('mcp-empty')).toBeVisible()
+  await expect(page.getByTestId('mcp-scan')).toBeDisabled()
+})
+
+test('a finished scan lands in the combination history and can be re-activated', async ({
+  page,
+}) => {
+  await designateDbMcp(page)
+  await page.locator(mcpRow).first().click()
+
+  // Seed the combo doc (as if the scan agent wrote it), scan, and finish the turn.
+  await page.evaluate(() =>
+    window.__mock.setMcpSchema('p-db', '# scanned map\n', ['postgres — production']),
+  )
+  await page.getByTestId('mcp-scan').click()
+  await page.evaluate(() => window.__mock.setStatus('s-db', 'done'))
+
+  // The combination is recorded: status line + a history chip appear.
+  await expect(page.getByTestId('mcp-combo-scanned')).toContainText('scanned')
+  await expect(page.getByTestId('mcp-history-postgres — production')).toBeVisible()
+
+  // A different combination shows as never scanned; clicking the history chip
+  // re-activates the scanned one.
+  await page.getByTestId('mcp-chip-postgres — production').click()
+  await expect(page.getByTestId('mcp-combo-name')).toHaveCount(0)
+  await page.getByTestId('mcp-history-postgres — production').click()
+  await expect(page.getByTestId('mcp-combo-name')).toHaveText('postgres — production')
+  await expect(page.getByTestId('mcp-combo-scanned')).toContainText('scanned')
 })

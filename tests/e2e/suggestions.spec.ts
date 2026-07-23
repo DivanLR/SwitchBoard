@@ -26,37 +26,49 @@ test('the composer is focused on session open — typing works without a click',
   await expect(page.getByTestId('composer-input')).toHaveValue('/hel')
 })
 
-test('inline ghost text completes from history and Tab accepts it', async ({ page }) => {
+test('past prompts are never auto-suggested — commands only', async ({ page }) => {
   const input = page.getByTestId('composer-input')
+  // Typing prose that matches history shows no dropdown and no ghost text.
   await input.fill('git c')
-  // Ghost shows the remainder of the most recent matching command.
-  await expect(page.getByTestId('ghost-suggestion')).toHaveText('ommit -m wip')
-  await input.press('Tab')
-  await expect(input).toHaveValue('git commit -m wip')
+  await expect(page.getByTestId('suggest-list')).toHaveCount(0)
+  await expect(page.getByTestId('ghost-suggestion')).toHaveText('')
 })
 
-test('a dropdown lists matching past commands and click accepts one', async ({ page }) => {
+test('inline ghost text completes a slash command and Tab accepts it', async ({ page }) => {
+  await page.evaluate(() => window.__mock.setCommands('p-alpha', ['speckit-plan']))
   const input = page.getByTestId('composer-input')
-  await input.fill('git')
+  await input.fill('/speckit-p')
+  await expect(page.getByTestId('ghost-suggestion')).toHaveText('lan')
+  await input.press('Tab')
+  await expect(input).toHaveValue('/speckit-plan')
+})
+
+test('the dropdown lists matching commands and click accepts one', async ({ page }) => {
+  await page.evaluate(() =>
+    window.__mock.setCommands('p-alpha', ['speckit-plan', 'speckit-tasks']),
+  )
+  const input = page.getByTestId('composer-input')
+  await input.fill('/speckit-')
   const list = page.getByTestId('suggest-list')
   await expect(list).toBeVisible()
-  // Both git commands match; newest first.
-  await expect(page.getByTestId('suggest-item-0')).toContainText('git commit -m wip')
-  await expect(page.getByTestId('suggest-item-1')).toContainText('git status')
+  await expect(list).toContainText('/speckit-plan')
+  await expect(list).toContainText('/speckit-tasks')
   await page.getByTestId('suggest-item-1').click()
-  await expect(input).toHaveValue('git status')
+  await expect(input).toHaveValue('/speckit-tasks')
 })
 
 test('arrow keys navigate the dropdown and Enter accepts the highlighted row', async ({ page }) => {
+  await page.evaluate(() =>
+    window.__mock.setCommands('p-alpha', ['speckit-plan', 'speckit-tasks']),
+  )
   const input = page.getByTestId('composer-input')
-  await input.fill('git')
+  await input.fill('/speckit-')
   await input.press('ArrowDown') // highlight row 0
   await input.press('ArrowDown') // highlight row 1
   await input.press('Enter') // accept highlighted, does not send
-  await expect(input).toHaveValue('git status')
-  // Nothing was sent by that Enter.
+  await expect(input).toHaveValue('/speckit-tasks')
   const sends = await page.evaluate(() => window.__mock.state().sends)
-  expect(sends.filter((s) => s.text === 'git status')).toHaveLength(1)
+  expect(sends.filter((s) => s.text === '/speckit-tasks')).toHaveLength(0)
 })
 
 test('up-arrow on an empty composer recalls the most recent command', async ({ page }) => {
@@ -69,10 +81,41 @@ test('up-arrow on an empty composer recalls the most recent command', async ({ p
 })
 
 test('Escape dismisses the suggestions', async ({ page }) => {
+  await page.evaluate(() => window.__mock.setCommands('p-alpha', ['speckit-plan']))
   const input = page.getByTestId('composer-input')
-  await input.fill('git')
+  await input.fill('/speckit')
   await expect(page.getByTestId('suggest-list')).toBeVisible()
   await input.press('Escape')
   await expect(page.getByTestId('suggest-list')).toHaveCount(0)
   await expect(page.getByTestId('ghost-suggestion')).toHaveText('')
+})
+
+test('commands only suggest for a slash token, never for plain prose', async ({ page }) => {
+  await page.evaluate(() =>
+    window.__mock.setCommands('p-alpha', [
+      { name: 'claude-api', description: 'API reference' },
+      { name: 'cleanup', description: 'Tidy the repo' },
+    ]),
+  )
+  const input = page.getByTestId('composer-input')
+
+  // Plain prose starting with "c": no command suggestions (history does not
+  // prefix-match "c" either, so the dropdown stays closed).
+  await input.fill('c')
+  await expect(page.getByTestId('suggest-list')).toHaveCount(0)
+
+  // A leading slash opens the command palette.
+  await input.fill('/c')
+  await expect(page.getByTestId('suggest-list')).toContainText('/claude-api')
+
+  // A mid-sentence slash after a space also suggests, and accepting replaces
+  // only that token.
+  await input.fill('please run /clean')
+  await expect(page.getByTestId('suggest-list')).toContainText('/cleanup')
+  await page.getByTestId('suggest-item-0').click()
+  await expect(input).toHaveValue('please run /cleanup ')
+
+  // A slash with no space before it (mid-word) does not suggest.
+  await input.fill('src/main')
+  await expect(page.getByTestId('suggest-list')).toHaveCount(0)
 })

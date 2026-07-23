@@ -66,9 +66,12 @@ async function startSession(): Promise<void> {
 <template>
   <div class="overlay" @click.self="emit('close')">
     <div class="dialog reg" data-testid="registration-dialog">
-      <div class="title mono"><span style="color: var(--green)">＋</span> New session</div>
-      <p class="sub">Point Claude Code at a folder and it shows up in the sidebar.</p>
+      <div class="reg-head">
+        <div class="title mono"><span style="color: var(--green)">＋</span> New session</div>
+        <p class="sub">Point Claude Code at a folder and it shows up in the sidebar.</p>
+      </div>
 
+      <div class="reg-body">
       <p v-if="error" class="error mono" data-testid="registration-error">{{ error }}</p>
 
       <div class="section-label mono">FOLDER</div>
@@ -84,17 +87,19 @@ async function startSession(): Promise<void> {
         Session name: <span class="name-val">{{ sessionName }}</span>
       </div>
 
-      <div class="section-label mono">FOLDER ACCESS — DEFAULT</div>
-      <div class="access mono">
-        <div class="access-row">
-          <span class="ok">✓</span> Read — everything inside this folder, no asking
-        </div>
-        <div class="access-row">
-          <span class="ok">✓</span> Write — create and edit files inside this folder, no asking
-        </div>
-        <div class="access-row">
-          <span class="ask">?</span> Anything outside the folder, shell commands, and deletes still
-          ask first
+      <div class="access-card">
+        <div class="access-label mono">FOLDER ACCESS — DEFAULT</div>
+        <div class="access mono">
+          <div class="access-row">
+            <span class="ok">✓</span> Read — everything inside this folder, no asking
+          </div>
+          <div class="access-row">
+            <span class="ok">✓</span> Write — create and edit files inside this folder, no asking
+          </div>
+          <div class="access-row">
+            <span class="ask">?</span> Anything outside the folder, shell commands, and deletes
+            still ask first
+          </div>
         </div>
       </div>
 
@@ -103,7 +108,7 @@ async function startSession(): Promise<void> {
           <div class="bypass-label">Bypass permissions</div>
           <div class="bypass-desc">
             Skips every approval — runs commands, edits, and deletes without asking
-            (<span class="mono">--dangerously-skip-permissions</span>)
+            (<span class="mono bypass-code">--dangerously-skip-permissions</span>)
           </div>
         </div>
         <button
@@ -138,6 +143,10 @@ async function startSession(): Promise<void> {
         </div>
       </template>
 
+      </div>
+
+      <!-- Pinned footer: Start session stays visible no matter how long the
+           suggestions list grows. -->
       <div class="actions">
         <button
           class="btn-solid"
@@ -157,51 +166,120 @@ async function startSession(): Promise<void> {
 
 <style scoped>
 .reg {
-  width: 560px;
-  max-height: 84vh;
-  overflow-y: auto;
+  width: 470px;
+  max-width: 92vw;
+  max-height: 88vh;
+  /* Flex column: header + scrollable body + pinned footer. The dialog itself
+     no longer scrolls, so the actions stay put. */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 22px;
+  /* A card, not a pill — 99px bows the corners in and clips the content. */
+  border-radius: var(--rc);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: var(--shadow-dlg);
 }
+
+.reg-head {
+  flex-shrink: 0;
+}
+
+/* Only the middle scrolls; the negative margins + padding keep focus rings and
+   the suggestion hover from being clipped at the scroll edges. */
+.reg-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0 -22px;
+  padding: 0 22px;
+}
+
 
 .title {
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-bright);
 }
 
 .sub {
   font-size: 12px;
-  color: var(--text-mid);
+  color: var(--text-meta);
   margin: 4px 0 0;
 }
 
 .section-label {
   font-size: 10px;
-  letter-spacing: 0.13em;
+  letter-spacing: 0.15em;
   color: var(--text-faint);
-  margin: 18px 0 8px;
+  margin: 18px 0 6px;
+}
+
+/* Design's toggle track/knob is a rounded rect (var(--rc)), not a pill —
+   scoped here so it only reshapes the bypass switch this dialog renders. */
+.switch {
+  border-radius: var(--rc);
+}
+
+.switch .knob {
+  border-radius: var(--rc);
 }
 
 .folder-input {
   width: 100%;
-  font-size: 12px;
+  font-size: 12.5px;
+  padding: 9px 12px;
+  background: var(--bg);
+  border-radius: var(--rc);
 }
 
 .name-preview {
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--text-faint);
   margin-top: 6px;
 }
 
 .name-val {
-  color: var(--text-body);
+  color: var(--text-mid);
+}
+
+.access-card {
+  margin-top: 16px;
+  padding: 12px 14px;
+  background: var(--bg-card);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(52, 211, 153, 0.18);
+  border-radius: var(--rc);
+}
+
+.access-label {
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  color: var(--text-faint);
+  margin-bottom: 9px;
 }
 
 .access {
-  font-size: 11.5px;
-  color: var(--text-mid);
+  font-size: 12px;
+  color: var(--text-body);
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 7px;
+}
+
+.access-row {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+
+.access-row .ok,
+.access-row .ask {
+  font-size: 11px;
+  width: 14px;
+  min-width: 14px;
 }
 
 .access-row .ok {
@@ -216,10 +294,13 @@ async function startSession(): Promise<void> {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-top: 16px;
-  padding: 10px 12px;
+  margin-top: 12px;
+  padding: 12px 14px;
   background: var(--bg-card);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--border-card);
+  border-radius: var(--rc);
 }
 
 .bypass-text {
@@ -228,25 +309,35 @@ async function startSession(): Promise<void> {
 }
 
 .bypass-label {
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-title);
 }
 
 .bypass-desc {
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--text-tab);
   margin-top: 2px;
   line-height: 1.5;
 }
 
+.bypass-code {
+  font-size: 10.5px;
+}
+
 .bypass-warn {
   margin-top: 8px;
   padding: 8px 10px;
-  font-size: 11px;
-  color: var(--red);
-  border: 1px solid rgba(143, 59, 44, 0.35);
-  background: rgba(143, 59, 44, 0.07);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: #e0937f;
+  border: 1px solid rgba(143, 59, 44, 0.4);
+  background: rgba(143, 59, 44, 0.06);
+  border-radius: var(--rc);
+}
+
+html.sb-light .bypass-warn {
+  color: #f87171;
 }
 
 .suggestion {
@@ -286,10 +377,13 @@ async function startSession(): Promise<void> {
   color: var(--green);
 }
 
+/* Pinned footer: stays visible below the scrollable body. */
 .actions {
+  flex-shrink: 0;
   display: flex;
   gap: 8px;
-  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
 }
 
 .error {

@@ -21,14 +21,14 @@ test('session usage meter shows token spend and increases after a completed turn
   await expect(tokens).not.toHaveText('0 tok')
 })
 
-test('settings exposes planning and work model cards', async ({ page }) => {
+test('settings exposes intelligent and worker model cards', async ({ page }) => {
   await page.getByTestId('open-settings').click()
   const panel = page.getByTestId('settings-panel')
-  await expect(panel.getByTestId('plan-model-claude-fable-5')).toBeVisible()
-  await expect(panel.getByTestId('work-model-claude-opus-4-8')).toBeVisible()
-  // Picking a work-model card selects it.
-  await panel.getByTestId('work-model-claude-opus-4-8').click()
-  await expect(panel.getByTestId('work-model-claude-opus-4-8')).toHaveClass(/sel/)
+  await expect(panel.getByTestId('intelligent-model-claude-fable-5')).toBeVisible()
+  await expect(panel.getByTestId('worker-model-claude-sonnet-5')).toBeVisible()
+  // Picking an intelligent-model card selects it.
+  await panel.getByTestId('intelligent-model-claude-opus-4-8').click()
+  await expect(panel.getByTestId('intelligent-model-claude-opus-4-8')).toHaveClass(/sel/)
   // The sidebar model summary reflects the choice.
   await panel.getByTestId('settings-done').click()
   await expect(page.getByTestId('model-summary')).toContainText('Opus')
@@ -55,12 +55,13 @@ test('settings has a This project tab with a per-project model override', async 
   await expect(panel.getByTestId('proj-model-claude-haiku-4-5-20251001')).toHaveClass(/sel/)
 })
 
-test('the session usage meter shows when a session reports rate-limit usage', async ({ page }) => {
-  // No usage yet → no meter.
-  await expect(page.getByTestId('usage-meter')).toHaveCount(0)
-  await page.evaluate(() => window.__mock.setUsage('s-alpha', 72, 95, 'five_hour'))
+test('the session usage meter shows for a live session and fills in when usage reports', async ({ page }) => {
+  // A live session exists → the meter shows at once, with a placeholder until
+  // the SDK reports rate-limit utilization.
   const meter = page.getByTestId('usage-meter')
   await expect(meter).toBeVisible()
+  await expect(meter).toContainText('— of 5h limit')
+  await page.evaluate(() => window.__mock.setUsage('s-alpha', 72, 95, 'five_hour'))
   await expect(meter).toContainText('72% of 5h limit')
   await expect(meter).toContainText('Resets in')
 })

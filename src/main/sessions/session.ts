@@ -9,9 +9,10 @@ import {
   type SDKMessage,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
-import type { McpServer, ProjectCommand, SessionStatus } from '@shared/domain'
+import type { McpServer, ModelMode, ProjectCommand, SessionStatus } from '@shared/domain'
 import { MessageMapper, type EventSink } from './message-mapper'
-import { classifyIntent } from './model-routing'
+import { classifyWorkload } from './model-routing'
+import { modeAgents } from './modes'
 
 /** Streaming input queue the SDK consumes; `end()` closes the session gracefully. */
 class AsyncPushQueue<T> implements AsyncIterable<T> {
@@ -81,6 +82,10 @@ export interface HostedSessionOptions {
   /** Route each message by intent (question→planModel, code→workModel) instead
    *  of by the plan-mode toggle. */
   autoModelRouting?: boolean
+  /** Advisor/Orchestrator pairing mode; 'auto' picks per message by workload. */
+  modelMode?: ModelMode
+  /** Pairing mode chosen for the latest work turn (header chip); null = plan turn. */
+  onTurnMode?: (mode: 'advisor' | 'orchestrator' | null) => void
   /** Bypass all permission checks for this session (auto-approve every tool). */
   bypassPermissions?: boolean
   /** Relabel a turn's closing message as ✦ SUMMARY (off = raw response). */
@@ -93,6 +98,11 @@ export interface HostedSessionOptions {
   onCommands?: (commands: ProjectCommand[]) => void
   /** Subscription rate-limit usage from rate_limit_event (session usage meter). */
   onUsage?: (usage: { utilization: number | null; resetsAt: number | null; limitType: string | null }) => void
+  /** Per-model usage for each finished turn (session totals, top-model chips). */
+  onModelUsage?: (modelUsage: Record<string, import('./message-mapper').ModelTurnUsage>) => void
+  /** Live background tasks (deep-research workflows, backgrounded subagents/bash)
+   *  from the SDK's background_tasks_changed signal — REPLACE semantics. */
+  onBackgroundTasks?: (tasks: { taskId: string; description: string }[]) => void
   /** MCP servers reported in the init message (sidebar MCP section). */
   onMcpServers?: (servers: McpServer[]) => void
   /** Model the SDK reports for each main-loop turn (header display). */
@@ -132,6 +142,7 @@ export class HostedSession {
       sink: options.sink,
       onSdkSessionId: options.onSdkSessionId,
       summaries: options.summaries,
+      onModelUsage: options.onModelUsage,
     })
   }
 
@@ -164,6 +175,13 @@ export class HostedSession {
         systemPrompt: this.options.systemPromptAppend
           ? { type: 'preset', preset: 'claude_code', append: this.options.systemPromptAppend }
           : undefined,
+        // Advisor/Orchestrator pairing agents: `advisor` on the strong model,
+        // `worker` on the cheap one. Static per session; the mode protocol in
+        // the system-prompt append tells the loop when to reach for each.
+        agents: modeAgents({
+          strongModel: this.options.workModel,
+          cheapModel: this.options.workerModel,
+        }),
         canUseTool: (toolName, input, canUseToolOptions) =>
           this.options.gate({
             sessionId: this.sessionId,
@@ -253,12 +271,22 @@ export class HostedSession {
   private applyModelForIntent(text: string): void {
     if (!this.options.autoModelRouting) return
     const norm = (m?: string): string | undefined => (m && m !== 'default' ? m : undefined)
-    const intent = classifyIntent(text)
-    // Work-classified turns prefer the cheaper per-project worker model when set.
+    // Workload → pairing mode: questions stay on the plan model; scoped work
+    // runs ADVISOR (cheap executor loop, strong advisor subagent); broad work
+    // runs ORCHESTRATOR (strong loop delegating to cheap worker subagents).
+    // A forced mode pins every work turn to that pattern.
+    const auto = classifyWorkload(text)
+    const workload =
+      this.options.modelMode && this.options.modelMode !== 'auto' && auto !== 'plan'
+        ? this.options.modelMode
+        : auto
     const wanted =
-      intent === 'plan'
+      workload === 'plan'
         ? norm(this.options.planModel)
-        : (norm(this.options.workerModel) ?? norm(this.options.workModel))
+        : workload === 'orchestrator'
+          ? norm(this.options.workModel)
+          : (norm(this.options.workerModel) ?? norm(this.options.workModel))
+    this.options.onTurnMode?.(workload === 'plan' ? null : workload)
     const target = wanted ?? '__default__'
     if (this.appliedModel === target) return
     this.appliedModel = target
@@ -317,6 +345,7 @@ export class HostedSession {
       taskId: t.task_id ?? '',
       description: t.description ?? '',
     }))
+    this.options.onBackgroundTasks?.(this.backgroundTasks)
     this.recomputeStatus()
   }
 
