@@ -1,6 +1,6 @@
 // Intent heuristic for automatic model routing.
 import { describe, expect, it } from 'vitest'
-import { classifyIntent, classifyWorkload } from '@main/sessions/model-routing'
+import { classifyIntent, classifyWorkload, nextStrongestModel } from '@main/sessions/model-routing'
 
 describe('classifyIntent', () => {
   it('routes questions and discussion to the plan model', () => {
@@ -43,5 +43,23 @@ describe('classifyWorkload (Advisor/Orchestrator auto mode)', () => {
     expect(
       classifyWorkload('do all of the following\n- fix the header\n- add a toggle\n- update the tests'),
     ).toBe('orchestrator')
+  })
+})
+
+describe('nextStrongestModel (usage-limit fallback ladder)', () => {
+  it('drops the default/strong tier to the Sonnet workhorse', () => {
+    expect(nextStrongestModel('default')).toBe('claude-sonnet-5')
+    expect(nextStrongestModel(undefined)).toBe('claude-sonnet-5')
+    expect(nextStrongestModel('claude-opus-4-8')).toBe('claude-sonnet-5')
+  })
+
+  it('walks one rung down and stops at the floor', () => {
+    expect(nextStrongestModel('claude-fable-5')).toBe('claude-opus-4-8')
+    expect(nextStrongestModel('claude-sonnet-5')).toBe('claude-haiku-4-5-20251001')
+    expect(nextStrongestModel('claude-haiku-4-5-20251001')).toBeNull()
+  })
+
+  it('returns null for an unknown id', () => {
+    expect(nextStrongestModel('some-future-model')).toBeNull()
   })
 })

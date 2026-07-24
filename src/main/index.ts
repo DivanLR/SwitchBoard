@@ -253,7 +253,7 @@ async function main(): Promise<void> {
     getWindow: () => mainWindow,
     dbProjectId: dbProject.id,
   })
-  scheduleRetention(() => runRetention(db, repos))
+  scheduleRetention(() => runRetention(db))
   initUpdater({ onStatus: (status) => pusher.push('push.updateStatus', status) })
 
   createWindow()

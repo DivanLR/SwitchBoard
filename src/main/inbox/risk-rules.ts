@@ -5,10 +5,6 @@
 import type { RiskClassificationRule, RiskInputMatcher, RiskLevel } from '@shared/domain'
 import { newId } from '@main/store/repositories'
 
-export interface RiskEvaluation {
-  risk: RiskLevel
-}
-
 const REGEX_SPECIALS = new Set(['.', '+', '^', '$', '{', '}', '(', ')', '|', '[', ']', '\\'])
 
 export function globToRegExp(glob: string): RegExp {
@@ -55,15 +51,15 @@ export function classifyRisk(
   rules: RiskClassificationRule[],
   toolName: string,
   input: Record<string, unknown>,
-): RiskEvaluation {
+): RiskLevel {
   const ordered = [...rules].sort((a, b) => a.position - b.position)
   for (const rule of ordered) {
     if (rule.toolMatcher !== '*' && rule.toolMatcher !== toolName) continue
     if (rule.inputMatcher && !matchesInput(rule.inputMatcher, input)) continue
-    return { risk: rule.risk }
+    return rule.risk
   }
   // Fail-safe: anything not matched by a rule is high risk (FR-008a).
-  return { risk: 'high' }
+  return 'high'
 }
 
 interface DefaultRuleSeed {

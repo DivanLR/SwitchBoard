@@ -57,12 +57,12 @@ describe('runRetention', () => {
     insertEvent(repos, previous, 1)
     insertEvent(repos, current, 1)
 
-    const dry = runRetention(db, repos, { dryRun: true })
+    const dry = runRetention(db, { dryRun: true })
     expect(dry.eventsDeleted).toBe(2)
     // Dry run deletes nothing.
     expect(repos.events.page(oldSession)).toHaveLength(2)
 
-    const result = runRetention(db, repos)
+    const result = runRetention(db)
     expect(result.eventsDeleted).toBe(2)
     expect(repos.events.page(oldSession)).toHaveLength(0)
     expect(repos.events.page(previous)).toHaveLength(1)
@@ -99,7 +99,7 @@ describe('runRetention', () => {
     const pending = newId()
     repos.requests.insert({ ...base, id: pending, status: 'pending', resolvedAt: null })
 
-    const result = runRetention(db, repos, { now: new Date('2026-07-19T00:00:00.000Z') })
+    const result = runRetention(db, { now: new Date('2026-07-19T00:00:00.000Z') })
     expect(result.decisionsDeleted).toBe(1)
     expect(repos.requests.byId(oldDecision)).toBeUndefined()
     expect(repos.requests.byId(recentDecision)).toBeDefined()

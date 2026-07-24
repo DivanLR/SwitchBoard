@@ -9,9 +9,9 @@ import {
   type SDKMessage,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
-import type { McpServer, ModelMode, ProjectCommand, SessionStatus } from '@shared/domain'
+import { MODEL_CHOICES, type McpServer, type ModelMode, type ProjectCommand, type SessionStatus } from '@shared/domain'
 import { MessageMapper, type EventSink } from './message-mapper'
-import { classifyWorkload } from './model-routing'
+import { classifyWorkload, nextStrongestModel } from './model-routing'
 import { modeAgents } from './modes'
 
 /** Streaming input queue the SDK consumes; `end()` closes the session gracefully. */
@@ -107,6 +107,9 @@ export interface HostedSessionOptions {
   onMcpServers?: (servers: McpServer[]) => void
   /** Model the SDK reports for each main-loop turn (header display). */
   onModel?: (model: string) => void
+  /** Models this subscription can actually select (from the SDK's supportedModels),
+   *  as wire ids — lets settings hide models the account cannot use. */
+  onModels?: (modelIds: string[]) => void
   /** Fired after every completed turn (branch observation, counters). */
   onTurnComplete: () => void
   onExit: (reason: 'completed' | 'stopped' | 'crashed', detail?: string) => void
@@ -208,6 +211,24 @@ export class HostedSession {
       .catch(() => {
         // Older CLI without the control request — the init message still covers it.
       })
+    // The models this subscription can select (hides unavailable ones in settings).
+    // Collect both the row's own id and its resolved wire id so an alias row
+    // ("opus") and a full id ("claude-opus-4-8") both match a MODEL_CHOICES entry.
+    if (this.options.onModels) {
+      void this.q
+        .supportedModels()
+        .then((models) => {
+          const ids = [
+            ...new Set(
+              models.flatMap((m) => [m.value, m.resolvedModel].filter((v): v is string => Boolean(v))),
+            ),
+          ]
+          this.options.onModels?.(ids)
+        })
+        .catch(() => {
+          // Older CLI without supportedModels — settings falls back to showing all.
+        })
+    }
     this.setStatus('done')
   }
 
@@ -240,6 +261,7 @@ export class HostedSession {
     if (!this.options.autoModelRouting) this.applyModelForMode(message)
     this.captureModel(message)
     this.captureUsage(message)
+    this.maybeDowngradeOnLimit(message)
     this.mapper.handle(message)
     if (message.type === 'result') {
       this.turnInFlight = false
@@ -324,6 +346,48 @@ export class HostedSession {
       utilization: typeof info.utilization === 'number' ? info.utilization : null,
       resetsAt: typeof info.resetsAt === 'number' ? info.resetsAt : null,
       limitType: info.rateLimitType ?? null,
+    })
+  }
+
+  /**
+   * When a turn fails because the current model's usage limit is reached, opt to
+   * the next strongest model so the next message goes through, and tell the user.
+   * Turn-level only (the SDK cannot switch models mid-turn); does NOT auto-resend
+   * the failed prompt — that avoids any retry loop, the user just sends again on
+   * the downgraded model. Walks one rung down per limit hit and stops at Haiku.
+   *
+   * ponytail: the trigger is a text heuristic (the SDK has no dedicated
+   * limit-reached signal — a limit surfaces as a non-success result). Tune LIMIT
+   * if the wording changes; a real signal would replace the regex.
+   */
+  private static readonly LIMIT =
+    /\b(usage limit|rate[ -]?limit|too many requests|quota|limit reached|reset[s]? at|429)\b/i
+  private maybeDowngradeOnLimit(message: SDKMessage): void {
+    if (this.stopping || this.fatal) return
+    const msg = message as { type?: string; subtype?: string; errors?: string[]; result?: string }
+    if (msg.type !== 'result' || msg.subtype === 'success') return
+    const text = [msg.result ?? '', ...(msg.errors ?? [])].join('\n')
+    if (!HostedSession.LIMIT.test(text)) return
+
+    // Reference the main-loop (work) model; keep plan aligned with it.
+    const current = this.options.workModel
+    const next = nextStrongestModel(current)
+    const label = (id: string): string => MODEL_CHOICES.find((m) => m.id === id)?.label ?? id
+    if (!next) {
+      this.options.sink.append('assistant_text', {
+        text: `⚙ Usage limit reached on ${label(current ?? 'default')} — no lower model to fall back to. Try again after the limit resets.`,
+        partial: false,
+      })
+      return
+    }
+    this.options.workModel = next
+    this.options.planModel = next
+    this.appliedModel = null // force the next turn to apply the new model
+    void this.q?.setModel(next).catch(() => {})
+    this.options.onModel?.(next)
+    this.options.sink.append('assistant_text', {
+      text: `⚙ Usage limit reached — switched this session to ${label(next)} to keep going. Send your message again.`,
+      partial: false,
     })
   }
 

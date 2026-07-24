@@ -191,6 +191,9 @@ export interface InvokeMap {
   'rules.swallow.restoreDefaults': { req: void; res: SwallowRule[] }
   'settings.get': { req: void; res: Settings }
   'settings.set': { req: Partial<Settings>; res: Settings }
+  /** Wire ids of the models this subscription can select (from the SDK). Empty
+   *  = unknown (no session has initialised yet) → the UI shows all models. */
+  'models.available': { req: void; res: string[] }
   /** App auto-update (GitHub releases). */
   'updates.check': { req: void; res: { status: UpdateStatus['state'] } }
   'updates.install': { req: void; res: void }

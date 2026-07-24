@@ -107,12 +107,12 @@ const overSpendLimit = computed(() => {
   return limit > 0 && projects.counters.costTodayUsd >= limit
 })
 
-const tokensLabel = computed(() => {
-  const n = projects.counters.tokensToday
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
-  return `${n}`
-})
+const tokensLabel = computed(() =>
+  // Compact notation; lowercase the 'K' suffix to keep the design's "1.2k" style.
+  Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 })
+    .format(projects.counters.tokensToday)
+    .replace('K', 'k'),
+)
 
 // --- Session usage meter (subscription rate limit from the SDK) ---
 // Shown for ANY live session; the % fills in once the SDK reports a

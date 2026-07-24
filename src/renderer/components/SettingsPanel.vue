@@ -50,32 +50,48 @@ watch(
 onMounted(() => {
   void store.load()
   projId.value = projects.selectedProjectId
+  void window.switchboard
+    .invoke('models.available', undefined)
+    .then((ids) => (availableModelIds.value = ids))
+    .catch(() => {
+      /* no session initialised yet — keep the show-all fallback */
+    })
 })
 
 function save(patch: Partial<Settings>): void {
   void store.save(patch)
 }
 
-/** Per-project intelligent model: 'global' follows the Models tab. */
-const projModel = computed(() => {
-  const id = proj.value?.id
-  return (id && settings.value?.projectModels?.[id]) || 'global'
-})
+// Per-project model overrides ('global' follows the Models tab). Data-driven so
+// the intelligent + worker pickers share one loop (mirrors MODEL_SECTIONS above).
+type ProjModelField = 'projectModels' | 'projectWorkerModels'
+const PROJ_MODEL_SECTIONS = [
+  {
+    field: 'projectModels',
+    globalKey: 'intelligentModel',
+    testid: 'proj-model',
+    label: 'INTELLIGENT MODEL',
+    desc: 'Overrides the global default for this project only — plans, answers, orchestrates broad work, and advises the worker.',
+  },
+  {
+    field: 'projectWorkerModels',
+    globalKey: 'workerModel',
+    testid: 'proj-worker',
+    label: 'WORKER MODEL',
+    desc: 'Overrides the global worker for this project only — the cheaper model that runs Advisor-mode turns and Orchestrator worker subagents here.',
+  },
+] as const
 
-function saveProjModel(modelId: string): void {
-  if (!proj.value || !settings.value) return
-  save({ projectModels: { ...settings.value.projectModels, [proj.value.id]: modelId } })
+/** This project's override for a section, or 'global' when unset. */
+function projModelFor(field: ProjModelField): string {
+  const id = proj.value?.id
+  return (id && settings.value?.[field]?.[id]) || 'global'
 }
 
-/** Per-project worker model (always the cheaper one); 'global' follows the Models tab. */
-const projWorkerModel = computed(() => {
-  const id = proj.value?.id
-  return (id && settings.value?.projectWorkerModels?.[id]) || 'global'
-})
-
-function saveProjWorkerModel(modelId: string): void {
+function saveProjModelFor(field: ProjModelField, modelId: string): void {
   if (!proj.value || !settings.value) return
-  save({ projectWorkerModels: { ...settings.value.projectWorkerModels, [proj.value.id]: modelId } })
+  const map = { ...settings.value[field], [proj.value.id]: modelId }
+  save(field === 'projectModels' ? { projectModels: map } : { projectWorkerModels: map })
 }
 
 const terseExplain: Record<TerseLevel, string> = {
@@ -87,6 +103,17 @@ const terseExplain: Record<TerseLevel, string> = {
 function modelLabel(id: string): string {
   return MODEL_CHOICES.find((m) => m.id === id)?.label ?? id
 }
+
+// Models this subscription can actually select (from the SDK). Empty = unknown
+// (no session has initialised yet) → show everything rather than hide wrongly.
+const availableModelIds = ref<string[]>([])
+const modelChoices = computed(() => {
+  if (availableModelIds.value.length === 0) return MODEL_CHOICES
+  const set = new Set(availableModelIds.value)
+  // 'default' (Account default) is always selectable; otherwise keep only models
+  // the account has, so e.g. Fable 5 is hidden on subscriptions without it.
+  return MODEL_CHOICES.filter((m) => m.id === 'default' || set.has(m.id))
+})
 
 // Advisor/Orchestrator pairing modes (see src/main/sessions/modes.ts).
 const MODE_CHOICES: { id: Settings['modelMode']; label: string; desc: string }[] = [
@@ -318,7 +345,7 @@ const updateLine = computed(() => {
               <div class="group-desc">{{ section.desc }}</div>
               <div class="cards">
                 <button
-                  v-for="m in MODEL_CHOICES"
+                  v-for="m in modelChoices"
                   :key="m.id"
                   class="card-opt"
                   :class="{ sel: settings[section.key] === m.id }"
@@ -391,73 +418,32 @@ const updateLine = computed(() => {
                 </div>
               </div>
 
-              <div class="group">
-                <div class="group-label mono">INTELLIGENT MODEL</div>
-                <div class="group-desc">
-                  Overrides the global default for this project only — plans, answers, orchestrates
-                  broad work, and advises the worker.
-                </div>
+              <div v-for="section in PROJ_MODEL_SECTIONS" :key="section.field" class="group">
+                <div class="group-label mono">{{ section.label }}</div>
+                <div class="group-desc">{{ section.desc }}</div>
                 <div class="cards">
                   <button
                     class="card-opt"
-                    :class="{ sel: projModel === 'global' }"
-                    data-testid="proj-model-global"
-                    @click="saveProjModel('global')"
+                    :class="{ sel: projModelFor(section.field) === 'global' }"
+                    :data-testid="`${section.testid}-global`"
+                    @click="saveProjModelFor(section.field, 'global')"
                   >
-                    <span class="opt-dot" :class="{ on: projModel === 'global' }"></span>
+                    <span class="opt-dot" :class="{ on: projModelFor(section.field) === 'global' }"></span>
                     <div class="opt-body">
                       <div class="opt-name mono">Use global default</div>
-                      <div class="opt-sub">Follows the Models tab ({{ modelLabel(settings.intelligentModel) }})</div>
+                      <div class="opt-sub">Follows the Models tab ({{ modelLabel(settings[section.globalKey]) }})</div>
                     </div>
                     <span class="opt-price mono">—</span>
                   </button>
                   <button
-                    v-for="m in MODEL_CHOICES"
+                    v-for="m in modelChoices"
                     :key="m.id"
                     class="card-opt"
-                    :class="{ sel: projModel === m.id }"
-                    :data-testid="`proj-model-${m.id}`"
-                    @click="saveProjModel(m.id)"
+                    :class="{ sel: projModelFor(section.field) === m.id }"
+                    :data-testid="`${section.testid}-${m.id}`"
+                    @click="saveProjModelFor(section.field, m.id)"
                   >
-                    <span class="opt-dot" :class="{ on: projModel === m.id }"></span>
-                    <div class="opt-body">
-                      <div class="opt-name mono">{{ m.label }}</div>
-                      <div class="opt-sub">{{ m.desc }}</div>
-                    </div>
-                    <span class="opt-price mono">{{ m.price }}</span>
-                  </button>
-                </div>
-              </div>
-
-              <div class="group">
-                <div class="group-label mono">WORKER MODEL</div>
-                <div class="group-desc">
-                  Overrides the global worker for this project only — the cheaper model that runs
-                  Advisor-mode turns and Orchestrator worker subagents here.
-                </div>
-                <div class="cards">
-                  <button
-                    class="card-opt"
-                    :class="{ sel: projWorkerModel === 'global' }"
-                    data-testid="proj-worker-global"
-                    @click="saveProjWorkerModel('global')"
-                  >
-                    <span class="opt-dot" :class="{ on: projWorkerModel === 'global' }"></span>
-                    <div class="opt-body">
-                      <div class="opt-name mono">Use global default</div>
-                      <div class="opt-sub">Follows the Models tab ({{ modelLabel(settings.workerModel) }})</div>
-                    </div>
-                    <span class="opt-price mono">—</span>
-                  </button>
-                  <button
-                    v-for="m in MODEL_CHOICES"
-                    :key="m.id"
-                    class="card-opt"
-                    :class="{ sel: projWorkerModel === m.id }"
-                    :data-testid="`proj-worker-${m.id}`"
-                    @click="saveProjWorkerModel(m.id)"
-                  >
-                    <span class="opt-dot" :class="{ on: projWorkerModel === m.id }"></span>
+                    <span class="opt-dot" :class="{ on: projModelFor(section.field) === m.id }"></span>
                     <div class="opt-body">
                       <div class="opt-name mono">{{ m.label }}</div>
                       <div class="opt-sub">{{ m.desc }}</div>

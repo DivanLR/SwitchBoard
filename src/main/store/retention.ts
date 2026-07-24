@@ -2,7 +2,6 @@
 // previous session per project, prunes resolved decisions older than 30 days,
 // and vacuums opportunistically. Runs at startup and nightly.
 import type { AppDatabase } from './db'
-import type { Repositories } from './repositories'
 
 export interface RetentionResult {
   eventsDeleted: number
@@ -24,16 +23,19 @@ const VACUUM_MIN_DELETIONS = 500
 
 export function runRetention(
   db: AppDatabase,
-  repos: Repositories,
   options: RetentionOptions = {},
 ): RetentionResult {
   const dryRun = options.dryRun ?? false
   const now = options.now ?? new Date()
 
-  const keepIds = repos.sessions.retainedSessionIds(SESSIONS_PER_PROJECT)
-  const placeholders = keepIds.map(() => '?').join(', ')
-  const eventsWhere =
-    keepIds.length > 0 ? `WHERE sessionId NOT IN (${placeholders})` : ''
+  // Keep events for the most recent SESSIONS_PER_PROJECT sessions per project;
+  // the window subquery is the keep-set, so nothing round-trips through JS.
+  const eventsWhere = `WHERE sessionId NOT IN (
+      SELECT id FROM (
+        SELECT id, ROW_NUMBER() OVER (PARTITION BY projectId ORDER BY startedAt DESC) AS rn
+        FROM sessions
+      ) WHERE rn <= ?
+    )`
 
   const decisionCutoff = new Date(
     now.getTime() - DECISION_DAYS * 24 * 60 * 60 * 1000,
@@ -44,7 +46,7 @@ export function runRetention(
 
   if (dryRun) {
     eventsDeleted = (
-      db.prepare(`SELECT COUNT(*) AS n FROM events ${eventsWhere}`).get(...keepIds) as { n: number }
+      db.prepare(`SELECT COUNT(*) AS n FROM events ${eventsWhere}`).get(SESSIONS_PER_PROJECT) as { n: number }
     ).n
     decisionsDeleted = (
       db
@@ -54,7 +56,7 @@ export function runRetention(
         .get(decisionCutoff) as { n: number }
     ).n
   } else {
-    eventsDeleted = db.prepare(`DELETE FROM events ${eventsWhere}`).run(...keepIds).changes
+    eventsDeleted = db.prepare(`DELETE FROM events ${eventsWhere}`).run(SESSIONS_PER_PROJECT).changes
     decisionsDeleted = db
       .prepare("DELETE FROM permission_requests WHERE status != 'pending' AND resolvedAt < ?")
       .run(decisionCutoff).changes

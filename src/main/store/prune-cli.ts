@@ -5,7 +5,6 @@
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { openDatabase } from './db'
-import { createRepositories } from './repositories'
 import { runRetention } from './retention'
 
 const dryRun = process.argv.includes('--dry-run')
@@ -25,8 +24,7 @@ if (!existsSync(dbPath)) {
 }
 
 const db = openDatabase(dbPath)
-const repos = createRepositories(db)
-const result = runRetention(db, repos, { dryRun })
+const result = runRetention(db, { dryRun })
 console.log(
   `${result.dryRun ? '[dry run] Would delete' : 'Deleted'} ${result.eventsDeleted} event rows and ${result.decisionsDeleted} resolved decisions (database: ${dbPath}).`,
 )

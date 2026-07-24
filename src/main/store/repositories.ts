@@ -276,18 +276,6 @@ export class SessionsRepo {
     return result.changes
   }
 
-  /** Session ids to keep events for: the current and previous session per project (FR-021a). */
-  retainedSessionIds(perProject: number): string[] {
-    const rows = this.db
-      .prepare(
-        `SELECT id FROM (
-           SELECT id, ROW_NUMBER() OVER (PARTITION BY projectId ORDER BY startedAt DESC) AS rn
-           FROM sessions
-         ) WHERE rn <= ?`,
-      )
-      .all(perProject) as { id: string }[]
-    return rows.map((r) => r.id)
-  }
 }
 
 export class EventsRepo {

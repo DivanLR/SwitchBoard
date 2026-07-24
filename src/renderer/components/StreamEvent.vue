@@ -23,13 +23,10 @@ const emit = defineEmits<{ (e: 'open-inbox', requestId: string): void }>()
 
 const kind = computed(() => props.event.kind)
 
-/** HH:MM stamp shown when the Timestamps setting is on. */
-const stamp = computed(() => {
-  if (!props.stamps) return null
-  const d = new Date(props.event.createdAt)
-  const pad = (n: number): string => String(n).padStart(2, '0')
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`
-})
+/** HH:MM stamp shown when the Timestamps setting is on (toTimeString zero-pads). */
+const stamp = computed(() =>
+  props.stamps ? new Date(props.event.createdAt).toTimeString().slice(0, 5) : null,
+)
 
 // Per-kind typed accessors: narrow on `kind` once here rather than casting the
 // payload inline throughout the template.

@@ -83,6 +83,30 @@ export interface ModelTurnUsage {
   costUSD: number
 }
 
+/**
+ * Merge a result message's per-model usage into the running session totals.
+ *
+ * IMPORTANT: in streaming-input mode the SDK emits one `result` per turn, and
+ * its `modelUsage`/`total_cost_usd`/`num_turns` are CUMULATIVE for the whole
+ * session — not the delta for that turn. So each model's figures are REPLACED
+ * with the latest cumulative snapshot, never added (adding sums cumulative
+ * snapshots and inflates the totals every turn). Models absent from a later
+ * snapshot keep their last known value.
+ */
+export function foldModelTotals(
+  prev: Record<string, { tokens: number; costUsd: number }>,
+  modelUsage: Record<string, ModelTurnUsage>,
+): Record<string, { tokens: number; costUsd: number }> {
+  const totals = { ...prev }
+  for (const [model, u] of Object.entries(modelUsage)) {
+    totals[model] = {
+      tokens: u.inputTokens + u.outputTokens + u.cacheReadInputTokens + u.cacheCreationInputTokens,
+      costUsd: u.costUSD,
+    }
+  }
+  return totals
+}
+
 export class MessageMapper {
   private sink: EventSink
   private onSdkSessionId?: (id: string) => void

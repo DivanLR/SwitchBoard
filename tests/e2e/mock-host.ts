@@ -729,6 +729,8 @@ export function installMockHost(scenario: MockScenario): void {
       settings = { ...settings, ...req }
       return { ...settings }
     },
+    // Empty = unknown → the settings panel shows all models (no filtering in e2e).
+    'models.available': () => [],
   }
 
   window.switchboard = {

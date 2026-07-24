@@ -172,12 +172,22 @@ watch([() => props.project.id, currentKey], () => void loadSchema(), { immediate
 let scanningCombo: string[] = []
 
 // A scan finishes when the session returns to idle — record the combination in
-// the history (main verifies its doc landed) and re-read the doc.
+// the history (main verifies its doc landed) and re-read the doc. recordScan
+// returns null until the doc actually exists, so stay ARMED across an idle blip
+// that is not real completion (e.g. the session pausing on a permission prompt
+// to write the doc, which flips working→false before the file is written).
+// Clearing `scanning` only on a real record avoids the "scanned but shows never
+// scanned" bug where a mid-scan permission pause consumed the flag too early.
+// ponytail: if the agent never writes the doc at the expected path the spinner
+// stays until the next scan/combo change — acceptable vs. recording a phantom scan.
 watch(working, (now, was) => {
   if (was && !now) {
     if (scanning.value) {
-      scanning.value = false
-      void projects.mcpRecordScan(props.project.id, scanningCombo).then(() => loadHistory())
+      void projects.mcpRecordScan(props.project.id, scanningCombo).then((row) => {
+        if (!row) return // doc not written yet — stay armed, record on the next idle
+        scanning.value = false
+        void loadHistory()
+      })
     }
     void loadSchema()
   }
@@ -259,11 +269,6 @@ async function ask(): Promise<void> {
 function answer(eventId: string, choice: string): void {
   void active.answerQuestion(eventId, choice)
 }
-
-// Stop a running scan/query (same interrupt path as the session view / Ctrl+C).
-async function interrupt(): Promise<void> {
-  await active.interrupt()
-}
 </script>
 
 <template>
@@ -280,7 +285,7 @@ async function interrupt(): Promise<void> {
           class="stop-btn mono"
           data-testid="mcp-stop"
           title="Stop (Ctrl+C)"
-          @click="interrupt()"
+          @click="active.interrupt()"
         >
           ■
         </button>
@@ -881,9 +886,6 @@ html.sb-light .suggest-list {
   font-weight: 600;
 }
 
-.suggest-rest {
-  color: var(--text-mid);
-}
 
 .suggest-desc {
   margin-left: 12px;

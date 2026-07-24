@@ -19,8 +19,9 @@ import type { SessionStatusPush } from '@shared/ipc-types'
 import { newId, nowIso, type Repositories } from '@main/store/repositories'
 import { readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
 import { HostedSession, type PermissionGate } from './session'
-import type { EventSink } from './message-mapper'
+import { foldModelTotals, type EventSink } from './message-mapper'
 import { terseSystemPromptAppend } from './terse-mode'
+import { adhdSystemPromptAppend } from './adhd-mode'
 import { modesSystemPromptAppend } from './modes'
 import { resolveClaudeExecutable } from './claude-executable'
 
@@ -117,6 +118,10 @@ export async function readGitDiffStat(
 export class SessionManager {
   private hosted = new Map<string, HostedEntry>()
   private classifier: NoiseClassifier | null = null
+  /** Wire ids of the models this subscription can select, captured from the SDK's
+   *  supportedModels() on any session start. Empty until a session initialises;
+   *  settings treats empty as "unknown → show all". Account-global, not per-session. */
+  availableModels: string[] = []
 
   constructor(
     private repos: Repositories,
@@ -210,6 +215,9 @@ export class SessionManager {
       terseMode: settings.terseMode,
       terseLevel: settings.terseLevel,
     })
+    // ADHD output style as the backbone — on when the global i-have-adhd
+    // always-on flag is set, so app sessions match every other Claude session.
+    const adhdAppend = adhdSystemPromptAppend()
     const activeCombo = settings.mcpActiveServers ?? []
     const schemaDoc = (
       (activeCombo.length > 0 ? readComboDoc(project.path, activeCombo) : null) ??
@@ -227,8 +235,9 @@ export class SessionManager {
       refDirs: project.refs.map((r) => r.path),
       resumeSdkSessionId,
       systemPromptAppend:
-        [terseAppend, modesAppend, schemaAppend].filter((s): s is string => Boolean(s)).join('\n\n') ||
-        undefined,
+        [adhdAppend, terseAppend, modesAppend, schemaAppend]
+          .filter((s): s is string => Boolean(s))
+          .join('\n\n') || undefined,
       claudeExecutablePath,
       // The hosted session's plan/work slots both take the intelligent model;
       // the pairing modes decide when the worker runs the loop instead.
@@ -277,28 +286,21 @@ export class SessionManager {
         entry.row.currentModel = model
         this.pushStatus(entry)
       },
+      // Models this subscription can select — account-global, cached for the
+      // settings model list (hides models the account cannot use).
+      onModels: (modelIds) => {
+        this.availableModels = modelIds
+      },
       // Live background tasks — in-memory only, shown as a card + header pill.
       onBackgroundTasks: (tasks) => {
         entry.row.backgroundTasks = tasks
         this.pushStatus(entry)
       },
-      // Cumulative per-model usage — in-memory only, drives the header's
-      // session-total + top-model chips.
+      // Per-model usage — in-memory only, drives the header's session-total +
+      // top-model chips. The SDK's per-turn modelUsage is session-CUMULATIVE, so
+      // this replaces per model rather than adding (see foldModelTotals).
       onModelUsage: (modelUsage) => {
-        const totals = entry.row.modelTotals ?? {}
-        for (const [model, u] of Object.entries(modelUsage)) {
-          const prev = totals[model] ?? { tokens: 0, costUsd: 0 }
-          totals[model] = {
-            tokens:
-              prev.tokens +
-              u.inputTokens +
-              u.outputTokens +
-              u.cacheReadInputTokens +
-              u.cacheCreationInputTokens,
-            costUsd: prev.costUsd + u.costUSD,
-          }
-        }
-        entry.row.modelTotals = totals
+        entry.row.modelTotals = foldModelTotals(entry.row.modelTotals ?? {}, modelUsage)
         this.pushStatus(entry)
       },
       onTurnComplete: () => {

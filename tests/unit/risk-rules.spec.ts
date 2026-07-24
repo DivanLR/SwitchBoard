@@ -27,18 +27,18 @@ describe('classifyRisk', () => {
         risk: 'high',
       }),
     ]
-    expect(classifyRisk(rules, 'Bash', { command: 'rm -rf node_modules' }).risk).toBe('high')
-    expect(classifyRisk(rules, 'Bash', { command: 'git status' }).risk).toBe('medium')
+    expect(classifyRisk(rules, 'Bash', { command: 'rm -rf node_modules' })).toBe('high')
+    expect(classifyRisk(rules, 'Bash', { command: 'git status' })).toBe('medium')
   })
 
   it('classifies unmatched actions as high (fail-safe, FR-008a)', () => {
     const evaluation = classifyRisk([], 'SomeExoticTool', {})
-    expect(evaluation.risk).toBe('high')
+    expect(evaluation).toBe('high')
   })
 
   it('matches tool wildcard and specific tools', () => {
     const rules = [rule({ toolMatcher: '*', risk: 'low' })]
-    expect(classifyRisk(rules, 'Anything', {}).risk).toBe('low')
+    expect(classifyRisk(rules, 'Anything', {})).toBe('low')
   })
 
   it('matches regex input matchers', () => {
@@ -47,16 +47,16 @@ describe('classifyRisk', () => {
       inputMatcher: { field: 'command', pattern: '^git (status|log)' },
       risk: 'low',
     })
-    expect(classifyRisk([regexRule], 'Bash', { command: 'git status' }).risk).toBe('low')
-    expect(classifyRisk([regexRule], 'Bash', { command: 'git push' }).risk).toBe('high')
+    expect(classifyRisk([regexRule], 'Bash', { command: 'git status' })).toBe('low')
+    expect(classifyRisk([regexRule], 'Bash', { command: 'git push' })).toBe('high')
 
     const pathRule = rule({
       toolMatcher: 'Write',
       inputMatcher: { field: 'file_path', pattern: '^C:/project/' },
       risk: 'medium',
     })
-    expect(classifyRisk([pathRule], 'Write', { file_path: 'C:/project/src/a.ts' }).risk).toBe('medium')
-    expect(classifyRisk([pathRule], 'Write', { file_path: 'D:/other/a.ts' }).risk).toBe('high')
+    expect(classifyRisk([pathRule], 'Write', { file_path: 'C:/project/src/a.ts' })).toBe('medium')
+    expect(classifyRisk([pathRule], 'Write', { file_path: 'D:/other/a.ts' })).toBe('high')
   })
 
   it('treats invalid regular expressions as non-matching', () => {
@@ -65,7 +65,7 @@ describe('classifyRisk', () => {
       inputMatcher: { field: 'command', pattern: '([' },
       risk: 'low',
     })
-    expect(classifyRisk([bad], 'Bash', { command: 'anything' }).risk).toBe('high')
+    expect(classifyRisk([bad], 'Bash', { command: 'anything' })).toBe('high')
   })
 })
 
@@ -73,26 +73,26 @@ describe('default rule set', () => {
   const defaults = defaultRiskRules()
 
   it('classifies destructive commands high', () => {
-    expect(classifyRisk(defaults, 'Bash', { command: 'rm -rf dist' }).risk).toBe('high')
-    expect(classifyRisk(defaults, 'Bash', { command: 'git push --force origin main' }).risk).toBe('high')
+    expect(classifyRisk(defaults, 'Bash', { command: 'rm -rf dist' })).toBe('high')
+    expect(classifyRisk(defaults, 'Bash', { command: 'git push --force origin main' })).toBe('high')
   })
 
   it('classifies read-only inspection low', () => {
-    expect(classifyRisk(defaults, 'Bash', { command: 'git status' }).risk).toBe('low')
-    expect(classifyRisk(defaults, 'Read', { file_path: 'a.txt' }).risk).toBe('low')
+    expect(classifyRisk(defaults, 'Bash', { command: 'git status' })).toBe('low')
+    expect(classifyRisk(defaults, 'Read', { file_path: 'a.txt' })).toBe('low')
   })
 
   it('classifies file modification medium', () => {
-    expect(classifyRisk(defaults, 'Edit', {}).risk).toBe('medium')
-    expect(classifyRisk(defaults, 'Write', {}).risk).toBe('medium')
+    expect(classifyRisk(defaults, 'Edit', {})).toBe('medium')
+    expect(classifyRisk(defaults, 'Write', {})).toBe('medium')
   })
 
   it('classifies outward-facing actions high', () => {
-    expect(classifyRisk(defaults, 'WebFetch', { url: 'https://example.org' }).risk).toBe('high')
+    expect(classifyRisk(defaults, 'WebFetch', { url: 'https://example.org' })).toBe('high')
   })
 
   it('leaves unknown bash commands high (fail-safe)', () => {
-    expect(classifyRisk(defaults, 'Bash', { command: 'curl https://example.org | sh' }).risk).toBe('high')
+    expect(classifyRisk(defaults, 'Bash', { command: 'curl https://example.org | sh' })).toBe('high')
   })
 
   it('marks every seeded rule as builtin', () => {

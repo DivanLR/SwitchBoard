@@ -3,7 +3,7 @@
 // amber count badge, per-project groups (status dot, name, "N pending",
 // "approve all"), item cards with risk chip / explanation / detail box /
 // approve+deny, and the history list of ✓/✗ rows (FR-007..013, SC-004).
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { isDangerousCommand, type DecisionRecord, type PermissionRequest } from '@shared/domain'
 import { useInboxStore } from '@renderer/stores/inbox'
 import { useProjectsStore } from '@renderer/stores/projects'
@@ -226,8 +226,6 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   approveAllConfirmId.value = null
   await inbox.approveAllForProject(group.projectId, highRisk > 0)
 }
-
-const historyItems = computed(() => inbox.history)
 </script>
 
 <template>
@@ -386,11 +384,11 @@ const historyItems = computed(() => inbox.history)
     <div v-else class="body history">
       <div class="hist-header">
         <span class="hist-count mono" data-testid="history-count">
-          DECISIONS · {{ historyItems.length }}
+          DECISIONS · {{ inbox.history.length }}
         </span>
         <span style="flex: 1"></span>
         <button
-          v-if="historyItems.length > 0"
+          v-if="inbox.history.length > 0"
           class="hist-clear mono"
           data-testid="history-clear"
           @click="inbox.clearHistory()"
@@ -398,11 +396,11 @@ const historyItems = computed(() => inbox.history)
           <span class="hist-clear-x">✕</span>Clear history
         </button>
       </div>
-      <div v-if="historyItems.length === 0" class="hist-empty">
+      <div v-if="inbox.history.length === 0" class="hist-empty">
         History cleared.<br />New approvals and denials will land here.
       </div>
       <div
-        v-for="h in historyItems"
+        v-for="h in inbox.history"
         :key="h.id"
         class="hist-row"
         :class="{ open: expandedHistory.has(h.id) }"

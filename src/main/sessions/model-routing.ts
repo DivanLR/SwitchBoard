@@ -21,6 +21,25 @@ export function classifyIntent(text: string): 'plan' | 'work' {
   return 'plan'
 }
 
+// Downgrade ladder for usage-limit fallback: when a turn fails because the
+// current model's usage limit is reached, opt to the next strongest model that
+// is likely still available. 'default' and the top strong tier drop to the
+// Sonnet workhorse (the common "weekly Opus/strong limit hit" case); Sonnet
+// drops to Haiku; Haiku has nowhere lower.
+const DOWNGRADE: Record<string, string | null> = {
+  default: 'claude-sonnet-5',
+  'claude-fable-5': 'claude-opus-4-8',
+  'claude-opus-4-8': 'claude-sonnet-5',
+  'claude-sonnet-5': 'claude-haiku-4-5-20251001',
+  'claude-haiku-4-5-20251001': null,
+}
+
+/** The next strongest model to try when `current` is usage-limited, or null at
+ *  the floor / for an unknown id. `undefined`/'' is treated as the account default. */
+export function nextStrongestModel(current: string | undefined): string | null {
+  return DOWNGRADE[current || 'default'] ?? null
+}
+
 export type Workload = 'plan' | 'advisor' | 'orchestrator'
 
 // Signals that a work request is BROAD (many files / multi-step / research-

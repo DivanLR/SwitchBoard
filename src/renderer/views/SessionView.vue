@@ -1,3 +1,12 @@
+<script lang="ts">
+// Unsent composer text kept per project for the app's lifetime, so switching
+// projects (or opening another view) never loses what you typed. Module-level
+// so it survives this component unmounting/remounting. In-memory only — distinct
+// from the persisted `drafts` table, which holds undelivered *queued* sends.
+// ponytail: in-memory Map; add DB persistence only if drafts must survive restart.
+const composerDrafts = new Map<string, string>()
+</script>
+
 <script setup lang="ts">
 // Session stream — 1:1 with the design reference: two-row header (identity,
 // status pill, clean/raw segments, meta line), clean stream with swallowed
@@ -186,6 +195,9 @@ onUnmounted(() => {
   clearInterval(tick)
   window.removeEventListener('keydown', onGlobalKeydown)
   unsubscribeCommands?.()
+  // Opening another view (MCP, no selection) unmounts us without firing the
+  // project-switch watcher — save the draft here so it survives the round-trip.
+  composerDrafts.set(props.project.id, composer.value)
 })
 
 const sessionTimer = computed(() => {
@@ -267,11 +279,9 @@ const usageColor = computed(() => {
   return p > 85 ? 'var(--red)' : p > 60 ? 'var(--amber)' : 'var(--green)'
 })
 const usageLimitLabel = computed(() => {
+  // 7d for a weekly window; otherwise the 5h label (also the pre-report placeholder).
   const t = liveSession.value?.usageLimitType
-  if (t === 'five_hour') return '5h limit'
-  if (t?.startsWith('seven_day')) return '7d limit'
-  // Before the SDK reports a window, show the primary (5h) label as a placeholder.
-  return '5h limit'
+  return t?.startsWith('seven_day') ? '7d limit' : '5h limit'
 })
 
 // Prompt-cache hit rate for the latest completed turn: cache_read /
@@ -362,8 +372,11 @@ watch(
 
 watch(
   () => props.project.id,
-  (projectId) => {
-    composer.value = ''
+  (projectId, prevId) => {
+    // Stash the project we're leaving, restore the one we're entering, so unsent
+    // composer text is preserved across switches instead of being wiped.
+    if (prevId) composerDrafts.set(prevId, composer.value)
+    composer.value = composerDrafts.get(projectId) ?? ''
     draftRestored.value = false
     mainTab.value = 'session'
     editTarget.value = null
@@ -1368,6 +1381,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   flex-direction: column;
   height: 100%;
   min-width: 0;
+  position: relative; /* anchors the drop-overlay */
 }
 
 .head {
@@ -1594,10 +1608,6 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 }
 
 /* Drag-over overlay (design): full-pane dashed frame naming the drop action. */
-.session-view {
-  position: relative;
-}
-
 .drop-overlay {
   position: absolute;
   inset: 8px;
@@ -2230,10 +2240,6 @@ html.sb-light .suggest-list {
 .suggest-typed {
   color: var(--text);
   font-weight: 600;
-}
-
-.suggest-rest {
-  color: var(--text-mid);
 }
 
 /* Small what-it-does explanation next to a suggested /command. */

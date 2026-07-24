@@ -79,6 +79,32 @@ Pick separate models for planning turns and work turns. Flip on **terse mode**
 (lite / full / ultra) to cut output tokens without losing code, commands, or errors.
 The app keeps itself current via auto-update from GitHub releases.
 
+## Built with
+
+**Runtime**
+
+- [`@anthropic-ai/claude-agent-sdk`](https://docs.claude.com/en/api/agent-sdk/overview) — hosts every Claude Code session
+- [`vue`](https://vuejs.org/) + [`pinia`](https://pinia.vuejs.org/) — renderer UI and state
+- [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3) — local, synchronous SQLite store
+
+**Build & packaging**
+
+- [`electron`](https://www.electronjs.org/) — desktop shell
+- [`electron-vite`](https://electron-vite.org/) + [`vite`](https://vite.dev/) + [`@vitejs/plugin-vue`](https://github.com/vitejs/vite-plugin-vue) — dev server and bundling
+- [`electron-builder`](https://www.electron.build/) + [`@electron/fuses`](https://github.com/electron/fuses) — NSIS installer and runtime hardening
+- [`prebuild-install`](https://github.com/prebuild/prebuild-install) — fetches the matching `better-sqlite3` ABI
+
+**Quality & tooling**
+
+- [`typescript`](https://www.typescriptlang.org/) + [`vue-tsc`](https://github.com/vuejs/language-tools) — typing across processes
+- [`vitest`](https://vitest.dev/) + [`@playwright/test`](https://playwright.dev/) — unit and end-to-end tests
+- [`eslint`](https://eslint.org/) ([`typescript-eslint`](https://typescript-eslint.io/), [`eslint-plugin-vue`](https://eslint.vuejs.org/), [`eslint-config-prettier`](https://github.com/prettier/eslint-config-prettier)) + [`prettier`](https://prettier.io/) — linting and formatting
+- [`tsx`](https://github.com/privatenumber/tsx) — runs the TypeScript retention CLI
+
+### Built with an ADHD-friendly workflow
+
+Development runs on Claude Code with [`i-have-adhd`](https://github.com/ayghri/i-have-adhd) as the backbone — action-first, numbered, no-preamble output — kept always-on so every session (global and inside Switchboard) is shaped the same way. It pairs with [`ponytail`](https://github.com/DietrichGebert/ponytail) for lazy/minimal code and [`github/spec-kit`](https://github.com/github/spec-kit) for specs. Switchboard applies the same output style to the sessions it hosts.
+
 ## Getting started
 
 **Prerequisites:** Node.js 20+, npm, and an authenticated

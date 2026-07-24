@@ -219,7 +219,7 @@ export class PermissionBroker {
       project !== undefined &&
       isPathWithinProject(project.path, context.input)
     const described = describeTool(context.toolName, context.input)
-    const { risk } = classifyRisk(this.repos.riskRules.list(), context.toolName, context.input)
+    const risk = classifyRisk(this.repos.riskRules.list(), context.toolName, context.input)
     const settings = this.repos.settings.get()
     const autoApproved =
       Boolean(standing) ||

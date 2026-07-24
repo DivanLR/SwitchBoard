@@ -309,6 +309,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     },
     'settings.get': () => repos.settings.get(),
     'settings.set': (req) => repos.settings.set(req),
+    'models.available': () => manager.availableModels,
     'updates.check': async () => ({ status: await checkForUpdates() }),
     'updates.install': () => installNow(),
   }

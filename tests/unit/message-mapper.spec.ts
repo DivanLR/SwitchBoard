@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { EventKind, EventPayloadMap, SessionEvent } from '@shared/domain'
 import { SWALLOWABLE_KINDS } from '@shared/domain'
-import { MessageMapper, previewOf, type EventSink } from '@main/sessions/message-mapper'
+import { MessageMapper, previewOf, foldModelTotals, type EventSink } from '@main/sessions/message-mapper'
 import { classifyNoise, defaultSwallowRules } from '@main/stream/swallow-rules'
 
 interface RecordedUpdate {
@@ -440,6 +440,42 @@ describe('the /usage response is not hidden by the clean view (regression)', () 
     )
     expect(seen).toHaveLength(1)
     expect(seen[0]['claude-opus-4-8']).toMatchObject({ inputTokens: 100, costUSD: 0.02 })
+  })
+
+  it('folds cumulative per-model usage by REPLACING, not adding', () => {
+    const turn1 = {
+      'claude-opus-4-8': {
+        inputTokens: 100,
+        outputTokens: 50,
+        cacheReadInputTokens: 1000,
+        cacheCreationInputTokens: 200,
+        costUSD: 0.02,
+      },
+    }
+    // Turn 2's snapshot is cumulative (includes turn 1), as the SDK sends it.
+    const turn2 = {
+      'claude-opus-4-8': {
+        inputTokens: 180,
+        outputTokens: 90,
+        cacheReadInputTokens: 1800,
+        cacheCreationInputTokens: 300,
+        costUSD: 0.035,
+      },
+    }
+    let totals = foldModelTotals({}, turn1)
+    expect(totals['claude-opus-4-8']).toEqual({ tokens: 1350, costUsd: 0.02 })
+    totals = foldModelTotals(totals, turn2)
+    // Must equal the latest cumulative snapshot (2370), NOT 1350 + 2370.
+    expect(totals['claude-opus-4-8']).toEqual({ tokens: 2370, costUsd: 0.035 })
+  })
+
+  it('keeps a previously-seen model when a later snapshot omits it', () => {
+    const totals = foldModelTotals(
+      { 'claude-sonnet-5': { tokens: 500, costUsd: 0.01 } },
+      { 'claude-opus-4-8': { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 0.001 } },
+    )
+    expect(totals['claude-sonnet-5']).toEqual({ tokens: 500, costUsd: 0.01 })
+    expect(totals['claude-opus-4-8']).toEqual({ tokens: 15, costUsd: 0.001 })
   })
 
   it('keeps interactive-question closings as plain assistant text, not summary', () => {
