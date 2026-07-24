@@ -45,9 +45,12 @@ Thumbs.db
 .idea/
 
 # --- AI assistant tooling, plugins, and instruction files (not the base project) ---
+# specs/ and .specify/ are anchored to the repo root: they ignore spec-kit's own
+# output when it is run against THIS repo, without matching src/main/specs/ (the
+# app's source). A bare `specs/` matches at any depth and hid spec-kit.ts.
 .claude/
-.specify/
-specs/
+/.specify/
+/specs/
 CLAUDE.md
 AGENTS.md
 .cursorrules
