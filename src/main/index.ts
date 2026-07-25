@@ -180,6 +180,9 @@ async function main(): Promise<void> {
     },
   })
   manager.reconcileOnStartup()
+  // Warm the model list (one short-lived CLI query) so the settings picker is
+  // populated the first time it opens, before any session has reported.
+  void manager.models()
 
   const notify = createNotifier({
     isWindowActive: () =>

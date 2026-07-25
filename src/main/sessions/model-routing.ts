@@ -2,6 +2,7 @@
 // Questions and discussion route to the plan model (deep reasoning); requests
 // to change code or run scripts route to the work model (the workhorse).
 // Turn-granularity only — the SDK cannot switch models partway through a turn.
+import { modelFamily } from '@shared/domain'
 
 /** 'work' when the message asks to change code or run something, else 'plan'. */
 export function classifyIntent(text: string): 'plan' | 'work' {
@@ -22,38 +23,37 @@ export function classifyIntent(text: string): 'plan' | 'work' {
 }
 
 // Downgrade ladder for usage-limit fallback: when a turn fails because the
-// current model's usage limit is reached, opt to the next strongest model that
-// is likely still available. 'default' and the top strong tier drop to the
-// Sonnet workhorse (the common "weekly Opus/strong limit hit" case); Sonnet
-// drops to Haiku; Haiku has nowhere lower.
+// current model's usage limit is reached, opt to the next strongest FAMILY and
+// name it by the CLI's family alias, which always points at the newest model in
+// that family. Keying on families rather than on model ids keeps the ladder
+// correct across model releases with no edit. Haiku has nowhere lower.
 const DOWNGRADE: Record<string, string | null> = {
-  default: 'claude-sonnet-5',
-  'claude-fable-5': 'claude-opus-5[1m]',
-  'claude-opus-5[1m]': 'claude-sonnet-5',
-  'claude-opus-5': 'claude-sonnet-5',
-  'claude-opus-4-8': 'claude-sonnet-5',
-  'claude-sonnet-5': 'claude-haiku-4-5-20251001',
-  'claude-haiku-4-5-20251001': null,
+  fable: 'opus',
+  opus: 'sonnet',
+  sonnet: 'haiku',
+  haiku: null,
 }
 
 /** The next strongest model to try when `current` is usage-limited, or null at
- *  the floor / for an unknown id. `undefined`/'' is treated as the account default. */
+ *  the floor. The account default and any id naming no known family drop to the
+ *  Sonnet workhorse (the common "weekly strong-model limit hit" case). */
 export function nextStrongestModel(current: string | undefined): string | null {
-  return DOWNGRADE[current || 'default'] ?? null
+  const family = modelFamily(current)
+  if (!family) return 'sonnet'
+  return DOWNGRADE[family] ?? null
 }
 
-const FABLE_5 = 'claude-fable-5'
-
 /**
- * Reasoning effort for a resolved model under the "max effort unless Fable 5"
- * rule: Fable 5 already reasons at depth, so it keeps its default effort; every
- * other model is pushed to 'max' ("ultra") to compensate. Returns null (no
- * override → account/CLI default) for Fable 5 and for an unknown/'default' id,
- * where we cannot tell whether it resolves to Fable 5 — the SDK-reported model
- * reconciles that case. Models that do not support 'max' silently downgrade.
+ * Reasoning effort for a resolved model under the "max effort unless Fable"
+ * rule: the Fable family already reasons at depth, so it keeps its default
+ * effort; every other model is pushed to 'max' ("ultra") to compensate. Returns
+ * null (no override → account/CLI default) for Fable and for an
+ * unknown/'default' id, where we cannot tell which family it resolves to — the
+ * SDK-reported model reconciles that case. Models that do not support 'max'
+ * silently downgrade.
  */
 export function maxEffortUnlessFable(modelId: string | undefined): 'max' | null {
-  if (!modelId || modelId === 'default' || modelId === FABLE_5) return null
+  if (!modelId || modelId === 'default' || modelFamily(modelId) === 'fable') return null
   return 'max'
 }
 

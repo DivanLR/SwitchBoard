@@ -5,7 +5,7 @@
 // footer. State and transport live in the settings store.
 import { computed, onMounted, ref, watch } from 'vue'
 import type { AvailableModel, ModelChoice, PermissionRule, Settings, TerseLevel } from '@shared/domain'
-import { MODEL_CHOICES } from '@shared/domain'
+import { modelLabel, modelPrice } from '@shared/domain'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { useInboxStore } from '@renderer/stores/inbox'
@@ -100,38 +100,24 @@ const terseExplain: Record<TerseLevel, string> = {
   ultra: 'Maximum: telegraphic notes only. Densest, least conversational.',
 }
 
-function modelLabel(id: string): string {
-  return (
-    MODEL_CHOICES.find((m) => m.id === id)?.label ??
-    availableModels.value.find((m) => m.id === id)?.label ??
-    id
-  )
-}
-
-// Models this subscription can select, discovered from the SDK. Empty = unknown
-// (no session has initialised yet) → show the curated set rather than hide wrongly.
+// Models this subscription can select, read from the CLI by the main process.
+// The cards are built from that list alone — no hardcoded catalogue — so a model
+// released today is selectable today, and a retired one stops being offered.
 const availableModels = ref<AvailableModel[]>([])
-const modelChoices = computed<ModelChoice[]>(() => {
-  const sdk = availableModels.value
-  if (sdk.length === 0) return [...MODEL_CHOICES]
-  const out: ModelChoice[] = []
-  const seen = new Set<string>()
-  const push = (c: ModelChoice): void => {
-    if (!seen.has(c.id)) {
-      out.push(c)
-      seen.add(c.id)
-    }
-  }
-  // Account default always first, then the known models (curated copy + price) the
-  // account has, in curated order, then any NEW model the SDK reports — styled from
-  // its own label/description so it appears without a code change.
-  const dflt = MODEL_CHOICES.find((m) => m.id === 'default')
-  if (dflt) push(dflt)
-  const have = new Set(sdk.map((m) => m.id))
-  for (const m of MODEL_CHOICES) if (m.id !== 'default' && have.has(m.id)) push(m)
-  for (const m of sdk) push({ id: m.id, label: m.label || m.id, desc: m.description || '', price: '—' })
-  return out
-})
+const modelChoices = computed<ModelChoice[]>(() => [
+  {
+    id: 'default',
+    label: modelLabel('default'),
+    desc: 'Follows your subscription default model',
+    price: '—',
+  },
+  ...availableModels.value.map((m) => ({
+    id: m.id,
+    label: modelLabel(m.id),
+    desc: m.description,
+    price: modelPrice(m.id),
+  })),
+])
 
 // Advisor/Orchestrator pairing modes (see src/main/sessions/modes.ts).
 const MODE_CHOICES: { id: Settings['modelMode']; label: string; desc: string }[] = [

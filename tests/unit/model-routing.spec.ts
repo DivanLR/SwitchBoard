@@ -52,22 +52,23 @@ describe('classifyWorkload (Advisor/Orchestrator auto mode)', () => {
 })
 
 describe('nextStrongestModel (usage-limit fallback ladder)', () => {
-  it('drops the default/strong tier to the Sonnet workhorse', () => {
-    expect(nextStrongestModel('default')).toBe('claude-sonnet-5')
-    expect(nextStrongestModel(undefined)).toBe('claude-sonnet-5')
-    expect(nextStrongestModel('claude-opus-4-8')).toBe('claude-sonnet-5')
-    expect(nextStrongestModel('claude-opus-5[1m]')).toBe('claude-sonnet-5')
-    expect(nextStrongestModel('claude-opus-5')).toBe('claude-sonnet-5')
+  it('drops the account default and unknown ids to the Sonnet workhorse', () => {
+    expect(nextStrongestModel('default')).toBe('sonnet')
+    expect(nextStrongestModel(undefined)).toBe('sonnet')
+    expect(nextStrongestModel('some-future-model')).toBe('sonnet')
   })
 
-  it('walks one rung down and stops at the floor', () => {
-    expect(nextStrongestModel('claude-fable-5')).toBe('claude-opus-5[1m]')
-    expect(nextStrongestModel('claude-sonnet-5')).toBe('claude-haiku-4-5-20251001')
+  it('walks one family down and stops at the floor', () => {
+    expect(nextStrongestModel('claude-fable-5')).toBe('opus')
+    expect(nextStrongestModel('claude-sonnet-5')).toBe('haiku')
     expect(nextStrongestModel('claude-haiku-4-5-20251001')).toBeNull()
   })
 
-  it('returns null for an unknown id', () => {
-    expect(nextStrongestModel('some-future-model')).toBeNull()
+  it('is keyed by family, so any release of a family takes the same rung', () => {
+    expect(nextStrongestModel('claude-opus-4-8')).toBe('sonnet')
+    expect(nextStrongestModel('claude-opus-5[1m]')).toBe('sonnet')
+    expect(nextStrongestModel('claude-opus-9-fictional')).toBe('sonnet')
+    expect(nextStrongestModel('opus')).toBe('sonnet')
   })
 })
 
@@ -79,8 +80,9 @@ describe('maxEffortUnlessFable (ultra effort for non-Fable models)', () => {
     expect(maxEffortUnlessFable('some-future-model')).toBe('max')
   })
 
-  it('leaves Fable 5 and the account default at their default effort', () => {
+  it('leaves the Fable family and the account default at their default effort', () => {
     expect(maxEffortUnlessFable('claude-fable-5')).toBeNull()
+    expect(maxEffortUnlessFable('claude-fable-5[1m]')).toBeNull()
     expect(maxEffortUnlessFable('default')).toBeNull()
     expect(maxEffortUnlessFable(undefined)).toBeNull()
     expect(maxEffortUnlessFable('')).toBeNull()

@@ -192,9 +192,9 @@ export interface InvokeMap {
   'rules.swallow.restoreDefaults': { req: void; res: SwallowRule[] }
   'settings.get': { req: void; res: Settings }
   'settings.set': { req: Partial<Settings>; res: Settings }
-  /** Models this subscription can select (from the SDK, with label/description).
-   *  Empty = unknown (no session has initialised yet) → the UI shows the curated
-   *  set. Non-empty lets the settings picker discover new models automatically. */
+  /** Models this subscription can select, read from the CLI (probed on first ask
+   *  when no session has reported yet), so the picker follows the account across
+   *  model releases. Empty only when the CLI cannot answer → default only. */
   'models.available': { req: void; res: AvailableModel[] }
   /** App auto-update (GitHub releases). */
   'updates.check': { req: void; res: { status: UpdateStatus['state'] } }

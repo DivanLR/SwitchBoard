@@ -305,14 +305,13 @@ export interface SwallowRule {
 
 export type TerseLevel = 'lite' | 'full' | 'ultra'
 
-/** Curated metadata for a model card (design reference). Now an OVERLAY: the
- *  selectable list is discovered from the SDK at runtime (see AvailableModel) and
- *  styled with these hand-tuned label/desc/price hints where an id is known. Also
- *  the fallback list shown before any session has reported its available models. */
+/** Shape of one model card in the settings picker. Built at runtime from the
+ *  discovered model list (see AvailableModel) — there is no hardcoded catalogue,
+ *  so a newly released model appears without a code change. */
 export interface ModelChoice {
   id: string
   label: string
-  /** One-line strengths description shown under the name. */
+  /** One-line strengths description shown under the name (from the SDK). */
   desc: string
   /** Relative cost hint shown at the card's right edge. */
   price: string
@@ -320,22 +319,56 @@ export interface ModelChoice {
 
 /** A model the subscription can actually select, discovered from the SDK's
  *  supportedModels(). `id` is the canonical wire id (used for setModel and
- *  persisted in settings); label/description come from the SDK unless a
- *  MODEL_CHOICES overlay supplies curated copy. */
+ *  persisted in settings); `label`/`description` come from the SDK. */
 export interface AvailableModel {
   id: string
   label: string
   description: string
 }
 
-export const MODEL_CHOICES: readonly ModelChoice[] = [
-  { id: 'default', label: 'Account default', desc: 'Follows your subscription default model', price: '—' },
-  { id: 'claude-fable-5', label: 'Fable 5', desc: 'Deepest reasoning — best for architecture and tricky plans', price: '$$$' },
-  { id: 'claude-opus-5[1m]', label: 'Opus 5', desc: 'Latest flagship with 1M context — strong everyday reasoning', price: '$$$' },
-  { id: 'claude-opus-4-8', label: 'Opus 4.8', desc: 'Strong reasoning with faster output', price: '$$$' },
-  { id: 'claude-sonnet-5', label: 'Sonnet 5', desc: 'Fast and strong — the everyday workhorse', price: '$$' },
-  { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', desc: 'Fastest and cheapest — simple, mechanical edits', price: '$' },
-]
+// Model families, strongest first. The only model knowledge the app keeps:
+// families change far more rarely than the models within them, so a new release
+// inherits its family's label, price hint and fallback rung automatically.
+const FAMILIES = ['fable', 'opus', 'sonnet', 'haiku'] as const
+
+/** The family an id belongs to, or null when it names none (including 'default',
+ *  which resolves to whatever the account default is). */
+export function modelFamily(id: string | undefined): string | null {
+  if (!id) return null
+  const lower = id.toLowerCase()
+  return FAMILIES.find((family) => lower.includes(family)) ?? null
+}
+
+/**
+ * Display label derived from a model id, so any model reads correctly with no
+ * code change: 'claude-opus-5[1m]' → 'Opus 5 (1M)', 'claude-haiku-4-5-20251001'
+ * → 'Haiku 4.5', 'sonnet' → 'Sonnet'. Preferred over the SDK's own displayName,
+ * which drops the version ('Opus', 'Sonnet') and so cannot tell two releases of
+ * one family apart.
+ */
+export function modelLabel(id: string): string {
+  if (!id || id === 'default') return 'Account default'
+  const oneMillion = /\[1m\]/i.test(id)
+  const base = id
+    .replace(/\[1m\]/i, '')
+    .replace(/^claude-/, '')
+    .replace(/-\d{8}$/, '') // release-date suffix, e.g. haiku-4-5-20251001
+  const [family = base, ...version] = base.split('-')
+  const name = family.charAt(0).toUpperCase() + family.slice(1)
+  return `${name}${version.length ? ` ${version.join('.')}` : ''}${oneMillion ? ' (1M)' : ''}`
+}
+
+const FAMILY_PRICE: Record<string, string> = {
+  fable: '$$$',
+  opus: '$$$',
+  sonnet: '$$',
+  haiku: '$',
+}
+
+/** Relative cost hint for a model card; '—' when the family is not recognised. */
+export function modelPrice(id: string): string {
+  return FAMILY_PRICE[modelFamily(id) ?? ''] ?? '—'
+}
 
 /** Advisor/Orchestrator pairing mode; 'auto' picks per message by workload. */
 export type ModelMode = 'auto' | 'advisor' | 'orchestrator'

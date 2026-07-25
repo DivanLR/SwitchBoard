@@ -20,6 +20,7 @@ import type { SessionStatusPush } from '@shared/ipc-types'
 import { newId, nowIso, type Repositories } from '@main/store/repositories'
 import { readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
 import { HostedSession, type PermissionGate } from './session'
+import { probeAvailableModels } from './model-catalog'
 import { foldModelTotals, type EventSink } from './message-mapper'
 import { terseSystemPromptAppend } from './terse-mode'
 import { adhdSystemPromptAppend } from './adhd-mode'
@@ -120,14 +121,36 @@ export class SessionManager {
   private hosted = new Map<string, HostedEntry>()
   private classifier: NoiseClassifier | null = null
   /** Models this subscription can select, captured from the SDK's supportedModels()
-   *  on any session start (with SDK label/description). Empty until a session
-   *  initialises; settings treats empty as "unknown → show curated". Account-global. */
+   *  on any session start, or probed on demand by `models()`. Account-global and
+   *  in-memory: the account's model list is whatever the CLI reports today. */
   availableModels: AvailableModel[] = []
+  private probingModels: Promise<AvailableModel[]> | null = null
 
   constructor(
     private repos: Repositories,
     private callbacks: SessionManagerCallbacks,
   ) {}
+
+  /**
+   * The selectable model list, probing the CLI once when no session has reported
+   * one yet (a cold start opening Settings). Empty only when the CLI is missing
+   * or too old to answer, in which case the picker offers the account default.
+   */
+  async models(): Promise<AvailableModel[]> {
+    if (this.availableModels.length > 0) return this.availableModels
+    // ponytail: concurrent callers share one in-flight probe; a failure simply
+    // re-probes on the next ask (no backoff, no cached negative result).
+    this.probingModels ??= probeAvailableModels(
+      this.repos.projects.listActive()[0]?.path ?? process.cwd(),
+    )
+    try {
+      const models = await this.probingModels
+      if (models.length > 0) this.availableModels = models
+    } finally {
+      this.probingModels = null
+    }
+    return this.availableModels
+  }
 
   setNoiseClassifier(classifier: NoiseClassifier): void {
     this.classifier = classifier

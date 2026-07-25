@@ -4,7 +4,7 @@
 // and the running / needs-you / cost-today stats card (FR-003/004/005).
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { isIpcError } from '@shared/ipc-types'
-import { MODEL_CHOICES } from '@shared/domain'
+import { modelLabel } from '@shared/domain'
 import { activeAgents } from '@shared/agents'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
@@ -44,8 +44,7 @@ const emit = defineEmits<{
 const modelSummary = computed(() => {
   const id = settings.settings?.intelligentModel ?? 'default'
   if (id === 'default') return 'default model'
-  const choice = MODEL_CHOICES.find((m) => m.id === id)
-  return choice ? choice.label : id
+  return modelLabel(id)
 })
 
 // --- Theme + collapse toggles (design: icon buttons beside the logo) ---

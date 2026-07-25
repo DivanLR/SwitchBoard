@@ -9,8 +9,9 @@ import {
   type SDKMessage,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
-import { MODEL_CHOICES, type AvailableModel, type McpServer, type ModelMode, type ProjectCommand, type SessionStatus } from '@shared/domain'
+import { modelLabel, type AvailableModel, type McpServer, type ModelMode, type ProjectCommand, type SessionStatus } from '@shared/domain'
 import { MessageMapper, type EventSink } from './message-mapper'
+import { toAvailableModels } from './model-catalog'
 import { classifyWorkload, maxEffortUnlessFable, nextStrongestModel } from './model-routing'
 import { modeAgents } from './modes'
 
@@ -211,29 +212,15 @@ export class HostedSession {
       .catch(() => {
         // Older CLI without the control request — the init message still covers it.
       })
-    // The models this subscription can select, with the SDK's own label and
-    // description, so the settings picker discovers new models automatically
-    // instead of relying on a hardcoded list. Keyed by the canonical wire id
-    // (resolvedModel ?? value) so an alias row and a full-id row dedupe to one.
+    // The models this subscription can select, so the settings picker follows the
+    // account rather than a hardcoded list. A live session reports them for free;
+    // model-catalog probes separately when Settings asks before any session ran.
     if (this.options.onModels) {
       void this.q
         .supportedModels()
-        .then((models) => {
-          const byId = new Map<string, AvailableModel>()
-          for (const m of models) {
-            // 'default' is an alias row, not a selectable model, and it resolves to
-            // whatever the account default is. Keeping it would claim that model's
-            // id first and hide its real row (e.g. Opus 5 labelled "Default
-            // (recommended)"); the curated 'Account default' card already covers it.
-            if (m.value === 'default') continue
-            const id = m.resolvedModel ?? m.value
-            if (!id || byId.has(id)) continue
-            byId.set(id, { id, label: m.displayName ?? id, description: m.description ?? '' })
-          }
-          this.options.onModels?.([...byId.values()])
-        })
+        .then((models) => this.options.onModels?.(toAvailableModels(models)))
         .catch(() => {
-          // Older CLI without supportedModels — settings falls back to showing all.
+          // Older CLI without supportedModels — the manager keeps what it had.
         })
     }
     this.setStatus('done')
@@ -403,10 +390,9 @@ export class HostedSession {
     // Reference the main-loop (work) model; keep plan aligned with it.
     const current = this.options.workModel
     const next = nextStrongestModel(current)
-    const label = (id: string): string => MODEL_CHOICES.find((m) => m.id === id)?.label ?? id
     if (!next) {
       this.options.sink.append('assistant_text', {
-        text: `⚙ Usage limit reached on ${label(current ?? 'default')} — no lower model to fall back to. Try again after the limit resets.`,
+        text: `⚙ Usage limit reached on ${modelLabel(current ?? 'default')} — no lower model to fall back to. Try again after the limit resets.`,
         partial: false,
       })
       return
@@ -418,7 +404,7 @@ export class HostedSession {
     this.applyEffortForModel(next)
     this.options.onModel?.(next)
     this.options.sink.append('assistant_text', {
-      text: `⚙ Usage limit reached — switched this session to ${label(next)} to keep going. Send your message again.`,
+      text: `⚙ Usage limit reached — switched this session to ${modelLabel(next)} to keep going. Send your message again.`,
       partial: false,
     })
   }

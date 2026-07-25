@@ -13,7 +13,7 @@ const composerDrafts = new Map<string, string>()
 // blocks and a live status line, dark raw log, and the ❯ composer bar
 // (FR-014..019a, R2 resume).
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { MODEL_CHOICES } from '@shared/domain'
+import { modelLabel } from '@shared/domain'
 import type { AgentScopedPayload, SessionEvent, CleanupGroup } from '@shared/domain'
 import { activeAgents } from '@shared/agents'
 import { parseInlineQuestion } from '@shared/inline-question'
@@ -302,10 +302,9 @@ const cacheHitPct = computed(() => {
 })
 
 // The model the SDK reported for the latest turn (reflects intent routing live).
-const modelLabel = computed(() => {
+const currentModelLabel = computed(() => {
   const id = liveSession.value?.currentModel
-  if (!id) return null
-  return MODEL_CHOICES.find((m) => m.id === id)?.label ?? id
+  return id ? modelLabel(id) : null
 })
 
 // --- Session usage widget: total tokens + the 2 most-used models, clickable
@@ -314,13 +313,6 @@ function fmtTok(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${Math.round(n / 1_000)}k`
   return String(n)
-}
-
-function shortModel(id: string): string {
-  const label = MODEL_CHOICES.find((m) => m.id === id)?.label
-  if (label) return label
-  // Unlisted ids: strip the vendor prefix/date suffix for a compact chip.
-  return id.replace(/^claude-/, '').replace(/-\d{8}$/, '')
 }
 
 const sessionUsage = computed(() => {
@@ -333,7 +325,7 @@ const sessionUsage = computed(() => {
   return {
     total,
     cost,
-    top: models.slice(0, 2).map(([id, u]) => ({ id, label: shortModel(id), tokens: u.tokens })),
+    top: models.slice(0, 2).map(([id, u]) => ({ id, label: modelLabel(id), tokens: u.tokens })),
   }
 })
 
@@ -874,11 +866,11 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
       <div class="head-meta mono">
         <span style="white-space: nowrap">⎇ {{ liveSession?.branch ?? endedSession?.branch ?? '—' }}</span>
         <span
-          v-if="modelLabel"
+          v-if="currentModelLabel"
           data-testid="session-model"
           style="color: var(--text-faint); white-space: nowrap"
         >
-          {{ modelLabel }}
+          {{ currentModelLabel }}
         </span>
         <span
           v-if="liveSession?.currentMode"

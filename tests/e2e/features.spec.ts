@@ -27,32 +27,36 @@ test('settings exposes intelligent and worker model cards', async ({ page }) => 
   await expect(panel.getByTestId('intelligent-model-claude-fable-5')).toBeVisible()
   await expect(panel.getByTestId('worker-model-claude-sonnet-5')).toBeVisible()
   // Picking an intelligent-model card selects it.
-  await panel.getByTestId('intelligent-model-claude-opus-4-8').click()
-  await expect(panel.getByTestId('intelligent-model-claude-opus-4-8')).toHaveClass(/sel/)
-  // The sidebar model summary reflects the choice.
+  await panel.getByTestId('intelligent-model-claude-opus-5[1m]').click()
+  await expect(panel.getByTestId('intelligent-model-claude-opus-5[1m]')).toHaveClass(/sel/)
+  // The sidebar model summary reflects the choice, labelled from the id.
   await panel.getByTestId('settings-done').click()
-  await expect(page.getByTestId('model-summary')).toContainText('Opus')
+  await expect(page.getByTestId('model-summary')).toContainText('Opus 5')
 })
 
-test('a newly available model is discovered automatically in the picker', async ({ page }) => {
-  // Simulate the subscription gaining a model the app has never hardcoded.
+test('the picker follows the account: a new model appears, a retired one goes', async ({ page }) => {
+  // Simulate a model release: the account gains a model the app has never seen
+  // and loses the one it used to ship in code.
   await page.evaluate(() =>
     window.__mock.setAvailableModels([
-      { id: 'claude-fable-5', label: 'Fable 5', description: '' },
-      { id: 'claude-sonnet-5', label: 'Sonnet 5', description: '' },
-      { id: 'claude-opus-4-9', label: 'Opus 4.9', description: 'Newest Opus' },
+      { id: 'claude-fable-5', label: 'Fable', description: '' },
+      { id: 'claude-sonnet-5', label: 'Sonnet', description: '' },
+      { id: 'claude-opus-7-2[1m]', label: 'Opus (1M context)', description: 'Newest Opus' },
     ]),
   )
   await page.getByTestId('open-settings').click()
   const panel = page.getByTestId('settings-panel')
-  // The brand-new model appears as its own card, labelled from the SDK.
-  const newCard = panel.getByTestId('intelligent-model-claude-opus-4-9')
+  // The brand-new model is selectable, named and described without a code change.
+  const newCard = panel.getByTestId('intelligent-model-claude-opus-7-2[1m]')
   await expect(newCard).toBeVisible()
-  await expect(newCard).toContainText('Opus 4.9')
-  // A curated known model still appears.
+  await expect(newCard).toContainText('Opus 7.2 (1M)')
+  await expect(newCard).toContainText('Newest Opus')
   await expect(panel.getByTestId('intelligent-model-claude-fable-5')).toBeVisible()
-  // A model NOT in the available set is hidden (opus-4-8 was not provided).
+  // Models the account no longer offers are gone, including the previous Opus.
+  await expect(panel.getByTestId('intelligent-model-claude-opus-5[1m]')).toHaveCount(0)
   await expect(panel.getByTestId('intelligent-model-claude-opus-4-8')).toHaveCount(0)
+  // The account default is always offered, whatever the account reports.
+  await expect(panel.getByTestId('intelligent-model-default')).toBeVisible()
 })
 
 test('settings Terminals tab explains terse mode and its levels', async ({ page }) => {

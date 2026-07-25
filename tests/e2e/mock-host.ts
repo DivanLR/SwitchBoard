@@ -160,8 +160,16 @@ export function installMockHost(scenario: MockScenario): void {
   // Keyed by projectId (legacy single doc) or `projectId|comboKey` (per-combination).
   const mcpSchemaByProject = new Map<string, string>()
   const mcpScans: { id: string; projectId: string; comboKey: string; servers: string[]; scannedAt: string }[] = []
-  // Models the "subscription" can select (drives the settings picker's auto-discovery).
-  let availableModels: { id: string; label: string; description: string }[] = []
+  // Models the "subscription" can select, as the real host reports them (it reads
+  // them from the CLI). Drives the settings picker entirely — there is no
+  // hardcoded catalogue behind it. A test can replace the set via
+  // __mock.setAvailableModels to exercise a model release.
+  let availableModels: { id: string; label: string; description: string }[] = [
+    { id: 'claude-fable-5', label: 'Fable', description: 'Most capable for the hardest tasks' },
+    { id: 'claude-opus-5[1m]', label: 'Opus (1M context)', description: 'Best for everyday, complex tasks' },
+    { id: 'claude-sonnet-5', label: 'Sonnet', description: 'Efficient for routine tasks' },
+    { id: 'claude-haiku-4-5-20251001', label: 'Haiku', description: 'Fastest for quick answers' },
+  ]
   const standingRules: AnyRecord[] = []
   let costToday = 0
   let tokensToday = 0
@@ -732,8 +740,7 @@ export function installMockHost(scenario: MockScenario): void {
       settings = { ...settings, ...req }
       return { ...settings }
     },
-    // Empty = unknown → the settings panel shows the curated set. A test can push
-    // models via __mock.setAvailableModels to exercise auto-discovery.
+    // The real host probes the CLI for this list; the panel renders it as-is.
     'models.available': () => availableModels,
   }
 
