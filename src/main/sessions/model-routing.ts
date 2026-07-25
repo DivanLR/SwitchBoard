@@ -28,7 +28,9 @@ export function classifyIntent(text: string): 'plan' | 'work' {
 // drops to Haiku; Haiku has nowhere lower.
 const DOWNGRADE: Record<string, string | null> = {
   default: 'claude-sonnet-5',
-  'claude-fable-5': 'claude-opus-4-8',
+  'claude-fable-5': 'claude-opus-5[1m]',
+  'claude-opus-5[1m]': 'claude-sonnet-5',
+  'claude-opus-5': 'claude-sonnet-5',
   'claude-opus-4-8': 'claude-sonnet-5',
   'claude-sonnet-5': 'claude-haiku-4-5-20251001',
   'claude-haiku-4-5-20251001': null,

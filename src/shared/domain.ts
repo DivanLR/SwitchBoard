@@ -331,6 +331,7 @@ export interface AvailableModel {
 export const MODEL_CHOICES: readonly ModelChoice[] = [
   { id: 'default', label: 'Account default', desc: 'Follows your subscription default model', price: '—' },
   { id: 'claude-fable-5', label: 'Fable 5', desc: 'Deepest reasoning — best for architecture and tricky plans', price: '$$$' },
+  { id: 'claude-opus-5[1m]', label: 'Opus 5', desc: 'Latest flagship with 1M context — strong everyday reasoning', price: '$$$' },
   { id: 'claude-opus-4-8', label: 'Opus 4.8', desc: 'Strong reasoning with faster output', price: '$$$' },
   { id: 'claude-sonnet-5', label: 'Sonnet 5', desc: 'Fast and strong — the everyday workhorse', price: '$$' },
   { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', desc: 'Fastest and cheapest — simple, mechanical edits', price: '$' },

@@ -221,6 +221,11 @@ export class HostedSession {
         .then((models) => {
           const byId = new Map<string, AvailableModel>()
           for (const m of models) {
+            // 'default' is an alias row, not a selectable model, and it resolves to
+            // whatever the account default is. Keeping it would claim that model's
+            // id first and hide its real row (e.g. Opus 5 labelled "Default
+            // (recommended)"); the curated 'Account default' card already covers it.
+            if (m.value === 'default') continue
             const id = m.resolvedModel ?? m.value
             if (!id || byId.has(id)) continue
             byId.set(id, { id, label: m.displayName ?? id, description: m.description ?? '' })

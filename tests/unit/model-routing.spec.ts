@@ -56,10 +56,12 @@ describe('nextStrongestModel (usage-limit fallback ladder)', () => {
     expect(nextStrongestModel('default')).toBe('claude-sonnet-5')
     expect(nextStrongestModel(undefined)).toBe('claude-sonnet-5')
     expect(nextStrongestModel('claude-opus-4-8')).toBe('claude-sonnet-5')
+    expect(nextStrongestModel('claude-opus-5[1m]')).toBe('claude-sonnet-5')
+    expect(nextStrongestModel('claude-opus-5')).toBe('claude-sonnet-5')
   })
 
   it('walks one rung down and stops at the floor', () => {
-    expect(nextStrongestModel('claude-fable-5')).toBe('claude-opus-4-8')
+    expect(nextStrongestModel('claude-fable-5')).toBe('claude-opus-5[1m]')
     expect(nextStrongestModel('claude-sonnet-5')).toBe('claude-haiku-4-5-20251001')
     expect(nextStrongestModel('claude-haiku-4-5-20251001')).toBeNull()
   })
