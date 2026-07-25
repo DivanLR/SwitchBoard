@@ -4,7 +4,8 @@
 // and the running / needs-you / cost-today stats card (FR-003/004/005).
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { isIpcError } from '@shared/ipc-types'
-import { modelLabel } from '@shared/domain'
+import { modelLabel, type ProjectGroup } from '@shared/domain'
+import { groupSections } from '@shared/project-groups'
 import { activeAgents } from '@shared/agents'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
@@ -170,9 +171,75 @@ function mcpDot(status: string): string {
   return 'var(--amber)'
 }
 
+// --- Collapsible project groups (sidebar-only organisation, kept in Settings
+// beside the other per-project maps, so it persists with no schema change) ---
+const groups = computed<ProjectGroup[]>(() => settings.settings?.projectGroups ?? [])
+const groupOf = computed<Record<string, string>>(() => settings.settings?.projectGroupOf ?? {})
+/** Groups in order, then the ungrouped tail. Collapsed only hides the rows. */
+const sections = computed(() => groupSections(projects.visibleItems, groups.value, groupOf.value))
+
+function saveGroups(next: ProjectGroup[]): void {
+  void settings.save({ projectGroups: next })
+}
+
+/** Move a project into a group, or out of all groups with null. */
+function assignGroup(projectId: string, groupId: string | null): void {
+  const map = { ...groupOf.value }
+  if (groupId) map[projectId] = groupId
+  else delete map[projectId]
+  void settings.save({ projectGroupOf: map })
+}
+
+function toggleGroup(id: string): void {
+  saveGroups(groups.value.map((g) => (g.id === id ? { ...g, collapsed: !g.collapsed } : g)))
+}
+
+/** Adds a group and drops straight into inline naming. */
+function newGroup(projectId?: string): void {
+  const group: ProjectGroup = { id: crypto.randomUUID(), name: 'New group', collapsed: false }
+  saveGroups([...groups.value, group])
+  if (projectId) assignGroup(projectId, group.id)
+  renamingGroupId.value = group.id
+  renameVal.value = group.name
+}
+
+/** Removing a group never removes projects: they fall back to ungrouped. */
+function removeGroup(id: string): void {
+  const map = { ...groupOf.value }
+  for (const [projectId, groupId] of Object.entries(map)) {
+    if (groupId === id) delete map[projectId]
+  }
+  void settings.save({
+    projectGroups: groups.value.filter((g) => g.id !== id),
+    projectGroupOf: map,
+  })
+}
+
+function moveGroup(id: string, delta: number): void {
+  const from = groups.value.findIndex((g) => g.id === id)
+  const to = from + delta
+  if (from === -1 || to < 0 || to >= groups.value.length) return
+  const next = [...groups.value]
+  const [moved] = next.splice(from, 1)
+  next.splice(to, 0, moved)
+  saveGroups(next)
+}
+
+/** Pending items inside a group — kept visible while it is folded shut. */
+function pendingInGroup(items: { id: string }[]): number {
+  return items.reduce((sum, item) => sum + pendingFor(item.id), 0)
+}
+
 // --- Context menu (right-click) + inline rename ---
-const ctx = ref<{ id: string; name: string; x: number; y: number } | null>(null)
+const ctx = ref<{
+  kind: 'project' | 'group'
+  id: string
+  name: string
+  x: number
+  y: number
+} | null>(null)
 const renamingId = ref<string | null>(null)
+const renamingGroupId = ref<string | null>(null)
 const renameVal = ref('')
 
 // Function refs run on every re-render (each keystroke updates renameVal), so
@@ -186,7 +253,11 @@ function focusOnMount(el: unknown): void {
 }
 
 function openCtx(item: (typeof projects.items)[number], event: MouseEvent): void {
-  ctx.value = { id: item.id, name: item.name, x: event.clientX, y: event.clientY }
+  ctx.value = { kind: 'project', id: item.id, name: item.name, x: event.clientX, y: event.clientY }
+}
+
+function openGroupCtx(group: ProjectGroup, event: MouseEvent): void {
+  ctx.value = { kind: 'group', id: group.id, name: group.name, x: event.clientX, y: event.clientY }
 }
 
 function closeCtx(): void {
@@ -195,7 +266,8 @@ function closeCtx(): void {
 
 function startRename(): void {
   if (!ctx.value) return
-  renamingId.value = ctx.value.id
+  if (ctx.value.kind === 'group') renamingGroupId.value = ctx.value.id
+  else renamingId.value = ctx.value.id
   renameVal.value = ctx.value.name
   ctx.value = null
 }
@@ -208,6 +280,14 @@ async function commitRename(): Promise<void> {
   if (name.length > 0) await projects.rename(id, name)
 }
 
+function commitGroupRename(): void {
+  const id = renamingGroupId.value
+  renamingGroupId.value = null
+  if (!id) return
+  const name = renameVal.value.trim()
+  if (name.length > 0) saveGroups(groups.value.map((g) => (g.id === id ? { ...g, name } : g)))
+}
+
 function ctxDelete(): void {
   if (!ctx.value) return
   askRemove(ctx.value.id)
@@ -216,8 +296,33 @@ function ctxDelete(): void {
 
 function ctxMove(delta: number): void {
   if (!ctx.value) return
+  if (ctx.value.kind === 'group') {
+    moveGroup(ctx.value.id, delta)
+    ctx.value = null
+    return
+  }
   const index = projects.items.findIndex((p) => p.id === ctx.value?.id)
   if (index !== -1) void projects.move(ctx.value.id, index + delta)
+  ctx.value = null
+}
+
+/** Context-menu "Move to" — the keyboard-free route into a group. */
+function ctxAssign(groupId: string | null): void {
+  if (!ctx.value || ctx.value.kind !== 'project') return
+  assignGroup(ctx.value.id, groupId)
+  ctx.value = null
+}
+
+function ctxNewGroup(): void {
+  if (!ctx.value) return
+  const projectId = ctx.value.kind === 'project' ? ctx.value.id : undefined
+  ctx.value = null
+  newGroup(projectId)
+}
+
+function ctxRemoveGroup(): void {
+  if (!ctx.value || ctx.value.kind !== 'group') return
+  removeGroup(ctx.value.id)
   ctx.value = null
 }
 
@@ -227,6 +332,22 @@ function ctxMove(delta: number): void {
 // @path into that project's composer. ---
 const dragId = ref<string | null>(null)
 const rowDrop = ref<{ id: string; zone: 'before' | 'after' | 'file' } | null>(null)
+/** Group header highlighted as the drop target for the dragged project. */
+const groupDrop = ref<string | null>(null)
+
+function onGroupDragOver(group: ProjectGroup, event: DragEvent): void {
+  if (!(event.dataTransfer?.types ?? []).includes('text/x-sb-project')) return
+  event.preventDefault()
+  groupDrop.value = group.id
+}
+
+function onGroupDrop(group: ProjectGroup | null, event: DragEvent): void {
+  event.preventDefault()
+  groupDrop.value = null
+  const dragged = event.dataTransfer?.getData('text/x-sb-project') || dragId.value
+  dragId.value = null
+  if (dragged) assignGroup(dragged, group?.id ?? null)
+}
 
 function onDragStart(item: (typeof projects.items)[number], event: DragEvent): void {
   dragId.value = item.id
@@ -279,12 +400,17 @@ async function onRowDrop(item: (typeof projects.items)[number], event: DragEvent
   const targetIndex = projects.items.findIndex((p) => p.id === item.id)
   let toIndex = drop.zone === 'before' ? targetIndex : targetIndex + 1
   if (fromIndex < toIndex) toIndex -= 1
+  // Dropping among a group's rows also joins that group, so dragging into the
+  // middle of a group does the obvious thing instead of only reordering.
+  const targetGroup = groupOf.value[item.id] ?? null
+  if ((groupOf.value[dragged] ?? null) !== targetGroup) assignGroup(dragged, targetGroup)
   await projects.move(dragged, toIndex)
 }
 
 function onDragEnd(): void {
   dragId.value = null
   rowDrop.value = null
+  groupDrop.value = null
 }
 
 // --- Remove (archive) a project, via a confirmation popup ---
@@ -362,16 +488,88 @@ async function confirmRemoveNow(): Promise<void> {
       <span v-if="!collapsed" class="section-label mono">PROJECTS</span>
       <!-- Single line, no surrounding whitespace: a text node around the glyph
            becomes a flex text run with trailing space that shifts + off-centre. -->
+      <button
+        v-if="!collapsed"
+        class="add mono"
+        data-testid="new-group"
+        title="New group"
+        @click="newGroup()"
+      >⊞</button>
       <button class="add mono" data-testid="add-project" title="New session" @click="emit('add-project')">+</button>
     </div>
 
     <div class="project-list">
+      <template v-for="section in sections" :key="section.group?.id ?? '__ungrouped'">
+        <!-- Group header: click to fold, right-click for rename/reorder/remove,
+             and a drop target for dragging a project in. Hidden on the collapsed
+             rail, where there is no room for headers. -->
+        <div
+          v-if="section.group && !collapsed"
+          class="group-head"
+          :class="{ folded: section.group.collapsed, 'drop-into': groupDrop === section.group.id }"
+          :data-testid="`group-head-${section.group.name}`"
+          @click="toggleGroup(section.group.id)"
+          @contextmenu.prevent.stop="openGroupCtx(section.group, $event)"
+          @dragover="onGroupDragOver(section.group, $event)"
+          @dragleave="groupDrop = groupDrop === section.group.id ? null : groupDrop"
+          @drop="onGroupDrop(section.group, $event)"
+        >
+          <span class="group-caret mono">{{ section.group.collapsed ? '▸' : '▾' }}</span>
+          <input
+            v-if="renamingGroupId === section.group.id"
+            :ref="focusOnMount"
+            v-model="renameVal"
+            class="rename-input mono"
+            :data-testid="`group-rename-input-${section.group.name}`"
+            @click.stop
+            @keydown.enter="commitGroupRename"
+            @keydown.esc="renamingGroupId = null"
+            @blur="commitGroupRename"
+          />
+          <span v-else class="group-name mono">{{ section.group.name }}</span>
+          <span style="flex: 1"></span>
+          <span
+            v-if="section.group.collapsed && pendingInGroup(section.items) > 0"
+            class="badge-count"
+            :data-testid="`group-badge-${section.group.name}`"
+          >
+            {{ pendingInGroup(section.items) }}
+          </span>
+          <span class="group-count mono" :data-testid="`group-count-${section.group.name}`">
+            {{ section.items.length }}
+          </span>
+          <button
+            class="remove mono"
+            :data-testid="`group-remove-${section.group.name}`"
+            title="Remove this group (its projects stay)"
+            @click.stop="removeGroup(section.group.id)"
+          >
+            ✕
+          </button>
+        </div>
+        <!-- Ungrouped tail is a drop target too, so a project can leave a group. -->
+        <div
+          v-else-if="!section.group && !collapsed && groups.length > 0"
+          class="group-head ungrouped"
+          data-testid="group-head-ungrouped"
+          @dragover.prevent
+          @drop="onGroupDrop(null, $event)"
+        >
+          <span class="group-name mono">Ungrouped</span>
+          <span style="flex: 1"></span>
+          <span class="group-count mono" data-testid="group-count-ungrouped">
+            {{ section.items.length }}
+          </span>
+        </div>
+
+        <template v-if="collapsed || !section.group?.collapsed">
       <div
-        v-for="item in projects.visibleItems"
+        v-for="item in section.items"
         :key="item.id"
         class="project"
         :class="{
           active: item.id === projects.selectedProjectId,
+          grouped: !!section.group && !collapsed,
           'drop-before': rowDrop?.id === item.id && rowDrop.zone === 'before',
           'drop-after': rowDrop?.id === item.id && rowDrop.zone === 'after',
           'drop-file': rowDrop?.id === item.id && rowDrop.zone === 'file',
@@ -479,6 +677,8 @@ async function confirmRemoveNow(): Promise<void> {
           </div>
         </div>
       </div>
+        </template>
+      </template>
       <div v-if="projects.loaded && projects.visibleItems.length === 0" class="empty mono">
         No projects yet — press + to add one.
       </div>
@@ -585,8 +785,40 @@ async function confirmRemoveNow(): Promise<void> {
       <button class="ctx-item mono" data-testid="ctx-move-down" @click="ctxMove(1)">
         <span>↓</span>Move down
       </button>
-      <button class="ctx-item mono danger" data-testid="ctx-remove" @click="ctxDelete">
-        <span>🗑</span>Remove from list
+      <template v-if="ctx.kind === 'project'">
+        <div class="ctx-sep"></div>
+        <button class="ctx-item mono" data-testid="ctx-new-group" @click="ctxNewGroup">
+          <span style="color: var(--green)">⊞</span>New group with this
+        </button>
+        <button
+          v-for="g in groups"
+          :key="g.id"
+          class="ctx-item mono"
+          :data-testid="`ctx-move-to-${g.name}`"
+          @click="ctxAssign(g.id)"
+        >
+          <span>→</span>Move to {{ g.name }}
+        </button>
+        <button
+          v-if="groupOf[ctx.id]"
+          class="ctx-item mono"
+          data-testid="ctx-move-to-ungrouped"
+          @click="ctxAssign(null)"
+        >
+          <span>→</span>Move out of group
+        </button>
+        <div class="ctx-sep"></div>
+        <button class="ctx-item mono danger" data-testid="ctx-remove" @click="ctxDelete">
+          <span>🗑</span>Remove from list
+        </button>
+      </template>
+      <button
+        v-else
+        class="ctx-item mono danger"
+        data-testid="ctx-remove-group"
+        @click="ctxRemoveGroup"
+      >
+        <span>🗑</span>Remove group (keeps projects)
       </button>
     </div>
   </div>
@@ -775,6 +1007,16 @@ async function confirmRemoveNow(): Promise<void> {
   padding: 4px 16px 6px;
 }
 
+/* The label takes the slack so the row's buttons stay together on the right,
+   rather than space-between spreading them across the row. */
+.section-row .section-label {
+  flex: 1;
+}
+
+.section-row .add + .add {
+  margin-left: 6px;
+}
+
 .section-label {
   font-size: 10px;
   letter-spacing: 0.16em;
@@ -808,12 +1050,75 @@ async function confirmRemoveNow(): Promise<void> {
   padding: 2px 0 8px;
 }
 
+/* --- Collapsible group headers --- */
+.group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 8px 2px;
+  padding: 5px 8px 5px 6px;
+  border-radius: var(--rc);
+  cursor: pointer;
+  color: var(--text-faint);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.group-head:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.group-head.drop-into {
+  background: var(--bg-hover);
+  box-shadow: inset 0 0 0 1px var(--green);
+  color: var(--text);
+}
+
+/* The ungrouped divider is a label and a drop target, never foldable. */
+.group-head.ungrouped {
+  cursor: default;
+  opacity: 0.65;
+}
+
+.group-caret {
+  width: 9px;
+  color: var(--text-faint);
+}
+
+.group-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-count {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.group-head .remove {
+  position: static;
+  opacity: 0;
+}
+
+.group-head:hover .remove {
+  opacity: 0.7;
+}
+
 .project {
   position: relative;
   margin: 0 8px 2px;
   padding: 9px 12px 9px 10px;
   border-radius: var(--rc);
   cursor: pointer;
+}
+
+/* Rows inside a group sit indented under their header. */
+.project.grouped {
+  margin-left: 18px;
 }
 
 .project:hover {
@@ -1214,6 +1519,12 @@ async function confirmRemoveNow(): Promise<void> {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.ctx-sep {
+  height: 1px;
+  margin: 3px 0;
+  background: rgba(52, 211, 153, 0.18);
 }
 
 .ctx-item {

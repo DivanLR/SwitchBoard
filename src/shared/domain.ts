@@ -305,6 +305,14 @@ export interface SwallowRule {
 
 export type TerseLevel = 'lite' | 'full' | 'ultra'
 
+/** A collapsible sidebar group holding projects; array order is display order. */
+export interface ProjectGroup {
+  id: string
+  name: string
+  /** Persisted so a folded group stays folded across restarts. */
+  collapsed: boolean
+}
+
 /** Shape of one model card in the settings picker. Built at runtime from the
  *  discovered model list (see AvailableModel) — there is no hardcoded catalogue,
  *  so a newly released model appears without a code change. */
@@ -430,6 +438,13 @@ export interface Settings {
   /** Auto-approve requests by risk level (Allowed list tab): recorded as rule_approved. */
   autoApproveLow: boolean
   autoApproveMedium: boolean
+  /**
+   * Collapsible sidebar groups, in display order. Sidebar-only organisation, so
+   * it lives here beside the other per-project maps rather than in the schema.
+   */
+  projectGroups: ProjectGroup[]
+  /** projectId -> groupId. An absent or unknown id means the project is ungrouped. */
+  projectGroupOf: Record<string, string>
   /** Per-project plugin/skill commands hidden from composer suggestions. */
   disabledCommands: Record<string, string[]>
   /**
@@ -475,6 +490,8 @@ export const DEFAULT_SETTINGS: Settings = {
   projectWorkerModels: {},
   autoApproveLow: false,
   autoApproveMedium: false,
+  projectGroups: [],
+  projectGroupOf: {},
   disabledCommands: {},
   databaseMcpServers: [],
   mcpActiveServers: [],
