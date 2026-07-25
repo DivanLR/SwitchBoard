@@ -4,7 +4,7 @@
 // card + toggle + segmented controls, and a "Changes apply immediately · Done"
 // footer. State and transport live in the settings store.
 import { computed, onMounted, ref, watch } from 'vue'
-import type { PermissionRule, Settings, TerseLevel } from '@shared/domain'
+import type { AvailableModel, ModelChoice, PermissionRule, Settings, TerseLevel } from '@shared/domain'
 import { MODEL_CHOICES } from '@shared/domain'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { useProjectsStore } from '@renderer/stores/projects'
@@ -52,9 +52,9 @@ onMounted(() => {
   projId.value = projects.selectedProjectId
   void window.switchboard
     .invoke('models.available', undefined)
-    .then((ids) => (availableModelIds.value = ids))
+    .then((models) => (availableModels.value = models))
     .catch(() => {
-      /* no session initialised yet — keep the show-all fallback */
+      /* no session initialised yet — keep the curated fallback */
     })
 })
 
@@ -101,18 +101,36 @@ const terseExplain: Record<TerseLevel, string> = {
 }
 
 function modelLabel(id: string): string {
-  return MODEL_CHOICES.find((m) => m.id === id)?.label ?? id
+  return (
+    MODEL_CHOICES.find((m) => m.id === id)?.label ??
+    availableModels.value.find((m) => m.id === id)?.label ??
+    id
+  )
 }
 
-// Models this subscription can actually select (from the SDK). Empty = unknown
-// (no session has initialised yet) → show everything rather than hide wrongly.
-const availableModelIds = ref<string[]>([])
-const modelChoices = computed(() => {
-  if (availableModelIds.value.length === 0) return MODEL_CHOICES
-  const set = new Set(availableModelIds.value)
-  // 'default' (Account default) is always selectable; otherwise keep only models
-  // the account has, so e.g. Fable 5 is hidden on subscriptions without it.
-  return MODEL_CHOICES.filter((m) => m.id === 'default' || set.has(m.id))
+// Models this subscription can select, discovered from the SDK. Empty = unknown
+// (no session has initialised yet) → show the curated set rather than hide wrongly.
+const availableModels = ref<AvailableModel[]>([])
+const modelChoices = computed<ModelChoice[]>(() => {
+  const sdk = availableModels.value
+  if (sdk.length === 0) return [...MODEL_CHOICES]
+  const out: ModelChoice[] = []
+  const seen = new Set<string>()
+  const push = (c: ModelChoice): void => {
+    if (!seen.has(c.id)) {
+      out.push(c)
+      seen.add(c.id)
+    }
+  }
+  // Account default always first, then the known models (curated copy + price) the
+  // account has, in curated order, then any NEW model the SDK reports — styled from
+  // its own label/description so it appears without a code change.
+  const dflt = MODEL_CHOICES.find((m) => m.id === 'default')
+  if (dflt) push(dflt)
+  const have = new Set(sdk.map((m) => m.id))
+  for (const m of MODEL_CHOICES) if (m.id !== 'default' && have.has(m.id)) push(m)
+  for (const m of sdk) push({ id: m.id, label: m.label || m.id, desc: m.description || '', price: '—' })
+  return out
 })
 
 // Advisor/Orchestrator pairing modes (see src/main/sessions/modes.ts).

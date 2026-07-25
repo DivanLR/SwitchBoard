@@ -1,6 +1,11 @@
 // Intent heuristic for automatic model routing.
 import { describe, expect, it } from 'vitest'
-import { classifyIntent, classifyWorkload, nextStrongestModel } from '@main/sessions/model-routing'
+import {
+  classifyIntent,
+  classifyWorkload,
+  maxEffortUnlessFable,
+  nextStrongestModel,
+} from '@main/sessions/model-routing'
 
 describe('classifyIntent', () => {
   it('routes questions and discussion to the plan model', () => {
@@ -61,5 +66,21 @@ describe('nextStrongestModel (usage-limit fallback ladder)', () => {
 
   it('returns null for an unknown id', () => {
     expect(nextStrongestModel('some-future-model')).toBeNull()
+  })
+})
+
+describe('maxEffortUnlessFable (ultra effort for non-Fable models)', () => {
+  it('pushes non-Fable models to max effort', () => {
+    expect(maxEffortUnlessFable('claude-opus-4-8')).toBe('max')
+    expect(maxEffortUnlessFable('claude-sonnet-5')).toBe('max')
+    expect(maxEffortUnlessFable('claude-haiku-4-5-20251001')).toBe('max')
+    expect(maxEffortUnlessFable('some-future-model')).toBe('max')
+  })
+
+  it('leaves Fable 5 and the account default at their default effort', () => {
+    expect(maxEffortUnlessFable('claude-fable-5')).toBeNull()
+    expect(maxEffortUnlessFable('default')).toBeNull()
+    expect(maxEffortUnlessFable(undefined)).toBeNull()
+    expect(maxEffortUnlessFable('')).toBeNull()
   })
 })

@@ -9,9 +9,9 @@ import {
   type SDKMessage,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
-import { MODEL_CHOICES, type McpServer, type ModelMode, type ProjectCommand, type SessionStatus } from '@shared/domain'
+import { MODEL_CHOICES, type AvailableModel, type McpServer, type ModelMode, type ProjectCommand, type SessionStatus } from '@shared/domain'
 import { MessageMapper, type EventSink } from './message-mapper'
-import { classifyWorkload, nextStrongestModel } from './model-routing'
+import { classifyWorkload, maxEffortUnlessFable, nextStrongestModel } from './model-routing'
 import { modeAgents } from './modes'
 
 /** Streaming input queue the SDK consumes; `end()` closes the session gracefully. */
@@ -108,8 +108,8 @@ export interface HostedSessionOptions {
   /** Model the SDK reports for each main-loop turn (header display). */
   onModel?: (model: string) => void
   /** Models this subscription can actually select (from the SDK's supportedModels),
-   *  as wire ids — lets settings hide models the account cannot use. */
-  onModels?: (modelIds: string[]) => void
+   *  with SDK label/description — lets settings discover new models automatically. */
+  onModels?: (models: AvailableModel[]) => void
   /** Fired after every completed turn (branch observation, counters). */
   onTurnComplete: () => void
   onExit: (reason: 'completed' | 'stopped' | 'crashed', detail?: string) => void
@@ -211,19 +211,21 @@ export class HostedSession {
       .catch(() => {
         // Older CLI without the control request — the init message still covers it.
       })
-    // The models this subscription can select (hides unavailable ones in settings).
-    // Collect both the row's own id and its resolved wire id so an alias row
-    // ("opus") and a full id ("claude-opus-4-8") both match a MODEL_CHOICES entry.
+    // The models this subscription can select, with the SDK's own label and
+    // description, so the settings picker discovers new models automatically
+    // instead of relying on a hardcoded list. Keyed by the canonical wire id
+    // (resolvedModel ?? value) so an alias row and a full-id row dedupe to one.
     if (this.options.onModels) {
       void this.q
         .supportedModels()
         .then((models) => {
-          const ids = [
-            ...new Set(
-              models.flatMap((m) => [m.value, m.resolvedModel].filter((v): v is string => Boolean(v))),
-            ),
-          ]
-          this.options.onModels?.(ids)
+          const byId = new Map<string, AvailableModel>()
+          for (const m of models) {
+            const id = m.resolvedModel ?? m.value
+            if (!id || byId.has(id)) continue
+            byId.set(id, { id, label: m.displayName ?? id, description: m.description ?? '' })
+          }
+          this.options.onModels?.([...byId.values()])
         })
         .catch(() => {
           // Older CLI without supportedModels — settings falls back to showing all.
@@ -285,6 +287,7 @@ export class HostedSession {
     void this.q?.setModel(wanted).catch(() => {
       // Best-effort: an older CLI may not support runtime model switching.
     })
+    this.applyEffortForModel(wanted)
   }
 
   /** Pick the model for the turn about to start from the message's intent.
@@ -315,13 +318,33 @@ export class HostedSession {
     void this.q?.setModel(wanted).catch(() => {
       // Best-effort: an older CLI may not support runtime model switching.
     })
+    this.applyEffortForModel(wanted)
+  }
+
+  /**
+   * Reasoning effort for the main-loop model: 'max' ("ultra") for every model
+   * except Fable 5, which keeps its default. Applied whenever the model changes
+   * (proactively from the routing paths for explicit models, and from the
+   * SDK-reported model below for the account-default case). Session-scoped and
+   * best-effort; a model without 'max' support silently downgrades.
+   */
+  private appliedEffort: 'max' | null | undefined = undefined
+  private applyEffortForModel(modelId: string | undefined): void {
+    const wanted = maxEffortUnlessFable(modelId)
+    if (this.appliedEffort === wanted) return
+    const nothingYet = this.appliedEffort === undefined
+    this.appliedEffort = wanted
+    // Nothing set yet and no override wanted → nothing to clear.
+    if (nothingYet && wanted === null) return
+    void this.q?.applyFlagSettings({ effortLevel: wanted }).catch(() => {
+      // Older CLI without applyFlagSettings, or a model without effort support.
+    })
   }
 
   /** Report the model the SDK actually used for the latest MAIN-LOOP turn
    *  (subagent turns carry parent_tool_use_id and must not overwrite it). */
   private lastModel: string | null = null
   private captureModel(message: SDKMessage): void {
-    if (!this.options.onModel) return
     const msg = message as {
       type?: string
       parent_tool_use_id?: string | null
@@ -331,7 +354,10 @@ export class HostedSession {
     const model = msg.message?.model
     if (!model || model === this.lastModel) return
     this.lastModel = model
-    this.options.onModel(model)
+    // Effort follows the ACTUAL resolved model — reconciles the account-default
+    // case the routing paths cannot classify (they only see 'default').
+    this.applyEffortForModel(model)
+    this.options.onModel?.(model)
   }
 
   private captureUsage(message: SDKMessage): void {
@@ -384,6 +410,7 @@ export class HostedSession {
     this.options.planModel = next
     this.appliedModel = null // force the next turn to apply the new model
     void this.q?.setModel(next).catch(() => {})
+    this.applyEffortForModel(next)
     this.options.onModel?.(next)
     this.options.sink.append('assistant_text', {
       text: `⚙ Usage limit reached — switched this session to ${label(next)} to keep going. Send your message again.`,

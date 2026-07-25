@@ -14,8 +14,14 @@
 // native levers: per-turn main-loop model switching + per-subagent models.
 import type { AgentDefinition } from '@anthropic-ai/claude-agent-sdk'
 import type { ModelMode } from '@shared/domain'
+import { maxEffortUnlessFable } from './model-routing'
 
 const norm = (m?: string): string | undefined => (m && m !== 'default' ? m : undefined)
+
+// Per-agent effort under the "max unless Fable 5" rule: undefined = inherit the
+// default (the agent's own model, incl. when it inherits the main model).
+const effortFor = (model?: string): 'max' | undefined =>
+  maxEffortUnlessFable(norm(model)) ?? undefined
 
 /**
  * The two mode subagents, injected into every session so the protocol below
@@ -40,6 +46,7 @@ export function modeAgents(options: {
         'Do NOT write full implementations — sketches and diffs of the tricky part only. ' +
         'If the question is under-specified, state the assumption you would proceed on.',
       model: norm(options.strongModel),
+      effort: effortFor(options.strongModel),
     },
     worker: {
       description:
@@ -52,6 +59,7 @@ export function modeAgents(options: {
         'raw and complete, no commentary. If the input is ambiguous or does not match what the ' +
         'instructions assume, STOP and return one short clarifying question instead of guessing.',
       model: norm(options.cheapModel),
+      effort: effortFor(options.cheapModel),
     },
   }
 }

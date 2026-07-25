@@ -40,6 +40,7 @@ export interface MockDriver {
   setSpecKit: (projectId: string, state: Record<string, unknown>) => void
   setMcpSchema: (projectId: string, content: string, servers?: string[]) => void
   setUsage: (sessionId: string, utilization: number, resetsInMinutes: number, limitType: string) => void
+  setAvailableModels: (models: { id: string; label: string; description: string }[]) => void
   setBackgroundTasks: (sessionId: string, tasks: { taskId: string; description: string }[]) => void
   emitLines: (sessionId: string, lines: string[]) => void
   raisePermission: (options: {
@@ -159,6 +160,8 @@ export function installMockHost(scenario: MockScenario): void {
   // Keyed by projectId (legacy single doc) or `projectId|comboKey` (per-combination).
   const mcpSchemaByProject = new Map<string, string>()
   const mcpScans: { id: string; projectId: string; comboKey: string; servers: string[]; scannedAt: string }[] = []
+  // Models the "subscription" can select (drives the settings picker's auto-discovery).
+  let availableModels: { id: string; label: string; description: string }[] = []
   const standingRules: AnyRecord[] = []
   let costToday = 0
   let tokensToday = 0
@@ -729,8 +732,9 @@ export function installMockHost(scenario: MockScenario): void {
       settings = { ...settings, ...req }
       return { ...settings }
     },
-    // Empty = unknown → the settings panel shows all models (no filtering in e2e).
-    'models.available': () => [],
+    // Empty = unknown → the settings panel shows the curated set. A test can push
+    // models via __mock.setAvailableModels to exercise auto-discovery.
+    'models.available': () => availableModels,
   }
 
   window.switchboard = {
@@ -762,6 +766,9 @@ export function installMockHost(scenario: MockScenario): void {
       const shaped = commands.map((c) => (typeof c === 'string' ? { name: c } : c))
       projectCommands.set(projectId, shaped)
       push('push.projectCommands', { projectId, commands: shaped })
+    },
+    setAvailableModels: (models) => {
+      availableModels = models
     },
     setSpecKit: (projectId, state) => specKitByProject.set(projectId, state),
     setMcpSchema: (projectId, content, servers) =>

@@ -6,6 +6,7 @@ import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
 import type {
+  AvailableModel,
   EventKind,
   EventPayloadMap,
   ProjectCommand,
@@ -118,10 +119,10 @@ export async function readGitDiffStat(
 export class SessionManager {
   private hosted = new Map<string, HostedEntry>()
   private classifier: NoiseClassifier | null = null
-  /** Wire ids of the models this subscription can select, captured from the SDK's
-   *  supportedModels() on any session start. Empty until a session initialises;
-   *  settings treats empty as "unknown → show all". Account-global, not per-session. */
-  availableModels: string[] = []
+  /** Models this subscription can select, captured from the SDK's supportedModels()
+   *  on any session start (with SDK label/description). Empty until a session
+   *  initialises; settings treats empty as "unknown → show curated". Account-global. */
+  availableModels: AvailableModel[] = []
 
   constructor(
     private repos: Repositories,
@@ -287,9 +288,9 @@ export class SessionManager {
         this.pushStatus(entry)
       },
       // Models this subscription can select — account-global, cached for the
-      // settings model list (hides models the account cannot use).
-      onModels: (modelIds) => {
-        this.availableModels = modelIds
+      // settings model list (which discovers new models from it automatically).
+      onModels: (models) => {
+        this.availableModels = models
       },
       // Live background tasks — in-memory only, shown as a card + header pill.
       onBackgroundTasks: (tasks) => {

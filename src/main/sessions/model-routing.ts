@@ -40,6 +40,21 @@ export function nextStrongestModel(current: string | undefined): string | null {
   return DOWNGRADE[current || 'default'] ?? null
 }
 
+const FABLE_5 = 'claude-fable-5'
+
+/**
+ * Reasoning effort for a resolved model under the "max effort unless Fable 5"
+ * rule: Fable 5 already reasons at depth, so it keeps its default effort; every
+ * other model is pushed to 'max' ("ultra") to compensate. Returns null (no
+ * override → account/CLI default) for Fable 5 and for an unknown/'default' id,
+ * where we cannot tell whether it resolves to Fable 5 — the SDK-reported model
+ * reconciles that case. Models that do not support 'max' silently downgrade.
+ */
+export function maxEffortUnlessFable(modelId: string | undefined): 'max' | null {
+  if (!modelId || modelId === 'default' || modelId === FABLE_5) return null
+  return 'max'
+}
+
 export type Workload = 'plan' | 'advisor' | 'orchestrator'
 
 // Signals that a work request is BROAD (many files / multi-step / research-

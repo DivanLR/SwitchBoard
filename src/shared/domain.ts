@@ -305,7 +305,10 @@ export interface SwallowRule {
 
 export type TerseLevel = 'lite' | 'full' | 'ultra'
 
-/** Selectable Claude models for sessions, rendered as settings cards (design reference). */
+/** Curated metadata for a model card (design reference). Now an OVERLAY: the
+ *  selectable list is discovered from the SDK at runtime (see AvailableModel) and
+ *  styled with these hand-tuned label/desc/price hints where an id is known. Also
+ *  the fallback list shown before any session has reported its available models. */
 export interface ModelChoice {
   id: string
   label: string
@@ -313,6 +316,16 @@ export interface ModelChoice {
   desc: string
   /** Relative cost hint shown at the card's right edge. */
   price: string
+}
+
+/** A model the subscription can actually select, discovered from the SDK's
+ *  supportedModels(). `id` is the canonical wire id (used for setModel and
+ *  persisted in settings); label/description come from the SDK unless a
+ *  MODEL_CHOICES overlay supplies curated copy. */
+export interface AvailableModel {
+  id: string
+  label: string
+  description: string
 }
 
 export const MODEL_CHOICES: readonly ModelChoice[] = [
