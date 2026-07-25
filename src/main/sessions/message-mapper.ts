@@ -63,7 +63,7 @@ function usageOf(raw: Record<string, unknown> | undefined): ResultUsage {
   }
 }
 
-export interface MessageMapperOptions {
+interface MessageMapperOptions {
   sink: EventSink
   /** Fired once when the SDK reports its session id (used for resume). */
   onSdkSessionId?: (sdkSessionId: string) => void

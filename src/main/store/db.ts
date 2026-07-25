@@ -1,11 +1,38 @@
 // SQLite bootstrap: WAL mode plus ordered, idempotent schema migrations.
 // The caller supplies the database path (Electron userData in production,
 // a temporary directory in tests) so this module stays Electron-free.
-import Database from 'better-sqlite3'
+//
+// The store runs on the runtime's own `node:sqlite`, not a native npm module, so
+// there is no compiled binary to match to an ABI: the same code runs under
+// Electron and under Vitest with no rebuild step, and nothing has to be unpacked
+// from the asar archive. One behavioural difference to know about, since the
+// schema is the guard rather than the driver: node:sqlite binds a MISSING named
+// parameter as NULL where better-sqlite3 threw, so a NOT NULL column raises a
+// constraint error and a nullable one quietly stores NULL.
+import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 
-export type AppDatabase = Database.Database
+/**
+ * The slice of node:sqlite the store actually uses, with rows typed as `unknown`
+ * so each repository can assert its own row shape directly. The driver types rows
+ * as `Record<string, SQLOutputValue>`, which does not overlap with a plain
+ * interface, so without this every query would need an `as unknown as Row` cast.
+ */
+export interface AppStatement {
+  all(...params: (SQLInputValue | object)[]): unknown[]
+  get(...params: (SQLInputValue | object)[]): unknown
+  run(...params: (SQLInputValue | object)[]): {
+    changes: number | bigint
+    lastInsertRowid: number | bigint
+  }
+}
+
+export interface AppDatabase {
+  prepare(sql: string): AppStatement
+  exec(sql: string): void
+  close(): void
+}
 
 interface Migration {
   name: string
@@ -252,13 +279,35 @@ const MIGRATIONS: Migration[] = [
   },
 ]
 
+/**
+ * Runs `work` inside a transaction, rolling back if it throws. node:sqlite has no
+ * transaction wrapper of its own (better-sqlite3 supplied `db.transaction()`).
+ *
+ * ponytail: no SAVEPOINT nesting — nothing here nests, and a nested call fails
+ * loudly ("cannot start a transaction within a transaction") rather than quietly
+ * committing early. Add savepoints only when something actually needs to nest.
+ */
+export function transaction<T>(db: AppDatabase, work: () => T): T {
+  db.exec('BEGIN')
+  try {
+    const result = work()
+    db.exec('COMMIT')
+    return result
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
+}
+
 export function openDatabase(dbPath: string): AppDatabase {
   if (dbPath !== ':memory:') {
     mkdirSync(dirname(dbPath), { recursive: true })
   }
-  const db = new Database(dbPath)
-  db.pragma('journal_mode = WAL')
-  db.pragma('foreign_keys = ON')
+  const db = new DatabaseSync(dbPath)
+  // WAL keeps reads from blocking on the writer. Foreign keys are already on by
+  // default in node:sqlite; stated anyway so the guarantee is not inherited.
+  db.exec('PRAGMA journal_mode = WAL')
+  db.exec('PRAGMA foreign_keys = ON')
   migrate(db)
   return db
 }
@@ -276,10 +325,9 @@ function migrate(db: AppDatabase): void {
   const record = db.prepare('INSERT INTO migrations (name, appliedAt) VALUES (?, ?)')
   for (const migration of MIGRATIONS) {
     if (applied.has(migration.name)) continue
-    const run = db.transaction(() => {
+    transaction(db, () => {
       migration.up(db)
       record.run(migration.name, new Date().toISOString())
     })
-    run()
   }
 }

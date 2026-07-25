@@ -55,7 +55,7 @@ interface QuestionGroup {
   settled: boolean
 }
 
-export interface BrokerCallbacks {
+interface BrokerCallbacks {
   onInboxChanged: (push: InboxChangedPush) => void
   onCountersChanged: () => void
   /** Desktop notification hook; fired when an item starts blocking (FR-013a). */
@@ -83,38 +83,6 @@ interface CanUseToolContext {
 const str = (v: unknown): string | null => (typeof v === 'string' && v.length > 0 ? v : null)
 
 /**
- * Short plain-language explanations for common shell commands (design ask:
- * "cd means accessing a specific folder"). First match wins.
- */
-const COMMAND_EXPLANATIONS: [RegExp, string][] = [
-  [/^cd(\s|$)/, 'Accesses a specific folder.'],
-  [/^(ls|dir)\b/, 'Lists the files in a folder.'],
-  [/^(cat|type|head|tail)\b/, 'Reads a file and shows its contents.'],
-  [/^(rm|del|rd|rmdir|remove-item)\b/i, 'Deletes files or folders.'],
-  [/^(mkdir|md)\b/, 'Creates a folder.'],
-  [/^(cp|copy)\b/, 'Copies files.'],
-  [/^(mv|move|ren)\b/, 'Moves or renames files.'],
-  [/^git (status|log|diff|show|branch)\b/, 'Checks the repository state — read-only.'],
-  [/^git (add|commit)\b/, 'Saves changes into the repository history.'],
-  [/^git push\b/, 'Uploads commits to the remote repository.'],
-  [/^git (pull|fetch)\b/, 'Downloads changes from the remote repository.'],
-  [/^(npm|pnpm|yarn) i(nstall)?\b/, 'Installs project dependencies.'],
-  [/^(npm|pnpm|yarn) (run|test|ci)\b/, 'Runs a project script or its tests.'],
-  [/^(curl|wget|invoke-webrequest|iwr)\b/i, 'Talks to the internet — downloads or sends data.'],
-  [/^(grep|rg|findstr|select-string)\b/i, 'Searches for text in files.'],
-  [/^echo\b/, 'Prints text.'],
-  [/^(node|npx|tsx|python|py|dotnet)\b/, 'Runs a program or script.'],
-]
-
-function explainCommand(command: string): string | null {
-  const trimmed = command.trim()
-  for (const [pattern, explanation] of COMMAND_EXPLANATIONS) {
-    if (pattern.test(trimmed)) return explanation
-  }
-  return null
-}
-
-/**
  * Produces a clear, human-first title, a plain-language explanation of what the
  * action would do, and the underlying detail (exact command / file / input).
  * Titles are full (never truncated) — the inbox card wraps them.
@@ -131,8 +99,7 @@ function describeTool(toolName: string, input: Record<string, unknown>): {
   if (toolName === 'Bash' && command) {
     return {
       title: `Run a command: ${command}`,
-      explanation:
-        explainCommand(command) ?? 'Claude wants to run this shell command in the project folder.',
+      explanation: 'Claude wants to run this shell command in the project folder.',
       detail: command,
     }
   }

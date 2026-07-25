@@ -83,12 +83,10 @@ export class RendererPush {
   }
 }
 
-export interface HandlerDeps {
+interface HandlerDeps {
   repos: Repositories
   manager: SessionManager
   broker: PermissionBroker
-  /** Re-reads swallow rules into the manager's classifier cache. */
-  refreshSwallowRules: () => void
   /** The trusted main window; IPC is accepted only from its webContents (A17). */
   getWindow: () => BrowserWindow | null
   /** Reserved project id backing the global Database MCP session; marked
@@ -286,26 +284,6 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         matcher: { kind: 'command_prefix', value: pattern },
         createdFromRequestId: 'manual',
       })
-    },
-    'rules.risk.list': () => repos.riskRules.list(),
-    'rules.risk.save': (req) => {
-      repos.riskRules.replaceAll(req.rules)
-      return repos.riskRules.list()
-    },
-    'rules.risk.restoreDefaults': () => {
-      repos.riskRules.replaceAll(defaultRiskRules())
-      return repos.riskRules.list()
-    },
-    'rules.swallow.list': (req) => repos.swallowRules.list(req.projectId),
-    'rules.swallow.save': (req) => {
-      repos.swallowRules.replaceAll(req.rules)
-      deps.refreshSwallowRules()
-      return repos.swallowRules.list()
-    },
-    'rules.swallow.restoreDefaults': () => {
-      repos.swallowRules.replaceAll(defaultSwallowRules())
-      deps.refreshSwallowRules()
-      return repos.swallowRules.list()
     },
     'settings.get': () => repos.settings.get(),
     'settings.set': (req) => repos.settings.set(req),

@@ -14,13 +14,11 @@ import type {
   ProjectCommand,
   ProjectRef,
   QueuedTask,
-  RiskClassificationRule,
   Session,
   SessionEvent,
   Settings,
   SpecDetail,
   SpecKitState,
-  SwallowRule,
 } from './domain'
 
 // --- Error model ---
@@ -184,12 +182,8 @@ export interface InvokeMap {
   'rules.standing.restore': { req: { ruleId: string }; res: void }
   // User-authored allowed command (Allowed list tab): a Bash command-prefix rule.
   'rules.standing.add': { req: { projectId: string; pattern: string }; res: PermissionRule }
-  'rules.risk.list': { req: void; res: RiskClassificationRule[] }
-  'rules.risk.save': { req: { rules: RiskClassificationRule[] }; res: RiskClassificationRule[] }
-  'rules.risk.restoreDefaults': { req: void; res: RiskClassificationRule[] }
-  'rules.swallow.list': { req: { projectId?: string }; res: SwallowRule[] }
-  'rules.swallow.save': { req: { rules: SwallowRule[] }; res: SwallowRule[] }
-  'rules.swallow.restoreDefaults': { req: void; res: SwallowRule[] }
+  // Risk and swallow rules are seeded defaults read by the main process only.
+  // They have no editing UI, so they carry no IPC surface either.
   'settings.get': { req: void; res: Settings }
   'settings.set': { req: Partial<Settings>; res: Settings }
   /** Models this subscription can select, read from the CLI (probed on first ask

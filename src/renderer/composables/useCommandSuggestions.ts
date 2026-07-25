@@ -17,36 +17,13 @@ export function normalizeForMatch(s: string): string {
   return s.toLowerCase().replace(/[-_:/\s]/g, '')
 }
 
-export interface CommandSuggestions {
-  suggestions: Ref<string[]>
-  /** All available slash-command names for this project (for install detection). */
-  availableCommandNames: Ref<string[]>
-  ghostRest: Ref<string>
-  /** True when the composer text exactly matches a known slash command. */
-  isCommandMatch: Ref<boolean>
-  suggestIndex: Ref<number>
-  acceptSuggestion: (text: string) => void
-  onComposerInput: () => void
-  onComposerKeydown: (event: KeyboardEvent) => void
-  /** Load history + available commands for a project. */
-  load: (projectId: string) => Promise<void>
-  /** Replace the available slash commands / skills (e.g. from a live push). */
-  setCommands: (commands: ProjectCommand[]) => void
-  /** Small explanation of what a suggested /command does, if known. */
-  hintFor: (text: string) => string
-  /** Reset transient recall/dropdown state (on project switch). */
-  reset: () => void
-  /** Record a just-sent command at the top of history. */
-  recordSent: (text: string) => void
-}
-
 export function useCommandSuggestions(opts: {
   composer: Ref<string>
   composerEl: Ref<HTMLTextAreaElement | null>
   onSubmit: () => void
   /** Drops disabled plugin/skill commands (Settings → This project toggles). */
   filterCommands?: (commands: ProjectCommand[]) => ProjectCommand[]
-}): CommandSuggestions {
+}) {
   const { composer, composerEl, onSubmit } = opts
   const projects = useProjectsStore()
   // Guards against out-of-order responses: a rapid project switch must not leave
@@ -272,17 +249,24 @@ export function useCommandSuggestions(opts: {
 
   return {
     suggestions,
+    /** All available slash-command names for this project (for install detection). */
     availableCommandNames,
     ghostRest,
+    /** True when the composer text exactly matches a known slash command. */
     isCommandMatch,
     suggestIndex,
     acceptSuggestion,
     onComposerInput,
     onComposerKeydown,
+    /** Load history + available commands for a project. */
     load,
+    /** Replace the available slash commands / skills (e.g. from a live push). */
     setCommands,
+    /** Small explanation of what a suggested /command does, if known. */
     hintFor,
+    /** Reset transient recall/dropdown state (on project switch). */
     reset,
+    /** Record a just-sent command at the top of history. */
     recordSent,
   }
 }

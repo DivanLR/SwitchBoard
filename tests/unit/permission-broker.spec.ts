@@ -333,11 +333,13 @@ describe('PermissionBroker lifecycle', () => {
     expect(h.repos.requests.pending()).toHaveLength(2)
   })
 
-  it('explains common commands in plain language (cd → folder access)', async () => {
+  it('shows a Bash request with the command verbatim in the title and detail', async () => {
     void h.gate('Bash', { command: 'cd C:\\proj\\sub' })
     await settle()
     const [req] = h.repos.requests.pending()
-    expect(req.explanation).toBe('Accesses a specific folder.')
+    expect(req.title).toBe('Run a command: cd C:\\proj\\sub')
+    expect(req.detail).toBe('cd C:\\proj\\sub')
+    expect(req.explanation).toBe('Claude wants to run this shell command in the project folder.')
     h.broker.decide(req.id, 'deny')
   })
 

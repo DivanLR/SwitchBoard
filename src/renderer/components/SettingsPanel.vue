@@ -825,26 +825,6 @@ const updateLine = computed(() => {
               </button>
             </div>
 
-            <div class="group-label mono" style="margin-top: 8px">APPROVALS &amp; SPEND</div>
-            <div class="setting-row">
-              <div class="sr-text">
-                <div class="sr-label">Daily spend limit</div>
-                <div class="sr-desc">Cost today turns red in the sidebar once passed</div>
-              </div>
-              <div class="seg mono">
-                <button
-                  v-for="[v, label] in ([[0, 'Off'], [5, '$5'], [10, '$10'], [25, '$25'], [50, '$50']] as const)"
-                  :key="v"
-                  class="seg-opt"
-                  :class="{ on: settings.dailySpendLimit === v }"
-                  :data-testid="`spend-limit-${v}`"
-                  @click="save({ dailySpendLimit: v })"
-                >
-                  {{ label }}
-                </button>
-              </div>
-            </div>
-
             <div class="group-label mono" style="margin-top: 8px">APP UPDATES</div>
             <div class="group-desc">
               New versions are published to GitHub releases. Switchboard checks for a newer release

@@ -1,7 +1,7 @@
 // Typed repositories over the SQLite schema (data-model.md). All JSON columns
 // are serialised here so the rest of the main process works with domain types.
 import { randomUUID } from 'node:crypto'
-import type { AppDatabase } from './db'
+import { transaction, type AppDatabase } from './db'
 import type {
   DecisionOutcome,
   DecisionRecord,
@@ -170,7 +170,7 @@ export class ProjectsRepo {
 
   /** Reorders an active project to `toIndex` in the sidebar (drag / move up-down). */
   move(id: string, toIndex: number): void {
-    const run = this.db.transaction(() => {
+    transaction(this.db, () => {
       const ids = (
         this.db
           .prepare('SELECT id FROM projects WHERE archivedAt IS NULL ORDER BY position, createdAt')
@@ -183,7 +183,6 @@ export class ProjectsRepo {
       const set = this.db.prepare('UPDATE projects SET position = ? WHERE id = ?')
       ids.forEach((pid, index) => set.run(index, pid))
     })
-    run()
   }
 
   archive(id: string): void {
@@ -273,7 +272,7 @@ export class SessionsRepo {
          WHERE endedAt IS NULL`,
       )
       .run(nowIso(), reason)
-    return result.changes
+    return Number(result.changes)
   }
 
 }
@@ -490,7 +489,7 @@ export class RiskRulesRepo {
       `INSERT INTO risk_rules (id, scope, position, toolMatcher, inputMatcher, risk, builtin)
        VALUES (@id, @scope, @position, @toolMatcher, @inputMatcher, @risk, @builtin)`,
     )
-    const run = this.db.transaction(() => {
+    transaction(this.db, () => {
       this.db.prepare('DELETE FROM risk_rules').run()
       rules.forEach((rule, index) =>
         insert.run({
@@ -501,7 +500,6 @@ export class RiskRulesRepo {
         }),
       )
     })
-    run()
   }
 
   count(): number {
@@ -530,11 +528,10 @@ export class SwallowRulesRepo {
       `INSERT INTO swallow_rules (id, scope, projectId, position, eventKindMatcher, pattern, noiseKind, enabled)
        VALUES (@id, @scope, @projectId, @position, @eventKindMatcher, @pattern, @noiseKind, @enabled)`,
     )
-    const run = this.db.transaction(() => {
+    transaction(this.db, () => {
       this.db.prepare('DELETE FROM swallow_rules').run()
       rules.forEach((rule, index) => insert.run({ ...rule, position: index, enabled: rule.enabled ? 1 : 0 }))
     })
-    run()
   }
 
   count(): number {
@@ -571,6 +568,8 @@ export class SettingsRepo {
     }
     delete stored.planModel
     delete stored.workModel
+    // Dropped setting: a "limit" that only recoloured the spend readout.
+    delete stored.dailySpendLimit
     return { ...DEFAULT_SETTINGS, ...stored }
   }
 
@@ -674,7 +673,7 @@ export class TaskQueueRepo {
 
   /** Removes and returns the front-of-queue task for a project, or null if empty. */
   takeNext(projectId: string): QueuedTask | null {
-    const take = this.db.transaction((): QueuedTask | null => {
+    return transaction(this.db, (): QueuedTask | null => {
       const row = this.db
         .prepare('SELECT * FROM task_queue WHERE projectId = ? ORDER BY position LIMIT 1')
         .get(projectId) as QueuedTask | undefined
@@ -682,7 +681,6 @@ export class TaskQueueRepo {
       this.db.prepare('DELETE FROM task_queue WHERE id = ?').run(row.id)
       return row
     })
-    return take()
   }
 }
 

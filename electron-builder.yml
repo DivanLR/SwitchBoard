@@ -17,23 +17,18 @@ files:
   # errors clearly if it is missing. This roughly halves the packaged size.
   - '!**/node_modules/@anthropic-ai/claude-agent-sdk-*/**'
 
-# better-sqlite3 is a native module: its .node binary cannot be loaded from
-# inside the asar archive, so unpack it. The binary must already be built for
-# the Electron ABI (the package script runs rebuild:electron first).
-asarUnpack:
-  - '**/node_modules/better-sqlite3/**'
-
-# Do not let electron-builder rebuild native modules from source; use the
-# prebuilt Electron-ABI binary that rebuild:electron placed in the tree.
-npmRebuild: false
+# No native modules: the SQLite store runs on the runtime's own `node:sqlite`,
+# so there is nothing to rebuild per ABI and nothing to unpack from the asar.
 
 # Harden the packaged binary: disable ELECTRON_RUN_AS_NODE / node CLI inspect.
 afterPack: scripts/after-pack.mjs
 
-# Identifies the GitHub repo for builds (writes app-update.yml). NOTE: releases
-# are published manually with ONLY the installer attached — no latest.yml — so
-# electron-updater's auto-update will not resolve newer versions. Re-attach
-# latest.yml (build with `electron-builder --publish always`) to re-enable it.
+# The GitHub release feed electron-updater reads (also writes app-update.yml into
+# the package). Releases are published manually, so BOTH artefacts must be
+# attached to every release: the NSIS installer AND the generated
+# release/latest.yml. Without latest.yml the in-app updater cannot resolve a new
+# version, and it is also where the SHA-512 it verifies the download against
+# lives.
 publish:
   provider: github
   owner: DivanLR
@@ -59,5 +54,7 @@ nsis:
   allowToChangeInstallationDirectory: true
   artifactName: ${productName}-Setup-${version}.${ext}
   shortcutName: Switchboard
-  # Releases carry only the installer, so skip the differential .blockmap.
+  # Full download only: a differential update needs the previous release's
+  # .blockmap attached as well, and releases carry just the installer plus
+  # latest.yml. electron-updater falls back to the full installer either way.
   differentialPackage: false

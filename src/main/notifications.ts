@@ -7,7 +7,7 @@ import { Notification } from 'electron'
 import type { FocusRequestPush } from '@shared/ipc-types'
 import { buildApprovalToastXml } from './deep-link'
 
-export interface NotifierDeps {
+interface NotifierDeps {
   /** True when the window is visible and focused (no notification needed). */
   isWindowActive: () => boolean
   showWindow: () => void
@@ -16,7 +16,7 @@ export interface NotifierDeps {
   projectName: (projectId: string) => string
 }
 
-export interface NeedsYouContext {
+interface NeedsYouContext {
   projectId: string
   sessionId: string
   kind: 'permission' | 'plan' | 'question'

@@ -3,9 +3,11 @@
 // (SC-006).
 import { expect, test } from '@playwright/test'
 import { installMockHost, type MockScenario } from './mock-host'
+import { DEFAULT_SETTINGS } from '../../src/shared/domain'
 
 function tenProjectScenario(): MockScenario {
   return {
+    settings: DEFAULT_SETTINGS,
     projects: Array.from({ length: 10 }, (_, i) => ({
       id: `p-${i}`,
       name: `project-${i}`,

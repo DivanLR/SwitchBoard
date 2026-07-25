@@ -203,10 +203,8 @@ async function main(): Promise<void> {
     onNeedsYou: (context) => notify(context),
   })
 
-  let swallowRules: SwallowRule[] = repos.swallowRules.list()
-  const refreshSwallowRules = (): void => {
-    swallowRules = repos.swallowRules.list()
-  }
+  // Read once: swallow rules are seeded defaults with no editing surface.
+  const swallowRules: SwallowRule[] = repos.swallowRules.list()
   manager.setNoiseClassifier((event, projectId) => classifyNoise(swallowRules, event, projectId))
 
   // Database MCP: a reserved project row gives it cwd/permissions/history
@@ -252,7 +250,6 @@ async function main(): Promise<void> {
     repos,
     manager,
     broker,
-    refreshSwallowRules,
     getWindow: () => mainWindow,
     dbProjectId: dbProject.id,
   })

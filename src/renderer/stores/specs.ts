@@ -1,162 +1,150 @@
 // Spec Kit state per project: installed flag, spec summaries, and the selected
 // spec's detail. The store owns all specs transport (view/transport separation).
-import { defineStore } from 'pinia'
+import { reactive } from 'vue'
 import type { SpecDetail, SpecKitState } from '@shared/domain'
-
-interface SpecsState {
-  byProject: Record<string, SpecKitState>
-  detail: SpecDetail | null
-  selectedSpecId: string | null
-  loading: boolean
-  installing: boolean
-  installError: string | null
-  /** The project whose phase is being implemented (null = nothing running). */
-  runningProjectId: string | null
-  pollTimer: ReturnType<typeof setInterval> | null
-}
 
 // Monotonic token guarding the shared, un-keyed detail/selectedSpecId state:
 // switching projects while a load is in flight must not let the older response
 // overwrite the newer project's spec detail (mirrors activeSession.open).
 let specRequestToken = 0
+// The poll handle is machinery, not view state, so it stays out of the store.
+let pollTimer: ReturnType<typeof setInterval> | null = null
 
-export const useSpecsStore = defineStore('specs', {
-  state: (): SpecsState => ({
-    byProject: {},
-    detail: null,
-    selectedSpecId: null,
-    loading: false,
-    installing: false,
-    installError: null,
-    runningProjectId: null,
-    pollTimer: null,
-  }),
+const store = reactive({
+  byProject: {} as Record<string, SpecKitState>,
+  detail: null as SpecDetail | null,
+  selectedSpecId: null as string | null,
+  loading: false,
+  installing: false,
+  installError: null as string | null,
+  /** The project whose phase is being implemented (null = nothing running). */
+  runningProjectId: null as string | null,
 
-  getters: {
-    stateFor(state) {
-      return (projectId: string): SpecKitState =>
-        state.byProject[projectId] ?? { installed: false, specs: [] }
-    },
-    /** True when a phase is being implemented for the given project. */
-    isRunning(state) {
-      return (projectId: string): boolean => state.runningProjectId === projectId
-    },
+  stateFor(projectId: string): SpecKitState {
+    return this.byProject[projectId] ?? { installed: false, specs: [] }
   },
 
-  actions: {
-    async loadState(projectId: string): Promise<void> {
-      const token = ++specRequestToken
-      this.loading = true
-      try {
-        const state = await window.switchboard.invoke('specs.state', { projectId })
-        if (token !== specRequestToken) return // a newer project load superseded this
-        this.byProject[projectId] = state
-        // Auto-select the first spec if none chosen or the current one is gone.
-        if (state.specs.length > 0) {
-          if (!this.selectedSpecId || !state.specs.some((s) => s.id === this.selectedSpecId)) {
-            this.selectedSpecId = state.specs[0].id
-            const detail = await window.switchboard.invoke('specs.detail', {
-              projectId,
-              specId: state.specs[0].id,
-            })
-            if (token !== specRequestToken) return
-            this.detail = detail
-          }
-        } else {
-          this.selectedSpecId = null
-          this.detail = null
+  /** True when a phase is being implemented for the given project. */
+  isRunning(projectId: string): boolean {
+    return this.runningProjectId === projectId
+  },
+
+  async loadState(projectId: string): Promise<void> {
+    const token = ++specRequestToken
+    this.loading = true
+    try {
+      const state = await window.switchboard.invoke('specs.state', { projectId })
+      if (token !== specRequestToken) return // a newer project load superseded this
+      this.byProject[projectId] = state
+      // Auto-select the first spec if none chosen or the current one is gone.
+      if (state.specs.length > 0) {
+        if (!this.selectedSpecId || !state.specs.some((s) => s.id === this.selectedSpecId)) {
+          this.selectedSpecId = state.specs[0].id
+          const detail = await window.switchboard.invoke('specs.detail', {
+            projectId,
+            specId: state.specs[0].id,
+          })
+          if (token !== specRequestToken) return
+          this.detail = detail
         }
-      } finally {
-        if (token === specRequestToken) this.loading = false
+      } else {
+        this.selectedSpecId = null
+        this.detail = null
       }
-    },
+    } finally {
+      if (token === specRequestToken) this.loading = false
+    }
+  },
 
-    async selectSpec(projectId: string, specId: string): Promise<void> {
-      const token = ++specRequestToken
-      this.selectedSpecId = specId
-      const detail = await window.switchboard.invoke('specs.detail', { projectId, specId })
-      if (token !== specRequestToken) return // a newer selection superseded this
-      this.detail = detail
-    },
+  async selectSpec(projectId: string, specId: string): Promise<void> {
+    const token = ++specRequestToken
+    this.selectedSpecId = specId
+    const detail = await window.switchboard.invoke('specs.detail', { projectId, specId })
+    if (token !== specRequestToken) return // a newer selection superseded this
+    this.detail = detail
+  },
 
-    /** Send a spec-kit command / prompt to the project's session. */
-    async runInSession(projectId: string, text: string): Promise<void> {
-      await window.switchboard.invoke('specs.runInSession', { projectId, text })
-    },
+  /** Send a spec-kit command / prompt to the project's session. */
+  async runInSession(projectId: string, text: string): Promise<void> {
+    await window.switchboard.invoke('specs.runInSession', { projectId, text })
+  },
 
-    /**
-     * Start implementing a phase (or a whole spec): send the implement command,
-     * then poll specs.detail so tasks visibly flip to done as they complete.
-     */
-    async startPhase(projectId: string, specId: string, text: string): Promise<void> {
-      await this.selectSpec(projectId, specId)
-      this.runningProjectId = projectId
-      try {
-        await this.runInSession(projectId, text)
-      } catch (e) {
-        // A failed send must not leave the view stuck in the implementing state.
-        this.stopPolling()
-        throw e
-      }
-      this.startPolling(projectId, specId)
-    },
+  /**
+   * Start implementing a phase (or a whole spec): send the implement command,
+   * then poll specs.detail so tasks visibly flip to done as they complete.
+   */
+  async startPhase(projectId: string, specId: string, text: string): Promise<void> {
+    await this.selectSpec(projectId, specId)
+    this.runningProjectId = projectId
+    try {
+      await this.runInSession(projectId, text)
+    } catch (e) {
+      // A failed send must not leave the view stuck in the implementing state.
+      this.stopPolling()
+      throw e
+    }
+    this.startPolling(projectId, specId)
+  },
 
-    startPolling(projectId: string, specId: string): void {
-      this.clearTimer()
-      let idleRounds = 0
-      const progressOf = (): { done: number; total: number } => {
-        // Read from the target spec's summary, not the shared `detail`, so
-        // selecting a different spec mid-run can't mislead the stop condition.
-        const s = this.byProject[projectId]?.specs.find((x) => x.id === specId)
-        return { done: s?.tasksDone ?? 0, total: s?.tasksTotal ?? 0 }
-      }
-      let lastDone = progressOf().done
-      this.pollTimer = setInterval(() => {
-        void (async () => {
-          try {
-            this.byProject[projectId] = await window.switchboard.invoke('specs.state', { projectId })
-            if (this.selectedSpecId === specId) {
-              this.detail = await window.switchboard.invoke('specs.detail', { projectId, specId })
-            }
-          } catch {
-            // Project/spec gone or transport hiccup — stop rather than spin.
-            this.stopPolling()
-            return
+  startPolling(projectId: string, specId: string): void {
+    this.clearTimer()
+    let idleRounds = 0
+    const progressOf = (): { done: number; total: number } => {
+      // Read from the target spec's summary, not the shared `detail`, so
+      // selecting a different spec mid-run can't mislead the stop condition.
+      const s = this.byProject[projectId]?.specs.find((x) => x.id === specId)
+      return { done: s?.tasksDone ?? 0, total: s?.tasksTotal ?? 0 }
+    }
+    let lastDone = progressOf().done
+    pollTimer = setInterval(() => {
+      void (async () => {
+        try {
+          this.byProject[projectId] = await window.switchboard.invoke('specs.state', { projectId })
+          if (this.selectedSpecId === specId) {
+            this.detail = await window.switchboard.invoke('specs.detail', { projectId, specId })
           }
-          const { done, total } = progressOf()
-          idleRounds = done === lastDone ? idleRounds + 1 : 0
-          lastDone = done
-          // Stop when everything is done, or after progress has stalled a while.
-          if ((total > 0 && done >= total) || idleRounds >= 40) this.stopPolling()
-        })()
-      }, 3000)
-    },
+        } catch {
+          // Project/spec gone or transport hiccup — stop rather than spin.
+          this.stopPolling()
+          return
+        }
+        const { done, total } = progressOf()
+        idleRounds = done === lastDone ? idleRounds + 1 : 0
+        lastDone = done
+        // Stop when everything is done, or after progress has stalled a while.
+        if ((total > 0 && done >= total) || idleRounds >= 40) this.stopPolling()
+      })()
+    }, 3000)
+  },
 
-    clearTimer(): void {
-      if (this.pollTimer) {
-        clearInterval(this.pollTimer)
-        this.pollTimer = null
-      }
-    },
+  clearTimer(): void {
+    if (pollTimer) {
+      clearInterval(pollTimer)
+      pollTimer = null
+    }
+  },
 
-    stopPolling(): void {
-      this.clearTimer()
-      this.runningProjectId = null
-    },
+  stopPolling(): void {
+    this.clearTimer()
+    this.runningProjectId = null
+  },
 
-    async install(projectId: string): Promise<void> {
-      this.installing = true
-      this.installError = null
-      try {
-        const state = await window.switchboard.invoke('specs.install', { projectId })
-        this.byProject[projectId] = state
-        if (state.specs[0]) await this.selectSpec(projectId, state.specs[0].id)
-      } catch (e) {
-        this.installError =
-          typeof e === 'object' && e && 'message' in e ? String((e as { message: unknown }).message) : String(e)
-      } finally {
-        this.installing = false
-      }
-    },
+  async install(projectId: string): Promise<void> {
+    this.installing = true
+    this.installError = null
+    try {
+      const state = await window.switchboard.invoke('specs.install', { projectId })
+      this.byProject[projectId] = state
+      if (state.specs[0]) await this.selectSpec(projectId, state.specs[0].id)
+    } catch (e) {
+      this.installError =
+        typeof e === 'object' && e && 'message' in e
+          ? String((e as { message: unknown }).message)
+          : String(e)
+    } finally {
+      this.installing = false
+    }
   },
 })
+
+export const useSpecsStore = (): typeof store => store

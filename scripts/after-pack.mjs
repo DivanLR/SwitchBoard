@@ -2,7 +2,7 @@
 // to disable ELECTRON_RUN_AS_NODE and Node CLI inspect arguments, so the
 // shipped executable cannot be relaunched to run arbitrary Node code
 // (Electron security checklist A19). The app never relies on either — it
-// spawns the standalone Claude CLI and loads better-sqlite3 as a native module.
+// spawns the standalone Claude CLI and stores data through `node:sqlite`.
 import { FuseVersion, FuseV1Options, flipFuses } from '@electron/fuses'
 import { join } from 'node:path'
 

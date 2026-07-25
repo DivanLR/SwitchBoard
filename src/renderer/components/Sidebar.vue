@@ -100,12 +100,6 @@ function pendingFor(projectId: string): number {
 
 const costLabel = computed(() => `$${projects.counters.costTodayUsd.toFixed(2)}`)
 
-// Daily spend limit (General settings): cost turns red once passed.
-const overSpendLimit = computed(() => {
-  const limit = settings.settings?.dailySpendLimit ?? 0
-  return limit > 0 && projects.counters.costTodayUsd >= limit
-})
-
 const tokensLabel = computed(() =>
   // Compact notation; lowercase the 'K' suffix to keep the design's "1.2k" style.
   Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 })
@@ -546,12 +540,7 @@ async function confirmRemoveNow(): Promise<void> {
       </div>
       <div class="stat mono" data-testid="counter-cost">
         <span>Cost today</span
-        ><span
-          class="val"
-          :style="overSpendLimit ? { color: 'var(--red)' } : undefined"
-          data-testid="counter-cost-value"
-          >{{ costLabel }}</span
-        >
+        ><span class="val" data-testid="counter-cost-value">{{ costLabel }}</span>
       </div>
       <div class="stat mono" data-testid="counter-tokens">
         <span>Tokens today</span

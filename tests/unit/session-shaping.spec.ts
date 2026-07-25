@@ -1,6 +1,10 @@
-// Terse output mode instruction builder.
+// What the app injects into every session: output-style appends and the
+// Advisor/Orchestrator mode protocol.
 import { describe, expect, it } from 'vitest'
-import { terseSystemPromptAppend } from '@main/sessions/terse-mode'
+import {
+  modesSystemPromptAppend,
+  terseSystemPromptAppend,
+} from '@main/sessions/session-shaping'
 
 describe('terseSystemPromptAppend', () => {
   it('returns null when terse mode is off', () => {
@@ -23,6 +27,28 @@ describe('terseSystemPromptAppend', () => {
       const text = terseSystemPromptAppend({ terseMode: true, terseLevel: level })
       expect(text).toMatch(/code|commands|error/i)
       expect(text).toMatch(/reproduce|preserv|exactly/i)
+    }
+  })
+})
+
+describe('modesSystemPromptAppend', () => {
+  it('teaches only the forced pattern, and both under auto', () => {
+    const advisor = modesSystemPromptAppend('advisor')
+    const orchestrator = modesSystemPromptAppend('orchestrator')
+    const auto = modesSystemPromptAppend('auto')
+    expect(advisor).toContain('SCOPED WORK')
+    expect(advisor).not.toContain('BROAD WORK')
+    expect(orchestrator).toContain('BROAD WORK')
+    expect(orchestrator).not.toContain('SCOPED WORK')
+    expect(auto).toContain('SCOPED WORK')
+    expect(auto).toContain('BROAD WORK')
+  })
+
+  it('names both subagents so either tier can reach for them', () => {
+    for (const mode of ['advisor', 'orchestrator', 'auto'] as const) {
+      const text = modesSystemPromptAppend(mode)
+      expect(text).toContain('`advisor`')
+      expect(text).toContain('`worker`')
     }
   })
 })

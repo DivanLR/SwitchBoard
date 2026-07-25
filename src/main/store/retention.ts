@@ -3,15 +3,10 @@
 // and vacuums opportunistically. Runs at startup and nightly.
 import type { AppDatabase } from './db'
 
-export interface RetentionResult {
+interface RetentionResult {
   eventsDeleted: number
   decisionsDeleted: number
   dryRun: boolean
-}
-
-export interface RetentionOptions {
-  dryRun?: boolean
-  now?: Date
 }
 
 // Fixed in v1 (FR-021a); promote to Settings only when a UI actually sets them.
@@ -23,7 +18,7 @@ const VACUUM_MIN_DELETIONS = 500
 
 export function runRetention(
   db: AppDatabase,
-  options: RetentionOptions = {},
+  options: { dryRun?: boolean; now?: Date } = {},
 ): RetentionResult {
   const dryRun = options.dryRun ?? false
   const now = options.now ?? new Date()
@@ -56,10 +51,14 @@ export function runRetention(
         .get(decisionCutoff) as { n: number }
     ).n
   } else {
-    eventsDeleted = db.prepare(`DELETE FROM events ${eventsWhere}`).run(SESSIONS_PER_PROJECT).changes
-    decisionsDeleted = db
-      .prepare("DELETE FROM permission_requests WHERE status != 'pending' AND resolvedAt < ?")
-      .run(decisionCutoff).changes
+    eventsDeleted = Number(
+      db.prepare(`DELETE FROM events ${eventsWhere}`).run(SESSIONS_PER_PROJECT).changes,
+    )
+    decisionsDeleted = Number(
+      db
+        .prepare("DELETE FROM permission_requests WHERE status != 'pending' AND resolvedAt < ?")
+        .run(decisionCutoff).changes,
+    )
     if (eventsDeleted + decisionsDeleted >= VACUUM_MIN_DELETIONS) {
       try {
         db.exec('VACUUM')

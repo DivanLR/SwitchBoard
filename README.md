@@ -84,15 +84,15 @@ The app keeps itself current via auto-update from GitHub releases.
 **Runtime**
 
 - [`@anthropic-ai/claude-agent-sdk`](https://docs.claude.com/en/api/agent-sdk/overview) — hosts every Claude Code session
-- [`vue`](https://vuejs.org/) + [`pinia`](https://pinia.vuejs.org/) — renderer UI and state
-- [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3) — local, synchronous SQLite store
+- [`vue`](https://vuejs.org/) — renderer UI; state is plain `reactive()` module stores
+- [`node:sqlite`](https://nodejs.org/api/sqlite.html) — the runtime's own synchronous SQLite store, so there is no native module to build
+- [`electron-updater`](https://www.electron.build/auto-update) — in-app update from the GitHub release feed
 
 **Build & packaging**
 
 - [`electron`](https://www.electronjs.org/) — desktop shell
 - [`electron-vite`](https://electron-vite.org/) + [`vite`](https://vite.dev/) + [`@vitejs/plugin-vue`](https://github.com/vitejs/vite-plugin-vue) — dev server and bundling
 - [`electron-builder`](https://www.electron.build/) + [`@electron/fuses`](https://github.com/electron/fuses) — NSIS installer and runtime hardening
-- [`prebuild-install`](https://github.com/prebuild/prebuild-install) — fetches the matching `better-sqlite3` ABI
 
 **Quality & tooling**
 
@@ -127,8 +127,8 @@ npm run package      # NSIS installer (auto-updating)
 ## Development
 
 ```powershell
-npm run dev          # Electron + Vite with hot reload (swaps better-sqlite3 to the Electron ABI)
-npm run test         # Vitest unit tests (swaps better-sqlite3 back to the Node ABI)
+npm run dev          # Electron + Vite with hot reload
+npm run test         # Vitest unit tests
 npm run test:e2e     # Playwright against the mock session host (no live sessions)
 npm run lint         # ESLint
 npm run typecheck    # tsc (main/preload) + vue-tsc (renderer)
@@ -136,11 +136,17 @@ npm run prune -- --dry-run   # Preview the retention job
 npm run package      # electron-builder distributable
 ```
 
-### Native module note
+There are no native modules and therefore no rebuild step: the store runs on the
+runtime's own `node:sqlite`, so the same code loads under Electron and under Vitest.
 
-`better-sqlite3` ships different ABIs for Node and Electron. `scripts/swap-sqlite.mjs`
-downloads the matching prebuilt binary automatically: `npm run dev` targets Electron,
-`npm test` targets Node. No C++ toolchain required.
+### Publishing a release
+
+`npm run package` writes both artefacts to `release/`. Attach **both** to the GitHub
+release, or the in-app updater cannot see the new version:
+
+- `Switchboard-Setup-<version>.exe` — the installer
+- `latest.yml` — the update feed, which also carries the SHA-512 `electron-updater`
+  verifies the download against
 
 ### Real-session smoke test
 
@@ -162,9 +168,9 @@ src/
 │   ├── stream/      Output swallow classifier
 │   ├── specs/       Spec Kit discovery & parsing
 │   ├── projects/    Project registration & discovery
-│   └── store/       SQLite (better-sqlite3) repositories & retention
+│   └── store/       SQLite (node:sqlite) repositories & retention
 ├── preload/         Typed contextBridge (invoke + validated push channels)
-├── renderer/        Vue 3 + Pinia UI
+├── renderer/        Vue 3 UI (reactive() module stores)
 └── shared/          Domain types shared across processes
 ```
 

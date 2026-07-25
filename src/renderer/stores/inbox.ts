@@ -1,155 +1,143 @@
 // Central permission inbox state (FR-007..013): pending items grouped by
 // project, decisions, history, and undeliverable-decision surfacing (SC-004).
-import { defineStore } from 'pinia'
+import { reactive } from 'vue'
 import type { DecisionRecord, PermissionRequest, PermissionRule } from '@shared/domain'
 import type { InboxChangedPush } from '@shared/ipc-types'
 
-interface InboxState {
-  pending: PermissionRequest[]
-  history: DecisionRecord[]
-  focusRequestId: string | null
+const UNDELIVERABLE_DECISION =
+  'The decision could not be delivered: the originating session has ended. The item was marked expired.'
+
+const store = reactive({
+  pending: [] as PermissionRequest[],
+  history: [] as DecisionRecord[],
+  focusRequestId: null as string | null,
   /** Banner shown when a decision could not reach its session (SC-004). */
-  undeliverableNotice: string | null
-}
+  undeliverableNotice: null as string | null,
 
-export const useInboxStore = defineStore('inbox', {
-  state: (): InboxState => ({
-    pending: [],
-    history: [],
-    focusRequestId: null,
-    undeliverableNotice: null,
-  }),
-
-  getters: {
-    /** Grouped by project, oldest first within each group (clarified FIFO). */
-    groups(state): { projectId: string; items: PermissionRequest[] }[] {
-      const byProject = new Map<string, PermissionRequest[]>()
-      for (const item of state.pending) {
-        const list = byProject.get(item.projectId) ?? []
-        list.push(item)
-        byProject.set(item.projectId, list)
-      }
-      return [...byProject.entries()].map(([projectId, items]) => ({
-        projectId,
-        items: [...items].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
-      }))
-    },
-    pendingCount(state): number {
-      return state.pending.length
-    },
+  /** Grouped by project, oldest first within each group (clarified FIFO). */
+  get groups(): { projectId: string; items: PermissionRequest[] }[] {
+    const byProject = new Map<string, PermissionRequest[]>()
+    for (const item of this.pending) {
+      const list = byProject.get(item.projectId) ?? []
+      list.push(item)
+      byProject.set(item.projectId, list)
+    }
+    return [...byProject.entries()].map(([projectId, items]) => ({
+      projectId,
+      items: [...items].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+    }))
+  },
+  get pendingCount(): number {
+    return this.pending.length
   },
 
-  actions: {
-    async refresh(): Promise<void> {
-      this.pending = await window.switchboard.invoke('inbox.pending', undefined)
-    },
+  async refresh(): Promise<void> {
+    this.pending = await window.switchboard.invoke('inbox.pending', undefined)
+  },
 
-    async decide(
-      requestId: string,
-      decision: 'approve' | 'deny',
-      confirmHighRisk = false,
-    ): Promise<boolean> {
-      const result = await window.switchboard.invoke('inbox.decide', {
-        requestId,
-        decision,
-        confirmHighRisk,
-      })
-      if (!result.delivered) {
+  async decide(
+    requestId: string,
+    decision: 'approve' | 'deny',
+    confirmHighRisk = false,
+  ): Promise<boolean> {
+    const result = await window.switchboard.invoke('inbox.decide', {
+      requestId,
+      decision,
+      confirmHighRisk,
+    })
+    if (!result.delivered) this.undeliverableNotice = UNDELIVERABLE_DECISION
+    return result.delivered
+  },
+
+  async alwaysAllow(requestId: string): Promise<void> {
+    // From a decided history entry; the matcher is derived server-side.
+    await window.switchboard.invoke('inbox.alwaysAllow', { requestId })
+  },
+
+  /** From a pending item: server-side inserts the rule, then approves.
+   *  confirmHighRisk gates the broad MCP tool_only grant (high by fail-safe). */
+  async approveAlways(requestId: string, confirmHighRisk = false): Promise<boolean> {
+    const result = await window.switchboard.invoke('inbox.approveAlways', {
+      requestId,
+      confirmHighRisk,
+    })
+    if (!result.delivered) this.undeliverableNotice = UNDELIVERABLE_DECISION
+    return result.delivered
+  },
+
+  /** Active Bash command-prefix values already allowed for a project (so the
+   *  history menu can hide "Always allow" for commands a rule already covers). */
+  async allowedCommandBases(projectId: string): Promise<string[]> {
+    const rules = await this.listStandingRules(projectId, false)
+    return rules
+      .filter(
+        (r) => r.toolName === 'Bash' && r.matcher.kind === 'command_prefix' && r.matcher.value,
+      )
+      .map((r) => r.matcher.value as string)
+  },
+
+  /** Standing (always-allow) command rules for a project — Allowed-list tab. */
+  async listStandingRules(projectId: string, includeRevoked = false): Promise<PermissionRule[]> {
+    return window.switchboard.invoke('rules.standing.list', { projectId, includeRevoked })
+  },
+
+  async revokeStandingRule(ruleId: string): Promise<void> {
+    await window.switchboard.invoke('rules.standing.revoke', { ruleId })
+  },
+
+  async restoreStandingRule(ruleId: string): Promise<void> {
+    await window.switchboard.invoke('rules.standing.restore', { ruleId })
+  },
+
+  async addStandingRule(projectId: string, pattern: string): Promise<PermissionRule> {
+    return window.switchboard.invoke('rules.standing.add', { projectId, pattern })
+  },
+
+  async deleteHistory(requestId: string): Promise<void> {
+    await window.switchboard.invoke('inbox.deleteHistory', { requestId })
+    this.history = this.history.filter((h) => h.id !== requestId)
+  },
+
+  async clearHistory(): Promise<void> {
+    await window.switchboard.invoke('inbox.clearHistory', undefined)
+    this.history = []
+  },
+
+  async approveAllForProject(
+    projectId: string,
+    includeHighRisk = false,
+  ): Promise<{ approved: number; skippedHighRisk: number }> {
+    return window.switchboard.invoke('inbox.approveAllForProject', { projectId, includeHighRisk })
+  },
+
+  async loadHistory(projectId?: string): Promise<void> {
+    this.history = await window.switchboard.invoke('inbox.history', { projectId })
+  },
+
+  applyInboxPush(push: InboxChangedPush): void {
+    if (push.added) {
+      const added = push.added
+      if (!this.pending.some((p) => p.id === added.id)) {
+        this.pending.push(added)
+      }
+    }
+    if (push.resolved) {
+      const requestId = push.resolved.requestId
+      this.pending = this.pending.filter((p) => p.id !== requestId)
+      if (push.resolved.deliveryFailed) {
         this.undeliverableNotice =
-          'The decision could not be delivered: the originating session has ended. The item was marked expired.'
+          'A decision could not be delivered to its session and was marked expired.'
       }
-      return result.delivered
-    },
+    }
+  },
 
-    async alwaysAllow(requestId: string): Promise<void> {
-      // From a decided history entry; the matcher is derived server-side.
-      await window.switchboard.invoke('inbox.alwaysAllow', { requestId })
-    },
+  focusRequest(requestId: string): void {
+    this.focusRequestId = requestId
+  },
 
-    /** From a pending item: server-side inserts the rule, then approves.
-     *  confirmHighRisk gates the broad MCP tool_only grant (high by fail-safe). */
-    async approveAlways(requestId: string, confirmHighRisk = false): Promise<boolean> {
-      const result = await window.switchboard.invoke('inbox.approveAlways', {
-        requestId,
-        confirmHighRisk,
-      })
-      if (!result.delivered) {
-        this.undeliverableNotice =
-          'The decision could not be delivered: the originating session has ended. The item was marked expired.'
-      }
-      return result.delivered
-    },
-
-    /** Active Bash command-prefix values already allowed for a project (so the
-     *  history menu can hide "Always allow" for commands a rule already covers). */
-    async allowedCommandBases(projectId: string): Promise<string[]> {
-      const rules = await this.listStandingRules(projectId, false)
-      return rules
-        .filter((r) => r.toolName === 'Bash' && r.matcher.kind === 'command_prefix' && r.matcher.value)
-        .map((r) => r.matcher.value as string)
-    },
-
-    /** Standing (always-allow) command rules for a project — Allowed-list tab. */
-    async listStandingRules(projectId: string, includeRevoked = false): Promise<PermissionRule[]> {
-      return window.switchboard.invoke('rules.standing.list', { projectId, includeRevoked })
-    },
-
-    async revokeStandingRule(ruleId: string): Promise<void> {
-      await window.switchboard.invoke('rules.standing.revoke', { ruleId })
-    },
-
-    async restoreStandingRule(ruleId: string): Promise<void> {
-      await window.switchboard.invoke('rules.standing.restore', { ruleId })
-    },
-
-    async addStandingRule(projectId: string, pattern: string): Promise<PermissionRule> {
-      return window.switchboard.invoke('rules.standing.add', { projectId, pattern })
-    },
-
-    async deleteHistory(requestId: string): Promise<void> {
-      await window.switchboard.invoke('inbox.deleteHistory', { requestId })
-      this.history = this.history.filter((h) => h.id !== requestId)
-    },
-
-    async clearHistory(): Promise<void> {
-      await window.switchboard.invoke('inbox.clearHistory', undefined)
-      this.history = []
-    },
-
-    async approveAllForProject(
-      projectId: string,
-      includeHighRisk = false,
-    ): Promise<{ approved: number; skippedHighRisk: number }> {
-      return window.switchboard.invoke('inbox.approveAllForProject', { projectId, includeHighRisk })
-    },
-
-    async loadHistory(projectId?: string): Promise<void> {
-      this.history = await window.switchboard.invoke('inbox.history', { projectId })
-    },
-
-    applyInboxPush(push: InboxChangedPush): void {
-      if (push.added) {
-        const added = push.added
-        if (!this.pending.some((p) => p.id === added.id)) {
-          this.pending.push(added)
-        }
-      }
-      if (push.resolved) {
-        const requestId = push.resolved.requestId
-        this.pending = this.pending.filter((p) => p.id !== requestId)
-        if (push.resolved.deliveryFailed) {
-          this.undeliverableNotice =
-            'A decision could not be delivered to its session and was marked expired.'
-        }
-      }
-    },
-
-    focusRequest(requestId: string): void {
-      this.focusRequestId = requestId
-    },
-
-    dismissNotice(): void {
-      this.undeliverableNotice = null
-    },
+  dismissNotice(): void {
+    this.undeliverableNotice = null
   },
 })
+
+export const useInboxStore = (): typeof store => store

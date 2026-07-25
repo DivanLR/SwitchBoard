@@ -1,194 +1,94 @@
-// Update check + in-app install via the GitHub Releases API. Releases ship the
-// NSIS installer only (no electron-updater `latest.yml` feed, so no YAML parse
-// errors). On check this compares the latest release tag to the running
-// version; on install it downloads that release's installer asset inside the
-// app, reporting progress, then launches it and quits so it can replace files.
+// App auto-update through electron-updater, reading the GitHub release feed
+// electron-builder's `publish:` block already describes. The IPC contract is
+// unchanged: check reports whether a newer release exists, install downloads it
+// (reporting progress) and then quits so the installer can replace files.
+//
+// Integrity: electron-updater verifies the downloaded installer against the
+// SHA-512 recorded in the release's `latest.yml`, so a release MUST attach that
+// file next to the installer (see electron-builder.yml). Without it the feed
+// cannot be read and a check reports an error rather than a silent no-op.
 import { app, shell } from 'electron'
-import { execFile, spawn } from 'node:child_process'
-import { createHash } from 'node:crypto'
-import { promisify } from 'node:util'
-import { rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import electronUpdater from 'electron-updater'
 import type { UpdateStatus } from '@shared/ipc-types'
 
-const execFileAsync = promisify(execFile)
+// electron-updater is CommonJS and the main bundle is ESM, so Node cannot detect
+// `autoUpdater` as a named export: it has to come off the default import. A named
+// import type-checks and then fails at runtime in the packaged app.
+const { autoUpdater } = electronUpdater
 
-const REPO = 'DivanLR/SwitchBoard'
-const RELEASES_PAGE = `https://github.com/${REPO}/releases/latest`
+const RELEASES_PAGE = 'https://github.com/DivanLR/SwitchBoard/releases/latest'
 
-export interface UpdaterDeps {
-  onStatus: (status: UpdateStatus) => void
-}
+let emit: (status: UpdateStatus) => void = () => {}
+/** Set once a check finds a release; gates install and names it in the status. */
+let availableVersion: string | null = null
 
-let deps: UpdaterDeps | null = null
-/** Release page for the newest version seen by the last check (browser fallback). */
-let latestUrl: string = RELEASES_PAGE
-/** Direct installer-asset download URL from the last check, if one was found. */
-let latestAssetUrl: string | null = null
-/** GitHub's SHA-256 for that asset (hex, no prefix), for download verification. */
-let latestAssetDigest: string | null = null
-let latestVersion = ''
-
-export function initUpdater(d: UpdaterDeps): void {
-  deps = d
-  // Check once on startup in packaged builds; dev builds check only on demand.
+export function initUpdater(deps: { onStatus: (status: UpdateStatus) => void }): void {
+  emit = deps.onStatus
+  // Check and download are separate steps: the banner offers the download, the
+  // developer chooses when to take it.
+  autoUpdater.autoDownload = false
+  autoUpdater.autoInstallOnAppQuit = false
+  autoUpdater.on('checking-for-update', () => emit({ state: 'checking' }))
+  autoUpdater.on('update-available', (info) => {
+    availableVersion = info.version
+    emit({ state: 'available', version: info.version })
+  })
+  autoUpdater.on('update-not-available', () => {
+    availableVersion = null
+    emit({ state: 'none' })
+  })
+  autoUpdater.on('download-progress', (progress) => {
+    emit({
+      state: 'downloading',
+      version: availableVersion ?? undefined,
+      percent: Math.min(100, Math.round(progress.percent)),
+    })
+  })
+  autoUpdater.on('update-downloaded', (info) => emit({ state: 'ready', version: info.version }))
+  autoUpdater.on('error', (error) => emit({ state: 'error', message: error.message }))
+  // Check once on startup in packaged builds; dev builds check only on demand
+  // (an unpackaged app has no update feed to read).
   if (app.isPackaged) void check()
 }
 
-function emit(status: UpdateStatus): void {
-  deps?.onStatus(status)
-}
-
-/** Accept a github.com URL under our own repo; else null. Guards what we open
- *  or download against untrusted GitHub API fields (Electron A15/E6). */
-function safeGithubUrl(candidate: string | undefined): string | null {
-  try {
-    const u = new URL(candidate ?? '')
-    if (u.origin === 'https://github.com' && u.pathname.startsWith(`/${REPO}/`)) return u.href
-  } catch {
-    // fall through
-  }
-  return null
-}
-
-/** True when semver-ish string `a` is strictly newer than `b` (numeric compare). */
-function isNewer(a: string, b: string): boolean {
-  return a.localeCompare(b, undefined, { numeric: true }) > 0
-}
-
-interface GithubAsset {
-  name?: string
-  browser_download_url?: string
-  /** GitHub-computed content digest, e.g. "sha256:abc…" (all uploaded assets). */
-  digest?: string
-}
-
 export async function check(): Promise<UpdateStatus['state']> {
-  emit({ state: 'checking' })
-  try {
-    const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
-      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Switchboard-Updater' },
-    })
-    if (!res.ok) throw new Error(`GitHub API returned ${res.status}`)
-    const release = (await res.json()) as {
-      tag_name?: string
-      html_url?: string
-      assets?: GithubAsset[]
-    }
-    const latest = (release.tag_name ?? '').replace(/^v/i, '').trim()
-    if (latest && isNewer(latest, app.getVersion())) {
-      latestVersion = latest
-      latestUrl = safeGithubUrl(release.html_url) ?? RELEASES_PAGE
-      // The NSIS installer asset (Switchboard-Setup-x.y.z.exe) drives the
-      // in-app download; if absent, install falls back to the browser page.
-      const installer = (release.assets ?? []).find((a) => /\.exe$/i.test(a.name ?? ''))
-      latestAssetUrl = safeGithubUrl(installer?.browser_download_url)
-      latestAssetDigest = /^sha256:[0-9a-f]{64}$/i.test(installer?.digest ?? '')
-        ? installer!.digest!.slice('sha256:'.length).toLowerCase()
-        : null
-      emit({ state: 'available', version: latest })
-      return 'available'
-    }
+  if (!app.isPackaged) {
     emit({ state: 'none' })
     return 'none'
-  } catch (err) {
-    emit({ state: 'error', message: err instanceof Error ? err.message : String(err) })
+  }
+  try {
+    await autoUpdater.checkForUpdates()
+    // The update-available / update-not-available events are the authoritative
+    // signal (the result carries the feed's latest version either way).
+    return availableVersion ? 'available' : 'none'
+  } catch {
+    // The 'error' event already reported the detail to the renderer.
     return 'error'
   }
 }
 
 /**
- * Refuse to launch an installer that is not carrying a valid Authenticode
- * signature. TLS + the origin-validated download guard the transport; this
- * guards the authenticity of what actually executes (Electron A15/D). When the
- * build is not yet code-signed (see electron-builder.yml) the status is not
- * 'Valid', so the caller falls back to the browser download rather than running
- * an unverified binary. Windows-only, matching the sole packaged target.
- */
-async function hasValidSignature(filePath: string): Promise<boolean> {
-  const psPath = `'${filePath.replace(/'/g, "''")}'`
-  try {
-    const { stdout } = await execFileAsync(
-      'powershell.exe',
-      [
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        `(Get-AuthenticodeSignature -LiteralPath ${psPath}).Status`,
-      ],
-      { timeout: 15000, windowsHide: true },
-    )
-    return stdout.trim() === 'Valid'
-  } catch {
-    return false
-  }
-}
-
-/**
- * Download the release installer inside the app (reporting progress), verify its
- * signature, then launch it and quit so it can replace the running files. Falls
- * back to opening the release page in the browser when no installer asset was
- * found on the last check (e.g. a release that attached only source archives),
- * or when the downloaded installer fails signature verification.
+ * Downloads the update (progress arrives through the events above) and restarts
+ * into the installer. Falls back to the release page when the feed or the
+ * download is unusable, so the developer is never left with a dead button.
  */
 export async function installNow(): Promise<void> {
-  if (!latestAssetUrl) {
-    await shell.openExternal(latestUrl)
+  if (!availableVersion) {
+    await shell.openExternal(RELEASES_PAGE)
     return
   }
   try {
-    emit({ state: 'downloading', version: latestVersion, percent: 0 })
-    // fetch follows GitHub's redirect to the asset CDN automatically.
-    const res = await fetch(latestAssetUrl, { headers: { 'User-Agent': 'Switchboard-Updater' } })
-    if (!res.ok || !res.body) throw new Error(`Download failed (${res.status})`)
-    const total = Number(res.headers.get('content-length')) || 0
-    const reader = res.body.getReader()
-    const chunks: Buffer[] = []
-    let received = 0
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      if (value) {
-        chunks.push(Buffer.from(value))
-        received += value.length
-        if (total > 0) {
-          emit({
-            state: 'downloading',
-            version: latestVersion,
-            percent: Math.min(100, Math.round((received / total) * 100)),
-          })
-        }
-      }
-    }
-    // Version comes from a GitHub tag; keep only digits/dots so it can never
-    // steer the temp write/launch path outside the temp directory.
-    const safeVersion = latestVersion.replace(/[^0-9.]/g, '') || 'latest'
-    const dest = join(app.getPath('temp'), `Switchboard-Setup-${safeVersion}.exe`)
-    const payload = Buffer.concat(chunks)
-    writeFileSync(dest, payload)
-    // Never execute an unverified binary. Two accepted proofs, either suffices:
-    // a valid Authenticode signature (once the build is code-signed), or a
-    // SHA-256 match against the digest GitHub computed for the release asset
-    // (integrity: the bytes are exactly what the release carries, over TLS with
-    // an origin-validated URL). Unsigned builds previously ALWAYS failed here,
-    // making in-app update a guaranteed dead end.
-    const digestOk =
-      latestAssetDigest !== null &&
-      createHash('sha256').update(payload).digest('hex') === latestAssetDigest
-    if (!digestOk && !(await hasValidSignature(dest))) {
-      rmSync(dest, { force: true })
-      emit({
-        state: 'error',
-        message: 'The downloaded update could not be verified; opened the release page instead.',
-      })
-      await shell.openExternal(latestUrl)
-      return
-    }
-    emit({ state: 'ready', version: latestVersion })
-    // Detach the installer so it survives our exit, then quit to unlock files.
-    spawn(dest, { detached: true, stdio: 'ignore' }).unref()
-    app.quit()
-  } catch (err) {
-    emit({ state: 'error', message: err instanceof Error ? err.message : String(err) })
+    await autoUpdater.downloadUpdate()
+    // Detaches the installer and quits so the running files can be replaced.
+    autoUpdater.quitAndInstall()
+  } catch (error) {
+    emit({
+      state: 'error',
+      message:
+        error instanceof Error
+          ? `${error.message}; opened the release page instead.`
+          : 'The update could not be downloaded; opened the release page instead.',
+    })
+    await shell.openExternal(RELEASES_PAGE)
   }
 }

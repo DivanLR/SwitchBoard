@@ -234,11 +234,11 @@ export interface DecisionRecord extends Omit<PermissionRequest, 'status' | 'reso
   resolvedAt: string
 }
 
-export type PermissionRuleMatcherKind = 'command_prefix' | 'path_glob' | 'exact_input' | 'tool_only'
+export type PermissionRuleMatcherKind = 'command_prefix' | 'path_glob' | 'tool_only'
 
 export interface PermissionRuleMatcher {
   kind: PermissionRuleMatcherKind
-  /** Prefix, glob, or serialised input depending on `kind`; absent for `tool_only`. */
+  /** Command prefix or path glob depending on `kind`; absent for `tool_only`. */
   value?: string
 }
 
@@ -430,8 +430,6 @@ export interface Settings {
   /** Auto-approve requests by risk level (Allowed list tab): recorded as rule_approved. */
   autoApproveLow: boolean
   autoApproveMedium: boolean
-  /** Daily spend budget in USD; 0 = off. Sidebar cost turns red when exceeded. */
-  dailySpendLimit: number
   /** Per-project plugin/skill commands hidden from composer suggestions. */
   disabledCommands: Record<string, string[]>
   /**
@@ -477,7 +475,6 @@ export const DEFAULT_SETTINGS: Settings = {
   projectWorkerModels: {},
   autoApproveLow: false,
   autoApproveMedium: false,
-  dailySpendLimit: 0,
   disabledCommands: {},
   databaseMcpServers: [],
   mcpActiveServers: [],

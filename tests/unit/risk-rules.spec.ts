@@ -2,7 +2,7 @@
 // the seeded default set (FR-008a).
 import { describe, expect, it } from 'vitest'
 import type { RiskClassificationRule } from '@shared/domain'
-import { classifyRisk, defaultRiskRules, globToRegExp } from '@main/inbox/risk-rules'
+import { classifyRisk, defaultRiskRules } from '@main/inbox/risk-rules'
 
 function rule(partial: Partial<RiskClassificationRule>): RiskClassificationRule {
   return {
@@ -97,18 +97,5 @@ describe('default rule set', () => {
 
   it('marks every seeded rule as builtin', () => {
     expect(defaults.every((r) => r.builtin)).toBe(true)
-  })
-})
-
-describe('globToRegExp', () => {
-  it('handles ** and * with windows and posix separators', () => {
-    expect(globToRegExp('C:/p/**').test('C:/p/src/deep/file.ts')).toBe(true)
-    expect(globToRegExp('src/*.ts').test('src/a.ts')).toBe(true)
-    expect(globToRegExp('src/*.ts').test('src/nested/a.ts')).toBe(false)
-  })
-
-  it('escapes regex specials and supports spaces', () => {
-    expect(globToRegExp('C:/Program Files/**').test('C:/Program Files/App/x.dll')).toBe(true)
-    expect(globToRegExp('a.b').test('axb')).toBe(false)
   })
 })

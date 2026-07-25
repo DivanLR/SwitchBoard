@@ -2,9 +2,8 @@
 // from an approved action, evaluated in creation order before an item is
 // enqueued; revoked rules stop matching immediately. Only low and medium risk
 // requests may create rules; the broker enforces that invariant.
-import { isAbsolute, resolve, sep } from 'node:path'
+import { isAbsolute, posix, resolve, sep } from 'node:path'
 import type { PermissionRule, PermissionRuleMatcher } from '@shared/domain'
-import { globToRegExp } from './risk-rules'
 
 const PATH_FIELDS = ['file_path', 'path', 'notebook_path'] as const
 
@@ -35,6 +34,10 @@ export function isWithinDir(dir: string, candidate: string): boolean {
   )
 }
 
+/** Posix form, lower-cased: `posix.matchesGlob` is separator- and case-sensitive,
+ *  while rules and tool inputs mix slash styles and casing on Windows. */
+const foldPath = (p: string): string => p.replace(/\\/g, '/').toLowerCase()
+
 /**
  * True when `candidate` matches the glob AND its RESOLVED path stays inside the
  * glob's base directory (directory-traversal-safe via isWithinDir).
@@ -45,7 +48,7 @@ function withinGlob(glob: string, candidate: string): boolean {
   const resolvedCandidate = isAbsolute(candidate)
     ? resolve(candidate)
     : resolve(resolve(base), candidate)
-  return globToRegExp(glob.replace(/\\/g, '/')).test(resolvedCandidate.replace(/\\/g, '/'))
+  return posix.matchesGlob(foldPath(resolvedCandidate), foldPath(glob))
 }
 
 export function pathOf(input: Record<string, unknown>): string | null {
@@ -100,8 +103,6 @@ export function matchesRule(
       if (!path || !rule.matcher.value) return false
       return withinGlob(rule.matcher.value, path)
     }
-    case 'exact_input':
-      return JSON.stringify(input) === rule.matcher.value
   }
 }
 

@@ -48,6 +48,21 @@ describe('matchesRule', () => {
     expect(matchesRule(rule, 'Write', { file_path: 'C:\\other\\a.ts' })).toBe(false)
   })
 
+  it('matches path globs case-insensitively, spaces and all', () => {
+    const rule = makeRule({
+      toolName: 'Read',
+      matcher: { kind: 'path_glob', value: 'C:/Program Files/App/**' },
+    })
+    expect(matchesRule(rule, 'Read', { file_path: 'c:\\program files\\app\\x.dll' })).toBe(true)
+    expect(matchesRule(rule, 'Read', { file_path: 'C:\\Program Files\\Other\\x.dll' })).toBe(false)
+  })
+
+  it('keeps a single star inside one path segment', () => {
+    const rule = makeRule({ toolName: 'Read', matcher: { kind: 'path_glob', value: 'C:/p/*.ts' } })
+    expect(matchesRule(rule, 'Read', { file_path: 'C:/p/a.ts' })).toBe(true)
+    expect(matchesRule(rule, 'Read', { file_path: 'C:/p/nested/a.ts' })).toBe(false)
+  })
+
   it('rejects directory-traversal that resolves outside the glob base', () => {
     const rule = makeRule({ toolName: 'Read', matcher: { kind: 'path_glob', value: 'C:\\proj\\**' } })
     // Resolves to C:\Users\victim\.ssh\id_rsa — outside C:\proj — must NOT match.

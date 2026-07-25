@@ -3,7 +3,11 @@
 // full `window.switchboard` surface from src/shared/ipc-types.ts, plus a
 // `window.__mock` test-driver API for scripting sessions and permissions.
 // The function must stay self-contained: it is serialised into the browser
-// context, so it may not reference imports at runtime.
+// context, so it may not reference imports at runtime. Anything it needs from
+// the real contract therefore arrives as scenario DATA, which is how the
+// settings shape below stays tied to the app's own defaults instead of being a
+// hand-copied duplicate that silently drifts.
+import { DEFAULT_SETTINGS, type Settings } from '../../src/shared/domain'
 
 export interface MockSessionSeed {
   id: string
@@ -28,6 +32,9 @@ export interface MockProjectSeed {
 export interface MockScenario {
   projects: MockProjectSeed[]
   suggestions?: { path: string; name: string }[]
+  /** Starting settings. Pass DEFAULT_SETTINGS so the mock cannot drift from the
+   *  real defaults; override individual fields for a specific test. */
+  settings: Settings
 }
 
 export interface MockDriver {
@@ -217,28 +224,8 @@ export function installMockHost(scenario: MockScenario): void {
       builtin: true,
     },
   ]
-  let settings: AnyRecord = {
-    defaultView: 'clean',
-    notificationsEnabled: true,
-    intelligentModel: 'default',
-    workerModel: 'claude-sonnet-5',
-    terseMode: true,
-    terseLevel: 'full',
-    fontSize: 'md',
-    showToolRows: false,
-    timestamps: false,
-    autoscroll: true,
-    projectModels: {},
-    projectWorkerModels: {},
-    autoModelRouting: true,
-    autoApproveLow: false,
-    autoApproveMedium: false,
-    dailySpendLimit: 0,
-    disabledCommands: {},
-    databaseMcpServers: [],
-    mcpActiveServers: [],
-    modelMode: 'auto',
-  }
+  // The real DEFAULT_SETTINGS, handed in as data by the scenario.
+  let settings: AnyRecord = { ...(scenario.settings as unknown as AnyRecord) }
 
   const listeners = new Map<string, Set<(payload: unknown) => void>>()
   function push(channel: string, payload: unknown): void {
@@ -901,6 +888,7 @@ export function installMockHost(scenario: MockScenario): void {
 /** Convenience: a two-project scenario used by several specs. */
 export function twoProjectScenario(): MockScenario {
   return {
+    settings: DEFAULT_SETTINGS,
     projects: [
       {
         id: 'p-alpha',

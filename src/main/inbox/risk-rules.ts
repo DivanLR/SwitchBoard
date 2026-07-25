@@ -5,30 +5,6 @@
 import type { RiskClassificationRule, RiskInputMatcher, RiskLevel } from '@shared/domain'
 import { newId } from '@main/store/repositories'
 
-const REGEX_SPECIALS = new Set(['.', '+', '^', '$', '{', '}', '(', ')', '|', '[', ']', '\\'])
-
-export function globToRegExp(glob: string): RegExp {
-  let pattern = ''
-  for (let i = 0; i < glob.length; i += 1) {
-    const ch = glob[i]
-    if (ch === '*') {
-      if (glob[i + 1] === '*') {
-        pattern += '.*'
-        i += 1
-      } else {
-        pattern += '[^/\\\\]*'
-      }
-    } else if (ch === '?') {
-      pattern += '.'
-    } else if (REGEX_SPECIALS.has(ch)) {
-      pattern += `\\${ch}`
-    } else {
-      pattern += ch
-    }
-  }
-  return new RegExp(`^${pattern}$`, 'i')
-}
-
 function inputValue(input: Record<string, unknown>, field: string): string {
   const value = input[field]
   if (value === undefined || value === null) return ''

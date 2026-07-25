@@ -5,11 +5,13 @@
 // the DB as live queries.
 import { expect, test } from '@playwright/test'
 import { installMockHost, type MockScenario } from './mock-host'
+import { DEFAULT_SETTINGS } from '../../src/shared/domain'
 
 /** alpha is an ordinary selected project; the reserved row hosts the DB session
  *  reporting its MCP roster (surfaced as the connection pill). */
 function dbScenario(): MockScenario {
   return {
+    settings: DEFAULT_SETTINGS,
     projects: [
       {
         id: 'p-alpha',

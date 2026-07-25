@@ -13,7 +13,7 @@ import { modelLabel, type AvailableModel, type McpServer, type ModelMode, type P
 import { MessageMapper, type EventSink } from './message-mapper'
 import { toAvailableModels } from './model-catalog'
 import { classifyWorkload, maxEffortUnlessFable, nextStrongestModel } from './model-routing'
-import { modeAgents } from './modes'
+import { modeAgents } from './session-shaping'
 
 /** Streaming input queue the SDK consumes; `end()` closes the session gracefully. */
 class AsyncPushQueue<T> implements AsyncIterable<T> {
@@ -51,7 +51,7 @@ class AsyncPushQueue<T> implements AsyncIterable<T> {
   }
 }
 
-export type CanUseToolOptions = Parameters<CanUseTool>[2]
+type CanUseToolOptions = Parameters<CanUseTool>[2]
 
 /** The permission broker's entry point, bound per session by the manager (R3). */
 export type PermissionGate = (context: {
@@ -61,7 +61,7 @@ export type PermissionGate = (context: {
   options: CanUseToolOptions
 }) => Promise<PermissionResult>
 
-export interface HostedSessionOptions {
+interface HostedSessionOptions {
   /** Switchboard session id (not the SDK session id). */
   sessionId: string
   projectPath: string

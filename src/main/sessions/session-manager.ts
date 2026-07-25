@@ -22,9 +22,11 @@ import { readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
 import { HostedSession, type PermissionGate } from './session'
 import { probeAvailableModels } from './model-catalog'
 import { foldModelTotals, type EventSink } from './message-mapper'
-import { terseSystemPromptAppend } from './terse-mode'
-import { adhdSystemPromptAppend } from './adhd-mode'
-import { modesSystemPromptAppend } from './modes'
+import {
+  adhdSystemPromptAppend,
+  modesSystemPromptAppend,
+  terseSystemPromptAppend,
+} from './session-shaping'
 import { resolveClaudeExecutable } from './claude-executable'
 
 export class SessionManagerError extends Error {
@@ -37,9 +39,9 @@ export class SessionManagerError extends Error {
 }
 
 /** Classifier hook installed by the swallow rule engine (FR-015a); null until then. */
-export type NoiseClassifier = (event: SessionEvent, projectId: string) => string | null
+type NoiseClassifier = (event: SessionEvent, projectId: string) => string | null
 
-export interface SessionManagerCallbacks {
+interface SessionManagerCallbacks {
   onEvent: (event: SessionEvent) => void
   onSessionStatus: (push: SessionStatusPush) => void
   onCountersChanged: () => void
