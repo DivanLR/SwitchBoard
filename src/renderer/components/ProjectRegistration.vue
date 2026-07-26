@@ -46,7 +46,15 @@ async function startSession(): Promise<void> {
       if (existing) {
         projects.select(existing.id)
         if (!existing.session || existing.session.endedAt) {
-          await projects.startSession(existing.id, false, bypass.value)
+          try {
+            await projects.startSession(existing.id, false, bypass.value)
+          } catch (startError) {
+            // Starting can fail on its own terms (a bypass session needs Docker
+            // running). Report it here rather than letting it escape this catch
+            // block as an unhandled rejection with the dialog looking idle.
+            error.value = isIpcError(startError) ? startError.message : String(startError)
+            return
+          }
         }
         emit('close')
       } else {

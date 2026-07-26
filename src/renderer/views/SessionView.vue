@@ -17,7 +17,7 @@ import { modelLabel } from '@shared/domain'
 import type { AgentScopedPayload, SessionEvent, CleanupGroup } from '@shared/domain'
 import { activeAgents } from '@shared/agents'
 import { parseInlineQuestion } from '@shared/inline-question'
-import type { ProjectListItem } from '@shared/ipc-types'
+import { isIpcError, type ProjectListItem } from '@shared/ipc-types'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { useInboxStore } from '@renderer/stores/inbox'
@@ -83,6 +83,8 @@ const busy = ref(false)
 // Ended-banner restart option: start the next session with all permissions
 // bypassed (--dangerously-skip-permissions), mirroring the New session dialog.
 const bypassRestart = ref(false)
+/** Session-start failure (e.g. Docker down for a bypass session), ended banner. */
+const startError = ref<string | null>(null)
 const streamEl = ref<HTMLElement | null>(null)
 const composerEl = ref<HTMLTextAreaElement | null>(null)
 
@@ -372,10 +374,28 @@ watch(
     draftRestored.value = false
     mainTab.value = 'session'
     editTarget.value = null
+    // Per-project, both of these: a start failure from the project we left must
+    // not read as this one's, and an armed bypass toggle must never carry over
+    // and silently start the NEXT project's session with permissions skipped.
+    startError.value = null
+    busy.value = false
+    bypassRestart.value = false
     resetSuggestions()
     void loadHistory(projectId)
     void specs.loadState(projectId)
     void queue.load(projectId)
+  },
+  { immediate: true },
+)
+
+// The bypass toggle follows whatever session the banner is offering to resume:
+// a bypass session's transcript lives in that project's container volume, so
+// resuming it as a native session would look on the host and find nothing (and
+// the reverse). Declared after the project watcher so it wins on a switch.
+watch(
+  () => endedSession.value?.id ?? null,
+  (id) => {
+    if (id) bypassRestart.value = endedSession.value?.bypassPermissions ?? false
   },
   { immediate: true },
 )
@@ -627,11 +647,21 @@ async function removeQueued(id: string): Promise<void> {
 }
 
 async function start(resume: boolean): Promise<void> {
+  // This view is reused across projects and a bypass start can take minutes
+  // (first-run image build), so the call is pinned to the project it was made
+  // for — otherwise its result lands on whichever project is on screen when it
+  // finally settles.
+  const target = props.project.id
   busy.value = true
+  startError.value = null
   try {
-    await projects.startSession(props.project.id, resume, bypassRestart.value)
+    await projects.startSession(target, resume, bypassRestart.value)
+  } catch (e) {
+    // Docker down / not logged in (bypass sessions run containerised) — show
+    // it in the ended banner instead of dying as an unhandled rejection.
+    if (props.project.id === target) startError.value = isIpcError(e) ? e.message : String(e)
   } finally {
-    busy.value = false
+    if (props.project.id === target) busy.value = false
   }
 }
 
@@ -1043,6 +1073,9 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
               </button>
               <span :class="{ armed: bypassRestart }">Bypass permissions</span>
             </span>
+          </div>
+          <div v-if="startError" class="mono" style="color: var(--red)" data-testid="start-error">
+            ✗ {{ startError }}
           </div>
         </div>
 

@@ -139,15 +139,6 @@ npm run package      # electron-builder distributable
 There are no native modules and therefore no rebuild step: the store runs on the
 runtime's own `node:sqlite`, so the same code loads under Electron and under Vitest.
 
-### Publishing a release
-
-`npm run package` writes both artefacts to `release/`. Attach **both** to the GitHub
-release, or the in-app updater cannot see the new version:
-
-- `Switchboard-Setup-<version>.exe` — the installer
-- `latest.yml` — the update feed, which also carries the SHA-512 `electron-updater`
-  verifies the download against
-
 ### Real-session smoke test
 
 The default suite never talks to Claude. To validate the live integration against an
@@ -187,29 +178,29 @@ isolation, no Node integration, a strict CSP, and a structured error envelope. S
 
 ## Releasing
 
-Installed builds check for updates through the GitHub Releases API and install the
-attached NSIS installer in-app (see `src/main/updater.ts`). Each release carries the
-installer only — no `electron-updater` `latest.yml` feed.
+Installed builds check for updates with `electron-updater`, which reads `latest.yml`
+from the GitHub release (see `src/main/updater.ts`). Both artefacts must be attached
+to every release: without `latest.yml` the updater cannot resolve the new version, and
+it is also where the SHA-512 it verifies the download against lives.
 
 1. Bump `version` in `package.json`.
-2. Build the installer:
+2. Build both artefacts:
 
    ```powershell
    npm run package
    ```
 
-   This produces `release/Switchboard-Setup-<version>.exe`.
-3. Publish a GitHub release, attaching only that installer:
+   This produces `release/Switchboard-Setup-<version>.exe` and `release/latest.yml`.
+3. Publish a GitHub release, attaching both:
 
    ```powershell
-   gh release create v<version> "release/Switchboard-Setup-<version>.exe" --title "..." --notes "..."
+   gh release create v<version> `
+     "release/Switchboard-Setup-<version>.exe" "release/latest.yml" `
+     --title "<version>" --notes "..."
    ```
 
-The updater compares the release tag to the running version and downloads the `.exe`
-asset. Do not run `electron-builder --publish always` (it re-attaches `latest.yml`,
-which the in-app updater does not use). Unsigned builds still install, but the updater
-verifies the Authenticode signature before launching — until a signing certificate is
-configured it falls back to opening the release page, and SmartScreen warns on first run.
+Unsigned builds still install, but SmartScreen warns on first run until a signing
+certificate is configured.
 
 ---
 

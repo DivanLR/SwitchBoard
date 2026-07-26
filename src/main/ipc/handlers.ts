@@ -236,9 +236,9 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       const scannedAt = statSync(docPath).mtime.toISOString()
       return repos.mcpScans.upsert(req.projectId, comboKey(req.servers), req.servers, scannedAt)
     },
-    'specs.runInSession': (req) => {
+    'specs.runInSession': async (req) => {
       let session = repos.sessions.activeForProject(req.projectId)
-      if (!session) session = manager.startSession(req.projectId)
+      if (!session) session = await manager.startSession(req.projectId)
       manager.sendMessage(session.id, req.text)
       return { sessionId: session.id }
     },

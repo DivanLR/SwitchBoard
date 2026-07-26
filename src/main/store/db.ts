@@ -277,6 +277,16 @@ const MIGRATIONS: Migration[] = [
       `)
     },
   },
+  {
+    // Bypass sessions run inside a container and keep their SDK transcript in a
+    // Docker volume rather than the host's ~/.claude, so "resume" has to know
+    // which of the two a previous session used. That outlives the app process,
+    // so the flag can no longer be in-memory only.
+    name: '012-session-bypass-permissions',
+    up: (db) => {
+      db.exec(`ALTER TABLE sessions ADD COLUMN bypassPermissions INTEGER;`)
+    },
+  },
 ]
 
 /**

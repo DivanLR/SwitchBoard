@@ -70,7 +70,7 @@ describe.runIf(enabled)('real Claude Code session (quickstart smoke)', () => {
       })
       late.broker = broker
 
-      const session = manager.startSession(project.id)
+      const session = await manager.startSession(project.id)
       manager.sendMessage(
         session.id,
         'Using the Bash tool, create a file with `echo hello > smoke.txt` and then delete it with `rm smoke.txt`. Then reply with the single word DONE.',
@@ -140,7 +140,7 @@ describe.runIf(enabled)('real AskUserQuestion routing (T021 watch item)', () => 
       })
       late.broker = broker
 
-      const session = manager.startSession(project.id)
+      const session = await manager.startSession(project.id)
       manager.sendMessage(
         session.id,
         'Use the AskUserQuestion tool to ask me one question: "Which colour do you prefer?" with exactly two options, Red and Blue. After I answer, reply with only the colour I chose.',

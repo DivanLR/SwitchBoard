@@ -28,6 +28,7 @@ import {
   terseSystemPromptAppend,
 } from './session-shaping'
 import { resolveClaudeExecutable } from './claude-executable'
+import { ensureSandboxImage, sweepOrphanedContainers } from './docker-sandbox'
 
 export class SessionManagerError extends Error {
   constructor(
@@ -121,6 +122,10 @@ export async function readGitDiffStat(
 
 export class SessionManager {
   private hosted = new Map<string, HostedEntry>()
+  /** Projects with a start in flight. startSession now awaits before inserting
+   *  its row, so the DB's "already active" check alone no longer closes the
+   *  window — two concurrent starts would both pass it and run two sessions. */
+  private starting = new Set<string>()
   private classifier: NoiseClassifier | null = null
   /** Models this subscription can select, captured from the SDK's supportedModels()
    *  on any session start, or probed on demand by `models()`. Account-global and
@@ -164,15 +169,46 @@ export class SessionManager {
     for (const request of this.repos.requests.pending()) {
       this.repos.requests.resolve(request.id, 'expired')
     }
+    // Sessions are not only DB rows now: a bypass session owns a container that
+    // outlives a hard kill, so reconciling the rows without reaping those would
+    // leave an autonomous agent running against the project folder.
+    sweepOrphanedContainers()
   }
 
-  startSession(projectId: string, resume = false, bypassPermissions = false): Session {
+  /**
+   * Reserves the project for the whole start, so a second concurrent start can
+   * never slip through the "already active" check while the first is still
+   * awaiting (the DB row only appears at the very end). Guarding the wrapper
+   * rather than the awaited call keeps this correct if the body later grows
+   * another await.
+   */
+  async startSession(projectId: string, resume = false, bypassPermissions = false): Promise<Session> {
+    if (this.starting.has(projectId)) {
+      throw new SessionManagerError('ALREADY_ACTIVE', 'The project already has an active session')
+    }
+    this.starting.add(projectId)
+    try {
+      return await this.launchSession(projectId, resume, bypassPermissions)
+    } finally {
+      this.starting.delete(projectId)
+    }
+  }
+
+  private async launchSession(
+    projectId: string,
+    resume: boolean,
+    bypassPermissions: boolean,
+  ): Promise<Session> {
     const project = this.repos.projects.byId(projectId)
     if (!project) throw new SessionManagerError('NOT_FOUND', 'Project not found')
     const active = this.repos.sessions.activeForProject(projectId)
     if (active) {
       throw new SessionManagerError('ALREADY_ACTIVE', 'The project already has an active session')
     }
+    // Bypass sessions run containerised (docker-sandbox): fail here, before a
+    // row exists, when Docker is down or not logged in. First call builds the
+    // image, which can take minutes — the renderer awaits with its busy state.
+    if (bypassPermissions) await ensureSandboxImage()
     // The app drives the user's own Claude Code CLI and no longer bundles a copy
     // (that binary is ~245 MB). Every Switchboard user has Claude Code, so this
     // is normally present; if not, fail with a clear message rather than letting
@@ -208,11 +244,12 @@ export class SessionManager {
       startedAt: nowIso(),
       endedAt: null,
       endReason: null,
+      // Persisted: it drives the "⚠ Bypass" header pill, and after the session
+      // ends it is the only record of whether the transcript went to the host or
+      // to this project's container volume — which resume has to match.
+      bypassPermissions,
     }
     this.repos.sessions.insert(row)
-    // In-memory only (never bound into the INSERT): surfaces the "⚠ Bypass"
-    // header pill through liveSessionRow snapshots for the session's lifetime.
-    row.bypassPermissions = bypassPermissions
 
     const entry: HostedEntry = {
       row,
@@ -256,6 +293,7 @@ export class SessionManager {
     const modesAppend = modesSystemPromptAppend(settings.modelMode ?? 'auto')
     entry.session = new HostedSession({
       sessionId: row.id,
+      projectId,
       projectPath: project.path,
       // ponytail: refs added mid-session apply from the next session start.
       refDirs: project.refs.map((r) => r.path),

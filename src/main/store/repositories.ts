@@ -67,6 +67,16 @@ interface SessionRow {
   startedAt: string
   endedAt: string | null
   endReason: SessionEndReason | null
+  /** SQLite has no boolean type, so this arrives as 0/1 (or null pre-migration). */
+  bypassPermissions: number | null
+}
+
+/** SessionRow is the raw shape; Session wants a real boolean for the flag. */
+function toSession(row: SessionRow): Session
+function toSession(row: SessionRow | undefined): Session | undefined
+function toSession(row: SessionRow | undefined): Session | undefined {
+  if (!row) return undefined
+  return { ...row, bypassPermissions: row.bypassPermissions === 1 }
 }
 
 interface EventRow {
@@ -205,14 +215,35 @@ export class SessionsRepo {
   insert(session: Session): void {
     this.db
       .prepare(
-        `INSERT INTO sessions (id, projectId, sdkSessionId, status, statusDetail, branch, diffAdds, diffDels, usageUtilization, usageResetsAt, usageLimitType, startedAt, endedAt, endReason)
-         VALUES (@id, @projectId, @sdkSessionId, @status, @statusDetail, @branch, @diffAdds, @diffDels, @usageUtilization, @usageResetsAt, @usageLimitType, @startedAt, @endedAt, @endReason)`,
+        `INSERT INTO sessions (id, projectId, sdkSessionId, status, statusDetail, branch, diffAdds, diffDels, usageUtilization, usageResetsAt, usageLimitType, startedAt, endedAt, endReason, bypassPermissions)
+         VALUES (@id, @projectId, @sdkSessionId, @status, @statusDetail, @branch, @diffAdds, @diffDels, @usageUtilization, @usageResetsAt, @usageLimitType, @startedAt, @endedAt, @endReason, @bypassPermissions)`,
       )
-      .run(session)
+      // SQLite takes no booleans, and the in-memory Session carries non-scalar
+      // extras (mcpServers, backgroundTasks) that are not columns — so bind the
+      // column set explicitly rather than handing over the whole object.
+      .run({
+        id: session.id,
+        projectId: session.projectId,
+        sdkSessionId: session.sdkSessionId,
+        status: session.status,
+        statusDetail: session.statusDetail,
+        branch: session.branch,
+        diffAdds: session.diffAdds,
+        diffDels: session.diffDels,
+        usageUtilization: session.usageUtilization,
+        usageResetsAt: session.usageResetsAt,
+        usageLimitType: session.usageLimitType,
+        startedAt: session.startedAt,
+        endedAt: session.endedAt,
+        endReason: session.endReason,
+        bypassPermissions: session.bypassPermissions ? 1 : 0,
+      })
   }
 
   byId(id: string): Session | undefined {
-    return this.db.prepare('SELECT * FROM sessions WHERE id = ?').get(id) as SessionRow | undefined
+    return toSession(
+      this.db.prepare('SELECT * FROM sessions WHERE id = ?').get(id) as SessionRow | undefined,
+    )
   }
 
   update(
@@ -241,27 +272,35 @@ export class SessionsRepo {
   }
 
   activeForProject(projectId: string): Session | undefined {
-    return this.db
-      .prepare('SELECT * FROM sessions WHERE projectId = ? AND endedAt IS NULL ORDER BY startedAt DESC LIMIT 1')
-      .get(projectId) as SessionRow | undefined
+    return toSession(
+      this.db
+        .prepare('SELECT * FROM sessions WHERE projectId = ? AND endedAt IS NULL ORDER BY startedAt DESC LIMIT 1')
+        .get(projectId) as SessionRow | undefined,
+    )
   }
 
   latestForProject(projectId: string): Session | undefined {
-    return this.db
-      .prepare('SELECT * FROM sessions WHERE projectId = ? ORDER BY startedAt DESC LIMIT 1')
-      .get(projectId) as SessionRow | undefined
+    return toSession(
+      this.db
+        .prepare('SELECT * FROM sessions WHERE projectId = ? ORDER BY startedAt DESC LIMIT 1')
+        .get(projectId) as SessionRow | undefined,
+    )
   }
 
   latestEndedForProject(projectId: string): Session | undefined {
-    return this.db
-      .prepare(
-        'SELECT * FROM sessions WHERE projectId = ? AND endedAt IS NOT NULL ORDER BY startedAt DESC LIMIT 1',
-      )
-      .get(projectId) as SessionRow | undefined
+    return toSession(
+      this.db
+        .prepare(
+          'SELECT * FROM sessions WHERE projectId = ? AND endedAt IS NOT NULL ORDER BY startedAt DESC LIMIT 1',
+        )
+        .get(projectId) as SessionRow | undefined,
+    )
   }
 
   listUnended(): Session[] {
-    return this.db.prepare('SELECT * FROM sessions WHERE endedAt IS NULL').all() as SessionRow[]
+    return (this.db.prepare('SELECT * FROM sessions WHERE endedAt IS NULL').all() as SessionRow[]).map(
+      (row) => toSession(row),
+    )
   }
 
   /** Startup reconciliation: any session left open by a previous run is marked ended (FR-022). */

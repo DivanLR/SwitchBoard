@@ -10,6 +10,7 @@ import {
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
 import { modelLabel, type AvailableModel, type McpServer, type ModelMode, type ProjectCommand, type SessionStatus } from '@shared/domain'
+import { sandboxSpawn } from './docker-sandbox'
 import { MessageMapper, type EventSink } from './message-mapper'
 import { toAvailableModels } from './model-catalog'
 import { classifyWorkload, maxEffortUnlessFable, nextStrongestModel } from './model-routing'
@@ -64,6 +65,8 @@ export type PermissionGate = (context: {
 interface HostedSessionOptions {
   /** Switchboard session id (not the SDK session id). */
   sessionId: string
+  /** Owning project; scopes the sandbox's persisted container home per project. */
+  projectId: string
   projectPath: string
   /** Referenced folders (REFS chips) granted as additional directories. */
   refDirs?: string[]
@@ -151,6 +154,18 @@ export class HostedSession {
   }
 
   start(): void {
+    // Bypass sessions run the CLI in a disposable Linux container: no OS
+    // sandbox exists on native Windows, so the container is the isolation
+    // boundary (docker-sandbox.ts). Paths handed to the CLI must then be
+    // container-side (/workspace, /refs/*), not host paths.
+    const sandbox = this.options.bypassPermissions
+      ? sandboxSpawn({
+          sessionId: this.sessionId,
+          projectId: this.options.projectId,
+          projectPath: this.options.projectPath,
+          refDirs: this.options.refDirs ?? [],
+        })
+      : null
     this.q = query({
       prompt: this.input,
       options: {
@@ -158,13 +173,16 @@ export class HostedSession {
         includePartialMessages: true,
         resume: this.options.resumeSdkSessionId,
         pathToClaudeCodeExecutable: this.options.claudeExecutablePath,
+        spawnClaudeCodeProcess: sandbox?.spawn,
         // Load user (~/.claude), project, and local settings — without this the
         // SDK loads NO filesystem settings, so global skills and commands
         // never appear in the CLI's command list.
         settingSources: ['user', 'project', 'local'],
         // Grant read/write within the project's own folder without prompting,
         // plus read access to any referenced folders (REFS chips).
-        additionalDirectories: [this.options.projectPath, ...(this.options.refDirs ?? [])],
+        additionalDirectories: sandbox
+          ? sandbox.additionalDirectories
+          : [this.options.projectPath, ...(this.options.refDirs ?? [])],
         // Work model for normal turns; 'default'/undefined uses the account default.
         model:
           this.options.workModel && this.options.workModel !== 'default'

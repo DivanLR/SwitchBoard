@@ -71,9 +71,11 @@ export interface Session {
   endedAt: string | null
   endReason: SessionEndReason | null
   /**
-   * Started with --dangerously-skip-permissions (header "⚠ Bypass" pill).
-   * In-memory only on live session rows; not persisted — a bypass session
-   * never outlives the app process.
+   * Started with --dangerously-skip-permissions (header "⚠ Bypass" pill), which
+   * also means the session ran inside the Docker sandbox. Persisted, because a
+   * bypass session's transcript lives in a container volume rather than the
+   * host's ~/.claude: resuming one as a native session (or the reverse) would
+   * look for that transcript in the wrong place and silently find nothing.
    */
   bypassPermissions?: boolean
   /** MCP servers reported in the session init message (in-memory only). */

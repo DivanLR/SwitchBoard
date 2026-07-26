@@ -18,6 +18,7 @@ function makeSession() {
   }
   const session = new HostedSession({
     sessionId: 's1',
+    projectId: 'p1',
     projectPath: '.',
     sink,
     gate: (async () => ({ behavior: 'allow', updatedInput: {} })) as never,
