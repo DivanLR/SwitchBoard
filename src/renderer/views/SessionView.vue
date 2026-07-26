@@ -31,6 +31,7 @@ import SwallowedBlock from '@renderer/components/SwallowedBlock.vue'
 import QuestionEvent from '@renderer/components/QuestionEvent.vue'
 import SpecsView from '@renderer/views/SpecsView.vue'
 import CleanupView from '@renderer/views/CleanupView.vue'
+import EvalsView from '@renderer/views/EvalsView.vue'
 
 const props = defineProps<{ project: ProjectListItem }>()
 const emit = defineEmits<{ (e: 'open-proj-settings'): void }>()
@@ -71,7 +72,7 @@ function pillLabel(status: string): string {
 
 // Main-area tab: the live session stream, the project's Spec Kit specs, or the
 // review/cleanup command launcher.
-const mainTab = ref<'session' | 'specs' | 'cleanup'>('session')
+const mainTab = ref<'session' | 'specs' | 'tests' | 'cleanup'>('session')
 const specCount = computed(() => specs.stateFor(props.project.id).specs.length)
 
 const composer = ref('')
@@ -582,11 +583,12 @@ function onSetTarget(label: string): void {
   void nextTick(() => composerEl.value?.focus())
 }
 
-// A Cleanup card sends its slash command straight to the session; output lands
-// in the Session tab, so switch there to watch it run.
-function runCleanup(command: string): void {
+// A Cleanup card's slash command, or an eval line's check / manual-pass prompt,
+// goes straight to the session; output lands in the Session tab, so switch there
+// to watch it run.
+function runInSession(text: string): void {
   mainTab.value = 'session'
-  void specs.runInSession(props.project.id, command)
+  void specs.runInSession(props.project.id, text)
 }
 
 // "Download to project" adds the plugin's marketplace then installs it — two
@@ -988,7 +990,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
       </div>
     </div>
 
-    <!-- Session / Specs / Cleanup tabs -->
+    <!-- Session / Specs / Tests / Cleanup tabs -->
     <div class="main-tabs mono">
       <button
         class="mt"
@@ -1001,6 +1003,14 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
       <button class="mt" :class="{ sel: mainTab === 'specs' }" data-testid="tab-specs" @click="mainTab = 'specs'">
         Specs
         <span v-if="specCount > 0" class="mt-badge">{{ specCount }}</span>
+      </button>
+      <button
+        class="mt"
+        :class="{ sel: mainTab === 'tests' }"
+        data-testid="tab-tests"
+        @click="mainTab = 'tests'"
+      >
+        Tests
       </button>
       <button
         class="mt"
@@ -1018,11 +1028,18 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
       @set-target="onSetTarget"
       @ran="((mainTab = 'session'), scrollToBottom())"
     />
+    <EvalsView
+      v-else-if="mainTab === 'tests'"
+      :project-id="project.id"
+      :project-name="project.name"
+      @run="runInSession"
+      @ran="((mainTab = 'session'), scrollToBottom())"
+    />
     <CleanupView
       v-else-if="mainTab === 'cleanup'"
       :project-name="project.name"
       :available="availableCommandNames"
-      @run="runCleanup"
+      @run="runInSession"
       @install="installCleanup"
     />
 

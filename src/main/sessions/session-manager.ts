@@ -28,6 +28,7 @@ import {
   modesSystemPromptAppend,
   terseSystemPromptAppend,
 } from './session-shaping'
+import { parseEvalMarker } from '@main/evals/eval-dispatch'
 import { resolveClaudeExecutable } from './claude-executable'
 import { ensureSandboxImage, sweepOrphanedContainers } from './docker-sandbox'
 
@@ -51,6 +52,9 @@ interface SessionManagerCallbacks {
   onSessionExit: (sessionId: string) => void
   /** Fired when a project's planned task queue changes (add/remove/auto-run). */
   onQueueChanged: (projectId: string) => void
+  /** Fired when a session reports an acceptance line's check outcome or judge
+   *  verdict, so the Tests tab reflects the gate without a manual refresh. */
+  onEvalsChanged: (projectId: string) => void
   /** Fired when a session reports its available slash commands / skills (init message). */
   onProjectCommands: (projectId: string, commands: ProjectCommand[]) => void
   gate: PermissionGate
@@ -495,6 +499,37 @@ export class SessionManager {
     return [...this.hosted.keys()]
   }
 
+  // --- Verifier gate (spec 002 US7) ---
+  // An acceptance line's check runs in the session, so its outcome has to be read
+  // back OUT of the session. The dispatch prompt demands one machine-readable
+  // line; this watch scans the session's own assistant output for it. No line
+  // means no result — the row stays unverified rather than passing (FR-047).
+  private evalWatch = new Map<string, { evalId: string; kind: 'check' | 'judge' }>()
+
+  /** Watch a session's next output for one acceptance line's reported result. */
+  watchEvalMarker(sessionId: string, evalId: string, kind: 'check' | 'judge'): void {
+    this.evalWatch.set(sessionId, { evalId, kind })
+  }
+
+  // Only assistant-authored kinds: the dispatch prompt itself names the sentinels,
+  // so scanning a 'prompt' event would read the instruction as the answer.
+  private static readonly EVAL_SCAN_KINDS = new Set<EventKind>(['assistant_text', 'summary', 'result'])
+
+  private scanEvalMarker(entry: HostedEntry, kind: EventKind, payload: unknown): void {
+    const watch = this.evalWatch.get(entry.row.id)
+    if (!watch || !SessionManager.EVAL_SCAN_KINDS.has(kind)) return
+    const text = (payload as { text?: string }).text
+    if (!text) return
+    const marker = parseEvalMarker(text)
+    if (!marker || marker.kind !== watch.kind) return
+    this.evalWatch.delete(entry.row.id)
+    this.repos.evals.update(
+      watch.evalId,
+      marker.kind === 'check' ? { checkStatus: marker.status } : { judge: marker.verdict },
+    )
+    this.callbacks.onEvalsChanged(entry.row.projectId)
+  }
+
   /** Sink for the permission broker: markers and questions enter the stream here. */
   sinkFor(sessionId: string): EventSink {
     const entry = this.hosted.get(sessionId)
@@ -545,6 +580,7 @@ export class SessionManager {
         if (UPDATABLE_KINDS.has(kind)) {
           entry.live.set(event.id, { event, persisted: persist })
         }
+        this.scanEvalMarker(entry, kind, payload)
         this.callbacks.onEvent({ ...event })
         return event as SessionEvent<K>
       },
@@ -580,6 +616,7 @@ export class SessionManager {
             liveEntry.persisted = true
           }
         }
+        this.scanEvalMarker(entry, liveEntry.event.kind, payload)
         this.callbacks.onEvent({ ...liveEntry.event })
       },
     }

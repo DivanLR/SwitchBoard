@@ -6,6 +6,7 @@ import type {
   DecisionOutcome,
   DecisionRecord,
   Draft,
+  EvalRun,
   EventKind,
   EventPayloadMap,
   McpScan,
@@ -777,6 +778,74 @@ export class McpScansRepo {
   }
 }
 
+/**
+ * Acceptance lines for the eval loop (FR-086..FR-092). One row per small change:
+ * the observable sentence, its check, and the developer's verdict + rating.
+ */
+export class EvalsRepo {
+  constructor(private db: AppDatabase) {}
+
+  /** A project's acceptance lines, newest first (FR-090). Ties on `createdAt`
+   *  (two lines added inside the same millisecond) break on insert order —
+   *  `id` is a random UUID, so ordering by it would be arbitrary. */
+  listForProject(projectId: string): EvalRun[] {
+    return this.db
+      .prepare('SELECT * FROM eval_runs WHERE projectId = ? ORDER BY createdAt DESC, rowid DESC')
+      .all(projectId) as EvalRun[]
+  }
+
+  add(projectId: string, acceptance: string, checkCmd?: string | null): EvalRun {
+    const run: EvalRun = {
+      id: newId(),
+      projectId,
+      acceptance: acceptance.trim(),
+      checkCmd: checkCmd?.trim() || null,
+      checkStatus: 'not_run',
+      verdict: 'pending',
+      rating: null,
+      note: null,
+      attempts: 1,
+      judge: null,
+      createdAt: nowIso(),
+    }
+    this.db
+      .prepare(
+        `INSERT INTO eval_runs
+           (id, projectId, acceptance, checkCmd, checkStatus, verdict, rating, note, attempts, judge, createdAt)
+         VALUES (@id, @projectId, @acceptance, @checkCmd, @checkStatus, @verdict, @rating, @note, @attempts, @judge, @createdAt)`,
+      )
+      .run(run)
+    return run
+  }
+
+  byId(id: string): EvalRun | null {
+    return (this.db.prepare('SELECT * FROM eval_runs WHERE id = ?').get(id) as EvalRun) ?? null
+  }
+
+  /** Record what the developer saw: check outcome, verdict, rating, note. Only
+   *  the keys present are written, so rating survives a later verdict change. */
+  update(
+    id: string,
+    patch: Partial<
+      Pick<EvalRun, 'checkCmd' | 'checkStatus' | 'verdict' | 'rating' | 'note' | 'attempts' | 'judge'>
+    >,
+  ): EvalRun | null {
+    const columns = (
+      ['checkCmd', 'checkStatus', 'verdict', 'rating', 'note', 'attempts', 'judge'] as const
+    ).filter((key) => patch[key] !== undefined)
+    if (columns.length > 0) {
+      this.db
+        .prepare(`UPDATE eval_runs SET ${columns.map((c) => `${c} = @${c}`).join(', ')} WHERE id = @id`)
+        .run({ id, ...Object.fromEntries(columns.map((c) => [c, patch[c] ?? null])) })
+    }
+    return (this.db.prepare('SELECT * FROM eval_runs WHERE id = ?').get(id) as EvalRun) ?? null
+  }
+
+  remove(id: string): void {
+    this.db.prepare('DELETE FROM eval_runs WHERE id = ?').run(id)
+  }
+}
+
 export interface Repositories {
   projects: ProjectsRepo
   sessions: SessionsRepo
@@ -791,6 +860,7 @@ export interface Repositories {
   projectCommands: ProjectCommandsRepo
   taskQueue: TaskQueueRepo
   mcpScans: McpScansRepo
+  evals: EvalsRepo
 }
 
 export function createRepositories(db: AppDatabase): Repositories {
@@ -808,5 +878,6 @@ export function createRepositories(db: AppDatabase): Repositories {
     projectCommands: new ProjectCommandsRepo(db),
     taskQueue: new TaskQueueRepo(db),
     mcpScans: new McpScansRepo(db),
+    evals: new EvalsRepo(db),
   }
 }

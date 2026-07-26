@@ -4,6 +4,7 @@
 // stream events at >= 30 Hz flushes (SC-007).
 import { ipcMain, type BrowserWindow } from 'electron'
 import type { SessionEvent } from '@shared/domain'
+import { canPassEval } from '@shared/domain'
 import type {
   Counters,
   InvokeMap,
@@ -26,7 +27,9 @@ import {
 } from '@main/projects/discovery'
 import { defaultRiskRules } from '@main/inbox/risk-rules'
 import { defaultSwallowRules } from '@main/stream/swallow-rules'
-import { existsSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, statSync } from 'node:fs'
+import { detectStacks } from '@shared/test-catalog'
+import { attemptsPrompt, checkPrompt, judgePrompt } from '@main/evals/eval-dispatch'
 import { comboDocPath, readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
 import { comboKey } from '@shared/mcp-combo'
 import { installSpecKit, readSpecDetail, readSpecKitState } from '@main/specs/spec-kit'
@@ -241,6 +244,86 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       if (!session) session = await manager.startSession(req.projectId)
       manager.sendMessage(session.id, req.text)
       return { sessionId: session.id }
+    },
+    // Eval loop: the row is the whole record for a small change. A rating is the
+    // developer's own (FR-089), so it is stored exactly as given; the app never
+    // derives one, and an unrun check stays 'not_run' rather than passing.
+    'evals.list': (req) => repos.evals.listForProject(req.projectId),
+    'evals.add': (req) => {
+      const acceptance = req.acceptance.trim()
+      if (!acceptance) throw { code: 'INVALID_PATH', message: 'Write what is observably true when it works.' } satisfies IpcError
+      repos.evals.add(req.projectId, acceptance, req.checkCmd)
+      return repos.evals.listForProject(req.projectId)
+    },
+    'evals.record': (req) => {
+      if (req.rating != null && (req.rating < 1 || req.rating > 5)) {
+        throw { code: 'INVALID_PATH', message: 'A rating is 1 to 5.' } satisfies IpcError
+      }
+      if (req.attempts != null && (req.attempts < 1 || req.attempts > 5)) {
+        throw { code: 'INVALID_PATH', message: 'Attempts are 1 to 5.' } satisfies IpcError
+      }
+      // The gate: a PASS verdict needs the check to have passed (FR-087). Nothing
+      // in the UI offers it otherwise, and the rule is enforced here too so it
+      // cannot be bypassed by a caller.
+      if (req.verdict === 'pass') {
+        const current = repos.evals.byId(req.id)
+        if (current && !canPassEval(current)) {
+          throw {
+            code: 'CONFIRM_REQUIRED',
+            message: 'The check has not passed yet — run it, or mark this line failed.',
+          } satisfies IpcError
+        }
+      }
+      const updated = repos.evals.update(req.id, {
+        checkStatus: req.checkStatus,
+        verdict: req.verdict,
+        rating: req.rating,
+        note: req.note,
+        attempts: req.attempts,
+      })
+      if (!updated) throw { code: 'NOT_FOUND', message: 'That acceptance line no longer exists.' } satisfies IpcError
+      return repos.evals.listForProject(req.projectId)
+    },
+    'evals.remove': (req) => {
+      repos.evals.remove(req.id)
+      return repos.evals.listForProject(req.projectId)
+    },
+    // What this project can be tested with, from its own tooling — the app
+    // writes no runners, it only knows the commands (FR-035/FR-037).
+    'evals.suites': (req) => {
+      const project = repos.projects.byId(req.projectId)
+      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
+      try {
+        return detectStacks(readdirSync(project.path))
+      } catch {
+        // Unreadable folder (removed, permissions): no stack, not a crash.
+        return []
+      }
+    },
+    // Implement / verify / review, all through the session (FR-041). A check and
+    // a judge pass are watched for their reported result; attempts only records
+    // how many were asked for — the developer picks the winner.
+    'evals.dispatch': async (req) => {
+      const run = repos.evals.byId(req.id)
+      if (!run) throw { code: 'NOT_FOUND', message: 'That acceptance line no longer exists.' } satisfies IpcError
+      if (req.kind === 'check' && !run.checkCmd) {
+        throw { code: 'INVALID_PATH', message: 'This line has no check — use the manual pass.' } satisfies IpcError
+      }
+      const text =
+        req.kind === 'check'
+          ? checkPrompt(run.acceptance, run.checkCmd as string)
+          : req.kind === 'attempts'
+            ? attemptsPrompt(run.acceptance, run.checkCmd, run.attempts)
+            : judgePrompt(run.acceptance)
+      let session = repos.sessions.activeForProject(req.projectId)
+      if (!session) session = await manager.startSession(req.projectId)
+      // Re-running a check clears the previous outcome, so a stale PASS can never
+      // stand in for the run that is only just starting.
+      if (req.kind === 'check') repos.evals.update(req.id, { checkStatus: 'not_run' })
+      if (req.kind === 'judge') repos.evals.update(req.id, { judge: null })
+      if (req.kind !== 'attempts') manager.watchEvalMarker(session.id, req.id, req.kind)
+      manager.sendMessage(session.id, text)
+      return { sessionId: session.id, runs: repos.evals.listForProject(req.projectId) }
     },
     'queue.list': (req) => manager.listQueue(req.projectId),
     'queue.add': (req) => {

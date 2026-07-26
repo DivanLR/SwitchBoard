@@ -62,6 +62,13 @@ export interface MockDriver {
   askQuestion: (sessionId: string, text: string, options: string[]) => string
   completeTurn: (sessionId: string, costUsd?: number) => void
   setStatus: (sessionId: string, status: string) => void
+  /** Stand in for the main process reading a check/judge marker off the session:
+   *  writes the result onto the line and pushes it, like the real gate does. */
+  reportEvalResult: (
+    projectId: string,
+    id: string,
+    result: { checkStatus?: string; judge?: string },
+  ) => void
   startFlood: (intervalMs: number, perTick: number) => void
   stopFlood: () => void
   state: () => {
@@ -311,6 +318,7 @@ export function installMockHost(scenario: MockScenario): void {
   const decisionLog: { requestId: string; decision: string }[] = []
   const queuedBySession = new Map<string, { eventId: string; text: string }[]>()
   const taskQueueByProject = new Map<string, AnyRecord[]>()
+  const evalsByProject = new Map<string, AnyRecord[]>()
 
   function deliver(sessionId: string, text: string): void {
     sends.push({ sessionId, text })
@@ -579,6 +587,99 @@ export function installMockHost(scenario: MockScenario): void {
         out.push(s.text)
       }
       return out
+    },
+    // Eval loop: newest first, and every mutation answers with the full list.
+    'evals.list': (req) => [...(evalsByProject.get(String(req.projectId)) ?? [])],
+    'evals.add': (req) => {
+      const projectId = String(req.projectId)
+      const acceptance = String(req.acceptance).trim()
+      if (!acceptance) throw { code: 'INVALID_PATH', message: 'Write what is observably true when it works.' }
+      const list = evalsByProject.get(projectId) ?? []
+      list.unshift({
+        id: nextId('eval'),
+        projectId,
+        acceptance,
+        checkCmd: String(req.checkCmd ?? '').trim() || null,
+        checkStatus: 'not_run',
+        verdict: 'pending',
+        rating: null,
+        note: null,
+        attempts: 1,
+        judge: null,
+        createdAt: now(),
+      })
+      evalsByProject.set(projectId, list)
+      return [...list]
+    },
+    'evals.record': (req) => {
+      const projectId = String(req.projectId)
+      const list = evalsByProject.get(projectId) ?? []
+      const row = list.find((r) => r.id === req.id)
+      if (!row) throw { code: 'NOT_FOUND', message: 'That acceptance line no longer exists.' }
+      // The gate, same rule as the main process: no pass while the check has not.
+      if (req.verdict === 'pass' && row.checkCmd && row.checkStatus !== 'pass') {
+        throw { code: 'CONFIRM_REQUIRED', message: 'The check has not passed yet.' }
+      }
+      for (const key of ['checkStatus', 'verdict', 'rating', 'note', 'attempts'] as const) {
+        if (req[key] !== undefined) row[key] = req[key] as never
+      }
+      return [...list]
+    },
+    // A fixed two-stack project, so the suite picker has API/unit/UI rows to show.
+    'evals.suites': () => [
+      {
+        stackId: 'node',
+        stackLabel: 'Node / Vue / Electron',
+        suites: [
+          {
+            id: 'node-unit',
+            kind: 'unit',
+            label: 'Unit tests',
+            acceptance: 'every unit test passes',
+            command: 'npm test',
+          },
+          {
+            id: 'node-e2e',
+            kind: 'ui',
+            label: 'UI end-to-end (Playwright)',
+            acceptance: 'the affected screens work end to end',
+            command: 'npx playwright test',
+          },
+          {
+            id: 'node-api',
+            kind: 'api',
+            label: 'HTTP smoke',
+            acceptance: 'every route answers with the status and shape it should',
+            command: 'start the server, then send one request per route',
+          },
+        ],
+      },
+    ],
+    'evals.dispatch': (req) => {
+      const projectId = String(req.projectId)
+      const list = evalsByProject.get(projectId) ?? []
+      const row = list.find((r) => r.id === req.id)
+      if (!row) throw { code: 'NOT_FOUND', message: 'That acceptance line no longer exists.' }
+      if (req.kind === 'check' && !row.checkCmd) {
+        throw { code: 'INVALID_PATH', message: 'This line has no check — use the manual pass.' }
+      }
+      // The real prompts live in main; the mock records enough to assert intent.
+      const text =
+        req.kind === 'check'
+          ? `Verify this acceptance line: "${row.acceptance}"\nRun exactly: ${row.checkCmd}\nEVAL_CHECK`
+          : req.kind === 'attempts'
+            ? `Acceptance line: "${row.acceptance}"\nProduce ${row.attempts} INDEPENDENT attempts, git worktree each`
+            : `Judge the current diff against this acceptance line: "${row.acceptance}"\nEVAL_JUDGE`
+      if (req.kind === 'check') row.checkStatus = 'not_run'
+      if (req.kind === 'judge') row.judge = null
+      const result = invokeHandlers['specs.runInSession']({ projectId, text }) as { sessionId: string }
+      return { sessionId: result.sessionId, runs: [...list] }
+    },
+    'evals.remove': (req) => {
+      const projectId = String(req.projectId)
+      const list = (evalsByProject.get(projectId) ?? []).filter((r) => r.id !== req.id)
+      evalsByProject.set(projectId, list)
+      return [...list]
     },
     'queue.list': (req) => [...(taskQueueByProject.get(String(req.projectId)) ?? [])],
     'queue.add': (req) => {
@@ -861,6 +962,14 @@ export function installMockHost(scenario: MockScenario): void {
       if (!hadComposerQueue && session) maybeDrainQueue(session.projectId)
     },
     setStatus: (sessionId, status) => setStatus(sessionId, status),
+    reportEvalResult: (projectId, id, result) => {
+      const list = evalsByProject.get(projectId) ?? []
+      const row = list.find((r) => r.id === id)
+      if (!row) return
+      if (result.checkStatus !== undefined) row.checkStatus = result.checkStatus
+      if (result.judge !== undefined) row.judge = result.judge
+      push('push.evalsChanged', { projectId, runs: [...list] })
+    },
     startFlood: (intervalMs, perTick) => {
       const ids = [...sessions.keys()]
       floodTimer = window.setInterval(() => {

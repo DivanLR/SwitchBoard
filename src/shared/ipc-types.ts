@@ -6,6 +6,9 @@ import type {
   AvailableModel,
   DecisionRecord,
   Draft,
+  EvalCheckStatus,
+  EvalRun,
+  EvalVerdict,
   McpScan,
   PermissionRequest,
   PermissionRequestStatus,
@@ -20,6 +23,7 @@ import type {
   SpecDetail,
   SpecKitState,
 } from './domain'
+import type { AvailableSuites } from './test-catalog'
 
 // --- Error model ---
 
@@ -140,6 +144,41 @@ export interface InvokeMap {
    * prompt), starting a session first if none is live. Returns its id.
    */
   'specs.runInSession': { req: { projectId: string; text: string }; res: { sessionId: string } }
+  /** Eval loop (spec 002 US7): acceptance lines with their verdicts + ratings.
+   *  Every mutation answers with the project's full list, newest first, so the
+   *  view never has to merge a partial response. The check itself runs through
+   *  `specs.runInSession` like any other session work (FR-041/FR-087). */
+  'evals.list': { req: { projectId: string }; res: EvalRun[] }
+  'evals.add': { req: { projectId: string; acceptance: string; checkCmd?: string }; res: EvalRun[] }
+  'evals.record': {
+    req: {
+      projectId: string
+      id: string
+      checkStatus?: EvalCheckStatus
+      verdict?: EvalVerdict
+      /** 1-5, the developer's own score; null clears it. */
+      rating?: number | null
+      note?: string | null
+      /** Parallel attempts to ask for next time this line is implemented (1-5). */
+      attempts?: number
+    }
+    res: EvalRun[]
+  }
+  'evals.remove': { req: { projectId: string; id: string }; res: EvalRun[] }
+  /** Suites the project's detected stacks support — the API/FE/UI checks
+   *  available without writing a runner (FR-033/FR-035/FR-037). */
+  'evals.suites': { req: { projectId: string }; res: AvailableSuites[] }
+  /**
+   * Send an acceptance line's work to the session (FR-041) and, for a check or a
+   * judge pass, watch that session's output for the reported result:
+   *   check    — run the check and report PASS / FAIL / INCONCLUSIVE
+   *   attempts — N worktree-isolated attempts, then a report naming the winner
+   *   judge    — a second opinion on the diff against the acceptance line
+   */
+  'evals.dispatch': {
+    req: { projectId: string; id: string; kind: 'check' | 'attempts' | 'judge' }
+    res: { sessionId: string; runs: EvalRun[] }
+  }
   /** Planned task queue: prompts/goals that auto-run in sequence (FR-023). */
   'queue.list': { req: { projectId: string }; res: QueuedTask[] }
   'queue.add': { req: { projectId: string; text: string }; res: QueuedTask[] }
@@ -230,6 +269,13 @@ export type FocusRequestPush =
   | { target: 'inbox'; requestId: string }
   | { target: 'session'; sessionId: string; eventId?: string }
 
+/** An acceptance line's result read off the session (the verifier gate), pushed
+ *  so the Tests tab updates while the developer watches the check run. */
+export interface EvalsChangedPush {
+  projectId: string
+  runs: EvalRun[]
+}
+
 export interface PushMap {
   /** Individual events; the transport batches them (>= 30 Hz flushes) and the bridge fans out per event. */
   'push.event': SessionEvent
@@ -237,6 +283,7 @@ export interface PushMap {
   'push.counters': Counters
   'push.inboxChanged': InboxChangedPush
   'push.queueChanged': QueueChangedPush
+  'push.evalsChanged': EvalsChangedPush
   'push.projectCommands': ProjectCommandsPush
   'push.focusRequest': FocusRequestPush
   'push.updateStatus': UpdateStatus
@@ -250,6 +297,7 @@ export const PUSH_CHANNELS: readonly PushChannel[] = [
   'push.counters',
   'push.inboxChanged',
   'push.queueChanged',
+  'push.evalsChanged',
   'push.projectCommands',
   'push.focusRequest',
   'push.updateStatus',

@@ -515,6 +515,68 @@ export interface Draft {
 }
 
 /** A planned prompt/command queued to auto-run when the session next goes idle (FR-023). */
+// --- Eval loop (spec 002 US7 / FR-086..FR-092) ---
+
+/** Outcome of an acceptance line's check. 'not_run' is never "passing": the app
+ *  does not parse a verdict the session did not report (FR-087). 'inconclusive'
+ *  is the check having run without reporting a readable result (FR-047) — also
+ *  never passing. */
+export type EvalCheckStatus = 'not_run' | 'pass' | 'fail' | 'inconclusive'
+/** The developer's own verdict on the change, after looking at it. */
+export type EvalVerdict = 'pending' | 'pass' | 'fail'
+
+/**
+ * One small change, recorded as a single observable acceptance line instead of a
+ * spec document. The check proves it, the verdict is the developer's, and the
+ * rating (1-5) is their score of what was generated — never derived (FR-089).
+ */
+export interface EvalRun {
+  id: string
+  projectId: string
+  /** One observable sentence: a testid, a label, a status — not an approach. */
+  acceptance: string
+  /** The command that proves it, run through the session. Null for styling-only. */
+  checkCmd: string | null
+  checkStatus: EvalCheckStatus
+  verdict: EvalVerdict
+  rating: number | null
+  note: string | null
+  /** How many independent, worktree-isolated attempts were requested (1 = one
+   *  straight run). Best-of-N: the developer keeps the winner. */
+  attempts: number
+  /** The judge pass: a second opinion on the diff against the acceptance line,
+   *  read back from the session. Null until a judge pass has run. */
+  judge: string | null
+  createdAt: string
+}
+
+/** A rating at or below this needs another loop, not a rewrite (FR-091). */
+export const EVAL_RELOOP_RATING = 3
+
+/**
+ * Coordinator-Implementor-Verifier stage of an acceptance line. Derived from
+ * what has actually happened rather than stored, so it can never disagree with
+ * the row: no stored stage to drift, nothing to advance by hand.
+ */
+export type EvalStage = 'implement' | 'verify' | 'review' | 'done'
+
+export function evalStage(run: Pick<EvalRun, 'checkStatus' | 'verdict' | 'judge'>): EvalStage {
+  if (run.verdict !== 'pending') return 'done'
+  if (run.judge) return 'review'
+  if (run.checkStatus !== 'not_run') return 'verify'
+  return 'implement'
+}
+
+/**
+ * The verifier gate: a human PASS is only offered once the check has passed
+ * (FR-087). A line with no check at all is gated by the manual pass instead, so
+ * it is never blocked here. Fail is always available — a gate stops false
+ * passes, not honest failures.
+ */
+export function canPassEval(run: Pick<EvalRun, 'checkCmd' | 'checkStatus'>): boolean {
+  return !run.checkCmd || run.checkStatus === 'pass'
+}
+
 export interface QueuedTask {
   id: string
   projectId: string

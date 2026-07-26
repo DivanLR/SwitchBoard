@@ -173,6 +173,8 @@ async function main(): Promise<void> {
     onSessionExit: (sessionId) => broker?.expireForSession(sessionId),
     onQueueChanged: (projectId) =>
       pusher.push('push.queueChanged', { projectId, items: repos.taskQueue.listForProject(projectId) }),
+    onEvalsChanged: (projectId) =>
+      pusher.push('push.evalsChanged', { projectId, runs: repos.evals.listForProject(projectId) }),
     onProjectCommands: (projectId, commands) => pusher.push('push.projectCommands', { projectId, commands }),
     gate: (context) => {
       if (!broker) throw new Error('Broker not initialised')

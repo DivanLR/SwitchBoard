@@ -287,6 +287,31 @@ const MIGRATIONS: Migration[] = [
       db.exec(`ALTER TABLE sessions ADD COLUMN bypassPermissions INTEGER;`)
     },
   },
+  {
+    // The eval loop (spec 002, US7): a small change is one observable acceptance
+    // line, the check that proves it, and the developer's verdict + 1-5 rating.
+    // No spec/plan/task files — this row IS the record. `attempts` counts the
+    // parallel worktree-isolated attempts asked for (best-of-N) and `judge` holds
+    // the second-opinion review of the diff, both read back from the session.
+    name: '013-eval-runs',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS eval_runs (
+          id TEXT PRIMARY KEY,
+          projectId TEXT NOT NULL REFERENCES projects(id),
+          acceptance TEXT NOT NULL,
+          checkCmd TEXT,
+          checkStatus TEXT NOT NULL CHECK (checkStatus IN ('not_run', 'pass', 'fail', 'inconclusive')),
+          verdict TEXT NOT NULL CHECK (verdict IN ('pending', 'pass', 'fail')),
+          rating INTEGER CHECK (rating BETWEEN 1 AND 5),
+          note TEXT,
+          attempts INTEGER NOT NULL DEFAULT 1 CHECK (attempts BETWEEN 1 AND 5),
+          judge TEXT,
+          createdAt TEXT NOT NULL
+        );
+      `)
+    },
+  },
 ]
 
 /**

@@ -50,6 +50,7 @@ describe.runIf(enabled)('real Claude Code session (quickstart smoke)', () => {
         onCountersChanged: () => {},
         onSessionExit: (sessionId) => late.broker?.expireForSession(sessionId),
         onQueueChanged: () => {},
+        onEvalsChanged: () => {},
         onProjectCommands: () => {},
         gate: (context) => {
           if (!late.broker) throw new Error('broker missing')
@@ -125,6 +126,7 @@ describe.runIf(enabled)('real AskUserQuestion routing (T021 watch item)', () => 
         onCountersChanged: () => {},
         onSessionExit: (sessionId) => late.broker?.expireForSession(sessionId),
         onQueueChanged: () => {},
+        onEvalsChanged: () => {},
         onProjectCommands: () => {},
         gate: (context) => {
           if (!late.broker) throw new Error('broker missing')
