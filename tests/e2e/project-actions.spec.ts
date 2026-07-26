@@ -178,6 +178,8 @@ test('Ctrl+C interrupts the running session, like a terminal (confirm first)', a
 test('End ends the session (distinct from Ctrl+C interrupt)', async ({ page }) => {
   await page.getByTestId('sidebar-project-alpha').click()
   await page.getByTestId('end-session').click()
+  // Teardown is not instant, so the End button shows a loading bar meanwhile.
+  await expect(page.getByTestId('ending-bar')).toBeVisible()
   await expect(page.getByTestId('ended-banner')).toContainText('stopped')
   // The live-only controls are gone once the session has ended.
   await expect(page.getByTestId('end-session')).toHaveCount(0)

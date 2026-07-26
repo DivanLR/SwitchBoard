@@ -523,9 +523,12 @@ export function installMockHost(scenario: MockScenario): void {
       pushCounters()
       return { ...session }
     },
-    'sessions.stop': (req) => {
+    'sessions.stop': async (req) => {
       const session = sessions.get(String(req.sessionId))
       if (!session) throw { code: 'NOT_FOUND', message: 'Session not found' }
+      // Real teardown takes a moment (SDK drain, container stop); the delay
+      // keeps the UI's ending bar observable instead of resolving instantly.
+      await new Promise((resolve) => setTimeout(resolve, 250))
       session.endedAt = now()
       session.endReason = 'stopped'
       setStatus(session.id, 'done')

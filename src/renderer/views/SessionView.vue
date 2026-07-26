@@ -671,8 +671,19 @@ async function interrupt(): Promise<void> {
 }
 
 // End the session outright (distinct from Ctrl+C, which only interrupts the turn).
+// Stopping can take a few seconds (SDK drain, container teardown), so the End
+// button shows an indeterminate bar until the session row flips to ended. Keyed
+// by project id because this view is reused across projects.
+const endingFor = ref<string | null>(null)
+const ending = computed(() => endingFor.value === props.project.id)
+
 async function stop(): Promise<void> {
-  await active.stop()
+  endingFor.value = props.project.id
+  try {
+    await active.stop()
+  } finally {
+    endingFor.value = null
+  }
 }
 
 function answerQuestion(eventId: string, choice: string): void {
@@ -862,9 +873,11 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
           class="ctl mono"
           data-testid="end-session"
           title="End the session (resumable later)"
+          :disabled="ending"
           @click="stop()"
         >
-          End
+          {{ ending ? 'Ending' : 'End' }}
+          <span v-if="ending" class="ending-bar" data-testid="ending-bar"></span>
         </button>
         <button
           class="ctl mono"
@@ -1524,6 +1537,31 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 .ctl:hover {
   color: var(--text-strong);
   border-color: var(--border-strong);
+}
+
+.ctl:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+/* Indeterminate progress bar under the End label while the session tears down. */
+.ending-bar {
+  display: block;
+  height: 2px;
+  margin: 3px -5px 0;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--green), transparent) no-repeat;
+  background-size: 60% 100%;
+  animation: ending-slide 0.9s linear infinite;
+}
+
+@keyframes ending-slide {
+  from {
+    background-position: -60% 0;
+  }
+  to {
+    background-position: 160% 0;
+  }
 }
 
 .pill.agents-pill {
