@@ -9,6 +9,7 @@ import type {
   AvailableModel,
   EventKind,
   EventPayloadMap,
+  ModelMode,
   ProjectCommand,
   QueuedTask,
   Session,
@@ -176,6 +177,35 @@ export class SessionManager {
   }
 
   /**
+   * The model routing a project's session should use RIGHT NOW: the INTELLIGENT
+   * model (plans, questions, orchestrator loops, the advisor) and the WORKER
+   * model (advisor-mode executor + orchestrator workers), each taking the
+   * "This project" override when set, else the global Models tab.
+   *
+   * Read at session start AND again before every turn (see HostedSession's
+   * resolveModels), so changing a model in Settings reaches a running session on
+   * its next turn instead of only the next session.
+   */
+  private resolveModelRouting(projectId: string): {
+    intelligentModel: string
+    workerModel: string
+    modelMode: ModelMode
+    autoModelRouting: boolean
+  } {
+    const settings = this.repos.settings.get()
+    const override = settings.projectModels?.[projectId]
+    const workerOverride = settings.projectWorkerModels?.[projectId]
+    return {
+      intelligentModel:
+        override && override !== 'global' ? override : settings.intelligentModel,
+      workerModel:
+        workerOverride && workerOverride !== 'global' ? workerOverride : settings.workerModel,
+      modelMode: settings.modelMode ?? 'auto',
+      autoModelRouting: settings.autoModelRouting,
+    }
+  }
+
+  /**
    * Reserves the project for the whole start, so a second concurrent start can
    * never slip through the "already active" check while the first is still
    * awaiting (the DB row only appears at the very end). Guarding the wrapper
@@ -260,16 +290,7 @@ export class SessionManager {
     }
 
     const settings = this.repos.settings.get()
-    // INTELLIGENT model (plans, questions, orchestrator loops, the advisor);
-    // per-project override from the "This project" tab, else global.
-    const override = settings.projectModels?.[projectId]
-    const intelligentModel =
-      override && override !== 'global' ? override : settings.intelligentModel
-    // WORKER model (the cheaper one: advisor-mode executor + orchestrator
-    // workers); per-project override, else the global worker model.
-    const workerOverride = settings.projectWorkerModels?.[projectId]
-    const workerModel =
-      workerOverride && workerOverride !== 'global' ? workerOverride : settings.workerModel
+    const { intelligentModel, workerModel } = this.resolveModelRouting(projectId)
     // Any project that has previously run an MCP scan gets its schema map
     // injected as context on every session start (no-op when never scanned).
     // Scans are per-combination now: prefer the ACTIVE combination's doc and
@@ -310,6 +331,9 @@ export class SessionManager {
       planModel: intelligentModel,
       autoModelRouting: settings.autoModelRouting,
       modelMode: settings.modelMode,
+      // Re-read before each turn so a Settings change lands on a RUNNING session
+      // (the note in Settings promises exactly that).
+      resolveModels: () => this.resolveModelRouting(projectId),
       // Pairing mode per work turn — in-memory only, shown as a header chip.
       onTurnMode: (mode) => {
         if (entry.row.currentMode === mode) return

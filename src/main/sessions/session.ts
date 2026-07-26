@@ -88,6 +88,14 @@ interface HostedSessionOptions {
   autoModelRouting?: boolean
   /** Advisor/Orchestrator pairing mode; 'auto' picks per message by workload. */
   modelMode?: ModelMode
+  /** The current model routing from Settings, re-read before every turn so a
+   *  change in Settings reaches this running session (see refreshModelRouting). */
+  resolveModels?: () => {
+    intelligentModel: string
+    workerModel: string
+    modelMode: ModelMode
+    autoModelRouting: boolean
+  }
   /** Pairing mode chosen for the latest work turn (header chip); null = plan turn. */
   onTurnMode?: (mode: 'advisor' | 'orchestrator' | null) => void
   /** Bypass all permission checks for this session (auto-approve every tool). */
@@ -300,6 +308,32 @@ export class HostedSession {
     this.applyEffortForModel(wanted)
   }
 
+  /**
+   * Re-read the model routing from Settings before a turn is delivered, so
+   * changing a model, the pairing mode, or the routing toggle applies to THIS
+   * running session and not only to the next one. Both routing paths read
+   * `this.options`, so refreshing them here covers intent routing and the
+   * plan/build path alike.
+   *
+   * Skipped once a usage limit has downgraded this session: that opt is
+   * session-scoped and must survive, or the next turn would climb straight back
+   * onto the limited model.
+   *
+   * ponytail: the `advisor`/`worker` SUBAGENT models are a query() option fixed
+   * at spawn, so a change to them still applies from the next session start.
+   */
+  private downgraded = false
+  private refreshModelRouting(): void {
+    if (this.downgraded) return
+    const next = this.options.resolveModels?.()
+    if (!next) return
+    this.options.workModel = next.intelligentModel
+    this.options.planModel = next.intelligentModel
+    this.options.workerModel = next.workerModel
+    this.options.modelMode = next.modelMode
+    this.options.autoModelRouting = next.autoModelRouting
+  }
+
   /** Pick the model for the turn about to start from the message's intent.
    *  Fire-and-forget (best-effort), exactly like applyModelForMode, so the send
    *  path stays synchronous — no await window for a stop/interrupt to race. */
@@ -417,6 +451,7 @@ export class HostedSession {
     }
     this.options.workModel = next
     this.options.planModel = next
+    this.downgraded = true // hold this rung: a settings re-read must not undo it
     this.appliedModel = null // force the next turn to apply the new model
     void this.q?.setModel(next).catch(() => {})
     this.applyEffortForModel(next)
@@ -521,6 +556,7 @@ export class HostedSession {
   private deliverNow(eventId: string, text: string): void {
     // Route the model for this turn's intent before the message enters the
     // stream (best-effort setModel, not awaited — keeps this synchronous).
+    this.refreshModelRouting()
     this.applyModelForIntent(text)
     this.options.sink.update(eventId, { text, pending: false }, { persist: true })
     this.input.push({
