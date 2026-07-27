@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest'
 import {
   classifyIntent,
   classifyWorkload,
-  maxEffortUnlessFable,
+  effortForRole,
+  mainLoopModel,
   nextStrongestModel,
 } from '@main/sessions/model-routing'
 
@@ -72,19 +73,43 @@ describe('nextStrongestModel (usage-limit fallback ladder)', () => {
   })
 })
 
-describe('maxEffortUnlessFable (ultra effort for non-Fable models)', () => {
-  it('pushes non-Fable models to max effort', () => {
-    expect(maxEffortUnlessFable('claude-opus-4-8')).toBe('max')
-    expect(maxEffortUnlessFable('claude-sonnet-5')).toBe('max')
-    expect(maxEffortUnlessFable('claude-haiku-4-5-20251001')).toBe('max')
-    expect(maxEffortUnlessFable('some-future-model')).toBe('max')
+describe('effortForRole (effort follows the job, not the ceiling)', () => {
+  it('reasons on the main loop and the advisor', () => {
+    expect(effortForRole('main', 'claude-opus-5')).toBe('xhigh')
+    expect(effortForRole('advisor', 'claude-opus-5')).toBe('xhigh')
+    expect(effortForRole('main', 'some-future-model')).toBe('xhigh')
   })
 
-  it('leaves the Fable family and the account default at their default effort', () => {
-    expect(maxEffortUnlessFable('claude-fable-5')).toBeNull()
-    expect(maxEffortUnlessFable('claude-fable-5[1m]')).toBeNull()
-    expect(maxEffortUnlessFable('default')).toBeNull()
-    expect(maxEffortUnlessFable(undefined)).toBeNull()
-    expect(maxEffortUnlessFable('')).toBeNull()
+  it('keeps the worker cheap — depth there erases the point of the tier', () => {
+    expect(effortForRole('worker', 'claude-sonnet-5')).toBe('low')
+    expect(effortForRole('worker', 'claude-haiku-4-5-20251001')).toBe('low')
+  })
+
+  it('leaves the Fable family and the account default at their own default', () => {
+    for (const role of ['main', 'advisor', 'worker'] as const) {
+      expect(effortForRole(role, 'claude-fable-5')).toBeNull()
+      expect(effortForRole(role, 'claude-fable-5[1m]')).toBeNull()
+      expect(effortForRole(role, 'default')).toBeNull()
+      expect(effortForRole(role, undefined)).toBeNull()
+      expect(effortForRole(role, '')).toBeNull()
+    }
+  })
+})
+
+describe('mainLoopModel (one model per session, never switched)', () => {
+  const models = { intelligentModel: 'claude-opus-5', workerModel: 'claude-sonnet-5' }
+
+  it('runs the cheap model in Advisor mode — the strong tier is the advisor subagent', () => {
+    expect(mainLoopModel('advisor', models)).toBe('claude-sonnet-5')
+  })
+
+  it('runs the intelligent model for Orchestrator and auto', () => {
+    expect(mainLoopModel('orchestrator', models)).toBe('claude-opus-5')
+    expect(mainLoopModel('auto', models)).toBe('claude-opus-5')
+    expect(mainLoopModel(undefined, models)).toBe('claude-opus-5')
+  })
+
+  it('falls back to the intelligent model when no worker is configured', () => {
+    expect(mainLoopModel('advisor', { intelligentModel: 'claude-opus-5' })).toBe('claude-opus-5')
   })
 })

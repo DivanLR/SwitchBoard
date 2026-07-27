@@ -2,7 +2,7 @@
 // Questions and discussion route to the plan model (deep reasoning); requests
 // to change code or run scripts route to the work model (the workhorse).
 // Turn-granularity only — the SDK cannot switch models partway through a turn.
-import { modelFamily } from '@shared/domain'
+import { modelFamily, type ModelMode } from '@shared/domain'
 
 /** 'work' when the message asks to change code or run something, else 'plan'. */
 export function classifyIntent(text: string): 'plan' | 'work' {
@@ -43,21 +43,58 @@ export function nextStrongestModel(current: string | undefined): string | null {
   return DOWNGRADE[family] ?? null
 }
 
+/** What a model is being asked to do, which is what its effort should follow. */
+export type ModelRole = 'main' | 'advisor' | 'worker'
+
 /**
- * Reasoning effort for a resolved model under the "max effort unless Fable"
- * rule: the Fable family already reasons at depth, so it keeps its default
- * effort; every other model is pushed to 'max' ("ultra") to compensate. Returns
- * null (no override → account/CLI default) for Fable and for an
- * unknown/'default' id, where we cannot tell which family it resolves to — the
- * SDK-reported model reconciles that case. Models that do not support 'max'
- * silently downgrade.
+ * Reasoning effort for a resolved model, scaled to its ROLE rather than pushed
+ * to the ceiling everywhere:
+ *
+ *   main / advisor — 'xhigh', the level current guidance names for coding and
+ *     agentic work. 'max' is deliberately not used: it shows diminishing
+ *     returns for the extra tokens and is prone to overthinking.
+ *   worker — 'low'. A mechanical executor with an explicit input and output
+ *     does not need depth, and paying for it erases the point of a cheap tier.
+ *
+ * The Fable family keeps its own default (it already reasons at depth), as does
+ * an unknown/'default' id whose family cannot be resolved yet — the SDK-reported
+ * model reconciles that case. A model that does not support a level silently
+ * downgrades.
  */
-export function maxEffortUnlessFable(modelId: string | undefined): 'max' | null {
+export function effortForRole(
+  role: ModelRole,
+  modelId: string | undefined,
+): 'xhigh' | 'low' | null {
   if (!modelId || modelId === 'default' || modelFamily(modelId) === 'fable') return null
-  return 'max'
+  return role === 'worker' ? 'low' : 'xhigh'
 }
 
 export type Workload = 'plan' | 'advisor' | 'orchestrator'
+
+/**
+ * The model the MAIN LOOP runs for a whole session. Switching the main-loop
+ * model mid-session invalidates every prompt-cache tier — tools, system, and
+ * the entire message history — so the whole prefix is re-written at the cache
+ * WRITE rate on the very next turn. The cheap tier is reached through the
+ * `worker` subagent instead, which carries its own context and shares no cache
+ * with the main loop.
+ *
+ *   advisor — the cheap model runs the loop; the strong model is the `advisor`
+ *     subagent, consulted at decision points only.
+ *   orchestrator / auto — the strong model runs the loop and delegates chunks
+ *     to cheap `worker` subagents.
+ *
+ * Depends only on the mode, never on the message, so it is stable for the life
+ * of the session.
+ */
+export function mainLoopModel(
+  mode: ModelMode | undefined,
+  models: { intelligentModel?: string; workerModel?: string },
+): string | undefined {
+  return mode === 'advisor'
+    ? (models.workerModel ?? models.intelligentModel)
+    : models.intelligentModel
+}
 
 // Signals that a work request is BROAD (many files / multi-step / research-
 // shaped), which pays for the orchestrator pattern: strong model plans and

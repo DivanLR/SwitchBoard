@@ -112,11 +112,59 @@ export function sweepOrphanedContainers(): void {
   )
 }
 
+export interface Mount {
+  host: string
+  container: string
+}
+
 export interface SandboxPlan {
   /** Container-side paths to hand the SDK as additionalDirectories (--add-dir). */
   additionalDirectories: string[]
+  /** Every host→container mapping, longest host path first. The session rewrites
+   *  outgoing message text through these, and the manager describes them to the
+   *  agent — a Windows path means nothing inside the container. */
+  mounts: Mount[]
   /** Drop-in for the SDK's spawnClaudeCodeProcess option. */
   spawn: (options: SdkSpawnOptions) => SpawnedProcess
+}
+
+/** REFS chips mount read-only under /refs/<basename>; duplicates get an index. */
+export function refMounts(refDirs: readonly string[]): Mount[] {
+  const mounts: Mount[] = []
+  const seen = new Set<string>()
+  for (const dir of refDirs) {
+    let name = basename(dir) || 'ref'
+    if (seen.has(name)) name = `${name}-${mounts.length}`
+    seen.add(name)
+    mounts.push({ host: dir, container: `/refs/${name}` })
+  }
+  return mounts
+}
+
+/**
+ * Rewrite host paths in text to their container-side mounts.
+ *
+ * The composer appends `@<host path>` for every REFS chip, and a developer
+ * pastes Windows paths freely — inside the container none of those exist, so the
+ * agent hunts for `/mnt/c/...`, finds nothing, and reports the repo unreachable.
+ * Translating on the way in fixes every source of a host path at once.
+ *
+ * Longest host path first, so a ref nested inside the project maps to the ref
+ * rather than to /workspace. Matching is case-insensitive and treats `\` and `/`
+ * as the same separator, because both spellings reach us.
+ */
+export function toContainerPaths(text: string, mounts: readonly Mount[]): string {
+  const ordered = [...mounts].sort((a, b) => b.host.length - a.host.length)
+  let out = text
+  for (const { host, container } of ordered) {
+    const pattern = host
+      .replace(/[/\\]+$/, '')
+      .replace(/[.*+?^${}()|[\]\\/]/g, (c) => (/[/\\]/.test(c) ? '[/\\\\]' : `\\${c}`))
+    // Any following path segments come along, with their separators normalised.
+    const re = new RegExp(`${pattern}((?:[/\\\\][^\\s"'\`)\\]]*)*)`, 'gi')
+    out = out.replace(re, (_all, rest: string) => container + rest.replace(/\\/g, '/'))
+  }
+  return out
 }
 
 export function sandboxSpawn(config: {
@@ -125,20 +173,13 @@ export function sandboxSpawn(config: {
   projectPath: string
   refDirs: string[]
 }): SandboxPlan {
-  // REFS chips mount read-only under /refs/<basename>; duplicates get an index.
-  const refMounts: { host: string; container: string }[] = []
-  const seen = new Set<string>()
-  for (const dir of config.refDirs) {
-    let name = basename(dir) || 'ref'
-    if (seen.has(name)) name = `${name}-${refMounts.length}`
-    seen.add(name)
-    refMounts.push({ host: dir, container: `/refs/${name}` })
-  }
+  const refs = refMounts(config.refDirs)
   const safe = (value: string): string => value.replace(/[^a-zA-Z0-9_.-]/g, '')
   const containerName = `${NAME_PREFIX}${safe(config.sessionId)}`
   const homeVolume = `${HOME_VOLUME_PREFIX}${safe(config.projectId)}`
   return {
-    additionalDirectories: ['/workspace', ...refMounts.map((r) => r.container)],
+    additionalDirectories: ['/workspace', ...refs.map((r) => r.container)],
+    mounts: [{ host: config.projectPath, container: '/workspace' }, ...refs],
     spawn: (options) => {
       const args = [
         'run',
@@ -153,7 +194,7 @@ export function sandboxSpawn(config: {
         `${homeVolume}:/home/node/.claude`,
         '-v',
         `${credsPath()}:/creds/.credentials.json:ro`,
-        ...refMounts.flatMap((r) => ['-v', `${r.host}:${r.container}:ro`]),
+        ...refs.flatMap((r) => ['-v', `${r.host}:${r.container}:ro`]),
         '-w',
         '/workspace',
         // The bind mount looks foreign-owned to git inside the container.

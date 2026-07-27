@@ -26,11 +26,13 @@ import { foldModelTotals, type EventSink } from './message-mapper'
 import {
   adhdSystemPromptAppend,
   modesSystemPromptAppend,
+  sandboxSystemPromptAppend,
   terseSystemPromptAppend,
 } from './session-shaping'
 import { parseEvalMarker } from '@main/evals/eval-dispatch'
+import { mainLoopModel } from './model-routing'
 import { resolveClaudeExecutable } from './claude-executable'
-import { ensureSandboxImage, sweepOrphanedContainers } from './docker-sandbox'
+import { ensureSandboxImage, refMounts, sweepOrphanedContainers } from './docker-sandbox'
 
 export class SessionManagerError extends Error {
   constructor(
@@ -316,6 +318,14 @@ export class SessionManager {
       : null
     // Advisor/Orchestrator protocol (static text — prompt-cache friendly).
     const modesAppend = modesSystemPromptAppend(settings.modelMode ?? 'auto')
+    // A bypass session's CLI runs in a container: tell it the layout, or it hunts
+    // for host paths that cannot exist and calls mounted refs unreachable.
+    const sandboxAppend = bypassPermissions
+      ? sandboxSystemPromptAppend([
+          { container: '/workspace' },
+          ...refMounts(project.refs.map((r) => r.path)),
+        ])
+      : null
     entry.session = new HostedSession({
       sessionId: row.id,
       projectId,
@@ -324,15 +334,17 @@ export class SessionManager {
       refDirs: project.refs.map((r) => r.path),
       resumeSdkSessionId,
       systemPromptAppend:
-        [adhdAppend, terseAppend, modesAppend, schemaAppend]
+        [sandboxAppend, adhdAppend, terseAppend, modesAppend, schemaAppend]
           .filter((s): s is string => Boolean(s))
           .join('\n\n') || undefined,
       claudeExecutablePath,
       // The hosted session's plan/work slots both take the intelligent model;
       // the pairing modes decide when the worker runs the loop instead.
-      workModel: intelligentModel,
+      // One main-loop model for the session (Advisor runs the cheap one), so no
+      // turn ever switches it and throws away the prompt cache.
+      mainModel: mainLoopModel(settings.modelMode, { intelligentModel, workerModel }),
+      strongModel: intelligentModel,
       workerModel,
-      planModel: intelligentModel,
       autoModelRouting: settings.autoModelRouting,
       modelMode: settings.modelMode,
       // Re-read before each turn so a Settings change lands on a RUNNING session

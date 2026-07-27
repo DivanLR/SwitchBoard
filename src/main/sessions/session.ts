@@ -10,10 +10,10 @@ import {
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
 import { modelLabel, type AvailableModel, type McpServer, type ModelMode, type ProjectCommand, type SessionStatus } from '@shared/domain'
-import { sandboxSpawn } from './docker-sandbox'
+import { sandboxSpawn, toContainerPaths, type SandboxPlan } from './docker-sandbox'
 import { MessageMapper, type EventSink } from './message-mapper'
 import { toAvailableModels } from './model-catalog'
-import { classifyWorkload, maxEffortUnlessFable, nextStrongestModel } from './model-routing'
+import { classifyWorkload, effortForRole, mainLoopModel, nextStrongestModel } from './model-routing'
 import { modeAgents } from './session-shaping'
 
 /** Streaming input queue the SDK consumes; `end()` closes the session gracefully. */
@@ -76,15 +76,18 @@ interface HostedSessionOptions {
   systemPromptAppend?: string
   /** Path to the bundled standalone Claude executable (avoids the Electron spawn crash). */
   claudeExecutablePath?: string
-  /** Model id for work turns; omitted/'default' uses the account default. */
-  workModel?: string
-  /** Cheaper model id for work-classified turns under auto routing; falls back
-   *  to workModel when unset. */
+  /** The model the MAIN LOOP runs for this whole session — the intelligent
+   *  model, or the worker model in Advisor mode. Fixed for the session because
+   *  changing it mid-flight invalidates every prompt-cache tier (mainLoopModel).
+   *  Omitted/'default' uses the account default. */
+  mainModel?: string
+  /** Cheaper model id for the `worker` subagent; falls back to the main model. */
   workerModel?: string
-  /** Model id for plan-mode turns; applied via setModel when entering plan mode. */
-  planModel?: string
-  /** Route each message by intent (question→planModel, code→workModel) instead
-   *  of by the plan-mode toggle. */
+  /** The intelligent model, for the `advisor` subagent. In Advisor mode this is
+   *  the tier the main loop is NOT running; elsewhere it matches mainModel. */
+  strongModel?: string
+  /** Report the pairing pattern per message (and apply the pinned main model).
+   *  Off leaves the session on whatever model it started with. */
   autoModelRouting?: boolean
   /** Advisor/Orchestrator pairing mode; 'auto' picks per message by workload. */
   modelMode?: ModelMode
@@ -149,6 +152,8 @@ export class HostedSession {
   private backgroundTasks: { taskId: string; description: string }[] = []
   private stopping = false
   private fatal = false
+  /** Set for a bypass session: its host→container mounts (see deliverNow). */
+  private sandbox: SandboxPlan | null = null
 
   constructor(options: HostedSessionOptions) {
     this.sessionId = options.sessionId
@@ -174,6 +179,7 @@ export class HostedSession {
           refDirs: this.options.refDirs ?? [],
         })
       : null
+    this.sandbox = sandbox
     this.q = query({
       prompt: this.input,
       options: {
@@ -191,10 +197,12 @@ export class HostedSession {
         additionalDirectories: sandbox
           ? sandbox.additionalDirectories
           : [this.options.projectPath, ...(this.options.refDirs ?? [])],
-        // Work model for normal turns; 'default'/undefined uses the account default.
+        // The session's one main-loop model; 'default'/undefined uses the
+        // account default. Spawning on it means the very first turn is already
+        // right, with no switch (and no cache write) on the way in.
         model:
-          this.options.workModel && this.options.workModel !== 'default'
-            ? this.options.workModel
+          this.options.mainModel && this.options.mainModel !== 'default'
+            ? this.options.mainModel
             : undefined,
         // Bypass mode auto-approves every tool (no inbox prompts); requires the
         // dangerous-skip flag. The canUseTool gate simply is never invoked then.
@@ -206,10 +214,11 @@ export class HostedSession {
           ? { type: 'preset', preset: 'claude_code', append: this.options.systemPromptAppend }
           : undefined,
         // Advisor/Orchestrator pairing agents: `advisor` on the strong model,
-        // `worker` on the cheap one. Static per session; the mode protocol in
-        // the system-prompt append tells the loop when to reach for each.
+        // `worker` on the cheap one. These carry the tier the main loop is NOT
+        // running, which is how the pairing stays cache-safe. Static per session;
+        // the mode protocol in the system-prompt append says when to use each.
         agents: modeAgents({
-          strongModel: this.options.workModel,
+          strongModel: this.options.strongModel ?? this.options.mainModel,
           cheapModel: this.options.workerModel,
         }),
         canUseTool: (toolName, input, canUseToolOptions) =>
@@ -276,9 +285,6 @@ export class HostedSession {
     this.captureInitCommands(message)
     this.captureInitMcp(message)
     this.captureBackgroundTasks(message)
-    // Intent routing owns the model per message (see deliverNow); the mode-based
-    // switch would otherwise fight it, so run only one of the two.
-    if (!this.options.autoModelRouting) this.applyModelForMode(message)
     this.captureModel(message)
     this.captureUsage(message)
     this.maybeDowngradeOnLimit(message)
@@ -291,29 +297,12 @@ export class HostedSession {
     }
   }
 
-  /** Switch to the plan model while a session is in plan mode, else the work model. */
   private appliedModel: string | null = null
-  private applyModelForMode(message: SDKMessage): void {
-    const mode = (message as { permissionMode?: string }).permissionMode
-    if (!mode) return
-    const norm = (m?: string): string | undefined => (m && m !== 'default' ? m : undefined)
-    const wanted =
-      mode === 'plan' ? norm(this.options.planModel) : norm(this.options.workModel)
-    const target = wanted ?? '__default__'
-    if (this.appliedModel === target) return
-    this.appliedModel = target
-    void this.q?.setModel(wanted).catch(() => {
-      // Best-effort: an older CLI may not support runtime model switching.
-    })
-    this.applyEffortForModel(wanted)
-  }
 
   /**
    * Re-read the model routing from Settings before a turn is delivered, so
    * changing a model, the pairing mode, or the routing toggle applies to THIS
-   * running session and not only to the next one. Both routing paths read
-   * `this.options`, so refreshing them here covers intent routing and the
-   * plan/build path alike.
+   * running session and not only to the next one.
    *
    * Skipped once a usage limit has downgraded this session: that opt is
    * session-scoped and must survive, or the next turn would climb straight back
@@ -327,37 +316,40 @@ export class HostedSession {
     if (this.downgraded) return
     const next = this.options.resolveModels?.()
     if (!next) return
-    this.options.workModel = next.intelligentModel
-    this.options.planModel = next.intelligentModel
+    this.options.mainModel = mainLoopModel(next.modelMode, next)
     this.options.workerModel = next.workerModel
     this.options.modelMode = next.modelMode
     this.options.autoModelRouting = next.autoModelRouting
   }
 
-  /** Pick the model for the turn about to start from the message's intent.
-   *  Fire-and-forget (best-effort), exactly like applyModelForMode, so the send
-   *  path stays synchronous — no await window for a stop/interrupt to race. */
-  private applyModelForIntent(text: string): void {
+  /**
+   * Apply the session's main-loop model before a turn is delivered, and report
+   * which pairing pattern this message falls into.
+   *
+   * The model comes from the MODE, not the message, and therefore does not
+   * change from turn to turn: switching the main-loop model mid-session
+   * invalidates the tools, system, AND message prompt-cache tiers, so the whole
+   * conversation prefix is re-written at the cache-write rate on the next turn.
+   * The cheap tier is reached through the `worker` subagent, which keeps its own
+   * context. The pairing pattern still varies per message — that only changes
+   * which protocol the loop follows and which subagent it reaches for.
+   *
+   * Fire-and-forget (best-effort) so the send path stays synchronous — no await
+   * window for a stop/interrupt to race.
+   */
+  private applyModelForTurn(text: string): void {
     if (!this.options.autoModelRouting) return
-    const norm = (m?: string): string | undefined => (m && m !== 'default' ? m : undefined)
-    // Workload → pairing mode: questions stay on the plan model; scoped work
-    // runs ADVISOR (cheap executor loop, strong advisor subagent); broad work
-    // runs ORCHESTRATOR (strong loop delegating to cheap worker subagents).
-    // A forced mode pins every work turn to that pattern.
     const auto = classifyWorkload(text)
     const workload =
       this.options.modelMode && this.options.modelMode !== 'auto' && auto !== 'plan'
         ? this.options.modelMode
         : auto
-    const wanted =
-      workload === 'plan'
-        ? norm(this.options.planModel)
-        : workload === 'orchestrator'
-          ? norm(this.options.workModel)
-          : (norm(this.options.workerModel) ?? norm(this.options.workModel))
     this.options.onTurnMode?.(workload === 'plan' ? null : workload)
+
+    const model = this.options.mainModel
+    const wanted = model && model !== 'default' ? model : undefined
     const target = wanted ?? '__default__'
-    if (this.appliedModel === target) return
+    if (this.appliedModel === target) return // already on it — no cache to break
     this.appliedModel = target
     void this.q?.setModel(wanted).catch(() => {
       // Best-effort: an older CLI may not support runtime model switching.
@@ -366,15 +358,16 @@ export class HostedSession {
   }
 
   /**
-   * Reasoning effort for the main-loop model: 'max' ("ultra") for every model
-   * except Fable 5, which keeps its default. Applied whenever the model changes
-   * (proactively from the routing paths for explicit models, and from the
-   * SDK-reported model below for the account-default case). Session-scoped and
-   * best-effort; a model without 'max' support silently downgrades.
+   * Reasoning effort for the main-loop model — 'xhigh', the level current
+   * guidance names for coding and agentic work; Fable keeps its own default.
+   * (Subagents are set separately: the worker runs 'low'. See effortForRole.)
+   * Applied whenever the model changes: proactively from the routing path for an
+   * explicit model, and from the SDK-reported model below for the
+   * account-default case. Best-effort; an unsupported level silently downgrades.
    */
-  private appliedEffort: 'max' | null | undefined = undefined
+  private appliedEffort: 'xhigh' | 'low' | null | undefined = undefined
   private applyEffortForModel(modelId: string | undefined): void {
-    const wanted = maxEffortUnlessFable(modelId)
+    const wanted = effortForRole('main', modelId)
     if (this.appliedEffort === wanted) return
     const nothingYet = this.appliedEffort === undefined
     this.appliedEffort = wanted
@@ -439,8 +432,7 @@ export class HostedSession {
     const text = [msg.result ?? '', ...(msg.errors ?? [])].join('\n')
     if (!HostedSession.LIMIT.test(text)) return
 
-    // Reference the main-loop (work) model; keep plan aligned with it.
-    const current = this.options.workModel
+    const current = this.options.mainModel
     const next = nextStrongestModel(current)
     if (!next) {
       this.options.sink.append('assistant_text', {
@@ -449,8 +441,7 @@ export class HostedSession {
       })
       return
     }
-    this.options.workModel = next
-    this.options.planModel = next
+    this.options.mainModel = next
     this.downgraded = true // hold this rung: a settings re-read must not undo it
     this.appliedModel = null // force the next turn to apply the new model
     void this.q?.setModel(next).catch(() => {})
@@ -554,10 +545,14 @@ export class HostedSession {
   }
 
   private deliverNow(eventId: string, text: string): void {
+    // A container session sees /workspace and /refs/*, never a Windows path. The
+    // composer appends `@<host path>` per REFS chip and developers paste host
+    // paths freely, so translate here — the one point every send passes through.
+    if (this.sandbox) text = toContainerPaths(text, this.sandbox.mounts)
     // Route the model for this turn's intent before the message enters the
     // stream (best-effort setModel, not awaited — keeps this synchronous).
     this.refreshModelRouting()
-    this.applyModelForIntent(text)
+    this.applyModelForTurn(text)
     this.options.sink.update(eventId, { text, pending: false }, { persist: true })
     this.input.push({
       type: 'user',

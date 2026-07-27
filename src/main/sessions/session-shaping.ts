@@ -13,7 +13,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { AgentDefinition } from '@anthropic-ai/claude-agent-sdk'
 import type { ModelMode, TerseLevel } from '@shared/domain'
-import { maxEffortUnlessFable } from './model-routing'
+import { effortForRole, type ModelRole } from './model-routing'
 
 // --- Terse output mode (Settings → Terminals) ---
 // Inspired by the caveman skill's premise; the text is original.
@@ -96,6 +96,38 @@ const ADHD_APPEND =
   'the request is ambiguous, ask one short question. Never trade a required step, ' +
   'code, command, path, or error text for brevity — reproduce those exactly.'
 
+// --- Container layout (bypass sessions) ---
+// A bypass session's CLI runs inside a Linux container, so the project and the
+// REFS folders are at container paths. Message text is translated on the way in
+// (toContainerPaths), but the agent still has to know the shape of what it is
+// standing in — without this it treats a missing /mnt/c as "the repo is
+// unreachable" and asks the developer to git clone something already mounted.
+
+/** The container-layout append for a bypass session, else null. */
+export function sandboxSystemPromptAppend(mounts: readonly { container: string }[] = []): string | null {
+  if (mounts.length === 0) return null
+  const refs = mounts.filter((m) => m.container !== '/workspace').map((m) => m.container)
+  return (
+    '## ENVIRONMENT — you are inside a Linux container, not on the host\n' +
+    'This session runs in a disposable container. The host is Windows; its drive is NOT mounted, ' +
+    'so `/mnt/c/...`, `C:\\...` and any other host path do not exist here and never will.\n' +
+    '- `/workspace` — this project, read-write. Your cwd.\n' +
+    (refs.length > 0
+      ? `- ${refs.map((r) => `\`${r}\``).join(', ')} — the referenced folders (REFS), read-only. ` +
+        'They are ALREADY here: read them directly. Never ask for a git clone or a pasted file ' +
+        'for anything under these paths, and never conclude a referenced repo is unreachable ' +
+        'before listing them.\n' +
+        'They sit OUTSIDE /workspace, so a repo-wide search from your cwd does not reach them and ' +
+        '"0 hits repo-wide" proves nothing about them. When a search is about where something is ' +
+        'defined, used, or called, pass them explicitly:\n' +
+        `  rg -n "pattern" /workspace ${refs.join(' ')}\n`
+      : '- No referenced folders are mounted. REFS chips added after the session started only ' +
+        'mount from the next session, so ask for a restart rather than a clone.\n') +
+    'A path in the developer\'s message has already been translated to its container path, so use ' +
+    'it as given.'
+  )
+}
+
 /** The ADHD append when the always-on flag file is present, else null. */
 export function adhdSystemPromptAppend(): string | null {
   const dir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
@@ -115,14 +147,19 @@ export function adhdSystemPromptAppend(): string | null {
 //
 // The Messages-API advisor tool (advisor_20260301) is not wireable through a
 // Claude Code session, so both patterns are expressed with the Agent SDK's
-// native levers: per-turn main-loop model switching + per-subagent models.
+// native levers: ONE main-loop model per session plus per-subagent models. The
+// main loop never switches model mid-session — that would invalidate every
+// prompt-cache tier — so the other tier is always reached through a subagent,
+// which carries its own context (see mainLoopModel in model-routing).
 
 const norm = (m?: string): string | undefined => (m && m !== 'default' ? m : undefined)
 
-// Per-agent effort under the "max unless Fable" rule: undefined = inherit the
-// default (the agent's own model, incl. when it inherits the main model).
-const effortFor = (model?: string): 'max' | undefined =>
-  maxEffortUnlessFable(norm(model)) ?? undefined
+// Effort per agent ROLE: the advisor reasons ('xhigh'), the worker executes
+// ('low'). A mechanical executor given an explicit input and expected output
+// gains nothing from depth, and paying for it is what erases the saving the
+// cheap tier exists for. undefined = inherit the default.
+const effortFor = (role: ModelRole, model?: string): 'xhigh' | 'low' | undefined =>
+  effortForRole(role, norm(model)) ?? undefined
 
 /**
  * The two mode subagents, injected into every session so the protocol below
@@ -147,7 +184,7 @@ export function modeAgents(options: {
         'Do NOT write full implementations — sketches and diffs of the tricky part only. ' +
         'If the question is under-specified, state the assumption you would proceed on.',
       model: norm(options.strongModel),
-      effort: effortFor(options.strongModel),
+      effort: effortFor('advisor', options.strongModel),
     },
     worker: {
       description:
@@ -160,7 +197,7 @@ export function modeAgents(options: {
         'raw and complete, no commentary. If the input is ambiguous or does not match what the ' +
         'instructions assume, STOP and return one short clarifying question instead of guessing.',
       model: norm(options.cheapModel),
-      effort: effortFor(options.cheapModel),
+      effort: effortFor('worker', options.cheapModel),
     },
   }
 }

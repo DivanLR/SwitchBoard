@@ -124,17 +124,17 @@ const MODE_CHOICES: { id: Settings['modelMode']; label: string; desc: string }[]
   {
     id: 'auto',
     label: 'Auto (Recommended)',
-    desc: 'Picks per message: scoped work runs Advisor, broad multi-step work runs Orchestrator.',
+    desc: 'Intelligent model runs the session; each message picks the pattern — scoped work consults the advisor, broad work delegates to workers.',
   },
   {
     id: 'advisor',
     label: 'Advisor',
-    desc: 'Cheap model executes; the strong model is consulted rarely for the approach, unsticking, and review.',
+    desc: 'Worker model runs the whole session and does the work; the intelligent model is a subagent consulted rarely for approach, unsticking, and review.',
   },
   {
     id: 'orchestrator',
     label: 'Orchestrator',
-    desc: 'Strong model plans and reviews; well-scoped chunks are delegated to cheap parallel workers.',
+    desc: 'Intelligent model runs the whole session, plans and reviews; well-scoped chunks go to cheap parallel workers.',
   },
 ]
 
@@ -368,10 +368,11 @@ const updateLine = computed(() => {
 
             <div class="setting-row">
               <div class="sr-text">
-                <div class="sr-label">Route by message intent</div>
+                <div class="sr-label">Pair models by message</div>
                 <div class="sr-desc">
-                  Questions and discussion use the intelligent model; requests to change code or run
-                  scripts pair the models by mode (Advisor or Orchestrator). Off pins the intelligent model.
+                  Reads each message and picks the pattern for that turn — consult the advisor, or
+                  delegate to workers. The session keeps ONE main model either way: switching it
+                  mid-session would throw away the prompt cache and re-bill the whole conversation.
                 </div>
               </div>
               <button
