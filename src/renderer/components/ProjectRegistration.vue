@@ -338,14 +338,14 @@ async function startSession(): Promise<void> {
   padding: 8px 10px;
   font-size: 11.5px;
   line-height: 1.5;
-  color: #e0937f;
+  color: var(--red-hover);
   border: 1px solid rgba(143, 59, 44, 0.4);
   background: rgba(143, 59, 44, 0.06);
   border-radius: var(--rc);
 }
 
 html.sb-light .bypass-warn {
-  color: #f87171;
+  color: var(--red);
 }
 
 .suggestion {

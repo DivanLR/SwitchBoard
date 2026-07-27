@@ -31,7 +31,7 @@ import SwallowedBlock from '@renderer/components/SwallowedBlock.vue'
 import QuestionEvent from '@renderer/components/QuestionEvent.vue'
 import SpecsView from '@renderer/views/SpecsView.vue'
 import CleanupView from '@renderer/views/CleanupView.vue'
-import EvalsView from '@renderer/views/EvalsView.vue'
+import TestsView from '@renderer/views/TestsView.vue'
 
 const props = defineProps<{ project: ProjectListItem }>()
 const emit = defineEmits<{ (e: 'open-proj-settings'): void }>()
@@ -1028,10 +1028,11 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
       @set-target="onSetTarget"
       @ran="((mainTab = 'session'), scrollToBottom())"
     />
-    <EvalsView
+    <TestsView
       v-else-if="mainTab === 'tests'"
       :project-id="project.id"
       :project-name="project.name"
+      :branch="liveSession?.branch ?? endedSession?.branch ?? null"
       @run="runInSession"
       @ran="((mainTab = 'session'), scrollToBottom())"
     />

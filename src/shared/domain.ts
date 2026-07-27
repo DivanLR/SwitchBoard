@@ -437,6 +437,10 @@ export interface Settings {
    * worker model.
    */
   projectWorkerModels: Record<string, string>
+  /** The verification stack chosen for a project's Tests section (a TEST_STACKS
+   *  id). Absent means nothing chosen yet, so the section shows the picker with
+   *  whatever detection found. */
+  projectTestStacks: Record<string, string>
   /** Auto-approve requests by risk level (Allowed list tab): recorded as rule_approved. */
   autoApproveLow: boolean
   autoApproveMedium: boolean
@@ -490,6 +494,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoscroll: true,
   projectModels: {},
   projectWorkerModels: {},
+  projectTestStacks: {},
   autoApproveLow: false,
   autoApproveMedium: false,
   projectGroups: [],

@@ -175,8 +175,19 @@ function mcpDot(status: string): string {
 // beside the other per-project maps, so it persists with no schema change) ---
 const groups = computed<ProjectGroup[]>(() => settings.settings?.projectGroups ?? [])
 const groupOf = computed<Record<string, string>>(() => settings.settings?.projectGroupOf ?? {})
+/** Sidebar filter (design: the ⌕ box under the logo). Narrows the list by name
+ *  or branch — with a dozen projects, scanning beats scrolling. */
+const filterQuery = ref('')
+const filtered = computed(() => {
+  const q = filterQuery.value.trim().toLowerCase()
+  if (!q) return projects.visibleItems
+  return projects.visibleItems.filter(
+    (p) => p.name.toLowerCase().includes(q) || (p.session?.branch ?? '').toLowerCase().includes(q),
+  )
+})
+
 /** Groups in order, then the ungrouped tail. Collapsed only hides the rows. */
-const sections = computed(() => groupSections(projects.visibleItems, groups.value, groupOf.value))
+const sections = computed(() => groupSections(filtered.value, groups.value, groupOf.value))
 
 function saveGroups(next: ProjectGroup[]): void {
   void settings.save({ projectGroups: next })
@@ -484,6 +495,29 @@ async function confirmRemoveNow(): Promise<void> {
       <div v-if="!collapsed" class="tagline mono">Claude Code sessions · one inbox</div>
     </div>
 
+    <!-- Filter (design): narrows the list by project name or branch. -->
+    <div v-if="!collapsed" class="filter-wrap">
+      <div class="filter" :class="{ on: filterQuery.length > 0 }">
+        <span class="filter-icon mono">⌕</span>
+        <input
+          v-model="filterQuery"
+          class="filter-in"
+          data-testid="project-filter"
+          placeholder="Filter"
+          @keydown.escape="filterQuery = ''"
+        />
+        <button
+          v-if="filterQuery"
+          class="filter-clear mono"
+          data-testid="project-filter-clear"
+          title="Clear"
+          @click="filterQuery = ''"
+        >
+          ✕
+        </button>
+      </div>
+    </div>
+
     <div class="section-row">
       <span v-if="!collapsed" class="section-label mono">PROJECTS</span>
       <!-- Single line, no surrounding whitespace: a text node around the glyph
@@ -555,7 +589,7 @@ async function confirmRemoveNow(): Promise<void> {
           @dragover.prevent
           @drop="onGroupDrop(null, $event)"
         >
-          <span class="group-name mono">Ungrouped</span>
+          <span class="group-name mono">EVERY OTHER PROJECT</span>
           <span style="flex: 1"></span>
           <span class="group-count mono" data-testid="group-count-ungrouped">
             {{ section.items.length }}
@@ -998,6 +1032,55 @@ async function confirmRemoveNow(): Promise<void> {
   font-size: 10.5px;
   color: var(--text-faint);
   margin-top: 3px;
+}
+
+/* Filter box (design): hairline field that greens on focus or when filtering. */
+.filter-wrap {
+  padding: 0 14px 10px 18px;
+  flex-shrink: 0;
+}
+
+.filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border: 1px solid var(--border-seg);
+  border-radius: 8px;
+  transition:
+    border-color 0.14s ease,
+    box-shadow 0.14s ease;
+}
+
+.filter:focus-within,
+.filter.on {
+  border-color: var(--green);
+}
+
+.filter-icon {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.filter-in {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-name);
+  font-family: var(--sans);
+  font-size: 12px;
+}
+
+.filter-clear {
+  font-size: 11px;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.filter-clear:hover {
+  color: var(--text-strong);
 }
 
 .section-row {

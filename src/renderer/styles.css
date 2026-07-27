@@ -16,166 +16,160 @@ html.sb-light {
      blue-grey hairlines and shadows, dark-slate text, forest-green + sky-blue
      accents, an Inter face and a wider 14px corner radius. Every value below is
      the design's explicit light override; the dark :root stays byte-identical. */
-  --bg: #e9f1fb;
-  --bg-panel: rgba(255, 255, 255, 0.72);
-  --bg-card: rgba(255, 255, 255, 0.55);
+  --bg: #ffffff;
+  --bg-panel: rgba(250,250,251, 0.72);
+  --bg-card: rgba(255,255,255, 0.55);
   --bg-card-alt: rgba(255, 255, 255, 0.5);
-  --bg-code: #edf3fb;
-  --bg-hover: rgba(255, 255, 255, 0.42);
-  --bg-active: #e4f6ec;
-  --bg-seg: rgba(96, 125, 160, 0.14);
-  --bg-chip: rgba(96, 125, 160, 0.08);
-  --border: rgba(96, 125, 160, 0.28);
-  --border-card: rgba(96, 125, 160, 0.28);
-  --border-card-alt: rgba(96, 125, 160, 0.24);
-  --border-soft: rgba(96, 125, 160, 0.2);
-  --border-code: rgba(96, 125, 160, 0.18);
-  --border-strong: rgba(96, 125, 160, 0.38);
-  --border-seg: rgba(96, 125, 160, 0.28);
-  --border-hist: rgba(96, 125, 160, 0.18);
-  --text-bright: #102532;
-  --text-strong: #102532;
-  --text-title: #102532;
-  --text: #102532;
-  --text-body: #274050;
-  --text-name: #102532;
-  --text-prompt: #102532;
-  --text-mid: #3c5566;
-  --text-meta: #3c5566;
-  --text-tab: #516778;
-  --text-noise: #516778;
-  --text-label: #516778;
-  --text-faint: #5f7688;
-  --text-ghost: #6d8394;
-  --green: #167c3a;
-  --green-hover: #16a34a;
-  --green2: #136a33;
-  --green-ink: #f5faff;
-  --green-glow: 0 6px 18px -6px rgba(22, 163, 74, 0.6);
-  --blue: #0284c7;
-  --amber: #b45309;
-  --amber-hover: #d97706;
-  --amber-ink: #fffbeb;
-  --red: #dc2626;
-  --red-hover: #ef4444;
-  --red-ink: #fff7ed;
-  --detail: #516778;
+  --bg-code: #ffffff;
+  --bg-hover: rgba(255,255,255, 0.42);
+  --bg-active: rgba(20,20,26, 0.06);
+  --bg-seg: rgba(20,20,26, 0.14);
+  --bg-chip: rgba(20,20,26, 0.06);
+  --border: rgba(20,20,26, 0.08);
+  --border-card: rgba(20,20,26, 0.1);
+  --border-card-alt: rgba(20,20,26, 0.09);
+  --border-soft: rgba(20,20,26, 0.08);
+  --border-code: rgba(20,20,26, 0.08);
+  --border-strong: rgba(20,20,26, 0.14);
+  --border-seg: rgba(20,20,26, 0.09);
+  --border-hist: rgba(20,20,26, 0.06);
+  --text-bright: #131316;
+  --text-strong: #1c1c20;
+  --text-title: #25252a;
+  --text: #131316;
+  --text-body: #43434b;
+  --text-name: #2e2e34;
+  --text-prompt: #3a3a41;
+  --text-mid: #5c5c65;
+  --text-meta: #6b6b74;
+  --text-tab: #64646d;
+  --text-noise: #757580;
+  --text-label: #757580;
+  --text-faint: #64646d;
+  --text-ghost: #6f6f78;
+  --green: #1a7a55;
+  --green-hover: #1f8f63;
+  --green2: #1a7a55;
+  --green-ink: #ffffff;
+  --green-glow: 0 6px 18px -6px rgba(31,143,99, 0.6);
+  --blue: #2f6fbd;
+  --amber: #8a5a15;
+  --amber-hover: #c08a30;
+  --amber-ink: #ffffff;
+  --red: #c0392f;
+  --red-hover: #d4574c;
+  --red-ink: #ffffff;
+  --detail: #5c6a75;
   /* Database/MCP accent (design light: sky-blue, not teal). */
-  --teal: #0ea5e9;
-  --surface-inset: #edf3fb;
-  --surface-inset-line: #cbdaea;
-  --surface-line: #d3e0ee;
-  --surface-raised: #eef4fb;
-  --surface-hover: #e2ecf7;
-  --surface-hover-line: #c3d3e4;
-  --surface-sunken: #edf3fb;
-  --bg-panel-2: #e9f1fb;
+  --teal: #2b8fa0;
+  --surface-inset: #fafafb;
+  --surface-inset-line: #d9d9dd;
+  --surface-line: #d9d9dd;
+  --surface-raised: #f0f0f2;
+  --surface-hover: #eeeef0;
+  --surface-hover-line: #d9d9dd;
+  --surface-sunken: #f7f7f8;
+  --bg-panel-2: #f5f5f6;
   /* Soft elevation + subtle top gloss for glass panes/cards; wider radius. */
-  --elev: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 1px 2px rgba(20, 40, 70, 0.04),
-    0 12px 30px -12px rgba(20, 40, 70, 0.16);
-  --gloss: linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 54%);
-  --rc: 14px;
+  --elev: inset 0 1px 0 rgba(255,255,255,.7),0 1px 2px rgba(20,40,70,.05);
+  --gloss: linear-gradient(rgba(255,255,255,0),rgba(255,255,255,0));
+  --rc: 10px;
   /* Design light uses Inter; fall back to the OS UI face (Segoe UI on
      Windows) rather than bundling a second webfont just for this face. */
-  --sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --sans: 'Instrument Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
   /* Light scrim + shadows: the design remaps --rgb-0-0-0 → 20,40,70 and
      --rgb-5-6-9 → 236,243,251, so overlays lighten and shadows go blue-grey. */
-  --scrim: rgba(236, 243, 251, 0.66);
-  --shadow-dlg: 0 32px 80px rgba(20, 40, 70, 0.6), 0 0 0 1px rgba(96, 125, 160, 0.03) inset;
-  --shadow-dd: 0 16px 40px rgba(20, 40, 70, 0.5);
-  --shadow-menu: 0 16px 40px rgba(20, 40, 70, 0.55);
+  --scrim: rgba(230,230,234, 0.66);
+  --shadow-dlg: 0 32px 80px rgba(20,20,30, 0.6), 0 0 0 1px rgba(20,20,26, 0.03) inset;
+  --shadow-dd: 0 16px 40px rgba(20,20,30, 0.5);
+  --shadow-menu: 0 16px 40px rgba(20,20,30, 0.55);
 }
 
 /* Light-mode app background: the design's light --app-bg — soft sky-blue and
    emerald glows over a pale blue base, replacing the dark gradient below. */
 html.sb-light body {
-  background-color: #eef4fb;
-  background-image:
-    radial-gradient(1100px 720px at 12% -12%, rgba(56, 189, 248, 0.14), transparent 55%),
-    radial-gradient(1000px 780px at 112% 4%, rgba(2, 132, 199, 0.08), transparent 55%),
-    radial-gradient(900px 700px at 50% 120%, rgba(22, 163, 74, 0.05), transparent 60%),
-    linear-gradient(180deg, #f5faff, #e5eff9);
+  background: radial-gradient(900px 620px at 6% -12%,rgba(31,143,99,.09),transparent 62%),radial-gradient(820px 700px at 110% 6%,rgba(47,111,189,.07),transparent 58%),#f4f4f5;
 }
 
 :root {
   /* Palette — Switchboard (standalone) (2).html: emerald accents on a deep
      blue-black base, glassmorphic translucent panes/cards (backdrop-blur),
-     translucent-white borders, and a Figtree sans face (JetBrains Mono for
+     translucent-white borders, and an Instrument Sans face (JetBrains Mono for
      code/terminal). */
-  --bg: #070a14;
-  --bg-panel: rgba(16, 22, 42, 0.72);
-  --bg-card: rgba(22, 29, 52, 0.55);
-  --bg-card-alt: rgba(18, 24, 44, 0.5);
-  --bg-code: #0a0f1e;
-  --bg-hover: rgba(42, 50, 84, 0.42);
-  --bg-active: rgba(255, 255, 255, 0.06);
-  --bg-seg: rgba(255, 255, 255, 0.14);
-  --bg-chip: rgba(255, 255, 255, 0.06);
-  --border: rgba(255, 255, 255, 0.08);
-  --border-card: rgba(255, 255, 255, 0.1);
-  --border-card-alt: rgba(255, 255, 255, 0.09);
-  --border-soft: rgba(255, 255, 255, 0.08);
-  --border-code: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.14);
-  --border-seg: rgba(255, 255, 255, 0.09);
-  --border-hist: rgba(255, 255, 255, 0.06);
-  --text-bright: #eaeef6;
-  --text-strong: #e7ebf3;
-  --text-title: #e2e6ee;
-  --text: #e3e7f4;
-  --text-body: #c3cad8;
-  --text-name: #d2d8e4;
-  --text-prompt: #cdd1d8;
-  --text-mid: #9aa2b4;
-  --text-meta: #8f97a9;
-  --text-tab: #7e8698;
-  --text-noise: #6a707b;
-  --text-label: #5f6570;
-  --text-faint: #5a6274;
-  --text-ghost: #454e60;
-  --green: #34d399;
-  --green-hover: #6ee7b7;
+  --bg: #121215;
+  --bg-panel: rgba(10,10,12, 0.72);
+  --bg-card: rgba(22,22,26, 0.55);
+  --bg-card-alt: rgba(18, 18, 22, 0.5);
+  --bg-code: #0a0a0c;
+  --bg-hover: rgba(38,38,45, 0.42);
+  --bg-active: rgba(255,255,255, 0.06);
+  --bg-seg: rgba(255,255,255, 0.14);
+  --bg-chip: rgba(255,255,255, 0.06);
+  --border: rgba(255,255,255, 0.08);
+  --border-card: rgba(255,255,255, 0.1);
+  --border-card-alt: rgba(255,255,255, 0.09);
+  --border-soft: rgba(255,255,255, 0.08);
+  --border-code: rgba(255,255,255, 0.08);
+  --border-strong: rgba(255,255,255, 0.14);
+  --border-seg: rgba(255,255,255, 0.09);
+  --border-hist: rgba(255,255,255, 0.06);
+  --text-bright: #f5f5f7;
+  --text-strong: #ededf0;
+  --text-title: #e5e5e9;
+  --text: #f5f5f7;
+  --text-body: #bdbdc5;
+  --text-name: #d5d5db;
+  --text-prompt: #c9c9d0;
+  --text-mid: #9d9da7;
+  --text-meta: #8c8c96;
+  --text-tab: #82828c;
+  --text-noise: #84848e;
+  --text-label: #84848e;
+  --text-faint: #8b8b95;
+  --text-ghost: #7c7c86;
+  --green: #3fb27f;
+  --green-hover: #4ecb92;
   /* Darker gradient stop for the primary-button fill (design: 135deg emerald→
      green with a top gloss). --gloss is transparent in dark, so the dark button
      is just the two-stop green gradient; light adds the white gloss sheen. */
-  --green2: #10b981;
-  --green-ink: #0a0f1e;
-  --green-glow: 0 6px 18px -6px rgba(52, 211, 153, 0.6);
-  --blue: #3a6291;
-  --amber: #9a6f2a;
-  --amber-hover: #f2c574;
-  --amber-ink: #201505;
-  --red: #8f3b2c;
-  --red-hover: #ea8266;
-  --red-ink: #1c0b07;
-  --detail: #8fa8bd;
+  --green2: #3fb27f;
+  --green-ink: #0a0a0c;
+  --green-glow: 0 6px 18px -6px rgba(63,178,127, 0.6);
+  --blue: #5b93d6;
+  --amber: #c9913f;
+  --amber-hover: #e0b878;
+  --amber-ink: #0a0a0c;
+  --red: #d05f5f;
+  --red-hover: #e07d7d;
+  --red-ink: #0a0a0c;
+  --detail: #a6b3bd;
   /* Database/MCP accent (teal, distinct from the emerald green). */
-  --teal: #2dd4bf;
+  --teal: #4fb2c4;
   /* Opaque surface + line tokens for view chrome (agent cards, spec panels,
      sidebar rows). These dark values are the originals the components hardcoded,
      so the dark view stays byte-identical; html.sb-light redefines them above. */
-  --surface-inset: #0d1017;
-  --surface-inset-line: #253044;
-  --surface-line: #232937;
-  --surface-raised: #1b202c;
-  --surface-hover: #1c2230;
-  --surface-hover-line: #3b4456;
-  --surface-sunken: #10141d;
-  --bg-panel-2: #12161f;
-  /* Figtree for body/UI text; JetBrains Mono for code, commands and terminal. */
-  --sans: 'Figtree', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --surface-inset: #121215;
+  --surface-inset-line: #33343a;
+  --surface-line: #2a2b30;
+  --surface-raised: #1e1f22;
+  --surface-hover: #212226;
+  --surface-hover-line: #33343a;
+  --surface-sunken: #161619;
+  --bg-panel-2: #161619;
+  /* Instrument Sans for body/UI text; JetBrains Mono for code, commands and terminal. */
+  --sans: 'Instrument Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
   --mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', monospace;
-  /* Surface tokens (design "standalone.html"): soft elevation + top gloss on
-     glass panes and cards, and a shared corner radius. Dark = flat/none. */
-  --elev: none;
+  /* Surface tokens: the design's dark elevation is a hairline top-inset plus a
+     tight drop shadow; the gloss is deliberately a no-op gradient (flat). */
+  --elev: inset 0 1px 0 rgba(255,255,255,.045),0 1px 2px rgba(0,0,0,.28);
   --gloss: linear-gradient(rgba(255, 255, 255, 0), rgba(255, 255, 255, 0));
   --rc: 10px;
   /* Overlay scrim + dialog/menu drop shadows (design: rgba over themed rgb
      triplets — near-black in dark, pale blue-grey in light). */
-  --scrim: rgba(5, 6, 9, 0.66);
-  --shadow-dlg: 0 32px 80px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.03) inset;
-  --shadow-dd: 0 16px 40px rgba(0, 0, 0, 0.5);
-  --shadow-menu: 0 16px 40px rgba(0, 0, 0, 0.55);
+  --scrim: rgba(6,6,7, 0.66);
+  --shadow-dlg: 0 32px 80px rgba(0,0,0, 0.6), 0 0 0 1px rgba(255,255,255, 0.03) inset;
+  --shadow-dd: 0 16px 40px rgba(0,0,0, 0.5);
+  --shadow-menu: 0 16px 40px rgba(0,0,0, 0.55);
 }
 
 * {
@@ -202,12 +196,10 @@ body {
   font-family: var(--sans);
   font-size: 13px;
   overflow: hidden;
-  background-color: #070a16;
-  background-image:
-    radial-gradient(1100px 720px at 10% -12%, rgba(52, 211, 153, 0.22), transparent 60%),
-    radial-gradient(1000px 820px at 110% 6%, rgba(45, 212, 191, 0.13), transparent 55%),
-    radial-gradient(900px 900px at 50% 124%, rgba(52, 211, 153, 0.12), transparent 60%),
-    linear-gradient(180deg, #080b1a, #070a14);
+  background:
+    radial-gradient(900px 620px at 6% -12%, rgba(63, 178, 127, 0.1), transparent 62%),
+    radial-gradient(820px 700px at 110% 6%, rgba(91, 147, 214, 0.07), transparent 58%),
+    #0a0a0c;
 }
 
 /* The app shell is transparent so the body glow shows through the glass. */
@@ -373,7 +365,7 @@ button {
   border-color: var(--red);
 }
 
-/* The updated design uses the Figtree sans face for all UI chrome; only genuine
+/* The updated design uses the Instrument Sans face for all UI chrome; only genuine
    code/terminal content (raw output, tool activity, swallowed lines, code
    blocks) keeps the mono face via explicit `font-family: var(--mono)` rules.
    So the historically-ubiquitous `.mono` class now resolves to the sans face. */

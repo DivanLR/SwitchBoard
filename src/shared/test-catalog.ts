@@ -184,6 +184,43 @@ export const TEST_STACKS: readonly TestStack[] = [
   },
 ]
 
+/**
+ * The six verification gates the Tests section reports, in the design's order.
+ *
+ * `built` is the honest bit: a gate is built when the app can actually produce
+ * its verdict today, which for now means "run one command through the session
+ * and read the PASS/FAIL it reports". Coverage, mutation and the code-quality
+ * service need a report parsed out of a tool the app does not read yet, so their
+ * tiles and panels say so rather than showing a number nothing measured
+ * (FR-072: never derive, estimate or substitute a figure we did not measure).
+ */
+export interface VerifyGate {
+  id: 'unit' | 'integration' | 'architecture' | 'mutation' | 'coverage' | 'quality-service'
+  /** Tile label, in the design's caps. */
+  name: string
+  /** Which suite kind produces it, or null when nothing does yet. */
+  from: SuiteKind | null
+  /** The sub-tab the tile jumps to. */
+  panel: 'qa' | 'coverage' | 'quality' | 'evidence'
+  built: boolean
+  /** Threshold shown on the gate bar. */
+  target: string
+}
+
+export const VERIFY_GATES: readonly VerifyGate[] = [
+  { id: 'unit', name: 'UNIT', from: 'unit', panel: 'qa', built: true, target: 'all pass' },
+  { id: 'integration', name: 'INTEGRATION', from: 'api', panel: 'qa', built: true, target: 'all pass' },
+  { id: 'architecture', name: 'ARCHITECTURE', from: 'quality', panel: 'quality', built: true, target: '0 violations' },
+  { id: 'mutation', name: 'MUTATION', from: null, panel: 'quality', built: false, target: '≥ 70%' },
+  { id: 'coverage', name: 'COVERAGE', from: 'coverage', panel: 'coverage', built: false, target: '≥ 80% line · ≥ 90% changed' },
+  { id: 'quality-service', name: 'CODE QUALITY', from: null, panel: 'quality', built: false, target: 'gate passes · ≤ 3% duplication' },
+]
+
+/** A stack by id, for the chosen-profile header. */
+export function stackById(id: string | undefined): TestStack | null {
+  return TEST_STACKS.find((s) => s.id === id) ?? null
+}
+
 /** Suites available for the stacks detected in a project, grouped per stack. */
 export interface AvailableSuites {
   stackId: string

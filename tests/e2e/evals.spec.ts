@@ -10,6 +10,8 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
   await page.getByTestId('sidebar-project-alpha').click()
   await page.getByTestId('tab-tests').click()
+  // The section opens on the stack picker; the eval loop lives in Manual QA.
+  await page.getByTestId('tests-stack-node').click()
   await expect(page.getByTestId('evals-view')).toBeVisible()
 })
 
@@ -144,6 +146,8 @@ test('lines are per project and survive leaving the section', async ({ page }) =
 
   await page.getByTestId('sidebar-project-beta').click()
   await page.getByTestId('tab-tests').click()
+  // A different project picks its own stack — the choice is per project too.
+  await page.getByTestId('tests-stack-node').click()
   await expect(page.getByTestId('eval-count')).toHaveText('0 lines')
 
   await page.getByTestId('sidebar-project-alpha').click()

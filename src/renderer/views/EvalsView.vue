@@ -96,9 +96,9 @@ const shortDate = (iso: string): string =>
 <template>
   <div class="evals" data-testid="evals-view">
     <div class="intro">
-      One observable line per small change to <span class="proj">{{ projectName }}</span> — no spec,
-      no plan, no task list. Implement (one run, or several isolated attempts), let the check report,
-      judge it, then record a verdict and a rating. A pass needs the check to have passed.
+      One observable line per small change — implement (one run, or several isolated attempts), let
+      the check report, judge it, then record a verdict and a rating. A pass needs the check to have
+      passed.
       <span class="gate">
         More than a handful of files, an acceptance that will not fit in three sentences, or a
         stored-data change → use <span class="mono">/speckit-specify</span> instead.
@@ -350,7 +350,7 @@ const shortDate = (iso: string): string =>
   max-width: 840px;
   margin-bottom: 8px;
   font-size: 11.5px;
-  color: var(--red, #f87171);
+  color: var(--red);
 }
 
 .summary {
@@ -406,7 +406,7 @@ const shortDate = (iso: string): string =>
 }
 
 .del:hover {
-  color: var(--red, #f87171);
+  color: var(--red);
 }
 
 .row-meta {
@@ -440,7 +440,7 @@ const shortDate = (iso: string): string =>
 }
 
 .stage.verify {
-  color: var(--blue, #7aa2d2);
+  color: var(--blue);
   border-color: rgba(122, 162, 210, 0.4);
 }
 
@@ -523,7 +523,7 @@ const shortDate = (iso: string): string =>
 }
 
 .suite-kind.api {
-  color: var(--blue, #7aa2d2);
+  color: var(--blue);
 }
 
 .suite-kind.ui {
@@ -558,7 +558,7 @@ const shortDate = (iso: string): string =>
 }
 
 .chip.fail {
-  color: var(--red, #f87171);
+  color: var(--red);
   background: rgba(248, 113, 113, 0.1);
   border-color: rgba(248, 113, 113, 0.32);
 }
@@ -626,7 +626,7 @@ const shortDate = (iso: string): string =>
 }
 
 .act.bad {
-  color: var(--red, #f87171);
+  color: var(--red);
   border-color: rgba(248, 113, 113, 0.5);
   background: rgba(248, 113, 113, 0.1);
 }

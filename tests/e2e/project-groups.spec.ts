@@ -137,3 +137,22 @@ test('the collapsed rail ignores grouping and still lists every project', async 
   await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
   await expect(page.getByTestId('sidebar-project-beta')).toBeVisible()
 })
+
+test('the sidebar filter narrows the list by name and by branch', async ({ page }) => {
+  await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
+  await expect(page.getByTestId('sidebar-project-beta')).toBeVisible()
+
+  await page.getByTestId('project-filter').fill('alph')
+  await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
+  await expect(page.getByTestId('sidebar-project-beta')).toHaveCount(0)
+
+  // Clearing restores the full list.
+  await page.getByTestId('project-filter-clear').click()
+  await expect(page.getByTestId('sidebar-project-beta')).toBeVisible()
+
+  // Escape clears it too, and a miss shows nothing rather than everything.
+  await page.getByTestId('project-filter').fill('zzz-no-such-project')
+  await expect(page.getByTestId('sidebar-project-alpha')).toHaveCount(0)
+  await page.getByTestId('project-filter').press('Escape')
+  await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
+})
