@@ -11,7 +11,7 @@ import { useProjectsStore } from '@renderer/stores/projects'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useInboxStore } from '@renderer/stores/inbox'
 import { useSettingsStore } from '@renderer/stores/settings'
-import { accentFor } from '@renderer/project-accent'
+import { accentFor, GROUP_COLORS } from '@renderer/project-accent'
 
 const projects = useProjectsStore()
 const activeSession = useActiveSessionStore()
@@ -69,7 +69,7 @@ function initials(name: string): string {
   return (words.length > 1 ? `${words[0][0]}${words[1][0]}` : name.slice(0, 2)).toLowerCase()
 }
 
-// Stable per-project accent stripe on the row's right edge (shared with the
+// Stable per-project accent bar on the row's leading edge (shared with the
 // session header dot) — identifies the project at a glance in the collapsed rail.
 const now = ref(Date.now())
 let timer: ReturnType<typeof setInterval> | undefined
@@ -186,8 +186,44 @@ const filtered = computed(() => {
   )
 })
 
-/** Groups in order, then the ungrouped tail. Collapsed only hides the rows. */
-const sections = computed(() => groupSections(filtered.value, groups.value, groupOf.value))
+/** Whether the ungrouped tail is folded. Not persisted like a real group's fold:
+ *  it is a view preference on a section the developer never created. */
+const ungroupedFolded = ref(false)
+
+/**
+ * The sections as the sidebar draws them: colour, fold state, count and pending
+ * total per group, then the ungrouped tail.
+ *
+ * Filtering overrides folding — a folded group that holds a match opens rather
+ * than hiding it — and a group with no match drops out entirely, so what is left
+ * on screen is exactly what matched.
+ */
+const sections = computed(() => {
+  const filtering = filterQuery.value.trim().length > 0
+  const withColor = groups.value.map((group, index) => ({
+    ...group,
+    color: group.color ?? GROUP_COLORS[index % GROUP_COLORS.length],
+  }))
+  return groupSections(filtered.value, withColor, groupOf.value)
+    .map((section) => {
+      const folded = section.group
+        ? section.group.collapsed && !filtering
+        : ungroupedFolded.value && !filtering
+      return {
+        group: section.group,
+        items: section.items,
+        // The tail is only worth labelling once a group exists to contrast it.
+        head: !!section.group || groups.value.length > 0,
+        name: section.group?.name ?? 'Ungrouped',
+        color: section.group?.color ?? 'var(--text-faint)',
+        folded,
+        pending: section.items.reduce((sum, item) => sum + pendingFor(item.id), 0),
+        // Only a real, open, unfiltered group invites a drop when it is empty.
+        emptyOpen: !!section.group && !folded && !filtering && section.items.length === 0,
+      }
+    })
+    .filter((section) => !filtering || section.items.length > 0)
+})
 
 function saveGroups(next: ProjectGroup[]): void {
   void settings.save({ projectGroups: next })
@@ -201,13 +237,23 @@ function assignGroup(projectId: string, groupId: string | null): void {
   void settings.save({ projectGroupOf: map })
 }
 
-function toggleGroup(id: string): void {
+/** Folds a group, or the ungrouped tail when there is no id. */
+function toggleGroup(id: string | null): void {
+  if (!id) {
+    ungroupedFolded.value = !ungroupedFolded.value
+    return
+  }
   saveGroups(groups.value.map((g) => (g.id === id ? { ...g, collapsed: !g.collapsed } : g)))
 }
 
 /** Adds a group and drops straight into inline naming. */
 function newGroup(projectId?: string): void {
-  const group: ProjectGroup = { id: crypto.randomUUID(), name: 'New group', collapsed: false }
+  const group: ProjectGroup = {
+    id: crypto.randomUUID(),
+    name: 'New group',
+    collapsed: false,
+    color: GROUP_COLORS[groups.value.length % GROUP_COLORS.length],
+  }
   saveGroups([...groups.value, group])
   if (projectId) assignGroup(projectId, group.id)
   renamingGroupId.value = group.id
@@ -234,11 +280,6 @@ function moveGroup(id: string, delta: number): void {
   const [moved] = next.splice(from, 1)
   next.splice(to, 0, moved)
   saveGroups(next)
-}
-
-/** Pending items inside a group — kept visible while it is folded shut. */
-function pendingInGroup(items: { id: string }[]): number {
-  return items.reduce((sum, item) => sum + pendingFor(item.id), 0)
 }
 
 // --- Context menu (right-click) + inline rename ---
@@ -346,10 +387,14 @@ const rowDrop = ref<{ id: string; zone: 'before' | 'after' | 'file' } | null>(nu
 /** Group header highlighted as the drop target for the dragged project. */
 const groupDrop = ref<string | null>(null)
 
-function onGroupDragOver(group: ProjectGroup, event: DragEvent): void {
+// The ungrouped tail is a drop target too (it takes a project back out of its
+// group), so it needs a key of its own in `groupDrop` — it has no id.
+const UNGROUPED = '__ungrouped'
+
+function onGroupDragOver(group: ProjectGroup | null, event: DragEvent): void {
   if (!(event.dataTransfer?.types ?? []).includes('text/x-sb-project')) return
   event.preventDefault()
-  groupDrop.value = group.id
+  groupDrop.value = group?.id ?? UNGROUPED
 }
 
 function onGroupDrop(group: ProjectGroup | null, event: DragEvent): void {
@@ -518,92 +563,100 @@ async function confirmRemoveNow(): Promise<void> {
       </div>
     </div>
 
-    <div class="section-row">
-      <span v-if="!collapsed" class="section-label mono">PROJECTS</span>
-      <!-- Single line, no surrounding whitespace: a text node around the glyph
-           becomes a flex text run with trailing space that shifts + off-centre. -->
-      <button
-        v-if="!collapsed"
-        class="add mono"
-        data-testid="new-group"
-        title="New group"
-        @click="newGroup()"
-      >⊞</button>
-      <button class="add mono" data-testid="add-project" title="New session" @click="emit('add-project')">+</button>
-    </div>
-
     <div class="project-list">
-      <template v-for="section in sections" :key="section.group?.id ?? '__ungrouped'">
+      <!-- Sticky above the rows (design), so the heading and its controls stay
+           reachable however far the list is scrolled. -->
+      <div class="section-row">
+        <template v-if="!collapsed">
+          <span class="section-label mono">PROJECTS</span>
+          <span class="section-count mono" data-testid="project-count">{{ filtered.length }}</span>
+        </template>
+        <span style="flex: 1"></span>
+        <!-- Single line, no surrounding whitespace: a text node around the glyph
+             becomes a flex text run with trailing space that shifts + off-centre. -->
+        <button
+          v-if="!collapsed"
+          class="add mono"
+          data-testid="new-group"
+          title="New group"
+          @click="newGroup()"
+        >▤</button>
+        <button class="add mono" data-testid="add-project" title="New session" @click="emit('add-project')">+</button>
+      </div>
+
+      <template v-for="section in sections" :key="section.group?.id ?? UNGROUPED">
         <!-- Group header: click to fold, right-click for rename/reorder/remove,
              and a drop target for dragging a project in. Hidden on the collapsed
-             rail, where there is no room for headers. -->
+             rail, where there is no room for headers. The ungrouped tail uses the
+             same header, so it folds and accepts a drop like any other. -->
         <div
-          v-if="section.group && !collapsed"
+          v-if="section.head && !collapsed"
           class="group-head"
-          :class="{ folded: section.group.collapsed, 'drop-into': groupDrop === section.group.id }"
-          :data-testid="`group-head-${section.group.name}`"
-          @click="toggleGroup(section.group.id)"
-          @contextmenu.prevent.stop="openGroupCtx(section.group, $event)"
+          :class="{ folded: section.folded, 'drop-into': groupDrop === (section.group?.id ?? UNGROUPED) }"
+          :data-testid="section.group ? `group-head-${section.name}` : 'group-head-ungrouped'"
+          :title="`${section.name} · ${section.items.length} ${section.items.length === 1 ? 'project' : 'projects'} — drag a project here to move it in`"
+          @click="toggleGroup(section.group?.id ?? null)"
+          @contextmenu.prevent.stop="section.group && openGroupCtx(section.group, $event)"
           @dragover="onGroupDragOver(section.group, $event)"
-          @dragleave="groupDrop = groupDrop === section.group.id ? null : groupDrop"
+          @dragleave="groupDrop = groupDrop === (section.group?.id ?? UNGROUPED) ? null : groupDrop"
           @drop="onGroupDrop(section.group, $event)"
         >
-          <span class="group-caret mono">{{ section.group.collapsed ? '▸' : '▾' }}</span>
+          <span class="group-caret mono">{{ section.folded ? '▶' : '▼' }}</span>
+          <span class="group-swatch" :style="{ background: section.color }"></span>
           <input
-            v-if="renamingGroupId === section.group.id"
+            v-if="section.group && renamingGroupId === section.group.id"
             :ref="focusOnMount"
             v-model="renameVal"
             class="rename-input mono"
-            :data-testid="`group-rename-input-${section.group.name}`"
+            :data-testid="`group-rename-input-${section.name}`"
             @click.stop
             @keydown.enter="commitGroupRename"
             @keydown.esc="renamingGroupId = null"
             @blur="commitGroupRename"
           />
-          <span v-else class="group-name mono">{{ section.group.name }}</span>
-          <span style="flex: 1"></span>
+          <span v-else class="group-name mono">{{ section.name }}</span>
           <span
-            v-if="section.group.collapsed && pendingInGroup(section.items) > 0"
+            v-if="section.pending > 0"
             class="badge-count"
-            :data-testid="`group-badge-${section.group.name}`"
+            :data-testid="section.group ? `group-badge-${section.name}` : 'group-badge-ungrouped'"
           >
-            {{ pendingInGroup(section.items) }}
+            {{ section.pending }}
           </span>
-          <span class="group-count mono" :data-testid="`group-count-${section.group.name}`">
+          <span
+            class="group-count mono"
+            :data-testid="section.group ? `group-count-${section.name}` : 'group-count-ungrouped'"
+          >
             {{ section.items.length }}
           </span>
           <button
+            v-if="section.group"
             class="remove mono"
-            :data-testid="`group-remove-${section.group.name}`"
+            :data-testid="`group-remove-${section.name}`"
             title="Remove this group (its projects stay)"
             @click.stop="removeGroup(section.group.id)"
           >
             ✕
           </button>
         </div>
-        <!-- Ungrouped tail is a drop target too, so a project can leave a group. -->
+
+        <!-- An empty open group says what it is for, and takes the drop itself. -->
         <div
-          v-else-if="!section.group && !collapsed && groups.length > 0"
-          class="group-head ungrouped"
-          data-testid="group-head-ungrouped"
-          @dragover.prevent
-          @drop="onGroupDrop(null, $event)"
+          v-if="section.emptyOpen && !collapsed"
+          class="group-empty mono"
+          :data-testid="`group-empty-${section.name}`"
+          @dragover="onGroupDragOver(section.group, $event)"
+          @drop="onGroupDrop(section.group, $event)"
         >
-          <span class="group-name mono">EVERY OTHER PROJECT</span>
-          <span style="flex: 1"></span>
-          <span class="group-count mono" data-testid="group-count-ungrouped">
-            {{ section.items.length }}
-          </span>
+          Drag a project here
         </div>
 
-        <template v-if="collapsed || !section.group?.collapsed">
+        <template v-if="collapsed || !section.folded">
       <div
         v-for="item in section.items"
         :key="item.id"
         class="project"
         :class="{
           active: item.id === projects.selectedProjectId,
-          grouped: !!section.group && !collapsed,
           'drop-before': rowDrop?.id === item.id && rowDrop.zone === 'before',
           'drop-after': rowDrop?.id === item.id && rowDrop.zone === 'after',
           'drop-file': rowDrop?.id === item.id && rowDrop.zone === 'file',
@@ -666,6 +719,14 @@ async function confirmRemoveNow(): Promise<void> {
               >
                 {{ pendingFor(item.id) }}
               </span>
+              <!-- Design: the elapsed time rides on the title line, not below it. -->
+              <span
+                v-if="item.session && !item.session.endedAt"
+                class="timer mono"
+                :data-testid="`timer-${item.name}`"
+              >
+                {{ timerOf(item.session.startedAt) }}
+              </span>
               <button
                 class="remove mono"
                 :data-testid="`remove-project-${item.name}`"
@@ -676,15 +737,10 @@ async function confirmRemoveNow(): Promise<void> {
               </button>
             </template>
           </div>
-          <div v-if="!collapsed" class="meta">
+          <!-- Branch belongs to the row you are working in: showing it on every
+               row turns the list into a wall of text (design). -->
+          <div v-if="!collapsed && item.id === projects.selectedProjectId" class="meta">
             <span class="branch mono">⎇ {{ item.session?.branch ?? '—' }}</span>
-            <span
-              v-if="item.session && !item.session.endedAt"
-              class="timer mono"
-              :data-testid="`timer-${item.name}`"
-            >
-              {{ timerOf(item.session.startedAt) }}
-            </span>
           </div>
           <div v-if="!collapsed && collisions.has(item.name)" class="path mono">{{ item.path }}</div>
           <div
@@ -756,49 +812,56 @@ async function confirmRemoveNow(): Promise<void> {
     >
       {{ theme === 'light' ? '☾' : '☀' }}
     </button>
-    <div class="settings-row" data-testid="open-settings" @click="emit('open-settings')">
-      <span class="gear mono">⚙</span>
-      <template v-if="!collapsed">
+    <!-- Footer (design): the counters as one inline run, a hairline usage bar,
+         and Settings as the last row — one block, not three stacked cards. -->
+    <div v-if="!collapsed" class="foot">
+      <div class="foot-line mono">
+        <span class="foot-stat" data-testid="counter-running">
+          <span class="foot-dot" style="background: var(--blue)"></span>
+          <span data-testid="counter-running-value">{{ projects.counters.running }}</span> running
+        </span>
+        <span class="foot-stat" data-testid="counter-needsyou">
+          <span class="foot-dot" style="background: var(--amber)"></span>
+          <span class="amber" data-testid="counter-needsyou-value">{{ projects.counters.needsYou }}</span>
+          waiting
+        </span>
+      </div>
+      <div class="foot-line mono">
+        <span class="foot-stat" data-testid="counter-cost">
+          <span data-testid="counter-cost-value">{{ costLabel }}</span> today
+        </span>
+        <span class="foot-stat" data-testid="counter-tokens">
+          <span data-testid="counter-tokens-value">{{ tokensLabel }}</span> tokens
+        </span>
+      </div>
+
+      <div v-if="usageSession" class="usage" data-testid="usage-meter">
+        <div class="usage-head mono">
+          <span>Session usage</span>
+          <span v-if="usagePct !== null" :style="{ color: usageColor }">
+            {{ usagePct }}% of {{ usageLimitLabel }}
+          </span>
+          <span v-else>— of {{ usageLimitLabel }}</span>
+        </div>
+        <div class="usage-bar">
+          <div class="usage-fill" :style="{ width: `${usagePct ?? 0}%`, background: usageColor }"></div>
+        </div>
+        <div class="usage-foot mono">
+          <span data-testid="usage-tokens">{{ tokensLabel }} tok</span>
+          <span v-if="usageReset">Resets in {{ usageReset }}</span>
+        </div>
+      </div>
+
+      <div class="settings-row" data-testid="open-settings" @click="emit('open-settings')">
+        <span class="gear mono">⚙</span>
         <span class="settings-label mono">Settings</span>
         <span class="model-summary mono" data-testid="model-summary">{{ modelSummary }}</span>
-      </template>
-    </div>
-
-    <div v-if="!collapsed" class="stats">
-      <div class="stat mono" data-testid="counter-running">
-        <span>Running</span><span class="val" data-testid="counter-running-value">{{ projects.counters.running }}</span>
-      </div>
-      <div class="stat mono" data-testid="counter-needsyou">
-        <span>Needs you</span
-        ><span class="val amber" data-testid="counter-needsyou-value">{{ projects.counters.needsYou }}</span>
-      </div>
-      <div class="stat mono" data-testid="counter-cost">
-        <span>Cost today</span
-        ><span class="val" data-testid="counter-cost-value">{{ costLabel }}</span>
-      </div>
-      <div class="stat mono" data-testid="counter-tokens">
-        <span>Tokens today</span
-        ><span class="val" data-testid="counter-tokens-value">{{ tokensLabel }}</span>
       </div>
     </div>
 
-    <div v-if="!collapsed && usageSession" class="usage-card" data-testid="usage-meter">
-      <div class="usage-head mono">
-        <span>Session usage</span>
-        <span v-if="usagePct !== null" :style="{ color: usageColor }">
-          {{ usagePct }}% of {{ usageLimitLabel }}
-        </span>
-        <span v-else>— of {{ usageLimitLabel }}</span>
-      </div>
-      <div class="usage-bar">
-        <div class="usage-fill" :style="{ width: `${usagePct ?? 0}%`, background: usageColor }"></div>
-      </div>
-      <div class="usage-foot mono">
-        <span data-testid="usage-tokens">{{ tokensLabel }} tok</span>
-        <span v-if="usageReset">Resets in {{ usageReset }}</span>
-      </div>
+    <div v-else class="settings-row rail" data-testid="open-settings" @click="emit('open-settings')">
+      <span class="gear mono">⚙</span>
     </div>
-
   </aside>
 
   <!-- Right-click context menu -->
@@ -896,9 +959,6 @@ async function confirmRemoveNow(): Promise<void> {
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  /* Breathing room so the last footer section (usage/stats) never hugs the
-     window edge. */
-  padding-bottom: 8px;
 }
 
 .sidebar.collapsed {
@@ -961,10 +1021,6 @@ async function confirmRemoveNow(): Promise<void> {
 
 .sidebar.collapsed .section-row {
   justify-content: center;
-}
-
-.section-row.mcp-section {
-  padding: 10px 16px 2px;
 }
 
 .initials {
@@ -1083,48 +1139,54 @@ async function confirmRemoveNow(): Promise<void> {
   color: var(--text-strong);
 }
 
+/* Design: the heading rides above the rows on a blurred bar rather than
+   scrolling away with them, so its controls are reachable from anywhere. */
 .section-row {
+  position: sticky;
+  top: 0;
+  z-index: 3;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 4px 16px 6px;
+  gap: 8px;
+  padding: 2px 14px 8px 18px;
+  background: var(--bg-sticky);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
 }
 
-/* The label takes the slack so the row's buttons stay together on the right,
-   rather than space-between spreading them across the row. */
-.section-row .section-label {
-  flex: 1;
-}
-
-.section-row .add + .add {
-  margin-left: 6px;
+.section-row.mcp-section {
+  position: static;
+  padding: 14px 18px 8px;
 }
 
 .section-label {
-  font-size: 10px;
-  letter-spacing: 0.16em;
+  font-size: 11px;
+  letter-spacing: 0.08em;
   color: var(--text-faint);
 }
 
+.section-count {
+  font-size: 11px;
+  color: var(--text-ghost);
+}
+
+/* Bare glyph controls (design): no chrome until hovered. */
 .add {
-  /* Flex-center the + glyph in a fixed square — line-height boxes leave it
-     sitting low/left of the visual middle. */
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  min-width: 21px;
+  height: 21px;
   font-size: 13px;
   color: var(--text-faint);
   line-height: 1;
-  padding: 0;
-  border: 1px solid var(--border-card-alt);
-  border-radius: var(--rc);
+  padding: 0 5px;
+  border-radius: 6px;
 }
 
 .add:hover {
   color: var(--green);
-  border-color: var(--green);
+  background: var(--bg-hover);
 }
 
 .project-list {
@@ -1133,53 +1195,76 @@ async function confirmRemoveNow(): Promise<void> {
   padding: 2px 0 8px;
 }
 
-/* --- Collapsible group headers --- */
+/* --- Collapsible group headers ---
+   Full-bleed and sticky under the PROJECTS bar (design), so the group a row
+   belongs to is still named once its header has scrolled past. */
 .group-head {
+  position: sticky;
+  top: 31px;
+  z-index: 2;
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin: 6px 8px 2px;
-  padding: 5px 8px 5px 6px;
-  border-radius: var(--rc);
+  gap: 8px;
+  margin: 8px 0 3px;
+  padding: 4px 18px 4px 16px;
+  background: var(--bg-sticky);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   cursor: pointer;
-  color: var(--text-faint);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
   user-select: none;
 }
 
-.group-head:hover {
-  background: var(--bg-hover);
-  color: var(--text);
+.group-head > * {
+  position: relative;
 }
 
-.group-head.drop-into {
-  background: var(--bg-hover);
-  box-shadow: inset 0 0 0 1px var(--green);
-  color: var(--text);
+.group-head:hover .group-name {
+  color: var(--text-strong);
 }
 
-/* The ungrouped divider is a label and a drop target, never foldable. */
-.group-head.ungrouped {
-  cursor: default;
-  opacity: 0.65;
+/* Drop highlight is an inset overlay, not a border, so the sticky bar keeps
+   its exact height as a project is dragged over it. */
+.group-head.drop-into::after {
+  content: '';
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 0;
+  bottom: 0;
+  border: 1px dashed var(--green);
+  background: rgba(52, 211, 153, 0.08);
+  border-radius: 6px;
 }
 
 .group-caret {
-  width: 9px;
+  width: 8px;
+  font-size: 8px;
   color: var(--text-faint);
 }
 
+/* The group's own colour, carried from the palette it was created with. */
+.group-swatch {
+  width: 6px;
+  min-width: 6px;
+  height: 6px;
+  border-radius: 2px;
+}
+
 .group-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-meta);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .group-count {
-  font-size: 10px;
-  opacity: 0.7;
+  font-size: 11px;
+  color: var(--text-faint);
 }
 
 .group-head .remove {
@@ -1191,37 +1276,45 @@ async function confirmRemoveNow(): Promise<void> {
   opacity: 0.7;
 }
 
-.project {
-  position: relative;
-  margin: 0 8px 2px;
-  padding: 9px 12px 9px 10px;
+/* An open group with nothing in it: the drop target IS the explanation. */
+.group-empty {
+  margin: 0 10px 2px;
+  padding: 9px 10px;
+  border: 1px dashed var(--border-strong);
   border-radius: var(--rc);
-  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-faint);
+  text-align: center;
 }
 
-/* Rows inside a group sit indented under their header. */
-.project.grouped {
-  margin-left: 18px;
+.project {
+  position: relative;
+  margin: 0 10px 1px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.12s ease;
 }
 
 .project:hover {
   background: var(--bg-hover);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  box-shadow: var(--elev);
 }
 
-/* Per-project color code on the right edge (visible collapsed and expanded). */
+/* Per-project colour code: a soft bar on the row's leading edge, carried by the
+   selected row (design). The collapsed rail keeps it on every row — there the
+   dot and two initials are all the identity a row has. */
 .accent {
   position: absolute;
-  right: 3px;
-  top: 7px;
-  bottom: 7px;
-  width: 3px;
-  opacity: 0.55;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 99px;
+  opacity: 0;
 }
 
-.project.active .accent {
+.project.active .accent,
+.sidebar.collapsed .accent {
   opacity: 1;
 }
 
@@ -1234,8 +1327,7 @@ async function confirmRemoveNow(): Promise<void> {
   position: absolute;
   inset: 0;
   background: var(--bg-active);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--rc);
+  border-radius: 8px;
 }
 
 .content {
@@ -1250,7 +1342,7 @@ async function confirmRemoveNow(): Promise<void> {
 
 .name {
   flex: 1;
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--text-name);
   white-space: nowrap;
@@ -1380,21 +1472,28 @@ async function confirmRemoveNow(): Promise<void> {
   display: flex;
   justify-content: space-between;
   gap: 8px;
-  padding-left: 16px;
-  margin-top: 3px;
+  padding-left: 17px;
+  margin-top: 2px;
 }
 
-.branch,
-.timer {
-  font-size: 10.5px;
+.branch {
+  font-size: 11px;
   color: var(--text-faint);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+/* Tabular figures so a ticking clock does not jitter the row's width. */
+.timer {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-ghost);
+}
+
 .path {
-  padding-left: 16px;
+  padding-left: 17px;
   margin-top: 2px;
   font-size: 10px;
   color: var(--text-ghost);
@@ -1408,8 +1507,8 @@ async function confirmRemoveNow(): Promise<void> {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  margin-top: 6px;
-  padding-left: 16px;
+  margin-top: 5px;
+  padding-left: 17px;
 }
 
 .agent-line {
@@ -1461,43 +1560,6 @@ async function confirmRemoveNow(): Promise<void> {
   color: var(--text-strong);
   font-size: 12px;
   padding: 2px 7px;
-}
-
-.usage-card {
-  margin: 8px 10px 10px;
-  padding: 9px 12px;
-  border: 1px solid var(--border-card);
-  border-radius: var(--rc);
-  box-shadow: 0 1px 3px rgba(90, 98, 116, 0.16);
-}
-
-.usage-head {
-  display: flex;
-  justify-content: space-between;
-  font-size: 10.5px;
-  color: var(--text-faint);
-  margin-bottom: 6px;
-}
-
-.usage-bar {
-  height: 5px;
-  border-radius: 99px;
-  background: rgba(255, 255, 255, 0.07);
-  overflow: hidden;
-}
-
-.usage-fill {
-  height: 100%;
-  border-radius: 99px;
-  transition: width 0.3s ease;
-}
-
-.usage-foot {
-  display: flex;
-  justify-content: space-between;
-  font-size: 10px;
-  color: var(--text-faint);
-  margin-top: 6px;
 }
 
 /* MCP server row (design): ⛁ teal icon, name + status, connection dot, teal
@@ -1632,42 +1694,91 @@ async function confirmRemoveNow(): Promise<void> {
   color: var(--red);
 }
 
+/* Footer: one block hairlined off from the list (design), not a stack of cards. */
+.foot {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  padding: 11px 14px 13px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.foot-line {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.foot-stat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.foot-stat .amber {
+  color: var(--amber);
+}
+
+.foot-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.usage-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-bottom: 5px;
+}
+
+/* A 3px hairline, not a meter: it reports, it does not demand attention. */
+.usage-bar {
+  height: 3px;
+  border-radius: 99px;
+  background: var(--bg-seg);
+  overflow: hidden;
+}
+
+.usage-fill {
+  height: 100%;
+  border-radius: 99px;
+  transition: width 0.3s ease;
+}
+
+.usage-foot {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10.5px;
+  color: var(--text-ghost);
+  margin-top: 5px;
+}
+
+/* Settings is the last row of the footer block, highlighted only on hover. */
 .settings-row {
-  margin: 10px 10px 0;
-  padding: 9px 12px;
   display: flex;
   align-items: center;
   gap: 9px;
-  border: 1px solid var(--border-card);
-  border-radius: var(--rc);
+  margin: 0 -8px -3px;
+  padding: 7px 8px;
+  border-radius: 8px;
   cursor: pointer;
   user-select: none;
-  box-shadow: 0 1px 3px rgba(90, 98, 116, 0.16);
 }
 
 .settings-row:hover {
   background: var(--bg-hover);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  box-shadow: var(--elev);
-  border-color: var(--border-strong);
 }
 
-/* Design collapses this to a bare centered gear, no card chrome. */
-.sidebar.collapsed .settings-row {
+/* On the rail it is a bare centred gear, with no room for anything else. */
+.settings-row.rail {
   margin: 10px 0 12px;
-  padding: 0;
-  border: none;
-  box-shadow: none;
-  background: transparent;
   justify-content: center;
-}
-
-.sidebar.collapsed .settings-row:hover {
-  background: transparent;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-  box-shadow: none;
 }
 
 .gear {
@@ -1677,45 +1788,16 @@ async function confirmRemoveNow(): Promise<void> {
 
 .settings-label {
   flex: 1;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-body);
 }
 
 .model-summary {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-faint);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 110px;
-}
-
-.stats {
-  margin: 10px 10px 0;
-  padding: 10px 12px;
-  background: var(--bg-card);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid var(--border-card);
-  border-radius: var(--rc);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  box-shadow: 0 1px 3px rgba(90, 98, 116, 0.16);
-}
-
-.stat {
-  display: flex;
-  justify-content: space-between;
-  font-size: 11px;
-  color: var(--text-meta);
-}
-
-.stat .val {
-  color: var(--text);
-}
-
-.stat .val.amber {
-  color: var(--amber);
 }
 </style>

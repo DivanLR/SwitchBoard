@@ -123,6 +123,56 @@ test('dragging a project onto a group header joins that group', async ({ page })
   await expect(page.getByTestId('group-count-ungrouped')).toHaveText('2')
 })
 
+test('an empty group says what it is for, and the tail is labelled Ungrouped', async ({ page }) => {
+  await createGroup(page, 'Work')
+  // A group with nothing in it is a drop target, and says so rather than
+  // reading as a broken heading.
+  await expect(page.getByTestId('group-empty-Work')).toContainText('Drag a project here')
+
+  await page.getByTestId('sidebar-project-alpha').click({ button: 'right' })
+  await page.getByTestId('ctx-move-to-Work').click()
+  await expect(page.getByTestId('group-empty-Work')).toHaveCount(0)
+  await expect(page.getByTestId('group-head-ungrouped')).toContainText('Ungrouped')
+})
+
+test('the ungrouped tail folds like any other section', async ({ page }) => {
+  await createGroup(page, 'Work')
+  await page.getByTestId('sidebar-project-alpha').click({ button: 'right' })
+  await page.getByTestId('ctx-move-to-Work').click()
+
+  await page.getByTestId('group-head-ungrouped').click()
+  await expect(page.getByTestId('sidebar-project-beta')).toHaveCount(0)
+  // Folding the tail leaves the real group alone.
+  await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
+
+  await page.getByTestId('group-head-ungrouped').click()
+  await expect(page.getByTestId('sidebar-project-beta')).toBeVisible()
+})
+
+test('filtering opens a folded group that holds a match, and hides the rest', async ({ page }) => {
+  await createGroup(page, 'Work')
+  await page.getByTestId('sidebar-project-alpha').click({ button: 'right' })
+  await page.getByTestId('ctx-move-to-Work').click()
+  await page.getByTestId('group-head-Work').click() // fold it shut
+  await expect(page.getByTestId('sidebar-project-alpha')).toHaveCount(0)
+
+  // A match inside a folded group must surface — filtering beats folding.
+  await page.getByTestId('project-filter').fill('alph')
+  await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
+  // And a section with nothing matching drops out rather than sitting empty.
+  await expect(page.getByTestId('group-head-ungrouped')).toHaveCount(0)
+
+  // Clearing restores the fold rather than losing it.
+  await page.getByTestId('project-filter-clear').click()
+  await expect(page.getByTestId('sidebar-project-alpha')).toHaveCount(0)
+})
+
+test('the header counts the projects on screen', async ({ page }) => {
+  await expect(page.getByTestId('project-count')).toHaveText('2')
+  await page.getByTestId('project-filter').fill('alph')
+  await expect(page.getByTestId('project-count')).toHaveText('1')
+})
+
 test('the collapsed rail ignores grouping and still lists every project', async ({ page }) => {
   await createGroup(page, 'Work')
   await page.getByTestId('sidebar-project-alpha').click({ button: 'right' })

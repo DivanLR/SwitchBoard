@@ -18,6 +18,7 @@ html.sb-light {
      the design's explicit light override; the dark :root stays byte-identical. */
   --bg: #ffffff;
   --bg-panel: rgba(250,250,251, 0.72);
+  --bg-sticky: rgba(250,250,251, 0.82);
   --bg-card: rgba(255,255,255, 0.55);
   --bg-card-alt: rgba(255, 255, 255, 0.5);
   --bg-code: #ffffff;
@@ -62,6 +63,7 @@ html.sb-light {
   --detail: #5c6a75;
   /* Database/MCP accent (design light: sky-blue, not teal). */
   --teal: #2b8fa0;
+  --purple: #6d4fb8;
   --surface-inset: #fafafb;
   --surface-inset-line: #d9d9dd;
   --surface-line: #d9d9dd;
@@ -98,6 +100,9 @@ html.sb-light body {
      code/terminal). */
   --bg: #121215;
   --bg-panel: rgba(10,10,12, 0.72);
+  /* Sticky list headings sit a shade denser than the pane they float over, so
+     rows scrolling underneath stay readable through them. */
+  --bg-sticky: rgba(10,10,12, 0.82);
   --bg-card: rgba(22,22,26, 0.55);
   --bg-card-alt: rgba(18, 18, 22, 0.5);
   --bg-code: #0a0a0c;
@@ -145,6 +150,8 @@ html.sb-light body {
   --detail: #a6b3bd;
   /* Database/MCP accent (teal, distinct from the emerald green). */
   --teal: #4fb2c4;
+  /* Sixth accent, used only to colour-code projects and groups in the sidebar. */
+  --purple: #9b7bd4;
   /* Opaque surface + line tokens for view chrome (agent cards, spec panels,
      sidebar rows). These dark values are the originals the components hardcoded,
      so the dark view stays byte-identical; html.sb-light redefines them above. */

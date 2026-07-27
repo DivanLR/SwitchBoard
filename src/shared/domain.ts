@@ -313,6 +313,10 @@ export interface ProjectGroup {
   name: string
   /** Persisted so a folded group stays folded across restarts. */
   collapsed: boolean
+  /** Swatch colour on the group header, taken from the sidebar accent palette
+   *  when the group is created. Absent on groups saved before colours existed;
+   *  those fall back to their position in the list. */
+  color?: string
 }
 
 /** Shape of one model card in the settings picker. Built at runtime from the

@@ -12,10 +12,18 @@ test.beforeEach(async ({ page }) => {
 
 test('sidebar shows name, branch, status dot and a ticking timer (FR-003/004)', async ({ page }) => {
   const alpha = page.getByTestId('sidebar-project-alpha')
+  const beta = page.getByTestId('sidebar-project-beta')
   await expect(alpha).toContainText('alpha')
-  await expect(alpha).toContainText('main')
   await expect(page.getByTestId('status-badge-alpha')).toHaveAttribute('data-status', 'working')
-  await expect(page.getByTestId('sidebar-project-beta')).toContainText('feature/x')
+
+  // The branch belongs to the row being worked in: the selected project shows
+  // it, the rest stay one line (design), and selecting another moves it.
+  await expect(alpha).toContainText('main')
+  await expect(beta).not.toContainText('feature/x')
+  await beta.click()
+  await expect(beta).toContainText('feature/x')
+  await expect(alpha).not.toContainText('main')
+  await alpha.click()
 
   const first = await page.getByTestId('timer-alpha').textContent()
   await expect
