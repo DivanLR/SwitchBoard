@@ -28,8 +28,9 @@ import {
 import { defaultRiskRules } from '@main/inbox/risk-rules'
 import { defaultSwallowRules } from '@main/stream/swallow-rules'
 import { existsSync, readdirSync, statSync } from 'node:fs'
-import { detectStacks } from '@shared/test-catalog'
+import { detectStacks, stackById } from '@shared/test-catalog'
 import { attemptsPrompt, checkPrompt, judgePrompt } from '@main/evals/eval-dispatch'
+import { evidencePrompt, planSuites, verifyPrompt } from '@main/evals/verify-dispatch'
 import { comboDocPath, readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
 import { comboKey } from '@shared/mcp-combo'
 import { installSpecKit, readSpecDetail, readSpecKitState } from '@main/specs/spec-kit'
@@ -324,6 +325,61 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       if (req.kind !== 'attempts') manager.watchEvalMarker(session.id, req.id, req.kind)
       manager.sendMessage(session.id, text)
       return { sessionId: session.id, runs: repos.evals.listForProject(req.projectId) }
+    },
+    // Verification runs: the session executes the suites and reports one result
+    // line; the run row is what the gates and panels read. Nothing here parses a
+    // coverage file or calls a quality service — the session already has the
+    // tools, and the app never invents a figure it did not measure (FR-072).
+    'verify.list': (req) => repos.verifyRuns.listForProject(req.projectId),
+    'verify.start': async (req) => {
+      const stack = stackById(req.stackId)
+      if (!stack) throw { code: 'NOT_FOUND', message: 'Unknown stack.' } satisfies IpcError
+      let session = repos.sessions.activeForProject(req.projectId)
+      if (!session) session = await manager.startSession(req.projectId)
+      // A bypass session runs in the sandbox container, which ships node and
+      // nothing else — those suites are named as skipped up front rather than
+      // attempted and reported as failures of the code (FR-057).
+      const sandboxed = session.bypassPermissions === true
+      const plan = planSuites(stack.suites, req.suiteIds, sandboxed)
+      if (plan.length === 0) {
+        throw { code: 'INVALID_PATH', message: 'Choose at least one suite to run.' } satisfies IpcError
+      }
+      if (plan.every((p) => p.unavailable)) {
+        throw {
+          code: 'INVALID_PATH',
+          message: 'None of the chosen suites can run in the bypass container — end it, or pick node suites.',
+        } satisfies IpcError
+      }
+      const run = repos.verifyRuns.start({
+        projectId: req.projectId,
+        stackId: stack.id,
+        sessionId: session.id,
+        branch: session.branch ?? null,
+        requested: plan.map((p) => p.suite.id),
+      })
+      manager.watchVerifyReport(session.id, run.id, 'suites')
+      manager.sendMessage(session.id, verifyPrompt(plan, stack.label, sandboxed))
+      return { sessionId: session.id, runs: repos.verifyRuns.listForProject(req.projectId) }
+    },
+    'verify.evidence': async (req) => {
+      const run = req.runId
+        ? repos.verifyRuns.byId(req.runId)
+        : (repos.verifyRuns.listForProject(req.projectId)[0] ?? null)
+      if (!run) {
+        throw { code: 'NOT_FOUND', message: 'Run a verification pass first — evidence attaches to a run.' } satisfies IpcError
+      }
+      let session = repos.sessions.activeForProject(req.projectId)
+      if (!session) session = await manager.startSession(req.projectId)
+      // The acceptance lines still waiting on a verdict say what the evidence has
+      // to show; without any, the session works from the diff alone.
+      const hints = repos.evals
+        .listForProject(req.projectId)
+        .filter((line) => line.verdict === 'pending')
+        .slice(0, 5)
+        .map((line) => line.acceptance)
+      manager.watchVerifyReport(session.id, run.id, 'evidence')
+      manager.sendMessage(session.id, evidencePrompt(hints, session.bypassPermissions === true))
+      return { sessionId: session.id, runs: repos.verifyRuns.listForProject(req.projectId) }
     },
     'queue.list': (req) => manager.listQueue(req.projectId),
     'queue.add': (req) => {

@@ -16,7 +16,7 @@ import type {
   SessionEvent,
   SessionStatus,
 } from '@shared/domain'
-import { SWALLOWABLE_KINDS } from '@shared/domain'
+import { SWALLOWABLE_KINDS, verifyVerdict } from '@shared/domain'
 import type { SessionStatusPush } from '@shared/ipc-types'
 import { newId, nowIso, type Repositories } from '@main/store/repositories'
 import { readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
@@ -30,6 +30,7 @@ import {
   terseSystemPromptAppend,
 } from './session-shaping'
 import { parseEvalMarker } from '@main/evals/eval-dispatch'
+import { parseVerifyReport } from '@main/evals/verify-dispatch'
 import { mainLoopModel } from './model-routing'
 import { resolveClaudeExecutable } from './claude-executable'
 import { ensureSandboxImage, refMounts, sweepOrphanedContainers } from './docker-sandbox'
@@ -57,6 +58,9 @@ interface SessionManagerCallbacks {
   /** Fired when a session reports an acceptance line's check outcome or judge
    *  verdict, so the Tests tab reflects the gate without a manual refresh. */
   onEvalsChanged: (projectId: string) => void
+  /** Fired when a verification run's report lands (or the run closes without
+   *  one), so the Tests tab's gates and panels update as it finishes. */
+  onVerifyChanged: (projectId: string) => void
   /** Fired when a session reports its available slash commands / skills (init message). */
   onProjectCommands: (projectId: string, commands: ProjectCommand[]) => void
   gate: PermissionGate
@@ -542,6 +546,58 @@ export class SessionManager {
     this.callbacks.onEvalsChanged(entry.row.projectId)
   }
 
+  // --- Verification runs (spec 002 US1-US4) ---
+  // Same shape as the gate above: the run's figures exist only in the session's
+  // output, so they are read back out of it. A run whose session finishes the
+  // turn without reporting is INCONCLUSIVE with the reason kept — never a pass,
+  // and never left spinning (FR-047).
+  private verifyWatch = new Map<string, { runId: string; kind: 'suites' | 'evidence' }>()
+
+  watchVerifyReport(sessionId: string, runId: string, kind: 'suites' | 'evidence'): void {
+    this.verifyWatch.set(sessionId, { runId, kind })
+  }
+
+  private scanMarkers(entry: HostedEntry, kind: EventKind, payload: unknown): void {
+    this.scanEvalMarker(entry, kind, payload)
+    this.scanVerifyReport(entry, kind, payload)
+  }
+
+  private scanVerifyReport(entry: HostedEntry, kind: EventKind, payload: unknown): void {
+    const watch = this.verifyWatch.get(entry.row.id)
+    if (!watch || !SessionManager.EVAL_SCAN_KINDS.has(kind)) return
+    const text = (payload as { text?: string }).text
+    if (!text) return
+    const report = parseVerifyReport(text)
+    if (!report) return
+    this.verifyWatch.delete(entry.row.id)
+    if (watch.kind === 'evidence') {
+      this.repos.verifyRuns.attachEvidence(watch.runId, report.evidence)
+    } else {
+      this.repos.verifyRuns.finish(watch.runId, verifyVerdict(report), report, null)
+    }
+    this.callbacks.onVerifyChanged(entry.row.projectId)
+  }
+
+  /**
+   * The turn ended. A run still being watched never got its report line, so it is
+   * closed as inconclusive rather than left running — the session's own output
+   * stays as the record of what happened.
+   */
+  private closeUnreportedVerify(entry: HostedEntry): void {
+    const watch = this.verifyWatch.get(entry.row.id)
+    if (!watch) return
+    this.verifyWatch.delete(entry.row.id)
+    if (watch.kind === 'suites') {
+      this.repos.verifyRuns.finish(
+        watch.runId,
+        'inconclusive',
+        null,
+        'The session finished the turn without reporting a result line — open its output to see what ran.',
+      )
+    }
+    this.callbacks.onVerifyChanged(entry.row.projectId)
+  }
+
   /** Sink for the permission broker: markers and questions enter the stream here. */
   sinkFor(sessionId: string): EventSink {
     const entry = this.hosted.get(sessionId)
@@ -592,7 +648,7 @@ export class SessionManager {
         if (UPDATABLE_KINDS.has(kind)) {
           entry.live.set(event.id, { event, persisted: persist })
         }
-        this.scanEvalMarker(entry, kind, payload)
+        this.scanMarkers(entry, kind, payload)
         this.callbacks.onEvent({ ...event })
         return event as SessionEvent<K>
       },
@@ -628,13 +684,16 @@ export class SessionManager {
             liveEntry.persisted = true
           }
         }
-        this.scanEvalMarker(entry, liveEntry.event.kind, payload)
+        this.scanMarkers(entry, liveEntry.event.kind, payload)
         this.callbacks.onEvent({ ...liveEntry.event })
       },
     }
   }
 
   private handleStatusChange(entry: HostedEntry, status: SessionStatus, detail?: string | null): void {
+    // The turn is over ('needs_you' is a pending permission, not an ending): a
+    // verification run that never reported is closed here rather than spinning.
+    if (status === 'done' || status === 'error') this.closeUnreportedVerify(entry)
     entry.row.status = status
     entry.row.statusDetail = detail ?? null
     this.repos.sessions.update(entry.row.id, { status, statusDetail: detail ?? null })
@@ -667,6 +726,7 @@ export class SessionManager {
   }
 
   private handleExit(entry: HostedEntry, reason: 'completed' | 'stopped' | 'crashed', detail?: string): void {
+    this.closeUnreportedVerify(entry)
     if (reason === 'crashed') {
       entry.row.status = 'error'
       entry.row.statusDetail = detail ?? 'Session process ended unexpectedly'

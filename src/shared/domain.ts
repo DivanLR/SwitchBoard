@@ -582,6 +582,131 @@ export function canPassEval(run: Pick<EvalRun, 'checkCmd' | 'checkStatus'>): boo
   return !run.checkCmd || run.checkStatus === 'pass'
 }
 
+// --- Verification runs (spec 002 US1-US4: results, coverage, quality, evidence) ---
+
+/**
+ * One figure plus the tool that produced it (FR-072). `value: null` means NOT
+ * MEASURED and must render as "—": the app never derives, estimates or
+ * substitutes a number, and every number it does show names its source.
+ */
+export interface Measured {
+  value: number | null
+  /** e.g. "dotnet test --collect", "sonarqube", "stryker". Null when unmeasured. */
+  source: string | null
+}
+
+/** 'unavailable' is the environment's limit (no .NET SDK in the sandbox), never
+ *  the code's fault (FR-057). 'not_run' is a suite a stopped run never reached
+ *  (FR-075) — both are distinct from a failure. */
+export type SuiteStatus = 'pass' | 'fail' | 'skipped' | 'unavailable' | 'not_run'
+
+export interface SuiteResult {
+  /** Catalog suite id, so the panel can name it even if the report shortens it. */
+  id: string
+  label: string
+  status: SuiteStatus
+  /** One line: counts, the first failure, or why it could not run. */
+  detail: string
+}
+
+/** Proof the code was executed — real input and the real result (FR-048). */
+export interface EvidenceItem {
+  kind: 'run' | 'screenshot'
+  /** The request sent, the case exercised, or the screen captured. */
+  what: string
+  /** What actually came back. */
+  result: string
+  /** Absolute path to a file the session saved (a screenshot), if any. */
+  path: string | null
+}
+
+/** What one verification run measured. Every block is independently nullable:
+ *  a run that only executed unit tests reports coverage and quality as unmeasured
+ *  rather than as zero. */
+export interface VerifyReport {
+  suites: SuiteResult[]
+  coverage: {
+    line: Measured
+    /** Coverage of the changed lines alone — the threshold that matters (FR-084). */
+    changed: Measured
+    /** The touched files a test reaches least, worst first. */
+    files: { path: string; pct: number }[]
+  }
+  quality: {
+    /** The external code-quality service's own gate. 'not_configured' when no
+     *  such server is connected — absence is stated, never read as a pass. */
+    gate: 'pass' | 'fail' | 'not_configured' | null
+    gateSource: string | null
+    /** Percent duplicated lines. */
+    duplication: Measured
+    /** The service's technical-debt figure, verbatim (e.g. "2d 4h"). */
+    debt: string | null
+    /** Percent of mutants killed. */
+    mutation: Measured
+    /** Surviving mutants worth looking at, as the tool described them. */
+    survivors: string[]
+    archViolations: Measured
+    /** Named rule violations, worst first, so a count is never the whole story. */
+    findings: string[]
+  }
+  evidence: EvidenceItem[]
+}
+
+export type VerifyStatus = 'running' | 'pass' | 'fail' | 'inconclusive'
+
+/**
+ * One verification pass over the working tree: which suites ran, what they
+ * measured, and the session it ran in (so every figure traces back to the output
+ * that produced it — FR-046/FR-051).
+ */
+export interface VerifyRun {
+  id: string
+  projectId: string
+  stackId: string
+  sessionId: string | null
+  branch: string | null
+  /** Suite ids the run was asked to cover, so "not run" can be told from "not asked". */
+  requested: string[]
+  status: VerifyStatus
+  report: VerifyReport | null
+  /** Why an inconclusive run proved nothing, in one line (FR-047). */
+  note: string | null
+  startedAt: string
+  finishedAt: string | null
+}
+
+/**
+ * A run's verdict comes from its test results alone: a missed coverage or
+ * quality threshold is reported, but never turns a passing run into a failing
+ * one (FR-071). A run where nothing actually executed is INCONCLUSIVE, never a
+ * pass (FR-047).
+ */
+export function verifyVerdict(report: VerifyReport): Exclude<VerifyStatus, 'running'> {
+  const executed = report.suites.filter((s) => s.status === 'pass' || s.status === 'fail')
+  if (executed.some((s) => s.status === 'fail')) return 'fail'
+  return executed.length > 0 ? 'pass' : 'inconclusive'
+}
+
+/** The empty report a run starts from, so every panel can render before results. */
+export function emptyVerifyReport(): VerifyReport {
+  const unmeasured = (): Measured => ({ value: null, source: null })
+  return {
+    suites: [],
+    coverage: { line: unmeasured(), changed: unmeasured(), files: [] },
+    quality: {
+      gate: null,
+      gateSource: null,
+      duplication: unmeasured(),
+      debt: null,
+      mutation: unmeasured(),
+      survivors: [],
+      archViolations: unmeasured(),
+      findings: [],
+    },
+    evidence: [],
+  }
+}
+
 export interface QueuedTask {
   id: string
   projectId: string

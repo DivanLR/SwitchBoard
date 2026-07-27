@@ -7,6 +7,7 @@ import type {
   DecisionRecord,
   Draft,
   EvalRun,
+  EvidenceItem,
   EventKind,
   EventPayloadMap,
   McpScan,
@@ -26,8 +27,10 @@ import type {
   SessionStatus,
   Settings,
   SwallowRule,
+  VerifyReport,
+  VerifyRun,
 } from '@shared/domain'
-import { DEFAULT_SETTINGS } from '@shared/domain'
+import { DEFAULT_SETTINGS, emptyVerifyReport } from '@shared/domain'
 
 export function newId(): string {
   return randomUUID()
@@ -846,6 +849,141 @@ export class EvalsRepo {
   }
 }
 
+/**
+ * Verification runs. History is bounded by count per project (FR-043): the last
+ * VERIFY_HISTORY runs survive, older ones are dropped oldest-first on insert.
+ *
+ * ponytail: pruning on insert, not a scheduled job — a project gains a run only
+ * by starting one, so there is no moment where the table grows unattended.
+ */
+const VERIFY_HISTORY = 20
+
+export class VerifyRunsRepo {
+  constructor(private db: AppDatabase) {}
+
+  start(input: {
+    projectId: string
+    stackId: string
+    sessionId: string | null
+    branch: string | null
+    requested: string[]
+  }): VerifyRun {
+    const run: VerifyRun = {
+      id: newId(),
+      projectId: input.projectId,
+      stackId: input.stackId,
+      sessionId: input.sessionId,
+      branch: input.branch,
+      requested: input.requested,
+      status: 'running',
+      report: null,
+      note: null,
+      startedAt: nowIso(),
+      finishedAt: null,
+    }
+    this.db
+      .prepare(
+        `INSERT INTO verify_runs
+           (id, projectId, stackId, sessionId, branch, requested, status, report, note, startedAt, finishedAt)
+         VALUES (?, ?, ?, ?, ?, ?, 'running', NULL, NULL, ?, NULL)`,
+      )
+      .run(
+        run.id,
+        run.projectId,
+        run.stackId,
+        run.sessionId,
+        run.branch,
+        JSON.stringify(run.requested),
+        run.startedAt,
+      )
+    this.db
+      .prepare(
+        // Ties on `startedAt` (several runs inside the same millisecond) break on
+        // insert order — `id` is a random UUID, so ordering by it would drop an
+        // arbitrary run instead of the oldest.
+        `DELETE FROM verify_runs WHERE projectId = ? AND id NOT IN (
+           SELECT id FROM verify_runs WHERE projectId = ? ORDER BY startedAt DESC, rowid DESC LIMIT ?
+         )`,
+      )
+      .run(input.projectId, input.projectId, VERIFY_HISTORY)
+    return run
+  }
+
+  listForProject(projectId: string): VerifyRun[] {
+    return (
+      this.db
+        .prepare('SELECT * FROM verify_runs WHERE projectId = ? ORDER BY startedAt DESC, rowid DESC')
+        .all(projectId) as VerifyRunRow[]
+    ).map(hydrateVerifyRun)
+  }
+
+  byId(id: string): VerifyRun | null {
+    const row = this.db.prepare('SELECT * FROM verify_runs WHERE id = ?').get(id) as
+      | VerifyRunRow
+      | undefined
+    return row ? hydrateVerifyRun(row) : null
+  }
+
+  /** The run a result belongs to when the session reports one: the newest still
+   *  running, so a late report can never overwrite a finished run's figures. */
+  runningFor(projectId: string): VerifyRun | null {
+    const row = this.db
+      .prepare(
+        "SELECT * FROM verify_runs WHERE projectId = ? AND status = 'running' ORDER BY startedAt DESC, rowid DESC LIMIT 1",
+      )
+      .get(projectId) as VerifyRunRow | undefined
+    return row ? hydrateVerifyRun(row) : null
+  }
+
+  /** Record what the session reported. `note` states why an inconclusive run
+   *  proved nothing (FR-047); the run is never left as running. */
+  finish(id: string, status: VerifyRun['status'], report: VerifyReport | null, note: string | null): void {
+    this.db
+      .prepare('UPDATE verify_runs SET status = ?, report = ?, note = ?, finishedAt = ? WHERE id = ?')
+      .run(status, report ? JSON.stringify(report) : null, note, nowIso(), id)
+  }
+
+  /** Evidence is captured after the fact and attaches to the run it proves
+   *  (FR-059), without touching its verdict or its figures. */
+  attachEvidence(id: string, evidence: EvidenceItem[]): void {
+    const run = this.byId(id)
+    if (!run) return
+    const report = run.report ?? emptyVerifyReport()
+    report.evidence = [...report.evidence, ...evidence]
+    this.db.prepare('UPDATE verify_runs SET report = ? WHERE id = ?').run(JSON.stringify(report), id)
+  }
+}
+
+interface VerifyRunRow {
+  id: string
+  projectId: string
+  stackId: string
+  sessionId: string | null
+  branch: string | null
+  requested: string
+  status: VerifyRun['status']
+  report: string | null
+  note: string | null
+  startedAt: string
+  finishedAt: string | null
+}
+
+function hydrateVerifyRun(row: VerifyRunRow): VerifyRun {
+  return {
+    ...row,
+    requested: parseJson<string[]>(row.requested) ?? [],
+    report: row.report ? parseJson<VerifyReport>(row.report) : null,
+  }
+}
+
+function parseJson<T>(raw: string): T | null {
+  try {
+    return JSON.parse(raw) as T
+  } catch {
+    return null
+  }
+}
+
 export interface Repositories {
   projects: ProjectsRepo
   sessions: SessionsRepo
@@ -861,6 +999,7 @@ export interface Repositories {
   taskQueue: TaskQueueRepo
   mcpScans: McpScansRepo
   evals: EvalsRepo
+  verifyRuns: VerifyRunsRepo
 }
 
 export function createRepositories(db: AppDatabase): Repositories {
@@ -879,5 +1018,6 @@ export function createRepositories(db: AppDatabase): Repositories {
     taskQueue: new TaskQueueRepo(db),
     mcpScans: new McpScansRepo(db),
     evals: new EvalsRepo(db),
+    verifyRuns: new VerifyRunsRepo(db),
   }
 }

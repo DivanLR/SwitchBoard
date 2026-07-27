@@ -11,7 +11,14 @@
 // line anyway. Parse package.json/csproj only if that stops being true.
 
 /** The kind of thing a suite proves, so the UI can group API vs FE vs UI work. */
-export type SuiteKind = 'api' | 'unit' | 'ui' | 'coverage' | 'contract' | 'quality'
+export type SuiteKind = 'api' | 'unit' | 'ui' | 'coverage' | 'contract' | 'quality' | 'mutation'
+
+/**
+ * The toolchain a suite needs on PATH wherever the session runs. Named because a
+ * bypass session runs inside the Linux sandbox container, which ships node and
+ * nothing else — see SANDBOX_TOOLS.
+ */
+export type SuiteTool = 'dotnet' | 'node' | 'python' | 'browser'
 
 export interface TestSuite {
   /** Stable id, unique within a stack. */
@@ -22,6 +29,10 @@ export interface TestSuite {
   acceptance: string
   /** The command that proves it. Run in the project root through the session. */
   command: string
+  /** What has to exist for the command to run at all. */
+  needs: SuiteTool
+  /** Minutes, not seconds: excluded from a default run, opt in per run (FR-058). */
+  heavy?: boolean
 }
 
 export interface TestStack {
@@ -44,6 +55,7 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Unit tests',
         acceptance: 'the solution builds and every unit test passes',
         command: 'dotnet test --nologo',
+        needs: 'dotnet',
       },
       {
         id: 'dotnet-coverage',
@@ -51,6 +63,7 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Coverage',
         acceptance: 'the changed code is covered by tests',
         command: 'dotnet test --nologo --collect:"XPlat Code Coverage"',
+        needs: 'dotnet',
       },
       {
         id: 'dotnet-api',
@@ -58,6 +71,7 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'API integration tests',
         acceptance: 'every endpoint answers as its contract says (status, shape, auth)',
         command: 'dotnet test --nologo --filter Category=Integration',
+        needs: 'dotnet',
       },
       {
         id: 'dotnet-http',
@@ -65,6 +79,7 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'HTTP smoke (.http file)',
         acceptance: 'the running API answers the requests in the .http file as expected',
         command: 'dotnet run & then send each request in the project\'s .http file and report status + body',
+        needs: 'dotnet',
       },
       {
         id: 'dotnet-arch',
@@ -72,6 +87,24 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Architecture rules',
         acceptance: 'no layer depends on something it may not depend on',
         command: 'dotnet test --nologo --filter Category=Architecture',
+        needs: 'dotnet',
+      },
+      {
+        id: 'dotnet-format',
+        kind: 'quality',
+        label: 'Format and analyzers',
+        acceptance: 'formatting and analyzer rules are clean',
+        command: 'dotnet format --verify-no-changes && dotnet build --nologo -warnaserror',
+        needs: 'dotnet',
+      },
+      {
+        id: 'dotnet-mutation',
+        kind: 'mutation',
+        label: 'Mutation testing (Stryker)',
+        acceptance: 'the tests fail when the code is broken on purpose',
+        command: 'dotnet stryker',
+        needs: 'dotnet',
+        heavy: true,
       },
     ],
   },
@@ -86,6 +119,7 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Unit tests (Karma/Jest)',
         acceptance: 'every component and service spec passes',
         command: 'npx ng test --watch=false --browsers=ChromeHeadless',
+        needs: 'browser',
       },
       {
         id: 'ng-coverage',
@@ -93,6 +127,7 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Coverage',
         acceptance: 'the changed components are covered',
         command: 'npx ng test --watch=false --code-coverage --browsers=ChromeHeadless',
+        needs: 'browser',
       },
       {
         id: 'ng-e2e',
@@ -100,6 +135,7 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'UI end-to-end',
         acceptance: 'the affected screens work end to end in a real browser',
         command: 'npx playwright test',
+        needs: 'browser',
       },
       {
         id: 'ng-build',
@@ -107,6 +143,16 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Production build',
         acceptance: 'the production build succeeds with no new warnings',
         command: 'npx ng build --configuration production',
+        needs: 'node',
+      },
+      {
+        id: 'ng-mutation',
+        kind: 'mutation',
+        label: 'Mutation testing (Stryker)',
+        acceptance: 'the specs fail when the code is broken on purpose',
+        command: 'npx stryker run',
+        needs: 'browser',
+        heavy: true,
       },
     ],
   },
@@ -121,6 +167,15 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Unit tests',
         acceptance: 'every unit test passes',
         command: 'npm test',
+        needs: 'node',
+      },
+      {
+        id: 'node-coverage',
+        kind: 'coverage',
+        label: 'Coverage',
+        acceptance: 'the changed code is covered by tests',
+        command: 'npx vitest run --coverage',
+        needs: 'node',
       },
       {
         id: 'node-e2e',
@@ -128,6 +183,7 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'UI end-to-end (Playwright)',
         acceptance: 'the affected screens work end to end',
         command: 'npx playwright test',
+        needs: 'browser',
       },
       {
         id: 'node-ui-shot',
@@ -136,6 +192,7 @@ export const TEST_STACKS: readonly TestStack[] = [
         acceptance: 'the affected screen looks right',
         command:
           'launch the app (npm run dev), screenshot the affected screen with Playwright, and report what differs from the acceptance line',
+        needs: 'browser',
       },
       {
         id: 'node-api',
@@ -144,6 +201,7 @@ export const TEST_STACKS: readonly TestStack[] = [
         acceptance: 'every route answers with the status and shape it should',
         command:
           'start the server, then send one request per route and report status, shape, and any 4xx/5xx',
+        needs: 'node',
       },
       {
         id: 'node-types',
@@ -151,6 +209,16 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Types and lint',
         acceptance: 'types and lint are clean',
         command: 'npm run typecheck && npm run lint',
+        needs: 'node',
+      },
+      {
+        id: 'node-mutation',
+        kind: 'mutation',
+        label: 'Mutation testing (Stryker)',
+        acceptance: 'the tests fail when the code is broken on purpose',
+        command: 'npx stryker run',
+        needs: 'node',
+        heavy: true,
       },
     ],
   },
@@ -165,6 +233,7 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Unit tests',
         acceptance: 'every test passes',
         command: 'python -m pytest -q',
+        needs: 'python',
       },
       {
         id: 'py-coverage',
@@ -172,6 +241,7 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Coverage',
         acceptance: 'the changed code is covered',
         command: 'python -m pytest -q --cov',
+        needs: 'python',
       },
       {
         id: 'py-api',
@@ -179,46 +249,93 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'HTTP smoke',
         acceptance: 'every route answers with the status and shape it should',
         command: 'start the app, then send one request per route and report status, shape, and errors',
+        needs: 'python',
+      },
+      {
+        id: 'py-quality',
+        kind: 'quality',
+        label: 'Lint and types',
+        acceptance: 'lint and types are clean',
+        command: 'python -m ruff check . && python -m mypy .',
+        needs: 'python',
+      },
+      {
+        id: 'py-mutation',
+        kind: 'mutation',
+        label: 'Mutation testing (mutmut)',
+        acceptance: 'the tests fail when the code is broken on purpose',
+        command: 'python -m mutmut run',
+        needs: 'python',
+        heavy: true,
       },
     ],
   },
 ]
 
 /**
+ * What the bypass sandbox image actually ships: node:22-slim plus git and
+ * ripgrep (docker-sandbox.ts). No .NET SDK, no Python, no browser — so those
+ * suites cannot run in a bypass session, and saying so BEFORE the run is the
+ * point: an environment limit must never be reported as a failure of the
+ * developer's code (FR-057).
+ */
+export const SANDBOX_TOOLS: readonly SuiteTool[] = ['node']
+
+export function runnableInSandbox(suite: TestSuite): boolean {
+  return SANDBOX_TOOLS.includes(suite.needs)
+}
+
+/** Why a suite is unavailable here, in the developer's words — or null if it can run. */
+export function unavailableReason(suite: TestSuite, sandboxed: boolean): string | null {
+  if (!sandboxed || runnableInSandbox(suite)) return null
+  return `${suite.needs} is not in the bypass container`
+}
+
+/** The suites a plain "run verification" covers: everything runnable, minus the
+ *  heavy ones, which are opt-in per run (FR-058). */
+export function defaultSelection(suites: readonly TestSuite[], sandboxed: boolean): string[] {
+  return suites.filter((s) => !s.heavy && !unavailableReason(s, sandboxed)).map((s) => s.id)
+}
+
+/**
  * The six verification gates the Tests section reports, in the design's order.
  *
- * `built` is the honest bit: a gate is built when the app can actually produce
- * its verdict today, which for now means "run one command through the session
- * and read the PASS/FAIL it reports". Coverage, mutation and the code-quality
- * service need a report parsed out of a tool the app does not read yet, so their
- * tiles and panels say so rather than showing a number nothing measured
- * (FR-072: never derive, estimate or substitute a figure we did not measure).
+ * Every gate is produced by a verification run: the session runs the suites and
+ * reports one machine-readable report line, and the tile shows what that report
+ * measured. A figure the run did not measure stays "—" with the reason — the app
+ * never derives, estimates or substitutes one (FR-072).
  */
 export interface VerifyGate {
   id: 'unit' | 'integration' | 'architecture' | 'mutation' | 'coverage' | 'quality-service'
   /** Tile label, in the design's caps. */
   name: string
-  /** Which suite kind produces it, or null when nothing does yet. */
-  from: SuiteKind | null
   /** The sub-tab the tile jumps to. */
   panel: 'qa' | 'coverage' | 'quality' | 'evidence'
-  built: boolean
   /** Threshold shown on the gate bar. */
   target: string
 }
 
 export const VERIFY_GATES: readonly VerifyGate[] = [
-  { id: 'unit', name: 'UNIT', from: 'unit', panel: 'qa', built: true, target: 'all pass' },
-  { id: 'integration', name: 'INTEGRATION', from: 'api', panel: 'qa', built: true, target: 'all pass' },
-  { id: 'architecture', name: 'ARCHITECTURE', from: 'quality', panel: 'quality', built: true, target: '0 violations' },
-  { id: 'mutation', name: 'MUTATION', from: null, panel: 'quality', built: false, target: '≥ 70%' },
-  { id: 'coverage', name: 'COVERAGE', from: 'coverage', panel: 'coverage', built: false, target: '≥ 80% line · ≥ 90% changed' },
-  { id: 'quality-service', name: 'CODE QUALITY', from: null, panel: 'quality', built: false, target: 'gate passes · ≤ 3% duplication' },
+  { id: 'unit', name: 'UNIT', panel: 'evidence', target: 'all pass' },
+  { id: 'integration', name: 'INTEGRATION', panel: 'evidence', target: 'all pass' },
+  { id: 'architecture', name: 'ARCHITECTURE', panel: 'quality', target: '0 violations' },
+  { id: 'mutation', name: 'MUTATION', panel: 'quality', target: '≥ 70%' },
+  { id: 'coverage', name: 'COVERAGE', panel: 'coverage', target: '≥ 80% line · ≥ 90% changed' },
+  { id: 'quality-service', name: 'CODE QUALITY', panel: 'quality', target: 'gate passes · ≤ 3% duplication' },
 ]
 
 /** A stack by id, for the chosen-profile header. */
 export function stackById(id: string | undefined): TestStack | null {
   return TEST_STACKS.find((s) => s.id === id) ?? null
+}
+
+/** A suite by id across every stack — the report names suites by id alone. */
+export function suiteById(id: string): TestSuite | null {
+  for (const stack of TEST_STACKS) {
+    const found = stack.suites.find((s) => s.id === id)
+    if (found) return found
+  }
+  return null
 }
 
 /** Suites available for the stacks detected in a project, grouped per stack. */

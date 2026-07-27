@@ -19,6 +19,7 @@ function setup() {
     onSessionExit: () => {},
     onQueueChanged: () => {},
     onEvalsChanged: (projectId) => changed.push(projectId),
+    onVerifyChanged: () => {},
     onProjectCommands: () => {},
     gate: (async () => ({ behavior: 'allow', updatedInput: {} })) as never,
   })

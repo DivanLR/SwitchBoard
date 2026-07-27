@@ -22,6 +22,7 @@ import type {
   Settings,
   SpecDetail,
   SpecKitState,
+  VerifyRun,
 } from './domain'
 import type { AvailableSuites } from './test-catalog'
 
@@ -179,6 +180,24 @@ export interface InvokeMap {
     req: { projectId: string; id: string; kind: 'check' | 'attempts' | 'judge' }
     res: { sessionId: string; runs: EvalRun[] }
   }
+  /** Verification runs (spec 002 US1-US4): the suites a run executed and what it
+   *  measured — results, coverage, quality and evidence. Newest first. */
+  'verify.list': { req: { projectId: string }; res: VerifyRun[] }
+  /**
+   * Start a run: send the chosen suites to the project's session (FR-041/FR-045)
+   * and watch its output for the report. Suites the environment cannot run are
+   * reported as skipped with the reason rather than attempted (FR-057).
+   */
+  'verify.start': {
+    req: { projectId: string; stackId: string; suiteIds: string[] }
+    res: { sessionId: string; runs: VerifyRun[] }
+  }
+  /** Capture evidence for a finished run without re-running its tests (FR-059).
+   *  Attaches to `runId`, or to the newest run when omitted. */
+  'verify.evidence': {
+    req: { projectId: string; runId?: string }
+    res: { sessionId: string; runs: VerifyRun[] }
+  }
   /** Planned task queue: prompts/goals that auto-run in sequence (FR-023). */
   'queue.list': { req: { projectId: string }; res: QueuedTask[] }
   'queue.add': { req: { projectId: string; text: string }; res: QueuedTask[] }
@@ -276,6 +295,13 @@ export interface EvalsChangedPush {
   runs: EvalRun[]
 }
 
+/** A verification run's report read off the session, pushed so the gates and
+ *  panels fill in as the run finishes rather than on a manual refresh. */
+export interface VerifyChangedPush {
+  projectId: string
+  runs: VerifyRun[]
+}
+
 export interface PushMap {
   /** Individual events; the transport batches them (>= 30 Hz flushes) and the bridge fans out per event. */
   'push.event': SessionEvent
@@ -284,6 +310,7 @@ export interface PushMap {
   'push.inboxChanged': InboxChangedPush
   'push.queueChanged': QueueChangedPush
   'push.evalsChanged': EvalsChangedPush
+  'push.verifyChanged': VerifyChangedPush
   'push.projectCommands': ProjectCommandsPush
   'push.focusRequest': FocusRequestPush
   'push.updateStatus': UpdateStatus
@@ -298,6 +325,7 @@ export const PUSH_CHANNELS: readonly PushChannel[] = [
   'push.inboxChanged',
   'push.queueChanged',
   'push.evalsChanged',
+  'push.verifyChanged',
   'push.projectCommands',
   'push.focusRequest',
   'push.updateStatus',

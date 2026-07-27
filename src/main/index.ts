@@ -175,6 +175,8 @@ async function main(): Promise<void> {
       pusher.push('push.queueChanged', { projectId, items: repos.taskQueue.listForProject(projectId) }),
     onEvalsChanged: (projectId) =>
       pusher.push('push.evalsChanged', { projectId, runs: repos.evals.listForProject(projectId) }),
+    onVerifyChanged: (projectId) =>
+      pusher.push('push.verifyChanged', { projectId, runs: repos.verifyRuns.listForProject(projectId) }),
     onProjectCommands: (projectId, commands) => pusher.push('push.projectCommands', { projectId, commands }),
     gate: (context) => {
       if (!broker) throw new Error('Broker not initialised')

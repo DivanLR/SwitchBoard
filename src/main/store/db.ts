@@ -312,6 +312,33 @@ const MIGRATIONS: Migration[] = [
       `)
     },
   },
+  {
+    // Verification runs (spec 002 US1-US4): one row per verify pass over the
+    // working tree. `report` is the JSON the session reported — suites, coverage,
+    // quality and evidence in one blob, because nothing queries inside it: the
+    // panels render the latest run whole. `sessionId` is what makes every figure
+    // traceable back to the output that produced it (FR-046/FR-051).
+    name: '014-verify-runs',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS verify_runs (
+          id TEXT PRIMARY KEY,
+          projectId TEXT NOT NULL REFERENCES projects(id),
+          stackId TEXT NOT NULL,
+          sessionId TEXT,
+          branch TEXT,
+          requested TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('running', 'pass', 'fail', 'inconclusive')),
+          report TEXT,
+          note TEXT,
+          startedAt TEXT NOT NULL,
+          finishedAt TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_verify_runs_project
+          ON verify_runs (projectId, startedAt DESC);
+      `)
+    },
+  },
 ]
 
 /**

@@ -18,6 +18,9 @@ export interface MockSessionSeed {
   usageResetsAt?: number
   usageLimitType?: string
   mcpServers?: { name: string; status: string }[]
+  /** A bypass session runs inside the sandbox container, which ships node and
+   *  nothing else — the Tests section reads this to say what cannot run there. */
+  bypassPermissions?: boolean
 }
 
 export interface MockProjectSeed {
@@ -69,6 +72,9 @@ export interface MockDriver {
     id: string,
     result: { checkStatus?: string; judge?: string },
   ) => void
+  /** Stand in for the main process reading a verification report off the session:
+   *  finishes the running run with that report and pushes it. */
+  reportVerifyResult: (projectId: string, status: string, report: unknown) => void
   startFlood: (intervalMs: number, perTick: number) => void
   stopFlood: () => void
   state: () => {
@@ -102,6 +108,7 @@ export function installMockHost(scenario: MockScenario): void {
     usageUtilization: number | null
     usageResetsAt: number | null
     usageLimitType: string | null
+    bypassPermissions: boolean
     mcpServers: { name: string; status: string }[]
     startedAt: string
     endedAt: string | null
@@ -144,6 +151,7 @@ export function installMockHost(scenario: MockScenario): void {
         usageUtilization: p.session.usageUtilization ?? null,
         usageResetsAt: p.session.usageResetsAt ?? null,
         usageLimitType: p.session.usageLimitType ?? null,
+        bypassPermissions: p.session.bypassPermissions ?? false,
         mcpServers: p.session.mcpServers ?? [],
         startedAt: p.session.startedAt ?? now(),
         endedAt: null,
@@ -319,6 +327,7 @@ export function installMockHost(scenario: MockScenario): void {
   const queuedBySession = new Map<string, { eventId: string; text: string }[]>()
   const taskQueueByProject = new Map<string, AnyRecord[]>()
   const evalsByProject = new Map<string, AnyRecord[]>()
+  const verifyByProject = new Map<string, AnyRecord[]>()
 
   function deliver(sessionId: string, text: string): void {
     sends.push({ sessionId, text })
@@ -521,6 +530,7 @@ export function installMockHost(scenario: MockScenario): void {
         usageUtilization: null,
         usageResetsAt: null,
         usageLimitType: null,
+        bypassPermissions: req.bypassPermissions === true,
         mcpServers: [],
         startedAt: now(),
         endedAt: null,
@@ -680,6 +690,42 @@ export function installMockHost(scenario: MockScenario): void {
       const list = (evalsByProject.get(projectId) ?? []).filter((r) => r.id !== req.id)
       evalsByProject.set(projectId, list)
       return [...list]
+    },
+    'verify.list': (req) => [...(verifyByProject.get(String(req.projectId)) ?? [])],
+    // A run occupies the session and stays 'running' until the session reports —
+    // exactly like the real host, where the report is read off session output.
+    'verify.start': (req) => {
+      const projectId = String(req.projectId)
+      const suiteIds = (req.suiteIds ?? []) as string[]
+      if (suiteIds.length === 0) throw { code: 'INVALID_PATH', message: 'Choose at least one suite to run.' }
+      const text = `Verify the working tree of this project.\n${suiteIds.join('\n')}\nSWB_VERIFY`
+      const result = invokeHandlers['specs.runInSession']({ projectId, text }) as { sessionId: string }
+      const list = verifyByProject.get(projectId) ?? []
+      list.unshift({
+        id: `verify-${list.length + 1}`,
+        projectId,
+        stackId: String(req.stackId),
+        sessionId: result.sessionId,
+        branch: sessions.get(result.sessionId)?.branch ?? null,
+        requested: suiteIds,
+        status: 'running',
+        report: null,
+        note: null,
+        startedAt: new Date().toISOString(),
+        finishedAt: null,
+      })
+      verifyByProject.set(projectId, list)
+      return { sessionId: result.sessionId, runs: [...list] }
+    },
+    'verify.evidence': (req) => {
+      const projectId = String(req.projectId)
+      const list = verifyByProject.get(projectId) ?? []
+      if (list.length === 0) throw { code: 'NOT_FOUND', message: 'Run a verification pass first — evidence attaches to a run.' }
+      const result = invokeHandlers['specs.runInSession']({
+        projectId,
+        text: 'Capture evidence that the change in this working tree actually works.\nSWB_VERIFY',
+      }) as { sessionId: string }
+      return { sessionId: result.sessionId, runs: [...list] }
     },
     'queue.list': (req) => [...(taskQueueByProject.get(String(req.projectId)) ?? [])],
     'queue.add': (req) => {
@@ -969,6 +1015,18 @@ export function installMockHost(scenario: MockScenario): void {
       if (result.checkStatus !== undefined) row.checkStatus = result.checkStatus
       if (result.judge !== undefined) row.judge = result.judge
       push('push.evalsChanged', { projectId, runs: [...list] })
+    },
+    reportVerifyResult: (projectId, status, report) => {
+      const list = verifyByProject.get(projectId) ?? []
+      const index = list.findIndex((r) => r.status === 'running')
+      const at = index >= 0 ? index : 0
+      if (!list[at]) return
+      // Replaced, never mutated in place: the real host rebuilds each run from
+      // its SQLite row, so every push carries fresh objects. Mutating here would
+      // hand the renderer the identity it already holds and hide a stale view.
+      list[at] = { ...list[at], status, report, finishedAt: new Date().toISOString() }
+      verifyByProject.set(projectId, list)
+      push('push.verifyChanged', { projectId, runs: [...list] })
     },
     startFlood: (intervalMs, perTick) => {
       const ids = [...sessions.keys()]

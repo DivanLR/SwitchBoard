@@ -30,6 +30,13 @@ const HOME_VOLUME_PREFIX = 'switchboard-claude-home-'
 // ponytail: the CLI version is whatever npm had at image-build time; to pick
 // up a newer CLI, `docker rmi switchboard-sandbox` and the next bypass session
 // rebuilds.
+//
+// ponytail: node only — no .NET SDK, no Python, no browser. Verification runs
+// for those stacks belong on the host, where the SDK, the package caches and the
+// test infrastructure already are; baking them in would cost ~1 GB of image for
+// a session whose job is editing code. The Tests section reads this same fact
+// from SANDBOX_TOOLS in shared/test-catalog.ts and marks those suites
+// unavailable up front — change both together if a toolchain is ever added here.
 const DOCKERFILE = `FROM node:22-slim
 RUN apt-get update && apt-get install -y --no-install-recommends git ripgrep ca-certificates && rm -rf /var/lib/apt/lists/* \\
  && npm install -g @anthropic-ai/claude-code \\
