@@ -527,13 +527,22 @@ export class RiskRulesRepo {
     }))
   }
 
-  replaceAll(rules: RiskClassificationRule[]): void {
+  /**
+   * Seed the defaults, once. Not `replaceAll`: risk rules have no editing UI and
+   * therefore no IPC surface (see shared/ipc-types.ts), so nothing ever replaced
+   * or reordered them and the DELETE-then-reinsert existed for a flow that does
+   * not exist. The guard lives here rather than at each call site.
+   *
+   * Still transactional: a half-written seed would leave count() > 0, so it would
+   * never re-seed and the classifier would run on partial rules forever.
+   */
+  seedIfEmpty(rules: RiskClassificationRule[]): void {
+    if (this.count() > 0) return
     const insert = this.db.prepare(
       `INSERT INTO risk_rules (id, scope, position, toolMatcher, inputMatcher, risk, builtin)
        VALUES (@id, @scope, @position, @toolMatcher, @inputMatcher, @risk, @builtin)`,
     )
-    transaction(this.db, () => {
-      this.db.prepare('DELETE FROM risk_rules').run()
+    transaction(this.db, () =>
       rules.forEach((rule, index) =>
         insert.run({
           ...rule,
@@ -541,8 +550,8 @@ export class RiskRulesRepo {
           inputMatcher: rule.inputMatcher ? JSON.stringify(rule.inputMatcher) : null,
           builtin: rule.builtin ? 1 : 0,
         }),
-      )
-    })
+      ),
+    )
   }
 
   count(): number {
@@ -566,15 +575,16 @@ export class SwallowRulesRepo {
     return rows.map((r) => ({ ...r, enabled: r.enabled === 1 }))
   }
 
-  replaceAll(rules: SwallowRule[]): void {
+  /** Seed the defaults, once. Same reasoning as RiskRulesRepo.seedIfEmpty. */
+  seedIfEmpty(rules: SwallowRule[]): void {
+    if (this.count() > 0) return
     const insert = this.db.prepare(
       `INSERT INTO swallow_rules (id, scope, projectId, position, eventKindMatcher, pattern, noiseKind, enabled)
        VALUES (@id, @scope, @projectId, @position, @eventKindMatcher, @pattern, @noiseKind, @enabled)`,
     )
-    transaction(this.db, () => {
-      this.db.prepare('DELETE FROM swallow_rules').run()
-      rules.forEach((rule, index) => insert.run({ ...rule, position: index, enabled: rule.enabled ? 1 : 0 }))
-    })
+    transaction(this.db, () =>
+      rules.forEach((rule, index) => insert.run({ ...rule, position: index, enabled: rule.enabled ? 1 : 0 })),
+    )
   }
 
   count(): number {

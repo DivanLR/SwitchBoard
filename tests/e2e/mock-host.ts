@@ -14,9 +14,9 @@ export interface MockSessionSeed {
   status: 'working' | 'needs_you' | 'done' | 'error'
   branch?: string
   startedAt?: string
-  usageUtilization?: number
-  usageResetsAt?: number
-  usageLimitType?: string
+  // No usage fields here: every spec that exercises the usage meter sets it at
+  // runtime through __mock.setUsage(), so seed-time versions only ever resolved
+  // to null. The runtime MockSession below still carries them.
   mcpServers?: { name: string; status: string }[]
   /** A bypass session runs inside the sandbox container, which ships node and
    *  nothing else — the Tests section reads this to say what cannot run there. */
@@ -83,7 +83,6 @@ export interface MockDriver {
     answers: { eventId: string; choice: string }[]
     decisions: { requestId: string; decision: string }[]
     starts: { projectId: string; deniedMcpServers?: string[] }[]
-    eventCounts: Record<string, number>
   }
 }
 
@@ -148,9 +147,9 @@ export function installMockHost(scenario: MockScenario): void {
         branch: p.session.branch ?? 'main',
         diffAdds: 12,
         diffDels: 4,
-        usageUtilization: p.session.usageUtilization ?? null,
-        usageResetsAt: p.session.usageResetsAt ?? null,
-        usageLimitType: p.session.usageLimitType ?? null,
+        usageUtilization: null,
+        usageResetsAt: null,
+        usageLimitType: null,
         bypassPermissions: p.session.bypassPermissions ?? false,
         mcpServers: p.session.mcpServers ?? [],
         startedAt: p.session.startedAt ?? now(),
@@ -226,17 +225,6 @@ export function installMockHost(scenario: MockScenario): void {
       pattern: '^(Read|Glob|Grep|LS)\\b',
       noiseKind: 'file inspection',
       enabled: true,
-    },
-  ]
-  const riskRules: AnyRecord[] = [
-    {
-      id: 'rr-1',
-      scope: 'global',
-      position: 0,
-      toolMatcher: 'Read',
-      inputMatcher: null,
-      risk: 'low',
-      builtin: true,
     },
   ]
   // The real DEFAULT_SETTINGS, handed in as data by the scenario.
@@ -860,18 +848,11 @@ export function installMockHost(scenario: MockScenario): void {
       standingRules.push(rule)
       return { ...rule }
     },
-    'rules.risk.list': () => [...riskRules],
-    'rules.risk.save': (req) => {
-      riskRules.splice(0, riskRules.length, ...(req.rules as AnyRecord[]))
-      return [...riskRules]
-    },
-    'rules.risk.restoreDefaults': () => [...riskRules],
-    'rules.swallow.list': () => [...swallowRules],
-    'rules.swallow.save': (req) => {
-      swallowRules.splice(0, swallowRules.length, ...(req.rules as AnyRecord[]))
-      return [...swallowRules]
-    },
-    'rules.swallow.restoreDefaults': () => [...swallowRules],
+    // No rules.risk.* or rules.swallow.* here: those channels do not exist in the
+    // real InvokeMap (see shared/ipc-types.ts — risk and swallow rules are
+    // main-process seeded defaults with no editing UI and therefore no IPC), so
+    // stubbing them invented a contract no spec ever called. swallowRules itself
+    // stays: classify() below reads it to drive the real clean-view behaviour.
     'settings.get': () => ({ ...settings }),
     'settings.set': (req) => {
       settings = { ...settings, ...req }
@@ -1048,9 +1029,6 @@ export function installMockHost(scenario: MockScenario): void {
       answers: [...answers],
       decisions: [...decisionLog],
       starts: [...starts],
-      eventCounts: Object.fromEntries(
-        [...eventsBySession.entries()].map(([id, list]) => [id, list.length]),
-      ),
     }),
   }
 }

@@ -2,7 +2,7 @@
 // Sidebar — 1:1 with the design reference: logo, PROJECTS list with animated
 // status dots, mono names, per-project pending badges, branch + timer line,
 // and the running / needs-you / cost-today stats card (FR-003/004/005).
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { isIpcError } from '@shared/ipc-types'
 import { modelLabel, type ProjectGroup } from '@shared/domain'
 import { groupSections } from '@shared/project-groups'
@@ -78,8 +78,12 @@ onMounted(() => {
     now.value = Date.now()
   }, 1000)
   if (!settings.settings) void settings.load()
+  document.addEventListener('keydown', onOverlayKeydown, true)
 })
-onUnmounted(() => clearInterval(timer))
+onUnmounted(() => {
+  clearInterval(timer)
+  document.removeEventListener('keydown', onOverlayKeydown, true)
+})
 
 const collisions = computed(() => projects.nameCollisions)
 
@@ -326,6 +330,8 @@ function closeCtx(): void {
   ctx.value = null
 }
 
+
+
 function startRename(): void {
   if (!ctx.value) return
   if (ctx.value.kind === 'group') renamingGroupId.value = ctx.value.id
@@ -497,6 +503,29 @@ function cancelRemove(): void {
   confirmRemoveId.value = null
   removeError.value = null
 }
+
+// Escape closes whichever overlay is open, and opening one moves focus into it.
+// These live in Sidebar rather than in useModal because both are v-if blocks
+// inside a component that mounts once, so a composable's onMounted would fire
+// long before either overlay exists. Without this the context menu could only be
+// dismissed with the mouse, and the remove dialogue could not be reached at all.
+function onOverlayKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Escape') return
+  if (confirmRemoveId.value) {
+    event.stopPropagation()
+    cancelRemove()
+  } else if (ctx.value) {
+    event.stopPropagation()
+    closeCtx()
+  }
+}
+
+watch([ctx, confirmRemoveId], async ([menu, removing]) => {
+  if (!menu && !removing) return
+  await nextTick()
+  const selector = removing ? '[data-testid="remove-cancel"]' : '.ctx-item'
+  document.querySelector<HTMLElement>(selector)?.focus()
+})
 
 async function confirmRemoveNow(): Promise<void> {
   if (!confirmRemoveId.value) return
@@ -921,15 +950,33 @@ async function confirmRemoveNow(): Promise<void> {
         </div>
       </div>
 
-      <div class="settings-row" data-testid="open-settings" @click="emit('open-settings')">
-        <span class="gear mono">⚙</span>
+      <div
+        class="settings-row"
+        data-testid="open-settings"
+        role="button"
+        tabindex="0"
+        @click="emit('open-settings')"
+        @keydown.enter.prevent="emit('open-settings')"
+        @keydown.space.prevent="emit('open-settings')"
+      >
+        <span class="gear mono" aria-hidden="true">⚙</span>
         <span class="settings-label mono">Settings</span>
         <span class="model-summary mono" data-testid="model-summary">{{ modelSummary }}</span>
       </div>
     </div>
 
-    <div v-else class="settings-row rail" data-testid="open-settings" @click="emit('open-settings')">
-      <span class="gear mono">⚙</span>
+    <div
+      v-else
+      class="settings-row rail"
+      data-testid="open-settings"
+      role="button"
+      tabindex="0"
+      aria-label="Settings"
+      @click="emit('open-settings')"
+      @keydown.enter.prevent="emit('open-settings')"
+      @keydown.space.prevent="emit('open-settings')"
+    >
+      <span class="gear mono" aria-hidden="true">⚙</span>
     </div>
   </aside>
 
@@ -1909,6 +1956,11 @@ async function confirmRemoveNow(): Promise<void> {
 
 .settings-row:hover {
   background: var(--bg-hover);
+}
+
+.settings-row:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--green);
 }
 
 /* On the rail it is a bare centred gear, with no room for anything else. */

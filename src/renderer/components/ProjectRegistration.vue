@@ -3,12 +3,17 @@
 // name, the default folder-access summary, a bypass-permissions toggle with
 // warning, and Start/Cancel. Claude Code suggestions (FR-001a) fill the
 // folder input on click.
-import { computed, onMounted, ref } from 'vue'
+import { useTemplateRef, computed, onMounted, ref } from 'vue'
+import { useModal } from '@renderer/composables/useModal'
 import { isIpcError } from '@shared/ipc-types'
 import { useProjectsStore } from '@renderer/stores/projects'
 
 const projects = useProjectsStore()
 const emit = defineEmits<{ (e: 'close'): void }>()
+
+// Escape closes, Tab stays inside, focus returns to the opener on close.
+const dialogEl = useTemplateRef<HTMLElement>('dialog')
+useModal(dialogEl, () => emit('close'))
 
 const folder = ref('')
 const bypass = ref(false)
@@ -73,7 +78,13 @@ async function startSession(): Promise<void> {
 
 <template>
   <div class="overlay" @click.self="emit('close')">
-    <div class="dialog reg" data-testid="registration-dialog">
+    <div
+      ref="dialog"
+      class="dialog reg"
+      role="dialog"
+      aria-modal="true"
+      aria-label="New session"
+      tabindex="-1" data-testid="registration-dialog">
       <div class="reg-head">
         <div class="title mono"><span style="color: var(--green)">＋</span> New session</div>
         <p class="sub">Point Claude Code at a folder and it shows up in the sidebar.</p>

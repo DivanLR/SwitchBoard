@@ -7,6 +7,7 @@ import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { isDangerousCommand, type DecisionRecord, type PermissionRequest } from '@shared/domain'
 import { useInboxStore } from '@renderer/stores/inbox'
 import { useProjectsStore } from '@renderer/stores/projects'
+import { relativeTime } from '@renderer/relative-time'
 
 const RISK_LABEL: Record<'low' | 'medium' | 'high', string> = { low: 'Low', medium: 'Medium', high: 'High' }
 
@@ -69,12 +70,8 @@ function projectName(projectId: string): string {
   return projects.items.find((p) => p.id === projectId)?.name ?? 'unknown'
 }
 
-function age(createdAt: string): string {
-  const seconds = Math.max(0, Math.floor((now.value - Date.parse(createdAt)) / 1000))
-  if (seconds < 60) return `${seconds}s ago`
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`
-  return `${Math.floor(seconds / 3600)}h ago`
-}
+/** Shared with McpView; `now` ticks every 5s so these re-render on their own. */
+const age = (createdAt: string): string => relativeTime(createdAt, now.value)
 
 async function approve(item: PermissionRequest): Promise<void> {
   if (item.risk === 'high' && item.type === 'tool_permission' && confirmingId.value !== item.id) {
@@ -281,8 +278,12 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
       <button class="notice-dismiss" @click="inbox.dismissNotice()">Dismiss</button>
     </div>
 
-    <!-- Inbox tab -->
-    <div v-if="tab === 'inbox'" class="body">
+    <!-- Inbox tab. aria-live=polite on the list itself, because items arrive from
+         background sessions with no user action: a screen-reader user otherwise
+         has no way to learn that something is now waiting on them. Polite rather
+         than assertive, since the per-session "Blocked" alert already interrupts
+         and two interrupts for one event is worse than none. -->
+    <div v-if="tab === 'inbox'" class="body" aria-live="polite" aria-relevant="additions">
       <div v-if="inbox.groups.length === 0" class="empty" data-testid="inbox-zero">
         <div class="empty-icon mono">✓</div>
         <div class="empty-title">Inbox zero</div>

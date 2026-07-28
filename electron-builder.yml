@@ -20,8 +20,14 @@ files:
 # No native modules: the SQLite store runs on the runtime's own `node:sqlite`,
 # so there is nothing to rebuild per ABI and nothing to unpack from the asar.
 
-# Harden the packaged binary: disable ELECTRON_RUN_AS_NODE / node CLI inspect.
-afterPack: scripts/after-pack.mjs
+# Harden the packaged binary so it cannot be relaunched to run arbitrary Node
+# code (Electron security checklist A19). The app needs neither fuse: it spawns
+# the standalone Claude CLI and stores data through `node:sqlite`.
+# electron-builder flips these itself, so there is no afterPack hook and no
+# @electron/fuses dependency.
+electronFuses:
+  runAsNode: false
+  enableNodeCliInspectArguments: false
 
 # The GitHub release feed electron-updater reads (also writes app-update.yml into
 # the package). Releases are published manually, so BOTH artefacts must be
@@ -45,8 +51,19 @@ win:
   target:
     - target: nsis
   icon: build/icon.ico
-  # The application is not code-signed; Windows SmartScreen will warn on first
-  # run until a signing certificate is configured.
+  # NOT CODE-SIGNED. Windows SmartScreen warns on first run, and auto-update
+  # integrity therefore rests entirely on the SHA-512 in latest.yml — a hash
+  # published alongside the very release it validates, which protects against a
+  # corrupted download but not against a compromised release step.
+  #
+  # Signing needs a certificate that must be bought; it cannot be configured from
+  # the repo alone. When one exists, either:
+  #   - a traditional OV/EV certificate: set CSC_LINK and CSC_KEY_PASSWORD in the
+  #     build environment and electron-builder signs automatically; or
+  #   - Azure Trusted Signing: add an `azureSignOptions` block here, which avoids
+  #     holding a certificate file at all.
+  # EV and Azure Trusted Signing clear the SmartScreen warning immediately; a
+  # plain OV certificate has to accumulate reputation first.
 
 nsis:
   oneClick: false

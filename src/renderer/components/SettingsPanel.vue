@@ -3,7 +3,8 @@
 // (Models / This project / Terminals / General) with a Plan/Build footer,
 // card + toggle + segmented controls, and a "Changes apply immediately · Done"
 // footer. State and transport live in the settings store.
-import { computed, onMounted, ref, watch } from 'vue'
+import { useTemplateRef, computed, onMounted, ref, watch } from 'vue'
+import { useModal } from '@renderer/composables/useModal'
 import type { AvailableModel, ModelChoice, PermissionRule, Settings, TerseLevel } from '@shared/domain'
 import { modelLabel, modelPrice } from '@shared/domain'
 import { useSettingsStore } from '@renderer/stores/settings'
@@ -11,8 +12,15 @@ import { useProjectsStore } from '@renderer/stores/projects'
 import { useInboxStore } from '@renderer/stores/inbox'
 import { useUpdatesStore } from '@renderer/stores/updates'
 
-const props = defineProps<{ initialTab?: 'models' | 'proj' | 'mcp' | 'allowed' | 'term' | 'gen' }>()
+// The prop deliberately omits 'mcp' even though the Tab union below includes it:
+// the MCP tab is reachable by clicking, but no caller opens the panel straight
+// onto it, so accepting the value would be a promise nothing keeps.
+const props = defineProps<{ initialTab?: 'models' | 'proj' | 'allowed' | 'term' | 'gen' }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
+
+// Escape closes, Tab stays inside, focus returns to the opener on close.
+const dialogEl = useTemplateRef<HTMLElement>('dialog')
+useModal(dialogEl, () => emit('close'))
 const store = useSettingsStore()
 const projects = useProjectsStore()
 const inbox = useInboxStore()
@@ -287,7 +295,13 @@ const updateLine = computed(() => {
 
 <template>
   <div class="overlay" @click.self="emit('close')">
-    <div class="dialog settings" data-testid="settings-panel">
+    <div
+      ref="dialog"
+      class="dialog settings"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Settings"
+      tabindex="-1" data-testid="settings-panel">
       <!-- Header -->
       <div class="s-head">
         <span class="gear mono">⚙</span>
@@ -1121,7 +1135,9 @@ html.sb-light .overlay {
   flex-shrink: 0;
   width: 18px;
   height: 18px;
-  border-radius: 5px;
+  /* 3px, the documented content radius. It was 5px, which is on no scale: a
+     leftover from the replaced world's softer corners. */
+  border-radius: 3px;
   border: 1.5px solid var(--border-strong);
   color: var(--green-ink);
   font-size: 11px;

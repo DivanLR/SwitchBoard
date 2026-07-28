@@ -17,7 +17,7 @@ import type {
   SessionStatus,
 } from '@shared/domain'
 import { SWALLOWABLE_KINDS, verifyVerdict } from '@shared/domain'
-import type { SessionStatusPush } from '@shared/ipc-types'
+import type { IpcError, SessionStatusPush } from '@shared/ipc-types'
 import { newId, nowIso, type Repositories } from '@main/store/repositories'
 import { readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
 import { HostedSession, type PermissionGate } from './session'
@@ -34,15 +34,6 @@ import { parseVerifyReport } from '@main/evals/verify-dispatch'
 import { mainLoopModel } from './model-routing'
 import { resolveClaudeExecutable } from './claude-executable'
 import { ensureSandboxImage, refMounts, sweepOrphanedContainers } from './docker-sandbox'
-
-export class SessionManagerError extends Error {
-  constructor(
-    public code: 'NOT_FOUND' | 'ALREADY_ACTIVE' | 'SESSION_ENDED',
-    message: string,
-  ) {
-    super(message)
-  }
-}
 
 /** Classifier hook installed by the swallow rule engine (FR-015a); null until then. */
 type NoiseClassifier = (event: SessionEvent, projectId: string) => string | null
@@ -88,6 +79,43 @@ const UPDATABLE_KINDS: ReadonlySet<EventKind> = new Set([
   'permission_marker',
   'plan_marker',
 ])
+
+/**
+ * Kinds whose updates only ever arrive while they are still streaming, so an old
+ * one can be forgotten. Markers and questions are deliberately NOT here: a
+ * permission decided ten minutes later still updates its marker, so evicting
+ * those would silently drop the decision from the stream.
+ */
+const STREAM_LOCAL_KINDS: ReadonlySet<EventKind> = new Set([
+  'prompt',
+  'assistant_text',
+  'tool_activity',
+])
+
+/**
+ * How many stream-local events stay updatable. Without a cap, `live` held every
+ * partial's full payload for the session's entire life, which on a long run is
+ * unbounded main-process memory. Generous on purpose: updates target the last
+ * few events, so 200 is far beyond what streaming actually reaches back for, and
+ * `update()` already no-ops on an id it does not hold.
+ */
+const MAX_LIVE_STREAM_EVENTS = 200
+
+function evictStaleLive(entry: HostedEntry): void {
+  let streamLocal = 0
+  for (const { event } of entry.live.values()) {
+    if (STREAM_LOCAL_KINDS.has(event.kind)) streamLocal++
+  }
+  if (streamLocal <= MAX_LIVE_STREAM_EVENTS) return
+  let toDrop = streamLocal - MAX_LIVE_STREAM_EVENTS
+  // Map iterates in insertion order, so this drops the oldest first.
+  for (const [id, { event }] of entry.live) {
+    if (toDrop === 0) break
+    if (!STREAM_LOCAL_KINDS.has(event.kind)) continue
+    entry.live.delete(id)
+    toDrop--
+  }
+}
 
 export async function readGitBranch(projectPath: string): Promise<string | null> {
   try {
@@ -224,7 +252,7 @@ export class SessionManager {
    */
   async startSession(projectId: string, resume = false, bypassPermissions = false): Promise<Session> {
     if (this.starting.has(projectId)) {
-      throw new SessionManagerError('ALREADY_ACTIVE', 'The project already has an active session')
+      throw { code: 'ALREADY_ACTIVE', message: 'The project already has an active session' } satisfies IpcError
     }
     this.starting.add(projectId)
     try {
@@ -240,10 +268,10 @@ export class SessionManager {
     bypassPermissions: boolean,
   ): Promise<Session> {
     const project = this.repos.projects.byId(projectId)
-    if (!project) throw new SessionManagerError('NOT_FOUND', 'Project not found')
+    if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
     const active = this.repos.sessions.activeForProject(projectId)
     if (active) {
-      throw new SessionManagerError('ALREADY_ACTIVE', 'The project already has an active session')
+      throw { code: 'ALREADY_ACTIVE', message: 'The project already has an active session' } satisfies IpcError
     }
     // Bypass sessions run containerised (docker-sandbox): fail here, before a
     // row exists, when Docker is down or not logged in. First call builds the
@@ -256,10 +284,7 @@ export class SessionManager {
     // the SDK spawn the wrong runtime and crash under Electron.
     const claudeExecutablePath = resolveClaudeExecutable()
     if (!claudeExecutablePath) {
-      throw new SessionManagerError(
-        'NOT_FOUND',
-        'Claude Code was not found. Install it from https://claude.com/claude-code, then start a session.',
-      )
+      throw { code: 'NOT_FOUND', message: 'Claude Code was not found. Install it from https://claude.com/claude-code, then start a session.' } satisfies IpcError
     }
 
     let resumeSdkSessionId: string | undefined
@@ -602,7 +627,7 @@ export class SessionManager {
   /** Sink for the permission broker: markers and questions enter the stream here. */
   sinkFor(sessionId: string): EventSink {
     const entry = this.hosted.get(sessionId)
-    if (!entry) throw new SessionManagerError('SESSION_ENDED', 'Session is no longer active')
+    if (!entry) throw { code: 'SESSION_ENDED', message: 'Session is no longer active' } satisfies IpcError
     return this.makeSink(entry)
   }
 
@@ -618,8 +643,8 @@ export class SessionManager {
     const entry = this.hosted.get(sessionId)
     if (!entry) {
       const row = this.repos.sessions.byId(sessionId)
-      if (!row) throw new SessionManagerError('NOT_FOUND', 'Session not found')
-      throw new SessionManagerError('SESSION_ENDED', 'Session has ended')
+      if (!row) throw { code: 'NOT_FOUND', message: 'Session not found' } satisfies IpcError
+      throw { code: 'SESSION_ENDED', message: 'Session has ended' } satisfies IpcError
     }
     return entry
   }
@@ -648,6 +673,7 @@ export class SessionManager {
         if (persist) this.repos.events.insert(event)
         if (UPDATABLE_KINDS.has(kind)) {
           entry.live.set(event.id, { event, persisted: persist })
+          evictStaleLive(entry)
         }
         this.scanMarkers(entry, kind, payload)
         this.callbacks.onEvent({ ...event })

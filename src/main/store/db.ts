@@ -339,6 +339,19 @@ const MIGRATIONS: Migration[] = [
       `)
     },
   },
+  {
+    name: '015-eval-runs-project-index',
+    up: (db) => {
+      // eval_runs is read as `WHERE projectId = ? ORDER BY createdAt DESC`
+      // (repositories.ts listForProject) but shipped without an index matching
+      // it, so every read was a full scan plus a sort. verify_runs got the
+      // equivalent index when it was added; this one was simply missed.
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_eval_runs_project
+          ON eval_runs (projectId, createdAt DESC);
+      `)
+    },
+  },
 ]
 
 /**
@@ -369,6 +382,12 @@ export function openDatabase(dbPath: string): AppDatabase {
   // WAL keeps reads from blocking on the writer. Foreign keys are already on by
   // default in node:sqlite; stated anyway so the guarantee is not inherited.
   db.exec('PRAGMA journal_mode = WAL')
+  // NORMAL is SQLite's own recommended pairing with WAL: the writer stops
+  // fsyncing on every commit, which matters here because event inserts land on
+  // the main thread at streaming rates. The trade is precise: with WAL, NORMAL
+  // still cannot corrupt the database, it only risks losing the most recent
+  // commits if the OS itself dies. Session events are a transcript, not money.
+  db.exec('PRAGMA synchronous = NORMAL')
   db.exec('PRAGMA foreign_keys = ON')
   migrate(db)
   return db

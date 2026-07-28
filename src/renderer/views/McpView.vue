@@ -5,6 +5,7 @@
 // chat drive the project's live Agent SDK session — which already has the MCP
 // tools — so every answer is a real query, not a mock.
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { relativeTime } from '@renderer/relative-time'
 import { isIpcError, type ProjectListItem } from '@shared/ipc-types'
 import type { AgentScopedPayload, McpScan, QuestionPayload, SessionEvent } from '@shared/domain'
 import { comboDocRelPath, comboKey } from '@shared/mcp-combo'
@@ -73,13 +74,8 @@ function activateCombo(scan: McpScan): void {
   void settings.save({ databaseMcpServers: [...roster], mcpActiveServers: [...scan.servers] })
 }
 
-function ago(iso: string): string {
-  const mins = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000))
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  if (mins < 60 * 24) return `${Math.round(mins / 60)}h ago`
-  return `${Math.round(mins / (60 * 24))}d ago`
-}
+/** Shared with InboxView. Static: an MCP scan's age does not need a live tick. */
+const ago = (iso: string): string => relativeTime(iso, Date.now())
 
 function dotColor(status: string): string {
   const st = status.toLowerCase()
@@ -788,113 +784,12 @@ function answer(eventId: string, choice: string): void {
 }
 
 /* Command suggestions (same idioms as the session composer). */
-.input-wrap {
-  position: relative;
-  flex: 1;
-  min-width: 60px;
-  display: flex;
-}
 
-.composer-input {
-  position: relative;
-  z-index: 1;
-  display: block;
-  width: 100%;
-  resize: none;
-  overflow-y: auto;
-  field-sizing: content;
-  max-height: 160px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-  /* Bottom-pinned row: sit the text line level with the buttons' text. The
-     ghost mirror below must keep the identical padding. */
-  padding-bottom: 6px;
-}
-
-/* Exact /command match: hide the raw text (keep the caret) and let the ghost
-   mirror colour the command — teal in this view. */
-.composer-input.is-command {
-  color: transparent;
-  caret-color: var(--text);
-}
-
-.ghost {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  font-size: 13px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow: hidden;
-  pointer-events: none;
-  /* Mirrors .composer-input exactly — keep the paddings in lockstep. */
-  padding-bottom: 6px;
-}
-
-.ghost-typed {
-  color: transparent;
-}
-
+/* MCP accent: this view tints the whole matched command rather than splitting
+   cmd from args, so it overrides the shared ghost colouring. */
 .input-wrap:has(.is-command) .ghost-typed {
   color: var(--teal);
   font-weight: 600;
 }
 
-.ghost-rest {
-  color: var(--text-ghost);
-}
-
-.suggest-list {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 0;
-  right: 0;
-  max-height: 190px;
-  overflow-y: auto;
-  /* Opaque — a translucent dropdown lets the stream bleed through the rows. */
-  background: var(--bg-panel-2);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--rc);
-  padding: 4px;
-  z-index: 5;
-  box-shadow: var(--shadow-dd);
-}
-
-/* Light theme: a solid white sheet (the pale-blue panel tone read as see-through). */
-html.sb-light .suggest-list {
-  background: #fff;
-}
-
-.suggest-item {
-  font-size: 12.5px;
-  padding: 5px 8px;
-  border-radius: var(--rc);
-  cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.suggest-item.active {
-  background: var(--bg-active);
-}
-
-.suggest-typed {
-  color: var(--text);
-  font-weight: 600;
-}
-
-
-.suggest-desc {
-  margin-left: 12px;
-  float: right;
-  color: var(--text-faint);
-  font-size: 10.5px;
-  max-width: 55%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 </style>

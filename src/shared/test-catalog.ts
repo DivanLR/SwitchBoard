@@ -11,7 +11,10 @@
 // line anyway. Parse package.json/csproj only if that stops being true.
 
 /** The kind of thing a suite proves, so the UI can group API vs FE vs UI work. */
-export type SuiteKind = 'api' | 'unit' | 'ui' | 'coverage' | 'contract' | 'quality' | 'mutation'
+// No 'contract': no suite in TEST_STACKS was ever given that kind, so the only
+// code branching on it could never be taken. Add it back with the suite that
+// needs it, not before.
+export type SuiteKind = 'api' | 'unit' | 'ui' | 'coverage' | 'quality' | 'mutation'
 
 /**
  * The toolchain a suite needs on PATH wherever the session runs. Named because a

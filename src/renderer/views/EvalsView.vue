@@ -288,10 +288,6 @@ const shortDate = (iso: string): string =>
   text-wrap: pretty;
 }
 
-.intro .proj {
-  color: var(--text-body);
-}
-
 .intro .gate {
   display: block;
   margin-top: 6px;
@@ -461,7 +457,8 @@ const shortDate = (iso: string): string =>
   line-height: 1.5;
   color: var(--text-mid);
   background: color-mix(in srgb, var(--amber) 7%, transparent);
-  border-left: 2px solid var(--amber);
+  /* 1px: same refused side-tab pattern as StreamEvent's prompt callout. */
+  border-left: 1px solid var(--amber);
   border-radius: 3px;
   text-wrap: pretty;
 }

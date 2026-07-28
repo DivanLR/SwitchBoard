@@ -59,7 +59,11 @@ const store = reactive({
   /** push.event: replace by id (in-place updates) or insert in seq order. */
   applyEventPush(event: SessionEvent): void {
     if (event.sessionId !== this.sessionId) return
-    const index = this.events.findIndex((e) => e.id === event.id)
+    // Backwards, not forwards. Ids are unique so the result is identical, but the
+    // events that get replaced in place are partials and tool pairs still being
+    // streamed, which are always at the tail. Scanning from the front compared
+    // against the whole session history on every push, at streaming rates.
+    const index = this.events.findLastIndex((e) => e.id === event.id)
     if (index !== -1) {
       this.events[index] = event
       return

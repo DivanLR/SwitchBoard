@@ -13,6 +13,7 @@ const composerDrafts = new Map<string, string>()
 // blocks and a live status line, dark raw log, and the ❯ composer bar
 // (FR-014..019a, R2 resume).
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import type { ComputedRef, Ref } from 'vue'
 import { modelLabel } from '@shared/domain'
 import type { AgentScopedPayload, SessionEvent, CleanupGroup } from '@shared/domain'
 import { activeAgents } from '@shared/agents'
@@ -203,10 +204,13 @@ onUnmounted(() => {
   composerDrafts.set(props.project.id, composer.value)
 })
 
+/** Two-digit clock field. Module scope: the session timer and hhmm() both need
+ *  it and previously declared it byte-for-byte identically. */
+const pad = (n: number): string => String(n).padStart(2, '0')
+
 const sessionTimer = computed(() => {
   if (!liveSession.value) return null
   const sec = Math.max(0, Math.floor((now.value - Date.parse(liveSession.value.startedAt)) / 1000))
-  const pad = (n: number): string => String(n).padStart(2, '0')
   return `${pad(Math.floor(sec / 3600))}:${pad(Math.floor((sec % 3600) / 60))}:${pad(sec % 60)}`
 })
 
@@ -235,15 +239,21 @@ watch(
 
 // Cap how many parallel agents / background tasks are shown at once so a big
 // fan-out doesn't fill the pane; a toggle expands to all and collapses back.
+//
+// The state is shared through one helper rather than two hand-copied ref/computed
+// pairs. The MARKUP stays written out twice on purpose: a shared component would
+// need six props and a slot to cover two uses that differ in four data-testids
+// and their whole row content, which is more machinery than the repetition costs.
 const SHOW_LIMIT = 6
-const agentsExpanded = ref(false)
-const tasksExpanded = ref(false)
-const shownAgents = computed(() =>
-  agentsExpanded.value ? workingAgents.value : workingAgents.value.slice(0, SHOW_LIMIT),
-)
-const shownTasks = computed(() =>
-  tasksExpanded.value ? backgroundTasks.value : backgroundTasks.value.slice(0, SHOW_LIMIT),
-)
+function useCapped<T>(list: ComputedRef<T[]>): { expanded: Ref<boolean>; shown: ComputedRef<T[]> } {
+  const expanded = ref(false)
+  return {
+    expanded,
+    shown: computed(() => (expanded.value ? list.value : list.value.slice(0, SHOW_LIMIT))),
+  }
+}
+const { expanded: agentsExpanded, shown: shownAgents } = useCapped(workingAgents)
+const { expanded: tasksExpanded, shown: shownTasks } = useCapped(backgroundTasks)
 
 // --- Subagent chat view (design: click an agent → its own conversation) ---
 const selectedAgent = computed(
@@ -521,7 +531,6 @@ function rawLinesOf(event: SessionEvent): string[] {
 
 function hhmm(iso: string): string {
   const d = new Date(iso)
-  const pad = (n: number): string => String(n).padStart(2, '0')
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
@@ -1196,21 +1205,28 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
           </div>
         </div>
 
-        <!-- Live status line -->
+        <!-- Live status line. role=status (an implicit aria-live="polite") so a
+             screen reader announces the session changing state; the session's
+             status is the one thing in this app that changes without the user
+             doing anything, and silence there is the whole product failing. -->
         <div
           v-else-if="liveSession?.status === 'working'"
           class="live mono"
           data-testid="live-line"
+          role="status"
         >
-          <span class="blink" style="color: var(--green)">▊</span>
+          <span class="blink" style="color: var(--green)" aria-hidden="true">▊</span>
           {{ liveSession.statusDetail || 'Working…' }}
         </div>
+        <!-- assertive, not polite: this one means the session has stopped and is
+             waiting on the human, so it should interrupt rather than queue. -->
         <div
           v-else-if="liveSession?.status === 'needs_you'"
           class="live live-blocked mono"
           data-testid="live-line"
+          role="alert"
         >
-          <span class="blink">▊</span>
+          <span class="blink" aria-hidden="true">▊</span>
           Blocked — {{ pendingCount > 0 ? `${pendingCount} pending` : 'needs your answer' }}
         </div>
 
@@ -2204,135 +2220,6 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 
 .target-x:hover {
   color: var(--red);
-}
-
-.input-wrap {
-  position: relative;
-  flex: 1;
-  min-width: 60px;
-  display: flex;
-}
-
-/* Sits above the ghost-text overlay; base composer-input chrome is global. */
-/* Auto-growing multi-line composer (base transparent/borderless chrome is
-   global). CSS field-sizing grows it with content up to max-height, then it
-   scrolls. */
-.composer-input {
-  position: relative;
-  z-index: 1;
-  display: block;
-  width: 100%;
-  resize: none;
-  overflow-y: auto;
-  field-sizing: content;
-  min-height: 20px;
-  max-height: 168px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-  /* Bottom-pinned row: sit the text line level with the buttons' text. The
-     ghost mirror below must keep the identical padding. */
-  padding-bottom: 6px;
-}
-
-/* Typed text exactly matches a known /command — tint it so the match is clear. */
-/* First token is a command: hide the input's own text (keep the caret) and let
-   the ghost mirror colour the command green while the arguments stay normal. */
-.composer-input.is-command {
-  color: transparent;
-  caret-color: var(--text);
-}
-
-.ghost-cmd {
-  color: var(--green);
-}
-
-.ghost-args {
-  color: var(--text);
-}
-
-/* Extra bottom room so the live "working" line clears the floating REFS row. */
-.stream {
-  padding-bottom: 46px;
-}
-
-/* Inline ghost text: mirrors the input box exactly, typed part transparent,
-   remainder greyed, sitting directly under the live caret. */
-.ghost {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  font-size: 13px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow: hidden;
-  pointer-events: none;
-  /* Mirrors .composer-input exactly — keep the paddings in lockstep. */
-  padding-bottom: 6px;
-}
-
-.ghost-typed {
-  color: transparent;
-}
-
-.ghost-rest {
-  color: var(--text-ghost);
-}
-
-/* Suggestion dropdown, opening upward like a terminal completion menu. */
-.suggest-list {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 0;
-  right: 0;
-  max-height: 190px;
-  overflow-y: auto;
-  /* Opaque — a translucent dropdown lets the stream bleed through the rows. */
-  background: var(--bg-panel-2);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--rc);
-  padding: 4px;
-  z-index: 5;
-  box-shadow: var(--elev);
-}
-
-.suggest-item {
-  font-size: 12.5px;
-  padding: 5px 8px;
-  border-radius: var(--rc);
-  cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Light theme: a solid white sheet (the pale-blue panel tone read as see-through). */
-html.sb-light .suggest-list {
-  background: #fff;
-}
-
-.suggest-item.active {
-  background: var(--bg-active);
-}
-
-.suggest-typed {
-  color: var(--text);
-  font-weight: 600;
-}
-
-/* Small what-it-does explanation next to a suggested /command. */
-.suggest-desc {
-  margin-left: 12px;
-  float: right;
-  color: var(--text-faint);
-  font-size: 10.5px;
-  max-width: 55%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 </style>

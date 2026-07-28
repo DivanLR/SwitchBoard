@@ -4,7 +4,7 @@
 // store, session manager, permission broker, notifier, and IPC layer.
 import { app, BrowserWindow, dialog, Menu, nativeImage, session, Tray } from 'electron'
 import { join, resolve } from 'node:path'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, renameSync } from 'node:fs'
 import { openDatabase } from './store/db'
 import { createRepositories, type Repositories } from './store/repositories'
 import { runRetention, scheduleRetention } from './store/retention'
@@ -70,10 +70,13 @@ function createWindow(): void {
     // explicitly or the taskbar shows the stock Electron icon.
     icon: app.isPackaged ? undefined : join(app.getAppPath(), 'build', 'icon.ico'),
     webPreferences: {
-      preload: join(import.meta.dirname, '../preload/index.mjs'),
+      preload: join(import.meta.dirname, '../preload/index.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      // Electron's default since v20. Re-enabled by emitting the preload as
+      // CommonJS (see electron.vite.config.ts): the earlier ESM preload was the
+      // only reason this was ever off.
+      sandbox: true,
     },
   })
 
@@ -136,11 +139,53 @@ function applyContentSecurityPolicy(): void {
         // bindings (e.g. project accent colour, stream zoom) and Vue injects
         // scoped-style tags at runtime; this permits styles only, never script.
         'Content-Security-Policy': [
-          "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'",
+          // base-uri and form-action do NOT inherit from default-src, so they
+          // default permissive unless stated. object-src is stated for the same
+          // reason of not relying on inheritance. Defence in depth: the only
+          // v-html sink (MarkdownText) escapes first and reintroduces a fixed,
+          // attribute-free tag set, so there is no injection path today.
+          "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; base-uri 'none'; object-src 'none'; form-action 'none'",
         ],
       },
     })
   })
+}
+
+/**
+ * Open the store, and survive a corrupt file rather than dying silently.
+ *
+ * Before this, a database that failed to open threw out of main() before any
+ * window existed: the app simply never appeared, with no message and nothing in
+ * the UI to act on. A transcript store is not precious enough to be worth that,
+ * so a genuinely unopenable file is set aside and a fresh one created.
+ *
+ * The old file is RENAMED, never deleted, so the developer can still recover it
+ * or send it in. The second failure is not caught: if a brand-new database in a
+ * writable directory also fails, the problem is the environment, not the data,
+ * and pretending otherwise would hide it.
+ */
+function openCorruptSafe(dbPath: string): ReturnType<typeof openDatabase> {
+  try {
+    return openDatabase(dbPath)
+  } catch (error) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const quarantined = `${dbPath}.corrupt-${stamp}`
+    try {
+      renameSync(dbPath, quarantined)
+    } catch {
+      // Cannot even move it, so there is nothing left to try but a clean open,
+      // which will throw below and surface the real problem.
+    }
+    console.error(`[store] ${dbPath} could not be opened, moved to ${quarantined}:`, error)
+    const db = openDatabase(dbPath)
+    void dialog.showMessageBox({
+      type: 'warning',
+      message: 'Switchboard started with a new database.',
+      detail: `The previous store could not be opened and was moved to:\n${quarantined}\n\nProjects and history from before now are not loaded. The old file was kept, not deleted.`,
+      buttons: ['OK'],
+    })
+    return db
+  }
 }
 
 async function main(): Promise<void> {
@@ -151,7 +196,7 @@ async function main(): Promise<void> {
   Menu.setApplicationMenu(null)
   applyContentSecurityPolicy()
 
-  const db = openDatabase(join(app.getPath('userData'), 'switchboard.db'))
+  const db = openCorruptSafe(join(app.getPath('userData'), 'switchboard.db'))
   const repos: Repositories = createRepositories(db)
   // References are ephemeral: every launch starts with none (they persist only
   // within a run so they survive project switches, never across a restart).

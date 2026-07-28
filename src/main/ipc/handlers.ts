@@ -116,8 +116,8 @@ export function computeCounters(repos: Repositories): Counters {
 }
 
 export function seedDefaultRules(repos: Repositories): void {
-  if (repos.riskRules.count() === 0) repos.riskRules.replaceAll(defaultRiskRules())
-  if (repos.swallowRules.count() === 0) repos.swallowRules.replaceAll(defaultSwallowRules())
+  repos.riskRules.seedIfEmpty(defaultRiskRules())
+  repos.swallowRules.seedIfEmpty(defaultSwallowRules())
 }
 
 type Handlers = {

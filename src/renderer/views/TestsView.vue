@@ -42,8 +42,9 @@ type SubTab = 'coverage' | 'quality' | 'evidence' | 'qa' | 'skill'
 // Manual QA is the landing panel: with nothing run yet it is the one with
 // content. Starting a run switches to Results, where its output lands.
 const subTab = ref<SubTab>('qa')
-/** What a run covers. Only the working tree is scoped today. */
-const target = ref('tree')
+// No `target` ref: only the working tree is scoped today and the other two chips
+// are permanently disabled with no handler, so the ref could only ever hold
+// 'tree'. The chip below is rendered always-selected until they are implemented.
 /** Suite ids this run will cover; null until the stack is known. */
 const selected = ref<string[] | null>(null)
 
@@ -181,7 +182,7 @@ const gates = computed<GateView[]>(() =>
       case 'unit':
         return { ...gate, ...suiteGate(['unit']) }
       case 'integration':
-        return { ...gate, ...suiteGate(['api', 'contract']) }
+        return { ...gate, ...suiteGate(['api']) }
       case 'architecture': {
         const violations = quality?.archViolations
         if (!violations || violations.value === null) return { ...gate, ...suiteGate(['quality']) }
@@ -335,9 +336,7 @@ function statusWord(run: VerifyRun): string {
 
         <div class="targets">
           <span class="lbl">verify</span>
-          <button class="chip" :class="{ on: target === 'tree' }" data-testid="tests-target-tree" @click="target = 'tree'">
-            Working tree
-          </button>
+          <button class="chip on" data-testid="tests-target-tree">Working tree</button>
           <button class="chip dev" disabled title="Not built yet" data-testid="tests-target-head">
             Last commit <span class="dev-tag">in development</span>
           </button>

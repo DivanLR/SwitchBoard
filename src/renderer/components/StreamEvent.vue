@@ -237,13 +237,18 @@ const toolLabel = computed(() => {
   margin-top: 6px;
   padding: 8px 11px;
   background: color-mix(in srgb, var(--green) 6%, transparent);
-  border-left: 2px solid var(--green);
+  /* 1px, not 2px. A coloured side border above a hairline is the refused
+     side-tab pattern; the Sidebar's part identity took the same cut. The wash
+     already carries the accent, so the rule only needs to mark the edge. */
+  border-left: 1px solid var(--green);
   border-radius: var(--rc);
 }
 
-/* Light theme uses the remapped forest-green tint. */
+/* Derived from the token like every other wash. This was the last hardcoded
+   accent left in the renderer: a forest green from the replaced world that the
+   reconciliation sweep missed because that hue was never in its map. */
 html.sb-light .prompt {
-  background: rgba(22, 163, 74, 0.06);
+  background: color-mix(in srgb, var(--green) 6%, transparent);
 }
 
 .caret {
@@ -312,12 +317,6 @@ html.sb-light .prompt {
 
 .tool-failed {
   color: var(--red);
-}
-
-.tool-result {
-  padding-left: 16px;
-  max-height: 96px;
-  overflow: hidden;
 }
 
 .marker {

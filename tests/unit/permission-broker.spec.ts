@@ -55,7 +55,7 @@ interface Harness {
 function makeHarness(): Harness {
   const db = openDatabase(':memory:')
   const repos = createRepositories(db)
-  repos.riskRules.replaceAll(defaultRiskRules())
+  repos.riskRules.seedIfEmpty(defaultRiskRules())
 
   const project = repos.projects.insert({ name: 'alpha', path: 'C:\\proj\\alpha', source: 'manual' })
   const sessionId = newId()

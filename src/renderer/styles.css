@@ -747,3 +747,154 @@ button {
     transform: none;
   }
 }
+
+/* Ghost mirror + suggestion dropdown, shared by SessionView and McpView.
+   This lived twice, near-verbatim, in both views and had drifted three ways:
+   a leftover backdrop-filter blur (DESIGN.md forbids glass on panels), two
+   different dropdown shadows, and a cmd/args split only one view had. The
+   dropdown uses --shadow-dd because it IS a dropdown; each view keeps only its
+   own accent as a scoped override. */
+.input-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 60px;
+  display: flex;
+}
+
+/* Sits above the ghost-text overlay; base composer-input chrome is global. */
+/* Auto-growing multi-line composer (base transparent/borderless chrome is
+   global). CSS field-sizing grows it with content up to max-height, then it
+   scrolls. */
+.composer-input {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  resize: none;
+  overflow-y: auto;
+  field-sizing: content;
+  min-height: 20px;
+  max-height: 168px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  /* Bottom-pinned row: sit the text line level with the buttons' text. The
+     ghost mirror below must keep the identical padding. */
+  padding-bottom: 6px;
+}
+
+/* Typed text exactly matches a known /command — tint it so the match is clear. */
+/* First token is a command: hide the input's own text (keep the caret) and let
+   the ghost mirror colour the command green while the arguments stay normal. */
+.composer-input.is-command {
+  color: transparent;
+  caret-color: var(--text);
+}
+
+.ghost-cmd {
+  color: var(--green);
+}
+
+.ghost-args {
+  color: var(--text);
+}
+
+/* Extra bottom room so the live "working" line clears the floating REFS row. */
+.stream {
+  padding-bottom: 46px;
+}
+
+/* Inline ghost text: mirrors the input box exactly, typed part transparent,
+   remainder greyed, sitting directly under the live caret. */
+.ghost {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: hidden;
+  pointer-events: none;
+  /* Mirrors .composer-input exactly — keep the paddings in lockstep. */
+  padding-bottom: 6px;
+}
+
+.ghost-typed {
+  color: transparent;
+}
+
+.ghost-rest {
+  color: var(--text-ghost);
+}
+
+/* Suggestion dropdown, opening upward like a terminal completion menu. */
+.suggest-list {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: 190px;
+  overflow-y: auto;
+  /* Opaque — a translucent dropdown lets the stream bleed through the rows. */
+  background: var(--bg-panel-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--rc);
+  padding: 4px;
+  z-index: 5;
+  box-shadow: var(--shadow-dd);
+}
+
+.suggest-item {
+  font-size: 12.5px;
+  padding: 5px 8px;
+  border-radius: var(--rc);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Light theme: a solid white sheet (the pale-blue panel tone read as see-through). */
+html.sb-light .suggest-list {
+  background: #fff;
+}
+
+.suggest-item.active {
+  background: var(--bg-active);
+}
+
+.suggest-typed {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* Small what-it-does explanation next to a suggested /command. */
+.suggest-desc {
+  margin-left: 12px;
+  float: right;
+  color: var(--text-faint);
+  font-size: 10.5px;
+  max-width: 55%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Respect the OS "reduce motion" setting. Eleven looping animations run in this
+   app (the now-line breath, the needs-you pulse, the caret blink, the agent
+   fade, the inbox peek glow and their siblings), and none of them carry
+   information that stillness would lose: every one duplicates a state the
+   colour and the mark already state. So they stop entirely rather than being
+   slowed. Entrances collapse to near-zero instead of 0s, because a genuinely
+   0s animation never fires animationend and can strand a listener. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

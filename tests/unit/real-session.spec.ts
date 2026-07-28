@@ -6,7 +6,7 @@
 //
 //   $env:REAL_SESSION = '1'; npx vitest run tests/unit/real-session.spec.ts
 //
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { execSync } from 'node:child_process'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -20,13 +20,11 @@ import { defaultRiskRules } from '@main/inbox/risk-rules'
 
 const enabled = process.env.REAL_SESSION === '1'
 
-async function waitFor(predicate: () => boolean, timeoutMs: number, label: string): Promise<void> {
-  const start = Date.now()
-  while (!predicate()) {
-    if (Date.now() - start > timeoutMs) throw new Error(`Timed out waiting for ${label}`)
-    await new Promise((resolve) => setTimeout(resolve, 500))
-  }
-}
+// vi.waitFor replaces a hand-rolled polling loop. Its callbacks must ASSERT
+// rather than return a boolean: it retries only while the callback throws, and
+// resolves with whatever it returns, so a bare false predicate would pass
+// instantly and the test would never actually wait.
+const WAIT = { timeout: 150_000, interval: 500 }
 
 describe.runIf(enabled)('real Claude Code session (quickstart smoke)', () => {
   it(
@@ -37,7 +35,7 @@ describe.runIf(enabled)('real Claude Code session (quickstart smoke)', () => {
 
       const db = openDatabase(':memory:')
       const repos = createRepositories(db)
-      repos.riskRules.replaceAll(defaultRiskRules())
+      repos.riskRules.seedIfEmpty(defaultRiskRules())
       const project = repos.projects.insert({ name: 'smoke', path: projectDir, source: 'manual' })
 
       const events: SessionEvent[] = []
@@ -78,7 +76,7 @@ describe.runIf(enabled)('real Claude Code session (quickstart smoke)', () => {
         'Using the Bash tool, create a file with `echo hello > smoke.txt` and then delete it with `rm smoke.txt`. Then reply with the single word DONE.',
       )
 
-      await waitFor(() => events.some((e) => e.kind === 'result'), 150_000, 'a result event')
+      await vi.waitFor(() => expect(events.some((e) => e.kind === 'result')).toBe(true), WAIT)
 
       const kinds = new Set(events.map((e) => e.kind))
       expect(kinds.has('prompt')).toBe(true)
@@ -94,10 +92,9 @@ describe.runIf(enabled)('real Claude Code session (quickstart smoke)', () => {
       expect((result?.payload as { totalCostUsd: number }).totalCostUsd).toBeGreaterThanOrEqual(0)
 
       await manager.stopSession(session.id)
-      await waitFor(
-        () => repos.sessions.byId(session.id)?.endedAt !== null,
-        30_000,
-        'session end reconciliation',
+      await vi.waitFor(
+        () => expect(repos.sessions.byId(session.id)?.endedAt).not.toBeNull(),
+        { timeout: 30_000, interval: 500 },
       )
       db.close()
     },
@@ -112,7 +109,7 @@ describe.runIf(enabled)('real AskUserQuestion routing (T021 watch item)', () => 
       const projectDir = mkdtempSync(join(tmpdir(), 'switchboard-question-'))
       const db = openDatabase(':memory:')
       const repos = createRepositories(db)
-      repos.riskRules.replaceAll(defaultRiskRules())
+      repos.riskRules.seedIfEmpty(defaultRiskRules())
       const project = repos.projects.insert({ name: 'q-smoke', path: projectDir, source: 'manual' })
 
       const events: SessionEvent[] = []
@@ -150,7 +147,7 @@ describe.runIf(enabled)('real AskUserQuestion routing (T021 watch item)', () => 
         'Use the AskUserQuestion tool to ask me one question: "Which colour do you prefer?" with exactly two options, Red and Blue. After I answer, reply with only the colour I chose.',
       )
 
-      await waitFor(() => events.some((e) => e.kind === 'question'), 150_000, 'a question event')
+      await vi.waitFor(() => expect(events.some((e) => e.kind === 'question')).toBe(true), WAIT)
       const question = events.find((e) => e.kind === 'question')
       const payload = question?.payload as { options: { label: string }[] }
       expect(payload.options.map((o) => o.label)).toContain('Blue')
@@ -158,7 +155,7 @@ describe.runIf(enabled)('real AskUserQuestion routing (T021 watch item)', () => 
       expect(repos.requests.pending()).toHaveLength(0)
 
       broker.answerQuestion(session.id, question!.id, 'Blue')
-      await waitFor(() => events.some((e) => e.kind === 'result'), 150_000, 'the turn result')
+      await vi.waitFor(() => expect(events.some((e) => e.kind === 'result')).toBe(true), WAIT)
 
       const answered = events.find((e) => e.id === question!.id)?.payload as { answered: boolean }
       expect(answered.answered).toBe(true)

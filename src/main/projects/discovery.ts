@@ -8,17 +8,13 @@ import { open, readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, isAbsolute, join, resolve } from 'node:path'
 import type { Project, ProjectRef } from '@shared/domain'
-import type { ProjectSuggestion } from '@shared/ipc-types'
+import type { IpcError, ProjectSuggestion } from '@shared/ipc-types'
 import type { Repositories } from '@main/store/repositories'
 
-export class DiscoveryError extends Error {
-  constructor(
-    public code: 'INVALID_PATH' | 'DUPLICATE',
-    message: string,
-  ) {
-    super(message)
-  }
-}
+// No DiscoveryError class: nothing did an instanceof check on it and nothing read
+// its stack, so it was a subclass carrying no information the plain
+// { code, message } shape does not. That shape is what the IPC layer throws
+// everywhere else, and isIpcError duck-types on it.
 
 export function registerProject(
   repos: Repositories,
@@ -26,12 +22,12 @@ export function registerProject(
 ): Project {
   const path = resolve(input.path.trim().replace(/^~(?=$|[\\/])/, homedir()))
   if (!isAbsolute(path) || !existsSync(path) || !statSync(path).isDirectory()) {
-    throw new DiscoveryError('INVALID_PATH', 'The folder does not exist')
+    throw { code: 'INVALID_PATH', message: 'The folder does not exist' } satisfies IpcError
   }
   const existing = repos.projects.byPath(path)
   if (existing) {
     if (existing.archivedAt === null) {
-      throw new DiscoveryError('DUPLICATE', 'The folder is already registered')
+      throw { code: 'DUPLICATE', message: 'The folder is already registered' } satisfies IpcError
     }
     // Re-adding a previously removed folder: restore the archived row (the
     // path is UNIQUE, so inserting would fail) — the project keeps its id,
@@ -60,9 +56,9 @@ export function addProjectRef(
   target: string,
 ): ProjectRef[] {
   const project = repos.projects.byId(projectId)
-  if (!project) throw new DiscoveryError('INVALID_PATH', 'Project not found')
+  if (!project) throw { code: 'INVALID_PATH', message: 'Project not found' } satisfies IpcError
   const trimmed = target.trim()
-  if (!trimmed) throw new DiscoveryError('INVALID_PATH', 'Enter a folder path or a project name')
+  if (!trimmed) throw { code: 'INVALID_PATH', message: 'Enter a folder path or a project name' } satisfies IpcError
 
   // A project name wins over a path spelling; otherwise treat it as a folder.
   const active = repos.projects.listActive()
@@ -71,10 +67,10 @@ export function addProjectRef(
   )
   const path = named ? named.path : resolve(trimmed.replace(/^~(?=$|[\\/])/, homedir()))
   if (!named && (!isAbsolute(path) || !existsSync(path) || !statSync(path).isDirectory())) {
-    throw new DiscoveryError('INVALID_PATH', 'The folder does not exist')
+    throw { code: 'INVALID_PATH', message: 'The folder does not exist' } satisfies IpcError
   }
   if (path === project.path) {
-    throw new DiscoveryError('DUPLICATE', 'The project already reads its own folder')
+    throw { code: 'DUPLICATE', message: 'The project already reads its own folder' } satisfies IpcError
   }
   // A path that belongs to a registered project keeps that project's name.
   const owner = named ?? active.find((p) => p.path === path)
@@ -91,7 +87,7 @@ export function removeProjectRef(
   path: string,
 ): ProjectRef[] {
   const project = repos.projects.byId(projectId)
-  if (!project) throw new DiscoveryError('INVALID_PATH', 'Project not found')
+  if (!project) throw { code: 'INVALID_PATH', message: 'Project not found' } satisfies IpcError
   const refs = project.refs.filter((r) => r.path !== path)
   repos.projects.setRefs(projectId, refs)
   return refs

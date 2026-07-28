@@ -272,6 +272,19 @@ export function sandboxSpawn(config: {
         ...refs.flatMap((r) => ['-v', `${r.host}:${r.container}:ro`]),
         '-w',
         '/workspace',
+        // The image already runs as the unprivileged `node` user, so dropping
+        // every capability and barring privilege escalation costs nothing
+        // functionally while shrinking what a container-escape bug could reach.
+        // Deliberately NOT --network none: the CLI needs outbound HTTPS to reach
+        // the Anthropic API, which is the whole point of the session.
+        '--cap-drop',
+        'ALL',
+        '--security-opt',
+        'no-new-privileges',
+        // A runaway build inside the sandbox should not exhaust the host's
+        // process table. Generous enough for a .NET restore plus a test run.
+        '--pids-limit',
+        '1024',
         // The bind mount looks foreign-owned to git inside the container.
         '-e',
         'GIT_CONFIG_COUNT=1',
