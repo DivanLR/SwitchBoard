@@ -95,6 +95,16 @@ function statusOf(item: (typeof projects.items)[number]): string {
   return item.session.status
 }
 
+/** The lane's mark named in both languages: the score term and what it means.
+ *  Screen readers and hover both get the plain meaning, never the glyph alone. */
+function markTitle(status: string): string {
+  if (status === 'needs_you') return 'Fermata — held, needs you'
+  if (status === 'working') return 'Playing — working'
+  if (status === 'error') return 'Struck out — error'
+  if (status === 'ended') return 'Tacet — session ended'
+  return 'Fine — done'
+}
+
 function pendingFor(projectId: string): number {
   return inbox.pending.filter((p) => p.projectId === projectId).length
 }
@@ -537,7 +547,6 @@ async function confirmRemoveNow(): Promise<void> {
           {{ collapsed ? '»' : '«' }}
         </button>
       </div>
-      <div v-if="!collapsed" class="tagline mono">Claude Code sessions · one inbox</div>
     </div>
 
     <!-- Filter (design): narrows the list by project name or branch. -->
@@ -566,6 +575,7 @@ async function confirmRemoveNow(): Promise<void> {
     <div class="project-list">
       <!-- Sticky above the rows (design), so the heading and its controls stay
            reachable however far the list is scrolled. -->
+
       <div class="section-row">
         <template v-if="!collapsed">
           <span class="section-label mono">PROJECTS</span>
@@ -583,6 +593,7 @@ async function confirmRemoveNow(): Promise<void> {
         >▤</button>
         <button class="add mono" data-testid="add-project" title="New session" @click="emit('add-project')">+</button>
       </div>
+
 
       <template v-for="section in sections" :key="section.group?.id ?? UNGROUPED">
         <!-- Group header: click to fold, right-click for rename/reorder/remove,
@@ -663,7 +674,12 @@ async function confirmRemoveNow(): Promise<void> {
         }"
         :data-testid="`sidebar-project-${item.name}`"
         :draggable="renamingId !== item.id"
+        role="option"
+        :aria-selected="item.id === projects.selectedProjectId"
+        :tabindex="renamingId === item.id ? -1 : 0"
         @click="projects.select(item.id)"
+        @keydown.enter.prevent="projects.select(item.id)"
+        @keydown.space.prevent="projects.select(item.id)"
         @contextmenu.prevent="openCtx(item, $event)"
         @dragstart="onDragStart(item, $event)"
         @dragover="onRowDragOver(item, $event)"
@@ -672,21 +688,80 @@ async function confirmRemoveNow(): Promise<void> {
         @dragend="onDragEnd"
       >
         <div class="active-bg"></div>
+        <!-- Now, crossing this lane. Only drawn while something is playing. -->
         <span
-          class="accent"
-          :data-testid="`project-accent-${item.name}`"
-          :style="{ background: accentFor(item.id) }"
+          v-if="!collapsed && projects.counters.running > 0"
+          class="now"
+          aria-hidden="true"
         ></span>
+        <!-- Part identity is a brace, not a coloured edge bar: a 1px stroke in
+             the lane's own colour, always drawn the way a score always braces
+             its parts. -->
+        <span
+          class="brace"
+          :data-testid="`project-accent-${item.name}`"
+          :style="{ color: accentFor(item.id) }"
+          aria-hidden="true"
+        >
+          <svg viewBox="0 0 5 26" width="5" height="26">
+            <path
+              d="M4 1 C1.6 1 1.6 6 1.6 13 C1.6 20 1.6 25 4 25"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.2"
+            />
+          </svg>
+        </span>
         <div class="content">
           <div class="row">
+            <!-- The lane's current sign. Every state is a real mark: a fermata
+                 is a hold awaiting release, a beamed note is playing, a
+                 thin-thick double barline is fine, a struck bar is an error,
+                 and a bar rest is tacet. -->
             <span
               v-if="statusOf(item) !== 'none'"
-              class="dot"
+              class="mark"
               :class="statusOf(item)"
               :data-testid="`status-badge-${item.name}`"
               :data-status="statusOf(item)"
-              :title="statusOf(item) === 'needs_you' ? 'Needs you' : statusOf(item)"
-            ></span>
+              :title="markTitle(statusOf(item))"
+            >
+              <svg viewBox="0 0 16 14" width="16" height="14" aria-hidden="true">
+                <template v-if="statusOf(item) === 'needs_you'">
+                  <path
+                    d="M1.5 11.5 A6.5 6.5 0 0 1 14.5 11.5"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                  />
+                  <circle cx="8" cy="7.6" r="1.5" fill="currentColor" />
+                </template>
+                <template v-else-if="statusOf(item) === 'working'">
+                  <ellipse
+                    cx="4.6"
+                    cy="10.4"
+                    rx="3"
+                    ry="2.2"
+                    fill="currentColor"
+                    transform="rotate(-20 4.6 10.4)"
+                  />
+                  <rect x="7.1" y="2" width="1.3" height="8.6" fill="currentColor" />
+                  <rect x="7.1" y="2" width="6.9" height="2.1" fill="currentColor" />
+                </template>
+                <template v-else-if="statusOf(item) === 'error'">
+                  <rect x="7.2" y="1" width="1.4" height="12" fill="currentColor" />
+                  <path d="M2 12.4 L14 1.6" stroke="currentColor" stroke-width="1.6" />
+                </template>
+                <template v-else-if="statusOf(item) === 'ended'">
+                  <rect x="3" y="6" width="10" height="2.6" fill="currentColor" />
+                  <rect x="3" y="4.7" width="10" height="1" fill="currentColor" opacity=".45" />
+                </template>
+                <template v-else>
+                  <rect x="8" y="1" width="1.2" height="12" fill="currentColor" />
+                  <rect x="11" y="1" width="3" height="12" fill="currentColor" />
+                </template>
+              </svg>
+            </span>
             <!-- Collapsed rail: initials (+ pending badge). One template so the
                  v-else below always pairs with the collapsed check itself. -->
             <template v-if="collapsed">
@@ -785,16 +860,15 @@ async function confirmRemoveNow(): Promise<void> {
         :key="s"
         class="mcp-item"
         :class="{ open: activeSession.mcpOpen }"
-        :title="`${s} — part of the combined MCP chat`"
+        :title="`${s} — ${mcpStatusOf(s)} · part of the combined MCP chat`"
         :data-testid="`mcp-server-${s}`"
         @click="activeSession.openMcp(true)"
       >
         <span class="mcp-ico">⛁</span>
         <template v-if="!collapsed">
-          <div class="mcp-main">
-            <div class="mcp-name mono">{{ s }}</div>
-            <div class="mcp-sub mono">{{ mcpStatusOf(s) }}</div>
-          </div>
+          <!-- The dot IS the status; spelling it out under the name doubled the
+               row's height to repeat what the colour already says. -->
+          <div class="mcp-name mono">{{ s }}</div>
           <span class="mcp-dot" :style="{ background: mcpDot(mcpStatusOf(s)) }"></span>
         </template>
         <span class="mcp-accent"></span>
@@ -815,6 +889,8 @@ async function confirmRemoveNow(): Promise<void> {
     <!-- Footer (design): the counters as one inline run, a hairline usage bar,
          and Settings as the last row — one block, not three stacked cards. -->
     <div v-if="!collapsed" class="foot">
+      <!-- One run of numbers, not a grid of labelled cells: the four counters
+           read left to right and the meter below owns the limit story. -->
       <div class="foot-line mono">
         <span class="foot-stat" data-testid="counter-running">
           <span class="foot-dot" style="background: var(--blue)"></span>
@@ -825,29 +901,22 @@ async function confirmRemoveNow(): Promise<void> {
           <span class="amber" data-testid="counter-needsyou-value">{{ projects.counters.needsYou }}</span>
           waiting
         </span>
-      </div>
-      <div class="foot-line mono">
+        <span style="flex: 1"></span>
         <span class="foot-stat" data-testid="counter-cost">
-          <span data-testid="counter-cost-value">{{ costLabel }}</span> today
+          <span data-testid="counter-cost-value">{{ costLabel }}</span>
         </span>
-        <span class="foot-stat" data-testid="counter-tokens">
-          <span data-testid="counter-tokens-value">{{ tokensLabel }}</span> tokens
-        </span>
+        <span class="foot-stat" data-testid="usage-tokens">{{ tokensLabel }} tok</span>
       </div>
 
       <div v-if="usageSession" class="usage" data-testid="usage-meter">
-        <div class="usage-head mono">
-          <span>Session usage</span>
-          <span v-if="usagePct !== null" :style="{ color: usageColor }">
-            {{ usagePct }}% of {{ usageLimitLabel }}
-          </span>
-          <span v-else>— of {{ usageLimitLabel }}</span>
-        </div>
         <div class="usage-bar">
           <div class="usage-fill" :style="{ width: `${usagePct ?? 0}%`, background: usageColor }"></div>
         </div>
         <div class="usage-foot mono">
-          <span data-testid="usage-tokens">{{ tokensLabel }} tok</span>
+          <span v-if="usagePct !== null" :style="{ color: usageColor }">
+            {{ usagePct }}% of {{ usageLimitLabel }}
+          </span>
+          <span v-else>— of {{ usageLimitLabel }}</span>
           <span v-if="usageReset">Resets in {{ usageReset }}</span>
         </div>
       </div>
@@ -950,6 +1019,10 @@ async function confirmRemoveNow(): Promise<void> {
 
 <style scoped>
 .sidebar {
+  /* The PROJECTS bar's height, shared so the group headers that stick beneath it
+     cannot drift out of sync. This was a hard-coded 31px in two places, and
+     changing the bar's padding silently desynced them. */
+  --section-row-h: 31px;
   width: 252px;
   min-width: 252px;
   background: var(--bg-panel);
@@ -1042,18 +1115,17 @@ async function confirmRemoveNow(): Promise<void> {
   gap: 5px;
 }
 
-/* Design: collapsed status dots are small squares, not the round 8px dot. */
-.sidebar.collapsed .dot {
-  width: 7px;
-  min-width: 7px;
-  height: 7px;
-  border-radius: 0;
+/* On the rail there is no staff to read, so the mark shrinks to its glyph and
+   carries the whole state on its own. */
+.sidebar.collapsed .mark svg {
+  width: 13px;
+  height: 11px;
 }
 
 .collapsed-badge {
   font-size: 9px;
-  background: rgba(154, 111, 42, 0.15);
-  border-color: rgba(154, 111, 42, 0.4);
+  background: color-mix(in srgb, var(--amber) 15%, transparent);
+  border-color: color-mix(in srgb, var(--amber) 40%, transparent);
   border-radius: 0;
   padding: 0 4px;
   line-height: 12px;
@@ -1074,7 +1146,7 @@ async function confirmRemoveNow(): Promise<void> {
 .project.drop-file {
   outline: 1px dashed var(--green);
   outline-offset: -1px;
-  background: rgba(52, 211, 153, 0.06);
+  background: color-mix(in srgb, var(--green) 6%, transparent);
 }
 
 .logo {
@@ -1082,12 +1154,6 @@ async function confirmRemoveNow(): Promise<void> {
   font-weight: 700;
   color: var(--text-bright);
   letter-spacing: 0.02em;
-}
-
-.tagline {
-  font-size: 10.5px;
-  color: var(--text-faint);
-  margin-top: 3px;
 }
 
 /* Filter box (design): hairline field that greens on focus or when filtering. */
@@ -1148,7 +1214,12 @@ async function confirmRemoveNow(): Promise<void> {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 2px 14px 8px 18px;
+  /* Symmetric vertical padding. It was 2px top against 8px bottom, which left the
+     content band sitting 3px above the block's centre: align-items centred the
+     children within the band, but the band itself was high.
+     5px + 21px (the glyph buttons) + 5px keeps the row at exactly
+     var(--section-row-h), which .group-head's sticky offset depends on. */
+  padding: 5px 14px 5px 18px;
   background: var(--bg-sticky);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
@@ -1190,9 +1261,20 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .project-list {
+  position: relative;
   flex: 1;
   overflow-y: auto;
   padding: 2px 0 8px;
+}
+
+@keyframes nowBreath {
+  0%,
+  100% {
+    opacity: 0.34;
+  }
+  50% {
+    opacity: 0.72;
+  }
 }
 
 /* --- Collapsible group headers ---
@@ -1200,7 +1282,7 @@ async function confirmRemoveNow(): Promise<void> {
    belongs to is still named once its header has scrolled past. */
 .group-head {
   position: sticky;
-  top: 31px;
+  top: var(--section-row-h);
   z-index: 2;
   display: flex;
   align-items: center;
@@ -1232,7 +1314,7 @@ async function confirmRemoveNow(): Promise<void> {
   top: 0;
   bottom: 0;
   border: 1px dashed var(--green);
-  background: rgba(52, 211, 153, 0.08);
+  background: color-mix(in srgb, var(--green) 8%, transparent);
   border-radius: 6px;
 }
 
@@ -1253,9 +1335,9 @@ async function confirmRemoveNow(): Promise<void> {
 .group-name {
   flex: 1;
   min-width: 0;
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  /* Group names are typed by the developer — shown as typed. Uppercasing and
+     letter-spacing a name like "Work stuff" reads as a label, not a folder. */
+  font-size: 11.5px;
   color: var(--text-meta);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1287,11 +1369,12 @@ async function confirmRemoveNow(): Promise<void> {
   text-align: center;
 }
 
+/* A lane is full-bleed and square: a staff runs to both margins and a staff has
+   no corners. This is where the outgoing world's inset 8px-radius card row was. */
 .project {
   position: relative;
-  margin: 0 10px 1px;
-  padding: 7px 10px;
-  border-radius: 8px;
+  margin: 0 0 2px;
+  padding: 8px 18px 8px 13px;
   cursor: pointer;
   transition: background 0.12s ease;
 }
@@ -1300,21 +1383,53 @@ async function confirmRemoveNow(): Promise<void> {
   background: var(--bg-hover);
 }
 
-/* Per-project colour code: a soft bar on the row's leading edge, carried by the
-   selected row (design). The collapsed rail keeps it on every row — there the
-   dot and two initials are all the identity a row has. */
-.accent {
-  position: absolute;
-  left: 0;
-  top: 8px;
-  bottom: 8px;
-  width: 2px;
-  border-radius: 99px;
-  opacity: 0;
+/* Lanes are keyboard-operable (PRODUCT.md records keyboard and screen reader as
+   requirements). Focus is an inset rule so it never shifts the lane's geometry. */
+.project:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--green);
 }
 
-.project.active .accent,
-.sidebar.collapsed .accent {
+/* The staff: five rules the lane is ruled with, drawn as a repeating gradient so
+   there is no markup cost per line. It spans the lane's full width because a
+   staff is the lane's material, not a divider between rows. */
+/* The five-hairline staff that used to be ruled across each lane is gone. Behind
+   12px text in a 252px margin it read as guitar strings rather than as a staff,
+   which is the opposite of what the metaphor was for. The lane still reads as a
+   part through three marks that survived: its brace, its notation glyph, and the
+   now-line crossing it. */
+
+/* The now-line, one per lane at the same offset so it reads as a single rule
+   crossing the score. Per-lane rather than one tall element because a now-line
+   must cross staves, not empty plate below the last part. They share one
+   animation, so this stays a single authored moment. */
+.now {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  /* The lane's present edge. Two earlier positions both landed inside the
+     timer's digits, and a rule through a numeral is unreadable; at the edge it
+     reads as "everything left of this has happened" and can never collide. */
+  right: 5px;
+  width: 1px;
+  pointer-events: none;
+  background: var(--green);
+  animation: nowBreath 3.2s ease-in-out infinite;
+}
+
+/* Part identity: a brace in the lane's colour. A 1px stroke, because a coloured
+   edge bar above 1px on a list item is exactly the habit this world refuses. */
+.brace {
+  position: absolute;
+  left: 1px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  pointer-events: none;
+  opacity: 0.75;
+}
+
+.project.active .brace {
   opacity: 1;
 }
 
@@ -1337,17 +1452,55 @@ async function confirmRemoveNow(): Promise<void> {
 .row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
 }
 
+/* The lane's current sign. Colour comes from meaning: the pencil for a hold,
+   the now-line's cyan for playing, oxblood for a struck bar, and no hue at all
+   for fine, because a double barline needs none. */
+.mark {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  color: var(--text-meta);
+}
+
+.mark.needs_you {
+  color: var(--amber);
+}
+
+.mark.working {
+  color: var(--green);
+}
+
+.mark.error {
+  color: var(--red);
+}
+
+.mark.done {
+  color: var(--text-mid);
+}
+
+.mark.ended {
+  color: var(--text-ghost);
+}
+
+/* The part name sits in the margin, to the LEFT of where the staff begins, which
+   is where a score puts its instrument names. It needs no plate: an earlier pass
+   gave it a background and spread shadow, and that read as a text input. */
 .name {
   flex: 1;
-  font-size: 13px;
+  min-width: 0;
+  font-size: 12px;
   font-weight: 500;
   color: var(--text-name);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.project.active .name {
+  color: var(--text-bright);
 }
 
 /* Remove control: hidden until the row is hovered, like a close affordance. */
@@ -1394,8 +1547,8 @@ async function confirmRemoveNow(): Promise<void> {
   align-items: center;
   justify-content: center;
   font-size: 17px;
-  background: rgba(143, 59, 44, 0.1);
-  border: 1px solid rgba(143, 59, 44, 0.35);
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--red) 35%, transparent);
   border-radius: var(--rc);
 }
 
@@ -1521,7 +1674,7 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .agent-line:hover {
-  background: rgba(52, 211, 153, 0.1);
+  background: color-mix(in srgb, var(--green) 10%, transparent);
 }
 
 .agent-name.sel {
@@ -1597,23 +1750,11 @@ async function confirmRemoveNow(): Promise<void> {
   flex-shrink: 0;
 }
 
-.mcp-main {
+.mcp-name {
   flex: 1;
   min-width: 0;
-}
-
-.mcp-name {
   font-size: 12px;
   color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.mcp-sub {
-  font-size: 10px;
-  color: var(--text-faint);
-  margin-top: 2px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1660,7 +1801,7 @@ async function confirmRemoveNow(): Promise<void> {
   font-size: 10px;
   letter-spacing: 0.12em;
   color: var(--text-faint);
-  border-bottom: 1px solid rgba(52, 211, 153, 0.18);
+  border-bottom: 1px solid color-mix(in srgb, var(--green) 18%, transparent);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1669,7 +1810,7 @@ async function confirmRemoveNow(): Promise<void> {
 .ctx-sep {
   height: 1px;
   margin: 3px 0;
-  background: rgba(52, 211, 153, 0.18);
+  background: color-mix(in srgb, var(--green) 18%, transparent);
 }
 
 .ctx-item {
@@ -1685,12 +1826,12 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .ctx-item:hover {
-  background: rgba(52, 211, 153, 0.1);
+  background: color-mix(in srgb, var(--green) 10%, transparent);
   color: var(--text-strong);
 }
 
 .ctx-item.danger:hover {
-  background: rgba(143, 59, 44, 0.08);
+  background: color-mix(in srgb, var(--red) 8%, transparent);
   color: var(--red);
 }
 
@@ -1707,7 +1848,7 @@ async function confirmRemoveNow(): Promise<void> {
 .foot-line {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 11px;
   font-size: 11px;
   color: var(--text-faint);
 }
@@ -1716,6 +1857,9 @@ async function confirmRemoveNow(): Promise<void> {
   display: flex;
   align-items: center;
   gap: 6px;
+  /* The four counters share one line, so a stat must never wrap its unit onto a
+     second row ("0" above "tok") when the sidebar is at its narrowest. */
+  white-space: nowrap;
 }
 
 .foot-stat .amber {
@@ -1726,15 +1870,6 @@ async function confirmRemoveNow(): Promise<void> {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-}
-
-.usage-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 11px;
-  color: var(--text-faint);
-  margin-bottom: 5px;
 }
 
 /* A 3px hairline, not a meter: it reports, it does not demand attention. */
@@ -1754,9 +1889,10 @@ async function confirmRemoveNow(): Promise<void> {
 .usage-foot {
   display: flex;
   justify-content: space-between;
+  gap: 8px;
   font-size: 10.5px;
   color: var(--text-ghost);
-  margin-top: 5px;
+  margin-top: 4px;
 }
 
 /* Settings is the last row of the footer block, highlighted only on hover. */

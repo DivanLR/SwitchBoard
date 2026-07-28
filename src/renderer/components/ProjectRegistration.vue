@@ -258,7 +258,7 @@ async function startSession(): Promise<void> {
   background: var(--bg-card);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(52, 211, 153, 0.18);
+  border: 1px solid color-mix(in srgb, var(--green) 18%, transparent);
   border-radius: var(--rc);
 }
 
@@ -339,8 +339,8 @@ async function startSession(): Promise<void> {
   font-size: 11.5px;
   line-height: 1.5;
   color: var(--red-hover);
-  border: 1px solid rgba(143, 59, 44, 0.4);
-  background: rgba(143, 59, 44, 0.06);
+  border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
+  background: color-mix(in srgb, var(--red) 6%, transparent);
   border-radius: var(--rc);
 }
 

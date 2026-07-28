@@ -702,20 +702,20 @@ const partTabs: { id: Part; label: string }[] = [
 
 .sc-status.ready {
   color: var(--amber);
-  border-color: rgba(154, 111, 42, 0.4);
-  background: rgba(154, 111, 42, 0.07);
+  border-color: color-mix(in srgb, var(--amber) 40%, transparent);
+  background: color-mix(in srgb, var(--amber) 7%, transparent);
 }
 
 .sc-status.in_progress {
   color: var(--blue);
-  border-color: rgba(58, 98, 145, 0.4);
-  background: rgba(58, 98, 145, 0.07);
+  border-color: color-mix(in srgb, var(--blue) 40%, transparent);
+  background: color-mix(in srgb, var(--blue) 7%, transparent);
 }
 
 .sc-status.complete {
   color: var(--green);
-  border-color: rgba(52, 211, 153, 0.35);
-  background: rgba(52, 211, 153, 0.06);
+  border-color: color-mix(in srgb, var(--green) 35%, transparent);
+  background: color-mix(in srgb, var(--green) 6%, transparent);
 }
 
 .sc-path {
@@ -894,8 +894,8 @@ const partTabs: { id: Part; label: string }[] = [
 .pt-badge {
   font-size: 10px;
   color: var(--amber);
-  background: rgba(154, 111, 42, 0.13);
-  border: 1px solid rgba(154, 111, 42, 0.35);
+  background: color-mix(in srgb, var(--amber) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
   padding: 0 6px;
   line-height: 15px;
 }
@@ -978,7 +978,7 @@ const partTabs: { id: Part; label: string }[] = [
 
 .q-card.open {
   background: var(--bg-card);
-  border: 1px solid rgba(154, 111, 42, 0.3);
+  border: 1px solid color-mix(in srgb, var(--amber) 30%, transparent);
 }
 
 .q-card.resolved {
@@ -1068,8 +1068,8 @@ const partTabs: { id: Part; label: string }[] = [
   align-items: center;
   gap: 12px;
   padding: 13px 15px;
-  background: rgba(52, 211, 153, 0.05);
-  border: 1px solid rgba(52, 211, 153, 0.35);
+  background: color-mix(in srgb, var(--green) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--green) 35%, transparent);
   flex-wrap: wrap;
 }
 
@@ -1190,7 +1190,7 @@ const partTabs: { id: Part; label: string }[] = [
 .phase-start {
   font-size: 10.5px;
   color: var(--green);
-  border: 1px solid rgba(52, 211, 153, 0.35);
+  border: 1px solid color-mix(in srgb, var(--green) 35%, transparent);
   padding: 2px 9px;
   cursor: pointer;
   user-select: none;
@@ -1198,7 +1198,7 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .phase-start:hover {
-  background: rgba(52, 211, 153, 0.08);
+  background: color-mix(in srgb, var(--green) 8%, transparent);
 }
 
 .phase-tasks {

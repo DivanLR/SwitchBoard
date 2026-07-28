@@ -9,16 +9,21 @@
 // inside the container. A named volume persists the container-side ~/.claude
 // between runs (transcripts, so bypass→bypass resume works).
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import { promisify } from 'node:util'
 import type { SpawnOptions as SdkSpawnOptions, SpawnedProcess } from '@anthropic-ai/claude-agent-sdk'
+import { detectStacks, sandboxNeedsDotnet, sandboxTools, type SuiteTool } from '@shared/test-catalog'
 
 const execFileAsync = promisify(execFile)
 
 const IMAGE = 'switchboard-sandbox'
+const DOTNET_IMAGE = 'switchboard-sandbox-dotnet'
 const NAME_PREFIX = 'swb-'
+// Restore cache, kept out of the container so `dotnet test` does not re-download
+// every package on every session — containers are --rm, the volume is not.
+const NUGET_VOLUME = 'switchboard-nuget'
 // Per PROJECT, not global: the container's cwd is always /workspace, and the CLI
 // derives its per-project storage key from cwd — so with one shared volume every
 // project would collide on the same `projects/-workspace` directory and read each
@@ -31,23 +36,71 @@ const HOME_VOLUME_PREFIX = 'switchboard-claude-home-'
 // up a newer CLI, `docker rmi switchboard-sandbox` and the next bypass session
 // rebuilds.
 //
-// ponytail: node only — no .NET SDK, no Python, no browser. Verification runs
-// for those stacks belong on the host, where the SDK, the package caches and the
-// test infrastructure already are; baking them in would cost ~1 GB of image for
-// a session whose job is editing code. The Tests section reads this same fact
-// from SANDBOX_TOOLS in shared/test-catalog.ts and marks those suites
-// unavailable up front — change both together if a toolchain is ever added here.
-const DOCKERFILE = `FROM node:22-slim
-RUN apt-get update && apt-get install -y --no-install-recommends git ripgrep ca-certificates && rm -rf /var/lib/apt/lists/* \\
+// ponytail: two images, picked per project — node-only by default, node + the
+// .NET SDK when the project's stack detection says .NET. Still no Python and no
+// browser: those verification runs belong on the host, where the caches and test
+// infrastructure already are. The Tests section reads the same answer through
+// sandboxTools() in shared/test-catalog.ts and marks the rest unavailable up
+// front — change both together if a toolchain is ever added here.
+const SHARED_SETUP = `git ripgrep ca-certificates && rm -rf /var/lib/apt/lists/* \\
  && npm install -g @anthropic-ai/claude-code \\
  && printf '#!/bin/sh\\nmkdir -p "$HOME/.claude"\\n[ -f /creds/.credentials.json ] && cp /creds/.credentials.json "$HOME/.claude/.credentials.json"\\nexec "$@"\\n' > /entrypoint.sh \\
- && chmod +x /entrypoint.sh \\
+ && chmod +x /entrypoint.sh`
+
+const DOCKERFILE = `FROM node:22-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ${SHARED_SETUP} \\
  && mkdir -p /home/node/.claude && chown -R node:node /home/node/.claude
 USER node
 ENV HOME=/home/node
 WORKDIR /workspace
 ENTRYPOINT ["/entrypoint.sh"]
 `
+
+// The .NET SDK image has no node, so node is copied in from the same node:22-slim
+// the other image is built on — one node version to reason about, and no second
+// apt repository to keep working.
+//
+// `node` is created at uid 1000 with -o (non-unique): the SDK image is Ubuntu and
+// already parks its own `ubuntu` user there. The uid is what matters, not the
+// name — a project that gains a .sln flips to this image and must still write the
+// ~/.claude volume the node-only image created as uid 1000.
+const DOTNET_DOCKERFILE = `FROM mcr.microsoft.com/dotnet/sdk:10.0
+COPY --from=node:22-slim /usr/local/bin/node /usr/local/bin/node
+COPY --from=node:22-slim /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \\
+ && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \\
+ && apt-get update && apt-get install -y --no-install-recommends ${SHARED_SETUP} \\
+ && useradd -m -o -u 1000 node \\
+ && mkdir -p /home/node/.claude /home/node/.nuget/packages \\
+ && chown -R node:node /home/node
+USER node
+ENV HOME=/home/node
+ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
+ENV DOTNET_NOLOGO=1
+WORKDIR /workspace
+ENTRYPOINT ["/entrypoint.sh"]
+`
+
+/**
+ * Which image this project needs, from the same stack detection the Tests
+ * section shows. Unreadable folder → the small image: a wrong guess there costs
+ * a "dotnet is not in the bypass container" message, not a broken session.
+ */
+export function imageFor(projectPath: string): { image: string; dotnet: boolean } {
+  let dotnet: boolean
+  try {
+    dotnet = sandboxNeedsDotnet(detectStacks(readdirSync(projectPath)))
+  } catch {
+    dotnet = false
+  }
+  return { image: dotnet ? DOTNET_IMAGE : IMAGE, dotnet }
+}
+
+/** What a bypass session for this project can run, from the very same detection
+ *  that picks the image — so the two can never disagree. */
+export function sandboxToolsFor(projectPath: string): readonly SuiteTool[] {
+  return sandboxTools(imageFor(projectPath).dotnet)
+}
 
 function credsPath(): string {
   return join(homedir(), '.claude', '.credentials.json')
@@ -58,7 +111,8 @@ function credsPath(): string {
  * host login present, image built (first build downloads ~200 MB, minutes).
  * Throws with a message the session-start error path shows verbatim.
  */
-export async function ensureSandboxImage(): Promise<void> {
+export async function ensureSandboxImage(projectPath: string): Promise<void> {
+  const { image, dotnet } = imageFor(projectPath)
   if (!existsSync(credsPath())) {
     throw new Error(
       'Claude Code login not found (~/.claude/.credentials.json). Log in with the claude CLI once, then retry.',
@@ -75,16 +129,18 @@ export async function ensureSandboxImage(): Promise<void> {
     )
   }
   try {
-    await execFileAsync('docker', ['image', 'inspect', IMAGE], { windowsHide: true, timeout: 15_000 })
+    await execFileAsync('docker', ['image', 'inspect', image], { windowsHide: true, timeout: 15_000 })
     return
   } catch {
     // Image missing — build it (cached after the first time).
   }
   await new Promise<void>((resolve, reject) => {
-    const build = spawn('docker', ['build', '-t', IMAGE, '-'], {
+    const build = spawn('docker', ['build', '-t', image, '-'], {
       windowsHide: true,
       stdio: ['pipe', 'ignore', 'pipe'],
-      timeout: 600_000,
+      // The .NET SDK layer is ~1 GB to pull; 10 minutes is not enough on a slow
+      // link, and timing out here strands the developer with a half-built image.
+      timeout: dotnet ? 2_400_000 : 600_000,
     })
     let stderr = ''
     build.stderr.on('data', (chunk) => {
@@ -95,7 +151,7 @@ export async function ensureSandboxImage(): Promise<void> {
       if (code === 0) resolve()
       else reject(new Error(`Sandbox image build failed: ${stderr.slice(-400)}`))
     })
-    build.stdin.end(DOCKERFILE)
+    build.stdin.end(dotnet ? DOTNET_DOCKERFILE : DOCKERFILE)
   })
 }
 
@@ -184,6 +240,7 @@ export function sandboxSpawn(config: {
   const safe = (value: string): string => value.replace(/[^a-zA-Z0-9_.-]/g, '')
   const containerName = `${NAME_PREFIX}${safe(config.sessionId)}`
   const homeVolume = `${HOME_VOLUME_PREFIX}${safe(config.projectId)}`
+  const { image, dotnet } = imageFor(config.projectPath)
   return {
     additionalDirectories: ['/workspace', ...refs.map((r) => r.container)],
     mounts: [{ host: config.projectPath, container: '/workspace' }, ...refs],
@@ -201,6 +258,9 @@ export function sandboxSpawn(config: {
         `${homeVolume}:/home/node/.claude`,
         '-v',
         `${credsPath()}:/creds/.credentials.json:ro`,
+        // Shared across projects on purpose: NuGet packages are immutable per
+        // version, so one cache serves every .NET sandbox.
+        ...(dotnet ? ['-v', `${NUGET_VOLUME}:/home/node/.nuget/packages`] : []),
         ...refs.flatMap((r) => ['-v', `${r.host}:${r.container}:ro`]),
         '-w',
         '/workspace',
@@ -217,7 +277,7 @@ export function sandboxSpawn(config: {
         ...Object.entries(options.env ?? {})
           .filter(([k, v]) => v !== undefined && /^(CLAUDE|ANTHROPIC)/.test(k) && !/^[A-Za-z]:\\/.test(String(v)))
           .flatMap(([k, v]) => ['-e', `${k}=${v}`]),
-        IMAGE,
+        image,
         'claude',
         ...options.args,
       ]

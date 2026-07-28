@@ -247,8 +247,9 @@ export class SessionManager {
     }
     // Bypass sessions run containerised (docker-sandbox): fail here, before a
     // row exists, when Docker is down or not logged in. First call builds the
-    // image, which can take minutes — the renderer awaits with its busy state.
-    if (bypassPermissions) await ensureSandboxImage()
+    // image for this project's stack, which can take minutes (tens of them for
+    // the .NET one) — the renderer awaits with its busy state.
+    if (bypassPermissions) await ensureSandboxImage(project.path)
     // The app drives the user's own Claude Code CLI and no longer bundles a copy
     // (that binary is ~245 MB). Every Switchboard user has Claude Code, so this
     // is normally present; if not, fail with a clear message rather than letting

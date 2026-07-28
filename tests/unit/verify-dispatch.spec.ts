@@ -3,36 +3,54 @@
 // a figure nothing measured must come back null, never a number.
 import { describe, expect, it } from 'vitest'
 import { verifyVerdict } from '@shared/domain'
-import { stackById, defaultSelection, unavailableReason } from '@shared/test-catalog'
+import {
+  stackById,
+  defaultSelection,
+  sandboxNeedsDotnet,
+  sandboxTools,
+  unavailableReason,
+} from '@shared/test-catalog'
 import { parseVerifyReport, planSuites, verifyPrompt, VERIFY_MARKER } from '@main/evals/verify-dispatch'
 
 const dotnet = stackById('dotnet')!
 const node = stackById('node')!
 
+// The two sandbox images, as the planner sees them. `null` is a host session.
+const NODE_BOX = sandboxTools(false)
+const DOTNET_BOX = sandboxTools(true)
+
 describe('planning a run', () => {
   it('marks the suites the bypass container cannot run, instead of attempting them', () => {
-    const plan = planSuites(dotnet.suites, ['dotnet-unit', 'dotnet-arch'], true)
+    const plan = planSuites(dotnet.suites, ['dotnet-unit', 'dotnet-arch'], NODE_BOX)
     expect(plan).toHaveLength(2)
     expect(plan.every((p) => p.unavailable?.includes('dotnet'))).toBe(true)
 
     // The same suites are fine when the session runs on the host.
-    expect(planSuites(dotnet.suites, ['dotnet-unit'], false)[0].unavailable).toBeNull()
+    expect(planSuites(dotnet.suites, ['dotnet-unit'], null)[0].unavailable).toBeNull()
+  })
+
+  it('runs dotnet suites in the .NET sandbox image, which a .NET project gets', () => {
+    expect(sandboxNeedsDotnet([{ stackId: 'dotnet', stackLabel: '.NET', suites: dotnet.suites }])).toBe(true)
+    expect(sandboxNeedsDotnet([{ stackId: 'node', stackLabel: 'Node', suites: node.suites }])).toBe(false)
+    expect(planSuites(dotnet.suites, ['dotnet-unit'], DOTNET_BOX)[0].unavailable).toBeNull()
+    // Still no browser in there — a bigger image is not a different promise.
+    expect(unavailableReason(node.suites.find((s) => s.id === 'node-e2e')!, DOTNET_BOX)).toContain('browser')
   })
 
   it('keeps node suites runnable in the container, but not browser ones', () => {
-    expect(unavailableReason(node.suites.find((s) => s.id === 'node-unit')!, true)).toBeNull()
-    expect(unavailableReason(node.suites.find((s) => s.id === 'node-e2e')!, true)).toContain('browser')
+    expect(unavailableReason(node.suites.find((s) => s.id === 'node-unit')!, NODE_BOX)).toBeNull()
+    expect(unavailableReason(node.suites.find((s) => s.id === 'node-e2e')!, NODE_BOX)).toContain('browser')
   })
 
   it('leaves slow suites out of the default selection, and unavailable ones too', () => {
-    const chosen = defaultSelection(node.suites, true)
+    const chosen = defaultSelection(node.suites, NODE_BOX)
     expect(chosen).toContain('node-unit')
     expect(chosen).not.toContain('node-mutation') // heavy: opt in per run
     expect(chosen).not.toContain('node-e2e') // no browser in the container
   })
 
   it('tells the session what not to attempt, and why', () => {
-    const prompt = verifyPrompt(planSuites(dotnet.suites, ['dotnet-unit'], true), '.NET', true)
+    const prompt = verifyPrompt(planSuites(dotnet.suites, ['dotnet-unit'], NODE_BOX), '.NET', NODE_BOX)
     expect(prompt).toContain('Do NOT attempt these')
     expect(prompt).toContain('dotnet is not in the bypass container')
     expect(prompt).toContain(VERIFY_MARKER)

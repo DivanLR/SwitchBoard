@@ -236,7 +236,7 @@ const toolLabel = computed(() => {
   font-size: 12.5px;
   margin-top: 6px;
   padding: 8px 11px;
-  background: rgba(52, 211, 153, 0.06);
+  background: color-mix(in srgb, var(--green) 6%, transparent);
   border-left: 2px solid var(--green);
   border-radius: var(--rc);
 }
@@ -262,7 +262,7 @@ html.sb-light .prompt {
 .pending {
   font-size: 10px;
   color: var(--amber);
-  border: 1px solid rgba(154, 111, 42, 0.4);
+  border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
   border-radius: var(--rc);
   padding: 0 6px;
 }
@@ -342,8 +342,8 @@ html.sb-light .prompt {
 }
 
 .error-card {
-  border: 1px solid rgba(143, 59, 44, 0.4);
-  background: rgba(143, 59, 44, 0.05);
+  border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
+  background: color-mix(in srgb, var(--red) 5%, transparent);
   border-radius: var(--rc);
   padding: 11px 13px;
 }

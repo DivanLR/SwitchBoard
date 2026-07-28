@@ -15,7 +15,7 @@ import {
   type SuiteStatus,
   type VerifyReport,
 } from '@shared/domain'
-import { unavailableReason, type TestSuite } from '@shared/test-catalog'
+import { unavailableReason, type SandboxEnv, type TestSuite } from '@shared/test-catalog'
 
 /** Sentinel the session is told to emit, once, on its own line. */
 export const VERIFY_MARKER = 'SWB_VERIFY'
@@ -31,11 +31,11 @@ export interface PlannedSuite {
 export function planSuites(
   suites: readonly TestSuite[],
   chosen: readonly string[],
-  sandboxed: boolean,
+  sandbox: SandboxEnv,
 ): PlannedSuite[] {
   return suites
     .filter((s) => chosen.includes(s.id))
-    .map((suite) => ({ suite, unavailable: unavailableReason(suite, sandboxed) }))
+    .map((suite) => ({ suite, unavailable: unavailableReason(suite, sandbox) }))
 }
 
 const SCHEMA = `{
@@ -67,7 +67,7 @@ const HONESTY =
  * (FR-075 — figures gathered through failing tests are not reported, FR-076),
  * and report one line of JSON.
  */
-export function verifyPrompt(plan: PlannedSuite[], stackLabel: string, sandboxed: boolean): string {
+export function verifyPrompt(plan: PlannedSuite[], stackLabel: string, sandbox: SandboxEnv): string {
   const runnable = plan.filter((p) => !p.unavailable)
   const blocked = plan.filter((p) => p.unavailable)
   return (
@@ -80,9 +80,9 @@ export function verifyPrompt(plan: PlannedSuite[], stackLabel: string, sandboxed
         'failure of the code. Report each with status "skipped" and the reason as its detail:\n' +
         blocked.map((p) => `- ${p.suite.id}: ${p.unavailable}`).join('\n')
       : '') +
-    (sandboxed
-      ? '\n\nYou are inside the bypass container: it has node, npm, git and ripgrep, and ' +
-        'nothing else. Do not install a toolchain to work around that.'
+    (sandbox
+      ? `\n\nYou are inside the bypass container: it has git, ripgrep and ${sandbox.join(', ')}` +
+        ', and nothing else. Do not install a toolchain to work around that.'
       : '') +
     '\n\nThen gather the quality figures, without re-running the tests:\n' +
     '- Coverage: read the coverage report the run produced (cobertura/lcov/json) and give ' +

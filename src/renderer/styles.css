@@ -1,180 +1,219 @@
-/* Switchboard theme — 1:1 with the supplied Switchboard.html design reference. */
+/* Switchboard theme — THE ENGRAVED SCORE. The direction contract lives at the
+   top of App.vue and governs every value in this file. */
 @import './assets/fonts.css';
 
-/* Theme toggle (design "standalone.html"): the dark base gets a slight lift;
-   light mode is a REAL theme — every token below is redefined with the design's
-   explicit light values (no invert-filter hack), toggled via html.sb-light. */
-html:not(.sb-light) {
-  filter: brightness(1.05) saturate(1.06);
-}
+/* No global filter. The outgoing world lifted the whole document with
+   brightness+saturate; a plate is a measured material and its ink density is
+   authored per token, not boosted afterwards. Removing it also stops the filter
+   creating a containing block that broke fixed-position overlays. */
 
-/* Light theme: the design's explicit light palette. Dark values above are left
-   untouched, so the default dark view is byte-identical; only .sb-light flips. */
+/* Light theme: THE PROOF SHEET. The same score, pulled as a proof on cool
+   blueprint paper instead of cut into the plate. Ink becomes graphite, and the
+   three accents darken so they hold contrast on paper; nothing else changes,
+   because a proof and its plate are the same engraving. */
 html.sb-light {
-  /* Switchboard (standalone) (2).html light theme: a REAL cool-blue theme —
-     white translucent glass panes/cards over a pale sky-blue radial base,
-     blue-grey hairlines and shadows, dark-slate text, forest-green + sky-blue
-     accents, an Inter face and a wider 14px corner radius. Every value below is
-     the design's explicit light override; the dark :root stays byte-identical. */
-  --bg: #ffffff;
-  --bg-panel: rgba(250,250,251, 0.72);
-  --bg-sticky: rgba(250,250,251, 0.82);
-  --bg-card: rgba(255,255,255, 0.55);
-  --bg-card-alt: rgba(255, 255, 255, 0.5);
-  --bg-code: #ffffff;
-  --bg-hover: rgba(255,255,255, 0.42);
-  --bg-active: rgba(20,20,26, 0.06);
-  --bg-seg: rgba(20,20,26, 0.14);
-  --bg-chip: rgba(20,20,26, 0.06);
-  --border: rgba(20,20,26, 0.08);
-  --border-card: rgba(20,20,26, 0.1);
-  --border-card-alt: rgba(20,20,26, 0.09);
-  --border-soft: rgba(20,20,26, 0.08);
-  --border-code: rgba(20,20,26, 0.08);
-  --border-strong: rgba(20,20,26, 0.14);
-  --border-seg: rgba(20,20,26, 0.09);
-  --border-hist: rgba(20,20,26, 0.06);
-  --text-bright: #131316;
-  --text-strong: #1c1c20;
-  --text-title: #25252a;
-  --text: #131316;
-  --text-body: #43434b;
-  --text-name: #2e2e34;
-  --text-prompt: #3a3a41;
-  --text-mid: #5c5c65;
-  --text-meta: #6b6b74;
-  --text-tab: #64646d;
-  --text-noise: #757580;
-  --text-label: #757580;
-  --text-faint: #64646d;
-  --text-ghost: #6f6f78;
-  --green: #1a7a55;
-  --green-hover: #1f8f63;
-  --green2: #1a7a55;
-  --green-ink: #ffffff;
-  --green-glow: 0 6px 18px -6px rgba(31,143,99, 0.6);
-  --blue: #2f6fbd;
-  --amber: #8a5a15;
-  --amber-hover: #c08a30;
-  --amber-ink: #ffffff;
-  --red: #c0392f;
-  --red-hover: #d4574c;
-  --red-ink: #ffffff;
-  --detail: #5c6a75;
-  /* Database/MCP accent (design light: sky-blue, not teal). */
-  --teal: #2b8fa0;
-  --purple: #6d4fb8;
-  --surface-inset: #fafafb;
-  --surface-inset-line: #d9d9dd;
-  --surface-line: #d9d9dd;
-  --surface-raised: #f0f0f2;
-  --surface-hover: #eeeef0;
-  --surface-hover-line: #d9d9dd;
-  --surface-sunken: #f7f7f8;
-  --bg-panel-2: #f5f5f6;
-  /* Soft elevation + subtle top gloss for glass panes/cards; wider radius. */
-  --elev: inset 0 1px 0 rgba(255,255,255,.7),0 1px 2px rgba(20,40,70,.05);
-  --gloss: linear-gradient(rgba(255,255,255,0),rgba(255,255,255,0));
-  --rc: 10px;
-  /* Design light uses Inter; fall back to the OS UI face (Segoe UI on
-     Windows) rather than bundling a second webfont just for this face. */
-  --sans: 'Instrument Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
-  /* Light scrim + shadows: the design remaps --rgb-0-0-0 → 20,40,70 and
-     --rgb-5-6-9 → 236,243,251, so overlays lighten and shadows go blue-grey. */
-  --scrim: rgba(230,230,234, 0.66);
-  --shadow-dlg: 0 32px 80px rgba(20,20,30, 0.6), 0 0 0 1px rgba(20,20,26, 0.03) inset;
-  --shadow-dd: 0 16px 40px rgba(20,20,30, 0.5);
-  --shadow-menu: 0 16px 40px rgba(20,20,30, 0.55);
+  --bg: #f4f5f7;
+  /* Paper is opaque. The margin is a sheet laid on the sheet, not glass. */
+  --bg-panel: rgba(238,240,243, 0.92);
+  --bg-sticky: rgba(238,240,243, 0.97);
+  --bg-card: rgba(250,251,252, 0.8);
+  --bg-card-alt: rgba(248, 249, 251, 0.76);
+  --bg-code: #fbfbfc;
+  --bg-hover: rgba(34,38,43, 0.05);
+  /* --bg-active and --green-glow are NOT overridden here: both derive from
+     var(--green) in :root, and --green is theme-scoped, so they follow on their
+     own. Two fewer values to keep in sync. */
+  --bg-seg: rgba(34,38,43, 0.14);
+  --bg-chip: rgba(34,38,43, 0.06);
+  --border: rgba(34,38,43, 0.12);
+  --border-card: rgba(34,38,43, 0.14);
+  --border-card-alt: rgba(34,38,43, 0.13);
+  --border-soft: rgba(34,38,43, 0.1);
+  --border-code: rgba(34,38,43, 0.12);
+  --border-strong: rgba(34,38,43, 0.24);
+  --border-seg: rgba(34,38,43, 0.14);
+  --border-hist: rgba(34,38,43, 0.09);
+  /* Graphite ink on paper. */
+  --text-bright: #16191d;
+  --text-strong: #22262b;
+  --text-title: #2b3037;
+  --text: #22262b;
+  --text-body: #474d55;
+  --text-name: #2f353c;
+  --text-prompt: #3b4148;
+  /* Same measurement applied on paper: meta and ghost were 4.4 and 4.2. */
+  --text-mid: #5d646d;
+  --text-meta: #5f666f;
+  --text-tab: #616871;
+  --text-noise: #6a717a;
+  --text-label: #6a717a;
+  --text-faint: #616871;
+  --text-ghost: #616871;
+  --green: #1f6a7d;
+  --green-hover: #17596b;
+  --green2: #1a5f70;
+  --green-ink: #f7f9fa;
+  --blue: #1f6a7d;
+  --amber: #a8331f;
+  --amber-hover: #8d2717;
+  --amber-ink: #fdf6f4;
+  --red: #6b241c;
+  --red-hover: #571b14;
+  --red-ink: #fdf6f4;
+  --detail: #5c6570;
+  /* Continuo brass, darkened for paper. */
+  --teal: #7d5a22;
+  --purple: #5f5478;
+  --surface-inset: #fafbfc;
+  --surface-inset-line: #d5d9de;
+  --surface-line: #d5d9de;
+  --surface-raised: #eef0f3;
+  --surface-hover: #e8ebef;
+  --surface-hover-line: #d5d9de;
+  --surface-sunken: #f6f7f9;
+  --bg-panel-2: #f1f3f5;
+  /* On paper the lip of light inverts: the sheet catches light on its top edge. */
+  --elev: inset 0 1px 0 rgba(255,255,255,.8),0 1px 2px rgba(34,38,43,.07);
+  /* A whisper, not a sheen. At .5 this read as a glossy 2000s gradient button,
+     which is the opposite of ink laid on paper. */
+  --gloss: linear-gradient(rgba(255,255,255,.14),rgba(255,255,255,0));
+  --rc: 3px;
+  --sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --scrim: rgba(228,231,235, 0.7);
+  --shadow-dlg: 0 32px 80px rgba(34,38,43, 0.22), 0 0 0 1px rgba(34,38,43, 0.05) inset;
+  --shadow-dd: 0 16px 40px rgba(34,38,43, 0.18);
+  --shadow-menu: 0 16px 40px rgba(34,38,43, 0.2);
 }
 
-/* Light-mode app background: the design's light --app-bg — soft sky-blue and
-   emerald glows over a pale blue base, replacing the dark gradient below. */
+/* The proof sheet itself: flat cool paper, with the press bed showing at the
+   bottom edge. No glow pools — paper does not emit either. */
 html.sb-light body {
-  background: radial-gradient(900px 620px at 6% -12%,rgba(31,143,99,.09),transparent 62%),radial-gradient(820px 700px at 110% 6%,rgba(47,111,189,.07),transparent 58%),#f4f4f5;
+  background:
+    linear-gradient(158deg, rgba(255, 255, 255, 0.7), transparent 42%),
+    radial-gradient(1200px 800px at 50% 120%, rgba(34, 38, 43, 0.07), transparent 70%),
+    #eef0f3;
 }
 
 :root {
-  /* Palette — Switchboard (standalone) (2).html: emerald accents on a deep
-     blue-black base, glassmorphic translucent panes/cards (backdrop-blur),
-     translucent-white borders, and an Instrument Sans face (JetBrains Mono for
-     code/terminal). */
-  --bg: #121215;
-  --bg-panel: rgba(10,10,12, 0.72);
+  /* THE ENGRAVED SCORE — music engraving as produced, not as aged.
+     Ground is engraver's pewter plate, ink is bone. Three semantic accents come
+     from score production and never from expression: proof cyan is the live
+     now-line and therefore every "play on" action; rehearsal red is the
+     conductor's pencil, meaning a lane is held awaiting release; oxblood is a
+     struck-out bar. A finished lane gets NO hue: it draws a double barline.
+     Token NAMES are unchanged from the previous world so all 17 consuming files
+     keep working; only the values moved. That is why --green now holds a cyan
+     and --amber holds a red. Direction contract lives at the top of App.vue. */
+  --bg: #2b3037;
+  /* The margin plate is dense, not glassy: an engraving plate is metal. It also
+     sits a clear step BELOW the sheet it holds, because at near-equal values the
+     three panes read as one flat field with no seam between them. */
+  --bg-panel: rgba(30,34,39, 0.94);
   /* Sticky list headings sit a shade denser than the pane they float over, so
      rows scrolling underneath stay readable through them. */
-  --bg-sticky: rgba(10,10,12, 0.82);
-  --bg-card: rgba(22,22,26, 0.55);
-  --bg-card-alt: rgba(18, 18, 22, 0.5);
-  --bg-code: #0a0a0c;
-  --bg-hover: rgba(38,38,45, 0.42);
-  --bg-active: rgba(255,255,255, 0.06);
-  --bg-seg: rgba(255,255,255, 0.14);
-  --bg-chip: rgba(255,255,255, 0.06);
-  --border: rgba(255,255,255, 0.08);
-  --border-card: rgba(255,255,255, 0.1);
-  --border-card-alt: rgba(255,255,255, 0.09);
-  --border-soft: rgba(255,255,255, 0.08);
-  --border-code: rgba(255,255,255, 0.08);
-  --border-strong: rgba(255,255,255, 0.14);
-  --border-seg: rgba(255,255,255, 0.09);
-  --border-hist: rgba(255,255,255, 0.06);
-  --text-bright: #f5f5f7;
-  --text-strong: #ededf0;
-  --text-title: #e5e5e9;
-  --text: #f5f5f7;
-  --text-body: #bdbdc5;
-  --text-name: #d5d5db;
-  --text-prompt: #c9c9d0;
-  --text-mid: #9d9da7;
-  --text-meta: #8c8c96;
-  --text-tab: #82828c;
-  --text-noise: #84848e;
-  --text-label: #84848e;
-  --text-faint: #8b8b95;
-  --text-ghost: #7c7c86;
-  --green: #3fb27f;
-  --green-hover: #4ecb92;
-  /* Darker gradient stop for the primary-button fill (design: 135deg emerald→
-     green with a top gloss). --gloss is transparent in dark, so the dark button
-     is just the two-stop green gradient; light adds the white gloss sheen. */
-  --green2: #3fb27f;
-  --green-ink: #0a0a0c;
-  --green-glow: 0 6px 18px -6px rgba(63,178,127, 0.6);
-  --blue: #5b93d6;
-  --amber: #c9913f;
-  --amber-hover: #e0b878;
-  --amber-ink: #0a0a0c;
-  --red: #d05f5f;
-  --red-hover: #e07d7d;
-  --red-ink: #0a0a0c;
-  --detail: #a6b3bd;
-  /* Database/MCP accent (teal, distinct from the emerald green). */
-  --teal: #4fb2c4;
-  /* Sixth accent, used only to colour-code projects and groups in the sidebar. */
-  --purple: #9b7bd4;
+  --bg-sticky: rgba(26,29,34, 0.97);
+  --bg-card: rgba(38,43,49, 0.7);
+  --bg-card-alt: rgba(35, 40, 46, 0.66);
+  /* Proof sheet: where terminal output and code are printed. */
+  --bg-code: #1e2227;
+  --bg-hover: rgba(232,228,220, 0.06);
+  /* The selected part is washed in the now-line's own cyan. */
+  --bg-active: color-mix(in srgb, var(--green) 12%, transparent);
+  --bg-seg: rgba(232,228,220, 0.14);
+  --bg-chip: rgba(232,228,220, 0.06);
+  /* Every border in this system is a rule scored into the plate. */
+  --border: rgba(232,228,220, 0.1);
+  --border-card: rgba(232,228,220, 0.12);
+  --border-card-alt: rgba(232,228,220, 0.11);
+  --border-soft: rgba(232,228,220, 0.09);
+  --border-code: rgba(232,228,220, 0.1);
+  --border-strong: rgba(232,228,220, 0.2);
+  --border-seg: rgba(232,228,220, 0.12);
+  --border-hist: rgba(232,228,220, 0.08);
+  /* --staff is gone with the hairlines it ruled: at this width they read as
+     guitar strings behind the text rather than as a staff. If a lane ever wants
+     staff character back, a single rule is the honest form (percussion staves
+     use one line) rather than five reinstated at a lower alpha. */
+  /* Bone ink, printed on plate. Warm against the cool ground on purpose: ink
+     and metal are different materials and should not read as one. */
+  --text-bright: #f2efe8;
+  --text-strong: #e8e4dc;
+  --text-title: #ded9d0;
+  --text: #e8e4dc;
+  --text-body: #bcb8b0;
+  --text-name: #d8d3ca;
+  --text-prompt: #cdc8bf;
+  /* Every tier below carries real content (timers, counts, paths, group names,
+     risk labels), so all of them clear 4.5:1 on the plate. The first cut of this
+     world set them by eye and three failed: measured, not judged. */
+  --text-mid: #a09b93;
+  --text-meta: #a8a39a;
+  --text-tab: #a09b92;
+  --text-noise: #9c968d;
+  --text-label: #9c968d;
+  --text-faint: #a8a39a;
+  --text-ghost: #9c968d;
+  /* Proof cyan: the now-line, and every action that makes a lane play on. 5.85:1 */
+  --green: #57b9cf;
+  --green-hover: #74cbde;
+  /* Darker second stop of the action fill, so the button reads as inked rather
+     than flat. This was the accent's own value before the contrast retune. */
+  --green2: #3f9fb5;
+  --green-ink: #16191d;
+  --green-glow: 0 6px 18px -6px color-mix(in srgb, var(--green) 55%, transparent);
+  /* Working IS playing, so it takes the now-line's own hue rather than a fourth
+     colour. Action and state differ here in form, never in hue. */
+  --blue: #57b9cf;
+  /* Attention owed. CONTRACT AMENDMENT: the contract named rehearsal red here,
+     and on a dark plate that could not work. Lightened enough to read, red and
+     the error red separated by only 27deg of hue and 1.2:1 of contrast, so the
+     two signals that matter most became indistinguishable. Ochre is still score
+     material (cue letters and rehearsal marks are warm on plate) and it restores
+     the separation, so legibility of state beat thematic purity. 6.24:1, hue 33. */
+  --amber: #e0a760;
+  --amber-hover: #ecbb80;
+  /* Ink on the fill is dark now that the fill is light. 8.28:1 */
+  --amber-ink: #16191d;
+  /* A struck-out bar, and every destructive action. Red is kept here because it
+     is the one colour convention this product must not break. 4.78:1, hue 6. */
+  --red: #f0776a;
+  --red-hover: #f5938a;
+  --red-ink: #16191d;
+  --detail: #9aa3ab;
+  /* Continuo: the figured-bass line, where MCP and the database live. Brass sat
+     4deg from the ochre above and was unusable beside it; a viol blue-violet is
+     a different instrument family and separates cleanly. 5.14:1, hue 227. */
+  --teal: #8f9fd8;
+  /* Part identity only, never state: which brace a lane hangs from. 5.03:1 */
+  --purple: #bb8fd0;
   /* Opaque surface + line tokens for view chrome (agent cards, spec panels,
      sidebar rows). These dark values are the originals the components hardcoded,
      so the dark view stays byte-identical; html.sb-light redefines them above. */
-  --surface-inset: #121215;
-  --surface-inset-line: #33343a;
-  --surface-line: #2a2b30;
-  --surface-raised: #1e1f22;
-  --surface-hover: #212226;
-  --surface-hover-line: #33343a;
-  --surface-sunken: #161619;
-  --bg-panel-2: #161619;
-  /* Instrument Sans for body/UI text; JetBrains Mono for code, commands and terminal. */
-  --sans: 'Instrument Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --surface-inset: #24282e;
+  --surface-inset-line: #3d434b;
+  --surface-line: #363b42;
+  --surface-raised: #303540;
+  --surface-hover: #333841;
+  --surface-hover-line: #3d434b;
+  --surface-sunken: #262a30;
+  --bg-panel-2: #262a30;
+  /* Operate surfaces are well served by a system stack, and the outgoing face
+     (Instrument Sans) is a known training-data default. Georgia bold italic
+     carries score terms because engraved dynamics genuinely are bold italic
+     serif. JetBrains Mono is retained strictly for real terminal output. */
+  --sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', monospace;
-  /* Surface tokens: the design's dark elevation is a hairline top-inset plus a
-     tight drop shadow; the gloss is deliberately a no-op gradient (flat). */
-  --elev: inset 0 1px 0 rgba(255,255,255,.045),0 1px 2px rgba(0,0,0,.28);
+  --serif: Georgia, 'Iowan Old Style', 'Times New Roman', serif;
+  /* Depth is a hairline lip of light on a plate edge, never elevation. The gloss
+     is deliberately a no-op gradient in dark; light adds the sheen. */
+  --elev: inset 0 1px 0 rgba(232,228,220,.05),0 1px 2px rgba(0,0,0,.3);
   --gloss: linear-gradient(rgba(255, 255, 255, 0), rgba(255, 255, 255, 0));
-  --rc: 10px;
-  /* Overlay scrim + dialog/menu drop shadows (design: rgba over themed rgb
-     triplets — near-black in dark, pale blue-grey in light). */
-  --scrim: rgba(6,6,7, 0.66);
-  --shadow-dlg: 0 32px 80px rgba(0,0,0, 0.6), 0 0 0 1px rgba(255,255,255, 0.03) inset;
+  /* A plate is cut with straight rules and sharp edges. The outgoing world's
+     10px-everywhere was the loudest single signal of the look being replaced;
+     3px is a scored corner. Noteheads and dots stay genuinely round at 99px. */
+  --rc: 3px;
+  --scrim: rgba(20,23,26, 0.72);
+  --shadow-dlg: 0 32px 80px rgba(0,0,0, 0.62), 0 0 0 1px rgba(232,228,220, 0.04) inset;
   --shadow-dd: 0 16px 40px rgba(0,0,0, 0.5);
   --shadow-menu: 0 16px 40px rgba(0,0,0, 0.55);
 }
@@ -194,8 +233,9 @@ html,
   overflow: hidden;
 }
 
-/* Deep blue-black base with emerald glow pools bleeding in from the corners —
-   the translucent glass panes float over it. */
+/* An engraving plate: flat metal under one raking light from the top left. No
+   glow pools — a plate does not emit, it catches light. The vignette is what
+   gives the sheet an edge, and it is the only gradient in the ground. */
 body {
   margin: 0;
   height: 100%;
@@ -204,9 +244,9 @@ body {
   font-size: 13px;
   overflow: hidden;
   background:
-    radial-gradient(900px 620px at 6% -12%, rgba(63, 178, 127, 0.1), transparent 62%),
-    radial-gradient(820px 700px at 110% 6%, rgba(91, 147, 214, 0.07), transparent 58%),
-    #0a0a0c;
+    linear-gradient(158deg, rgba(232, 228, 220, 0.035), transparent 42%),
+    radial-gradient(1200px 800px at 50% 120%, rgba(0, 0, 0, 0.22), transparent 70%),
+    #2b3037;
 }
 
 /* The app shell is transparent so the body glow shows through the glass. */
@@ -222,12 +262,10 @@ a:hover {
   color: var(--green-hover);
 }
 
+/* Selecting text is marking the plate: the now-line's cyan, at pencil weight.
+   One rule serves both themes, because --green is already theme-scoped. */
 ::selection {
-  background: rgba(52, 211, 153, 0.28);
-}
-
-html.sb-light ::selection {
-  background: rgba(22, 163, 74, 0.28);
+  background: color-mix(in srgb, var(--green) 30%, transparent);
 }
 
 ::-webkit-scrollbar {
@@ -326,7 +364,7 @@ button {
 }
 
 .btn-outline:hover {
-  border-color: rgba(143, 59, 44, 0.5);
+  border-color: color-mix(in srgb, var(--red) 50%, transparent);
   color: var(--red);
 }
 
@@ -367,7 +405,9 @@ button {
 }
 
 .stop-btn:hover {
-  color: #fff;
+  /* Was #fff, which measured 2.78:1 once --red became a light struck-bar red.
+     --red-ink is the token that exists for exactly this: 6.34:1. */
+  color: var(--red-ink);
   background: var(--red);
   border-color: var(--red);
 }
@@ -400,27 +440,27 @@ button {
 
 .pill.working {
   color: var(--blue);
-  background: rgba(58, 98, 145, 0.1);
-  border: 1px solid rgba(58, 98, 145, 0.3);
+  background: color-mix(in srgb, var(--blue) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--blue) 30%, transparent);
 }
 
 .pill.needs_you {
   color: var(--amber);
-  background: rgba(154, 111, 42, 0.1);
-  border: 1px solid rgba(154, 111, 42, 0.35);
+  background: color-mix(in srgb, var(--amber) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
 }
 
 .pill.done {
   color: var(--green);
-  background: rgba(52, 211, 153, 0.08);
-  border: 1px solid rgba(52, 211, 153, 0.32);
+  background: color-mix(in srgb, var(--green) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--green) 32%, transparent);
 }
 
 .pill.error,
 .pill.ended {
   color: var(--red);
-  background: rgba(143, 59, 44, 0.09);
-  border: 1px solid rgba(143, 59, 44, 0.35);
+  background: color-mix(in srgb, var(--red) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--red) 35%, transparent);
 }
 
 .pill.ended {
@@ -429,38 +469,12 @@ button {
   border: 1px solid var(--border-strong);
 }
 
-/* Status dots (sidebar and inbox groups) */
-.dot {
-  width: 8px;
-  min-width: 8px;
-  height: 8px;
-  border-radius: 99px;
-  display: inline-block;
-}
-
-/* Busy/working dot: a vivid blue with a pulsing halo so it reads clearly at a
-   glance on the dark theme (the muted --blue alone was too faint). */
-.dot.working {
-  background: #5b9df9;
-  animation: sbGlow 1.4s ease-in-out infinite;
-}
-
-.dot.needs_you {
-  background: var(--amber);
-  animation: sbPulse 1.8s ease infinite;
-}
-
-.dot.done {
-  background: var(--green);
-}
-
-.dot.error {
-  background: var(--red);
-}
-
-.dot.ended {
-  background: var(--text-ghost);
-}
+/* The shared .dot block that lived here is gone. State is drawn as notation now
+   (see Sidebar.vue's .mark), so nothing applied .dot any more, in any template,
+   including dynamic bindings. Its sbGlow keyframe went with it: a zero-offset
+   coloured halo is decoration rather than depth, and the beamed note carries
+   "playing" without it. Views that still need a small round indicator declare
+   their own with an explicit 99px radius. */
 
 /* Risk chips (inbox cards) */
 .chip-risk {
@@ -479,18 +493,18 @@ button {
 
 .chip-risk.medium {
   color: var(--amber);
-  border: 1px solid rgba(154, 111, 42, 0.4);
+  border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
 }
 
 .chip-risk.high {
   color: var(--red);
-  border: 1px solid rgba(143, 59, 44, 0.45);
-  background: rgba(143, 59, 44, 0.07);
+  border: 1px solid color-mix(in srgb, var(--red) 45%, transparent);
+  background: color-mix(in srgb, var(--red) 7%, transparent);
 }
 
 .chip-risk.plan {
   color: var(--blue);
-  border: 1px solid rgba(58, 98, 145, 0.4);
+  border: 1px solid color-mix(in srgb, var(--blue) 40%, transparent);
 }
 
 /* Stream marker chips */
@@ -504,20 +518,20 @@ button {
 .chip-marker.approved,
 .chip-marker.rule_approved {
   color: var(--green);
-  border: 1px solid rgba(52, 211, 153, 0.35);
-  background: rgba(52, 211, 153, 0.07);
+  border: 1px solid color-mix(in srgb, var(--green) 35%, transparent);
+  background: color-mix(in srgb, var(--green) 7%, transparent);
 }
 
 .chip-marker.denied {
   color: var(--red);
-  border: 1px solid rgba(143, 59, 44, 0.4);
-  background: rgba(143, 59, 44, 0.07);
+  border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
+  background: color-mix(in srgb, var(--red) 7%, transparent);
 }
 
 .chip-marker.pending {
   color: var(--amber);
-  border: 1px solid rgba(154, 111, 42, 0.4);
-  background: rgba(154, 111, 42, 0.07);
+  border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
+  background: color-mix(in srgb, var(--amber) 7%, transparent);
 }
 
 .chip-marker.expired {
@@ -530,8 +544,8 @@ button {
   font-family: var(--mono);
   font-size: 10.5px;
   color: var(--amber);
-  background: rgba(154, 111, 42, 0.13);
-  border: 1px solid rgba(154, 111, 42, 0.35);
+  background: color-mix(in srgb, var(--amber) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
   border-radius: 99px;
   padding: 0 6px;
   line-height: 16px;
@@ -691,13 +705,13 @@ button {
 
 @keyframes sbPulse {
   0% {
-    box-shadow: 0 0 0 0 rgba(154, 111, 42, 0.5);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--amber) 50%, transparent);
   }
   70% {
-    box-shadow: 0 0 0 7px rgba(154, 111, 42, 0);
+    box-shadow: 0 0 0 7px transparent;
   }
   100% {
-    box-shadow: 0 0 0 0 rgba(154, 111, 42, 0);
+    box-shadow: 0 0 0 0 transparent;
   }
 }
 
@@ -723,16 +737,6 @@ button {
 }
 
 /* Distinct pulsing halo for the busy dot. */
-@keyframes sbGlow {
-  0%,
-  100% {
-    box-shadow: 0 0 4px 1px rgba(91, 157, 249, 0.7);
-  }
-  50% {
-    box-shadow: 0 0 11px 3px rgba(91, 157, 249, 1);
-  }
-}
-
 @keyframes sbIn {
   from {
     opacity: 0;

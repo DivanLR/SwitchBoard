@@ -441,17 +441,17 @@ const shortDate = (iso: string): string =>
 
 .stage.verify {
   color: var(--blue);
-  border-color: rgba(122, 162, 210, 0.4);
+  border-color: color-mix(in srgb, var(--blue) 40%, transparent);
 }
 
 .stage.review {
   color: var(--amber);
-  border-color: rgba(154, 111, 42, 0.5);
+  border-color: color-mix(in srgb, var(--amber) 50%, transparent);
 }
 
 .stage.done {
   color: var(--green);
-  border-color: rgba(52, 211, 153, 0.32);
+  border-color: color-mix(in srgb, var(--green) 32%, transparent);
 }
 
 .judge {
@@ -460,7 +460,7 @@ const shortDate = (iso: string): string =>
   font-size: 11.5px;
   line-height: 1.5;
   color: var(--text-mid);
-  background: rgba(154, 111, 42, 0.07);
+  background: color-mix(in srgb, var(--amber) 7%, transparent);
   border-left: 2px solid var(--amber);
   border-radius: 3px;
   text-wrap: pretty;
@@ -553,14 +553,14 @@ const shortDate = (iso: string): string =>
 
 .chip.pass {
   color: var(--green);
-  background: rgba(52, 211, 153, 0.1);
-  border-color: rgba(52, 211, 153, 0.32);
+  background: color-mix(in srgb, var(--green) 10%, transparent);
+  border-color: color-mix(in srgb, var(--green) 32%, transparent);
 }
 
 .chip.fail {
   color: var(--red);
-  background: rgba(248, 113, 113, 0.1);
-  border-color: rgba(248, 113, 113, 0.32);
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+  border-color: color-mix(in srgb, var(--red) 32%, transparent);
 }
 
 .cmd {
@@ -621,14 +621,14 @@ const shortDate = (iso: string): string =>
 
 .act.on {
   color: var(--green);
-  border-color: rgba(52, 211, 153, 0.5);
-  background: rgba(52, 211, 153, 0.1);
+  border-color: color-mix(in srgb, var(--green) 50%, transparent);
+  background: color-mix(in srgb, var(--green) 10%, transparent);
 }
 
 .act.bad {
   color: var(--red);
-  border-color: rgba(248, 113, 113, 0.5);
-  background: rgba(248, 113, 113, 0.1);
+  border-color: color-mix(in srgb, var(--red) 50%, transparent);
+  background: color-mix(in srgb, var(--red) 10%, transparent);
 }
 
 .star {

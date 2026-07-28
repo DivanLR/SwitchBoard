@@ -15,8 +15,8 @@ export type SuiteKind = 'api' | 'unit' | 'ui' | 'coverage' | 'contract' | 'quali
 
 /**
  * The toolchain a suite needs on PATH wherever the session runs. Named because a
- * bypass session runs inside the Linux sandbox container, which ships node and
- * nothing else — see SANDBOX_TOOLS.
+ * bypass session runs inside the Linux sandbox container, which ships node — and
+ * .NET only for a .NET project — see sandboxTools().
  */
 export type SuiteTool = 'dotnet' | 'node' | 'python' | 'browser'
 
@@ -273,28 +273,38 @@ export const TEST_STACKS: readonly TestStack[] = [
 ]
 
 /**
- * What the bypass sandbox image actually ships: node:22-slim plus git and
- * ripgrep (docker-sandbox.ts). No .NET SDK, no Python, no browser — so those
- * suites cannot run in a bypass session, and saying so BEFORE the run is the
- * point: an environment limit must never be reported as a failure of the
- * developer's code (FR-057).
+ * A .NET repo gets a sandbox image with the .NET SDK in it; everything else gets
+ * the small node-only one (docker-sandbox.ts builds both from this same answer).
+ * Baking .NET into every image would cost ~1 GB for projects that never call it.
  */
-export const SANDBOX_TOOLS: readonly SuiteTool[] = ['node']
-
-export function runnableInSandbox(suite: TestSuite): boolean {
-  return SANDBOX_TOOLS.includes(suite.needs)
+export function sandboxNeedsDotnet(stacks: readonly AvailableSuites[]): boolean {
+  return stacks.some((s) => s.stackId === 'dotnet')
 }
 
+/**
+ * What the bypass sandbox image actually ships: node:22-slim plus git and
+ * ripgrep, and — for a .NET project — the .NET SDK on top (docker-sandbox.ts).
+ * Never Python, never a browser, so those suites cannot run in a bypass session.
+ * Saying so BEFORE the run is the point: an environment limit must never be
+ * reported as a failure of the developer's code (FR-057).
+ */
+export function sandboxTools(dotnet: boolean): readonly SuiteTool[] {
+  return dotnet ? ['node', 'dotnet'] : ['node']
+}
+
+/** The sandbox a run happens in, or null when it runs natively on the host. */
+export type SandboxEnv = readonly SuiteTool[] | null
+
 /** Why a suite is unavailable here, in the developer's words — or null if it can run. */
-export function unavailableReason(suite: TestSuite, sandboxed: boolean): string | null {
-  if (!sandboxed || runnableInSandbox(suite)) return null
+export function unavailableReason(suite: TestSuite, sandbox: SandboxEnv): string | null {
+  if (!sandbox || sandbox.includes(suite.needs)) return null
   return `${suite.needs} is not in the bypass container`
 }
 
 /** The suites a plain "run verification" covers: everything runnable, minus the
  *  heavy ones, which are opt-in per run (FR-058). */
-export function defaultSelection(suites: readonly TestSuite[], sandboxed: boolean): string[] {
-  return suites.filter((s) => !s.heavy && !unavailableReason(s, sandboxed)).map((s) => s.id)
+export function defaultSelection(suites: readonly TestSuite[], sandbox: SandboxEnv): string[] {
+  return suites.filter((s) => !s.heavy && !unavailableReason(s, sandbox)).map((s) => s.id)
 }
 
 /**

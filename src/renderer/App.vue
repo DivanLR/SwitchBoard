@@ -119,7 +119,7 @@ const dbProject = computed(() => projects.dbProject)
 
 <template>
   <div v-if="bridgeMissing" class="bridge-missing">
-    <div class="mono" style="font-size: 15px; font-weight: 700">
+    <div class="mono" style="font-size: 15.5px; font-weight: 600">
       <span style="color: var(--green)">▣</span> switchboard
     </div>
     <p class="dim">
@@ -127,6 +127,27 @@ const dbProject = computed(() => projects.dbProject)
     </p>
   </div>
 
+  <!--
+    THESIS: Nine concurrent agents are parts in one score, not rows in a list.
+    Refuses the sidebar-list-plus-stream dashboard this category always ships.
+    OWN-WORLD: Engraver's pewter plate (#2b3037) under bone ink (#e8e4dc); ochre
+    (#e0a760) for attention owed, oxblood (#f0776a) for struck-out error, proof
+    cyan (#57b9cf) for the live now-line. System UI stack, JetBrains Mono for
+    terminal output only. Notation drawn as inline SVG, never a font.
+    AMENDED: attention was named "rehearsal red"; on a dark plate it and the
+    error red both had to lighten and then sat 27deg apart, so the two signals
+    collided. Ochre restores separation. AMENDED: the five-hairline staff is
+    removed; ruled behind 12px text at 252px it read as guitar strings.
+    STORY: The developer reads every lane against one time axis, believes the
+    held lane is the only one wanting them, and releases its fermata.
+    FIRST VIEWPORT: The sidebar is the score's margin and its lanes: a coloured
+    brace for part identity, a notation mark for state, and the now-line crossing
+    at the lane's present edge. UNMET: a held lane does not yet carry its decision
+    inline; Approve and Deny still live in the inbox pane.
+    FORM: The Engraved Score, candidate 7 of 7, no stagings dealt, seed 157f7fe9.
+    FINISH: unreviewed and undocumented is unfinished; this build ends with the
+    finish review, the verdict, and DESIGN.md
+  -->
   <div v-else class="shell">
     <div
       v-if="updates.active && !updateDismissed"
@@ -236,8 +257,8 @@ const dbProject = computed(() => projects.dbProject)
   align-items: center;
   gap: 10px;
   padding: 8px 16px;
-  background: rgba(52, 211, 153, 0.08);
-  border-bottom: 1px solid rgba(52, 211, 153, 0.3);
+  background: color-mix(in srgb, var(--green) 8%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--green) 30%, transparent);
   font-size: 12px;
   color: var(--text-body);
 }
@@ -341,10 +362,10 @@ const dbProject = computed(() => projects.dbProject)
 @keyframes inboxPeekGlow {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(154, 111, 42, 0.55);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--amber) 55%, transparent);
   }
   50% {
-    box-shadow: 0 0 10px 3px rgba(154, 111, 42, 0.75);
+    box-shadow: 0 0 10px 3px color-mix(in srgb, var(--amber) 75%, transparent);
   }
 }
 

@@ -98,8 +98,8 @@ function cleanLabel(label: string): string {
 
 <style scoped>
 .question {
-  border: 1px solid rgba(154, 111, 42, 0.35);
-  background: rgba(154, 111, 42, 0.04);
+  border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
+  background: color-mix(in srgb, var(--amber) 4%, transparent);
   border-radius: var(--rc);
   padding: 11px 13px;
   margin-bottom: 13px;
@@ -129,7 +129,7 @@ function cleanLabel(label: string): string {
 .chip {
   font-size: 11.5px;
   color: var(--text-body);
-  background: rgba(52, 211, 153, 0.1);
+  background: color-mix(in srgb, var(--green) 10%, transparent);
   border: 1px solid var(--border-strong);
   border-radius: var(--rc);
   padding: 5px 11px;

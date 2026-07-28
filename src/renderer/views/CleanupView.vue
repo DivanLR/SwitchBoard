@@ -134,14 +134,14 @@ function run(command: string): void {
 
 .badge.installed {
   color: var(--green);
-  background: rgba(52, 211, 153, 0.1);
-  border: 1px solid rgba(52, 211, 153, 0.32);
+  background: color-mix(in srgb, var(--green) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--green) 32%, transparent);
 }
 
 .badge.missing {
   color: var(--amber);
-  background: rgba(154, 111, 42, 0.12);
-  border: 1px solid rgba(154, 111, 42, 0.35);
+  background: color-mix(in srgb, var(--amber) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
 }
 
 .group-blurb {

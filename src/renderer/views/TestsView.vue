@@ -10,11 +10,14 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   defaultSelection,
+  sandboxNeedsDotnet,
+  sandboxTools,
   stackById,
   suiteById,
   TEST_STACKS,
   unavailableReason,
   VERIFY_GATES,
+  type SandboxEnv,
   type TestSuite,
   type VerifyGate,
 } from '@shared/test-catalog'
@@ -71,10 +74,14 @@ const stack = computed(() => stackById(chosenId.value))
 const latest = computed(() => verify.latestFor(props.projectId))
 const running = computed(() => latest.value?.status === 'running')
 
-/** A bypass session runs in the sandbox container: node only, no .NET SDK, no
- *  Python, no browser. Which suites that rules out is shown before the run. */
-const sandboxed = computed(
-  () => projectsStore.items.find((p) => p.id === props.projectId)?.session?.bypassPermissions === true,
+/** A bypass session runs in the sandbox container: node, plus the .NET SDK when
+ *  this project detects as .NET (docker-sandbox picks the image from the very
+ *  same detection). Never Python, never a browser — which suites that rules out
+ *  is shown before the run, not reported as a failure afterwards. */
+const sandboxed = computed<SandboxEnv>(() =>
+  projectsStore.items.find((p) => p.id === props.projectId)?.session?.bypassPermissions === true
+    ? sandboxTools(sandboxNeedsDotnet(detected.value))
+    : null,
 )
 
 const suites = computed<TestSuite[]>(() => [...(stack.value?.suites ?? [])])
@@ -603,8 +610,8 @@ function statusWord(run: VerifyRun): string {
   flex-shrink: 0;
   font-size: 10px;
   color: var(--green);
-  border: 1px solid rgba(63, 178, 127, 0.32);
-  background: rgba(63, 178, 127, 0.1);
+  border: 1px solid color-mix(in srgb, var(--green) 32%, transparent);
+  background: color-mix(in srgb, var(--green) 10%, transparent);
   border-radius: 99px;
   padding: 1px 9px;
 }
@@ -690,8 +697,8 @@ function statusWord(run: VerifyRun): string {
 
 .chip.on {
   color: var(--green);
-  border-color: rgba(63, 178, 127, 0.5);
-  background: rgba(63, 178, 127, 0.1);
+  border-color: color-mix(in srgb, var(--green) 50%, transparent);
+  background: color-mix(in srgb, var(--green) 10%, transparent);
 }
 
 .heavy-tag {
@@ -882,7 +889,7 @@ function statusWord(run: VerifyRun): string {
 
 .verdict.pass {
   color: var(--green);
-  border-color: rgba(63, 178, 127, 0.4);
+  border-color: color-mix(in srgb, var(--green) 40%, transparent);
 }
 
 .verdict.fail {
@@ -1064,8 +1071,8 @@ function statusWord(run: VerifyRun): string {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--amber);
-  border: 1px solid rgba(201, 145, 63, 0.4);
-  background: rgba(201, 145, 63, 0.08);
+  border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
+  background: color-mix(in srgb, var(--amber) 8%, transparent);
   border-radius: 99px;
   padding: 1px 9px;
 }

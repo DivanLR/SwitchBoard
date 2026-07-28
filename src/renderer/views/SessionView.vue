@@ -1483,7 +1483,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 .mt-badge {
   font-size: 10px;
   color: var(--text-meta);
-  background: rgba(52, 211, 153, 0.1);
+  background: color-mix(in srgb, var(--green) 10%, transparent);
   border: 1px solid var(--border-strong);
   border-radius: 99px;
   padding: 0 6px;
@@ -1538,7 +1538,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 }
 
 .seg.on {
-  background: rgba(52, 211, 153, 0.24);
+  background: color-mix(in srgb, var(--green) 24%, transparent);
   color: var(--text-strong);
   cursor: default;
 }
@@ -1584,18 +1584,18 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 
 .pill.agents-pill {
   color: var(--blue);
-  border: 1px solid rgba(58, 98, 145, 0.3);
+  border: 1px solid color-mix(in srgb, var(--blue) 30%, transparent);
 }
 
 .pill.bg-pill {
   color: var(--amber);
-  border: 1px solid rgba(154, 111, 42, 0.35);
+  border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
 }
 
 .pill.bypass-pill {
   color: var(--red);
-  background: rgba(143, 59, 44, 0.09);
-  border: 1px solid rgba(143, 59, 44, 0.4);
+  background: color-mix(in srgb, var(--red) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
 }
 
 /* REFS row (design): chips + dashed add pill under the meta line. */
@@ -1730,7 +1730,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 .mode-chip {
   font-size: 10px;
   color: var(--blue);
-  border: 1px solid rgba(58, 98, 145, 0.35);
+  border: 1px solid color-mix(in srgb, var(--blue) 35%, transparent);
   border-radius: 99px;
   padding: 1px 8px;
   white-space: nowrap;
@@ -1875,7 +1875,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 
 /* Parallel-agents card (design: ⑂ AGENTS · N working in parallel). */
 .agents {
-  border: 1px solid rgba(52, 211, 153, 0.18);
+  border: 1px solid color-mix(in srgb, var(--green) 18%, transparent);
   background: color-mix(in srgb, var(--surface-inset) 55%, transparent);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -2053,8 +2053,8 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   padding: 6px 11px;
   font-size: 11.5px;
   color: var(--amber);
-  background: rgba(154, 111, 42, 0.08);
-  border: 1px solid rgba(154, 111, 42, 0.4);
+  background: color-mix(in srgb, var(--amber) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
   border-radius: var(--rc);
   animation: sbIn 0.15s ease;
 }
@@ -2189,8 +2189,8 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   gap: 7px;
   font-size: 10.5px;
   color: var(--green);
-  background: rgba(52, 211, 153, 0.07);
-  border: 1px solid rgba(52, 211, 153, 0.35);
+  background: color-mix(in srgb, var(--green) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--green) 35%, transparent);
   border-radius: var(--rc);
   padding: 3px 9px;
   white-space: nowrap;

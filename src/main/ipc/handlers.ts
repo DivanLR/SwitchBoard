@@ -31,6 +31,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs'
 import { detectStacks, stackById } from '@shared/test-catalog'
 import { attemptsPrompt, checkPrompt, judgePrompt } from '@main/evals/eval-dispatch'
 import { evidencePrompt, planSuites, verifyPrompt } from '@main/evals/verify-dispatch'
+import { sandboxToolsFor } from '@main/sessions/docker-sandbox'
 import { comboDocPath, readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
 import { comboKey } from '@shared/mcp-combo'
 import { installSpecKit, readSpecDetail, readSpecKitState } from '@main/specs/spec-kit'
@@ -336,10 +337,13 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       if (!stack) throw { code: 'NOT_FOUND', message: 'Unknown stack.' } satisfies IpcError
       let session = repos.sessions.activeForProject(req.projectId)
       if (!session) session = await manager.startSession(req.projectId)
-      // A bypass session runs in the sandbox container, which ships node and
-      // nothing else — those suites are named as skipped up front rather than
-      // attempted and reported as failures of the code (FR-057).
-      const sandboxed = session.bypassPermissions === true
+      // A bypass session runs in the sandbox container, which ships node (plus
+      // .NET for a .NET project) and nothing else — the rest are named as
+      // skipped up front rather than attempted and reported as failures of the
+      // code (FR-057).
+      const project = repos.projects.byId(req.projectId)
+      const sandboxed =
+        session.bypassPermissions === true && project ? sandboxToolsFor(project.path) : null
       const plan = planSuites(stack.suites, req.suiteIds, sandboxed)
       if (plan.length === 0) {
         throw { code: 'INVALID_PATH', message: 'Choose at least one suite to run.' } satisfies IpcError

@@ -890,20 +890,20 @@ const updateLine = computed(() => {
 }
 
 html.sb-light .settings {
-  --hi09: rgba(96, 125, 160, 0.09);
-  --hi22: rgba(96, 125, 160, 0.22);
+  --hi09: color-mix(in srgb, var(--detail) 9%, transparent);
+  --hi22: color-mix(in srgb, var(--detail) 22%, transparent);
 }
 
 /* This dialog's own overlay tint/blur (design: separate from other dialogs') —
    scoped so it only touches the overlay this component renders. */
 .overlay {
-  background: rgba(6, 7, 8, 0.62);
+  background: color-mix(in srgb, var(--bg) 62%, transparent);
   backdrop-filter: blur(3px);
   -webkit-backdrop-filter: blur(3px);
 }
 
 html.sb-light .overlay {
-  background: rgba(236, 243, 251, 0.62);
+  background: color-mix(in srgb, var(--text-strong) 62%, transparent);
 }
 
 .s-head {
@@ -935,7 +935,7 @@ html.sb-light .overlay {
 
 .s-x:hover {
   color: var(--text-strong);
-  background: rgba(52, 211, 153, 0.1);
+  background: color-mix(in srgb, var(--green) 10%, transparent);
 }
 
 .s-main {
@@ -1059,8 +1059,8 @@ html.sb-light .overlay {
 }
 
 .card-opt.sel {
-  background: rgba(52, 211, 153, 0.06);
-  border-color: rgba(52, 211, 153, 0.4);
+  background: color-mix(in srgb, var(--green) 6%, transparent);
+  border-color: color-mix(in srgb, var(--green) 40%, transparent);
 }
 
 .card-opt.static {
@@ -1150,7 +1150,7 @@ html.sb-light .overlay {
 .lock-chip {
   font-size: 10px;
   color: var(--red);
-  border: 1px solid rgba(143, 59, 44, 0.4);
+  border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
   border-radius: var(--rc);
   padding: 2px 9px;
   white-space: nowrap;
@@ -1204,7 +1204,7 @@ html.sb-light .overlay {
   background: var(--bg-card);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(52, 211, 153, 0.18);
+  border: 1px solid color-mix(in srgb, var(--green) 18%, transparent);
   border-radius: var(--rc);
   margin-bottom: 10px;
 }
@@ -1219,7 +1219,7 @@ html.sb-light .overlay {
   gap: 10px;
   width: 100%;
   padding: 9px 13px;
-  background: rgba(52, 211, 153, 0.1);
+  background: color-mix(in srgb, var(--green) 10%, transparent);
   border: 1px solid var(--border-strong);
   border-radius: var(--rc);
   cursor: pointer;
@@ -1280,11 +1280,11 @@ html.sb-light .overlay {
 }
 
 .dd-item:hover {
-  background: rgba(52, 211, 153, 0.1);
+  background: color-mix(in srgb, var(--green) 10%, transparent);
 }
 
 .dd-item.sel {
-  background: rgba(52, 211, 153, 0.07);
+  background: color-mix(in srgb, var(--green) 7%, transparent);
   color: var(--text-strong);
 }
 
@@ -1358,14 +1358,14 @@ html.sb-light .overlay {
 }
 
 .seg-opt.on {
-  background: rgba(52, 211, 153, 0.24);
+  background: color-mix(in srgb, var(--green) 24%, transparent);
   color: var(--text-strong);
 }
 
 /* Allowed-list rows (design): the Auto pill, once active, gets its own
    lower-emphasis green treatment distinct from the generic seg selection. */
 .seg-auto.on {
-  background: rgba(52, 211, 153, 0.15);
+  background: color-mix(in srgb, var(--green) 15%, transparent);
   color: var(--green);
 }
 
@@ -1374,7 +1374,7 @@ html.sb-light .overlay {
   background: var(--bg-card);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(52, 211, 153, 0.18);
+  border: 1px solid color-mix(in srgb, var(--green) 18%, transparent);
   border-radius: var(--rc);
   font-size: 11.5px;
   line-height: 1.55;
@@ -1388,7 +1388,7 @@ html.sb-light .overlay {
   background: var(--bg-card);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(52, 211, 153, 0.18);
+  border: 1px solid color-mix(in srgb, var(--green) 18%, transparent);
   border-radius: var(--rc);
   margin-bottom: 12px;
 }

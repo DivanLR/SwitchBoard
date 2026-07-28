@@ -550,7 +550,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
 .notice {
   margin: 10px 12px 0;
   padding: 8px 10px;
-  border: 1px solid rgba(154, 111, 42, 0.4);
+  border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
   border-radius: var(--rc);
   color: var(--amber);
   font-size: 10.5px;
@@ -620,15 +620,16 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   color: var(--text-faint);
 }
 
-/* Pulsing amber status dot before the project name (design: 7x7, var(--rc)
-   radius — resolves to a full circle since --rc > half the box size). Kept
-   local rather than reusing the shared .dot class, whose sizes/colors serve
-   other views. */
+/* Pulsing status dot before the project name. Radius is stated as 99px rather
+   than var(--rc): it relied on --rc exceeding half the 7px box to round itself,
+   which was true at the previous world's 10px and false once --rc became 3px, so
+   it silently rendered a rounded square. A thing that reports a value is round
+   on purpose, not by arithmetic coincidence. */
 .group-dot {
   width: 7px;
   min-width: 7px;
   height: 7px;
-  border-radius: var(--rc);
+  border-radius: 99px;
   background: var(--amber);
   animation: sbPulse 1.8s ease infinite;
   flex-shrink: 0;
@@ -737,7 +738,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
    rule, with an explicit light-theme swap. */
 .detail-box {
   color: var(--detail);
-  background: rgba(8, 11, 24, 0.5);
+  background: color-mix(in srgb, var(--bg) 50%, transparent);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid rgba(255, 255, 255, 0.07);
@@ -748,8 +749,8 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
 }
 
 html.sb-light .detail-box {
-  background: rgba(236, 243, 251, 0.5);
-  border-color: rgba(96, 125, 160, 0.07);
+  background: color-mix(in srgb, var(--text-strong) 50%, transparent);
+  border-color: color-mix(in srgb, var(--detail) 7%, transparent);
 }
 
 .item-detail {
@@ -840,8 +841,8 @@ html.sb-light .detail-box {
 
 .hist-clear:hover {
   color: var(--text-strong);
-  border-color: rgba(143, 59, 44, 0.6);
-  background: rgba(143, 59, 44, 0.1);
+  border-color: color-mix(in srgb, var(--red) 60%, transparent);
+  background: color-mix(in srgb, var(--red) 10%, transparent);
 }
 
 .hist-empty {

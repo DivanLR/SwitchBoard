@@ -1,0 +1,439 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-28T13:45:49.922Z",
+  "title": "Design System: Switchboard",
+  "extensions": {
+    "colorMeta": {
+      "plate": {
+        "role": "neutral",
+        "displayName": "Engraver's Pewter",
+        "canonical": "#2b3037",
+        "tonalRamp": [
+          "oklch(0.14 0.006 255)",
+          "oklch(0.20 0.007 255)",
+          "oklch(0.28 0.008 255)",
+          "oklch(0.38 0.008 255)",
+          "oklch(0.50 0.008 255)",
+          "oklch(0.64 0.007 255)",
+          "oklch(0.80 0.006 255)",
+          "oklch(0.95 0.004 255)"
+        ]
+      },
+      "bone-ink": {
+        "role": "neutral",
+        "displayName": "Bone Ink (strong tier, 10.48:1 on plate)",
+        "canonical": "#e8e4dc",
+        "tonalRamp": [
+          "oklch(0.18 0.01 90)",
+          "oklch(0.28 0.012 90)",
+          "oklch(0.38 0.013 90)",
+          "oklch(0.50 0.014 90)",
+          "oklch(0.63 0.014 90)",
+          "oklch(0.76 0.013 90)",
+          "oklch(0.88 0.011 90)",
+          "oklch(0.96 0.007 90)"
+        ]
+      },
+      "text-body": {
+        "role": "neutral",
+        "displayName": "Bone Ink Body (6.72:1)",
+        "canonical": "#bcb8b0"
+      },
+      "text-meta": {
+        "role": "neutral",
+        "displayName": "Bone Ink Meta (5.30:1, shared with Faint)",
+        "canonical": "#a8a39a"
+      },
+      "text-tab": {
+        "role": "neutral",
+        "displayName": "Bone Ink Tab (4.81:1)",
+        "canonical": "#a09b92"
+      },
+      "text-ghost": {
+        "role": "neutral",
+        "displayName": "Bone Ink Ghost (4.53:1, shared with Noise and Label)",
+        "canonical": "#9c968d"
+      },
+      "plate-vignette": {
+        "role": "neutral",
+        "displayName": "Plate Vignette (ground, not a palette hue)",
+        "canonical": "rgba(0,0,0,0.22)"
+      },
+      "lip-white": {
+        "role": "neutral",
+        "displayName": "Lip White (neutral gloss family, 0.06-0.7 by surface)",
+        "canonical": "rgba(255,255,255,0.06)"
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Border",
+        "canonical": "rgba(232,228,220,0.1)"
+      },
+      "border-strong": {
+        "role": "neutral",
+        "displayName": "Border Strong",
+        "canonical": "rgba(232,228,220,0.2)"
+      },
+      "bg-panel": {
+        "role": "neutral",
+        "displayName": "Panel",
+        "canonical": "rgba(30,34,39,0.94)"
+      },
+      "bg-card": {
+        "role": "neutral",
+        "displayName": "Card",
+        "canonical": "rgba(38,43,49,0.7)"
+      },
+      "bg-code": {
+        "role": "neutral",
+        "displayName": "Code Plate",
+        "canonical": "#1e2227"
+      },
+      "proof-cyan": {
+        "role": "primary",
+        "displayName": "Proof Cyan",
+        "canonical": "#57b9cf",
+        "tonalRamp": [
+          "oklch(0.19 0.03 191)",
+          "oklch(0.29 0.05 191)",
+          "oklch(0.39 0.07 191)",
+          "oklch(0.49 0.08 191)",
+          "oklch(0.60 0.09 191)",
+          "oklch(0.71 0.09 191)",
+          "oklch(0.84 0.06 191)",
+          "oklch(0.95 0.03 191)"
+        ]
+      },
+      "proof-cyan-hover": {
+        "role": "primary",
+        "displayName": "Proof Cyan, hover",
+        "canonical": "#74cbde",
+        "tonalRamp": [
+          "oklch(0.21 0.03 192)",
+          "oklch(0.32 0.05 192)",
+          "oklch(0.43 0.06 192)",
+          "oklch(0.54 0.07 192)",
+          "oklch(0.66 0.08 192)",
+          "oklch(0.78 0.07 192)",
+          "oklch(0.88 0.05 192)",
+          "oklch(0.96 0.02 192)"
+        ]
+      },
+      "ochre": {
+        "role": "secondary",
+        "displayName": "Ochre (attention owed — contract amendment, was named \"rehearsal red\")",
+        "canonical": "#e0a760",
+        "tonalRamp": [
+          "oklch(0.18 0.03 33)",
+          "oklch(0.28 0.05 33)",
+          "oklch(0.38 0.07 33)",
+          "oklch(0.48 0.09 33)",
+          "oklch(0.58 0.10 33)",
+          "oklch(0.69 0.11 33)",
+          "oklch(0.82 0.07 33)",
+          "oklch(0.94 0.03 33)"
+        ]
+      },
+      "oxblood": {
+        "role": "secondary",
+        "displayName": "Oxblood (struck bar / error)",
+        "canonical": "#f0776a",
+        "tonalRamp": [
+          "oklch(0.18 0.04 6)",
+          "oklch(0.28 0.07 6)",
+          "oklch(0.38 0.10 6)",
+          "oklch(0.48 0.12 6)",
+          "oklch(0.58 0.14 6)",
+          "oklch(0.68 0.13 6)",
+          "oklch(0.82 0.08 6)",
+          "oklch(0.94 0.03 6)"
+        ]
+      },
+      "viol-blue-violet": {
+        "role": "tertiary",
+        "displayName": "Viol Blue-Violet (continuo/MCP — contract amendment, drop \"brass\")",
+        "canonical": "#8f9fd8",
+        "tonalRamp": [
+          "oklch(0.19 0.04 227)",
+          "oklch(0.29 0.06 227)",
+          "oklch(0.39 0.08 227)",
+          "oklch(0.49 0.10 227)",
+          "oklch(0.60 0.11 227)",
+          "oklch(0.71 0.10 227)",
+          "oklch(0.84 0.06 227)",
+          "oklch(0.95 0.03 227)"
+        ]
+      },
+      "brace-violet": {
+        "role": "tertiary",
+        "displayName": "Brace Violet (project identity only)",
+        "canonical": "#bb8fd0",
+        "tonalRamp": [
+          "oklch(0.19 0.04 281)",
+          "oklch(0.29 0.07 281)",
+          "oklch(0.39 0.10 281)",
+          "oklch(0.49 0.12 281)",
+          "oklch(0.60 0.13 281)",
+          "oklch(0.71 0.11 281)",
+          "oklch(0.84 0.07 281)",
+          "oklch(0.95 0.03 281)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "The ceiling of the system at 15.5px: the remove-project dialogue title and the bridge-missing fallback lockup. The prose recorded this tier but the frontmatter omitted it, so the detector read it as drift until both agreed."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Brand lockup and view headers. 6 declarations."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Prose and stream text; also the base size on html. 25 declarations."
+      },
+      "ui": {
+        "displayName": "UI",
+        "purpose": "Control and row labels. 46 declarations."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Section headings. Only the sidebar's PROJECTS heading still carries the defining 0.08em tracking; the six inherited views use their own tracking values (0.04em-0.18em). 51 declarations at this size overall."
+      },
+      "meta": {
+        "displayName": "Meta",
+        "purpose": "The most-used size in the application, 65 declarations. Secondary lines, timestamps, pills, footer readings."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "The tightest readable tier. Sub-labels, chip text, agent lines. 48 declarations."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "JetBrains Mono. 20 declarations explicitly set font-family: var(--mono) — commands, raw output, button/pill/chip/badge text. The .mono CSS class itself resolves to the sans face, not this font."
+      },
+      "score": {
+        "displayName": "Score (unwired)",
+        "purpose": "Georgia bold italic, named in the direction contract for score-term vocabulary (fermata, tacet, fine). Declared as --serif but not referenced by var(--serif) anywhere in src/renderer yet — an open commitment, not a built surface."
+      },
+      "glyph": {
+        "displayName": "Glyph (not type)",
+        "purpose": "Icon and symbol glyphs are sized to optical weight, not to the type ramp, and fall outside it by design."
+      }
+    },
+    "shadows": [
+      {
+        "name": "hairline-lip",
+        "value": "inset 0 1px 0 rgba(232,228,220,0.05), 0 1px 2px rgba(0,0,0,0.3)",
+        "purpose": "Default for any card or dialogue. A lip of light on a plate edge, not elevation."
+      },
+      {
+        "name": "action-glow",
+        "value": "0 6px 18px -6px rgba(87,185,207,0.55)",
+        "purpose": "Proof-cyan primary buttons only. The one place the system permits a coloured shadow."
+      },
+      {
+        "name": "menu-drop",
+        "value": "0 16px 40px rgba(0,0,0,0.55)",
+        "purpose": "Context menus and dropdowns."
+      },
+      {
+        "name": "dialogue-drop",
+        "value": "0 32px 80px rgba(0,0,0,0.62), 0 0 0 1px rgba(232,228,220,0.04) inset",
+        "purpose": "Modal dialogues only, the sole tier allowed a real cast shadow."
+      }
+    ],
+    "motion": [
+      {
+        "name": "nowBreath",
+        "value": "nowBreath 3.2s ease-in-out infinite",
+        "purpose": "The now-line's slow breath. One shared animation across every lane in the sidebar, so it reads as a single rule crossing the score rather than nine independent ones. The system's one authored moment."
+      },
+      {
+        "name": "sbFade",
+        "value": "sbFade 1.6s-2.2s ease infinite",
+        "purpose": "Parallel-agent and background-agent square indicators (Sidebar agent-sq, SessionView ab-dot/agent-dot, App.vue update banner dot, SpecsView). Widely used across the six non-score views."
+      },
+      {
+        "name": "sbIn",
+        "value": "sbIn 0.12s-0.25s ease",
+        "purpose": "Entrance for dialogues, context menus, the armed button state, and InboxView's approve-all confirm row. Rises 5px while fading in."
+      },
+      {
+        "name": "sbPulse",
+        "value": "sbPulse 1.8s ease infinite",
+        "purpose": "Expanding-ring pulse. Still live via InboxView's own .group-dot (which intentionally does not reuse the shared .dot class); the shared .dot.needs_you rule that also references it is unreferenced by any template."
+      },
+      {
+        "name": "sbBlink",
+        "value": "sbBlink 1.1s steps(1) infinite",
+        "purpose": "Terminal caret. Steps rather than eases, because a caret does not fade."
+      },
+      {
+        "name": "sbGlow",
+        "value": "sbGlow 1.4s ease-in-out infinite",
+        "purpose": "ORPHANED. Defined in styles.css and still wired to the shared .dot.working rule, but no template in src/renderer applies class=\"dot\" — every view rolls its own local status dot instead. Kept for historical reference only; do not treat as the system's live working-state motion."
+      },
+      {
+        "name": "row-hover",
+        "value": "background 0.12s ease",
+        "purpose": "Project lane hover."
+      },
+      {
+        "name": "field-active",
+        "value": "border-color 0.14s ease, box-shadow 0.14s ease",
+        "purpose": "Filter field gaining focus or becoming active."
+      },
+      {
+        "name": "meter-fill",
+        "value": "width 0.3s ease",
+        "purpose": "Usage meter fill. Deliberately slow, because the value it reports changes slowly."
+      },
+      {
+        "name": "switch-knob",
+        "value": "all 0.15s ease",
+        "purpose": "Toggle switch knob travelling between its two ends."
+      }
+    ],
+    "breakpoints": []
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single most useful action on a surface, filled proof cyan.",
+      "html": "<button class=\"ds-btn-primary\">Send</button>",
+      "css": ".ds-btn-primary { background: linear-gradient(135deg, var(--green, #57b9cf), var(--green2, #3f9fb5)); color: var(--green-ink, #16191d); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; font-weight: 600; padding: 6px 14px; border: none; border-radius: 3px; cursor: pointer; user-select: none; box-shadow: 0 6px 18px -6px rgba(87,185,207,0.55); } .ds-btn-primary:hover { background: var(--green-hover, #74cbde); } .ds-btn-primary:focus-visible { outline: 1px solid var(--green, #57b9cf); outline-offset: 2px; } .ds-btn-primary:disabled { opacity: 0.45; cursor: default; }"
+    },
+    {
+      "name": "Armed Button",
+      "kind": "button",
+      "refersTo": "button-armed",
+      "description": "Second step of a destructive confirmation, filled ochre. Enters with a rise-and-fade so the state change is visible.",
+      "html": "<button class=\"ds-btn-armed\">Confirm high risk</button>",
+      "css": ".ds-btn-armed { background: var(--amber, #e0a760); color: var(--amber-ink, #16191d); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; font-weight: 600; padding: 6px 14px; border: none; border-radius: 3px; cursor: pointer; user-select: none; animation: dsIn 0.2s ease; } .ds-btn-armed:hover { background: var(--amber-hover, #ecbb80); } .ds-btn-armed:focus-visible { outline: 1px solid var(--green, #57b9cf); outline-offset: 2px; } @keyframes dsIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }"
+    },
+    {
+      "name": "Outline Button",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "The cancel-and-destroy idiom: transparent at rest, its hover turns oxblood rather than the neutral proof-cyan that Quiet uses.",
+      "html": "<button class=\"ds-btn-outline\">Cancel</button>",
+      "css": ".ds-btn-outline { background: transparent; color: var(--text-mid, #a09b93); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; padding: 6px 14px; border: 1px solid var(--border-strong, rgba(232,228,220,0.2)); border-radius: 3px; cursor: pointer; user-select: none; } .ds-btn-outline:hover { border-color: rgba(240,119,106,0.5); color: var(--red, #f0776a); } .ds-btn-outline:focus-visible { outline: 1px solid var(--green, #57b9cf); outline-offset: 2px; }"
+    },
+    {
+      "name": "Input Field",
+      "kind": "input",
+      "refersTo": "input-field",
+      "description": "Code-plate fill with a hairline border. The 1px proof-cyan focus outline is the only focus treatment in the system.",
+      "html": "<input class=\"ds-input\" type=\"text\" placeholder=\"Filter\" />",
+      "css": ".ds-input { background: var(--bg-code, #1e2227); color: var(--text, #e8e4dc); font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; font-size: 13px; padding: 6px 10px; border: 1px solid var(--border-strong, rgba(232,228,220,0.2)); border-radius: 3px; } .ds-input::placeholder { color: var(--text-faint, #a8a39a); } .ds-input:focus { outline: 1px solid var(--green, #57b9cf); }"
+    },
+    {
+      "name": "Risk Chip (High)",
+      "kind": "chip",
+      "refersTo": "chip-risk",
+      "description": "The loudest of three risk steps: low is a bare border, medium adds ochre, high adds an oxblood wash behind the border.",
+      "html": "<span class=\"ds-chip-risk-high\">high</span>",
+      "css": ".ds-chip-risk-high { display: inline-block; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; color: var(--red, #f0776a); background: rgba(240,119,106,0.07); border: 1px solid rgba(240,119,106,0.45); border-radius: 3px; padding: 1px 6px; white-space: nowrap; }"
+    },
+    {
+      "name": "Count Badge",
+      "kind": "chip",
+      "refersTo": "badge-count",
+      "description": "Counts decisions a human owes. Fully round because it reports a value; the loudest small element in the interface.",
+      "html": "<span class=\"ds-badge-count\">3</span>",
+      "css": ".ds-badge-count { display: inline-block; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; color: var(--amber, #e0a760); background: rgba(224,167,96,0.13); border: 1px solid rgba(224,167,96,0.35); border-radius: 99px; padding: 0 6px; line-height: 16px; white-space: nowrap; }"
+    },
+    {
+      "name": "Toggle Switch",
+      "kind": "custom",
+      "refersTo": "button-primary",
+      "description": "Settings toggle. Fully round because it reports a state; fills proof cyan when on.",
+      "html": "<button class=\"ds-switch ds-switch--on\" aria-pressed=\"true\"><span class=\"ds-switch__knob\"></span></button>",
+      "css": ".ds-switch { position: relative; width: 38px; min-width: 38px; height: 21px; border: none; border-radius: 99px; background: var(--border-strong, rgba(232,228,220,0.2)); cursor: pointer; } .ds-switch--on { background: var(--green, #57b9cf); } .ds-switch__knob { position: absolute; top: 2px; left: 2px; width: 17px; height: 17px; border-radius: 99px; background: var(--text-faint, #a8a39a); transition: all 0.15s ease; } .ds-switch--on .ds-switch__knob { left: auto; right: 2px; background: var(--bg, #2b3037); } .ds-switch:focus-visible { outline: 1px solid var(--green, #57b9cf); outline-offset: 2px; }"
+    },
+    {
+      "name": "Notation Mark (Fermata)",
+      "kind": "custom",
+      "refersTo": "lane-row",
+      "description": "Signature component. A held lane draws a fermata (half-circle over a dot), ochre, with no motion of its own — state lives in shape and colour, never animation, in this world.",
+      "html": "<span class=\"ds-mark ds-mark--needs-you\" title=\"Fermata — held, needs you\"><svg viewBox=\"0 0 16 14\" width=\"16\" height=\"14\" aria-hidden=\"true\"><path d=\"M1.5 11.5 A6.5 6.5 0 0 1 14.5 11.5\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\"/><circle cx=\"8\" cy=\"7.6\" r=\"1.5\" fill=\"currentColor\"/></svg></span>",
+      "css": ".ds-mark { display: inline-flex; align-items: center; color: var(--text-meta, #a8a39a); } .ds-mark--needs-you { color: var(--amber, #e0a760); }"
+    },
+    {
+      "name": "Notation Mark (Beamed Note / Working)",
+      "kind": "custom",
+      "refersTo": "lane-row",
+      "description": "A playing lane draws a beamed note, proof cyan — the same hue as the now-line, because working IS playing in this system's own terms.",
+      "html": "<span class=\"ds-mark ds-mark--working\" title=\"Playing — working\"><svg viewBox=\"0 0 16 14\" width=\"16\" height=\"14\" aria-hidden=\"true\"><ellipse cx=\"4.6\" cy=\"10.4\" rx=\"3\" ry=\"2.2\" fill=\"currentColor\" transform=\"rotate(-20 4.6 10.4)\"/><rect x=\"7.1\" y=\"2\" width=\"1.3\" height=\"8.6\" fill=\"currentColor\"/><rect x=\"7.1\" y=\"2\" width=\"6.9\" height=\"2.1\" fill=\"currentColor\"/></svg></span>",
+      "css": ".ds-mark--working { color: var(--green, #57b9cf); }"
+    },
+    {
+      "name": "Project Lane",
+      "kind": "nav",
+      "refersTo": "lane-row",
+      "description": "Signature component and the application's real navigation: a five-hairline staff full-bleed in the lane, a per-lane now-line at the right edge while anything plays, and a 1px brace in the project's identity colour standing in for the coloured edge bar this world refuses.",
+      "html": "<div class=\"ds-lane ds-lane--active\" tabindex=\"0\" role=\"option\" aria-selected=\"true\"><span class=\"ds-lane__staff\" aria-hidden=\"true\"></span><span class=\"ds-lane__now\" aria-hidden=\"true\"></span><span class=\"ds-lane__brace\" aria-hidden=\"true\"><svg viewBox=\"0 0 5 26\" width=\"5\" height=\"26\"><path d=\"M4 1 C1.6 1 1.6 6 1.6 13 C1.6 20 1.6 25 4 25\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.2\"/></svg></span><span class=\"ds-lane__name\">api-server</span><span class=\"ds-lane__timer\">01:12:40</span></div>",
+      "css": ".ds-lane { position: relative; display: flex; align-items: center; gap: 7px; padding: 8px 18px 8px 13px; cursor: pointer; transition: background 0.12s ease; } .ds-lane:hover { background: var(--bg-hover, rgba(232,228,220,0.06)); } .ds-lane:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--green, #57b9cf); } .ds-lane--active { background: var(--bg-active, rgba(87,185,207,0.12)); } .ds-lane__staff { position: absolute; left: 0; right: 0; top: 50%; height: 13px; transform: translateY(-50%); pointer-events: none; background: repeating-linear-gradient(to bottom, var(--staff, rgba(232,228,220,0.3)) 0 1px, transparent 1px 3.25px); opacity: 0.8; } .ds-lane--active .ds-lane__staff { opacity: 1; } .ds-lane__now { position: absolute; top: 0; bottom: 0; right: 5px; width: 1px; pointer-events: none; background: var(--green, #57b9cf); animation: dsNowBreath 3.2s ease-in-out infinite; } @keyframes dsNowBreath { 0%, 100% { opacity: 0.34; } 50% { opacity: 0.72; } } .ds-lane__brace { position: absolute; left: 1px; top: 50%; transform: translateY(-50%); display: flex; pointer-events: none; opacity: 0.75; color: var(--purple, #bb8fd0); } .ds-lane--active .ds-lane__brace { opacity: 1; } .ds-lane__name { flex: 1; min-width: 0; font-size: 12px; font-weight: 500; color: var(--text-name, #d8d3ca); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .ds-lane--active .ds-lane__name { color: var(--text-bright, #f2efe8); } .ds-lane__timer { flex-shrink: 0; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--text-ghost, #9c968d); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Engraved Score",
+    "overview": "The thesis, recorded verbatim at the top of src/renderer/App.vue: nine concurrent agents are parts in one score, not rows in a list. The sidebar is not a list of projects with status badges; it is a score's margin, and each project is a horizontal five-line staff read against a single time axis. A held lane does not show a spinner or a badge — it carries a fermata, the mark a conductor draws over a note that must not resolve until someone releases it. The story the interface tells: the developer reads every lane at once, believes the held lane is the only one wanting them, and releases its fermata.\n\nThe material follows from the metaphor rather than decorating it. The ground is an engraver's pewter plate (#2b3037), not a screen — flat metal under one raking light from the top left, with a bottom vignette giving the sheet its edge. Ink is bone (#e8e4dc), warm against the cool plate on purpose, because ink and metal are different materials and should not read as one. Depth is a hairline lip of light on a plate edge, never a cast shadow, and corners are cut straight (a 3px radius) because a plate is scored with rules, not moulded with curves. Three accents come from score production itself and never from decoration: proof cyan is the live now-line and every \"play on\" action, ochre is the conductor's cue mark for a decision owed, and oxblood is a struck-out bar. A finished lane earns no hue at all — it draws a double barline.\n\nThis is a deliberate refusal of the category's usual dashboard: a sidebar list plus a stream pane. It replaces that reading with one where every project is visible against the same clock at the same time, and the one thing that moves without being asked is the now-line itself.",
+    "keyCharacteristics": [
+      "Every project is a five-line staff read against one shared now-line, not a row with a badge.",
+      "State is drawn as real music notation (fermata, beamed note, double barline, struck bar, rest), never as a coloured dot.",
+      "The plate is metal, not glass: flat colour, a raking highlight, a bottom vignette, no blur, no translucency stack borrowed from the previous world.",
+      "Straight corners (3px) everywhere content lives; full round (99px) is reserved for things that report a value.",
+      "One authored motion, the now-line's slow breath, shared across every lane so it reads as a single rule crossing the score.",
+      "Part identity is a 1px brace, never a coloured edge bar."
+    ],
+    "rules": [
+      {
+        "name": "The Two-Track Wash Rule",
+        "body": "Every translucent wash and accent border derives from its solid token by construction — color-mix(in srgb, var(--token) N%, transparent) — never a hardcoded rgba hue. Verified at 127 declarations across 14 files, with zero raw legacy accent hex triplets remaining. Retuning a token reaches every wash automatically.",
+        "section": "colors"
+      },
+      {
+        "name": "The Fine Gets No Hue Rule",
+        "body": "A finished lane draws a double barline in neutral ink, not a \"success green.\" Only three states carry colour — held (ochre), playing (proof cyan), struck (oxblood) — and finished is deliberately colourless so it never competes with a state that still needs the developer.",
+        "section": "colors"
+      },
+      {
+        "name": "The Earned Monospace Rule",
+        "body": "JetBrains Mono is for content that is genuinely code, a command, a path, or terminal output, plus the button/pill/chip idiom that borrows its voice. The .mono CSS class resolves to the sans face; reaching for it expecting monospace is the mistake this rule exists to name.",
+        "section": "typography"
+      },
+      {
+        "name": "The Unwired Score Face",
+        "body": "--serif (Georgia bold italic) is declared and named in the direction contract for score terms, but no component currently applies var(--serif). The fermata/tacet/fine vocabulary only appears in title attributes and ARIA labels, rendered in the browser's own UI font. Recorded as an open commitment, not a built surface.",
+        "section": "typography"
+      },
+      {
+        "name": "The Earned Shadow Rule",
+        "body": "Only the overlay tier casts a real shadow. A card that wants to lift off its panel is asking for the wrong tier.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do call the attention-owed colour Ochre, never red. It sits at hue 33; the error colour Oxblood sits at hue 6, and the two must stay separated.",
+      "Do treat --rc (3px) as the corner for anything that contains content, 8px for interactive rows, and 99px for anything that reports a value.",
+      "Do derive every wash from its solid token with color-mix(in srgb, var(--token) N%, transparent). Never hardcode an accent rgba triplet.",
+      "Do keep the now-line as the score's one shared, authored motion. A status mark should not animate on its own.",
+      "Do keep JetBrains Mono for terminal output, commands, and the button/pill/chip idiom. Everything else is the system sans stack.",
+      "Do add explicit dark and light values for any new token. The proof sheet is a real second theme with its own darkened accents, not a filter over the plate."
+    ],
+    "donts": [
+      "Don't use the word \"red\" for the attention-owed role. That collision is exactly what the ochre amendment fixed.",
+      "Don't describe the continuo/MCP token as brass. It is a viol blue-violet now; brass would describe a colour that no longer exists in this system.",
+      "Don't reintroduce a coloured edge bar for part identity. A brace is a 1px stroke; anything thicker is the habit this world refused.",
+      "Don't reintroduce backdrop-filter blur on panels or sticky headings. The plate is opaque metal, not the previous world's glass.",
+      "Don't thin the five-hairline staff below its current density. A prior 0.13-alpha-rule-in-a-0.55-opacity-container combination was verified invisible on screen; 0.3 in an 0.8 container is the measured floor.",
+      "Don't add a media query or a percentage-based breakpoint. The target is one fixed desktop window (min-width: 1080px on .panes), and the sidebar collapse is a user toggle, not responsive behaviour.",
+      "Don't present the Approve/Deny decision as living on the lane itself — it doesn't yet. Those controls still live in InboxView.vue, a separate pane from the sidebar's score margin."
+    ]
+  }
+}
