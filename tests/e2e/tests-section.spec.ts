@@ -188,6 +188,38 @@ test('evidence is captured against the run and shows what actually executed', as
   await expect(page.getByTestId('tests-evidence-1')).toContainText('orders.png')
 })
 
+test('Run verification survives the clone boundary that used to break it', async ({ page }) => {
+  await openTests(page)
+  await page.getByTestId('tests-stack-dotnet').click()
+
+  // The bug: the button handed invoke the reactive array of selected suite ids,
+  // and Electron's structuredClone rejects a Proxy. All 7 suites are ticked here,
+  // which is the exact state that failed. The mock enforces the same clone, so a
+  // dispatch landing at all is proof the request crossed the real boundary.
+  await expect(page.getByTestId('tests-run')).toContainText('Run verification')
+  await page.getByTestId('tests-run').click()
+
+  await expect(page.getByTestId('tests-run')).toContainText('Running')
+  await expect(page.getByTestId('tests-panel-evidence')).not.toContainText('could not be cloned')
+
+  const sent = await page.evaluate(() => window.__mock.state().sends.at(-1)?.text)
+  expect(sent).toContain('dotnet-unit')
+  expect(sent).toContain('dotnet-http')
+
+  // And the guard is genuinely armed: a Proxy handed over directly is rejected,
+  // so this test cannot pass because the boundary was quietly removed.
+  const rejected = await page.evaluate(async () => {
+    const proxy = new Proxy({ projectId: 'p-alpha' }, {})
+    try {
+      await window.switchboard.invoke('verify.list', proxy as never)
+      return null
+    } catch (error) {
+      return (error as { message?: string }).message ?? 'rejected'
+    }
+  })
+  expect(rejected).toContain('could not be cloned')
+})
+
 test('an API run shows each real call, the row behind it, and what the row proved', async ({ page }) => {
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()

@@ -866,8 +866,25 @@ export function installMockHost(scenario: MockScenario): void {
     invoke: (method: string, req: unknown) => {
       const handler = invokeHandlers[method]
       if (!handler) return Promise.reject({ code: 'NOT_FOUND', message: `Unknown method ${method}` })
+      // The real boundary is structuredClone, and it rejects a Proxy — which is
+      // what Vue wraps every array and object in. A store handing its own
+      // reactive state to invoke fails with "An object could not be cloned",
+      // naming neither the field nor the call. Cloning here holds every renderer
+      // call in the whole suite to the same rule the packaged app enforces,
+      // rather than letting the mock accept what Electron would reject.
+      let cloned: unknown
       try {
-        return Promise.resolve(handler((req ?? {}) as AnyRecord) ?? null)
+        cloned = structuredClone(req ?? {})
+      } catch {
+        return Promise.reject({
+          code: 'INTERNAL',
+          message:
+            `An object could not be cloned. ${method} was called with reactive state; ` +
+            'renderer code must go through invoke() in src/renderer/ipc.ts.',
+        })
+      }
+      try {
+        return Promise.resolve(handler(cloned as AnyRecord) ?? null)
       } catch (error) {
         return Promise.reject(error)
       }
