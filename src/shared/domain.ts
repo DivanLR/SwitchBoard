@@ -725,11 +725,22 @@ export interface VerifyRun {
  * quality threshold is reported, but never turns a passing run into a failing
  * one (FR-071). A run where nothing actually executed is INCONCLUSIVE, never a
  * pass (FR-047).
+ *
+ * A failed real endpoint call counts as a test result, and fails the run. FR-071
+ * exists to stop a *measurement about* the code (coverage, duplication, mutation
+ * score) from flipping a verdict; an HTTP call against the running API is not a
+ * measurement, it is an execution, and the most direct one the run performs. The
+ * whole point of exercising real endpoints is that a suite can go green against
+ * fixtures while every real request fails — so a verdict blind to those calls
+ * would report the green suite and hide the thing that was actually broken.
  */
 export function verifyVerdict(report: VerifyReport): Exclude<VerifyStatus, 'running'> {
   const executed = report.suites.filter((s) => s.status === 'pass' || s.status === 'fail')
-  if (executed.some((s) => s.status === 'fail')) return 'fail'
-  return executed.length > 0 ? 'pass' : 'inconclusive'
+  const calls = report.endpoints.filter((e) => e.outcome === 'pass' || e.outcome === 'fail')
+  if (executed.some((s) => s.status === 'fail') || calls.some((e) => e.outcome === 'fail')) return 'fail'
+  // A run that only made endpoint calls still proved something; one where nothing
+  // executed at all proved nothing, whatever it reported.
+  return executed.length > 0 || calls.length > 0 ? 'pass' : 'inconclusive'
 }
 
 /** The empty report a run starts from, so every panel can render before results. */

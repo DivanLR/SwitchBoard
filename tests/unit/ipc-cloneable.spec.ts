@@ -13,6 +13,7 @@
 import { describe, expect, it } from 'vitest'
 import { reactive, ref } from 'vue'
 import { toCloneable } from '@shared/cloneable'
+import { errorMessage } from '@shared/ipc-types'
 
 describe('IPC request serialisation', () => {
   it('proves the unguarded shape really does fail, so the guard is not superstition', () => {
@@ -61,6 +62,23 @@ describe('IPC request serialisation', () => {
     const out = toCloneable({ when })
     expect(out.when).toBeInstanceOf(Date)
     expect(structuredClone(out).when.toISOString()).toBe('2026-07-28T00:00:00.000Z')
+  })
+
+  it('reads the reason off a rejected invoke instead of printing [object Object]', () => {
+    // A rejected invoke does NOT arrive as an Error: the main process throws a
+    // plain { code, message } and it crosses the bridge as a plain object. The
+    // obvious instanceof check therefore fell through to String({...}) and put the
+    // literal text "[object Object]" on screen in place of every real reason.
+    const ipcError = { code: 'NOT_FOUND', message: 'Claude Code was not found. Install it first.' }
+    expect(errorMessage(ipcError)).toBe('Claude Code was not found. Install it first.')
+    expect(errorMessage(ipcError)).not.toContain('[object Object]')
+
+    expect(errorMessage(new Error('boom'))).toBe('boom')
+    expect(errorMessage('a thrown string')).toBe('a thrown string')
+    // Nothing usable: the caller's own wording beats a stringified object.
+    expect(errorMessage(undefined, 'Could not start the run.')).toBe('Could not start the run.')
+    expect(errorMessage({}, 'Could not start the run.')).toBe('Could not start the run.')
+    expect(errorMessage({ message: '   ' }, 'Could not start the run.')).toBe('Could not start the run.')
   })
 
   it('survives a cycle instead of recursing forever', () => {

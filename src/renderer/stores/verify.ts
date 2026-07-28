@@ -3,7 +3,7 @@
 // mutation answers with the project's full list, so there is nothing to merge.
 import { reactive } from 'vue'
 import type { VerifyRun } from '@shared/domain'
-import { invoke } from '@renderer/ipc'
+import { errorMessage, invoke } from '@renderer/ipc'
 
 // Guards the shared list against a slower response from a project the developer
 // has already switched away from (mirrors evals.load).
@@ -44,7 +44,7 @@ const store = reactive({
       this.byProject[projectId] = runs
       return true
     } catch (error) {
-      this.error = error instanceof Error ? error.message : String(error)
+      this.error = errorMessage(error)
       return false
     } finally {
       this.starting = false
@@ -59,7 +59,7 @@ const store = reactive({
       this.byProject[projectId] = runs
       return true
     } catch (error) {
-      this.error = error instanceof Error ? error.message : String(error)
+      this.error = errorMessage(error)
       return false
     }
   },

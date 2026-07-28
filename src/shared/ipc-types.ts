@@ -53,6 +53,29 @@ export function isIpcError(value: unknown): value is IpcError {
 }
 
 /**
+ * What went wrong, in words a developer can act on.
+ *
+ * A rejected invoke does NOT arrive as an Error. The main process throws a plain
+ * `IpcError` and it crosses the bridge as a plain object, so the obvious
+ * `error instanceof Error ? error.message : String(error)` fell through to
+ * `String({...})` and put the literal text "[object Object]" on screen. Every
+ * reason a call could fail — the stack was unknown, no suite was chosen, Claude
+ * Code was not installed — reached the user as that same useless string.
+ *
+ * Lives here rather than in the renderer because the shape it unwraps is defined
+ * here, and both sides of the bridge describe failures with it.
+ */
+export function errorMessage(error: unknown, fallback = 'Something went wrong.'): string {
+  if (isIpcError(error)) return error.message
+  if (error instanceof Error) return error.message
+  // A thrown string is still worth showing. Anything else has no message to give,
+  // and the caller's own wording beats printing a stringified object.
+  if (typeof error === 'string' && error.trim() !== '') return error
+  const message = (error as { message?: unknown } | null)?.message
+  return typeof message === 'string' && message.trim() !== '' ? message : fallback
+}
+
+/**
  * Wire envelope for invoke responses. Electron serialises thrown errors down
  * to their message string, so structured errors travel inside the envelope
  * and the preload bridge re-throws them as `IpcError`.

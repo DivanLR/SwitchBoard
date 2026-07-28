@@ -181,8 +181,24 @@ const gates = computed<GateView[]>(() =>
     switch (gate.id) {
       case 'unit':
         return { ...gate, ...suiteGate(['unit']) }
-      case 'integration':
-        return { ...gate, ...suiteGate(['api']) }
+      case 'integration': {
+        // The integration gate answers "does the API work", so a failed real call
+        // fails it even when the suite that made the call reported pass. Without
+        // this the headline gate is green while the call that proves the API is
+        // broken sits red in the panel below it.
+        const face = suiteGate(['api'])
+        const failed = (report?.endpoints ?? []).filter((e) => e.outcome === 'fail')
+        if (failed.length === 0) return { ...gate, ...face }
+        return {
+          ...gate,
+          status: 'fail',
+          value: 'failed',
+          sub:
+            failed.length === 1
+              ? `${failed[0].method} ${failed[0].path}`
+              : `${failed.length} real endpoint calls failed`,
+        }
+      }
       case 'architecture': {
         const violations = quality?.archViolations
         if (!violations || violations.value === null) return { ...gate, ...suiteGate(['quality']) }
@@ -262,12 +278,23 @@ const report = computed(() => latest.value?.report ?? null)
 const evidence = computed(() => report.value?.evidence ?? [])
 
 // Real HTTP calls the run made, with the rows they were drawn from. Only API
-// suites produce these, so an empty list means one of three different things
-// and the message has to say which — otherwise "none" reads as "all passed".
+// suites produce these, so an empty list means one of four different things and
+// the message has to say which — otherwise "none" reads as "all passed".
 const endpoints = computed(() => report.value?.endpoints ?? [])
 const endpointsEmpty = computed(() => {
-  const ran = (report.value?.suites ?? []).filter((r) => suiteById(r.id)?.kind === 'api')
-  if (ran.length === 0) return 'No API suite in this run. Include one above to call real endpoints.'
+  // What the run was ASKED to cover, not what it has reported: `requested` is
+  // there from the first moment, whereas the report only arrives at the end. A
+  // mid-run panel reading the report would claim there was no API suite while
+  // the API suite was still running.
+  const asked = (latest.value?.requested ?? []).filter((id) => suiteById(id)?.kind === 'api')
+  if (asked.length === 0) return 'No API suite in this run. Include one above to call real endpoints.'
+  if (running.value) return 'The run is still going. Endpoint calls appear here as it reports them.'
+  // An inconclusive run has no report at all: the session ended its turn without
+  // reporting a result line. Saying anything about what "the API suite" did would
+  // claim knowledge of a run that reported nothing.
+  if (!report.value) {
+    return 'This run reported nothing, so no endpoint call can be shown. The note above says why.'
+  }
   if (dbServers.value.length === 0) {
     return 'No database MCP server was connected on this session, so the run had no real rows to call the endpoints with. Connect one in the MCP section, then run again.'
   }
@@ -335,7 +362,9 @@ function statusWord(run: VerifyRun): string {
       <div class="prof">
         <div class="prof-head">
           <span class="prof-name">{{ stack.label }}</span>
-          <span class="prof-sub mono">{{ (selected ?? []).length }} of {{ stack.suites.length }} suites</span>
+          <span class="prof-sub mono" data-testid="tests-suite-count">
+            {{ (selected ?? []).length }} of {{ stack.suites.length }} suites
+          </span>
           <span style="flex: 1"></span>
           <button class="link" data-testid="tests-change-stack" @click="chooseStack('')">change stack</button>
         </div>
@@ -1186,6 +1215,10 @@ function statusWord(run: VerifyRun): string {
   font-size: 11.5px;
   color: var(--text-mid);
   margin-top: 4px;
+  /* Same protection as .ep-line and .ev-result: this holds model-written prose
+     that can carry an unbroken URL or stack frame, which would otherwise widen
+     the row and push the panel into a horizontal scroll. */
+  word-break: break-word;
 }
 
 /* The provenance lines: which server and query produced the identifiers, and

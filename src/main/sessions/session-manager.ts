@@ -541,6 +541,38 @@ export class SessionManager {
     return [...this.hosted.keys()]
   }
 
+  /**
+   * The session's connected MCP servers, waiting briefly for them to arrive.
+   *
+   * `startSession` resolves as soon as the process is spawned; the server list
+   * comes later, on the SDK's init message. A caller that reads the live row
+   * immediately after starting a session therefore sees nothing at all — which
+   * silently produced a verification prompt naming no database server even though
+   * the developer had them configured and connecting.
+   *
+   * Waits only while it can still change something: until every name in `wanted`
+   * has reported connected, or the deadline passes. Returns whatever is connected
+   * by then, so a server that never comes up delays the run rather than blocking
+   * it. With nothing wanted it returns at once and never waits.
+   */
+  async connectedMcpServers(sessionId: string, wanted: readonly string[], timeoutMs = 8000): Promise<string[]> {
+    const connected = (): string[] =>
+      (this.hosted.get(sessionId)?.row.mcpServers ?? [])
+        .filter((s) => s.status.toLowerCase() === 'connected')
+        .map((s) => s.name)
+
+    if (wanted.length === 0) return []
+    const deadline = Date.now() + timeoutMs
+    let live = connected()
+    while (Date.now() < deadline && !wanted.every((name) => live.includes(name))) {
+      await new Promise((resolve) => setTimeout(resolve, 150))
+      // A session that exited while we waited is never going to report.
+      if (!this.hosted.has(sessionId)) break
+      live = connected()
+    }
+    return wanted.filter((name) => live.includes(name))
+  }
+
   // --- Verifier gate (spec 002 US7) ---
   // An acceptance line's check runs in the session, so its outcome has to be read
   // back OUT of the session. The dispatch prompt demands one machine-readable

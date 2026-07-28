@@ -368,13 +368,15 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       // settings AND reporting connected on this session. An API suite uses them
       // to draw real identifiers, so a name that is configured but not connected
       // must not be offered — the session would query a server that is not there.
-      // `mcpServers` is in-memory only (not a sessions column), so it has to come
-      // off the manager's live row — the repo's copy never carries it.
+      // Database MCP servers the run can actually reach: named in settings AND
+      // reporting connected on this session. A name that is configured but absent
+      // must not be offered, or the session queries a server that is not there.
+      //
+      // This waits, because it has to: when the session above was just started,
+      // its server list has not arrived yet, and reading it immediately would name
+      // nothing at all. See SessionManager.connectedMcpServers.
       const configured = repos.settings.get().databaseMcpServers ?? []
-      const connected = (manager.liveSessionRow(session.id)?.mcpServers ?? [])
-        .filter((s) => s.status.toLowerCase() === 'connected')
-        .map((s) => s.name)
-      const dbServers = configured.filter((name) => connected.includes(name))
+      const dbServers = await manager.connectedMcpServers(session.id, configured)
       manager.sendMessage(session.id, verifyPrompt(plan, stack.label, sandboxed, dbServers))
       return { sessionId: session.id, runs: repos.verifyRuns.listForProject(req.projectId) }
     },

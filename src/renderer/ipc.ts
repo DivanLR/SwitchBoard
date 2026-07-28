@@ -1,6 +1,10 @@
 import type { InvokeMap, InvokeMethod } from '@shared/ipc-types'
 import { toCloneable } from '@shared/cloneable'
 
+// Re-exported so the door and the words for what came back through it are imported
+// from one place; the function itself lives with the IpcError shape it unwraps.
+export { errorMessage } from '@shared/ipc-types'
+
 /**
  * The renderer's single door to the main process.
  *
@@ -27,3 +31,4 @@ export function invoke<M extends InvokeMethod>(
 ): Promise<InvokeMap[M]['res']> {
   return window.switchboard.invoke(method, toCloneable(req))
 }
+

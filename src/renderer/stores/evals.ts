@@ -4,7 +4,7 @@
 import { reactive } from 'vue'
 import type { EvalCheckStatus, EvalRun, EvalVerdict } from '@shared/domain'
 import type { AvailableSuites } from '@shared/test-catalog'
-import { invoke } from '@renderer/ipc'
+import { errorMessage, invoke } from '@renderer/ipc'
 
 // Guards the shared list against a slower response from a project the developer
 // has already switched away from (mirrors specs.loadState).
@@ -52,7 +52,7 @@ const store = reactive({
       const { runs } = await invoke('evals.dispatch', { projectId, id, kind })
       this.byProject[projectId] = runs
     } catch (error) {
-      this.error = error instanceof Error ? error.message : String(error)
+      this.error = errorMessage(error)
     }
   },
 
@@ -65,7 +65,7 @@ const store = reactive({
         checkCmd: checkCmd?.trim() || undefined,
       })
     } catch (error) {
-      this.error = error instanceof Error ? error.message : String(error)
+      this.error = errorMessage(error)
     }
   },
 
@@ -89,7 +89,7 @@ const store = reactive({
         ...patch,
       })
     } catch (error) {
-      this.error = error instanceof Error ? error.message : String(error)
+      this.error = errorMessage(error)
     }
   },
 

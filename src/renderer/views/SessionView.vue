@@ -18,6 +18,7 @@ import { modelLabel } from '@shared/domain'
 import type { AgentScopedPayload, SessionEvent, CleanupGroup } from '@shared/domain'
 import { activeAgents } from '@shared/agents'
 import { parseInlineQuestion } from '@shared/inline-question'
+import { errorMessage } from '@renderer/ipc'
 import { isIpcError, type ProjectListItem } from '@shared/ipc-types'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useProjectsStore } from '@renderer/stores/projects'
@@ -765,7 +766,7 @@ async function commitRef(): Promise<void> {
     refError.value = null
     await projects.addRef(props.project.id, target)
   } catch (e) {
-    refError.value = e instanceof Error ? e.message : ((e as { message?: string })?.message ?? String(e))
+    refError.value = errorMessage(e)
   }
 }
 

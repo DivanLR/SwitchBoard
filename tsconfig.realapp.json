@@ -1,0 +1,36 @@
+{
+  // The real-application harness is the one thing in this repo that genuinely
+  // spans both worlds: it drives Electron from Node (so it imports main-process
+  // repositories to seed the real schema) and evaluates code inside the renderer
+  // (so it needs DOM and the window.switchboard augmentation). Neither the node
+  // nor the web project can own it without gaining types it must not have, so it
+  // gets its own project rather than widening theirs.
+  "compilerOptions": {
+    "composite": true,
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "types": ["node"],
+    "paths": {
+      "@shared/*": ["./src/shared/*"],
+      "@main/*": ["./src/main/*"]
+    },
+    "outDir": "out/tsc-realapp"
+  },
+  "include": [
+    "tests/e2e/real-app.spec.ts",
+    "tests/e2e/seed-real-app.ts",
+    "src/main/**/*.ts",
+    "src/shared/**/*.ts",
+    "playwright.real.config.ts"
+  ]
+}

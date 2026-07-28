@@ -258,6 +258,59 @@ test('an API run shows each real call, the row behind it, and what the row prove
   await expect(page.getByTestId('tests-endpoint-1')).toContainText('404 is the right answer')
 })
 
+test('a failed real call fails the integration gate, even with the suite green', async ({ page }) => {
+  await openTests(page)
+  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-run').click()
+  await page.evaluate(
+    (r) => window.__mock.reportVerifyResult('p-alpha', 'fail', r),
+    report({
+      // The suite reports pass. Only the real call caught it — which is the entire
+      // reason the endpoint pass exists.
+      suites: [
+        { id: 'node-unit', label: 'Unit tests', status: 'pass', detail: '142 passed' },
+        { id: 'node-api', label: 'HTTP smoke', status: 'pass', detail: '9 routes, all 2xx' },
+      ],
+      endpoints: [call({ status: 200, outcome: 'fail', detail: 'empty body for a real id' })],
+    }),
+  )
+
+  await expect(page.getByTestId('tests-gate-integration')).toContainText('failed')
+  await expect(page.getByTestId('tests-gate-integration')).toContainText('/api/v1/policies/{id}')
+  // Unit is untouched: only the API gate answers for the API.
+  await expect(page.getByTestId('tests-gate-unit')).toContainText('passed')
+})
+
+test('a run that reported nothing does not claim the API suite ran', async ({ page }) => {
+  await openTests(page)
+  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-run').click()
+  // Inconclusive with no report at all: the session ended its turn without a
+  // result line. Saying anything about what the API suite did would be invented.
+  await page.evaluate(() => window.__mock.reportVerifyResult('p-alpha', 'inconclusive', null))
+
+  await page.getByTestId('tests-sub-evidence').click()
+  await expect(page.getByTestId('tests-endpoints-empty')).toContainText('reported nothing')
+  await expect(page.getByTestId('tests-endpoints-empty')).not.toContainText('No database MCP server')
+  await expect(page.getByTestId('tests-endpoints-empty')).not.toContainText('ran but reported')
+})
+
+test('with a database server connected and still no calls, it says exactly that', async ({ page }) => {
+  // The fourth reason: everything was in place and the run reported no calls.
+  const scenario = twoProjectScenario()
+  scenario.settings = { ...scenario.settings, databaseMcpServers: ['postgres — production'] }
+  await openTests(page, scenario)
+  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-run').click()
+  await page.evaluate((r) => window.__mock.reportVerifyResult('p-alpha', 'pass', r), report())
+
+  await page.getByTestId('tests-sub-evidence').click()
+  const empty = page.getByTestId('tests-endpoints-empty')
+  await expect(empty).toContainText('reported no individual endpoint calls')
+  // And it names the server that WAS available, so the gap is unambiguous.
+  await expect(empty).toContainText('postgres — production')
+})
+
 test('a call that never completed shows no status at all, and does not read as a pass', async ({ page }) => {
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
@@ -282,16 +335,25 @@ test('with no endpoint calls, the panel says which of the reasons it was', async
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
   await page.getByTestId('tests-run').click()
+
+  // Mid-run there is no report yet. Reading the report's suites here would say
+  // "no API suite in this run" while the API suite was running, so the panel has
+  // to read what the run was ASKED to cover instead.
+  await page.getByTestId('tests-sub-evidence').click()
+  await expect(page.getByTestId('tests-endpoints-empty')).toContainText('still going')
+  await expect(page.getByTestId('tests-endpoints-empty')).not.toContainText('No API suite')
+
   // node-api is in this report, so the missing piece is the database server.
   await page.evaluate((r) => window.__mock.reportVerifyResult('p-alpha', 'pass', r), report())
 
   await expect(page.getByTestId('tests-endpoints-empty')).toContainText('No database MCP server was connected')
 
-  // With no API suite in the run at all, it says that instead.
-  await page.evaluate(
-    (r) => window.__mock.reportVerifyResult('p-alpha', 'pass', r),
-    report({ suites: [{ id: 'node-unit', label: 'Unit tests', status: 'pass', detail: '142 passed' }] }),
-  )
+  // With no API suite in the run at all, it says that instead. The reason comes
+  // from what the run was asked to cover, so this unticks the suite rather than
+  // editing the report — editing the report would test nothing real.
+  await page.getByTestId('tests-suite-node-api').click()
+  await page.getByTestId('tests-run').click()
+  await page.evaluate((r) => window.__mock.reportVerifyResult('p-alpha', 'pass', r), report())
   await expect(page.getByTestId('tests-endpoints-empty')).toContainText('No API suite in this run')
 })
 

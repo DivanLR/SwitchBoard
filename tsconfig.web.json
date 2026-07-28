@@ -20,5 +20,9 @@
     },
     "outDir": "out/tsc-web"
   },
-  "include": ["src/renderer/**/*.ts", "src/renderer/**/*.vue", "src/shared/**/*.ts", "tests/e2e/**/*.ts"]
+  "include": ["src/renderer/**/*.ts", "src/renderer/**/*.vue", "src/shared/**/*.ts", "tests/e2e/**/*.ts"],
+  // The real-application harness imports main-process code to seed the real
+  // database schema, which this project must not see. It has its own project:
+  // tsconfig.realapp.json.
+  "exclude": ["tests/e2e/real-app.spec.ts", "tests/e2e/seed-real-app.ts"]
 }

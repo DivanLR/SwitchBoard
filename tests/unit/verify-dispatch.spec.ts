@@ -186,6 +186,73 @@ describe('reading the report back', () => {
     const report = parseVerifyReport(line('{"suites":[{"id":"node-unit","status":"pass","detail":""}]}'))
     expect(report?.endpoints).toEqual([])
   })
+
+  it('fails the run when a real call failed, even though every suite passed', () => {
+    // This is the whole point of exercising real endpoints: the suite went green
+    // against fixtures while the real request was wrong. A verdict blind to the
+    // call would report the green suite and hide what was actually broken.
+    const report = parseVerifyReport(
+      line(
+        JSON.stringify({
+          suites: [
+            { id: 'dotnet-unit', status: 'pass', detail: '318 passed' },
+            { id: 'dotnet-http', status: 'pass', detail: 'all routes answered' },
+          ],
+          endpoints: [
+            { method: 'GET', path: '/api/v1/policies/PL-1', status: 200, outcome: 'pass' },
+            {
+              method: 'GET',
+              path: '/api/v1/policies/PL-0/contracts',
+              status: 200,
+              outcome: 'fail',
+              detail: '200 with an empty list for an id that does not exist',
+            },
+          ],
+        }),
+      ),
+    )
+    expect(verifyVerdict(report!)).toBe('fail')
+  })
+
+  it('still passes when every real call passed alongside the suites', () => {
+    const report = parseVerifyReport(
+      line(
+        JSON.stringify({
+          suites: [{ id: 'dotnet-http', status: 'pass', detail: 'ok' }],
+          endpoints: [{ method: 'GET', path: '/api/v1/health', status: 200, outcome: 'pass' }],
+        }),
+      ),
+    )
+    expect(verifyVerdict(report!)).toBe('pass')
+  })
+
+  it('is not rescued from inconclusive by a call that never ran', () => {
+    // A skipped suite plus a not_run call proved nothing at all.
+    const report = parseVerifyReport(
+      line(
+        JSON.stringify({
+          suites: [{ id: 'dotnet-http', status: 'skipped', detail: 'no dotnet here' }],
+          endpoints: [{ method: 'POST', path: '/api/v1/quotes', status: null, outcome: 'not_run' }],
+        }),
+      ),
+    )
+    expect(verifyVerdict(report!)).toBe('inconclusive')
+  })
+
+  it('does not report a quality shortfall as a failure, which is still not a test result', () => {
+    // The endpoint change must not have widened FR-071: a missed coverage or
+    // duplication threshold is reported and never flips the verdict.
+    const report = parseVerifyReport(
+      line(
+        JSON.stringify({
+          suites: [{ id: 'dotnet-unit', status: 'pass', detail: 'ok' }],
+          coverage: { line: { value: 4, source: 'coverlet' } },
+          quality: { gate: 'fail', gateSource: 'sonarqube', duplication: { value: 40, source: 'sonarqube' } },
+        }),
+      ),
+    )
+    expect(verifyVerdict(report!)).toBe('pass')
+  })
 })
 
 describe('asking for real endpoint calls', () => {
@@ -216,9 +283,17 @@ describe('asking for real endpoint calls', () => {
     )
   })
 
-  it('does not ask for real data when no database server is connected', () => {
+  it('says plainly that there is no real data source, rather than staying silent', () => {
+    // Asserting only that a name is absent would be vacuous: it was never an input.
+    // What matters is that the section still asks for the calls AND labels the
+    // inputs as not drawn from real rows, so an unseeded run cannot be mistaken
+    // for a verified one.
     const prompt = verifyPrompt(apiPlan, '.NET', null, [])
-    expect(prompt).not.toContain('postgres-main')
+    expect(prompt).toContain('No database MCP server is connected')
+    expect(prompt).toContain('Still call the endpoints')
+    expect(prompt).toMatch(/"dataSource" and "dataQuery" to null/)
+    // And it must not claim a source it does not have.
+    expect(prompt).not.toContain('Get your inputs from the connected database MCP server')
   })
 
   it('does not ask for endpoint calls when no API suite is in the run', () => {
