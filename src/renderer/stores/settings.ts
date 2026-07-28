@@ -6,16 +6,17 @@
 // library for. Components keep calling useXStore() and read/write the same way.
 import { reactive } from 'vue'
 import type { Settings } from '@shared/domain'
+import { invoke } from '@renderer/ipc'
 
 const store = reactive({
   settings: null as Settings | null,
 
   async load(): Promise<void> {
-    this.settings = await window.switchboard.invoke('settings.get', undefined)
+    this.settings = await invoke('settings.get', undefined)
   },
 
   async save(patch: Partial<Settings>): Promise<void> {
-    this.settings = await window.switchboard.invoke('settings.set', patch)
+    this.settings = await invoke('settings.set', patch)
   },
 })
 

@@ -4,6 +4,7 @@
 import { reactive } from 'vue'
 import type { EvalCheckStatus, EvalRun, EvalVerdict } from '@shared/domain'
 import type { AvailableSuites } from '@shared/test-catalog'
+import { invoke } from '@renderer/ipc'
 
 // Guards the shared list against a slower response from a project the developer
 // has already switched away from (mirrors specs.loadState).
@@ -28,8 +29,8 @@ const store = reactive({
     this.loading = true
     try {
       const [runs, suites] = await Promise.all([
-        window.switchboard.invoke('evals.list', { projectId }),
-        window.switchboard.invoke('evals.suites', { projectId }),
+        invoke('evals.list', { projectId }),
+        invoke('evals.suites', { projectId }),
       ])
       if (token !== requestToken) return
       this.byProject[projectId] = runs
@@ -48,7 +49,7 @@ const store = reactive({
   async dispatch(projectId: string, id: string, kind: 'check' | 'attempts' | 'judge'): Promise<void> {
     this.error = null
     try {
-      const { runs } = await window.switchboard.invoke('evals.dispatch', { projectId, id, kind })
+      const { runs } = await invoke('evals.dispatch', { projectId, id, kind })
       this.byProject[projectId] = runs
     } catch (error) {
       this.error = error instanceof Error ? error.message : String(error)
@@ -58,7 +59,7 @@ const store = reactive({
   async add(projectId: string, acceptance: string, checkCmd?: string): Promise<void> {
     this.error = null
     try {
-      this.byProject[projectId] = await window.switchboard.invoke('evals.add', {
+      this.byProject[projectId] = await invoke('evals.add', {
         projectId,
         acceptance,
         checkCmd: checkCmd?.trim() || undefined,
@@ -82,7 +83,7 @@ const store = reactive({
   ): Promise<void> {
     this.error = null
     try {
-      this.byProject[projectId] = await window.switchboard.invoke('evals.record', {
+      this.byProject[projectId] = await invoke('evals.record', {
         projectId,
         id,
         ...patch,
@@ -93,7 +94,7 @@ const store = reactive({
   },
 
   async remove(projectId: string, id: string): Promise<void> {
-    this.byProject[projectId] = await window.switchboard.invoke('evals.remove', { projectId, id })
+    this.byProject[projectId] = await invoke('evals.remove', { projectId, id })
   },
 })
 

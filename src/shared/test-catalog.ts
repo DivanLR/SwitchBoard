@@ -79,9 +79,15 @@ export const TEST_STACKS: readonly TestStack[] = [
       {
         id: 'dotnet-http',
         kind: 'api',
-        label: 'HTTP smoke (.http file)',
-        acceptance: 'the running API answers the requests in the .http file as expected',
-        command: 'dotnet run & then send each request in the project\'s .http file and report status + body',
+        label: 'HTTP smoke (real endpoints)',
+        acceptance:
+          'the running API answers real requests correctly, checked against real rows',
+        // Deliberately prose, not a shell one-liner: this suite is the one that
+        // draws identifiers from a connected database MCP server, calls the
+        // endpoints with them, and checks the response back against those rows.
+        // The full instruction lives in verify-dispatch's endpointSection.
+        command:
+          "start the API, take real identifiers from the project's database MCP server, call the endpoints with them (plus the project's .http file if present), and check each response back against the data",
         needs: 'dotnet',
       },
       {

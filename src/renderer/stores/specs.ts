@@ -2,6 +2,7 @@
 // spec's detail. The store owns all specs transport (view/transport separation).
 import { reactive } from 'vue'
 import type { SpecDetail, SpecKitState } from '@shared/domain'
+import { invoke } from '@renderer/ipc'
 
 // Monotonic token guarding the shared, un-keyed detail/selectedSpecId state:
 // switching projects while a load is in flight must not let the older response
@@ -33,14 +34,14 @@ const store = reactive({
     const token = ++specRequestToken
     this.loading = true
     try {
-      const state = await window.switchboard.invoke('specs.state', { projectId })
+      const state = await invoke('specs.state', { projectId })
       if (token !== specRequestToken) return // a newer project load superseded this
       this.byProject[projectId] = state
       // Auto-select the first spec if none chosen or the current one is gone.
       if (state.specs.length > 0) {
         if (!this.selectedSpecId || !state.specs.some((s) => s.id === this.selectedSpecId)) {
           this.selectedSpecId = state.specs[0].id
-          const detail = await window.switchboard.invoke('specs.detail', {
+          const detail = await invoke('specs.detail', {
             projectId,
             specId: state.specs[0].id,
           })
@@ -59,14 +60,14 @@ const store = reactive({
   async selectSpec(projectId: string, specId: string): Promise<void> {
     const token = ++specRequestToken
     this.selectedSpecId = specId
-    const detail = await window.switchboard.invoke('specs.detail', { projectId, specId })
+    const detail = await invoke('specs.detail', { projectId, specId })
     if (token !== specRequestToken) return // a newer selection superseded this
     this.detail = detail
   },
 
   /** Send a spec-kit command / prompt to the project's session. */
   async runInSession(projectId: string, text: string): Promise<void> {
-    await window.switchboard.invoke('specs.runInSession', { projectId, text })
+    await invoke('specs.runInSession', { projectId, text })
   },
 
   /**
@@ -99,9 +100,9 @@ const store = reactive({
     pollTimer = setInterval(() => {
       void (async () => {
         try {
-          this.byProject[projectId] = await window.switchboard.invoke('specs.state', { projectId })
+          this.byProject[projectId] = await invoke('specs.state', { projectId })
           if (this.selectedSpecId === specId) {
-            this.detail = await window.switchboard.invoke('specs.detail', { projectId, specId })
+            this.detail = await invoke('specs.detail', { projectId, specId })
           }
         } catch {
           // Project/spec gone or transport hiccup — stop rather than spin.
@@ -133,7 +134,7 @@ const store = reactive({
     this.installing = true
     this.installError = null
     try {
-      const state = await window.switchboard.invoke('specs.install', { projectId })
+      const state = await invoke('specs.install', { projectId })
       this.byProject[projectId] = state
       if (state.specs[0]) await this.selectSpec(projectId, state.specs[0].id)
     } catch (e) {

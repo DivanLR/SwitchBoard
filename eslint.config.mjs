@@ -41,6 +41,28 @@ export default tseslint.config(
     },
   },
   {
+    // The renderer must reach the main process through src/renderer/ipc.ts, never
+    // window.switchboard.invoke directly. contextBridge structured-clones each
+    // argument on the way out and rejects a Proxy, so a request built from Vue
+    // reactive state fails with "An object could not be cloned" — an error that
+    // names neither the field nor the call. ipc.ts strips the proxies first.
+    // Everything else on the bridge (on, onLoading, pathForFile) sends no payload
+    // outward and is fine to call directly.
+    files: ['src/renderer/**/*.{ts,vue}'],
+    ignores: ['src/renderer/ipc.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "MemberExpression[object.object.name='window'][object.property.name='switchboard'][property.name='invoke']",
+          message:
+            "Import { invoke } from '@renderer/ipc' instead. Calling window.switchboard.invoke directly sends Vue reactive proxies across contextBridge, which fails with 'An object could not be cloned'.",
+        },
+      ],
+    },
+  },
+  {
     files: ['scripts/**/*.mjs', '*.mjs'],
     languageOptions: {
       globals: {

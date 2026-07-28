@@ -4,6 +4,7 @@
 // card + toggle + segmented controls, and a "Changes apply immediately · Done"
 // footer. State and transport live in the settings store.
 import { useTemplateRef, computed, onMounted, ref, watch } from 'vue'
+import { invoke } from '@renderer/ipc'
 import { useModal } from '@renderer/composables/useModal'
 import type { AvailableModel, ModelChoice, PermissionRule, Settings, TerseLevel } from '@shared/domain'
 import { modelLabel, modelPrice } from '@shared/domain'
@@ -58,8 +59,7 @@ watch(
 onMounted(() => {
   void store.load()
   projId.value = projects.selectedProjectId
-  void window.switchboard
-    .invoke('models.available', undefined)
+  void invoke('models.available', undefined)
     .then((models) => (availableModels.value = models))
     .catch(() => {
       /* no session initialised yet — keep the curated fallback */

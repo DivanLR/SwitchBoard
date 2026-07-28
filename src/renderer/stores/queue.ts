@@ -3,6 +3,7 @@
 import { reactive } from 'vue'
 import type { QueuedTask } from '@shared/domain'
 import type { QueueChangedPush } from '@shared/ipc-types'
+import { invoke } from '@renderer/ipc'
 
 const store = reactive({
   byProject: {} as Record<string, QueuedTask[]>,
@@ -12,16 +13,16 @@ const store = reactive({
   },
 
   async load(projectId: string): Promise<void> {
-    this.byProject[projectId] = await window.switchboard.invoke('queue.list', { projectId })
+    this.byProject[projectId] = await invoke('queue.list', { projectId })
   },
 
   async add(projectId: string, text: string): Promise<void> {
     if (text.trim().length === 0) return
-    this.byProject[projectId] = await window.switchboard.invoke('queue.add', { projectId, text })
+    this.byProject[projectId] = await invoke('queue.add', { projectId, text })
   },
 
   async remove(projectId: string, id: string): Promise<void> {
-    this.byProject[projectId] = await window.switchboard.invoke('queue.remove', { projectId, id })
+    this.byProject[projectId] = await invoke('queue.remove', { projectId, id })
   },
 
   applyQueuePush(push: QueueChangedPush): void {

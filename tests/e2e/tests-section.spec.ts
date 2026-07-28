@@ -28,6 +28,24 @@ function report(over: Record<string, unknown> = {}): Record<string, unknown> {
       findings: [],
     },
     evidence: [],
+    endpoints: [],
+    ...over,
+  }
+}
+
+/** One real HTTP call as the run reports it, drawn from a real row. */
+function call(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    method: 'GET',
+    path: '/api/v1/policies/{id}',
+    status: 200,
+    ms: 84,
+    response: '{"id":"P-4417","status":"Active","contracts":3}',
+    dataSource: 'postgres reporting (read only)',
+    dataQuery: 'select id from policies where status = \'Active\' limit 1',
+    dataAssertion: 'the row lists 3 contracts; the response listed 3',
+    outcome: 'pass',
+    detail: 'answered with the policy the query named',
     ...over,
   }
 }
@@ -168,6 +186,81 @@ test('evidence is captured against the run and shows what actually executed', as
 
   await expect(page.getByTestId('tests-evidence-0')).toContainText('POST /orders')
   await expect(page.getByTestId('tests-evidence-1')).toContainText('orders.png')
+})
+
+test('an API run shows each real call, the row behind it, and what the row proved', async ({ page }) => {
+  await openTests(page)
+  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-run').click()
+  await page.evaluate(
+    (r) => window.__mock.reportVerifyResult('p-alpha', 'pass', r),
+    report({
+      endpoints: [
+        call(),
+        call({
+          method: 'GET',
+          path: '/api/v1/policies/does-not-exist',
+          status: 404,
+          ms: 12,
+          dataAssertion: 'no row with that id, so 404 is the right answer',
+          outcome: 'pass',
+          detail: 'the should-fail case',
+        }),
+      ],
+    }),
+  )
+
+  const first = page.getByTestId('tests-endpoint-0')
+  await expect(first).toContainText('GET')
+  await expect(first).toContainText('/api/v1/policies/{id}')
+  await expect(first).toContainText('200')
+  await expect(first).toContainText('84 ms')
+  // The provenance is the point: which server, which query, and what it proved.
+  await expect(first).toContainText('postgres reporting')
+  await expect(first).toContainText('select id from policies')
+  await expect(first).toContainText('the response listed 3')
+  await expect(first).toContainText('"contracts":3')
+
+  // A call that SHOULD fail is reported with what it actually returned.
+  await expect(page.getByTestId('tests-endpoint-1')).toContainText('404')
+  await expect(page.getByTestId('tests-endpoint-1')).toContainText('404 is the right answer')
+})
+
+test('a call that never completed shows no status at all, and does not read as a pass', async ({ page }) => {
+  await openTests(page)
+  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-run').click()
+  await page.evaluate(
+    (r) => window.__mock.reportVerifyResult('p-alpha', 'fail', r),
+    report({
+      endpoints: [
+        call({ status: null, ms: null, response: null, outcome: 'not_run', detail: 'connection refused on :5001' }),
+      ],
+    }),
+  )
+
+  const row = page.getByTestId('tests-endpoint-0')
+  await expect(row).toContainText('not run')
+  await expect(row).toContainText('connection refused')
+  await expect(row).toContainText('—')
+  await expect(row).not.toContainText('200')
+})
+
+test('with no endpoint calls, the panel says which of the reasons it was', async ({ page }) => {
+  await openTests(page)
+  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-run').click()
+  // node-api is in this report, so the missing piece is the database server.
+  await page.evaluate((r) => window.__mock.reportVerifyResult('p-alpha', 'pass', r), report())
+
+  await expect(page.getByTestId('tests-endpoints-empty')).toContainText('No database MCP server was connected')
+
+  // With no API suite in the run at all, it says that instead.
+  await page.evaluate(
+    (r) => window.__mock.reportVerifyResult('p-alpha', 'pass', r),
+    report({ suites: [{ id: 'node-unit', label: 'Unit tests', status: 'pass', detail: '142 passed' }] }),
+  )
+  await expect(page.getByTestId('tests-endpoints-empty')).toContainText('No API suite in this run')
 })
 
 test('a run that reports nothing is inconclusive, never a pass', async ({ page }) => {

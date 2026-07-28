@@ -9,6 +9,7 @@
 // the app never derives or substitutes one (FR-072).
 import {
   emptyVerifyReport,
+  type EndpointResult,
   type EvidenceItem,
   type Measured,
   type SuiteResult,
@@ -53,7 +54,19 @@ const SCHEMA = `{
     "survivors": ["<surviving mutant, file:line - what it changed>"],
     "archViolations": {"value": <count or null>, "source": "<...>"},
     "findings": ["<named rule violation, worst first>"]
-  }
+  },
+  "endpoints": [{
+    "method": "GET|POST|PUT|PATCH|DELETE",
+    "path": "<the path you actually called, with REAL values substituted>",
+    "status": <HTTP status you actually received, or null if the call never completed>,
+    "ms": <round-trip milliseconds, or null>,
+    "response": "<the response body, truncated to something readable>",
+    "dataSource": "<the MCP server the real data came from, or null>",
+    "dataQuery": "<the query you ran to get it, verbatim, or null>",
+    "dataAssertion": "<what the data proved, e.g. 'customer 4417 has 3 contracts; response listed 3'>",
+    "outcome": "pass|fail|not_run",
+    "detail": "<why it failed, or what you could not check>"
+  }]
 }`
 
 const HONESTY =
@@ -63,18 +76,84 @@ const HONESTY =
   'because it probably would.'
 
 /**
+ * Tell the session to exercise the API for real, and to get its inputs from the
+ * project's database MCP servers rather than inventing them.
+ *
+ * This is the difference between "the integration suite passed" and knowing what
+ * the API answered. A test suite can pass against fixtures while every real
+ * request 404s, and an endpoint called with a made-up id can answer 200 with an
+ * empty body and look healthy. So the identifiers must come from real rows, and
+ * the response must be checked back against those rows.
+ *
+ * When no database MCP server is connected, the section says so and asks for the
+ * calls anyway, unseeded: fewer facts, honestly labelled, beats a silent skip.
+ */
+function endpointSection(apiSuites: PlannedSuite[], dbServers: readonly string[]): string {
+  if (apiSuites.length === 0) return ''
+  const named = dbServers.length > 0
+  return (
+    `\n\nThis is what ${apiSuites.map((p) => p.suite.id).join(' and ')} above means in full, ` +
+    'and it is the part not to skip. Do it even if an earlier suite failed: a formatting or ' +
+    'coverage failure says nothing about whether the API answers, and a suite can go green ' +
+    'against fixtures while every real request fails. Report each call in "endpoints".\n' +
+    (named
+      ? `- Get your inputs from the connected database MCP server(s): ${dbServers.join(', ')}. ` +
+        'Query for identifiers that actually exist — a customer id, an account number, a ' +
+        'contract — and call the endpoints with THOSE. Record the query you ran verbatim in ' +
+        '"dataQuery" and the server in "dataSource".\n' +
+        '- Then check the response back against the data. Read the row counts or field values ' +
+        'from the database and say in "dataAssertion" what they proved, e.g. "customer 4417 ' +
+        'has 3 contracts; the response listed 3". An endpoint that answers 200 with an empty ' +
+        'body because it was called with an id that does not exist is a FAIL, not a pass: ' +
+        'that is exactly what querying first is for.\n'
+      : '- No database MCP server is connected for this project, so you have no source of ' +
+        'real identifiers. Still call the endpoints, using whatever the project itself ' +
+        'provides (a seed script, an .http file, appsettings), and set "dataSource" and ' +
+        '"dataQuery" to null so it is clear the inputs were not drawn from real data.\n') +
+    '- Start the API yourself if it is not already running, and shut it down afterwards.\n' +
+    '- Cover the endpoints this working tree touched first, then the main read paths. ' +
+    'Include at least one case that SHOULD fail (a missing id, absent auth) and report what ' +
+    'it actually returned — an API that returns 200 for a deleted record is the kind of ' +
+    'thing only a real call finds.\n' +
+    '- Record the real status, the round-trip time, and enough of the body to be useful. ' +
+    'Never write a status you did not receive: if the call did not complete, status is null ' +
+    'and outcome is "not_run" with the reason in "detail".\n' +
+    '- Do NOT mutate real data unless the endpoint under test is a write and the project ' +
+    'clearly points at a test database. If in doubt, exercise reads and say so in "detail".\n'
+  )
+}
+
+/**
  * The default run: execute the chosen suites in order, stop at the first failure
  * (FR-075 — figures gathered through failing tests are not reported, FR-076),
  * and report one line of JSON.
+ *
+ * The real-endpoint pass is deliberately outside the stop rule. FR-075 exists so
+ * a quality figure measured through failing tests is never reported, and that
+ * reasoning does not reach the API: whether the endpoints answer is independent
+ * evidence, and gating it on `dotnet format` would hide the answer the developer
+ * came for behind an unrelated failure.
  */
-export function verifyPrompt(plan: PlannedSuite[], stackLabel: string, sandbox: SandboxEnv): string {
+export function verifyPrompt(
+  plan: PlannedSuite[],
+  stackLabel: string,
+  sandbox: SandboxEnv,
+  /** Connected database MCP servers, so API suites can exercise real rows. */
+  dbServers: readonly string[] = [],
+): string {
   const runnable = plan.filter((p) => !p.unavailable)
   const blocked = plan.filter((p) => p.unavailable)
+  // Only worth asking for real endpoint exercise when an API-shaped suite is in
+  // the run: otherwise the instruction is noise the session has to read past.
+  const apiSuites = runnable.filter((p) => p.suite.kind === 'api')
   return (
     `Verify the working tree of this ${stackLabel} project. This is a verification pass: ` +
     'run things and report what happened. Do not fix anything and do not edit any file.\n\n' +
     'Run these in order, and STOP at the first one that fails:\n' +
     runnable.map((p) => `- ${p.suite.id} (${p.suite.label}): ${p.suite.command}`).join('\n') +
+    (apiSuites.length > 0
+      ? '\n(The endpoint pass described below is the exception to that stop rule.)'
+      : '') +
     (blocked.length > 0
       ? '\n\nDo NOT attempt these — this environment cannot run them, which is not a ' +
         'failure of the code. Report each with status "skipped" and the reason as its detail:\n' +
@@ -84,6 +163,7 @@ export function verifyPrompt(plan: PlannedSuite[], stackLabel: string, sandbox: 
       ? `\n\nYou are inside the bypass container: it has git, ripgrep and ${sandbox.join(', ')}` +
         ', and nothing else. Do not install a toolchain to work around that.'
       : '') +
+    endpointSection(apiSuites, dbServers) +
     '\n\nThen gather the quality figures, without re-running the tests:\n' +
     '- Coverage: read the coverage report the run produced (cobertura/lcov/json) and give ' +
     'total line coverage, coverage of the lines this working tree changed (compare against ' +
@@ -183,7 +263,38 @@ function normalizeReport(raw: unknown): VerifyReport | null {
   report.quality.survivors = asArray(quality.survivors).map(str).filter(isText)
   report.quality.findings = asArray(quality.findings).map(str).filter(isText)
   report.evidence = asArray(raw.evidence).map(toEvidence).filter((e): e is EvidenceItem => e !== null)
+  report.endpoints = asArray(raw.endpoints)
+    .map(toEndpointResult)
+    .filter((e): e is EndpointResult => e !== null)
   return report
+}
+
+/**
+ * One reported HTTP call, kept only when it names a method and a path.
+ *
+ * `status` is deliberately NOT defaulted: a missing or unparseable status stays
+ * null, so a call that never completed can never read as a response. `outcome`
+ * falls back to 'not_run' for the same reason — an unrecognised value must not
+ * become a pass, which is the one direction that would mislead.
+ */
+function toEndpointResult(raw: unknown): EndpointResult | null {
+  if (!isRecord(raw)) return null
+  const method = str(raw.method)?.toUpperCase()
+  const path = str(raw.path)
+  if (!method || !path) return null
+  const outcome = str(raw.outcome)?.toLowerCase().replace(/[\s-]/g, '_')
+  return {
+    method,
+    path,
+    status: num(raw.status),
+    ms: num(raw.ms),
+    response: str(raw.response),
+    dataSource: str(raw.dataSource),
+    dataQuery: str(raw.dataQuery),
+    dataAssertion: str(raw.dataAssertion),
+    outcome: outcome === 'pass' || outcome === 'fail' ? outcome : 'not_run',
+    detail: str(raw.detail),
+  }
 }
 
 const SUITE_STATUSES: readonly SuiteStatus[] = ['pass', 'fail', 'skipped', 'unavailable', 'not_run']

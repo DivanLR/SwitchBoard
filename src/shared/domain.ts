@@ -614,6 +614,41 @@ export interface SuiteResult {
 }
 
 /** Proof the code was executed — real input and the real result (FR-048). */
+/**
+ * One real HTTP call made against a running API, with the real data it used.
+ *
+ * This is the difference between "the integration suite passed" and knowing what
+ * the API actually answered. An endpoint result is only ever written from a call
+ * that was genuinely made: `status` null means the call did not complete, never
+ * that it was assumed to work.
+ *
+ * `dataSource` and `dataQuery` record where the identifiers came from. When a
+ * database MCP server supplied them, the row that made the call meaningful is
+ * named, so a passing endpoint can be told apart from one that returned 200 with
+ * an empty body because it was called with an id that does not exist.
+ */
+export interface EndpointResult {
+  method: string
+  /** The path called, with real values substituted, e.g. /api/customers/4417. */
+  path: string
+  /** HTTP status actually received, or null when the call never completed. */
+  status: number | null
+  /** Round-trip time in milliseconds, when measured. */
+  ms: number | null
+  /** Response body, truncated by the session to something readable. */
+  response: string | null
+  /** The MCP server that supplied the real data, e.g. "oracle-sqlcl". */
+  dataSource: string | null
+  /** The query run to obtain the identifiers, verbatim. */
+  dataQuery: string | null
+  /** What the data proved, e.g. "customer 4417 has 3 contracts; response listed 3". */
+  dataAssertion: string | null
+  /** 'pass' only when the response was checked against the real data and matched. */
+  outcome: 'pass' | 'fail' | 'not_run'
+  /** Why it failed, or what could not be checked. */
+  detail: string | null
+}
+
 export interface EvidenceItem {
   kind: 'run' | 'screenshot'
   /** The request sent, the case exercised, or the screen captured. */
@@ -654,6 +689,12 @@ export interface VerifyReport {
     findings: string[]
   }
   evidence: EvidenceItem[]
+  /**
+   * Real HTTP calls made against the running API, with the real data behind them.
+   * Empty when no API or HTTP suite ran, which is stated rather than implied: an
+   * empty list never means "the endpoints are fine".
+   */
+  endpoints: EndpointResult[]
 }
 
 export type VerifyStatus = 'running' | 'pass' | 'fail' | 'inconclusive'
@@ -708,6 +749,7 @@ export function emptyVerifyReport(): VerifyReport {
       findings: [],
     },
     evidence: [],
+    endpoints: [],
   }
 }
 

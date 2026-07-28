@@ -3,6 +3,7 @@
 // mutation answers with the project's full list, so there is nothing to merge.
 import { reactive } from 'vue'
 import type { VerifyRun } from '@shared/domain'
+import { invoke } from '@renderer/ipc'
 
 // Guards the shared list against a slower response from a project the developer
 // has already switched away from (mirrors evals.load).
@@ -25,7 +26,7 @@ const store = reactive({
 
   async load(projectId: string): Promise<void> {
     const token = ++requestToken
-    const runs = await window.switchboard.invoke('verify.list', { projectId })
+    const runs = await invoke('verify.list', { projectId })
     if (token !== requestToken) return
     this.byProject[projectId] = runs
   },
@@ -39,7 +40,7 @@ const store = reactive({
     this.error = null
     this.starting = true
     try {
-      const { runs } = await window.switchboard.invoke('verify.start', { projectId, stackId, suiteIds })
+      const { runs } = await invoke('verify.start', { projectId, stackId, suiteIds })
       this.byProject[projectId] = runs
       return true
     } catch (error) {
@@ -54,7 +55,7 @@ const store = reactive({
   async captureEvidence(projectId: string, runId?: string): Promise<boolean> {
     this.error = null
     try {
-      const { runs } = await window.switchboard.invoke('verify.evidence', { projectId, runId })
+      const { runs } = await invoke('verify.evidence', { projectId, runId })
       this.byProject[projectId] = runs
       return true
     } catch (error) {

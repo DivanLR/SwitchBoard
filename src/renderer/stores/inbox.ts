@@ -3,6 +3,7 @@
 import { reactive } from 'vue'
 import type { DecisionRecord, PermissionRequest, PermissionRule } from '@shared/domain'
 import type { InboxChangedPush } from '@shared/ipc-types'
+import { invoke } from '@renderer/ipc'
 
 const UNDELIVERABLE_DECISION =
   'The decision could not be delivered: the originating session has ended. The item was marked expired.'
@@ -32,7 +33,7 @@ const store = reactive({
   },
 
   async refresh(): Promise<void> {
-    this.pending = await window.switchboard.invoke('inbox.pending', undefined)
+    this.pending = await invoke('inbox.pending', undefined)
   },
 
   async decide(
@@ -40,7 +41,7 @@ const store = reactive({
     decision: 'approve' | 'deny',
     confirmHighRisk = false,
   ): Promise<boolean> {
-    const result = await window.switchboard.invoke('inbox.decide', {
+    const result = await invoke('inbox.decide', {
       requestId,
       decision,
       confirmHighRisk,
@@ -51,13 +52,13 @@ const store = reactive({
 
   async alwaysAllow(requestId: string): Promise<void> {
     // From a decided history entry; the matcher is derived server-side.
-    await window.switchboard.invoke('inbox.alwaysAllow', { requestId })
+    await invoke('inbox.alwaysAllow', { requestId })
   },
 
   /** From a pending item: server-side inserts the rule, then approves.
    *  confirmHighRisk gates the broad MCP tool_only grant (high by fail-safe). */
   async approveAlways(requestId: string, confirmHighRisk = false): Promise<boolean> {
-    const result = await window.switchboard.invoke('inbox.approveAlways', {
+    const result = await invoke('inbox.approveAlways', {
       requestId,
       confirmHighRisk,
     })
@@ -78,28 +79,28 @@ const store = reactive({
 
   /** Standing (always-allow) command rules for a project — Allowed-list tab. */
   async listStandingRules(projectId: string, includeRevoked = false): Promise<PermissionRule[]> {
-    return window.switchboard.invoke('rules.standing.list', { projectId, includeRevoked })
+    return invoke('rules.standing.list', { projectId, includeRevoked })
   },
 
   async revokeStandingRule(ruleId: string): Promise<void> {
-    await window.switchboard.invoke('rules.standing.revoke', { ruleId })
+    await invoke('rules.standing.revoke', { ruleId })
   },
 
   async restoreStandingRule(ruleId: string): Promise<void> {
-    await window.switchboard.invoke('rules.standing.restore', { ruleId })
+    await invoke('rules.standing.restore', { ruleId })
   },
 
   async addStandingRule(projectId: string, pattern: string): Promise<PermissionRule> {
-    return window.switchboard.invoke('rules.standing.add', { projectId, pattern })
+    return invoke('rules.standing.add', { projectId, pattern })
   },
 
   async deleteHistory(requestId: string): Promise<void> {
-    await window.switchboard.invoke('inbox.deleteHistory', { requestId })
+    await invoke('inbox.deleteHistory', { requestId })
     this.history = this.history.filter((h) => h.id !== requestId)
   },
 
   async clearHistory(): Promise<void> {
-    await window.switchboard.invoke('inbox.clearHistory', undefined)
+    await invoke('inbox.clearHistory', undefined)
     this.history = []
   },
 
@@ -107,11 +108,11 @@ const store = reactive({
     projectId: string,
     includeHighRisk = false,
   ): Promise<{ approved: number; skippedHighRisk: number }> {
-    return window.switchboard.invoke('inbox.approveAllForProject', { projectId, includeHighRisk })
+    return invoke('inbox.approveAllForProject', { projectId, includeHighRisk })
   },
 
   async loadHistory(projectId?: string): Promise<void> {
-    this.history = await window.switchboard.invoke('inbox.history', { projectId })
+    this.history = await invoke('inbox.history', { projectId })
   },
 
   applyInboxPush(push: InboxChangedPush): void {

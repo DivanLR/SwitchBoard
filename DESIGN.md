@@ -290,7 +290,8 @@ declarations, all sizes on the system sans stack unless noted):
 - **Meta** (400, 10.5px): the most-used size, 65 declarations. Secondary lines, timestamps, pills, footer readings.
 - **Mono** (400–600, 11.5px, JetBrains Mono): 55 font-size declarations at this step, of which 20 explicitly set `font-family: var(--mono)` — commands, raw output, and button/pill/chip/badge text. The remainder at this size stay on the sans stack.
 - **Label** (400, 11px): 51 declarations. Only one of these carries the 0.08em uppercase tracking that originally defined the role (the sidebar's `PROJECTS` heading); the six inherited views use their own section-heading tracking values (0.04em–0.18em) rather than one shared convention. Recorded as observed, not prescribed.
-- **Caption** (400, 10px): the tightest readable tier, 48 declarations. Sub-labels, chip text, agent lines.
+- **Caption** (400, 10px): 48 declarations. Sub-labels, chip text, agent lines.
+- **Micro** (400, 9.5px): the floor of the system, 22 declarations. Section rules, provenance lines, and tags that must be legible without competing with the line they annotate. Never used for anything the reader has to read in sequence. There is no step below this and no 9px near-duplicate: a second micro size the eye cannot tell apart is a ramp with a hole in it, not a finer tier.
 - **UI** (400, 12px): 46 declarations. Control and row labels.
 - **Body** (400, 13px, 1.6): 25 declarations, and the base size on `html`, so 13px is the default rather than a step down.
 - **Body Compact** (400, 12.5px, 1.6): 20 declarations. Dense prose inside cards.

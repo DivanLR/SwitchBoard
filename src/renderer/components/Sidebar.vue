@@ -1170,7 +1170,7 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .collapsed-badge {
-  font-size: 9px;
+  font-size: 9.5px;
   background: color-mix(in srgb, var(--amber) 15%, transparent);
   border-color: color-mix(in srgb, var(--amber) 40%, transparent);
   border-radius: 0;

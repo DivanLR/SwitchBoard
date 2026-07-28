@@ -127,4 +127,102 @@ describe('reading the report back', () => {
     )
     expect(verifyVerdict(report!)).toBe('inconclusive')
   })
+
+  it('reads each endpoint call back with the row it was drawn from', () => {
+    const report = parseVerifyReport(
+      line(
+        JSON.stringify({
+          suites: [{ id: 'dotnet-http', status: 'pass', detail: '4 calls' }],
+          endpoints: [
+            {
+              method: 'get',
+              path: '/api/v1/policies/{id}',
+              status: 200,
+              ms: 84,
+              response: '{"id":"...","status":"Active"}',
+              dataSource: 'postgres-prod (read only)',
+              dataQuery: 'select id from policies limit 1',
+              dataAssertion: 'status matches the row',
+              outcome: 'PASS',
+              detail: 'answered with the policy the query named',
+            },
+          ],
+        }),
+      ),
+    )
+    expect(report?.endpoints).toHaveLength(1)
+    // Method is normalised up, outcome down: the UI groups on both.
+    expect(report?.endpoints[0]).toMatchObject({
+      method: 'GET',
+      path: '/api/v1/policies/{id}',
+      status: 200,
+      ms: 84,
+      outcome: 'pass',
+      dataQuery: 'select id from policies limit 1',
+    })
+  })
+
+  it('never invents a status, and never reads an unknown outcome as a pass', () => {
+    const report = parseVerifyReport(
+      line(
+        JSON.stringify({
+          suites: [{ id: 'dotnet-http', status: 'fail', detail: 'timed out' }],
+          endpoints: [
+            { method: 'POST', path: '/api/v1/quotes', status: 'no response', outcome: 'probably fine' },
+            { path: '/api/v1/orphan' },
+            { method: 'GET', path: '/api/v1/health', status: 503, outcome: 'fail' },
+          ],
+        }),
+      ),
+    )
+    // The unparseable status stays null rather than becoming 0, the outcome the
+    // model made up drops to not_run, and the call with no method is discarded.
+    expect(report?.endpoints).toHaveLength(2)
+    expect(report?.endpoints[0]).toMatchObject({ status: null, ms: null, outcome: 'not_run' })
+    expect(report?.endpoints[1]).toMatchObject({ status: 503, outcome: 'fail' })
+  })
+
+  it('has no endpoints at all when the run reported none', () => {
+    const report = parseVerifyReport(line('{"suites":[{"id":"node-unit","status":"pass","detail":""}]}'))
+    expect(report?.endpoints).toEqual([])
+  })
+})
+
+describe('asking for real endpoint calls', () => {
+  const apiPlan = planSuites(dotnet.suites, ['dotnet-http'], null)
+
+  it('names the connected database servers, and what to draw from them', () => {
+    const prompt = verifyPrompt(apiPlan, '.NET', null, ['postgres-main', 'oracle-reporting'])
+    expect(prompt).toContain('postgres-main')
+    expect(prompt).toContain('oracle-reporting')
+    expect(prompt).toContain('endpoints')
+    // The one figure that must never be invented is named as such.
+    expect(prompt).toMatch(/never (write|report) a status/i)
+  })
+
+  it('exempts the endpoint pass from the stop-at-first-failure rule', () => {
+    // A formatting or coverage failure says nothing about whether the API
+    // answers, so gating the one thing the developer came for behind it would
+    // hide the answer. The exception is stated where the stop rule is given.
+    const plan = planSuites(dotnet.suites, ['dotnet-format', 'dotnet-http'], null)
+    const prompt = verifyPrompt(plan, '.NET', null, ['postgres-main'])
+    expect(prompt).toContain('STOP at the first one that fails')
+    expect(prompt).toContain('exception to that stop rule')
+    expect(prompt).toContain('even if an earlier suite failed')
+
+    // With no API suite, no exception is claimed — there is nothing to exempt.
+    expect(verifyPrompt(planSuites(dotnet.suites, ['dotnet-format'], null), '.NET', null, [])).not.toContain(
+      'exception to that stop rule',
+    )
+  })
+
+  it('does not ask for real data when no database server is connected', () => {
+    const prompt = verifyPrompt(apiPlan, '.NET', null, [])
+    expect(prompt).not.toContain('postgres-main')
+  })
+
+  it('does not ask for endpoint calls when no API suite is in the run', () => {
+    const prompt = verifyPrompt(planSuites(dotnet.suites, ['dotnet-unit'], null), '.NET', null, ['postgres-main'])
+    expect(prompt).not.toContain('postgres-main')
+  })
 })

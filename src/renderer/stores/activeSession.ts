@@ -3,6 +3,7 @@
 // session, and composer interaction (FR-014/016/019/020).
 import { reactive } from 'vue'
 import type { SessionEvent } from '@shared/domain'
+import { invoke } from '@renderer/ipc'
 
 const PAGE_SIZE = 300
 
@@ -34,7 +35,7 @@ const store = reactive({
     this.hasMoreHistory = false
     this.selectedAgentId = null
     if (!sessionId) return
-    const events = await window.switchboard.invoke('sessions.events', {
+    const events = await invoke('sessions.events', {
       sessionId,
       limit: PAGE_SIZE,
     })
@@ -46,7 +47,7 @@ const store = reactive({
 
   async loadEarlier(): Promise<void> {
     if (!this.sessionId || this.oldestSeq === null) return
-    const older = await window.switchboard.invoke('sessions.events', {
+    const older = await invoke('sessions.events', {
       sessionId: this.sessionId,
       beforeSeq: this.oldestSeq,
       limit: PAGE_SIZE,
@@ -84,7 +85,7 @@ const store = reactive({
 
   async send(text: string, agentId?: string): Promise<{ eventId: string; queued: boolean }> {
     if (!this.sessionId) throw new Error('No active session')
-    return window.switchboard.invoke('sessions.send', { sessionId: this.sessionId, text, agentId })
+    return invoke('sessions.send', { sessionId: this.sessionId, text, agentId })
   },
 
   /** Open (or close, with null) a subagent's chat view. */
@@ -100,7 +101,7 @@ const store = reactive({
 
   async answerQuestion(eventId: string, choice: string): Promise<void> {
     if (!this.sessionId) return
-    await window.switchboard.invoke('sessions.answerQuestion', {
+    await invoke('sessions.answerQuestion', {
       sessionId: this.sessionId,
       eventId,
       choice,
@@ -109,13 +110,13 @@ const store = reactive({
 
   async interrupt(): Promise<{ stillQueued: number }> {
     if (!this.sessionId) return { stillQueued: 0 }
-    return window.switchboard.invoke('sessions.interrupt', { sessionId: this.sessionId })
+    return invoke('sessions.interrupt', { sessionId: this.sessionId })
   },
 
   /** End the session for good (resumable later); queued sends survive as drafts. */
   async stop(): Promise<void> {
     if (!this.sessionId) return
-    await window.switchboard.invoke('sessions.stop', { sessionId: this.sessionId })
+    await invoke('sessions.stop', { sessionId: this.sessionId })
   },
 
   focusEvent(eventId: string): void {

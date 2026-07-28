@@ -2,6 +2,7 @@
 // exposes check/install actions.
 import { reactive } from 'vue'
 import type { UpdateStatus } from '@shared/ipc-types'
+import { invoke } from '@renderer/ipc'
 
 const store = reactive({
   status: { state: 'idle' } as UpdateStatus,
@@ -32,13 +33,13 @@ const store = reactive({
   },
 
   async check(): Promise<void> {
-    await window.switchboard.invoke('updates.check', undefined)
+    await invoke('updates.check', undefined)
   },
 
   /** Downloads the update inside the app and restarts into the installer. Falls
    *  back to the release page when the feed or the download is unusable. */
   async install(): Promise<void> {
-    await window.switchboard.invoke('updates.install', undefined)
+    await invoke('updates.install', undefined)
   },
 })
 

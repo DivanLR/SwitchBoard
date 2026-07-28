@@ -4,6 +4,7 @@ import { reactive } from 'vue'
 import type { McpScan, Project, ProjectCommand, Session } from '@shared/domain'
 import type { Counters, ProjectListItem, ProjectSuggestion, SessionStatusPush } from '@shared/ipc-types'
 import { useActiveSessionStore } from './activeSession'
+import { invoke } from '@renderer/ipc'
 
 const store = reactive({
   items: [] as ProjectListItem[],
@@ -33,7 +34,7 @@ const store = reactive({
   },
 
   async refresh(): Promise<void> {
-    const snapshot = await window.switchboard.invoke('projects.list', undefined)
+    const snapshot = await invoke('projects.list', undefined)
     this.items = snapshot.projects
     this.counters = snapshot.counters
     this.loaded = true
@@ -44,11 +45,11 @@ const store = reactive({
   },
 
   async loadSuggestions(): Promise<void> {
-    this.suggestions = await window.switchboard.invoke('projects.suggestions', undefined)
+    this.suggestions = await invoke('projects.suggestions', undefined)
   },
 
   async register(path: string, name?: string): Promise<Project> {
-    const project = await window.switchboard.invoke('projects.register', { path, name })
+    const project = await invoke('projects.register', { path, name })
     await this.refresh()
     await this.loadSuggestions()
     return project
@@ -56,55 +57,55 @@ const store = reactive({
 
   /** A project's available slash commands / skills (composer + settings). */
   async commands(projectId: string): Promise<ProjectCommand[]> {
-    return window.switchboard.invoke('projects.commands', { projectId })
+    return invoke('projects.commands', { projectId })
   },
 
   /** Recent composer prompts for a project (command history / up-arrow recall). */
   async promptHistory(projectId: string): Promise<string[]> {
-    return window.switchboard.invoke('sessions.promptHistory', { projectId })
+    return invoke('sessions.promptHistory', { projectId })
   },
 
   /** Cached MCP schema doc — a combination's own scan when servers given. */
   async readMcpSchema(projectId: string, servers?: string[]): Promise<string | null> {
-    const res = await window.switchboard.invoke('mcp.readSchema', { projectId, servers })
+    const res = await invoke('mcp.readSchema', { projectId, servers })
     return res.content
   },
 
   /** Scanned-combination history for the MCP view, newest first. */
   async mcpScanHistory(projectId: string): Promise<McpScan[]> {
-    return window.switchboard.invoke('mcp.scanHistory', { projectId })
+    return invoke('mcp.scanHistory', { projectId })
   },
 
   /** Record a finished scan for the active combination (null if no doc). */
   async mcpRecordScan(projectId: string, servers: string[]): Promise<McpScan | null> {
-    return window.switchboard.invoke('mcp.recordScan', { projectId, servers })
+    return invoke('mcp.recordScan', { projectId, servers })
   },
 
   async archive(projectId: string): Promise<void> {
-    await window.switchboard.invoke('projects.archive', { projectId })
+    await invoke('projects.archive', { projectId })
     if (this.selectedProjectId === projectId) this.selectedProjectId = null
     await this.refresh()
   },
 
   async rename(projectId: string, name: string): Promise<void> {
-    await window.switchboard.invoke('projects.rename', { projectId, name })
+    await invoke('projects.rename', { projectId, name })
     const item = this.items.find((p) => p.id === projectId)
     if (item) item.name = name
   },
 
   async move(projectId: string, toIndex: number): Promise<void> {
-    await window.switchboard.invoke('projects.move', { projectId, toIndex })
+    await invoke('projects.move', { projectId, toIndex })
     await this.refresh()
   },
 
   async addRef(projectId: string, target: string): Promise<void> {
-    const refs = await window.switchboard.invoke('projects.refs.add', { projectId, target })
+    const refs = await invoke('projects.refs.add', { projectId, target })
     const item = this.items.find((p) => p.id === projectId)
     if (item) item.refs = refs
   },
 
   async removeRef(projectId: string, path: string): Promise<void> {
-    const refs = await window.switchboard.invoke('projects.refs.remove', { projectId, path })
+    const refs = await invoke('projects.refs.remove', { projectId, path })
     const item = this.items.find((p) => p.id === projectId)
     if (item) item.refs = refs
   },
@@ -114,7 +115,7 @@ const store = reactive({
     resume = false,
     bypassPermissions = false,
   ): Promise<Session> {
-    const session = await window.switchboard.invoke('sessions.start', {
+    const session = await invoke('sessions.start', {
       projectId,
       resume,
       bypassPermissions,

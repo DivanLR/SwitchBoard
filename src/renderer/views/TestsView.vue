@@ -261,6 +261,35 @@ async function captureEvidence(): Promise<void> {
 const report = computed(() => latest.value?.report ?? null)
 const evidence = computed(() => report.value?.evidence ?? [])
 
+// Real HTTP calls the run made, with the rows they were drawn from. Only API
+// suites produce these, so an empty list means one of three different things
+// and the message has to say which — otherwise "none" reads as "all passed".
+const endpoints = computed(() => report.value?.endpoints ?? [])
+const endpointsEmpty = computed(() => {
+  const ran = (report.value?.suites ?? []).filter((r) => suiteById(r.id)?.kind === 'api')
+  if (ran.length === 0) return 'No API suite in this run. Include one above to call real endpoints.'
+  if (dbServers.value.length === 0) {
+    return 'No database MCP server was connected on this session, so the run had no real rows to call the endpoints with. Connect one in the MCP section, then run again.'
+  }
+  return `The API suite ran but reported no individual endpoint calls, even though ${dbServers.value.join(' and ')} was available.`
+})
+
+/** The same list the run itself was given: named in settings AND connected on this
+ *  project's session. Mirrors the filter in the verify.start handler, so the empty
+ *  state cannot claim a server was available when the prompt never offered it. */
+const dbServers = computed(() => {
+  const configured = settingsStore.settings?.databaseMcpServers ?? []
+  const live = projectsStore.items.find((p) => p.id === props.projectId)?.session?.mcpServers ?? []
+  const connected = live.filter((s) => s.status.toLowerCase() === 'connected').map((s) => s.name)
+  return configured.filter((name) => connected.includes(name))
+})
+
+function statusClass(status: number | null): string {
+  if (status === null) return ''
+  if (status < 300) return 'pass'
+  return status < 500 ? 'warn' : 'fail'
+}
+
 /** A suite result decorated with the catalog's own label. */
 const results = computed(() =>
   (report.value?.suites ?? []).map((r) => ({ ...r, label: suiteById(r.id)?.label ?? r.label })),
@@ -424,6 +453,33 @@ function statusWord(run: VerifyRun): string {
           <span class="row-status mono" :class="r.status">{{ r.status.replace('_', ' ') }}</span>
           <span class="row-name">{{ r.label }}</span>
           <span class="row-detail mono">{{ r.detail }}</span>
+        </div>
+
+        <div v-if="latest" class="sec mono">REAL ENDPOINTS, REAL DATA</div>
+        <p v-if="latest && endpoints.length === 0" class="empty" data-testid="tests-endpoints-empty">
+          {{ endpointsEmpty }}
+        </p>
+        <div
+          v-for="(e, i) in endpoints"
+          :key="`${e.method} ${e.path} ${i}`"
+          class="ep"
+          :data-testid="`tests-endpoint-${i}`"
+        >
+          <div class="ep-head">
+            <span class="ep-verdict mono" :class="e.outcome">{{ e.outcome.replace('_', ' ') }}</span>
+            <span class="ep-method mono">{{ e.method }}</span>
+            <span class="ep-path mono">{{ e.path }}</span>
+            <span class="ep-status mono" :class="statusClass(e.status)">{{ e.status ?? '—' }}</span>
+            <span class="ep-ms mono">{{ e.ms === null ? '—' : `${e.ms} ms` }}</span>
+          </div>
+          <div v-if="e.detail" class="ep-detail">{{ e.detail }}</div>
+          <div v-if="e.dataSource || e.dataQuery" class="ep-line mono">
+            <span class="ep-label">data</span>{{ [e.dataSource, e.dataQuery].filter(Boolean).join(' · ') }}
+          </div>
+          <div v-if="e.dataAssertion" class="ep-line mono">
+            <span class="ep-label">checked</span>{{ e.dataAssertion }}
+          </div>
+          <div v-if="e.response" class="ep-body mono">{{ e.response }}</div>
         </div>
 
         <div class="sec mono">ACTUAL RUNS AGAINST THE BUILD</div>
@@ -701,7 +757,7 @@ function statusWord(run: VerifyRun): string {
 }
 
 .heavy-tag {
-  font-size: 9px;
+  font-size: 9.5px;
   color: var(--text-ghost);
 }
 
@@ -802,7 +858,7 @@ function statusWord(run: VerifyRun): string {
 }
 
 .dev-tag {
-  font-size: 9px;
+  font-size: 9.5px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--amber);
@@ -849,7 +905,7 @@ function statusWord(run: VerifyRun): string {
 }
 
 .dev-dot {
-  font-size: 9px;
+  font-size: 9.5px;
   color: var(--amber);
 }
 
@@ -1049,6 +1105,116 @@ function statusWord(run: VerifyRun): string {
   font-size: 9.5px;
   color: var(--text-ghost);
   margin-top: 3px;
+}
+
+/* One real HTTP call: its verdict, the call, then the row it was drawn from. */
+.ep {
+  padding: 8px 10px;
+  margin-bottom: 5px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border-card);
+  border-radius: var(--rc);
+}
+
+.ep-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ep-verdict {
+  flex-shrink: 0;
+  width: 52px;
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+}
+
+.ep-verdict.pass {
+  color: var(--green);
+}
+
+.ep-verdict.fail {
+  color: var(--red);
+}
+
+.ep-method {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+  color: var(--text-mid);
+}
+
+.ep-path {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ep-status {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+
+.ep-status.pass {
+  color: var(--green);
+}
+
+.ep-status.warn {
+  color: var(--amber);
+}
+
+.ep-status.fail {
+  color: var(--red);
+}
+
+.ep-ms {
+  flex-shrink: 0;
+  width: 56px;
+  font-size: 9.5px;
+  text-align: right;
+  color: var(--text-ghost);
+}
+
+.ep-detail {
+  font-size: 11.5px;
+  color: var(--text-mid);
+  margin-top: 4px;
+}
+
+/* The provenance lines: which server and query produced the identifiers, and
+   what the response was checked against. Labelled so neither reads as prose. */
+.ep-line {
+  font-size: 9.5px;
+  color: var(--text-ghost);
+  margin-top: 3px;
+  word-break: break-word;
+}
+
+.ep-label {
+  display: inline-block;
+  width: 52px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ep-body {
+  font-size: 10px;
+  color: var(--text-mid);
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--border-card);
+  max-height: 168px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .dev-panel {

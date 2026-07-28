@@ -364,7 +364,18 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         requested: plan.map((p) => p.suite.id),
       })
       manager.watchVerifyReport(session.id, run.id, 'suites')
-      manager.sendMessage(session.id, verifyPrompt(plan, stack.label, sandboxed))
+      // Database MCP servers the session can actually reach right now: named in
+      // settings AND reporting connected on this session. An API suite uses them
+      // to draw real identifiers, so a name that is configured but not connected
+      // must not be offered — the session would query a server that is not there.
+      // `mcpServers` is in-memory only (not a sessions column), so it has to come
+      // off the manager's live row — the repo's copy never carries it.
+      const configured = repos.settings.get().databaseMcpServers ?? []
+      const connected = (manager.liveSessionRow(session.id)?.mcpServers ?? [])
+        .filter((s) => s.status.toLowerCase() === 'connected')
+        .map((s) => s.name)
+      const dbServers = configured.filter((name) => connected.includes(name))
+      manager.sendMessage(session.id, verifyPrompt(plan, stack.label, sandboxed, dbServers))
       return { sessionId: session.id, runs: repos.verifyRuns.listForProject(req.projectId) }
     },
     'verify.evidence': async (req) => {
