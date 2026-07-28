@@ -3,7 +3,7 @@
 // session, the gate that stops a false pass, and the derived stage.
 import { describe, expect, it } from 'vitest'
 import { canPassEval, evalStage, type EvalRun } from '@shared/domain'
-import { detectStacks, TEST_STACKS } from '@shared/test-catalog'
+import { detectStacks, stackEntries, TEST_STACKS } from '@shared/test-catalog'
 import {
   attemptsPrompt,
   checkPrompt,
@@ -35,6 +35,36 @@ describe('stack detection', () => {
   it('matches an extension pattern anywhere in the root, case-insensitively', () => {
     expect(detectStacks(['Thing.SLNX']).map((s) => s.stackId)).toEqual(['dotnet'])
     expect(detectStacks(['notes.txt'])).toEqual([])
+  })
+
+  // Both shapes below are real registered projects that a root-only scan reported
+  // as having no stack, which emptied their Tests section and sent their bypass
+  // session to the node-only sandbox image.
+  it('finds a solution one level down, where repos usually wrap it', () => {
+    const tree: Record<string, string[]> = {
+      '/ExternalAPI': ['CLAUDE.md', 'Ppl.Einstein.External.Api', 'device_recon.txt'],
+      '/ExternalAPI/Ppl.Einstein.External.Api': ['Ppl.Einstein.External.Api.sln', 'src'],
+    }
+    const entries = stackEntries('/ExternalAPI', (dir) => tree[dir] ?? [])
+    expect(entries).toContain('Ppl.Einstein.External.Api/Ppl.Einstein.External.Api.sln')
+    expect(detectStacks(entries).map((s) => s.stackId)).toEqual(['dotnet'])
+  })
+
+  it('matches an exact marker on the basename, not the whole nested path', () => {
+    expect(detectStacks(['app/global.json']).map((s) => s.stackId)).toEqual(['dotnet'])
+    // ...but not a file that merely ends with the marker's name.
+    expect(detectStacks(['my-global.json'])).toEqual([])
+  })
+
+  it('does not descend into build or vendor directories', () => {
+    const tree: Record<string, string[]> = {
+      '/p': ['node_modules', 'obj', '.git', 'src'],
+      '/p/node_modules': ['some.sln'],
+      '/p/obj': ['other.sln'],
+      '/p/.git': ['x.sln'],
+      '/p/src': ['README.md'],
+    }
+    expect(detectStacks(stackEntries('/p', (dir) => tree[dir] ?? []))).toEqual([])
   })
 
   it('offers API, UI and unit coverage for every stack it knows', () => {

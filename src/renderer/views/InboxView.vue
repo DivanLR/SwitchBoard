@@ -258,7 +258,21 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
         title="Collapse the inbox"
         @click="emit('collapse')"
       >
-        ›
+        <!-- A drawn chevron, not the ‹ character. Measured: the glyph was already
+             centred horizontally (8.63px each side) but sat ~1px high, because
+             U+203A's ink rides high inside its own line box and no alignment
+             property reaches that. A path centres by construction and does not
+             depend on the machine's system font. -->
+        <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
+          <path
+            d="M5.75 3.5 L10.25 8 L5.75 12.5"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.7"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
       </button>
     </div>
 
@@ -501,6 +515,9 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
 }
 
 /* Collapse chevron on the tab row's right edge. */
+/* The chevron is drawn, so there is no font-size or line-height here any more:
+   both existed to position a text glyph that no longer exists. Density was
+   tunable while choosing the variant and settled at 1, so 22px is the literal. */
 .inbox-collapse {
   flex-shrink: 0;
   width: 22px;
@@ -508,8 +525,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 15px;
-  line-height: 1;
+  padding: 0;
   color: var(--text-faint);
   border: 1px solid var(--border-seg);
   border-radius: 99px;
@@ -520,6 +536,11 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
 .inbox-collapse:hover {
   color: var(--text-strong);
   border-color: var(--border-strong);
+}
+
+/* Block, so the svg does not sit on a text baseline inside the flex line. */
+.inbox-collapse svg {
+  display: block;
 }
 
 .tab {

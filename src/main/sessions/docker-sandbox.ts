@@ -14,7 +14,13 @@ import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import { promisify } from 'node:util'
 import type { SpawnOptions as SdkSpawnOptions, SpawnedProcess } from '@anthropic-ai/claude-agent-sdk'
-import { detectStacks, sandboxNeedsDotnet, sandboxTools, type SuiteTool } from '@shared/test-catalog'
+import {
+  detectStacks,
+  sandboxNeedsDotnet,
+  sandboxTools,
+  stackEntries,
+  type SuiteTool,
+} from '@shared/test-catalog'
 
 const execFileAsync = promisify(execFile)
 
@@ -89,7 +95,9 @@ ENTRYPOINT ["/entrypoint.sh"]
 export function imageFor(projectPath: string): { image: string; dotnet: boolean } {
   let dotnet: boolean
   try {
-    dotnet = sandboxNeedsDotnet(detectStacks(readdirSync(projectPath)))
+    // Root plus one level, the same listing the Tests section detects from, so the
+    // image and the suite availability can never disagree about this project.
+    dotnet = sandboxNeedsDotnet(detectStacks(stackEntries(projectPath, (dir) => readdirSync(dir))))
   } catch {
     dotnet = false
   }

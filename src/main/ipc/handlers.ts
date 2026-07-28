@@ -28,7 +28,7 @@ import {
 import { defaultRiskRules } from '@main/inbox/risk-rules'
 import { defaultSwallowRules } from '@main/stream/swallow-rules'
 import { existsSync, readdirSync, statSync } from 'node:fs'
-import { detectStacks, stackById } from '@shared/test-catalog'
+import { detectStacks, stackById, stackEntries } from '@shared/test-catalog'
 import { attemptsPrompt, checkPrompt, judgePrompt } from '@main/evals/eval-dispatch'
 import { evidencePrompt, planSuites, verifyPrompt } from '@main/evals/verify-dispatch'
 import { sandboxToolsFor } from '@main/sessions/docker-sandbox'
@@ -296,7 +296,9 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       const project = repos.projects.byId(req.projectId)
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
       try {
-        return detectStacks(readdirSync(project.path))
+        // Root plus one level: a solution often sits in a subfolder of the
+        // folder the developer registered.
+        return detectStacks(stackEntries(project.path, (dir) => readdirSync(dir)))
       } catch {
         // Unreadable folder (removed, permissions): no stack, not a crash.
         return []

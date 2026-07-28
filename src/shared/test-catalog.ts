@@ -360,17 +360,53 @@ export interface AvailableSuites {
  * several stacks reports all of them (FR-033), so an API and its front end both
  * get their suites.
  */
-export function detectStacks(rootEntries: readonly string[]): AvailableSuites[] {
-  const lower = rootEntries.map((entry) => entry.toLowerCase())
+export function detectStacks(entries: readonly string[]): AvailableSuites[] {
+  // Entries may be plain names or one-level paths ("Api/Api.sln"), so an exact
+  // marker is matched against the basename rather than the whole string.
+  const lower = entries.map((entry) => entry.toLowerCase().replace(/\\/g, '/'))
   const present = (pattern: string): boolean => {
     const needle = pattern.toLowerCase()
     return needle.startsWith('*.')
       ? lower.some((entry) => entry.endsWith(needle.slice(1)))
-      : lower.includes(needle)
+      : lower.some((entry) => entry === needle || entry.endsWith(`/${needle}`))
   }
   return TEST_STACKS.filter((stack) => stack.detect.some(present)).map((stack) => ({
     stackId: stack.id,
     stackLabel: stack.label,
     suites: stack.suites,
   }))
+}
+
+/**
+ * Entry names to hand detectStacks: the project root plus one level down.
+ *
+ * A solution very often does not sit in the folder the developer registered.
+ * `ExternalAPI/Ppl.Einstein.External.Api/*.sln` and
+ * `MessageOrchestrator/Pepkor.MessageOrchestrator/*.slnx` are both real cases
+ * that a root-only scan reported as having no stack at all, which emptied the
+ * Tests section and sent the bypass session to the node-only sandbox image.
+ *
+ * One level, not a recursive walk: it covers the common "repo wraps the solution"
+ * shape without walking node_modules, bin, or obj on every detection.
+ *
+ * `list` is injected so this stays free of node:fs and usable from either process.
+ */
+export function stackEntries(root: string, list: (dir: string) => string[]): string[] {
+  const SKIP = new Set(['node_modules', '.git', 'bin', 'obj', 'dist', 'out', 'release', '.vs'])
+  const top = list(root)
+  const nested: string[] = []
+  for (const name of top) {
+    if (SKIP.has(name.toLowerCase()) || name.startsWith('.')) continue
+    // Do NOT guess directory-ness from the name. An earlier cut skipped anything
+    // with a trailing extension, which silently excluded `Ppl.Einstein.External.Api`
+    // and every other dotted .NET folder name — the exact ecosystem this exists
+    // for. Attempting the listing and letting a file throw is the only reliable
+    // test, and a project root holds few enough entries for that to be free.
+    try {
+      for (const child of list(`${root}/${name}`)) nested.push(`${name}/${child}`)
+    } catch {
+      // Not a directory, or unreadable. Detection is a hint, never a blocker.
+    }
+  }
+  return [...top, ...nested]
 }
