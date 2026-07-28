@@ -101,6 +101,12 @@ function endpointSection(apiSuites: PlannedSuite[], dbServers: readonly string[]
         'Query for identifiers that actually exist — a customer id, an account number, a ' +
         'contract — and call the endpoints with THOSE. Record the query you ran verbatim in ' +
         '"dataQuery" and the server in "dataSource".\n' +
+        '- Read the schema through that server before you query it, and write SQL in ITS ' +
+        'dialect. Do not guess a table or column name from the C# entity names, and do not ' +
+        'assume the syntax of a different engine — an Oracle server does not take LIMIT, and a ' +
+        'guessed table name fails in a way that looks like the API is broken when it is not. ' +
+        'If a query errors, say so in "detail" and set "outcome" to "not_run" rather than ' +
+        'reporting a call you never made.\n' +
         '- Then check the response back against the data. Read the row counts or field values ' +
         'from the database and say in "dataAssertion" what they proved, e.g. "customer 4417 ' +
         'has 3 contracts; the response listed 3". An endpoint that answers 200 with an empty ' +

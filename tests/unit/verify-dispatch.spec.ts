@@ -265,6 +265,10 @@ describe('asking for real endpoint calls', () => {
     expect(prompt).toContain('endpoints')
     // The one figure that must never be invented is named as such.
     expect(prompt).toMatch(/never (write|report) a status/i)
+    // And the schema is to be read, not guessed: a wrong table name fails in a way
+    // that looks exactly like a broken API when the API is fine.
+    expect(prompt).toContain('Read the schema through that server')
+    expect(prompt).toMatch(/its dialect/i)
   })
 
   it('exempts the endpoint pass from the stop-at-first-failure rule', () => {
