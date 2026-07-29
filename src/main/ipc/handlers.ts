@@ -31,6 +31,9 @@ import { existsSync, readdirSync, statSync } from 'node:fs'
 import { detectStacks, stackById, stackEntries } from '@shared/test-catalog'
 import { attemptsPrompt, checkPrompt, judgePrompt } from '@main/evals/eval-dispatch'
 import { evidencePrompt, planSuites, verifyPrompt } from '@main/evals/verify-dispatch'
+import { apiDataPrompt } from '@main/evals/api-dispatch'
+import { resolveApiHost, scanProjectEndpoints } from '@main/evals/api-scan'
+import { recentEndpoints } from '@shared/api-endpoints'
 import { sandboxToolsFor } from '@main/sessions/docker-sandbox'
 import { comboDocPath, readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
 import { comboKey } from '@shared/mcp-combo'
@@ -399,6 +402,78 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       manager.watchVerifyReport(session.id, run.id, 'evidence')
       manager.sendMessage(session.id, evidencePrompt(hints, session.bypassPermissions === true))
       return { sessionId: session.id, runs: repos.verifyRuns.listForProject(req.projectId) }
+    },
+    // The API eval set (deterministic path). Everything the app can establish
+    // itself, it establishes itself: the routes come from a scan of the project's
+    // source, the calls are made by the app, and the verdict is computed from the
+    // statuses that came back. The session is used for one thing only — request
+    // data drawn from real rows (api-dispatch.ts).
+    'api.endpoints': (req) => {
+      const project = repos.projects.byId(req.projectId)
+      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
+      const scan = scanProjectEndpoints(project.path)
+      const settings = repos.settings.get()
+      const host = resolveApiHost(project.path, {
+        baseUrl: settings.projectApiBase[req.projectId],
+        startCmd: settings.projectApiStart[req.projectId],
+      })
+      return {
+        endpoints: scan.endpoints,
+        recent: recentEndpoints(repos.apiRuns.listForProject(req.projectId)),
+        filesRead: scan.filesRead,
+        truncated: scan.truncated,
+        host:
+          'error' in host
+            ? { baseUrl: null, startCmd: null, from: null, error: host.error }
+            : { baseUrl: host.baseUrl, startCmd: host.startCmd, from: host.from, error: null },
+      }
+    },
+    'api.runs': (req) => repos.apiRuns.listForProject(req.projectId),
+    'api.start': async (req) => {
+      const project = repos.projects.byId(req.projectId)
+      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
+      if (req.endpoints.length === 0) {
+        throw { code: 'INVALID_PATH', message: 'Choose at least one endpoint to test.' } satisfies IpcError
+      }
+      const settings = repos.settings.get()
+      // Resolved BEFORE the session is touched: a project with nowhere to call is
+      // a sentence the developer can act on, not a run that starts and then fails.
+      const host = resolveApiHost(project.path, {
+        baseUrl: settings.projectApiBase[req.projectId],
+        startCmd: settings.projectApiStart[req.projectId],
+      })
+      if ('error' in host) throw { code: 'INVALID_PATH', message: host.error } satisfies IpcError
+      let session = repos.sessions.activeForProject(req.projectId)
+      if (!session) session = await manager.startSession(req.projectId)
+      const run = repos.apiRuns.start({
+        projectId: req.projectId,
+        baseUrl: host.baseUrl,
+        sessionId: session.id,
+      })
+      manager.watchApiRequests(session.id, run.id)
+      // Same wait as a verification run: a session started a moment ago has not
+      // reported its MCP servers yet, so reading the list immediately names none.
+      const dbServers = await manager.connectedMcpServers(
+        session.id,
+        settings.databaseMcpServers ?? [],
+      )
+      manager.sendMessage(session.id, apiDataPrompt(req.endpoints, dbServers))
+      return { sessionId: session.id, runs: repos.apiRuns.listForProject(req.projectId) }
+    },
+    'api.setHost': (req) => {
+      const settings = repos.settings.get()
+      const base = { ...settings.projectApiBase }
+      const start = { ...settings.projectApiStart }
+      // An empty string clears the override, which is what an emptied field means.
+      if (req.baseUrl !== undefined) {
+        if (req.baseUrl.trim()) base[req.projectId] = req.baseUrl.trim()
+        else delete base[req.projectId]
+      }
+      if (req.startCmd !== undefined) {
+        if (req.startCmd.trim()) start[req.projectId] = req.startCmd.trim()
+        else delete start[req.projectId]
+      }
+      return repos.settings.set({ projectApiBase: base, projectApiStart: start })
     },
     'queue.list': (req) => manager.listQueue(req.projectId),
     'queue.add': (req) => {

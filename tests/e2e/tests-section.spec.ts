@@ -367,6 +367,91 @@ test('a run that reports nothing is inconclusive, never a pass', async ({ page }
   await expect(page.getByTestId('tests-gate-unit')).not.toContainText('passed')
 })
 
+// --- The API eval set: the deterministic path -------------------------------
+// What separates these from the tests above: no report line decides anything.
+// The app sends the requests and computes the verdict, so the session's only
+// contribution is data, and the panel shows the calls the app actually made.
+
+/** One call as the app records it: the request it sent, and what came back. */
+function apiCall(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    request: {
+      template: '/api/customers/{id}',
+      method: 'GET',
+      path: '/api/customers/4417',
+      body: null,
+      headers: null,
+      expect: { status: 200, minItems: 3, mustContain: null },
+      note: 'customer 4417 has 3 contracts',
+      dataSource: 'oracle-sqlcl',
+      dataQuery: 'select customer_id from customers where rownum = 1',
+    },
+    status: 200,
+    ms: 84,
+    body: '{"id":4417,"contracts":[1,2,3]}',
+    outcome: 'pass',
+    detail: null,
+    ...over,
+  }
+}
+
+async function openApiPanel(page: Page): Promise<void> {
+  await openTests(page)
+  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-sub-api').click()
+  await expect(page.getByTestId('tests-panel-api')).toBeVisible()
+}
+
+test('the API panel offers the last tested endpoints and a search over the rest', async ({ page }) => {
+  await openApiPanel(page)
+  // Last tested first, so the common case is one click and no typing.
+  await expect(page.getByTestId('tests-api-recent-0')).toContainText('/api/customers/{id}')
+  await expect(page.getByTestId('tests-api-endpoint-0')).toContainText('/api/customers')
+  await page.getByTestId('tests-api-search').fill('search')
+  await expect(page.getByTestId('tests-api-endpoint-0')).toContainText('/api/customers/search')
+  await expect(page.getByTestId('tests-api-endpoint-1')).toHaveCount(0)
+  // Where the calls would go, and where that came from — never an implied port.
+  await expect(page.getByTestId('tests-api-host-from')).toContainText('launchSettings.json')
+})
+
+test('running the set asks the session for data only, and the app reports the calls', async ({ page }) => {
+  await openApiPanel(page)
+  await expect(page.getByTestId('tests-api-run')).toBeDisabled()
+  await page.getByTestId('tests-api-recent-0').click()
+  await page.getByTestId('tests-api-run').click()
+
+  const sent = await page.evaluate(() => window.__mock.state().sends.at(-1)?.text)
+  expect(sent).toContain('/api/customers/{id}')
+  // The instruction is for data, not for a verdict.
+  expect(sent).toContain('request data')
+  await expect(page.getByTestId('tests-api-run')).toContainText('Running')
+
+  await page.evaluate(
+    (c) => window.__mock.reportApiResult('p-alpha', 'pass', [c]),
+    apiCall(),
+  )
+  await expect(page.getByTestId('tests-api-call-0')).toContainText('200')
+  await expect(page.getByTestId('tests-api-call-0')).toContainText('84 ms')
+  // The check the app performed, in the terms it performed it.
+  await expect(page.getByTestId('tests-api-call-0')).toContainText('status 200 · at least 3 items')
+  await expect(page.getByTestId('tests-api-call-0')).toContainText('oracle-sqlcl')
+})
+
+test('a call that never completed shows no status, and the run says why', async ({ page }) => {
+  await openApiPanel(page)
+  await page.getByTestId('tests-api-recent-0').click()
+  await page.getByTestId('tests-api-run').click()
+  await page.evaluate(
+    (c) => window.__mock.reportApiResult('p-alpha', 'error', [c], 'Nothing is listening on http://localhost:5057.'),
+    apiCall({ status: null, ms: null, body: null, outcome: 'not_run', detail: 'the call did not complete: fetch failed' }),
+  )
+  await expect(page.getByTestId('tests-api-note')).toContainText('Nothing is listening')
+  const call0 = page.getByTestId('tests-api-call-0')
+  await expect(call0).toContainText('not run')
+  await expect(call0).toContainText('—')
+  await expect(call0).not.toContainText('pass')
+})
+
 test('a bypass session marks the suites its container cannot run, before the run', async ({ page }) => {
   const scenario = twoProjectScenario()
   scenario.projects[0].session!.bypassPermissions = true

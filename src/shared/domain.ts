@@ -445,6 +445,12 @@ export interface Settings {
    *  id). Absent means nothing chosen yet, so the section shows the picker with
    *  whatever detection found. */
   projectTestStacks: Record<string, string>
+  /** Base URL an API eval set calls for a project, e.g. http://localhost:5057.
+   *  Absent means it is read from the project's launchSettings.json instead. */
+  projectApiBase: Record<string, string>
+  /** Command that starts the project's API, when the app has to launch it.
+   *  Absent means `dotnet run --project <the project holding launchSettings>`. */
+  projectApiStart: Record<string, string>
   /** Auto-approve requests by risk level (Allowed list tab): recorded as rule_approved. */
   autoApproveLow: boolean
   autoApproveMedium: boolean
@@ -499,6 +505,8 @@ export const DEFAULT_SETTINGS: Settings = {
   projectModels: {},
   projectWorkerModels: {},
   projectTestStacks: {},
+  projectApiBase: {},
+  projectApiStart: {},
   autoApproveLow: false,
   autoApproveMedium: false,
   projectGroups: [],

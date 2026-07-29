@@ -25,6 +25,7 @@ import type {
   VerifyRun,
 } from './domain'
 import type { AvailableSuites } from './test-catalog'
+import type { ApiEvalRun, DiscoveredEndpoint } from './api-endpoints'
 
 // --- Error model ---
 
@@ -221,6 +222,40 @@ export interface InvokeMap {
     req: { projectId: string; runId?: string }
     res: { sessionId: string; runs: VerifyRun[] }
   }
+  /**
+   * The endpoints this project declares, scanned from its own source, plus the
+   * ones most recently tested and where a run would call them. Nothing here needs
+   * a session or a running API: the list is browsable and searchable cold.
+   */
+  'api.endpoints': {
+    req: { projectId: string }
+    res: {
+      endpoints: DiscoveredEndpoint[]
+      /** The last few endpoints actually tested, newest first. */
+      recent: { method: string; template: string }[]
+      /** Files the scan read, and whether it stopped at its own limit. */
+      filesRead: number
+      truncated: boolean
+      /** Where a run would call, or why it cannot yet. */
+      host: { baseUrl: string | null; startCmd: string | null; from: string | null; error: string | null }
+    }
+  }
+  /** API eval sets for a project, newest first. */
+  'api.runs': { req: { projectId: string }; res: ApiEvalRun[] }
+  /**
+   * Run an automated eval set over the chosen endpoints. The session is asked for
+   * the request data only; the app then starts the API if needed, sends every
+   * request itself, and judges each response in code.
+   */
+  'api.start': {
+    req: { projectId: string; endpoints: { method: string; template: string }[] }
+    res: { sessionId: string; runs: ApiEvalRun[] }
+  }
+  /** Set where a project's API lives. An empty string clears the override. */
+  'api.setHost': {
+    req: { projectId: string; baseUrl?: string; startCmd?: string }
+    res: Settings
+  }
   /** Planned task queue: prompts/goals that auto-run in sequence (FR-023). */
   'queue.list': { req: { projectId: string }; res: QueuedTask[] }
   'queue.add': { req: { projectId: string; text: string }; res: QueuedTask[] }
@@ -325,6 +360,13 @@ export interface VerifyChangedPush {
   runs: VerifyRun[]
 }
 
+/** An API eval set's calls, pushed as the run finishes: the requests the app sent
+ *  and the statuses it received, so the panel fills in without a refresh. */
+export interface ApiChangedPush {
+  projectId: string
+  runs: ApiEvalRun[]
+}
+
 export interface PushMap {
   /** Individual events; the transport batches them (>= 30 Hz flushes) and the bridge fans out per event. */
   'push.event': SessionEvent
@@ -334,6 +376,7 @@ export interface PushMap {
   'push.queueChanged': QueueChangedPush
   'push.evalsChanged': EvalsChangedPush
   'push.verifyChanged': VerifyChangedPush
+  'push.apiChanged': ApiChangedPush
   'push.projectCommands': ProjectCommandsPush
   'push.focusRequest': FocusRequestPush
   'push.updateStatus': UpdateStatus
@@ -349,6 +392,7 @@ export const PUSH_CHANNELS: readonly PushChannel[] = [
   'push.queueChanged',
   'push.evalsChanged',
   'push.verifyChanged',
+  'push.apiChanged',
   'push.projectCommands',
   'push.focusRequest',
   'push.updateStatus',

@@ -16,6 +16,7 @@ import { parseDeepLink, PROTOCOL_SCHEME } from './deep-link'
 import { registerProject } from './projects/discovery'
 import { computeCounters, registerIpcHandlers, RendererPush, seedDefaultRules } from './ipc/handlers'
 import { initUpdater } from './updater'
+import { completeApiRun } from './evals/api-runner'
 import type { SwallowRule } from '@shared/domain'
 
 const TRAY_ICON_DATA_URL =
@@ -222,6 +223,16 @@ async function main(): Promise<void> {
       pusher.push('push.evalsChanged', { projectId, runs: repos.evals.listForProject(projectId) }),
     onVerifyChanged: (projectId) =>
       pusher.push('push.verifyChanged', { projectId, runs: repos.verifyRuns.listForProject(projectId) }),
+    // The session has produced request data for an API eval set; the app makes
+    // the calls and judges them itself from here on (api-runner.ts).
+    onApiRequests: (projectId, runId, requests) =>
+      void completeApiRun({
+        repos,
+        projectId,
+        runId,
+        requests,
+        changed: (id) => pusher.push('push.apiChanged', { projectId: id, runs: repos.apiRuns.listForProject(id) }),
+      }),
     onProjectCommands: (projectId, commands) => pusher.push('push.projectCommands', { projectId, commands }),
     gate: (context) => {
       if (!broker) throw new Error('Broker not initialised')

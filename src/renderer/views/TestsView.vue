@@ -22,8 +22,10 @@ import {
   type VerifyGate,
 } from '@shared/test-catalog'
 import type { Measured, VerifyRun } from '@shared/domain'
+import { searchEndpoints, type ApiExpect, type DiscoveredEndpoint } from '@shared/api-endpoints'
 import { evals } from '@renderer/stores/evals'
 import { verify } from '@renderer/stores/verify'
+import { api } from '@renderer/stores/api'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { useSettingsStore } from '@renderer/stores/settings'
 import EvalsView from '@renderer/views/EvalsView.vue'
@@ -38,7 +40,7 @@ const emit = defineEmits<{
 const settingsStore = useSettingsStore()
 const projectsStore = useProjectsStore()
 
-type SubTab = 'coverage' | 'quality' | 'evidence' | 'qa' | 'skill'
+type SubTab = 'api' | 'coverage' | 'quality' | 'evidence' | 'qa' | 'skill'
 // Manual QA is the landing panel: with nothing run yet it is the one with
 // content. Starting a run switches to Results, where its output lands.
 const subTab = ref<SubTab>('qa')
@@ -51,21 +53,33 @@ const selected = ref<string[] | null>(null)
 // The shell owns the load: the picker needs detection before Manual QA (and so
 // EvalsView) has mounted, and the panels need the runs.
 let stopPush: (() => void) | null = null
+let stopApiPush: (() => void) | null = null
 onMounted(() => {
   void evals.load(props.projectId)
   void verify.load(props.projectId)
+  void api.load(props.projectId)
   // The report arrives from the session, not from a click.
   stopPush = window.switchboard.on('push.verifyChanged', (push) => {
     verify.applyPush(push.projectId, push.runs)
   })
+  // An API eval set finishes in the main process (the app makes the calls), so
+  // its result arrives on its own channel rather than as a reply to the click.
+  stopApiPush = window.switchboard.on('push.apiChanged', (push) => {
+    api.applyPush(push.projectId, push.runs)
+  })
 })
-onUnmounted(() => stopPush?.())
+onUnmounted(() => {
+  stopPush?.()
+  stopApiPush?.()
+})
 watch(
   () => props.projectId,
   (id) => {
     selected.value = null
+    picked.value = []
     void evals.load(id)
     void verify.load(id)
+    void api.load(id)
   },
 )
 
@@ -243,6 +257,7 @@ const gates = computed<GateView[]>(() =>
 // --- Run ---------------------------------------------------------------------
 
 const SUB_TABS: { id: SubTab; label: string; built: boolean }[] = [
+  { id: 'api', label: 'API', built: true },
   { id: 'evidence', label: 'Results', built: true },
   { id: 'coverage', label: 'Coverage', built: true },
   { id: 'quality', label: 'Quality', built: true },
@@ -272,6 +287,80 @@ async function captureEvidence(): Promise<void> {
   if (await verify.captureEvidence(props.projectId, latest.value?.id)) {
     subTab.value = 'evidence'
   }
+}
+
+// --- API eval set ------------------------------------------------------------
+// The deterministic path, and the reason this panel exists: the endpoints come
+// from a scan of the project's own source, the calls are made by the app, and
+// pass or fail is computed from the status that came back. The session is asked
+// for one thing only - identifiers that really exist - and nothing it says
+// decides a verdict.
+const picked = ref<{ method: string; template: string }[]>([])
+const search = ref('')
+const baseUrlField = ref('')
+const startCmdField = ref('')
+
+const apiRun = computed(() => api.latestFor(props.projectId))
+const apiRunning = computed(() => apiRun.value?.status === 'running')
+const apiHost = computed(() => api.hostFor(props.projectId))
+const apiScan = computed(() => api.scan[props.projectId] ?? null)
+
+/** The last five endpoints actually tested - or, before anything has run, the
+ *  first few the scan found, so the panel is never an empty search box. */
+const apiShortlist = computed<{ method: string; template: string }[]>(() => {
+  const recent = api.recentFor(props.projectId)
+  return recent.length > 0 ? recent : api.endpointsFor(props.projectId).slice(0, 5)
+})
+
+const apiMatches = computed<DiscoveredEndpoint[]>(() =>
+  searchEndpoints(api.endpointsFor(props.projectId), search.value),
+)
+
+const endpointKey = (e: { method: string; template: string }): string => `${e.method} ${e.template}`
+const isPicked = (e: { method: string; template: string }): boolean =>
+  picked.value.some((p) => endpointKey(p) === endpointKey(e))
+
+function togglePick(e: { method: string; template: string }): void {
+  picked.value = isPicked(e)
+    ? picked.value.filter((p) => endpointKey(p) !== endpointKey(e))
+    : [...picked.value, { method: e.method, template: e.template }]
+}
+
+// The fields show what a run would use right now, resolved or overridden, so
+// saving pins exactly what is on screen rather than something implied.
+watch(
+  apiHost,
+  (host) => {
+    baseUrlField.value = host?.baseUrl ?? ''
+    startCmdField.value = host?.startCmd ?? ''
+  },
+  { immediate: true },
+)
+
+async function saveApiHost(): Promise<void> {
+  await api.setHost(props.projectId, baseUrlField.value, startCmdField.value)
+}
+
+async function runApi(): Promise<void> {
+  if (picked.value.length === 0) return
+  await api.start(props.projectId, picked.value)
+}
+
+const apiSummary = computed(() => {
+  const run = apiRun.value
+  if (!run) return 'No API eval set yet.'
+  const when = new Date(run.startedAt).toLocaleString()
+  if (run.status === 'running') return `Running since ${when}`
+  const passed = run.calls.filter((c) => c.outcome === 'pass').length
+  return `${when} · ${passed}/${run.calls.length} calls passed · ${run.baseUrl}`
+})
+
+/** The check the app performed, in the terms it performed it. */
+function expectWords(e: ApiExpect): string {
+  const parts = [e.status !== null ? `status ${e.status}` : 'any 2xx']
+  if (e.minItems !== null) parts.push(`at least ${e.minItems} items`)
+  if (e.mustContain) parts.push(`body contains "${e.mustContain}"`)
+  return parts.join(' · ')
 }
 
 const report = computed(() => latest.value?.report ?? null)
@@ -464,6 +553,144 @@ function statusWord(run: VerifyRun): string {
         @ran="emit('ran')"
         @run="(text) => emit('run', text)"
       />
+
+      <!-- API eval set: chosen endpoints, called by the app, judged in code. -->
+      <div v-else-if="subTab === 'api'" class="panel" data-testid="tests-panel-api">
+        <div class="panel-head">
+          <span class="panel-title">API eval set</span>
+          <span class="panel-meta mono">{{ apiSummary }}</span>
+          <span v-if="apiRun" class="verdict mono" :class="apiRun.status">{{ apiRun.status }}</span>
+        </div>
+        <p class="quiet">
+          The app sends these requests itself and decides pass or fail from the status and body that
+          came back. The session is asked for one thing: identifiers that really exist.
+        </p>
+
+        <div class="host">
+          <label class="host-field">
+            <span class="host-lbl mono">base URL</span>
+            <input
+              v-model="baseUrlField"
+              class="host-in mono"
+              placeholder="http://localhost:5057"
+              data-testid="tests-api-base"
+            />
+          </label>
+          <label class="host-field">
+            <span class="host-lbl mono">start command</span>
+            <input
+              v-model="startCmdField"
+              class="host-in mono"
+              placeholder="dotnet run --project ..."
+              data-testid="tests-api-start"
+            />
+          </label>
+          <button class="chip" data-testid="tests-api-save-host" @click="saveApiHost()">Save</button>
+        </div>
+        <div class="host-from mono" data-testid="tests-api-host-from">
+          {{
+            apiHost?.error ??
+            (apiHost?.from ? `from ${apiHost.from} · started only if nothing answers there` : '')
+          }}
+        </div>
+
+        <div class="sec mono">LAST TESTED</div>
+        <p v-if="apiShortlist.length === 0" class="empty">
+          No endpoint found in this project's source{{
+            apiScan ? ` (${apiScan.filesRead} files scanned)` : ''
+          }}. Search below, or add a .http file the scan can read.
+        </p>
+        <div class="suites">
+          <button
+            v-for="(e, i) in apiShortlist"
+            :key="`${e.method} ${e.template}`"
+            class="chip"
+            :class="{ on: isPicked(e) }"
+            :data-testid="`tests-api-recent-${i}`"
+            @click="togglePick(e)"
+          >
+            <span class="ep-method mono">{{ e.method }}</span>
+            <span class="mono">{{ e.template }}</span>
+          </button>
+        </div>
+
+        <div class="sec mono">
+          SEARCH · {{ api.endpointsFor(projectId).length }} FOUND{{
+            apiScan?.truncated ? ' (SCAN LIMIT REACHED)' : ''
+          }}
+        </div>
+        <input
+          v-model="search"
+          class="host-in mono search"
+          placeholder="filter by path, method or file"
+          data-testid="tests-api-search"
+        />
+        <div
+          v-for="(e, i) in apiMatches"
+          :key="`${e.method} ${e.template}`"
+          class="row pick"
+          :class="{ on: isPicked(e) }"
+          :data-testid="`tests-api-endpoint-${i}`"
+          @click="togglePick(e)"
+        >
+          <span class="row-status mono" :class="isPicked(e) ? 'pass' : ''">
+            {{ isPicked(e) ? '✓' : '+' }}
+          </span>
+          <span class="ep-method mono">{{ e.method }}</span>
+          <span class="row-name mono">{{ e.template }}</span>
+          <span class="row-detail mono">{{ e.source }}</span>
+        </div>
+
+        <div class="targets">
+          <span class="lbl">{{ picked.length }} selected</span>
+          <span style="flex: 1"></span>
+          <button
+            class="run"
+            :disabled="api.starting || apiRunning || picked.length === 0"
+            data-testid="tests-api-run"
+            @click="runApi()"
+          >
+            {{ apiRunning ? '● Running…' : '▷ Run automated test' }}
+          </button>
+        </div>
+        <div v-if="api.error" class="err" data-testid="tests-api-error">{{ api.error }}</div>
+
+        <div class="sec mono">EVAL SET</div>
+        <p v-if="apiRun?.note" class="note" data-testid="tests-api-note">{{ apiRun.note }}</p>
+        <p v-if="!apiRun" class="empty">
+          Nothing called yet. Pick endpoints above and run - every result below is a request this app
+          sent and a status it received.
+        </p>
+        <p v-else-if="apiRunning" class="empty">
+          Waiting for request data from the session, then the app makes the calls.
+        </p>
+        <div
+          v-for="(c, i) in apiRun?.calls ?? []"
+          :key="`${c.request.method} ${c.request.path} ${i}`"
+          class="ep"
+          :data-testid="`tests-api-call-${i}`"
+        >
+          <div class="ep-head">
+            <span class="ep-verdict mono" :class="c.outcome">{{ c.outcome.replace('_', ' ') }}</span>
+            <span class="ep-method mono">{{ c.request.method }}</span>
+            <span class="ep-path mono">{{ c.request.path }}</span>
+            <span class="ep-status mono" :class="statusClass(c.status)">{{ c.status ?? '—' }}</span>
+            <span class="ep-ms mono">{{ c.ms === null ? '—' : `${c.ms} ms` }}</span>
+          </div>
+          <div class="ep-line mono">
+            <span class="ep-label">checked</span>{{ expectWords(c.request.expect) }}
+          </div>
+          <div v-if="c.detail" class="ep-detail">{{ c.detail }}</div>
+          <div v-if="c.request.note" class="ep-line mono">
+            <span class="ep-label">proves</span>{{ c.request.note }}
+          </div>
+          <div v-if="c.request.dataSource || c.request.dataQuery" class="ep-line mono">
+            <span class="ep-label">data</span>
+            {{ [c.request.dataSource, c.request.dataQuery].filter(Boolean).join(' · ') }}
+          </div>
+          <div v-if="c.body" class="ep-body mono">{{ c.body }}</div>
+        </div>
+      </div>
 
       <!-- Results + evidence: what ran, and the proof it was executed. -->
       <div v-else-if="subTab === 'evidence'" class="panel" data-testid="tests-panel-evidence">
@@ -989,6 +1216,70 @@ function statusWord(run: VerifyRun): string {
   font-size: 11.5px;
   color: var(--amber);
   margin-bottom: 10px;
+}
+
+.quiet {
+  font-size: 11.5px;
+  color: var(--text-mid);
+  margin-bottom: 10px;
+}
+
+.host {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.host-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1 1 220px;
+}
+
+.host-lbl {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-ghost);
+}
+
+.host-in {
+  padding: 5px 8px;
+  font-size: 11px;
+  color: var(--text-body);
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--rc);
+}
+
+.host-in:focus {
+  outline: none;
+  border-color: var(--green);
+}
+
+.search {
+  width: 100%;
+  margin-bottom: 6px;
+}
+
+.host-from {
+  margin-top: 5px;
+  font-size: 10px;
+  color: var(--text-ghost);
+}
+
+.row.pick {
+  cursor: pointer;
+}
+
+.row.pick:hover {
+  background: color-mix(in srgb, var(--green) 6%, transparent);
+}
+
+.row.pick.on {
+  background: color-mix(in srgb, var(--green) 10%, transparent);
 }
 
 .empty {

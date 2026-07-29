@@ -31,6 +31,7 @@ import type {
   VerifyRun,
 } from '@shared/domain'
 import { DEFAULT_SETTINGS, emptyVerifyReport } from '@shared/domain'
+import type { ApiCall, ApiEvalRun } from '@shared/api-endpoints'
 
 export function newId(): string {
   return randomUUID()
@@ -994,6 +995,98 @@ function parseJson<T>(raw: string): T | null {
   }
 }
 
+/**
+ * API eval sets. Same count-bounded history as verification runs, and for the
+ * same reason: a run exists only because the developer started one, so pruning
+ * on insert needs no scheduled job.
+ */
+const API_HISTORY = 20
+
+export class ApiRunsRepo {
+  constructor(private db: AppDatabase) {}
+
+  start(input: { projectId: string; baseUrl: string; sessionId: string | null }): ApiEvalRun {
+    const run: ApiEvalRun = {
+      id: newId(),
+      projectId: input.projectId,
+      baseUrl: input.baseUrl,
+      launched: false,
+      sessionId: input.sessionId,
+      status: 'running',
+      note: null,
+      calls: [],
+      startedAt: nowIso(),
+      finishedAt: null,
+    }
+    this.db
+      .prepare(
+        `INSERT INTO api_runs
+           (id, projectId, baseUrl, launched, sessionId, status, note, calls, startedAt, finishedAt)
+         VALUES (?, ?, ?, 0, ?, 'running', NULL, '[]', ?, NULL)`,
+      )
+      .run(run.id, run.projectId, run.baseUrl, run.sessionId, run.startedAt)
+    this.db
+      .prepare(
+        `DELETE FROM api_runs WHERE projectId = ? AND id NOT IN (
+           SELECT id FROM api_runs WHERE projectId = ? ORDER BY startedAt DESC, rowid DESC LIMIT ?
+         )`,
+      )
+      .run(input.projectId, input.projectId, API_HISTORY)
+    return run
+  }
+
+  listForProject(projectId: string): ApiEvalRun[] {
+    return (
+      this.db
+        .prepare('SELECT * FROM api_runs WHERE projectId = ? ORDER BY startedAt DESC, rowid DESC')
+        .all(projectId) as ApiRunRow[]
+    ).map(hydrateApiRun)
+  }
+
+  byId(id: string): ApiEvalRun | null {
+    const row = this.db.prepare('SELECT * FROM api_runs WHERE id = ?').get(id) as
+      | ApiRunRow
+      | undefined
+    return row ? hydrateApiRun(row) : null
+  }
+
+  /** Record what the app actually sent and received. A run is never left running. */
+  finish(
+    id: string,
+    status: ApiEvalRun['status'],
+    calls: ApiCall[],
+    note: string | null,
+    launched: boolean,
+  ): void {
+    this.db
+      .prepare(
+        'UPDATE api_runs SET status = ?, calls = ?, note = ?, launched = ?, finishedAt = ? WHERE id = ?',
+      )
+      .run(status, JSON.stringify(calls), note, launched ? 1 : 0, nowIso(), id)
+  }
+}
+
+interface ApiRunRow {
+  id: string
+  projectId: string
+  baseUrl: string
+  launched: number
+  sessionId: string | null
+  status: ApiEvalRun['status']
+  note: string | null
+  calls: string
+  startedAt: string
+  finishedAt: string | null
+}
+
+function hydrateApiRun(row: ApiRunRow): ApiEvalRun {
+  return {
+    ...row,
+    launched: row.launched === 1,
+    calls: parseJson<ApiCall[]>(row.calls) ?? [],
+  }
+}
+
 export interface Repositories {
   projects: ProjectsRepo
   sessions: SessionsRepo
@@ -1010,6 +1103,7 @@ export interface Repositories {
   mcpScans: McpScansRepo
   evals: EvalsRepo
   verifyRuns: VerifyRunsRepo
+  apiRuns: ApiRunsRepo
 }
 
 export function createRepositories(db: AppDatabase): Repositories {
@@ -1029,5 +1123,6 @@ export function createRepositories(db: AppDatabase): Repositories {
     mcpScans: new McpScansRepo(db),
     evals: new EvalsRepo(db),
     verifyRuns: new VerifyRunsRepo(db),
+    apiRuns: new ApiRunsRepo(db),
   }
 }

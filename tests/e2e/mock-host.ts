@@ -75,6 +75,14 @@ export interface MockDriver {
   /** Stand in for the main process reading a verification report off the session:
    *  finishes the running run with that report and pushes it. */
   reportVerifyResult: (projectId: string, status: string, report: unknown) => void
+  /** Finish the running API eval set the way the main process does: the app has
+   *  made the calls, so the driver supplies the calls and the verdict. */
+  reportApiResult: (
+    projectId: string,
+    status: string,
+    calls: unknown[],
+    note?: string | null,
+  ) => void
   startFlood: (intervalMs: number, perTick: number) => void
   stopFlood: () => void
   state: () => {
@@ -229,6 +237,8 @@ export function installMockHost(scenario: MockScenario): void {
   ]
   // The real DEFAULT_SETTINGS, handed in as data by the scenario.
   let settings: AnyRecord = { ...(scenario.settings as unknown as AnyRecord) }
+  /** API eval sets per project, newest first (mirrors verifyByProject). */
+  const apiRunsByProject = new Map<string, AnyRecord[]>()
 
   const listeners = new Map<string, Set<(payload: unknown) => void>>()
   function push(channel: string, payload: unknown): void {
@@ -715,6 +725,69 @@ export function installMockHost(scenario: MockScenario): void {
       }) as { sessionId: string }
       return { sessionId: result.sessionId, runs: [...list] }
     },
+    // The API eval set. The real host scans the project's source for routes and
+    // then makes the calls itself; the mock supplies a fixed catalogue and leaves
+    // a started run 'running', which is what the panel shows until the app's own
+    // calls finish and arrive on push.apiChanged.
+    'api.endpoints': () => ({
+      endpoints: [
+        { method: 'GET', template: '/api/customers', source: 'Api/CustomersController.cs:12' },
+        { method: 'GET', template: '/api/customers/{id}', source: 'Api/CustomersController.cs:20' },
+        { method: 'POST', template: '/api/customers/search', source: 'Api/CustomersController.cs:31' },
+      ],
+      recent: [{ method: 'GET', template: '/api/customers/{id}' }],
+      filesRead: 42,
+      truncated: false,
+      host: {
+        baseUrl: 'http://localhost:5057',
+        startCmd: 'dotnet run --project "src/Sample.Api"',
+        from: 'src/Sample.Api/Properties/launchSettings.json (profile https)',
+        error: null,
+      },
+    }),
+    'api.runs': (req) => [...(apiRunsByProject.get(String(req.projectId)) ?? [])],
+    'api.start': (req) => {
+      const projectId = String(req.projectId)
+      const endpoints = (req.endpoints ?? []) as { method: string; template: string }[]
+      if (endpoints.length === 0) {
+        throw { code: 'INVALID_PATH', message: 'Choose at least one endpoint to test.' }
+      }
+      const result = invokeHandlers['specs.runInSession']({
+        projectId,
+        text: `Produce the request data for an automated API test.\n${endpoints
+          .map((e) => `- ${e.method} ${e.template}`)
+          .join('\n')}\nSWB_APIDATA`,
+      }) as { sessionId: string }
+      const list = apiRunsByProject.get(projectId) ?? []
+      list.unshift({
+        id: `api-${list.length + 1}`,
+        projectId,
+        baseUrl: 'http://localhost:5057',
+        launched: false,
+        sessionId: result.sessionId,
+        status: 'running',
+        note: null,
+        calls: [],
+        startedAt: new Date().toISOString(),
+        finishedAt: null,
+      })
+      apiRunsByProject.set(projectId, list)
+      return { sessionId: result.sessionId, runs: [...list] }
+    },
+    'api.setHost': (req) => {
+      const base = { ...((settings.projectApiBase ?? {}) as AnyRecord) }
+      const start = { ...((settings.projectApiStart ?? {}) as AnyRecord) }
+      if (req.baseUrl !== undefined) {
+        if (String(req.baseUrl).trim()) base[String(req.projectId)] = String(req.baseUrl).trim()
+        else delete base[String(req.projectId)]
+      }
+      if (req.startCmd !== undefined) {
+        if (String(req.startCmd).trim()) start[String(req.projectId)] = String(req.startCmd).trim()
+        else delete start[String(req.projectId)]
+      }
+      settings = { ...settings, projectApiBase: base, projectApiStart: start }
+      return { ...settings }
+    },
     'queue.list': (req) => [...(taskQueueByProject.get(String(req.projectId)) ?? [])],
     'queue.add': (req) => {
       const projectId = String(req.projectId)
@@ -1025,6 +1098,21 @@ export function installMockHost(scenario: MockScenario): void {
       list[at] = { ...list[at], status, report, finishedAt: new Date().toISOString() }
       verifyByProject.set(projectId, list)
       push('push.verifyChanged', { projectId, runs: [...list] })
+    },
+    reportApiResult: (projectId, status, calls, note) => {
+      const list = apiRunsByProject.get(projectId) ?? []
+      const index = list.findIndex((r) => r.status === 'running')
+      const at = index >= 0 ? index : 0
+      if (!list[at]) return
+      list[at] = {
+        ...list[at],
+        status,
+        calls,
+        note: note ?? null,
+        finishedAt: new Date().toISOString(),
+      }
+      apiRunsByProject.set(projectId, list)
+      push('push.apiChanged', { projectId, runs: [...list] })
     },
     startFlood: (intervalMs, perTick) => {
       const ids = [...sessions.keys()]

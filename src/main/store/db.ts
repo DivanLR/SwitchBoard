@@ -352,6 +352,32 @@ const MIGRATIONS: Migration[] = [
       `)
     },
   },
+  {
+    // API eval sets: one row per automated endpoint run. `calls` is JSON the app
+    // itself produced — the requests it sent and the statuses it received — so
+    // unlike verify_runs.report, nothing in it is a model's account of what
+    // happened. `baseUrl` and `launched` record where the calls went and whether
+    // this run started the server, which is what makes a result reproducible.
+    name: '016-api-runs',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS api_runs (
+          id TEXT PRIMARY KEY,
+          projectId TEXT NOT NULL REFERENCES projects(id),
+          baseUrl TEXT NOT NULL,
+          launched INTEGER NOT NULL DEFAULT 0,
+          sessionId TEXT,
+          status TEXT NOT NULL CHECK (status IN ('running', 'pass', 'fail', 'error')),
+          note TEXT,
+          calls TEXT NOT NULL,
+          startedAt TEXT NOT NULL,
+          finishedAt TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_api_runs_project
+          ON api_runs (projectId, startedAt DESC);
+      `)
+    },
+  },
 ]
 
 /**

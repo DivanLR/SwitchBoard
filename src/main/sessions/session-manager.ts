@@ -31,6 +31,8 @@ import {
 } from './session-shaping'
 import { parseEvalMarker } from '@main/evals/eval-dispatch'
 import { parseVerifyReport } from '@main/evals/verify-dispatch'
+import { parseApiRequests } from '@main/evals/api-dispatch'
+import type { ApiRequestPlan } from '@shared/api-endpoints'
 import { mainLoopModel } from './model-routing'
 import { resolveClaudeExecutable } from './claude-executable'
 import { ensureSandboxImage, refMounts, sweepOrphanedContainers } from './docker-sandbox'
@@ -52,6 +54,11 @@ interface SessionManagerCallbacks {
   /** Fired when a verification run's report lands (or the run closes without
    *  one), so the Tests tab's gates and panels update as it finishes. */
   onVerifyChanged: (projectId: string) => void
+  /**
+   * Fired when a session reports the request data for an API eval set. The app
+   * then makes the calls itself — this callback carries data, never a result.
+   */
+  onApiRequests: (projectId: string, runId: string, requests: ApiRequestPlan[]) => void
   /** Fired when a session reports its available slash commands / skills (init message). */
   onProjectCommands: (projectId: string, commands: ProjectCommand[]) => void
   gate: PermissionGate
@@ -618,6 +625,39 @@ export class SessionManager {
   private scanMarkers(entry: HostedEntry, kind: EventKind, payload: unknown): void {
     this.scanEvalMarker(entry, kind, payload)
     this.scanVerifyReport(entry, kind, payload)
+    this.scanApiRequests(entry, kind, payload)
+  }
+
+  // --- API eval sets ---
+  // The session is asked for request DATA only, so this watch hands that data
+  // straight to the runner: the calls, the statuses and the verdict all happen in
+  // the app (api-runner.ts). Nothing the session says here decides pass or fail.
+  private apiWatch = new Map<string, { runId: string }>()
+
+  watchApiRequests(sessionId: string, runId: string): void {
+    this.apiWatch.set(sessionId, { runId })
+  }
+
+  private scanApiRequests(entry: HostedEntry, kind: EventKind, payload: unknown): void {
+    const watch = this.apiWatch.get(entry.row.id)
+    if (!watch || !SessionManager.EVAL_SCAN_KINDS.has(kind)) return
+    const text = (payload as { text?: string }).text
+    if (!text) return
+    const requests = parseApiRequests(text)
+    if (!requests) return
+    this.apiWatch.delete(entry.row.id)
+    this.callbacks.onApiRequests(entry.row.projectId, watch.runId, requests)
+  }
+
+  /**
+   * The turn ended without request data, so the run is handed an empty set: the
+   * runner then records why nothing was called rather than leaving a row running.
+   */
+  private closeUnreportedApi(entry: HostedEntry): void {
+    const watch = this.apiWatch.get(entry.row.id)
+    if (!watch) return
+    this.apiWatch.delete(entry.row.id)
+    this.callbacks.onApiRequests(entry.row.projectId, watch.runId, [])
   }
 
   private scanVerifyReport(entry: HostedEntry, kind: EventKind, payload: unknown): void {
@@ -752,7 +792,10 @@ export class SessionManager {
   private handleStatusChange(entry: HostedEntry, status: SessionStatus, detail?: string | null): void {
     // The turn is over ('needs_you' is a pending permission, not an ending): a
     // verification run that never reported is closed here rather than spinning.
-    if (status === 'done' || status === 'error') this.closeUnreportedVerify(entry)
+    if (status === 'done' || status === 'error') {
+      this.closeUnreportedVerify(entry)
+      this.closeUnreportedApi(entry)
+    }
     entry.row.status = status
     entry.row.statusDetail = detail ?? null
     this.repos.sessions.update(entry.row.id, { status, statusDetail: detail ?? null })
@@ -786,6 +829,7 @@ export class SessionManager {
 
   private handleExit(entry: HostedEntry, reason: 'completed' | 'stopped' | 'crashed', detail?: string): void {
     this.closeUnreportedVerify(entry)
+    this.closeUnreportedApi(entry)
     if (reason === 'crashed') {
       entry.row.status = 'error'
       entry.row.statusDetail = detail ?? 'Session process ended unexpectedly'

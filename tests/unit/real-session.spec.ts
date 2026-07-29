@@ -50,6 +50,7 @@ describe.runIf(enabled)('real Claude Code session (quickstart smoke)', () => {
         onQueueChanged: () => {},
         onEvalsChanged: () => {},
         onVerifyChanged: () => {},
+        onApiRequests: () => {},
         onProjectCommands: () => {},
         gate: (context) => {
           if (!late.broker) throw new Error('broker missing')
@@ -126,6 +127,7 @@ describe.runIf(enabled)('real AskUserQuestion routing (T021 watch item)', () => 
         onQueueChanged: () => {},
         onEvalsChanged: () => {},
         onVerifyChanged: () => {},
+        onApiRequests: () => {},
         onProjectCommands: () => {},
         gate: (context) => {
           if (!late.broker) throw new Error('broker missing')

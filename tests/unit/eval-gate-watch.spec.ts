@@ -20,6 +20,7 @@ function setup() {
     onQueueChanged: () => {},
     onEvalsChanged: (projectId) => changed.push(projectId),
     onVerifyChanged: () => {},
+    onApiRequests: () => {},
     onProjectCommands: () => {},
     gate: (async () => ({ behavior: 'allow', updatedInput: {} })) as never,
   })
