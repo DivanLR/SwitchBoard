@@ -519,3 +519,39 @@ test('the stack choice persists per project and can be changed', async ({ page }
   await page.getByTestId('tests-change-stack').click()
   await expect(page.getByTestId('tests-stack-node')).toBeVisible()
 })
+
+// A figure the app read out of the runner's own report file is different evidence
+// from the same number typed into the session's report line, and the tile says so.
+// The mark is the visible half of the artefact reconciliation the main process does.
+test('a figure checked against the runner’s own report file is marked as checked', async ({ page }) => {
+  await openTests(page)
+  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-run').click()
+  await page.evaluate(
+    (r) => window.__mock.reportVerifyResult('p-alpha', 'pass', r),
+    report({
+      suites: [
+        { id: 'node-unit', label: 'Unit tests', status: 'pass', detail: '142 passed, 0 failed, per TestResults/r.trx', verified: true },
+      ],
+      coverage: {
+        // A Cobertura report carries TOTAL line coverage and nothing about which
+        // lines this working tree changed, so the line figure is artefact-backed
+        // and the changed-line figure stays unmeasured rather than being derived.
+        line: { value: 78.2, source: 'coverage/cobertura-coverage.xml', verified: true },
+        changed: { value: null, source: null },
+        files: [],
+      },
+    }),
+  )
+
+  // Read from a file the app parsed itself.
+  await expect(page.getByTestId('tests-gate-verified-unit')).toBeVisible()
+  await expect(page.getByTestId('tests-gate-verified-coverage')).toBeVisible()
+  await expect(page.getByTestId('tests-gate-coverage')).toContainText('78.2%')
+  await expect(page.getByTestId('tests-gate-coverage')).toContainText('cobertura')
+
+  // ...and taken on the session's word, so it carries no mark. The figure is still
+  // shown: unverified is not the same as unmeasured.
+  await expect(page.getByTestId('tests-gate-verified-mutation')).toHaveCount(0)
+  await expect(page.getByTestId('tests-gate-mutation')).toContainText('74%')
+})

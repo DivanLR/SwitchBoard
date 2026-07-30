@@ -373,7 +373,7 @@ const partTabs: { id: Part; label: string }[] = [
             <span class="sc-progress-label mono">{{ detail.tasksDone }}/{{ detail.tasksTotal }} tasks</span>
             <span style="flex: 1"></span>
           </div>
-          <div class="sc-bar"><div class="sc-fill" :style="{ width: `${progressPct}%` }"></div></div>
+          <div class="sc-bar"><div class="sc-fill" :style="{ '--fill': progressPct / 100 }"></div></div>
         </div>
 
         <!-- Part tabs: spec.md / plan.md / tasks.md / Clarify / Commands -->
@@ -547,9 +547,15 @@ const partTabs: { id: Part; label: string }[] = [
     </div>
 
     <!-- New-spec popup: a short description, then /speckit-specify runs it -->
-    <div v-if="showNewSpec" class="ns-overlay" data-testid="new-spec-popup" @click.self="cancelNewSpec">
-      <div class="ns-box">
-        <div class="ns-title mono">New spec</div>
+    <div
+      v-if="showNewSpec"
+      class="ns-overlay"
+      data-testid="new-spec-popup"
+      @click.self="cancelNewSpec"
+      @keydown.esc="cancelNewSpec"
+    >
+      <div class="ns-box" role="dialog" aria-modal="true" aria-labelledby="new-spec-title">
+        <div id="new-spec-title" class="ns-title mono">New spec</div>
         <div class="ns-sub">
           Describe the feature in a sentence — <span class="mono">/speckit.specify</span> scaffolds it
           in the background.
@@ -728,7 +734,7 @@ const partTabs: { id: Part; label: string }[] = [
   font-size: 10.5px;
   color: var(--text-tab);
   border: 1px solid var(--border-seg);
-  border-radius: 99px;
+  border-radius: var(--rp);
   padding: 3px 10px;
   cursor: pointer;
   background: transparent;
@@ -857,10 +863,16 @@ const partTabs: { id: Part; label: string }[] = [
   overflow: hidden;
 }
 
+/* Scaled, not widened: .sc-bar above clips with overflow:hidden, so the fill can
+   be a full-width layer scaled from its left edge instead of animating a layout
+   property on every progress change. */
 .sc-fill {
   height: 100%;
+  width: 100%;
   background: var(--green);
-  transition: width 0.3s ease;
+  transform-origin: left;
+  transform: scaleX(var(--fill, 0));
+  transition: transform 0.3s ease;
 }
 
 /* Part tabs */

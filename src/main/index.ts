@@ -62,7 +62,12 @@ function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 920,
-    minWidth: 960,
+    // Must not be BELOW the renderer's own declared floor: `.panes` carries
+    // min-width: 1080px (src/renderer/App.vue). At 960 the window let .panes
+    // overflow the viewport by 120px with no document scrollbar, so the right of
+    // the inbox — the pane the whole product exists for — was clipped and
+    // unreachable. The height pair was already consistent (600 >= .panes' 560).
+    minWidth: 1080,
     minHeight: 600,
     show: false,
     autoHideMenuBar: true,

@@ -94,6 +94,14 @@ test('the Tests section opens the seeded .NET project with all seven suites', as
   }
   // The renamed suite proves this is the fixed bundle, not a stale build.
   await expect(page.getByTestId('tests-suite-dotnet-http')).toContainText('real endpoints')
+
+  // ...and none of the Blazor ones. This project routes controllers and has no
+  // components, so driving screens in a browser would prove nothing about it —
+  // the narrowing is what keeps them off the list.
+  await expect(page.getByTestId('tests-suite-blazor-ui')).toHaveCount(0)
+  await expect(page.getByTestId('tests-suite-blazor-interactive')).toHaveCount(0)
+  // The header names what is actually being verified, not everything .NET can be.
+  await expect(page.getByTestId('tests-view')).toContainText('.NET API')
 })
 
 // Runs before the Run verification test on purpose: that test starts a new run,
@@ -160,4 +168,79 @@ test('Run verification crosses the real boundary without the clone error', async
   const message = (await banner.textContent()) ?? ''
   expect(message).not.toMatch(/could not be cloned/i)
   expect(message).toMatch(/Claude Code was not found/i)
+})
+
+// Last in the file on purpose: creating groups changes the sidebar's shape, and
+// every test above it addresses projects by row.
+test('a second sidebar group can be created, and both persist', async () => {
+  const createGroup = async (name: string): Promise<void> => {
+    await page.getByTestId('new-group').click()
+    const input = page.getByTestId('group-rename-input-New group')
+    await expect(input).toBeVisible()
+    await input.fill(name)
+    await input.press('Enter')
+    await expect(page.getByTestId(`group-head-${name}`)).toBeVisible()
+  }
+
+  await createGroup('Work')
+  await createGroup('Clients')
+
+  await expect(page.getByTestId('group-head-Work')).toBeVisible()
+  await expect(page.getByTestId('group-head-Clients')).toBeVisible()
+
+  // On screen is not the same claim as persisted: read the real store back.
+  const names = await page.evaluate(async () => {
+    const settings = await window.switchboard.invoke('settings.get', undefined)
+    return settings.projectGroups.map((group) => group.name)
+  })
+  expect(names).toEqual(['Work', 'Clients'])
+})
+
+// The two flows behind "I cannot create multiple groups", both reproduced against
+// the real store before they were fixed.
+//
+// Every group edit is read-modify-write on ONE whole-array setting, and the array
+// the renderer reads only changed once the IPC round trip came back. So a second
+// edit that started while the first was still in flight rebuilt the array from a
+// copy the first edit was missing from, and the last write won. On top of that,
+// every new group was called "New group", so a second one was indistinguishable
+// from the first even when it did persist.
+const groupNames = (): Promise<string[]> =>
+  page.evaluate(async () => {
+    const settings = await window.switchboard.invoke('settings.get', undefined)
+    return settings.projectGroups.map((group) => group.name)
+  })
+
+async function clearGroups(): Promise<void> {
+  await page.evaluate(async () => {
+    await window.switchboard.invoke('settings.set', { projectGroups: [], projectGroupOf: {} })
+  })
+  await page.reload()
+  await expect(page.getByTestId('new-group')).toBeVisible()
+}
+
+test('naming a group and then clicking New group keeps the name', async () => {
+  await clearGroups()
+  // No Enter: clicking the button blurs the name field, so the rename and the
+  // create are in flight together. This lost the name every time.
+  await page.getByTestId('new-group').click()
+  await page.getByTestId('group-rename-input-New group').fill('Work')
+  await page.getByTestId('new-group').click()
+
+  await expect(page.getByTestId('group-head-Work')).toBeVisible()
+  expect(await groupNames()).toEqual(['Work', 'New group'])
+})
+
+test('two group creations in the same tick both survive, distinctly named', async () => {
+  await clearGroups()
+  // Dispatched together, so neither create sees the other's round trip. A button
+  // a user can double-click must not silently collapse two groups into one.
+  await page.evaluate(() => {
+    const button = document.querySelector('[data-testid="new-group"]') as HTMLButtonElement
+    button.click()
+    button.click()
+  })
+
+  await expect(page.getByTestId('group-head-New group 2')).toBeVisible()
+  expect(await groupNames()).toEqual(['New group', 'New group 2'])
 })

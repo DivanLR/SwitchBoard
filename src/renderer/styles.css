@@ -1,221 +1,245 @@
-/* Switchboard theme — THE ENGRAVED SCORE. The direction contract lives at the
+/* Switchboard theme — THE DEPLOYABLE SHEET. The direction contract lives at the
    top of App.vue and governs every value in this file. */
 @import './assets/fonts.css';
 
-/* No global filter. The outgoing world lifted the whole document with
-   brightness+saturate; a plate is a measured material and its ink density is
+/* No global filter. An earlier design lifted the whole document with
+   brightness+saturate; a sheet is a measured material and its tone is
    authored per token, not boosted afterwards. Removing it also stops the filter
    creating a containing block that broke fixed-position overlays. */
 
-/* Light theme: THE PROOF SHEET. The same score, pulled as a proof on cool
-   blueprint paper instead of cut into the plate. Ink becomes graphite, and the
-   three accents darken so they hold contrast on paper; nothing else changes,
-   because a proof and its plate are the same engraving. */
+/* Light theme: the same sheet, deployed on sheet white instead of carbon
+   fibre. Text darkens to graphite, and the three accents darken so they hold
+   contrast on paper; nothing else changes, because the light and dark themes
+   are the same folded sheet under different light. */
 html.sb-light {
-  --bg: #f4f5f7;
+  --bg: #F7F7F7;
   /* Paper is opaque. The margin is a sheet laid on the sheet, not glass. */
-  --bg-panel: rgba(238,240,243, 0.92);
-  --bg-sticky: rgba(238,240,243, 0.97);
-  --bg-card: rgba(250,251,252, 0.8);
-  --bg-card-alt: rgba(248, 249, 251, 0.76);
-  --bg-code: #fbfbfc;
-  --bg-hover: rgba(34,38,43, 0.05);
+  --bg-panel: #F1F0EC;
+  --bg-sticky: #EDECE7;
+  --bg-card: #FBFBFA;
+  --bg-card-alt: #F8F7F4;
+  --bg-code: #F4F3F0;
+  --bg-hover: rgba(10,10,10, 0.05);
   /* --bg-active and --green-glow are NOT overridden here: both derive from
      var(--green) in :root, and --green is theme-scoped, so they follow on their
      own. Two fewer values to keep in sync. */
-  --bg-seg: rgba(34,38,43, 0.14);
-  --bg-chip: rgba(34,38,43, 0.06);
-  --border: rgba(34,38,43, 0.12);
-  --border-card: rgba(34,38,43, 0.14);
-  --border-card-alt: rgba(34,38,43, 0.13);
-  --border-soft: rgba(34,38,43, 0.1);
-  --border-code: rgba(34,38,43, 0.12);
-  --border-strong: rgba(34,38,43, 0.24);
-  --border-seg: rgba(34,38,43, 0.14);
-  --border-hist: rgba(34,38,43, 0.09);
-  /* Graphite ink on paper. */
-  --text-bright: #16191d;
-  --text-strong: #22262b;
-  --text-title: #2b3037;
-  --text: #22262b;
-  --text-body: #474d55;
-  --text-name: #2f353c;
-  --text-prompt: #3b4148;
+  --bg-seg: rgba(10,10,10, 0.09);
+  --bg-chip: rgba(10,10,10, 0.05);
+  --border: rgba(10,10,10, 0.13);
+  --border-card: rgba(10,10,10, 0.15);
+  --border-card-alt: rgba(10,10,10, 0.14);
+  --border-soft: rgba(10,10,10, 0.1);
+  --border-code: rgba(10,10,10, 0.12);
+  --border-strong: rgba(10,10,10, 0.26);
+  --border-seg: rgba(10,10,10, 0.15);
+  --border-hist: rgba(10,10,10, 0.09);
+  /* Graphite text on paper. */
+  --text-bright: #0A0A0A;
+  --text-strong: #1C1B19;
+  --text-title: #2A2926;
+  --text: #1C1B19;
+  --text-body: #3B3934;
+  --text-name: #262521;
+  --text-prompt: #33322E;
   /* Same measurement applied on paper: meta and ghost were 4.4 and 4.2. */
-  --text-mid: #5d646d;
-  --text-meta: #5f666f;
-  --text-tab: #616871;
-  --text-noise: #6a717a;
-  --text-label: #6a717a;
-  --text-faint: #616871;
-  --text-ghost: #616871;
-  --green: #1f6a7d;
-  --green-hover: #17596b;
-  --green2: #1a5f70;
-  --green-ink: #f7f9fa;
-  --blue: #1f6a7d;
-  --amber: #a8331f;
-  --amber-hover: #8d2717;
-  --amber-ink: #fdf6f4;
-  --red: #6b241c;
-  --red-hover: #571b14;
-  --red-ink: #fdf6f4;
-  --detail: #5c6570;
-  /* Continuo brass, darkened for paper. */
-  --teal: #7d5a22;
-  --purple: #5f5478;
-  --surface-inset: #fafbfc;
-  --surface-inset-line: #d5d9de;
-  --surface-line: #d5d9de;
-  --surface-raised: #eef0f3;
-  --surface-hover: #e8ebef;
-  --surface-hover-line: #d5d9de;
-  --surface-sunken: #f6f7f9;
-  --bg-panel-2: #f1f3f5;
+  --text-mid: #55534D;
+  --text-meta: #5E5C55;
+  --text-tab: #605E57;
+  --text-noise: #666459;
+  --text-label: #666459;
+  --text-faint: #605E57;
+  --text-ghost: #605E57;
+  /* 5.49:1 on a --bg-hover card, 4.88:1 on a --bg-active row. See :root. */
+  --text-on-wash: #4E4C46;
+  --green: #7A5F14;
+  --green-hover: #634D10;
+  --green2: #6B5312;
+  --green-ink: #FBFAF6;
+  --blue: #2C5F94;
+  --amber: #2C5F94;
+  --amber-hover: #234C77;
+  --amber-ink: #FBFCFE;
+  --red: #A02A1B;
+  --red-hover: #822116;
+  --red-ink: #FEF7F5;
+  --detail: #55534D;
+  /* Graphite steel, darkened for paper. */
+  --teal: #3F5A6B;
+  --purple: #5B4E77;
+  --surface-inset: #FBFBFA;
+  --surface-inset-line: #D9D7D0;
+  --surface-line: #D9D7D0;
+  --surface-raised: #F1F0EC;
+  --surface-hover: #EAE8E2;
+  --surface-hover-line: #D9D7D0;
+  --surface-sunken: #F4F3F0;
+  --bg-panel-2: #EFEEE9;
   /* On paper the lip of light inverts: the sheet catches light on its top edge. */
-  --elev: inset 0 1px 0 rgba(255,255,255,.8),0 1px 2px rgba(34,38,43,.07);
+  --elev: inset 0 1px 0 rgba(255,255,255,.7),0 1px 2px rgba(10,10,10,.09);
   /* A whisper, not a sheen. At .5 this read as a glossy 2000s gradient button,
-     which is the opposite of ink laid on paper. */
-  --gloss: linear-gradient(rgba(255,255,255,.14),rgba(255,255,255,0));
-  --rc: 3px;
+     which is the opposite of a sheet folded flat. */
+  --gloss: linear-gradient(rgba(255,255,255,.1),rgba(255,255,255,0));
+  --rc: 0px;
+  /* The value-reporting idiom. The outgoing world bowed these to 99px; a fold
+     is a cut, so a tag that reports a figure is scored square like everything
+     else. One token because 37 declarations across 13 files used to decide it
+     independently. */
+  --rp: 0px;
+  /* One tracking value for every spec label, replacing fourteen ad-hoc ones. */
+  --track-label: 0.11em;
   --sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --scrim: rgba(228,231,235, 0.7);
-  --shadow-dlg: 0 32px 80px rgba(34,38,43, 0.22), 0 0 0 1px rgba(34,38,43, 0.05) inset;
-  --shadow-dd: 0 16px 40px rgba(34,38,43, 0.18);
-  --shadow-menu: 0 16px 40px rgba(34,38,43, 0.2);
+  --scrim: rgba(233,231,225, 0.72);
+  --shadow-dlg: 0 28px 70px rgba(10,10,10, 0.2), 0 0 0 1px rgba(10,10,10, 0.06) inset;
+  --shadow-dd: 0 14px 36px rgba(10,10,10, 0.17);
+  --shadow-menu: 0 14px 36px rgba(10,10,10, 0.19);
 }
 
-/* The proof sheet itself: flat cool paper, with the press bed showing at the
-   bottom edge. No glow pools — paper does not emit either. */
-html.sb-light body {
-  background:
-    linear-gradient(158deg, rgba(255, 255, 255, 0.7), transparent 42%),
-    radial-gradient(1200px 800px at 50% 120%, rgba(34, 38, 43, 0.07), transparent 70%),
-    #eef0f3;
-}
 
 :root {
-  /* THE ENGRAVED SCORE — music engraving as produced, not as aged.
-     Ground is engraver's pewter plate, ink is bone. Three semantic accents come
-     from score production and never from expression: proof cyan is the live
-     now-line and therefore every "play on" action; rehearsal red is the
-     conductor's pencil, meaning a lane is held awaiting release; oxblood is a
-     struck-out bar. A finished lane gets NO hue: it draws a double barline.
-     Token NAMES are unchanged from the previous world so all 17 consuming files
-     keep working; only the values moved. That is why --green now holds a cyan
-     and --amber holds a red. Direction contract lives at the top of App.vue. */
-  --bg: #2b3037;
-  /* The margin plate is dense, not glassy: an engraving plate is metal. It also
-     sits a clear step BELOW the sheet it holds, because at near-equal values the
-     three panes read as one flat field with no seam between them. */
-  --bg-panel: rgba(30,34,39, 0.94);
+  /* THE DEPLOYABLE SHEET — a Miura-fold sheet, scored and folded flat.
+     Ground is carbon-fibre near-black. Semantic accents come from the fold
+     vocabulary and never from expression: foil gold is the one action colour,
+     for every action that deploys or advances a lane; valley blue is
+     attention owed, meaning a lane is held awaiting release; a red-pencil mark
+     is a correction, meaning error. A finished lane gets NO hue: it draws a
+     locked fold. Token NAMES are unchanged from the previous world so all 17
+     consuming files keep working; only the values moved. That is why --green
+     now holds foil gold and --amber holds valley blue. Direction contract
+     lives at the top of App.vue. */
+  --bg: #17181B;
+  /* The margin pane is dense, not glassy: it is a heavier ply of the same
+     sheet. It also sits a clear step BELOW the sheet it holds, because at
+     near-equal values the three panes read as one flat field with no seam
+     between them. */
+  --bg-panel: #131417;
   /* Sticky list headings sit a shade denser than the pane they float over, so
      rows scrolling underneath stay readable through them. */
-  --bg-sticky: rgba(26,29,34, 0.97);
-  --bg-card: rgba(38,43,49, 0.7);
-  --bg-card-alt: rgba(35, 40, 46, 0.66);
-  /* Proof sheet: where terminal output and code are printed. */
-  --bg-code: #1e2227;
-  --bg-hover: rgba(232,228,220, 0.06);
-  /* The selected part is washed in the now-line's own cyan. */
-  --bg-active: color-mix(in srgb, var(--green) 12%, transparent);
-  --bg-seg: rgba(232,228,220, 0.14);
-  --bg-chip: rgba(232,228,220, 0.06);
-  /* Every border in this system is a rule scored into the plate. */
-  --border: rgba(232,228,220, 0.1);
-  --border-card: rgba(232,228,220, 0.12);
-  --border-card-alt: rgba(232,228,220, 0.11);
-  --border-soft: rgba(232,228,220, 0.09);
-  --border-code: rgba(232,228,220, 0.1);
-  --border-strong: rgba(232,228,220, 0.2);
-  --border-seg: rgba(232,228,220, 0.12);
-  --border-hist: rgba(232,228,220, 0.08);
-  /* --staff is gone with the hairlines it ruled: at this width they read as
-     guitar strings behind the text rather than as a staff. If a lane ever wants
-     staff character back, a single rule is the honest form (percussion staves
-     use one line) rather than five reinstated at a lower alpha. */
-  /* Bone ink, printed on plate. Warm against the cool ground on purpose: ink
-     and metal are different materials and should not read as one. */
-  --text-bright: #f2efe8;
-  --text-strong: #e8e4dc;
-  --text-title: #ded9d0;
-  --text: #e8e4dc;
-  --text-body: #bcb8b0;
-  --text-name: #d8d3ca;
-  --text-prompt: #cdc8bf;
+  --bg-sticky: #101114;
+  --bg-card: #1D1F23;
+  --bg-card-alt: #1B1D21;
+  /* Code surface: where terminal output and code are printed. */
+  --bg-code: #141518;
+  --bg-hover: rgba(244,244,242, 0.06);
+  /* The selected part is washed in mountain gray, the structural neutral. */
+  --bg-active: color-mix(in srgb, #B9B6AE 12%, transparent);
+  --bg-seg: rgba(244,244,242, 0.13);
+  --bg-chip: rgba(244,244,242, 0.06);
+  /* Every border in this system is a crease scored into the sheet. */
+  --border: rgba(244,244,242, 0.11);
+  --border-card: rgba(244,244,242, 0.13);
+  --border-card-alt: rgba(244,244,242, 0.12);
+  --border-soft: rgba(244,244,242, 0.09);
+  --border-code: rgba(244,244,242, 0.1);
+  --border-strong: rgba(244,244,242, 0.22);
+  --border-seg: rgba(244,244,242, 0.13);
+  --border-hist: rgba(244,244,242, 0.08);
+  /* The five-line staff token (--staff) is gone; the sheet world has no staff
+     motif to bring back. */
+  /* Warm text against the cool carbon ground on purpose: text and sheet are
+     different materials and should not read as one. */
+  --text-bright: #F4F4F2;
+  --text-strong: #E6E5E1;
+  --text-title: #D8D7D2;
+  --text: #E6E5E1;
+  --text-body: #B7B6B0;
+  --text-name: #D2D1CC;
+  --text-prompt: #C6C5C0;
   /* Every tier below carries real content (timers, counts, paths, group names,
-     risk labels), so all of them clear 4.5:1 on the plate. The first cut of this
+     risk labels), so all of them clear 4.5:1 on the sheet. The first cut of this
      world set them by eye and three failed: measured, not judged. */
-  --text-mid: #a09b93;
-  --text-meta: #a8a39a;
-  --text-tab: #a09b92;
-  --text-noise: #9c968d;
-  --text-label: #9c968d;
-  --text-faint: #a8a39a;
-  --text-ghost: #9c968d;
-  /* Proof cyan: the now-line, and every action that makes a lane play on. 5.85:1 */
-  --green: #57b9cf;
-  --green-hover: #74cbde;
-  /* Darker second stop of the action fill, so the button reads as inked rather
+  --text-mid: #9B9A94;
+  --text-meta: #A3A29C;
+  --text-tab: #9B9A94;
+  --text-noise: #97968F;
+  --text-label: #97968F;
+  --text-faint: #A3A29C;
+  --text-ghost: #97968F;
+  /*
+   * The palest text tone that stays legible once a WASH lightens the surface under it.
+   *
+   * The text ramp above was measured against the flat sheet, where Ghost sits
+   * at 4.53:1. It was never re-measured on the two surfaces derived from it: a
+   * --bg-hover card (6% text tone over the sheet) drops Ghost to 3.85:1, and a
+   * --bg-active row (12% foil gold over the panel) drops it to 4.32:1. Both fail
+   * AA on real content — gate targets, provenance lines, the selected lane's own
+   * timer and branch.
+   *
+   * This is a role rather than a new ramp step: raising Ghost itself would have
+   * pushed it past --text-faint and inverted the ramp. Measured 4.83:1 on a
+   * --bg-hover card and 5.42:1 on a --bg-active row, both with margin, and one
+   * shade from the nearest existing tier so the palette is unchanged.
+   */
+  --text-on-wash: #AEADA6;
+  /* Foil gold: the one action colour, and every action that deploys or advances a lane. 8.44:1 */
+  --green: #D4AF37;
+  --green-hover: #E2C25C;
+  /* Darker second stop of the action fill, so the button reads as stamped rather
      than flat. This was the accent's own value before the contrast retune. */
-  --green2: #3f9fb5;
-  --green-ink: #16191d;
-  --green-glow: 0 6px 18px -6px color-mix(in srgb, var(--green) 55%, transparent);
-  /* Working IS playing, so it takes the now-line's own hue rather than a fourth
-     colour. Action and state differ here in form, never in hue. */
-  --blue: #57b9cf;
-  /* Attention owed. CONTRACT AMENDMENT: the contract named rehearsal red here,
-     and on a dark plate that could not work. Lightened enough to read, red and
-     the error red separated by only 27deg of hue and 1.2:1 of contrast, so the
-     two signals that matter most became indistinguishable. Ochre is still score
-     material (cue letters and rehearsal marks are warm on plate) and it restores
-     the separation, so legibility of state beat thematic purity. 6.24:1, hue 33. */
-  --amber: #e0a760;
-  --amber-hover: #ecbb80;
-  /* Ink on the fill is dark now that the fill is light. 8.28:1 */
-  --amber-ink: #16191d;
-  /* A struck-out bar, and every destructive action. Red is kept here because it
-     is the one colour convention this product must not break. 4.78:1, hue 6. */
-  --red: #f0776a;
-  --red-hover: #f5938a;
-  --red-ink: #16191d;
-  --detail: #9aa3ab;
-  /* Continuo: the figured-bass line, where MCP and the database live. Brass sat
-     4deg from the ochre above and was unusable beside it; a viol blue-violet is
-     a different instrument family and separates cleanly. 5.14:1, hue 227. */
-  --teal: #8f9fd8;
-  /* Part identity only, never state: which brace a lane hangs from. 5.03:1 */
-  --purple: #bb8fd0;
+  --green2: #B8952A;
+  --green-ink: #17181B;
+  --green-glow: 0 6px 18px -6px color-mix(in srgb, var(--green) 45%, transparent);
+  /* Working IS the action state, so it borrows the action colour's own hue rather
+     than a fourth colour. Action and state differ here in form, never in hue. */
+  --blue: #8CB8E4;
+  /* Attention owed. CONTRACT AMENDMENT: the original direction named a warm
+     ochre mark here, and on a dark sheet that could not work. Lightened enough
+     to read, ochre and the error red separated by only 27deg of hue and 1.2:1
+     of contrast, so the two signals that matter most became indistinguishable.
+     Valley blue restores the separation, so legibility of state beat the
+     original colour choice. 8.53:1, hue 210. */
+  --amber: #8CB8E4;
+  --amber-hover: #A6C9EC;
+  /* Text on the fill is dark now that the fill is light. 8.53:1 */
+  --amber-ink: #17181B;
+  /* A red-pencil correction mark, and every destructive action. Red is kept here
+     because it is the one colour convention this product must not break. 5.84:1, hue 9. */
+  --red: #E8705C;
+  --red-hover: #EF8975;
+  --red-ink: #17181B;
+  --detail: #9B9A94;
+  /* Graphite steel: the database/MCP hue. The previous accent sat 4deg from the
+     ochre above and was unusable beside it; this blue-violet is a distinct hue
+     and separates cleanly. 7.76:1, hue 203. */
+  --teal: #8FB0C4;
+  /* Part identity only, never state: which fold tick a lane hangs from. 7.01:1 */
+  --purple: #A99BD0;
   /* Opaque surface + line tokens for view chrome (agent cards, spec panels,
      sidebar rows). These dark values are the originals the components hardcoded,
      so the dark view stays byte-identical; html.sb-light redefines them above. */
-  --surface-inset: #24282e;
-  --surface-inset-line: #3d434b;
-  --surface-line: #363b42;
-  --surface-raised: #303540;
-  --surface-hover: #333841;
-  --surface-hover-line: #3d434b;
-  --surface-sunken: #262a30;
-  --bg-panel-2: #262a30;
+  --surface-inset: #141518;
+  --surface-inset-line: rgba(244,244,242, 0.09);
+  --surface-line: rgba(244,244,242, 0.09);
+  --surface-raised: #1D1F23;
+  --surface-hover: #232529;
+  --surface-hover-line: rgba(244,244,242, 0.11);
+  --surface-sunken: #131417;
+  --bg-panel-2: #181A1D;
   /* Operate surfaces are well served by a system stack, and the outgoing face
-     (Instrument Sans) is a known training-data default. Georgia bold italic
-     carries score terms because engraved dynamics genuinely are bold italic
-     serif. JetBrains Mono is retained strictly for real terminal output. */
+     (Instrument Sans) is a known training-data default. There is no serif in
+     this world; --serif falls back to the same system stack. JetBrains Mono
+     is retained strictly for real terminal output. */
   --sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', monospace;
-  --serif: Georgia, 'Iowan Old Style', 'Times New Roman', serif;
-  /* Depth is a hairline lip of light on a plate edge, never elevation. The gloss
+  --mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  --serif: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /* Depth is a hairline lip of light on a sheet edge, never elevation. The gloss
      is deliberately a no-op gradient in dark; light adds the sheen. */
-  --elev: inset 0 1px 0 rgba(232,228,220,.05),0 1px 2px rgba(0,0,0,.3);
-  --gloss: linear-gradient(rgba(255, 255, 255, 0), rgba(255, 255, 255, 0));
-  /* A plate is cut with straight rules and sharp edges. The outgoing world's
-     10px-everywhere was the loudest single signal of the look being replaced;
-     3px is a scored corner. Noteheads and dots stay genuinely round at 99px. */
-  --rc: 3px;
-  --scrim: rgba(20,23,26, 0.72);
-  --shadow-dlg: 0 32px 80px rgba(0,0,0, 0.62), 0 0 0 1px rgba(232,228,220, 0.04) inset;
-  --shadow-dd: 0 16px 40px rgba(0,0,0, 0.5);
-  --shadow-menu: 0 16px 40px rgba(0,0,0, 0.55);
+  --elev: inset 0 1px 0 rgba(244,244,242,.05),0 1px 2px rgba(0,0,0,.4);
+  --gloss: linear-gradient(rgba(244,244,242,.03),rgba(244,244,242,0));
+  /* A fold is a cut, not a curve, so corners stay sharp at 0. The outgoing
+     world's 10px-everywhere was the loudest single signal of the look being
+     replaced. */
+  --rc: 0px;
+  /* The value-reporting idiom. The outgoing world bowed these to 99px; a fold
+     is a cut, so a tag that reports a figure is scored square like everything
+     else. One token because 37 declarations across 13 files used to decide it
+     independently. */
+  --rp: 0px;
+  /* One tracking value for every spec label, replacing fourteen ad-hoc ones. */
+  --track-label: 0.11em;
+  --scrim: rgba(10,11,13, 0.66);
+  --shadow-dlg: 0 28px 70px rgba(0,0,0, 0.6), 0 0 0 1px rgba(244,244,242, 0.05) inset;
+  --shadow-dd: 0 14px 36px rgba(0,0,0, 0.5);
+  --shadow-menu: 0 14px 36px rgba(0,0,0, 0.55);
 }
 
 * {
@@ -233,9 +257,10 @@ html,
   overflow: hidden;
 }
 
-/* An engraving plate: flat metal under one raking light from the top left. No
-   glow pools — a plate does not emit, it catches light. The vignette is what
-   gives the sheet an edge, and it is the only gradient in the ground. */
+/* A scored sheet in carbon fibre. The 60-degree crease lattice is this world's
+   signature ground: two repeating rules at the mountain and valley angles, kept
+   faint enough to sit under dense monospace output without competing with it. It
+   is painted on <body>, which never scrolls, so it costs nothing per frame. */
 body {
   margin: 0;
   height: 100%;
@@ -243,13 +268,71 @@ body {
   font-family: var(--sans);
   font-size: 13px;
   overflow: hidden;
+  --crease: rgba(244, 244, 242, 0.028);
   background:
-    linear-gradient(158deg, rgba(232, 228, 220, 0.035), transparent 42%),
-    radial-gradient(1200px 800px at 50% 120%, rgba(0, 0, 0, 0.22), transparent 70%),
-    #2b3037;
+    repeating-linear-gradient(60deg, var(--crease) 0 1px, transparent 1px 84px),
+    repeating-linear-gradient(-60deg, var(--crease) 0 1px, transparent 1px 84px),
+    #17181b;
 }
 
-/* The app shell is transparent so the body glow shows through the glass. */
+/* The light theme's version of the same sheet: the creases score darker on paper
+   because the mark is subtractive there, and the ground is the sheet white the
+   world names. */
+html.sb-light body {
+  --crease: rgba(10, 10, 10, 0.045);
+  background:
+    repeating-linear-gradient(60deg, var(--crease) 0 1px, transparent 1px 84px),
+    repeating-linear-gradient(-60deg, var(--crease) 0 1px, transparent 1px 84px),
+    #f7f7f7;
+}
+
+/* A fold is a cut, so a sheet's corner is chamfered rather than rounded. Applied
+   to surfaces only, never to a focusable control: clip-path would clip the focus
+   outline with it, and the keyboard work this app just did outranks the corner. */
+/*
+ * The spec-label: how this world annotates structure. A crease on the source sheet
+ * carries M-128; a section here carries PROJECTS or REFS in the same register.
+ *
+ * It exists as one utility because the tracking had drifted to fourteen different
+ * values between 0.04em and 0.15em across eight files, each view having decided it
+ * alone. DESIGN.md recorded that drift as observed rather than prescribed; this is
+ * the prescription, and --track-label is the single value.
+ */
+.spec-label {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--text-on-wash);
+}
+
+/*
+ * A scored hairline: a rule whose end is cut at the crease angle rather than
+ * stopping square. The world's own drawings terminate their leader lines this way,
+ * and on a surface that is mostly text it is the cheapest place the geometry shows.
+ */
+.scored-rule {
+  position: relative;
+  border-bottom: 1px solid var(--border);
+}
+
+.scored-rule::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  width: 14px;
+  height: 1px;
+  background: var(--border);
+  transform: skewX(-30deg);
+  transform-origin: right bottom;
+}
+
+.chamfer {
+  clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 7px 100%, 0 calc(100% - 7px));
+}
+
+/* The app shell is transparent so the body's crease lattice shows through. */
 #app {
   background: transparent;
 }
@@ -262,8 +345,8 @@ a:hover {
   color: var(--green-hover);
 }
 
-/* Selecting text is marking the plate: the now-line's cyan, at pencil weight.
-   One rule serves both themes, because --green is already theme-scoped. */
+/* Selecting text marks the sheet in foil gold. One rule serves both themes,
+   because --green is already theme-scoped. */
 ::selection {
   background: color-mix(in srgb, var(--green) 30%, transparent);
 }
@@ -276,7 +359,7 @@ a:hover {
 ::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.1);
   border: 2px solid var(--bg);
-  border-radius: 99px;
+  border-radius: var(--rp);
 }
 
 ::-webkit-scrollbar-track {
@@ -316,8 +399,15 @@ button {
 /* Shared button idioms from the reference. The primary fill is the design's
    135deg green gradient under a top gloss (transparent in dark), with a green
    glow; hover flips to the flat brighter green. */
+/* Foil catches light along the fold it is pressed over, so the one action colour
+   carries a raking highlight of its own on top of the shared --gloss. Shallow on
+   purpose: any stronger and it reads as a glossy 2000s button, which is the opposite
+   of foil pressed into a sheet. */
 .btn-solid {
-  background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
+  background:
+    linear-gradient(118deg, rgba(255, 255, 255, 0.18) 0%, rgba(255, 255, 255, 0) 46%),
+    var(--gloss),
+    linear-gradient(135deg, var(--green), var(--green2));
   color: var(--green-ink);
   font-weight: 600;
   font-size: 11.5px;
@@ -405,17 +495,22 @@ button {
 }
 
 .stop-btn:hover {
-  /* Was #fff, which measured 2.78:1 once --red became a light struck-bar red.
-     --red-ink is the token that exists for exactly this: 6.34:1. */
+  /* Was #fff, which measured 2.78:1 once --red became a lighter red-pencil red.
+     --red-ink is the token that exists for exactly this: 5.84:1. */
   color: var(--red-ink);
   background: var(--red);
   border-color: var(--red);
 }
 
-/* The updated design uses the Instrument Sans face for all UI chrome; only genuine
-   code/terminal content (raw output, tool activity, swallowed lines, code
-   blocks) keeps the mono face via explicit `font-family: var(--mono)` rules.
-   So the historically-ubiquitous `.mono` class now resolves to the sans face. */
+/* UI chrome is set in the system UI stack (--sans); only genuine code and terminal
+   content (raw output, tool activity, swallowed lines, code blocks) keeps the mono
+   face, via explicit `font-family: var(--mono)` rules. That is why the
+   historically-ubiquitous `.mono` class resolves to the SANS face and has done for
+   two design generations: the name is a leftover, not a description.
+
+   This comment named Instrument Sans until now, which was wrong through both the
+   engraved-score world and this one — that face was removed as a known
+   training-data default and never replaced by another webfont. */
 .mono {
   font-family: var(--sans);
 }
@@ -435,7 +530,7 @@ button {
   font-family: var(--mono);
   font-size: 10.5px;
   padding: 2px 10px;
-  border-radius: 99px;
+  border-radius: var(--rp);
 }
 
 .pill.working {
@@ -456,8 +551,10 @@ button {
   border: 1px solid color-mix(in srgb, var(--green) 32%, transparent);
 }
 
-.pill.error,
-.pill.ended {
+/* .pill.ended is deliberately NOT in this group: it has its own rule below at the
+   same specificity, which always won, so listing it here only ever looked like it
+   applied. An ended session is packed flat, not an error. */
+.pill.error {
   color: var(--red);
   background: color-mix(in srgb, var(--red) 9%, transparent);
   border: 1px solid color-mix(in srgb, var(--red) 35%, transparent);
@@ -469,11 +566,11 @@ button {
   border: 1px solid var(--border-strong);
 }
 
-/* The shared .dot block that lived here is gone. State is drawn as notation now
+/* The shared .dot block that lived here is gone. State is drawn as fold marks now
    (see Sidebar.vue's .mark), so nothing applied .dot any more, in any template,
    including dynamic bindings. Its sbGlow keyframe went with it: a zero-offset
-   coloured halo is decoration rather than depth, and the beamed note carries
-   "playing" without it. Views that still need a small round indicator declare
+   coloured halo is decoration rather than depth, and the DEPLOYING mark carries
+   "working" without it. Views that still need a small round indicator declare
    their own with an explicit 99px radius. */
 
 /* Risk chips (inbox cards) */
@@ -546,7 +643,7 @@ button {
   color: var(--amber);
   background: color-mix(in srgb, var(--amber) 13%, transparent);
   border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
-  border-radius: 99px;
+  border-radius: var(--rp);
   padding: 0 6px;
   line-height: 16px;
   white-space: nowrap;
@@ -607,9 +704,11 @@ button {
   padding: 0;
 }
 
-.composer-input:focus {
-  outline: none;
-}
+/* No :focus override here on purpose. This is the field every message to Claude
+   is typed into, and `outline: none` left it looking identical focused and
+   unfocused — the one control in the app that most needs to say where the caret
+   is. Deleting the override lets the shared input/textarea/select:focus rule
+   above give it the same 1px proof-cyan ring as every other field. */
 
 .to {
   flex-shrink: 0;
@@ -649,7 +748,7 @@ button {
   width: 38px;
   min-width: 38px;
   height: 21px;
-  border-radius: 99px;
+  border-radius: var(--rp);
   background: var(--border-strong);
   position: relative;
   cursor: pointer;
@@ -670,7 +769,7 @@ button {
   left: 2px;
   width: 17px;
   height: 17px;
-  border-radius: 99px;
+  border-radius: var(--rp);
   background: var(--text-faint);
   transition: all 0.15s ease;
 }
@@ -701,6 +800,9 @@ button {
   border-radius: var(--rc);
   padding: 16px;
   box-shadow: var(--elev);
+  /* A sheet laid on the sheet. Nothing inside a dialog takes focus through this
+     element, so the cut corner is safe here. */
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
 }
 
 @keyframes sbPulse {
@@ -881,9 +983,9 @@ html.sb-light .suggest-list {
   text-overflow: ellipsis;
 }
 
-/* Respect the OS "reduce motion" setting. Eleven looping animations run in this
-   app (the now-line breath, the needs-you pulse, the caret blink, the agent
-   fade, the inbox peek glow and their siblings), and none of them carry
+/* Respect the OS "reduce motion" setting. Several looping animations run in this
+   app (the needs-you pulse, the caret blink, the agent fade, the inbox peek glow
+   and their siblings), and none of them carry
    information that stillness would lose: every one duplicates a state the
    colour and the mark already state. So they stop entirely rather than being
    slowed. Entrances collapse to near-zero instead of 0s, because a genuinely

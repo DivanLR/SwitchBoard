@@ -898,8 +898,6 @@ const updateLine = computed(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   box-shadow: var(--shadow-dlg);
 }
 
@@ -983,8 +981,6 @@ html.sb-light .overlay {
 
 .rail-tab:hover {
   background: var(--bg-hover);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   box-shadow: var(--elev);
 }
 
@@ -1059,8 +1055,6 @@ html.sb-light .overlay {
   gap: 11px;
   padding: 10px 13px;
   background: var(--bg-hover);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   box-shadow: var(--elev);
   border: 1px solid var(--hi09);
   border-radius: var(--rc);
@@ -1094,7 +1088,7 @@ html.sb-light .overlay {
   width: 8px;
   min-width: 8px;
   height: 8px;
-  border-radius: 99px;
+  border-radius: var(--rp);
   border: 1.5px solid var(--hi22);
 }
 
@@ -1218,8 +1212,6 @@ html.sb-light .overlay {
 .proj-card {
   padding: 11px 12px;
   background: var(--bg-card);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   border: 1px solid color-mix(in srgb, var(--green) 18%, transparent);
   border-radius: var(--rc);
   margin-bottom: 10px;
@@ -1250,7 +1242,7 @@ html.sb-light .overlay {
   width: 8px;
   min-width: 8px;
   height: 8px;
-  border-radius: 99px;
+  border-radius: var(--rp);
   background: var(--green);
 }
 
@@ -1272,8 +1264,6 @@ html.sb-light .overlay {
   left: 0;
   right: 0;
   background: var(--bg-hover);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--border-strong);
   border-radius: var(--rc);
   overflow: hidden;
@@ -1327,8 +1317,6 @@ html.sb-light .overlay {
   gap: 12px;
   padding: 10px 13px;
   background: var(--bg-hover);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   box-shadow: var(--elev);
   border: 1px solid var(--hi09);
   border-radius: var(--rc);
@@ -1357,7 +1345,7 @@ html.sb-light .overlay {
   display: flex;
   flex-shrink: 0;
   border: 1px solid var(--border-seg);
-  border-radius: 99px;
+  border-radius: var(--rp);
   overflow: hidden;
 }
 
@@ -1388,8 +1376,6 @@ html.sb-light .overlay {
 .note {
   padding: 10px 13px;
   background: var(--bg-card);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   border: 1px solid color-mix(in srgb, var(--green) 18%, transparent);
   border-radius: var(--rc);
   font-size: 11.5px;
@@ -1402,8 +1388,6 @@ html.sb-light .overlay {
   color: var(--text-body);
   padding: 10px 13px;
   background: var(--bg-card);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   border: 1px solid color-mix(in srgb, var(--green) 18%, transparent);
   border-radius: var(--rc);
   margin-bottom: 12px;

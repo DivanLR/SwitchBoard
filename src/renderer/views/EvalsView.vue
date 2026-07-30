@@ -415,7 +415,7 @@ const shortDate = (iso: string): string =>
 .chip {
   flex-shrink: 0;
   font-size: 10px;
-  border-radius: 99px;
+  border-radius: var(--rp);
   padding: 1px 9px;
   white-space: nowrap;
   color: var(--text-faint);
@@ -429,7 +429,7 @@ const shortDate = (iso: string): string =>
   font-size: 9.5px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  border-radius: 99px;
+  border-radius: var(--rp);
   padding: 2px 8px;
   color: var(--text-faint);
   border: 1px solid var(--border-strong);

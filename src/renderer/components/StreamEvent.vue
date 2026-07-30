@@ -281,8 +281,6 @@ html.sb-light .prompt {
 
 .summary-card {
   background: var(--gloss), var(--bg-hover);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--border-card-alt);
   border-radius: var(--rc);
   padding: 11px 13px;
@@ -292,7 +290,9 @@ html.sb-light .prompt {
 .card-label {
   font-size: 10px;
   letter-spacing: 0.13em;
-  color: var(--text-label);
+  /* On .summary-card, which is --bg-hover over the plate: the label tier measures
+     3.85:1 there (dark) and 4.13:1 (light). */
+  color: var(--text-on-wash);
   margin-bottom: 6px;
 }
 

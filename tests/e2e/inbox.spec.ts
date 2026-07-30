@@ -224,3 +224,42 @@ test('history right-click: destructive command gets no allow item; entries remov
 test('inbox zero state communicates nothing needs attention', async ({ page }) => {
   await expect(page.getByTestId('inbox-zero')).toContainText('Inbox zero')
 })
+
+// The History tab was a <div> with a click handler and no tabindex, role, or
+// keydown handler, so an entire top-level section of the app's central decision
+// pane could not be reached without a mouse. These assert the keyboard path, not
+// the appearance.
+test('the inbox and history tabs are reachable and operable by keyboard', async ({ page }) => {
+  const history = page.getByTestId('inbox-tab-history')
+  await expect(history).toHaveRole('tab')
+  await expect(history).toHaveAttribute('aria-selected', 'false')
+
+  // Focus it directly rather than counting Tab presses: the claim under test is
+  // that it CAN hold focus and responds to a key, which a div never could.
+  await history.focus()
+  await expect(history).toBeFocused()
+  await page.keyboard.press('Enter')
+
+  await expect(history).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByTestId('inbox-tab-pending')).toHaveAttribute('aria-selected', 'false')
+})
+
+test('a history row expands from the keyboard and reports its expanded state', async ({ page }) => {
+  await page.evaluate(() => {
+    window.__mock.raisePermission({
+      projectId: 'p-alpha',
+      title: 'Run: npm run build',
+      explanation: 'Builds the production bundle to verify the change compiles.',
+      detail: 'Bash: npm run build',
+      risk: 'low',
+    })
+  })
+  await page.getByTestId('inbox-group-alpha').getByTestId('approve-btn').click()
+  await page.getByTestId('inbox-tab-history').click()
+
+  const row = page.getByTestId('history-item').first()
+  await expect(row).toHaveAttribute('aria-expanded', 'false')
+  await row.focus()
+  await page.keyboard.press('Enter')
+  await expect(row).toHaveAttribute('aria-expanded', 'true')
+})

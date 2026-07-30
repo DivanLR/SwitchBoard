@@ -27,7 +27,8 @@ import {
 } from '@main/projects/discovery'
 import { defaultRiskRules } from '@main/inbox/risk-rules'
 import { defaultSwallowRules } from '@main/stream/swallow-rules'
-import { existsSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import { detectStacks, stackById, stackEntries } from '@shared/test-catalog'
 import { attemptsPrompt, checkPrompt, judgePrompt } from '@main/evals/eval-dispatch'
 import { evidencePrompt, planSuites, verifyPrompt } from '@main/evals/verify-dispatch'
@@ -301,7 +302,18 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       try {
         // Root plus one level: a solution often sits in a subfolder of the
         // folder the developer registered.
-        return detectStacks(stackEntries(project.path, (dir) => readdirSync(dir)))
+        //
+        // The reader narrows a .NET project to what it actually is — an API, a
+        // Blazor front end, or both — so it is not offered suites that prove
+        // nothing about it. A file that will not open reads as absent evidence,
+        // never as a detection failure.
+        return detectStacks(stackEntries(project.path, (dir) => readdirSync(dir)), (entry) => {
+          try {
+            return readFileSync(join(project.path, entry), 'utf8')
+          } catch {
+            return null
+          }
+        })
       } catch {
         // Unreadable folder (removed, permissions): no stack, not a crash.
         return []

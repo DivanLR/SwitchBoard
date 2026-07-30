@@ -142,9 +142,24 @@ const scanned = computed(() => schemaDoc.value !== null)
 
 // Main-loop events only — subagent internals stay folded into the parent stream,
 // exactly like the session view.
-const dbEvents = computed<SessionEvent[]>(() =>
-  active.events.filter((e) => (e.payload as AgentScopedPayload).agentId === undefined),
-)
+/**
+ * The DB chat renders the last MAX_RENDER events, not the whole history.
+ *
+ * SessionView caps its stream for exactly this reason and says so; this view was
+ * built from the same store and inherited none of it, so every event the session
+ * had ever produced stayed mounted. A schema scan over a large database is one of
+ * the longest-running things this app does, and it is precisely the case that
+ * accumulates events.
+ *
+ * ponytail: a plain tail slice, no paging control, because unlike the session
+ * stream this view has no "show earlier" affordance to hang one on. Add paging
+ * here the day someone needs to read the top of a scan.
+ */
+const MAX_RENDER = 500
+const dbEvents = computed<SessionEvent[]>(() => {
+  const all = active.events.filter((e) => (e.payload as AgentScopedPayload).agentId === undefined)
+  return all.length > MAX_RENDER ? all.slice(all.length - MAX_RENDER) : all
+})
 const hasEvents = computed(() => dbEvents.value.length > 0)
 // Show the hero (with its Start-session / Scan buttons) whenever there is no
 // live session, even after a schema has been scanned — otherwise the only way
@@ -420,7 +435,13 @@ function answer(eventId: string, choice: string): void {
     <!-- Chat / scan stream -->
     <div v-else ref="streamEl" class="stream" data-testid="mcp-stream">
       <div class="stream-inner">
-        <div v-if="scanning" class="scan-banner mono" data-testid="mcp-scanning">
+        <div
+          v-if="scanning"
+          class="scan-banner mono"
+          data-testid="mcp-scanning"
+          role="status"
+          aria-live="polite"
+        >
           <span class="blink teal">▊</span> Scanning your MCP servers — walking their structure,
           then writing db-schema.md…
         </div>
@@ -511,8 +532,6 @@ function answer(eventId: string, choice: string): void {
   padding: 14px 18px 0;
   border-bottom: 1px solid var(--border);
   background: var(--gloss), var(--bg-panel);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
@@ -556,7 +575,7 @@ function answer(eventId: string, choice: string): void {
   color: var(--text-tab);
   padding: 3px 11px;
   border: 1px solid var(--border-seg);
-  border-radius: 99px;
+  border-radius: var(--rp);
   background: transparent;
   cursor: pointer;
 }
@@ -581,7 +600,7 @@ function answer(eventId: string, choice: string): void {
 .mcp-chip-dot {
   width: 7px;
   height: 7px;
-  border-radius: 99px;
+  border-radius: var(--rp);
 }
 
 /* Active combination line: combo name + scan freshness + scan button. */
@@ -632,7 +651,7 @@ function answer(eventId: string, choice: string): void {
   font-size: 10.5px;
   color: var(--text-tab);
   border: 1px solid var(--border-seg);
-  border-radius: 99px;
+  border-radius: var(--rp);
   padding: 2px 10px;
   background: transparent;
   cursor: pointer;
@@ -661,8 +680,6 @@ function answer(eventId: string, choice: string): void {
   padding: 0 16px;
   border-bottom: 1px solid var(--border);
   background: var(--gloss), var(--bg-panel);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 

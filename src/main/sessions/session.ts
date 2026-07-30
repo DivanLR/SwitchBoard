@@ -135,6 +135,40 @@ interface QueuedSend {
   text: string
 }
 
+/**
+ * Turn a bare process exit into something the developer can act on.
+ *
+ * The SDK reports only "Claude Code process exited with code N". For a bypass
+ * session that N comes from a container, and 137 is the one that matters: it is
+ * 128 + 9, a SIGKILL, which a process cannot explain itself because it was never
+ * asked to exit. It leaves no stderr either, so the honest reading is that
+ * something outside the process killed it, and inside a memory-limited WSL virtual
+ * machine that is nearly always the kernel reclaiming memory.
+ *
+ * Named rather than relayed, because reporting an environment limit as the
+ * developer's code crashing is the one thing this product forbids itself.
+ */
+export function explainExit(raw: string, bypass: boolean): string {
+  const code = /exited with code (\d+)/.exec(raw)?.[1]
+  if (code === '137') {
+    return bypass
+      ? 'The bypass sandbox container was killed from outside the process: exit 137 is ' +
+          'SIGKILL, so nothing inside it got to report why. Almost always the host ' +
+          'running out of memory for the container, because Docker Desktop shares one ' +
+          'WSL virtual machine and a long agent run inside it can exhaust the whole ' +
+          'allowance. Raise it with a memory= line in %USERPROFILE%\\.wslconfig and ' +
+          'restart Docker Desktop. The conversation is kept and resumes on the next start.'
+      : 'The Claude Code process was killed from outside: exit 137 is SIGKILL, so it got ' +
+          'no chance to report a reason. The host most likely ran out of memory.'
+  }
+  if (code === '13') {
+    return 'The Claude Code process exited with code 13, which is Node reporting an ' +
+      'unfinished top-level await: it waited on something that never arrived. Usually a ' +
+      'broken or interrupted install of the CLI.'
+  }
+  return `Session process ended unexpectedly: ${raw}`
+}
+
 export class HostedSession {
   readonly sessionId: string
   private readonly options: HostedSessionOptions
@@ -273,9 +307,10 @@ export class HostedSession {
         this.options.onExit('stopped')
         return
       }
-      const detail = error instanceof Error ? error.message : String(error)
+      const raw = error instanceof Error ? error.message : String(error)
+      const detail = explainExit(raw, this.options.bypassPermissions === true)
       this.fatal = true
-      this.mapper.fatalError(`Session process ended unexpectedly: ${detail}`)
+      this.mapper.fatalError(detail)
       this.setStatus('error', detail)
       this.options.onExit('crashed', detail)
     }

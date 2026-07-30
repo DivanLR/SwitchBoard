@@ -8,6 +8,7 @@
 // settings shape below stays tied to the app's own defaults instead of being a
 // hand-copied duplicate that silently drifts.
 import { DEFAULT_SETTINGS, type Settings } from '../../src/shared/domain'
+import { detectStacks, type AvailableSuites } from '../../src/shared/test-catalog'
 
 export interface MockSessionSeed {
   id: string
@@ -38,6 +39,16 @@ export interface MockScenario {
   /** Starting settings. Pass DEFAULT_SETTINGS so the mock cannot drift from the
    *  real defaults; override individual fields for a specific test. */
   settings: Settings
+  /**
+   * What `evals.suites` answers. Built from the real catalog by the scenario, for
+   * the same reason `settings` is: the Tests section now takes its suite list from
+   * this answer, so a hand-written subset here silently hides suites the real app
+   * offers, and the tests would be asserting against the mock's imagination.
+   *
+   * Omit it only in a scenario that never opens the Tests section: the picker then
+   * has nothing to offer, which is the honest answer for a project with no stack.
+   */
+  suites?: AvailableSuites[]
 }
 
 export interface MockDriver {
@@ -633,36 +644,9 @@ export function installMockHost(scenario: MockScenario): void {
       }
       return [...list]
     },
-    // A fixed two-stack project, so the suite picker has API/unit/UI rows to show.
-    'evals.suites': () => [
-      {
-        stackId: 'node',
-        stackLabel: 'Node / Vue / Electron',
-        suites: [
-          {
-            id: 'node-unit',
-            kind: 'unit',
-            label: 'Unit tests',
-            acceptance: 'every unit test passes',
-            command: 'npm test',
-          },
-          {
-            id: 'node-e2e',
-            kind: 'ui',
-            label: 'UI end-to-end (Playwright)',
-            acceptance: 'the affected screens work end to end',
-            command: 'npx playwright test',
-          },
-          {
-            id: 'node-api',
-            kind: 'api',
-            label: 'HTTP smoke',
-            acceptance: 'every route answers with the status and shape it should',
-            command: 'start the server, then send one request per route',
-          },
-        ],
-      },
-    ],
+    // The real catalog's answer for this project, carried in as scenario data.
+    'evals.suites': () =>
+      (scenario.suites ?? []).map((stack) => ({ ...stack, suites: [...stack.suites] })),
     'evals.dispatch': (req) => {
       const projectId = String(req.projectId)
       const list = evalsByProject.get(projectId) ?? []
@@ -1142,6 +1126,9 @@ export function installMockHost(scenario: MockScenario): void {
 export function twoProjectScenario(): MockScenario {
   return {
     settings: DEFAULT_SETTINGS,
+    // A node project, detected by the real catalog rather than described here, so
+    // the picker shows exactly the suites the real app would offer.
+    suites: detectStacks(['package.json']),
     projects: [
       {
         id: 'p-alpha',

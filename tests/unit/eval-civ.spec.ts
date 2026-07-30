@@ -162,3 +162,94 @@ describe('derived stage', () => {
     expect(evalStage(line({ verdict: 'fail' }))).toBe('done')
   })
 })
+
+// ".NET" is not one thing to verify. An HTTP smoke pass over the endpoints is the
+// strongest evidence there is for a Web API, and close to worthless for a Blazor
+// front end: every interactive render mode prerenders first, so the server's HTML
+// is the same whether or not the component ever became interactive.
+describe('what kind of .NET application a project holds', () => {
+  const suiteIds = (entries: string[], files: Record<string, string>): string[] => {
+    const stacks = detectStacks(entries, (entry) => files[entry] ?? null)
+    return stacks.find((s) => s.stackId === 'dotnet')?.suites.map((s) => s.id) ?? []
+  }
+  const label = (entries: string[], files: Record<string, string>): string | undefined =>
+    detectStacks(entries, (entry) => files[entry] ?? null).find((s) => s.stackId === 'dotnet')
+      ?.stackLabel
+
+  it('offers a Web API the endpoint suites and none of the browser ones', () => {
+    const entries = ['Api.sln', 'Program.cs', 'Api.csproj']
+    const files = { 'Program.cs': 'builder.Services.AddControllers();\napp.MapControllers();\n' }
+    const ids = suiteIds(entries, files)
+    expect(ids).toContain('dotnet-http')
+    expect(ids).toContain('dotnet-api')
+    expect(ids).not.toContain('blazor-ui')
+    expect(ids).not.toContain('blazor-interactive')
+    expect(label(entries, files)).toBe('.NET API')
+  })
+
+  it('offers a Blazor app the browser suites and never an HTTP smoke of endpoints', () => {
+    const entries = ['App.sln', 'Program.cs', 'App.csproj']
+    const files = {
+      'Program.cs':
+        'builder.Services.AddRazorComponents().AddInteractiveServerComponents();\n' +
+        'app.MapRazorComponents<App>().AddInteractiveServerRenderMode();\n',
+    }
+    const ids = suiteIds(entries, files)
+    expect(ids).toContain('blazor-ui')
+    expect(ids).toContain('blazor-interactive')
+    expect(ids).not.toContain('dotnet-http')
+    expect(ids).not.toContain('dotnet-api')
+    // The core suites are shape-agnostic and must survive the narrowing.
+    expect(ids).toContain('dotnet-unit')
+    expect(ids).toContain('dotnet-coverage')
+    expect(label(entries, files)).toBe('.NET Blazor')
+  })
+
+  it('recognises a standalone WebAssembly app from its root page and root component', () => {
+    const entries = ['Client.sln', 'wwwroot/index.html', 'Program.cs']
+    const files = { 'Program.cs': 'builder.RootComponents.Add<App>("#app");\n' }
+    expect(suiteIds(entries, files)).toContain('blazor-ui')
+    expect(label(entries, files)).toBe('.NET Blazor')
+  })
+
+  it('gives a solution holding both an API and a front end all of it', () => {
+    const entries = ['Both.sln', 'Api/Program.cs', 'Web/Program.cs']
+    const files = {
+      'Api/Program.cs': 'app.MapControllers();\napp.MapOpenApi();\n',
+      'Web/Program.cs': 'app.MapRazorComponents<App>();\n',
+    }
+    const ids = suiteIds(entries, files)
+    expect(ids).toContain('dotnet-http')
+    expect(ids).toContain('blazor-ui')
+    expect(label(entries, files)).toBe('.NET API + Blazor')
+  })
+
+  it('offers everything when the shape cannot be read, rather than hiding a suite on a guess', () => {
+    // No reader at all (the sandbox image decision), and a reader that cannot open
+    // anything, must both leave the catalog untouched.
+    const all = TEST_STACKS.find((s) => s.id === 'dotnet')?.suites.map((s) => s.id)
+    expect(detectStacks(['Api.sln'])[0].suites.map((s) => s.id)).toEqual(all)
+    expect(suiteIds(['Api.sln', 'Program.cs'], {})).toEqual(all)
+    expect(label(['Api.sln'], {})).toBe('.NET')
+  })
+
+  it('does not read a class named like a controller as evidence of a routed API', () => {
+    // Naming a type is not registering it. Only the framework call, or the
+    // Controllers folder convention, counts.
+    const ids = suiteIds(['App.sln', 'Program.cs'], {
+      'Program.cs': 'app.MapRazorComponents<App>();\n// class PolicyController lives elsewhere\n',
+    })
+    expect(ids).not.toContain('dotnet-http')
+    expect(ids).toContain('blazor-ui')
+  })
+
+  it('takes a Controllers folder as an API, the asymmetry being deliberate', () => {
+    // The shape this project really has on disk: a web SDK csproj whose Program.cs
+    // is a level deeper than detection reads. Without the folder convention it
+    // would fall through to "offer everything" and the narrowing would never fire.
+    const entries = ['Api.sln', 'Sample.Api.csproj', 'Controllers', 'Controllers/PoliciesController.cs']
+    const files = { 'Sample.Api.csproj': '<Project Sdk="Microsoft.NET.Sdk.Web"></Project>' }
+    expect(label(entries, files)).toBe('.NET API')
+    expect(suiteIds(entries, files)).not.toContain('blazor-ui')
+  })
+})

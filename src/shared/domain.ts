@@ -605,6 +605,17 @@ export interface Measured {
   value: number | null
   /** e.g. "dotnet test --collect", "sonarqube", "stryker". Null when unmeasured. */
   source: string | null
+  /**
+   * True when the app parsed this figure out of the runner's own artefact file
+   * itself, rather than taking the session's word for it.
+   *
+   * The distinction is the point. A machine-readable line from a session is a
+   * guarantee about shape, never about truth, so a figure the app read out of a
+   * TRX, Cobertura or Stryker report is different evidence from the same number
+   * typed into a report line. Absent means session-reported, which is still shown
+   * — just not as something the app checked.
+   */
+  verified?: boolean
 }
 
 /** 'unavailable' is the environment's limit (no .NET SDK in the sandbox), never
@@ -619,6 +630,8 @@ export interface SuiteResult {
   status: SuiteStatus
   /** One line: counts, the first failure, or why it could not run. */
   detail: string
+  /** True when a test-runner artefact, not the session's summary, settled this. */
+  verified?: boolean
 }
 
 /** Proof the code was executed — real input and the real result (FR-048). */

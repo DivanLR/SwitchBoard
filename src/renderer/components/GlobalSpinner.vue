@@ -64,7 +64,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 99px;
+  border-radius: var(--rp);
   background: var(--gloss), var(--bg-panel);
   border: 1px solid var(--border-strong);
   box-shadow: var(--shadow-dd);
@@ -74,7 +74,10 @@ onUnmounted(() => {
 .gs-ring {
   width: 15px;
   height: 15px;
-  border-radius: 99px;
+  /* The one thing in the app that stays a circle: it rotates, and a rotating
+     square reads as a glitch rather than as progress. The chamfer rule governs
+     surfaces and tags, not a spinner. */
+  border-radius: 50%;
   border: 2px solid var(--border-strong);
   border-top-color: var(--green);
   animation: gs-spin 0.7s linear infinite;

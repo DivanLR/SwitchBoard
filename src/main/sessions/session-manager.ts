@@ -15,6 +15,7 @@ import type {
   Session,
   SessionEvent,
   SessionStatus,
+  VerifyReport,
 } from '@shared/domain'
 import { SWALLOWABLE_KINDS, verifyVerdict } from '@shared/domain'
 import type { IpcError, SessionStatusPush } from '@shared/ipc-types'
@@ -31,6 +32,8 @@ import {
 } from './session-shaping'
 import { parseEvalMarker } from '@main/evals/eval-dispatch'
 import { parseVerifyReport } from '@main/evals/verify-dispatch'
+import { reconcile } from '@main/evals/artefacts'
+import { scanArtefacts } from '@main/evals/artefact-scan'
 import { parseApiRequests } from '@main/evals/api-dispatch'
 import type { ApiRequestPlan } from '@shared/api-endpoints'
 import { mainLoopModel } from './model-routing'
@@ -671,9 +674,50 @@ export class SessionManager {
     if (watch.kind === 'evidence') {
       this.repos.verifyRuns.attachEvidence(watch.runId, report.evidence)
     } else {
-      this.repos.verifyRuns.finish(watch.runId, verifyVerdict(report), report, null)
+      const settled = this.settleAgainstArtefacts(watch.runId, entry.row.projectId, report)
+      this.repos.verifyRuns.finish(watch.runId, verifyVerdict(settled.report), settled.report, settled.note)
     }
     this.callbacks.onVerifyChanged(entry.row.projectId)
+  }
+
+  /**
+   * Check the session's report against the artefact files the run left on disk.
+   *
+   * A schema-constrained report line guarantees its shape and says nothing about
+   * whether its values are true, and an agent working inside the tree it just
+   * edited is exactly the position from which a claim can be made to look true.
+   * So where a TRX, Cobertura or Stryker report exists, the file settles it: the
+   * figure is replaced, marked verified, and any disagreement is recorded on the
+   * run as a note rather than quietly resolved.
+   *
+   * No artefact changes nothing — the session's figures stand, unverified. This
+   * never invents a figure, which is the same rule the rest of the section follows.
+   */
+  private settleAgainstArtefacts(
+    runId: string,
+    projectId: string,
+    report: VerifyReport,
+  ): { report: VerifyReport; note: string | null } {
+    const project = this.repos.projects.byId(projectId)
+    const run = this.repos.verifyRuns.byId(runId)
+    if (!project || !run) return { report, note: null }
+    let settled: ReturnType<typeof reconcile>
+    try {
+      settled = reconcile(report, scanArtefacts(project.path, Date.parse(run.startedAt)))
+    } catch {
+      // An unreadable tree is not evidence about the code. Report what the session
+      // said, unverified, rather than failing the run over a filesystem error.
+      return { report, note: null }
+    }
+    if (settled.disagreements.length === 0) return { report: settled.report, note: null }
+    return {
+      report: settled.report,
+      note:
+        'The run reported figures its own artefacts contradict, and the artefacts were taken: ' +
+        settled.disagreements
+          .map((d) => `${d.about} — reported ${d.said}, measured ${d.measured}`)
+          .join('; '),
+    }
   }
 
   /**

@@ -127,7 +127,7 @@ function run(command: string): void {
 
 .badge {
   font-size: 10px;
-  border-radius: 99px;
+  border-radius: var(--rp);
   padding: 1px 9px;
   white-space: nowrap;
 }

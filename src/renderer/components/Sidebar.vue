@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// Sidebar — 1:1 with the design reference: logo, PROJECTS list with animated
-// status dots, mono names, per-project pending badges, branch + timer line,
+// Sidebar — 1:1 with the design reference: logo, PROJECTS list with status
+// fold marks, mono names, per-project pending badges, branch + timer line,
 // and the running / needs-you / cost-today stats card (FR-003/004/005).
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { isIpcError } from '@shared/ipc-types'
@@ -69,7 +69,7 @@ function initials(name: string): string {
   return (words.length > 1 ? `${words[0][0]}${words[1][0]}` : name.slice(0, 2)).toLowerCase()
 }
 
-// Stable per-project accent bar on the row's leading edge (shared with the
+// Stable per-project accent colour on the fold tick (shared with the
 // session header dot) — identifies the project at a glance in the collapsed rail.
 const now = ref(Date.now())
 let timer: ReturnType<typeof setInterval> | undefined
@@ -99,14 +99,14 @@ function statusOf(item: (typeof projects.items)[number]): string {
   return item.session.status
 }
 
-/** The lane's mark named in both languages: the score term and what it means.
- *  Screen readers and hover both get the plain meaning, never the glyph alone. */
+/** Plain language, no vocabulary to learn. Hover and screen readers get the same
+ *  words, and the mark beside them only narrows the guess. */
 function markTitle(status: string): string {
-  if (status === 'needs_you') return 'Fermata — held, needs you'
-  if (status === 'working') return 'Playing — working'
-  if (status === 'error') return 'Struck out — error'
-  if (status === 'ended') return 'Tacet — session ended'
-  return 'Fine — done'
+  if (status === 'needs_you') return 'Needs you'
+  if (status === 'working') return 'Working'
+  if (status === 'error') return 'Error'
+  if (status === 'ended') return 'Session ended'
+  return 'Done'
 }
 
 function pendingFor(projectId: string): number {
@@ -260,11 +260,20 @@ function toggleGroup(id: string | null): void {
   saveGroups(groups.value.map((g) => (g.id === id ? { ...g, collapsed: !g.collapsed } : g)))
 }
 
+/** A default name no existing group already has, so a second group reads as a
+ *  second group rather than a duplicate of the first. */
+function defaultGroupName(): string {
+  const taken = new Set(groups.value.map((g) => g.name))
+  let name = 'New group'
+  for (let n = 2; taken.has(name); n += 1) name = `New group ${n}`
+  return name
+}
+
 /** Adds a group and drops straight into inline naming. */
 function newGroup(projectId?: string): void {
   const group: ProjectGroup = {
     id: crypto.randomUUID(),
-    name: 'New group',
+    name: defaultGroupName(),
     collapsed: false,
     color: GROUP_COLORS[groups.value.length % GROUP_COLORS.length],
   }
@@ -510,6 +519,10 @@ function cancelRemove(): void {
 // long before either overlay exists. Without this the context menu could only be
 // dismissed with the mouse, and the remove dialogue could not be reached at all.
 function onOverlayKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Tab' && confirmRemoveId.value) {
+    trapTab(event)
+    return
+  }
   if (event.key !== 'Escape') return
   if (confirmRemoveId.value) {
     event.stopPropagation()
@@ -517,6 +530,33 @@ function onOverlayKeydown(event: KeyboardEvent): void {
   } else if (ctx.value) {
     event.stopPropagation()
     closeCtx()
+  }
+}
+
+/** Keeps Tab inside the open remove dialog. Without it, Tab walks out to the
+ *  window behind and the developer is operating a surface they cannot see while a
+ *  destructive confirmation is still up. */
+function trapTab(event: KeyboardEvent): void {
+  const dialog = document.querySelector<HTMLElement>('[data-testid="remove-dialog"]')
+  if (!dialog) return
+  const items = [
+    ...dialog.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex]:not([tabindex="-1"])'),
+  ].filter((el) => el.offsetParent !== null)
+  if (items.length === 0) return
+  const first = items[0]
+  const last = items[items.length - 1]
+  const active = document.activeElement
+  if (!event.shiftKey && active === last) {
+    event.preventDefault()
+    first.focus()
+  } else if (event.shiftKey && (active === first || active === dialog)) {
+    event.preventDefault()
+    last.focus()
+  } else if (!items.includes(active as HTMLElement)) {
+    // Focus was outside the dialog entirely (a click on the scrim, say): pull it
+    // back in rather than letting Tab continue through the window behind.
+    event.preventDefault()
+    first.focus()
   }
 }
 
@@ -618,8 +658,9 @@ async function confirmRemoveNow(): Promise<void> {
           class="add mono"
           data-testid="new-group"
           title="New group"
+          aria-label="New group"
           @click="newGroup()"
-        >▤</button>
+        >⊞</button>
         <button class="add mono" data-testid="add-project" title="New session" @click="emit('add-project')">+</button>
       </div>
 
@@ -717,36 +758,32 @@ async function confirmRemoveNow(): Promise<void> {
         @dragend="onDragEnd"
       >
         <div class="active-bg"></div>
-        <!-- Now, crossing this lane. Only drawn while something is playing. -->
-        <span
-          v-if="!collapsed && projects.counters.running > 0"
-          class="now"
-          aria-hidden="true"
-        ></span>
-        <!-- Part identity is a brace, not a coloured edge bar: a 1px stroke in
-             the lane's own colour, always drawn the way a score always braces
-             its parts. -->
+        <!-- Lane identity is a 1px stroke in the lane's own colour, never a
+             coloured edge bar. -->
         <span
           class="brace"
           :data-testid="`project-accent-${item.name}`"
           :style="{ color: accentFor(item.id) }"
           aria-hidden="true"
         >
+          <!-- A fold tick, not a brace: two scored segments meeting at the
+               world's 60-degree crease angle, in the project's own colour. -->
           <svg viewBox="0 0 5 26" width="5" height="26">
             <path
-              d="M4 1 C1.6 1 1.6 6 1.6 13 C1.6 20 1.6 25 4 25"
+              d="M4.2 1.5 L1.2 8 L1.2 18 L4.2 24.5"
               fill="none"
               stroke="currentColor"
               stroke-width="1.2"
+              stroke-linejoin="miter"
             />
           </svg>
         </span>
         <div class="content">
           <div class="row">
-            <!-- The lane's current sign. Every state is a real mark: a fermata
-                 is a hold awaiting release, a beamed note is playing, a
-                 thin-thick double barline is fine, a struck bar is an error,
-                 and a bar rest is tacet. -->
+            <!-- The lane's current sign. Every state is a real mark: HELD is a
+                 crease scored but not folded, DEPLOYING is facets opening,
+                 MISFOLD is two creases crossing, PACKED FLAT is the sheet
+                 folded away, and LOCKED is the fold seated, done. -->
             <span
               v-if="statusOf(item) !== 'none'"
               class="mark"
@@ -755,39 +792,32 @@ async function confirmRemoveNow(): Promise<void> {
               :data-status="statusOf(item)"
               :title="markTitle(statusOf(item))"
             >
+              <!-- Folds in a scored sheet, at the world's 60-degree crease angle.
+                   Deliberately plain geometry: the mark narrows the guess, the word
+                   beside it settles it, so nobody has to learn a symbol. -->
               <svg viewBox="0 0 16 14" width="16" height="14" aria-hidden="true">
                 <template v-if="statusOf(item) === 'needs_you'">
-                  <path
-                    d="M1.5 11.5 A6.5 6.5 0 0 1 14.5 11.5"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.6"
-                  />
-                  <circle cx="8" cy="7.6" r="1.5" fill="currentColor" />
+                  <!-- Held: one crease scored but not yet folded either way. -->
+                  <path d="M3 12 L8 2 L13 12" fill="none" stroke="currentColor" stroke-width="1.7" />
                 </template>
                 <template v-else-if="statusOf(item) === 'working'">
-                  <ellipse
-                    cx="4.6"
-                    cy="10.4"
-                    rx="3"
-                    ry="2.2"
-                    fill="currentColor"
-                    transform="rotate(-20 4.6 10.4)"
-                  />
-                  <rect x="7.1" y="2" width="1.3" height="8.6" fill="currentColor" />
-                  <rect x="7.1" y="2" width="6.9" height="2.1" fill="currentColor" />
+                  <!-- Deploying: three facets opening out of the packet. -->
+                  <path d="M2 12 L5.6 2.6 L8 12 Z" fill="currentColor" opacity=".55" />
+                  <path d="M8 12 L10.4 2.6 L14 12 Z" fill="currentColor" />
                 </template>
                 <template v-else-if="statusOf(item) === 'error'">
-                  <rect x="7.2" y="1" width="1.4" height="12" fill="currentColor" />
-                  <path d="M2 12.4 L14 1.6" stroke="currentColor" stroke-width="1.6" />
+                  <!-- Misfold: two creases crossing where they cannot both hold. -->
+                  <path d="M2.6 2.6 L13.4 11.4" stroke="currentColor" stroke-width="1.7" />
+                  <path d="M13.4 2.6 L2.6 11.4" stroke="currentColor" stroke-width="1.7" />
                 </template>
                 <template v-else-if="statusOf(item) === 'ended'">
-                  <rect x="3" y="6" width="10" height="2.6" fill="currentColor" />
-                  <rect x="3" y="4.7" width="10" height="1" fill="currentColor" opacity=".45" />
+                  <!-- Packed flat: the sheet folded back to a packet. -->
+                  <path d="M2.5 8.6 L5 5.4 L13.5 5.4 L11 8.6 Z" fill="currentColor" opacity=".5" />
                 </template>
                 <template v-else>
-                  <rect x="8" y="1" width="1.2" height="12" fill="currentColor" />
-                  <rect x="11" y="1" width="3" height="12" fill="currentColor" />
+                  <!-- Locked: the fold seated, no hue of its own. -->
+                  <path d="M3 9.6 L8 3.4 L13 9.6" fill="none" stroke="currentColor" stroke-width="1.6" />
+                  <path d="M3 12.2 L13 12.2" stroke="currentColor" stroke-width="1.6" />
                 </template>
               </svg>
             </span>
@@ -939,7 +969,10 @@ async function confirmRemoveNow(): Promise<void> {
 
       <div v-if="usageSession" class="usage" data-testid="usage-meter">
         <div class="usage-bar">
-          <div class="usage-fill" :style="{ width: `${usagePct ?? 0}%`, background: usageColor }"></div>
+          <div
+            class="usage-fill"
+            :style="{ '--fill': (usagePct ?? 0) / 100, background: usageColor }"
+          ></div>
         </div>
         <div class="usage-foot mono">
           <span v-if="usagePct !== null" :style="{ color: usageColor }">
@@ -1038,9 +1071,15 @@ async function confirmRemoveNow(): Promise<void> {
 
   <!-- Remove-project confirmation popup -->
   <div v-if="confirmRemove" class="overlay" @click.self="cancelRemove">
-    <div class="dialog remove-dialog" data-testid="remove-dialog">
-      <div class="rd-icon">🗑</div>
-      <div class="rd-title mono">Remove {{ confirmRemove.name }}?</div>
+    <div
+      class="dialog remove-dialog"
+      data-testid="remove-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="remove-dialog-title"
+    >
+      <div class="rd-icon" aria-hidden="true">🗑</div>
+      <div id="remove-dialog-title" class="rd-title mono">Remove {{ confirmRemove.name }}?</div>
       <div class="rd-body">
         <div class="rd-path faint mono">{{ confirmRemove.path }}</div>
         <p class="rd-note dim">
@@ -1069,12 +1108,15 @@ async function confirmRemoveNow(): Promise<void> {
   /* The PROJECTS bar's height, shared so the group headers that stick beneath it
      cannot drift out of sync. This was a hard-coded 31px in two places, and
      changing the bar's padding silently desynced them. */
-  --section-row-h: 31px;
+  /* Derived, not hand-synced: .group-head's sticky offset has to equal the
+     section row's real height, and that height is the glyph buttons plus the row's
+     symmetric padding. Change either part and the offset follows. */
+  --add-h: 21px;
+  --section-row-pad: 5px;
+  --section-row-h: calc(var(--add-h) + 2 * var(--section-row-pad));
   width: 252px;
   min-width: 252px;
   background: var(--bg-panel);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
   border-right: 1px solid var(--border);
   display: flex;
@@ -1162,8 +1204,8 @@ async function confirmRemoveNow(): Promise<void> {
   gap: 5px;
 }
 
-/* On the rail there is no staff to read, so the mark shrinks to its glyph and
-   carries the whole state on its own. */
+/* On the rail there is no room for anything else, so the mark shrinks to its
+   glyph and carries the whole state on its own. */
 .sidebar.collapsed .mark svg {
   width: 13px;
   height: 11px;
@@ -1215,7 +1257,9 @@ async function confirmRemoveNow(): Promise<void> {
   gap: 8px;
   padding: 5px 10px;
   border: 1px solid var(--border-seg);
-  border-radius: 8px;
+  /* 3px, not 8px: DESIGN.md names the filter field under the content radius, and
+     8px is the interactive-row corner. Every other input in the app uses --rc. */
+  border-radius: var(--rc);
   transition:
     border-color 0.14s ease,
     box-shadow 0.14s ease;
@@ -1264,12 +1308,11 @@ async function confirmRemoveNow(): Promise<void> {
   /* Symmetric vertical padding. It was 2px top against 8px bottom, which left the
      content band sitting 3px above the block's centre: align-items centred the
      children within the band, but the band itself was high.
-     5px + 21px (the glyph buttons) + 5px keeps the row at exactly
-     var(--section-row-h), which .group-head's sticky offset depends on. */
-  padding: 5px 14px 5px 18px;
+     The vertical padding is --section-row-pad and the buttons are --add-h, which
+     is how var(--section-row-h) is computed — .group-head's sticky offset depends
+     on this row's height matching it exactly. */
+  padding: var(--section-row-pad) 14px var(--section-row-pad) 18px;
   background: var(--bg-sticky);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
 }
 
 .section-row.mcp-section {
@@ -1293,8 +1336,8 @@ async function confirmRemoveNow(): Promise<void> {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 21px;
-  height: 21px;
+  min-width: var(--add-h);
+  height: var(--add-h);
   font-size: 13px;
   color: var(--text-faint);
   line-height: 1;
@@ -1314,15 +1357,6 @@ async function confirmRemoveNow(): Promise<void> {
   padding: 2px 0 8px;
 }
 
-@keyframes nowBreath {
-  0%,
-  100% {
-    opacity: 0.34;
-  }
-  50% {
-    opacity: 0.72;
-  }
-}
 
 /* --- Collapsible group headers ---
    Full-bleed and sticky under the PROJECTS bar (design), so the group a row
@@ -1337,8 +1371,6 @@ async function confirmRemoveNow(): Promise<void> {
   margin: 8px 0 3px;
   padding: 4px 18px 4px 16px;
   background: var(--bg-sticky);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
   cursor: pointer;
   user-select: none;
 }
@@ -1416,8 +1448,8 @@ async function confirmRemoveNow(): Promise<void> {
   text-align: center;
 }
 
-/* A lane is full-bleed and square: a staff runs to both margins and a staff has
-   no corners. This is where the outgoing world's inset 8px-radius card row was. */
+/* A lane is full-bleed and square: a fold is a cut, and a cut has no corners.
+   This is where the outgoing world's inset 8px-radius card row was. */
 .project {
   position: relative;
   margin: 0 0 2px;
@@ -1437,34 +1469,18 @@ async function confirmRemoveNow(): Promise<void> {
   box-shadow: inset 0 0 0 1px var(--green);
 }
 
-/* The staff: five rules the lane is ruled with, drawn as a repeating gradient so
-   there is no markup cost per line. It spans the lane's full width because a
-   staff is the lane's material, not a divider between rows. */
 /* The five-hairline staff that used to be ruled across each lane is gone. Behind
    12px text in a 252px margin it read as guitar strings rather than as a staff,
    which is the opposite of what the metaphor was for. The lane still reads as a
-   part through three marks that survived: its brace, its notation glyph, and the
-   now-line crossing it. */
+   part through the marks that survived: its fold tick and its status glyph. */
 
-/* The now-line, one per lane at the same offset so it reads as a single rule
-   crossing the score. Per-lane rather than one tall element because a now-line
-   must cross staves, not empty plate below the last part. They share one
-   animation, so this stays a single authored moment. */
-.now {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  /* The lane's present edge. Two earlier positions both landed inside the
-     timer's digits, and a rule through a numeral is unreadable; at the edge it
-     reads as "everything left of this has happened" and can never collide. */
-  right: 5px;
-  width: 1px;
-  pointer-events: none;
-  background: var(--green);
-  animation: nowBreath 3.2s ease-in-out infinite;
-}
+/* The now-line — one shared animated rule that used to cross every lane — is
+   gone with the score it belonged to: it was that world's one authored motion,
+   and the state mark plus its word already say "working", which is why the
+   reduced-motion block could stop every animation without losing information.
+   Nothing replaces it; a sheet at rest does not pulse. */
 
-/* Part identity: a brace in the lane's colour. A 1px stroke, because a coloured
+/* Lane identity: a fold tick in the lane's colour. A 1px stroke, because a coloured
    edge bar above 1px on a list item is exactly the habit this world refuses. */
 .brace {
   position: absolute;
@@ -1502,9 +1518,9 @@ async function confirmRemoveNow(): Promise<void> {
   gap: 7px;
 }
 
-/* The lane's current sign. Colour comes from meaning: the pencil for a hold,
-   the now-line's cyan for playing, oxblood for a struck bar, and no hue at all
-   for fine, because a double barline needs none. */
+/* The lane's current sign. Colour comes from meaning: amber for held (needs
+   you), green for deploying (working), red for a misfold (error), and no hue
+   at all for locked, because a done fold needs none. */
 .mark {
   flex-shrink: 0;
   display: flex;
@@ -1532,9 +1548,9 @@ async function confirmRemoveNow(): Promise<void> {
   color: var(--text-ghost);
 }
 
-/* The part name sits in the margin, to the LEFT of where the staff begins, which
-   is where a score puts its instrument names. It needs no plate: an earlier pass
-   gave it a background and spread shadow, and that read as a text input. */
+/* The project name sits in the margin, to the LEFT of where the lane begins.
+   It needs no background of its own: an earlier pass gave it a background and
+   spread shadow, and that read as a text input. */
 .name {
   flex: 1;
   min-width: 0;
@@ -1548,6 +1564,17 @@ async function confirmRemoveNow(): Promise<void> {
 
 .project.active .name {
   color: var(--text-bright);
+}
+
+/* The selected lane is washed in 12% valley blue, which lifts the surface under its
+   own metadata: the timer and path measure 4.32:1 there (dark) and the branch
+   4.19:1 (light), so the one lane the interface highlights had the least readable
+   detail line of any row. The branch only ever renders on the selected lane, so it
+   only ever rendered on this wash. */
+.project.active .timer,
+.project.active .path,
+.project.active .branch {
+  color: var(--text-on-wash);
 }
 
 /* Remove control: hidden until the row is hovered, like a close affordance. */
@@ -1834,8 +1861,6 @@ async function confirmRemoveNow(): Promise<void> {
   position: fixed;
   min-width: 180px;
   background: var(--bg-hover);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--border-strong);
   border-radius: var(--rc);
   overflow: hidden;
@@ -1922,15 +1947,21 @@ async function confirmRemoveNow(): Promise<void> {
 /* A 3px hairline, not a meter: it reports, it does not demand attention. */
 .usage-bar {
   height: 3px;
-  border-radius: 99px;
+  border-radius: var(--rp);
   background: var(--bg-seg);
   overflow: hidden;
 }
 
+/* Scaled, not widened: animating width is a layout property, and .usage-bar above
+   already carries the 99px radius plus overflow:hidden, so it supplies the pill
+   ends and the fill needs no radius of its own. That is what makes scaleX safe
+   here — on a fill with its own rounded ends it would stretch them. */
 .usage-fill {
   height: 100%;
-  border-radius: 99px;
-  transition: width 0.3s ease;
+  width: 100%;
+  transform-origin: left;
+  transform: scaleX(var(--fill, 0));
+  transition: transform 0.3s ease;
 }
 
 .usage-foot {

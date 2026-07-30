@@ -376,6 +376,25 @@ watch(
   { immediate: true },
 )
 
+/**
+ * How many raw events the clean and raw views derive from: a tail window, not the
+ * whole session.
+ *
+ * Measured, deriving over the full history: 5.0 ms of scripting per incoming event
+ * at 200 events, 6.4 at 1000, 14.0 at 3000, 41.7 at 6000 — because BOTH passes
+ * (scopedEvents, then items) re-scanned every event from the start, and the render
+ * then threw all but the last MAX_RENDER items away. Past roughly 3000 events each
+ * arriving event cost more than a frame, on a stream whose whole job is to keep up
+ * with output. The DOM was never the problem: node count was already flat at ~2004
+ * thanks to MAX_RENDER.
+ *
+ * Generous on purpose: 1500 raw events to produce 500 rendered items leaves room
+ * for grouping and filtering to collapse a lot, and `showEarlier` widens it before
+ * falling back to the store.
+ */
+const DERIVE_WINDOW = 1500
+const deriveWindow = ref(DERIVE_WINDOW)
+
 watch(
   () => props.project.id,
   (projectId, prevId) => {
@@ -392,6 +411,9 @@ watch(
     startError.value = null
     busy.value = false
     bypassRestart.value = false
+    // Per-project too: a window widened by paging through one long session must
+    // not carry into the next project and derive over its whole history.
+    deriveWindow.value = DERIVE_WINDOW
     resetSuggestions()
     void loadHistory(projectId)
     void specs.loadState(projectId)
@@ -420,9 +442,21 @@ type StreamItem =
 // The main stream hides subagent internals (they live in the agent chat view);
 // the agent view shows only that agent's events, opened by its delegating
 // prompt (synthesized — the Task tool input is the conversation opener).
+const derivedFrom = computed<SessionEvent[]>(() => {
+  const all = active.events
+  if (all.length <= deriveWindow.value) return all
+  let start = all.length - deriveWindow.value
+  // Back up to a natural block boundary (an event that is not noise) so the oldest
+  // visible block is a whole run rather than the tail of one that began before the
+  // window. Bounded, so a long unbroken run of noise cannot walk this to the start.
+  const floor = Math.max(0, start - 200)
+  while (start > floor && all[start].noiseKind) start -= 1
+  return all.slice(start)
+})
+
 const scopedEvents = computed<SessionEvent[]>(() => {
   const agent = selectedAgent.value
-  if (!agent) return active.events.filter((e) => agentIdOf(e) === undefined)
+  if (!agent) return derivedFrom.value.filter((e) => agentIdOf(e) === undefined)
   const intro: SessionEvent = {
     id: `agent-intro-${agent.id}`,
     sessionId: active.sessionId ?? '',
@@ -432,7 +466,7 @@ const scopedEvents = computed<SessionEvent[]>(() => {
     noiseKind: null,
     createdAt: '',
   }
-  return [intro, ...active.events.filter((e) => agentIdOf(e) === agent.id)]
+  return [intro, ...derivedFrom.value.filter((e) => agentIdOf(e) === agent.id)]
 })
 
 const items = computed<StreamItem[]>(() => {
@@ -483,7 +517,14 @@ const visibleItems = computed(() => items.value.slice(renderStart.value))
 
 function showEarlier(): void {
   renderStart.value = Math.max(0, renderStart.value - MAX_RENDER)
-  if (renderStart.value === 0 && active.hasMoreHistory) void active.loadEarlier()
+  if (renderStart.value > 0) return
+  // Widen before reaching for the store: what the developer is asking for may
+  // already be in memory and merely outside the derivation window.
+  if (deriveWindow.value < active.events.length) {
+    deriveWindow.value += DERIVE_WINDOW
+    return
+  }
+  if (active.hasMoreHistory) void active.loadEarlier()
 }
 
 // --- Raw view: complete session output as mono lines (FR-018) ---
@@ -540,7 +581,7 @@ function hhmm(iso: string): string {
 // sits in a gutter on its first line (matching the clean view).
 const rawLines = computed(() => {
   const stamps = outputPrefs.value.timestamps
-  return active.events.flatMap((event) => {
+  return derivedFrom.value.flatMap((event) => {
     const stamp = stamps ? hhmm(event.createdAt) : null
     return rawLinesOf(event).map((text, i) => ({
       key: `${event.id}:${i}`,
@@ -899,23 +940,29 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
         >
           ⚙
         </button>
-        <div class="segments mono" data-testid="view-toggle">
-          <div
+        <div class="segments mono" data-testid="view-toggle" role="tablist" aria-label="Stream view">
+          <button
+            type="button"
             class="seg"
             :class="{ on: active.view === 'clean' }"
             data-testid="view-clean"
+            role="tab"
+            :aria-selected="active.view === 'clean'"
             @click="switchView('clean')"
           >
             Clean
-          </div>
-          <div
+          </button>
+          <button
+            type="button"
             class="seg"
             :class="{ on: active.view === 'raw' }"
             data-testid="view-raw"
+            role="tab"
+            :aria-selected="active.view === 'raw'"
             @click="switchView('raw')"
           >
             Raw
-          </div>
+          </button>
         </div>
       </div>
       <div class="head-meta mono">
@@ -1065,9 +1112,15 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
       <div class="stream-inner">
         <!-- Agent chat banner: ← back │ ● name · subagent -->
         <div v-if="selectedAgent" class="agent-banner mono" data-testid="agent-banner">
-          <span class="ab-back" data-testid="agent-back" @click="active.selectAgent(null)">
+          <button
+            type="button"
+            class="ab-back"
+            data-testid="agent-back"
+            :aria-label="`Back to ${project.name}`"
+            @click="active.selectAgent(null)"
+          >
             ← {{ project.name }}
-          </span>
+          </button>
           <span class="ab-sep">│</span>
           <span class="ab-dot">●</span>
           <span class="ab-name">{{ selectedAgent.task || selectedAgent.name }}</span>
@@ -1120,13 +1173,14 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
           </div>
         </div>
 
-        <div
-          v-if="renderStart > 0 || active.hasMoreHistory"
+        <button
+          v-if="renderStart > 0 || deriveWindow < active.events.length || active.hasMoreHistory"
+          type="button"
           class="load-earlier mono"
           @click="showEarlier()"
         >
           ▴ show earlier activity
-        </div>
+        </button>
 
         <template
           v-for="item in visibleItems"
@@ -1183,18 +1237,20 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
             </button>
           </div>
           <div class="agents-rows">
-            <div
+            <button
               v-for="agent in shownAgents"
               :key="agent.id"
+              type="button"
               class="agent-row"
               data-testid="agent-row"
+              :aria-label="`Open ${agent.name}'s chat`"
               @click="active.selectAgent(agent.id)"
             >
               <span class="agent-dot">●</span>
               <span class="agent-name">{{ agent.name }}</span>
               <span class="agent-task">{{ agent.task || agent.label }}</span>
               <span class="agent-chat">chat →</span>
-            </div>
+            </button>
             <div
               v-if="!agentsExpanded && workingAgents.length > SHOW_LIMIT"
               class="agents-more"
@@ -1461,8 +1517,6 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   padding: 14px 22px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
@@ -1472,8 +1526,6 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   padding: 0 16px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
@@ -1502,7 +1554,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   color: var(--text-meta);
   background: color-mix(in srgb, var(--green) 10%, transparent);
   border: 1px solid var(--border-strong);
-  border-radius: 99px;
+  border-radius: var(--rp);
   padding: 0 6px;
   line-height: 15px;
 }
@@ -1524,6 +1576,18 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   font-weight: 600;
   color: var(--text-bright);
   white-space: nowrap;
+  /* The same treatment .h-path already has, right beside it. Without min-width: 0
+     a nowrap flex child cannot shrink below its text, so a long project name — a
+     dotted .NET solution folder, say — pushed the branch, pills, Stop, End and the
+     settings gear off the end of the row instead of truncating itself. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Both this and .h-path can now shrink, so say which one yields first. The name
+     identifies the lane the developer is working in; the path is corroboration and
+     is shown in full in the sidebar. Left to the flex default they truncated
+     together and the name lost as much as the path. */
+  flex-shrink: 1;
 }
 
 .h-path {
@@ -1532,6 +1596,8 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
+  flex-shrink: 6;
 }
 
 .segments {
@@ -1539,7 +1605,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   flex-shrink: 0;
   white-space: nowrap;
   border: 1px solid var(--border-seg);
-  border-radius: 99px;
+  border-radius: var(--rp);
   overflow: hidden;
   font-size: 11px;
 }
@@ -1565,7 +1631,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   font-size: 12px;
   color: var(--text-tab);
   border: 1px solid var(--border-seg);
-  border-radius: 99px;
+  border-radius: var(--rp);
   padding: 3px 9px;
 }
 
@@ -1645,8 +1711,6 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   font-size: 10.5px;
   color: var(--text-body);
   background: var(--bg-hover);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--border-card-alt);
   border-radius: var(--rc);
   padding: 3px 9px;
@@ -1675,8 +1739,6 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   border-radius: var(--rc);
   padding: 2px 10px;
   background: var(--bg-panel);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   box-shadow: var(--elev);
   pointer-events: auto;
 }
@@ -1748,7 +1810,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   font-size: 10px;
   color: var(--blue);
   border: 1px solid color-mix(in srgb, var(--blue) 35%, transparent);
-  border-radius: 99px;
+  border-radius: var(--rp);
   padding: 1px 8px;
   white-space: nowrap;
 }
@@ -1761,7 +1823,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   font-size: 10.5px;
   color: var(--text-meta);
   border: 1px solid var(--border-seg);
-  border-radius: 99px;
+  border-radius: var(--rp);
   padding: 2px 10px;
   cursor: pointer;
   background: transparent;
@@ -1828,6 +1890,11 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 }
 
 .load-earlier {
+  /* display/width because this is a <button> now (it had no keyboard path as a
+     div): a button is inline-block, so without these the pager would stop
+     spanning the stream and its centred label would sit left. */
+  display: block;
+  width: 100%;
   font-size: 11px;
   color: var(--text-faint);
   cursor: pointer;
@@ -1847,8 +1914,6 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   margin-bottom: 16px;
   padding: 9px 12px;
   background: color-mix(in srgb, var(--surface-inset) 55%, transparent);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--surface-inset-line);
   flex-wrap: wrap;
 }
@@ -1885,7 +1950,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   font-size: 10px;
   color: var(--text-faint);
   border: 1px solid var(--border-seg);
-  border-radius: 99px;
+  border-radius: var(--rp);
   padding: 1px 7px;
   white-space: nowrap;
 }
@@ -1894,8 +1959,6 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 .agents {
   border: 1px solid color-mix(in srgb, var(--green) 18%, transparent);
   background: color-mix(in srgb, var(--surface-inset) 55%, transparent);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   border-radius: var(--rc);
   padding: 11px 13px;
   margin-top: 6px;
@@ -1924,7 +1987,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   font-size: 10px;
   color: var(--text-tab);
   border: 1px solid var(--border-seg);
-  border-radius: 99px;
+  border-radius: var(--rp);
   padding: 1px 9px;
   background: transparent;
   cursor: pointer;
@@ -1974,15 +2037,16 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   display: flex;
   align-items: center;
   gap: 10px;
+  /* width so the flex row still spans its container as a <button>. */
+  width: 100%;
   margin: 0 -6px;
   padding: 4px 6px;
+  text-align: left;
   cursor: pointer;
 }
 
 .agent-row:hover {
   background: var(--bg-hover);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   box-shadow: var(--elev);
 }
 
@@ -2023,8 +2087,6 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   overflow-y: auto;
   padding: 16px 22px 52px;
   background: color-mix(in srgb, var(--bg-code) 50%, transparent);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
 }
 
 .raw-line {
@@ -2052,8 +2114,6 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 /* Positioning context for the floating REFS row; base composer chrome is global. */
 .composer {
   position: relative;
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
@@ -2082,7 +2142,10 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 
 .sc-stop {
   font-size: 11px;
-  color: #fff;
+  /* Not #fff: white on the light red-pencil correction red measures 2.78:1. --red-ink is the
+     token that exists for exactly this, at 6.34:1 — the same fix styles.css
+     already applied to .stop-btn:hover. */
+  color: var(--red-ink);
   background: var(--red);
   border: none;
   border-radius: 8px;
@@ -2128,8 +2191,6 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   font-size: 11px;
   color: var(--text-body);
   background: var(--bg-hover);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   box-shadow: var(--elev);
   border: 1px solid var(--border-card-alt);
   border-radius: var(--rc);

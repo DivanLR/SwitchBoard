@@ -30,12 +30,22 @@ export function seedRealApp(): SeededApp {
   const userDataDir = mkdtempSync(join(tmpdir(), 'switchboard-realapp-'))
   const projectPath = mkdtempSync(join(tmpdir(), 'switchboard-dotnet-'))
 
-  // A .csproj plus a Controllers folder is what stack detection looks for, so the
-  // Tests section offers the .NET stack and its seven suites.
+  // A solution file marks the stack; the Controllers folder and the routed
+  // MapControllers call mark it as an API rather than a Blazor front end, so the
+  // Tests section offers the endpoint suites and none of the browser ones.
   mkdirSync(join(projectPath, 'Controllers'), { recursive: true })
+  writeFileSync(join(projectPath, 'Sample.Api.sln'), '\n')
   writeFileSync(
     join(projectPath, 'Sample.Api.csproj'),
     '<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>\n',
+  )
+  writeFileSync(
+    join(projectPath, 'Program.cs'),
+    'var builder = WebApplication.CreateBuilder(args);\n' +
+      'builder.Services.AddControllers();\n' +
+      'var app = builder.Build();\n' +
+      'app.MapControllers();\n' +
+      'app.Run();\n',
   )
   writeFileSync(join(projectPath, 'Controllers', 'PoliciesController.cs'), '// placeholder\n')
   execSync('git init', { cwd: projectPath, stdio: 'ignore' })

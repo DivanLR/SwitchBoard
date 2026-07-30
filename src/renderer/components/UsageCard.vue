@@ -86,14 +86,14 @@ function barColor(pct: number): string {
 
 .uc-bar {
   height: 4px;
-  border-radius: 99px;
+  border-radius: var(--rp);
   background: rgba(255, 255, 255, 0.07);
   overflow: hidden;
 }
 
 .uc-fill {
   height: 100%;
-  border-radius: 99px;
+  border-radius: var(--rp);
 }
 
 .uc-meter-resets {

@@ -169,7 +169,10 @@ async function alwaysAllowSimilar(item: PermissionRequest): Promise<void> {
   await loadCoveredBases()
 }
 
-function openHistCtx(h: DecisionRecord, event: MouseEvent): void {
+/** Opens the history menu at a point. Separated from the mouse event so the
+ *  keyboard path (ContextMenu / Shift+F10 on the focused row) opens the same
+ *  menu at the row's own position, rather than the menu being mouse-only. */
+function openHistCtxAt(h: DecisionRecord, x: number, y: number): void {
   // Any approved shell command can be always-allowed except the destructive set
   // — the risk classifier fails safe to `high` for ordinary unmatched commands,
   // so gating on risk would hide the option for most vetted commands. Hide it
@@ -185,9 +188,25 @@ function openHistCtx(h: DecisionRecord, event: MouseEvent): void {
     detail: h.detail,
     allowBase: eligible ? base || null : null,
     // Clamped to the viewport so the menu never opens off-screen.
-    x: Math.min(event.clientX, window.innerWidth - 345),
-    y: Math.min(event.clientY, window.innerHeight - 130),
+    x: Math.min(x, window.innerWidth - 345),
+    y: Math.min(y, window.innerHeight - 130),
   }
+}
+
+function openHistCtx(h: DecisionRecord, event: MouseEvent): void {
+  openHistCtxAt(h, event.clientX, event.clientY)
+}
+
+/**
+ * The keyboard equivalent of the right-click, on the focused row: the platform's
+ * own Menu key, or Shift+F10 where a keyboard has no Menu key. Chosen over a
+ * visible per-row "..." button so every history row keeps the shape DESIGN.md
+ * gave it, while "Always allow this command" and "Remove this entry" stop being
+ * reachable by mouse alone.
+ */
+function openHistCtxKeyboard(h: DecisionRecord, event: KeyboardEvent): void {
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  openHistCtxAt(h, rect.left + 24, rect.bottom)
 }
 
 async function allowFromHist(): Promise<void> {
@@ -228,26 +247,32 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
 <template>
   <aside class="inbox" data-testid="inbox-view">
     <!-- Tabs -->
-    <div class="tabs">
-      <div
+    <div class="tabs" role="tablist" aria-label="Inbox and history">
+      <button
+        type="button"
         class="tab"
         :class="{ on: tab === 'inbox' }"
         data-testid="inbox-tab-pending"
+        role="tab"
+        :aria-selected="tab === 'inbox'"
         @click="tab = 'inbox'"
       >
         Inbox
         <span v-if="inbox.pendingCount > 0" class="badge-count" data-testid="inbox-badge">
           {{ inbox.pendingCount }}
         </span>
-      </div>
-      <div
+      </button>
+      <button
+        type="button"
         class="tab"
         :class="{ on: tab === 'history' }"
         data-testid="inbox-tab-history"
+        role="tab"
+        :aria-selected="tab === 'history'"
         @click="tab = 'history'"
       >
         History
-      </div>
+      </button>
       <span style="flex: 1"></span>
       <button
         class="inbox-collapse"
@@ -420,8 +445,15 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
         class="hist-row"
         :class="{ open: expandedHistory.has(h.id) }"
         data-testid="history-item"
-        title="Right-click for options"
+        title="Right-click, or press the Menu key, for options"
+        role="button"
+        tabindex="0"
+        :aria-expanded="expandedHistory.has(h.id)"
         @click="toggleHistory(h.id)"
+        @keydown.enter.prevent="toggleHistory(h.id)"
+        @keydown.space.prevent="toggleHistory(h.id)"
+        @keydown.f10.shift.prevent="openHistCtxKeyboard(h, $event)"
+        @keydown.context-menu.prevent="openHistCtxKeyboard(h, $event)"
         @contextmenu.prevent="openHistCtx(h, $event)"
       >
         <div class="hist-head">
@@ -459,8 +491,12 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
     </div>
 
     <!-- History right-click context menu. Teleported to <body> so its fixed
-         overlay covers the viewport: the .inbox pane uses backdrop-filter, which
-         would otherwise make it the containing block for position:fixed. -->
+         overlay covers the viewport rather than the pane. This was originally
+         needed because .inbox carried a backdrop-filter, which makes an element
+         the containing block for position:fixed; that blur is gone now (DESIGN.md
+         forbids glass on panels), so the Teleport is kept as the robust form
+         rather than as a workaround — any ancestor gaining a transform or filter
+         later would reintroduce the same trap. -->
     <Teleport to="body">
       <div
         v-if="histCtx"
@@ -500,8 +536,6 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   width: var(--inbox-w, 332px);
   min-width: var(--inbox-w, 332px);
   background: var(--gloss), var(--bg-panel);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
   border-left: 1px solid var(--border);
   display: flex;
@@ -529,7 +563,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   padding: 0;
   color: var(--text-faint);
   border: 1px solid var(--border-seg);
-  border-radius: 99px;
+  border-radius: var(--rp);
   background: transparent;
   cursor: pointer;
 }
@@ -651,7 +685,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   width: 7px;
   min-width: 7px;
   height: 7px;
-  border-radius: 99px;
+  border-radius: var(--rp);
   background: var(--amber);
   animation: sbPulse 1.8s ease infinite;
   flex-shrink: 0;
@@ -697,8 +731,6 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
 .item {
   /* Design fills this card from --bg-hover (not --bg-card) with a glass blur. */
   background: var(--gloss), var(--bg-hover);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--border-card-alt);
   border-radius: var(--rc);
   padding: 11px 12px;
@@ -761,8 +793,6 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
 .detail-box {
   color: var(--detail);
   background: color-mix(in srgb, var(--bg) 50%, transparent);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: var(--rc);
   white-space: pre-wrap;
@@ -848,8 +878,6 @@ html.sb-light .detail-box {
   font-size: 10.5px;
   color: var(--text-body);
   background: var(--gloss), var(--bg-hover);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   box-shadow: var(--elev);
   border: 1px solid var(--border-strong);
   border-radius: var(--rc);
@@ -953,7 +981,7 @@ html.sb-light .detail-box {
   line-height: 14px;
   text-align: center;
   border: 1px solid var(--border-card);
-  border-radius: 99px;
+  border-radius: var(--rp);
   transition: transform 0.12s ease;
 }
 

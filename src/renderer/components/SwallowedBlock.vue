@@ -54,8 +54,6 @@ function textOf(event: SessionEvent): string {
 
 .box {
   background: color-mix(in srgb, var(--bg-code) 50%, transparent);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--border-code);
   border-radius: var(--rc);
   padding: 9px 12px;

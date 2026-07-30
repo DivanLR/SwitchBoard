@@ -56,3 +56,9 @@ AGENTS.md
 .cursorrules
 .ponytail
 .ponytail/
+
+# Impeccable session state: decision-page payloads and the live-mode journal are
+# per-session scratch, not source. The design sidecar and live config ARE tracked.
+.impeccable/questions/
+.impeccable/live/sessions/
+.impeccable/sketches/

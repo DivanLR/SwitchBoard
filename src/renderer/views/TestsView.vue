@@ -99,7 +99,15 @@ const sandboxed = computed<SandboxEnv>(() =>
     : null,
 )
 
-const suites = computed<TestSuite[]>(() => [...(stack.value?.suites ?? [])])
+// Prefer what detection actually found for this project over the raw catalog
+// entry: a .NET project's suites are narrowed to whether it holds an API, a Blazor
+// front end, or both, so a front end is not offered an HTTP smoke pass over
+// endpoints it does not have. A stack the developer picked that detection did NOT
+// find is an override, and gets the whole catalog entry — that choice is theirs.
+const suites = computed<TestSuite[]>(() => {
+  const found = detected.value.find((d) => d.stackId === chosenId.value)
+  return [...(found?.suites ?? stack.value?.suites ?? [])]
+})
 const blockedReason = (suite: TestSuite): string | null => unavailableReason(suite, sandboxed.value)
 
 // The default selection follows the environment: heavy suites are opt-in, and a
@@ -107,8 +115,21 @@ const blockedReason = (suite: TestSuite): string | null => unavailableReason(sui
 watch(
   [suites, sandboxed],
   ([list, sandbox]) => {
-    if (list.length === 0) selected.value = null
-    else if (selected.value === null) selected.value = defaultSelection(list, sandbox)
+    if (list.length === 0) {
+      selected.value = null
+      return
+    }
+    if (selected.value === null) {
+      selected.value = defaultSelection(list, sandbox)
+      return
+    }
+    // The offered list narrows once detection lands — a .NET project turns out to
+    // be an API and its Blazor suites go away. A selection may not outlive the
+    // suite it names: a run must never be dispatched with an id this project was
+    // never offered, and the count must never read "9 of 7".
+    const offered = new Set(list.map((suite) => suite.id))
+    const kept = selected.value.filter((id) => offered.has(id))
+    if (kept.length !== selected.value.length) selected.value = kept
   },
   { immediate: true },
 )
@@ -122,6 +143,15 @@ function toggleSuite(suite: TestSuite): void {
 }
 
 const isSelected = (suite: TestSuite): boolean => (selected.value ?? []).includes(suite.id)
+
+/** Names what is actually being verified — ".NET Blazor" rather than ".NET" —
+ *  falling back to the catalog entry when the choice was an override. */
+const profileName = computed(
+  () =>
+    detected.value.find((d) => d.stackId === chosenId.value)?.stackLabel ??
+    stack.value?.label ??
+    '',
+)
 
 /** Detection is a hint, never a decision — the developer confirms it (FR-034). */
 const detectHint = computed(() =>
@@ -144,6 +174,13 @@ interface GateFace {
   status: 'pass' | 'fail' | 'warn' | 'none'
   value: string
   sub: string
+  /**
+   * True when the app read this out of the runner's own artefact file, rather than
+   * taking the session's word for it. The distinction is worth a mark on the tile:
+   * a report line is schema-valid whether or not it is true, so a figure the app
+   * checked itself is different evidence from the same figure typed into a report.
+   */
+  verified?: boolean
 }
 
 type GateView = VerifyGate & GateFace
@@ -169,10 +206,18 @@ function suiteGate(kinds: readonly string[]): GateFace {
     return { status: 'none', value: '—', sub: latest.value ? 'not in this run' : 'no run yet' }
   }
   const failed = executed.filter((r) => r.status === 'fail')
+  // Only when EVERY executed suite was settled by an artefact: one unverified
+  // suite in the set means the tile as a whole was not checked against a file.
+  const verified = executed.every((r) => r.verified === true)
   if (failed.length > 0) {
-    return { status: 'fail', value: 'failed', sub: failed[0].detail || `${failed.length} suite(s) failed` }
+    return {
+      status: 'fail',
+      value: 'failed',
+      sub: failed[0].detail || `${failed.length} suite(s) failed`,
+      verified,
+    }
   }
-  return { status: 'pass', value: 'passed', sub: `${executed.length} suite(s)` }
+  return { status: 'pass', value: 'passed', sub: `${executed.length} suite(s)`, verified }
 }
 
 /** A measured figure against its threshold. Under target is a warning, never a
@@ -181,10 +226,14 @@ function figureGate(m: Measured, minimum: number, sub?: string): GateFace {
   if (m.value === null) {
     return { status: 'none', value: '—', sub: latest.value ? 'not measured in this run' : 'no run yet' }
   }
+  const meets = m.value >= minimum
   return {
-    status: m.value >= minimum ? 'pass' : 'warn',
+    status: meets ? 'pass' : 'warn',
     value: pct(m),
-    sub: sub ?? sourceOf(m),
+    // The word, not just the hue: a figure gate's only state cue was green vs
+    // amber, and amber sits 27 degrees from the red used for failure.
+    sub: `${meets ? 'meets target' : 'under target'} · ${sub ?? sourceOf(m)}`,
+    verified: m.verified === true,
   }
 }
 
@@ -450,9 +499,9 @@ function statusWord(run: VerifyRun): string {
       <!-- Chosen profile: what is being verified, and the run control. -->
       <div class="prof">
         <div class="prof-head">
-          <span class="prof-name">{{ stack.label }}</span>
+          <span class="prof-name">{{ profileName }}</span>
           <span class="prof-sub mono" data-testid="tests-suite-count">
-            {{ (selected ?? []).length }} of {{ stack.suites.length }} suites
+            {{ (selected ?? []).length }} of {{ suites.length }} suites
           </span>
           <span style="flex: 1"></span>
           <button class="link" data-testid="tests-change-stack" @click="chooseStack('')">change stack</button>
@@ -460,6 +509,22 @@ function statusWord(run: VerifyRun): string {
         <div class="prof-meta mono">
           {{ branch ? `on ${branch}` : 'no branch' }} · verification runs through the session, never as
           its own process
+        </div>
+
+        <!-- Run state, in the header rather than only inside the Results panel.
+             Starting a run deliberately does not jump anywhere, so the developer is
+             expected to keep working in another panel while it executes — which
+             meant the run finishing was announced nowhere at all, and a screen
+             reader user had no way to learn it had. role=status is an implicit
+             aria-live="polite", and the line is visible because a sighted user
+             gains the same thing: the verdict without navigating to find it. -->
+        <div
+          v-if="latest"
+          class="prof-meta mono"
+          data-testid="tests-run-state"
+          role="status"
+        >
+          {{ running ? 'Running…' : `Last run ${statusWord(latest)}` }} · {{ runSummary }}
         </div>
 
         <!-- Suite picker: heavy suites are opt-in, and what the environment
@@ -524,6 +589,13 @@ function statusWord(run: VerifyRun): string {
           @click="subTab = g.panel"
         >
           <span class="gate-name mono">{{ g.name }}</span>
+          <span
+            v-if="g.verified"
+            class="gate-verified mono"
+            :data-testid="`tests-gate-verified-${g.id}`"
+            title="Read from the test runner's own report file, not from what the session said"
+            >checked</span
+          >
           <span class="gate-value">{{ g.value }}</span>
           <span class="gate-sub">{{ g.sub }}</span>
           <span class="gate-target mono">{{ g.target }}</span>
@@ -625,12 +697,16 @@ function statusWord(run: VerifyRun): string {
           placeholder="filter by path, method or file"
           data-testid="tests-api-search"
         />
-        <div
+        <button
           v-for="(e, i) in apiMatches"
           :key="`${e.method} ${e.template}`"
+          type="button"
           class="row pick"
           :class="{ on: isPicked(e) }"
           :data-testid="`tests-api-endpoint-${i}`"
+          role="checkbox"
+          :aria-checked="isPicked(e)"
+          :aria-label="`${e.method} ${e.template}`"
           @click="togglePick(e)"
         >
           <span class="row-status mono" :class="isPicked(e) ? 'pass' : ''">
@@ -639,7 +715,7 @@ function statusWord(run: VerifyRun): string {
           <span class="ep-method mono">{{ e.method }}</span>
           <span class="row-name mono">{{ e.template }}</span>
           <span class="row-detail mono">{{ e.source }}</span>
-        </div>
+        </button>
 
         <div class="targets">
           <span class="lbl">{{ picked.length }} selected</span>
@@ -923,7 +999,7 @@ function statusWord(run: VerifyRun): string {
   color: var(--green);
   border: 1px solid color-mix(in srgb, var(--green) 32%, transparent);
   background: color-mix(in srgb, var(--green) 10%, transparent);
-  border-radius: 99px;
+  border-radius: var(--rp);
   padding: 1px 9px;
 }
 
@@ -1071,6 +1147,16 @@ function statusWord(run: VerifyRun): string {
   color: var(--text-faint);
 }
 
+/* The mark that says the app read this figure out of the runner's own report file
+   rather than off the session's summary. Deliberately quiet: it qualifies the
+   figure, it is not the figure. */
+.gate-verified {
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+  color: var(--green);
+  opacity: 0.75;
+}
+
 .gate-value {
   font-size: 14px;
   color: var(--text-bright);
@@ -1087,7 +1173,7 @@ function statusWord(run: VerifyRun): string {
 .gate-target {
   margin-top: 3px;
   font-size: 9.5px;
-  color: var(--text-ghost);
+  color: var(--text-on-wash);
 }
 
 .gate.pass .gate-value {
@@ -1156,7 +1242,7 @@ function statusWord(run: VerifyRun): string {
   font-size: 9.5px;
   color: var(--green-ink);
   background: var(--green);
-  border-radius: 99px;
+  border-radius: var(--rp);
   padding: 0 5px;
 }
 
@@ -1192,7 +1278,7 @@ function statusWord(run: VerifyRun): string {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  border-radius: 99px;
+  border-radius: var(--rp);
   padding: 1px 9px;
   border: 1px solid var(--border-strong);
   color: var(--text-mid);
@@ -1295,6 +1381,10 @@ function statusWord(run: VerifyRun): string {
   display: flex;
   align-items: baseline;
   gap: 10px;
+  /* width + text-align because the pickable variant is a <button>: it had no
+     keyboard path as a div, and a button is inline-block and centred by default. */
+  width: 100%;
+  text-align: left;
   padding: 6px 10px;
   margin-bottom: 4px;
   background: var(--bg-hover);
@@ -1378,7 +1468,7 @@ function statusWord(run: VerifyRun): string {
 
 .fig-src {
   font-size: 9.5px;
-  color: var(--text-ghost);
+  color: var(--text-on-wash);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1423,7 +1513,7 @@ function statusWord(run: VerifyRun): string {
 
 .ev-path {
   font-size: 9.5px;
-  color: var(--text-ghost);
+  color: var(--text-on-wash);
   margin-top: 3px;
 }
 
@@ -1499,7 +1589,7 @@ function statusWord(run: VerifyRun): string {
   width: 56px;
   font-size: 9.5px;
   text-align: right;
-  color: var(--text-ghost);
+  color: var(--text-on-wash);
 }
 
 .ep-detail {
@@ -1516,7 +1606,7 @@ function statusWord(run: VerifyRun): string {
    what the response was checked against. Labelled so neither reads as prose. */
 .ep-line {
   font-size: 9.5px;
-  color: var(--text-ghost);
+  color: var(--text-on-wash);
   margin-top: 3px;
   word-break: break-word;
 }
@@ -1562,7 +1652,7 @@ function statusWord(run: VerifyRun): string {
   color: var(--amber);
   border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
   background: color-mix(in srgb, var(--amber) 8%, transparent);
-  border-radius: 99px;
+  border-radius: var(--rp);
   padding: 1px 9px;
 }
 
@@ -1584,7 +1674,7 @@ function statusWord(run: VerifyRun): string {
   letter-spacing: 0.05em;
   color: var(--text-ghost);
   border: 1px dashed var(--border-strong);
-  border-radius: 99px;
+  border-radius: var(--rp);
   padding: 1px 8px;
 }
 

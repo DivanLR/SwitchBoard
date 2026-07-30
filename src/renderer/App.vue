@@ -127,27 +127,11 @@ const dbProject = computed(() => projects.dbProject)
     </p>
   </div>
 
-  <!--
-    THESIS: Nine concurrent agents are parts in one score, not rows in a list.
-    Refuses the sidebar-list-plus-stream dashboard this category always ships.
-    OWN-WORLD: Engraver's pewter plate (#2b3037) under bone ink (#e8e4dc); ochre
-    (#e0a760) for attention owed, oxblood (#f0776a) for struck-out error, proof
-    cyan (#57b9cf) for the live now-line. System UI stack, JetBrains Mono for
-    terminal output only. Notation drawn as inline SVG, never a font.
-    AMENDED: attention was named "rehearsal red"; on a dark plate it and the
-    error red both had to lighten and then sat 27deg apart, so the two signals
-    collided. Ochre restores separation. AMENDED: the five-hairline staff is
-    removed; ruled behind 12px text at 252px it read as guitar strings.
-    STORY: The developer reads every lane against one time axis, believes the
-    held lane is the only one wanting them, and releases its fermata.
-    FIRST VIEWPORT: The sidebar is the score's margin and its lanes: a coloured
-    brace for part identity, a notation mark for state, and the now-line crossing
-    at the lane's present edge. UNMET: a held lane does not yet carry its decision
-    inline; Approve and Deny still live in the inbox pane.
-    FORM: The Engraved Score, candidate 7 of 7, no stagings dealt, seed 157f7fe9.
-    FINISH: unreviewed and undocumented is unfinished; this build ends with the
-    finish review, the verdict, and DESIGN.md
-  -->
+  <!-- The direction contract for the world this app is built in lives at the top
+       of <body> in index.html, so it survives the production build. It is not
+       duplicated here: the previous copy outlived its own world and went on
+       describing the engraved-score metaphor, in the shell template, after the
+       app had moved to the deployable-sheet look. One contract, one place. -->
   <div v-else class="shell">
     <div
       v-if="updates.active && !updateDismissed"
@@ -266,7 +250,7 @@ const dbProject = computed(() => projects.dbProject)
 .ub-dot {
   width: 8px;
   height: 8px;
-  border-radius: 99px;
+  border-radius: var(--rp);
   background: var(--green);
   animation: sbFade 2.2s ease infinite;
 }
@@ -300,6 +284,9 @@ const dbProject = computed(() => projects.dbProject)
 .panes {
   display: flex;
   flex: 1;
+  /* Keep these two in step with BrowserWindow's minWidth/minHeight in
+     src/main/index.ts. CSS cannot import the constant, so the pairing is stated in
+     both places: an OS floor below this one clips the panes with no scrollbar. */
   min-width: 1080px;
   min-height: 560px;
   overflow: hidden;
@@ -327,7 +314,7 @@ const dbProject = computed(() => projects.dbProject)
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 99px;
+  border-radius: var(--rp);
   border: 1px solid var(--border-strong);
   background: transparent;
   color: var(--text-tab);
@@ -369,12 +356,26 @@ const dbProject = computed(() => projects.dbProject)
   }
 }
 
+/* The centre pane is the sheet itself, so it carries the world's ground: a faint
+   60-degree crease lattice at the mountain and valley angles. It lives here rather
+   than on <body> because the three panes paint over the body entirely, and this is
+   the largest field the developer actually sees. Painted on a pane that does not
+   itself scroll, so it is composited once, not per frame. */
 .main {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  background: var(--bg);
+  --crease: rgba(244, 244, 242, 0.03);
+  background:
+    repeating-linear-gradient(60deg, var(--crease) 0 1px, transparent 1px 92px),
+    repeating-linear-gradient(-60deg, var(--crease) 0 1px, transparent 1px 92px),
+    var(--bg);
+}
+
+/* Ink on paper is subtractive, so the same creases score darker in the light (paper) theme. */
+html.sb-light .main {
+  --crease: rgba(10, 10, 10, 0.05);
 }
 
 /* Drag handle on the inbox's left edge (design seam sits on the inbox border). */

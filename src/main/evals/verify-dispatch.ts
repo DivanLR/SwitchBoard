@@ -73,7 +73,18 @@ const HONESTY =
   'Every number must come from output you actually ran or a report file you actually read. ' +
   'If you did not measure something, put null and leave its source null — a guessed, ' +
   'estimated or "typical" figure is far worse than no figure. Never mark a suite pass ' +
-  'because it probably would.'
+  'because it probably would.\n' +
+  // Said out loud on purpose. The app parses TestResults/*.trx, coverage.cobertura.xml
+  // and StrykerOutput mutation reports itself after the turn, and where a file
+  // disagrees with this line the file is taken and the disagreement is shown. Stating
+  // that removes any advantage in an optimistic summary, and makes the artefact the
+  // thing worth producing.
+  'Note how this is checked: after your turn the application reads the artefacts the ' +
+  'commands left behind — the TRX under TestResults, coverage.cobertura.xml, and ' +
+  "Stryker's mutation report — and where one of those files disagrees with what you " +
+  'reported, the FILE is taken and the disagreement is shown to the developer beside ' +
+  'your line. So do not summarise a file you did not open, and do not tidy a figure. ' +
+  'Leave the artefacts where the commands put them, and report what they say.'
 
 /**
  * Tell the session to exercise the API for real, and to get its inputs from the

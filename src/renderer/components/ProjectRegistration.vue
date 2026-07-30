@@ -147,11 +147,13 @@ async function startSession(): Promise<void> {
 
       <template v-if="projects.suggestions.length > 0">
         <div class="section-label mono">SUGGESTED · Claude Code has been used here</div>
-        <div
+        <button
           v-for="s in projects.suggestions"
           :key="s.path"
+          type="button"
           class="suggestion"
           :data-testid="`suggestion-${s.name}`"
+          :aria-label="`Use ${s.path}`"
           @click="folder = s.path"
         >
           <div class="s-meta">
@@ -159,7 +161,7 @@ async function startSession(): Promise<void> {
             <div class="s-path mono">{{ s.path }}</div>
           </div>
           <span class="s-use mono">Use</span>
-        </div>
+        </button>
       </template>
 
       </div>
@@ -196,8 +198,6 @@ async function startSession(): Promise<void> {
   padding: 22px;
   /* A card, not a pill — 99px bows the corners in and clips the content. */
   border-radius: var(--rc);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   box-shadow: var(--shadow-dlg);
 }
 
@@ -267,8 +267,6 @@ async function startSession(): Promise<void> {
   margin-top: 16px;
   padding: 12px 14px;
   background: var(--bg-card);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   border: 1px solid color-mix(in srgb, var(--green) 18%, transparent);
   border-radius: var(--rc);
 }
@@ -316,8 +314,6 @@ async function startSession(): Promise<void> {
   margin-top: 12px;
   padding: 12px 14px;
   background: var(--bg-card);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--border-card);
   border-radius: var(--rc);
 }
@@ -364,6 +360,10 @@ html.sb-light .bypass-warn {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  /* width + text-align: this is a <button> now, so it must be told to fill the
+     row the div filled for free. */
+  width: 100%;
+  text-align: left;
   padding: 8px 4px;
   border-bottom: 1px solid var(--border-hist);
   cursor: pointer;
