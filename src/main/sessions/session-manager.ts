@@ -218,6 +218,14 @@ export class SessionManager {
     for (const request of this.repos.requests.pending()) {
       this.repos.requests.resolve(request.id, 'expired')
     }
+    // Verification and API runs close when the session's turn ends, which never
+    // happens if the container was SIGKILLed or the app was killed. Left alone, one
+    // orphaned row makes the Tests section read as permanently Running and refuse
+    // to start another run, which is exactly what FR-022 exists to prevent.
+    const note =
+      'The application closed before this run reported a result, so nothing it measured is known.'
+    this.repos.verifyRuns.reconcileRunning(note)
+    this.repos.apiRuns.reconcileRunning(note)
     // Sessions are not only DB rows now: a bypass session owns a container that
     // outlives a hard kill, so reconciling the rows without reaping those would
     // leave an autonomous agent running against the project folder.

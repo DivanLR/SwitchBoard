@@ -935,6 +935,25 @@ export class VerifyRunsRepo {
     return row ? hydrateVerifyRun(row) : null
   }
 
+  /**
+   * Close any run left mid-flight by a previous launch (FR-022).
+   *
+   * A run is closed by the session's turn ending. A container killed by SIGKILL,
+   * an app that was killed, or a machine that slept never produces that turn end,
+   * and the row then reads as a live run for ever: the Tests section shows Running
+   * and will not start another. Inconclusive rather than failed, because nothing is
+   * known about what the suites did, and this product never reports an unmeasured
+   * outcome as a result.
+   */
+  reconcileRunning(note: string): number {
+    const result = this.db
+      .prepare(
+        "UPDATE verify_runs SET status = 'inconclusive', note = ?, finishedAt = ? WHERE status = 'running'",
+      )
+      .run(note, nowIso())
+    return Number(result.changes ?? 0)
+  }
+
   /** The run a result belongs to when the session reports one: the newest still
    *  running, so a late report can never overwrite a finished run's figures. */
   runningFor(projectId: string): VerifyRun | null {
@@ -1004,6 +1023,17 @@ const API_HISTORY = 20
 
 export class ApiRunsRepo {
   constructor(private db: AppDatabase) {}
+
+  /** Same orphan as verify_runs, same cause: 'error' is this table's terminal word
+   *  for a run that proved nothing, and it has no 'inconclusive'. */
+  reconcileRunning(note: string): number {
+    const result = this.db
+      .prepare(
+        "UPDATE api_runs SET status = 'error', note = ?, finishedAt = ? WHERE status = 'running'",
+      )
+      .run(note, nowIso())
+    return Number(result.changes ?? 0)
+  }
 
   start(input: { projectId: string; baseUrl: string; sessionId: string | null }): ApiEvalRun {
     const run: ApiEvalRun = {

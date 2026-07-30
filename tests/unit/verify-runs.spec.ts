@@ -13,6 +13,7 @@ function setup() {
   const db = openDatabase(':memory:')
   const repos = createRepositories(db)
   const project = repos.projects.insert({ name: 'a', path: 'C:\\a', source: 'manual' })
+  const projectId = project.id
   const changed: string[] = []
   const manager = new SessionManager(repos, {
     onEvent: () => {},
@@ -32,7 +33,7 @@ function setup() {
       (manager as unknown as Record<string, (...args: unknown[]) => void>)[name](entry, kind, payload)
   const start = () =>
     repos.verifyRuns.start({
-      projectId: project.id,
+      projectId,
       stackId: 'node',
       sessionId: 's1',
       branch: 'main',
@@ -41,7 +42,7 @@ function setup() {
   return {
     repos,
     manager,
-    projectId: project.id,
+    projectId,
     changed,
     start,
     scan: drive('scanVerifyReport'),
@@ -132,5 +133,64 @@ describe('a verification run', () => {
     const newer = start()
 
     expect(repos.verifyRuns.runningFor(projectId)?.id).toBe(newer.id)
+  })
+})
+
+// A run is closed by the session's turn ending. A container killed by SIGKILL (this
+// app's bypass sessions have done that 18 times), an app that was killed, or a
+// machine that slept never produces that turn end, so the row stayed 'running' for
+// ever and the Tests section read it as a live run: the button said Running and
+// refused to start another. Reproduced from a real stuck row dated 2026-07-29.
+describe('startup reconciliation of orphaned runs (FR-022)', () => {
+  it('closes a verification run the previous launch never finished', () => {
+    const { repos, manager, projectId } = setup()
+    const run = repos.verifyRuns.start({
+      projectId,
+      stackId: 'node',
+      sessionId: 'gone',
+      branch: 'main',
+      requested: ['node-unit'],
+    })
+    expect(repos.verifyRuns.byId(run.id)?.status).toBe('running')
+
+    manager.reconcileOnStartup()
+
+    const after = repos.verifyRuns.byId(run.id)
+    // Inconclusive, never failed: nothing is known about what the suites did, and a
+    // figure nothing measured is never reported as a result.
+    expect(after?.status).toBe('inconclusive')
+    expect(after?.finishedAt).toBeTruthy()
+    expect(after?.note).toContain('closed before this run reported')
+    // And the view's own "is a run live" question now answers no.
+    expect(repos.verifyRuns.runningFor(projectId)).toBeNull()
+  })
+
+  it('leaves an already-finished run exactly as it was', () => {
+    const { repos, manager, projectId } = setup()
+    const run = repos.verifyRuns.start({
+      projectId,
+      stackId: 'node',
+      sessionId: 's',
+      branch: 'main',
+      requested: ['node-unit'],
+    })
+    repos.verifyRuns.finish(run.id, 'fail', null, 'one suite failed')
+    manager.reconcileOnStartup()
+    const after = repos.verifyRuns.byId(run.id)
+    expect(after?.status).toBe('fail')
+    expect(after?.note).toBe('one suite failed')
+  })
+
+  it('closes an orphaned API eval run too, in that table’s own terminal word', () => {
+    const { repos, manager, projectId } = setup()
+    const run = repos.apiRuns.start({
+      projectId,
+      baseUrl: 'http://localhost:5000',
+      sessionId: 'gone',
+    })
+    expect(repos.apiRuns.byId(run.id)?.status).toBe('running')
+    manager.reconcileOnStartup()
+    // api_runs has no 'inconclusive'; 'error' is its word for a run that proved nothing.
+    expect(repos.apiRuns.byId(run.id)?.status).toBe('error')
   })
 })
