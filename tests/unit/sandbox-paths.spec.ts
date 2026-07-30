@@ -5,6 +5,12 @@
 import { describe, expect, it } from 'vitest'
 import { refMounts, toContainerPaths } from '@main/sessions/docker-sandbox'
 import { sandboxSystemPromptAppend } from '@main/sessions/session-shaping'
+import {
+  needsBrowser,
+  sandboxTools,
+  suiteById,
+  unavailableReason,
+} from '@shared/test-catalog'
 
 const MOUNTS = [
   { host: 'C:\\GithubDesktop\\Pepkor\\MessageOrchestrator', container: '/workspace' },
@@ -96,5 +102,72 @@ describe('sandboxSystemPromptAppend', () => {
 
   it('is absent for a non-sandboxed session', () => {
     expect(sandboxSystemPromptAppend([])).toBeNull()
+  })
+})
+
+// A browser is in the bypass container ONLY where the project actually drives one.
+// For every other project it is deliberately absent, and that absence is the common
+// case: Chromium's shared libraries are several hundred megabytes that a project
+// with no browser tests would carry in every session for nothing. The Tests section
+// reads the same answer and says so before a run rather than failing one after.
+describe('browser in the bypass container, only where earned', () => {
+  it('is absent for a plain node project, and the suites that need it say why', () => {
+    expect(needsBrowser(['package.json', 'src', 'vite.config.ts'])).toBe(false)
+
+    const tools = sandboxTools(false, false)
+    expect(tools).not.toContain('browser')
+
+    // The node stack always OFFERS an end-to-end run, which is exactly why "a suite
+    // wants a browser" is useless as a gate: it is true almost always.
+    const e2e = suiteById('node-e2e')!
+    expect(e2e.needs).toBe('browser')
+    expect(unavailableReason(e2e, tools)).toBe('browser is not in the bypass container')
+  })
+
+  it('is absent for a .NET API project, which has no screens to drive', () => {
+    const tools = sandboxTools(true, false)
+    expect(tools).toEqual(['node', 'dotnet'])
+    expect(unavailableReason(suiteById('dotnet-unit')!, tools)).toBeNull()
+  })
+
+  it('is present for a project with a Playwright config', () => {
+    expect(needsBrowser(['package.json', 'playwright.config.ts'])).toBe(true)
+    expect(needsBrowser(['playwright.real.config.ts'])).toBe(true)
+  })
+
+  it('is present for an Angular workspace, whose unit tests run ChromeHeadless', () => {
+    expect(needsBrowser(['angular.json', 'package.json'])).toBe(true)
+    expect(needsBrowser(['karma.conf.js'])).toBe(true)
+    // All four Angular suites are browser-gated, so without this an Angular project
+    // in a bypass session could run only its production build.
+    for (const id of ['ng-unit', 'ng-coverage', 'ng-e2e', 'ng-mutation']) {
+      expect(suiteById(id)!.needs).toBe('browser')
+      expect(unavailableReason(suiteById(id)!, sandboxTools(false, true))).toBeNull()
+    }
+  })
+
+  it('reads the manifest when there is no config file of its own', () => {
+    const manifest = JSON.stringify({ devDependencies: { '@playwright/test': '^1.61.0' } })
+    expect(needsBrowser(['package.json'], () => manifest)).toBe(true)
+    // And stays false for a manifest that merely mentions unrelated packages.
+    expect(needsBrowser(['package.json'], () => '{"devDependencies":{"vitest":"^4"}}')).toBe(false)
+  })
+
+  it('says no when it cannot read anything, rather than assuming a browser', () => {
+    // A false negative costs one honest message; a false positive costs every
+    // session on that project an image it never uses.
+    expect(needsBrowser(['package.json'], () => null)).toBe(false)
+    expect(needsBrowser([])).toBe(false)
+  })
+
+  it('gives a Blazor project its browser suites, which is why this matters now', () => {
+    const tools = sandboxTools(true, true)
+    expect(tools).toEqual(['node', 'dotnet', 'browser'])
+    for (const id of ['blazor-ui', 'blazor-interactive']) {
+      expect(suiteById(id)!.needs).toBe('browser')
+      expect(unavailableReason(suiteById(id)!, tools)).toBeNull()
+      // Without a browser, both of a Blazor project's UI suites are unavailable.
+      expect(unavailableReason(suiteById(id)!, sandboxTools(true, false))).toContain('not in the bypass container')
+    }
   })
 })

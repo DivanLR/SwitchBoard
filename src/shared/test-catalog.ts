@@ -347,8 +347,50 @@ export function sandboxNeedsDotnet(stacks: readonly AvailableSuites[]): boolean 
  * Saying so BEFORE the run is the point: an environment limit must never be
  * reported as a failure of the developer's code (FR-057).
  */
-export function sandboxTools(dotnet: boolean): readonly SuiteTool[] {
-  return dotnet ? ['node', 'dotnet'] : ['node']
+export function sandboxTools(dotnet: boolean, browser = false): readonly SuiteTool[] {
+  const tools: SuiteTool[] = ['node']
+  if (dotnet) tools.push('dotnet')
+  if (browser) tools.push('browser')
+  return tools
+}
+
+/**
+ * Whether this project has real browser test infrastructure, and therefore whether
+ * a bypass container should carry a browser.
+ *
+ * The catalog OFFERS a browser suite to almost everything: the node stack always
+ * lists an end-to-end run and a screenshot pass, so "some suite wants a browser" is
+ * true nearly always and is useless as a gate. What decides it is whether the
+ * project actually drives a browser today, which is a cheap file question:
+ * a Playwright config, a Karma config, an Angular workspace (its test builder runs
+ * ChromeHeadless), or Playwright declared as a dependency.
+ *
+ * Getting this wrong is not symmetrical. A false negative costs the developer a
+ * "browser is not in the bypass container" line, stated before the run, which is
+ * the behaviour that shipped for years. A false positive costs every session on
+ * that project a few hundred megabytes of image it never uses, so the gate is
+ * deliberately evidence-led rather than generous.
+ */
+export function needsBrowser(
+  entries: readonly string[],
+  read?: (entry: string) => string | null,
+): boolean {
+  const lower = entries.map((entry) => entry.replace(/\\/g, '/').toLowerCase())
+  const named = lower.some(
+    (entry) =>
+      /(^|\/)playwright[.-]?[a-z0-9.-]*\.(config|conf)\.(ts|js|mjs|cjs)$/.test(entry) ||
+      /(^|\/)karma\.conf\.(js|ts)$/.test(entry) ||
+      /(^|\/)angular\.json$/.test(entry) ||
+      /(^|\/)(cypress|wdio)\.config\.(ts|js|mjs|cjs)$/.test(entry),
+  )
+  if (named || !read) return named
+  // A project can drive Playwright with no config file of its own, so the manifest
+  // is the second witness.
+  for (const entry of entries.filter((e) => /(^|[\\/])package\.json$/i.test(e)).slice(0, 8)) {
+    const text = read(entry)
+    if (text && /"@playwright\/test"|"playwright"|"karma"|"cypress"/.test(text)) return true
+  }
+  return false
 }
 
 /** The sandbox a run happens in, or null when it runs natively on the host. */

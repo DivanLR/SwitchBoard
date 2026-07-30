@@ -9,13 +9,14 @@
 // inside the container. A named volume persists the container-side ~/.claude
 // between runs (transcripts, so bypass→bypass resume works).
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import { promisify } from 'node:util'
 import type { SpawnOptions as SdkSpawnOptions, SpawnedProcess } from '@anthropic-ai/claude-agent-sdk'
 import {
   detectStacks,
+  needsBrowser,
   sandboxNeedsDotnet,
   sandboxTools,
   stackEntries,
@@ -26,6 +27,17 @@ const execFileAsync = promisify(execFile)
 
 const IMAGE = 'switchboard-sandbox'
 const DOTNET_IMAGE = 'switchboard-sandbox-dotnet'
+/* Browser variants are separate images rather than a browser baked into every
+   one. Chromium plus its shared libraries is a few hundred megabytes, and most
+   projects here never drive a browser, so the cost is paid only where it buys
+   something. Same reasoning that keeps the .NET SDK out of the small image. */
+const BROWSER_SUFFIX = '-browser'
+/* Chromium is immutable per version, so one cache serves every project, exactly
+   like the NuGet volume. It is NOT baked into the image: the project's own
+   Playwright decides which build it needs, and a version the image guessed at is
+   worse than one the project downloaded for itself. */
+const BROWSER_VOLUME = 'switchboard-playwright'
+const BROWSER_CACHE_PATH = '/home/node/.cache/ms-playwright'
 const NAME_PREFIX = 'swb-'
 // Restore cache, kept out of the container so `dotnet test` does not re-download
 // every package on every session — containers are --rm, the volume is not.
@@ -42,23 +54,62 @@ const HOME_VOLUME_PREFIX = 'switchboard-claude-home-'
 // up a newer CLI, `docker rmi switchboard-sandbox` and the next bypass session
 // rebuilds.
 //
-// ponytail: two images, picked per project — node-only by default, node + the
-// .NET SDK when the project's stack detection says .NET. Still no Python and no
-// browser: those verification runs belong on the host, where the caches and test
-// infrastructure already are. The Tests section reads the same answer through
-// sandboxTools() in shared/test-catalog.ts and marks the rest unavailable up
-// front — change both together if a toolchain is ever added here.
+// Images are picked per project from what the project actually needs: node always,
+// the .NET SDK when stack detection says .NET, and a browser's shared libraries when
+// the project has real browser test infrastructure (needsBrowser() in
+// shared/test-catalog.ts). That gives four possible images and each is built on
+// first use.
+//
+// The browser is deliberately ABSENT for every other project, and that absence is
+// the common case rather than a gap: a project with no Playwright config, no Karma
+// config and no browser dependency gains nothing from several hundred megabytes of
+// Chromium libraries in every session, so it does not get them. The Tests section
+// reads the very same answer through sandboxToolsFor() and says "browser is not in
+// the bypass container" up front, before a run, rather than failing one afterwards.
+//
+// Still no Python: nothing in the catalog needs it inside a container yet.
+// The two answers must change together, here and in shared/test-catalog.ts.
 const SHARED_SETUP = `git ripgrep ca-certificates && rm -rf /var/lib/apt/lists/* \\
  && npm install -g @anthropic-ai/claude-code \\
  && printf '#!/bin/sh\\nmkdir -p "$HOME/.claude"\\n[ -f /creds/.credentials.json ] && cp /creds/.credentials.json "$HOME/.claude/.credentials.json"\\nexec "$@"\\n' > /entrypoint.sh \\
  && chmod +x /entrypoint.sh`
 
-const DOCKERFILE = `FROM node:22-slim
+/* Chromium needs a set of shared libraries that node:22-slim does not carry. This
+   installs those libraries ONLY; the browser binary itself is fetched by the
+   project's own Playwright into the shared cache volume, so the version always
+   matches the project rather than whatever the image was built against. */
+const BROWSER_LIBS = `libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 \\
+ libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \\
+ libgbm1 libpango-1.0-0 libcairo2 libasound2 libatspi2.0-0 fonts-liberation`
+
+/**
+ * The browser layer, or nothing at all.
+ *
+ * Only a project with real browser test infrastructure gets this; every other
+ * project's image is built without it and is several hundred megabytes smaller.
+ * Runs as root, before USER node, because installing shared libraries needs it.
+ */
+function browserLayer(browser: boolean): string {
+  if (!browser) return ''
+  return (
+    ` \\\n && apt-get update && apt-get install -y --no-install-recommends ${BROWSER_LIBS}` +
+    ` \\\n && rm -rf /var/lib/apt/lists/*` +
+    ` \\\n && mkdir -p ${BROWSER_CACHE_PATH} && chown -R node:node ${BROWSER_CACHE_PATH}`
+  )
+}
+
+/** PLAYWRIGHT_BROWSERS_PATH only exists on a browser image, so a project without
+ *  one cannot silently download Chromium into a directory nothing persists. */
+function browserEnv(browser: boolean): string {
+  return browser ? `ENV PLAYWRIGHT_BROWSERS_PATH=${BROWSER_CACHE_PATH}\n` : ''
+}
+
+const dockerfile = (browser: boolean): string => `FROM node:22-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ${SHARED_SETUP} \\
- && mkdir -p /home/node/.claude && chown -R node:node /home/node/.claude
+ && mkdir -p /home/node/.claude && chown -R node:node /home/node/.claude${browserLayer(browser)}
 USER node
 ENV HOME=/home/node
-WORKDIR /workspace
+${browserEnv(browser)}WORKDIR /workspace
 ENTRYPOINT ["/entrypoint.sh"]
 `
 
@@ -70,7 +121,7 @@ ENTRYPOINT ["/entrypoint.sh"]
 // already parks its own `ubuntu` user there. The uid is what matters, not the
 // name — a project that gains a .sln flips to this image and must still write the
 // ~/.claude volume the node-only image created as uid 1000.
-const DOTNET_DOCKERFILE = `FROM mcr.microsoft.com/dotnet/sdk:10.0
+const dotnetDockerfile = (browser: boolean): string => `FROM mcr.microsoft.com/dotnet/sdk:10.0
 COPY --from=node:22-slim /usr/local/bin/node /usr/local/bin/node
 COPY --from=node:22-slim /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \\
@@ -78,12 +129,12 @@ RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \\
  && apt-get update && apt-get install -y --no-install-recommends ${SHARED_SETUP} \\
  && useradd -m -o -u 1000 node \\
  && mkdir -p /home/node/.claude /home/node/.nuget/packages \\
- && chown -R node:node /home/node
+ && chown -R node:node /home/node${browserLayer(browser)}
 USER node
 ENV HOME=/home/node
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
 ENV DOTNET_NOLOGO=1
-WORKDIR /workspace
+${browserEnv(browser)}WORKDIR /workspace
 ENTRYPOINT ["/entrypoint.sh"]
 `
 
@@ -92,22 +143,42 @@ ENTRYPOINT ["/entrypoint.sh"]
  * section shows. Unreadable folder → the small image: a wrong guess there costs
  * a "dotnet is not in the bypass container" message, not a broken session.
  */
-export function imageFor(projectPath: string): { image: string; dotnet: boolean } {
-  let dotnet: boolean
+export function imageFor(projectPath: string): {
+  image: string
+  dotnet: boolean
+  browser: boolean
+} {
+  let dotnet = false
+  let browser = false
   try {
     // Root plus one level, the same listing the Tests section detects from, so the
     // image and the suite availability can never disagree about this project.
-    dotnet = sandboxNeedsDotnet(detectStacks(stackEntries(projectPath, (dir) => readdirSync(dir))))
+    const entries = stackEntries(projectPath, (dir) => readdirSync(dir))
+    dotnet = sandboxNeedsDotnet(detectStacks(entries))
+    // Evidence-led: a Playwright or Karma config, an Angular workspace, or the
+    // dependency declared in a manifest. Everything else gets no browser, which is
+    // the common case and is stated before a run rather than discovered during one.
+    browser = needsBrowser(entries, (entry) => {
+      try {
+        return readFileSync(join(projectPath, entry), 'utf8')
+      } catch {
+        return null
+      }
+    })
   } catch {
-    dotnet = false
+    // Unreadable folder: the smallest image. A wrong guess here costs a "not in the
+    // bypass container" message, never a broken session.
   }
-  return { image: dotnet ? DOTNET_IMAGE : IMAGE, dotnet }
+  const base = dotnet ? DOTNET_IMAGE : IMAGE
+  return { image: browser ? base + BROWSER_SUFFIX : base, dotnet, browser }
 }
 
 /** What a bypass session for this project can run, from the very same detection
- *  that picks the image — so the two can never disagree. */
+ *  that picks the image, so the two can never disagree. A project without browser
+ *  test infrastructure gets no browser here AND no browser in its container. */
 export function sandboxToolsFor(projectPath: string): readonly SuiteTool[] {
-  return sandboxTools(imageFor(projectPath).dotnet)
+  const { dotnet, browser } = imageFor(projectPath)
+  return sandboxTools(dotnet, browser)
 }
 
 function credsPath(): string {
@@ -120,7 +191,7 @@ function credsPath(): string {
  * Throws with a message the session-start error path shows verbatim.
  */
 export async function ensureSandboxImage(projectPath: string): Promise<void> {
-  const { image, dotnet } = imageFor(projectPath)
+  const { image, dotnet, browser } = imageFor(projectPath)
   if (!existsSync(credsPath())) {
     throw new Error(
       'Claude Code login not found (~/.claude/.credentials.json). Log in with the claude CLI once, then retry.',
@@ -148,7 +219,7 @@ export async function ensureSandboxImage(projectPath: string): Promise<void> {
       stdio: ['pipe', 'ignore', 'pipe'],
       // The .NET SDK layer is ~1 GB to pull; 10 minutes is not enough on a slow
       // link, and timing out here strands the developer with a half-built image.
-      timeout: dotnet ? 2_400_000 : 600_000,
+      timeout: dotnet ? 2_400_000 : browser ? 1_200_000 : 600_000,
     })
     let stderr = ''
     build.stderr.on('data', (chunk) => {
@@ -159,7 +230,7 @@ export async function ensureSandboxImage(projectPath: string): Promise<void> {
       if (code === 0) resolve()
       else reject(new Error(`Sandbox image build failed: ${stderr.slice(-400)}`))
     })
-    build.stdin.end(dotnet ? DOTNET_DOCKERFILE : DOCKERFILE)
+    build.stdin.end(dotnet ? dotnetDockerfile(browser) : dockerfile(browser))
   })
 }
 
@@ -248,7 +319,7 @@ export function sandboxSpawn(config: {
   const safe = (value: string): string => value.replace(/[^a-zA-Z0-9_.-]/g, '')
   const containerName = `${NAME_PREFIX}${safe(config.sessionId)}`
   const homeVolume = `${HOME_VOLUME_PREFIX}${safe(config.projectId)}`
-  const { image, dotnet } = imageFor(config.projectPath)
+  const { image, dotnet, browser } = imageFor(config.projectPath)
   return {
     additionalDirectories: ['/workspace', ...refs.map((r) => r.container)],
     mounts: [{ host: config.projectPath, container: '/workspace' }, ...refs],
@@ -269,6 +340,10 @@ export function sandboxSpawn(config: {
         // Shared across projects on purpose: NuGet packages are immutable per
         // version, so one cache serves every .NET sandbox.
         ...(dotnet ? ['-v', `${NUGET_VOLUME}:/home/node/.nuget/packages`] : []),
+        // Chromium is immutable per version, so one volume serves every project, the
+        // same reasoning as the NuGet cache above. Not mounted at all for a project
+        // with no browser tests, which is most of them.
+        ...(browser ? ['-v', `${BROWSER_VOLUME}:${BROWSER_CACHE_PATH}`] : []),
         ...refs.flatMap((r) => ['-v', `${r.host}:${r.container}:ro`]),
         '-w',
         '/workspace',
