@@ -153,11 +153,14 @@ export function explainExit(raw: string, bypass: boolean): string {
   if (code === '137') {
     return bypass
       ? 'The bypass sandbox container was killed from outside the process: exit 137 is ' +
-          'SIGKILL, so nothing inside it got to report why. Almost always the host ' +
-          'running out of memory for the container, because Docker Desktop shares one ' +
-          'WSL virtual machine and a long agent run inside it can exhaust the whole ' +
-          'allowance. Raise it with a memory= line in %USERPROFILE%\\.wslconfig and ' +
-          'restart Docker Desktop. The conversation is kept and resumes on the next start.'
+          'SIGKILL, so nothing inside it got to report why. It ran out of memory, and there ' +
+          'are two ceilings it could have hit. The container now runs with a limit of its ' +
+          'own (6 GiB by default), so a build that genuinely needs more stops here rather ' +
+          'than taking every other session down with it: raise it by setting ' +
+          'SWITCHBOARD_SANDBOX_MEMORY (e.g. 12g) where Switchboard is launched from. If ' +
+          'that is not it, the shared WSL virtual machine itself is too small — add a ' +
+          'memory= line to %USERPROFILE%\\.wslconfig and restart Docker Desktop. The ' +
+          'conversation is kept and resumes on the next start.'
       : 'The Claude Code process was killed from outside: exit 137 is SIGKILL, so it got ' +
           'no chance to report a reason. The host most likely ran out of memory.'
   }

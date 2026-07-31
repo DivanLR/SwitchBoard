@@ -7,6 +7,31 @@ import { invoke } from '@renderer/ipc'
 
 const PAGE_SIZE = 300
 
+/**
+ * How many events of one session the renderer keeps in memory.
+ *
+ * The DOM was already bounded (SessionView renders at most 500 items and derives
+ * from the last 1500 events), but THIS array was not: every event pushed during a
+ * session stayed in it for as long as the view was open, payload text included. A
+ * day on one long-running project therefore grew the renderer's heap without limit
+ * — and on this machine the renderer competes for the same memory as the bypass
+ * sandbox's virtual machine, so the app quietly holding hundreds of megabytes of
+ * text nobody is looking at is what makes a container run out.
+ *
+ * 3000 is twice the derive window on purpose: SessionView's "show earlier" first
+ * widens its own window over what the store holds, and only then pages back
+ * through the database. Trimming at the derive window would make that first step
+ * do nothing.
+ *
+ * Nothing is lost — every event is in SQLite, and trimming restores the
+ * "show earlier" affordance so paging brings it back.
+ *
+ * ponytail: a flat count, not a byte budget. Payload sizes vary, but a count is
+ * something the code can enforce for free; measure bytes only if a session with
+ * enormous single payloads shows this is the wrong ceiling.
+ */
+const MAX_LIVE_EVENTS = 3000
+
 const store = reactive({
   sessionId: null as string | null,
   events: [] as SessionEvent[],
@@ -76,6 +101,23 @@ const store = reactive({
       const at = this.events.findIndex((e) => e.seq > event.seq)
       this.events.splice(at === -1 ? this.events.length : at, 0, event)
     }
+    this.trimHead()
+  },
+
+  /**
+   * Drop the oldest events once the live tail passes its cap.
+   *
+   * Only ever called from a push: `loadEarlier` grows the array because the
+   * developer asked it to, and trimming what they just asked for would make the
+   * button appear to do nothing. Paging state is updated with it, so the view
+   * offers "show earlier" again for exactly what was dropped.
+   */
+  trimHead(): void {
+    const excess = this.events.length - MAX_LIVE_EVENTS
+    if (excess <= 0) return
+    this.events.splice(0, excess)
+    this.oldestSeq = this.events[0]?.seq ?? null
+    this.hasMoreHistory = true
   },
 
   setView(view: 'clean' | 'raw'): void {

@@ -43,6 +43,26 @@ describe('TaskQueueRepo', () => {
     expect(repos.taskQueue.takeNext(projectId)?.text).toBe('c')
   })
 
+  it('rewords a task in place, keeping its position', () => {
+    const { repos, projectId } = setup()
+    repos.taskQueue.add(projectId, 'a')
+    const b = repos.taskQueue.add(projectId, 'b')
+    repos.taskQueue.add(projectId, 'c')
+    repos.taskQueue.update(b.id, '  b, corrected  ')
+    expect(repos.taskQueue.listForProject(projectId).map((t) => t.text)).toEqual([
+      'a',
+      'b, corrected',
+      'c',
+    ])
+  })
+
+  it('treats an emptied task as a removal, never as an empty prompt', () => {
+    const { repos, projectId } = setup()
+    const a = repos.taskQueue.add(projectId, 'a')
+    repos.taskQueue.update(a.id, '   ')
+    expect(repos.taskQueue.listForProject(projectId)).toEqual([])
+  })
+
   it('trims text and scopes the queue per project', () => {
     const { repos, projectId, otherId } = setup()
     repos.taskQueue.add(projectId, '  padded  ')

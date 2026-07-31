@@ -49,6 +49,32 @@ const NUGET_VOLUME = 'switchboard-nuget'
 // and keeps bypass→bypass resume working for that project.
 const HOME_VOLUME_PREFIX = 'switchboard-claude-home-'
 
+/**
+ * The most memory one bypass container may take, and the reason sessions stopped
+ * dying in pairs.
+ *
+ * Docker Desktop runs every container in ONE shared WSL virtual machine with a
+ * fixed allowance. Without a limit, a single agent run — a .NET restore, a test
+ * pass, a browser — can consume that whole allowance, and the kernel then kills
+ * whichever process it likes, which in practice is somebody else's session as
+ * often as the greedy one. Exit 137 with nothing in stderr, and the developer
+ * looking for a bug in code that was never at fault (see explainExit).
+ *
+ * A cap does not make the memory go further; it decides WHO pays when it runs
+ * out. With one, the run that asked for too much is the one that stops, the
+ * virtual machine stays up, and every other session keeps working. Exactly the
+ * reasoning already applied to --pids-limit below.
+ *
+ * 6 GiB because a `dotnet restore` plus `dotnet test` on a real solution sits
+ * comfortably inside it while leaving room in a default 8–16 GiB allowance for
+ * a second session. Docker also permits swap up to the same figure again when
+ * only --memory is set, so a brief spike slows down instead of being killed.
+ * SWITCHBOARD_SANDBOX_MEMORY overrides it (any Docker size, e.g. "12g", or "0"
+ * to remove the cap) — the honest escape hatch for a machine or a build this
+ * default does not suit.
+ */
+const SANDBOX_MEMORY = process.env.SWITCHBOARD_SANDBOX_MEMORY?.trim() || '6g'
+
 // Built via stdin (`docker build -`): no build context, nothing to package.
 // ponytail: the CLI version is whatever npm had at image-build time; to pick
 // up a newer CLI, `docker rmi switchboard-sandbox` and the next bypass session
@@ -360,6 +386,10 @@ export function sandboxSpawn(config: {
         // process table. Generous enough for a .NET restore plus a test run.
         '--pids-limit',
         '1024',
+        // The same argument for memory: one session's appetite must not take the
+        // shared virtual machine down with it (see SANDBOX_MEMORY). '0' removes
+        // the cap, which is what a developer setting it to 0 is asking for.
+        ...(SANDBOX_MEMORY === '0' ? [] : ['--memory', SANDBOX_MEMORY]),
         // The bind mount looks foreign-owned to git inside the container.
         '-e',
         'GIT_CONFIG_COUNT=1',

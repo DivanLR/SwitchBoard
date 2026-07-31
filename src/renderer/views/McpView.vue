@@ -111,11 +111,11 @@ const composerEl = ref<HTMLTextAreaElement | null>(null)
 const {
   suggestions,
   ghostRest,
-  isCommandMatch,
   suggestIndex,
   acceptSuggestion,
   onComposerInput,
   onComposerKeydown,
+  onComposerScroll,
   load: loadCommands,
   setCommands: setSuggestionCommands,
   hintFor,
@@ -487,7 +487,6 @@ function answer(eventId: string, choice: string): void {
             ref="composerEl"
             v-model="composer"
             class="composer-input mono"
-            :class="{ 'is-command': isCommandMatch }"
             data-testid="mcp-composer"
             rows="1"
             :placeholder="
@@ -500,6 +499,7 @@ function answer(eventId: string, choice: string): void {
             autocomplete="off"
             @input="onComposerInput"
             @keydown="onComposerKeydown"
+            @scroll="onComposerScroll"
           ></textarea>
         </div>
         <span class="to mono">to MCP</span>

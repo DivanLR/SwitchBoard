@@ -20,6 +20,7 @@
     },
     "outDir": "out/tsc-node"
   },
+  "exclude": ["tests/unit/renderer/**"],
   "include": [
     "src/main/**/*.ts",
     "src/preload/**/*.ts",

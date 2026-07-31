@@ -102,6 +102,7 @@ const {
   acceptSuggestion,
   onComposerInput,
   onComposerKeydown,
+  onComposerScroll,
   load: loadHistory,
   setCommands: setSuggestionCommands,
   hintFor,
@@ -697,6 +698,30 @@ async function enqueue(): Promise<void> {
 
 async function removeQueued(id: string): Promise<void> {
   await queue.remove(props.project.id, id)
+}
+
+// Editing a queued task in place. A planned task is written before the work in
+// front of it has finished, so by the time its turn comes the developer usually
+// knows something they did not: the alternative to editing it is deleting it and
+// typing the whole thing again, which is why they end up not correcting it at all.
+const editingQueued = ref<string | null>(null)
+const queuedDraft = ref('')
+
+function beginEditQueued(task: { id: string; text: string }): void {
+  editingQueued.value = task.id
+  queuedDraft.value = task.text
+}
+
+async function saveQueued(): Promise<void> {
+  const id = editingQueued.value
+  if (!id) return
+  editingQueued.value = null
+  await queue.edit(props.project.id, id, queuedDraft.value)
+}
+
+function cancelEditQueued(): void {
+  editingQueued.value = null
+  queuedDraft.value = ''
 }
 
 async function start(resume: boolean): Promise<void> {
@@ -1396,7 +1421,29 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
           :data-testid="`queue-item-${index}`"
         >
           <span class="queue-num">{{ index + 1 }}</span>
-          <span class="queue-text">{{ task.text }}</span>
+          <!-- Enter saves, Escape abandons, and leaving the field saves too: the
+               edit is one line of text, so a dialog would be heavier than the
+               thing being changed. -->
+          <input
+            v-if="editingQueued === task.id"
+            v-model="queuedDraft"
+            class="queue-edit mono"
+            :data-testid="`queue-edit-${index}`"
+            :aria-label="`Edit queued task ${index + 1}`"
+            @keydown.enter.prevent="saveQueued()"
+            @keydown.esc.prevent="cancelEditQueued()"
+            @blur="saveQueued()"
+          />
+          <button
+            v-else
+            type="button"
+            class="queue-text"
+            :data-testid="`queue-text-${index}`"
+            title="Click to edit this task"
+            @click="beginEditQueued(task)"
+          >
+            {{ task.text }}
+          </button>
           <button
             class="queue-x"
             :data-testid="`queue-remove-${index}`"
@@ -1478,6 +1525,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
             autocomplete="off"
             @input="onComposerInput"
             @keydown="onComposerKeydown"
+            @scroll="onComposerScroll"
           ></textarea>
         </div>
         <span class="to mono" data-testid="composer-to">to {{ sendTo }}</span>
@@ -2202,10 +2250,31 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   color: var(--text-faint);
 }
 
+/* A button rather than a span so clicking it to edit is reachable by keyboard and
+   announced as an action; the base reset already strips the chrome, so it keeps
+   the chip's own type and colour. */
 .queue-text {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-align: left;
+  min-width: 0;
+}
+.queue-text:hover {
+  color: var(--text);
+  text-decoration: underline dotted;
+}
+
+/* Same width as the text it replaces, so opening an edit does not resize the row. */
+.queue-edit {
+  flex: 1;
+  min-width: 120px;
+  font-size: 11px;
+  color: var(--text);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--rc);
+  padding: 1px 5px;
 }
 
 .queue-x {

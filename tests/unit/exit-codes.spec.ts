@@ -6,10 +6,14 @@ import { describe, expect, it } from 'vitest'
 import { explainExit } from '@main/sessions/session'
 
 describe('explainExit', () => {
-  it('names a killed bypass container and says how to give it more memory', () => {
+  it('names a killed bypass container and both ceilings it could have hit', () => {
     const msg = explainExit('Claude Code process exited with code 137', true)
     expect(msg).toContain('SIGKILL')
-    expect(msg).toContain('running out of memory')
+    expect(msg).toContain('ran out of memory')
+    // The container's own cap and the virtual machine's are different fixes, and
+    // sending the developer to edit .wslconfig when the container limit was the
+    // ceiling they hit is an afternoon wasted.
+    expect(msg).toContain('SWITCHBOARD_SANDBOX_MEMORY')
     expect(msg).toContain('.wslconfig')
     // The developer must know their work is not lost.
     expect(msg).toContain('resumes')

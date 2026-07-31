@@ -21,6 +21,12 @@ const store = reactive({
     this.byProject[projectId] = await invoke('queue.add', { projectId, text })
   },
 
+  /** Reword a queued task. Saving it empty removes it, which is what clearing
+   *  the box means. */
+  async edit(projectId: string, id: string, text: string): Promise<void> {
+    this.byProject[projectId] = await invoke('queue.edit', { projectId, id, text })
+  },
+
   async remove(projectId: string, id: string): Promise<void> {
     this.byProject[projectId] = await invoke('queue.remove', { projectId, id })
   },

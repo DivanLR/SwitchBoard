@@ -132,6 +132,42 @@ export function useCommandSuggestions(opts: {
     histIndex.value = -1
     suggestIndex.value = -1
     suggestDismissed.value = false
+    syncGhostScroll()
+  }
+
+  /**
+   * Keep the ghost-text mirror at the same scroll offset as the textarea.
+   *
+   * The mirror is an absolutely positioned overlay that cannot scroll on its own,
+   * and when the first token is a known command the textarea's own text is
+   * transparent — so the mirror IS the visible text. Without this, a draft taller
+   * than the composer paints its first few lines forever while the caret moves
+   * somewhere invisible below: typing continues to work and nothing can be read,
+   * which is how "I cannot see lower in the block" happens.
+   *
+   * Found from the composer element rather than passed in, because both composers
+   * that use this composable put the mirror in the same wrapper, and threading an
+   * element ref through two views to set one number is not worth the wiring.
+   */
+  function syncGhostScroll(): void {
+    const el = composerEl.value
+    const ghost = el?.parentElement?.querySelector<HTMLElement>('.ghost')
+    if (el && ghost) ghost.scrollTop = el.scrollTop
+  }
+
+  /**
+   * Bring the highlighted suggestion into view.
+   *
+   * The dropdown holds up to 50 commands in a 190px box, so moving the highlight
+   * with the arrow keys walked it straight out of the visible rows: the key was
+   * doing exactly what it should and the list looked frozen. `block: 'nearest'`
+   * scrolls only as far as it must, so the rows do not jump under the cursor.
+   */
+  function scrollSuggestionIntoView(): void {
+    void nextTick(() => {
+      const active = composerEl.value?.parentElement?.querySelector('.suggest-item.active')
+      active?.scrollIntoView?.({ block: 'nearest' })
+    })
   }
 
   function caretAtEnd(): boolean {
@@ -165,6 +201,7 @@ export function useCommandSuggestions(opts: {
         if (list.length > 0) {
           event.preventDefault()
           suggestIndex.value = Math.min(suggestIndex.value + 1, list.length - 1)
+          scrollSuggestionIntoView()
         } else if (histIndex.value >= 0) {
           // Recall mode: step toward newer commands, back to an empty line.
           event.preventDefault()
@@ -177,6 +214,7 @@ export function useCommandSuggestions(opts: {
         if (list.length > 0 && suggestIndex.value > 0) {
           event.preventDefault()
           suggestIndex.value -= 1
+          scrollSuggestionIntoView()
         } else if (list.length > 0 && suggestIndex.value === 0) {
           event.preventDefault()
           suggestIndex.value = -1
@@ -258,6 +296,8 @@ export function useCommandSuggestions(opts: {
     acceptSuggestion,
     onComposerInput,
     onComposerKeydown,
+    /** Bind to the textarea's scroll event: keeps the ghost mirror aligned. */
+    onComposerScroll: syncGhostScroll,
     /** Load history + available commands for a project. */
     load,
     /** Replace the available slash commands / skills (e.g. from a live push). */
