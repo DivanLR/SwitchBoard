@@ -66,12 +66,24 @@ export interface ApiCall {
 
 export type ApiRunStatus = 'running' | 'pass' | 'fail' | 'error'
 
+/**
+ * Which environment a run went against.
+ *
+ * 'local' is the developer's own API, which the app may start and stop. 'qa' is a
+ * deployed environment that already exists: it is never launched, never stopped,
+ * and exercised as reads unless the developer says otherwise. The distinction is
+ * recorded on the run because a report that does not name its environment is
+ * evidence about nothing in particular.
+ */
+export type ApiTarget = 'local' | 'qa'
+
 /** One eval set: the requests sent against one base URL, and their verdicts. */
 export interface ApiEvalRun {
   id: string
   projectId: string
   /** Where the calls went. */
   baseUrl: string
+  target: ApiTarget
   /** True when the app started the server for this run and stopped it after. */
   launched: boolean
   /** The session used ONLY to produce request data, kept so it is traceable. */
@@ -141,16 +153,29 @@ type AddRoute = (
 
 /**
  * A controller's routes: the class-level [Route(...)] prefix joined to each
- * action's [Http*] attribute, with [controller] substituted from the class name.
+ * action's [Http*] attribute, with [controller] and the API version substituted.
  *
- * ponytail: the first Route attribute and the first *Controller class in the file
- * are taken as the pair. One controller per file is the convention everywhere,
- * and a second one in the same file loses only its prefix, not its routes.
+ * The version matters as much as the controller name. A versioned API writes
+ * `[Route("v{version:apiVersion}/[controller]")]`, and without substitution every
+ * route is discovered as `/v{version:apiVersion}/account/get-notes` — a template
+ * nothing can call. The value is in the same file, in `[ApiVersion("1")]`, so
+ * leaving it as a placeholder meant handing a model a guess to make about a fact
+ * the source already states. `Asp.Versioning` writes the segment exactly this way,
+ * which is the shape this matches.
+ *
+ * ponytail: the first Route attribute, the first *Controller class and the first
+ * ApiVersion in the file are taken as the set. One controller per file is the
+ * convention everywhere, and a controller serving two versions gets the lower one
+ * — still callable, where the placeholder was not.
  */
 function scanAttributes(file: { path: string; text: string }, add: AddRoute): void {
   const controller = /\bclass\s+(\w+?)Controller\b/.exec(file.text)?.[1] ?? null
   const routeAttr = /\[Route\s*\(\s*"([^"]*)"\s*\)\s*\]/.exec(file.text)?.[1] ?? ''
-  const prefix = controller ? routeAttr.replace(/\[controller\]/gi, controller) : routeAttr
+  const version = /\[ApiVersion\s*\(\s*"([^"]+)"/.exec(file.text)?.[1] ?? null
+  const named = controller ? routeAttr.replace(/\[controller\]/gi, controller) : routeAttr
+  // No attribute means nothing to substitute: the template stays as written rather
+  // than having a version invented for it.
+  const prefix = version ? named.replace(/\{version:apiVersion\}/gi, version) : named
   ATTR_RE.lastIndex = 0
   for (let m = ATTR_RE.exec(file.text); m; m = ATTR_RE.exec(file.text)) {
     const sub = m[2] ?? ''
@@ -262,11 +287,19 @@ function jsonArrayLength(body: string | null): number | null {
 /**
  * A run's verdict: every call passed, or it failed. A run where nothing ran at
  * all is an error rather than a pass — an empty eval set proves nothing.
+ *
+ * A single call that never completed is enough to take PASS away, and that is the
+ * point rather than pedantry. The badge and the report headline are what a
+ * developer reads, and a run of five endpoints where one answered and four timed
+ * out is not a passing API: it is a run that mostly did not happen. It reports as
+ * an error, with the per-call detail saying which calls never went out — the same
+ * rule the verification side already follows, where nothing measured is never
+ * reported as something proved.
  */
 export function apiVerdict(calls: readonly ApiCall[]): ApiRunStatus {
   if (calls.length === 0) return 'error'
   if (calls.some((c) => c.outcome === 'fail')) return 'fail'
-  if (calls.every((c) => c.outcome === 'not_run')) return 'error'
+  if (calls.some((c) => c.outcome === 'not_run')) return 'error'
   return 'pass'
 }
 

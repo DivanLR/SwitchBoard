@@ -31,7 +31,7 @@ import type {
   VerifyRun,
 } from '@shared/domain'
 import { DEFAULT_SETTINGS, emptyVerifyReport } from '@shared/domain'
-import type { ApiCall, ApiEvalRun } from '@shared/api-endpoints'
+import type { ApiCall, ApiEvalRun, ApiTarget } from '@shared/api-endpoints'
 
 export function newId(): string {
   return randomUUID()
@@ -721,6 +721,19 @@ export class TaskQueueRepo {
       .all(projectId) as QueuedTask[]
   }
 
+  /**
+   * Reword a task that has not run yet. Emptying it is a delete, because a queued
+   * task with nothing in it would be sent to the session as an empty prompt.
+   */
+  update(id: string, text: string): void {
+    const trimmed = text.trim()
+    if (!trimmed) {
+      this.remove(id)
+      return
+    }
+    this.db.prepare('UPDATE task_queue SET text = ? WHERE id = ?').run(trimmed, id)
+  }
+
   remove(id: string): void {
     this.db.prepare('DELETE FROM task_queue WHERE id = ?').run(id)
   }
@@ -1035,11 +1048,17 @@ export class ApiRunsRepo {
     return Number(result.changes ?? 0)
   }
 
-  start(input: { projectId: string; baseUrl: string; sessionId: string | null }): ApiEvalRun {
+  start(input: {
+    projectId: string
+    baseUrl: string
+    target: ApiTarget
+    sessionId: string | null
+  }): ApiEvalRun {
     const run: ApiEvalRun = {
       id: newId(),
       projectId: input.projectId,
       baseUrl: input.baseUrl,
+      target: input.target,
       launched: false,
       sessionId: input.sessionId,
       status: 'running',
@@ -1051,10 +1070,10 @@ export class ApiRunsRepo {
     this.db
       .prepare(
         `INSERT INTO api_runs
-           (id, projectId, baseUrl, launched, sessionId, status, note, calls, startedAt, finishedAt)
-         VALUES (?, ?, ?, 0, ?, 'running', NULL, '[]', ?, NULL)`,
+           (id, projectId, baseUrl, target, launched, sessionId, status, note, calls, startedAt, finishedAt)
+         VALUES (?, ?, ?, ?, 0, ?, 'running', NULL, '[]', ?, NULL)`,
       )
-      .run(run.id, run.projectId, run.baseUrl, run.sessionId, run.startedAt)
+      .run(run.id, run.projectId, run.baseUrl, run.target, run.sessionId, run.startedAt)
     this.db
       .prepare(
         `DELETE FROM api_runs WHERE projectId = ? AND id NOT IN (
@@ -1100,6 +1119,7 @@ interface ApiRunRow {
   id: string
   projectId: string
   baseUrl: string
+  target: string | null
   launched: number
   sessionId: string | null
   status: ApiEvalRun['status']
@@ -1112,6 +1132,10 @@ interface ApiRunRow {
 function hydrateApiRun(row: ApiRunRow): ApiEvalRun {
   return {
     ...row,
+    // Anything but the QA word is a local run: a row written before the column
+    // existed went against the developer's own API, and an unreadable value must
+    // never grant a run the treatment a deployed environment gets.
+    target: row.target === 'qa' ? 'qa' : 'local',
     launched: row.launched === 1,
     calls: parseJson<ApiCall[]>(row.calls) ?? [],
   }

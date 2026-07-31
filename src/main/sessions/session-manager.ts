@@ -486,6 +486,16 @@ export class SessionManager {
     this.maybeDrainQueue(projectId)
   }
 
+  /**
+   * Reword a planned task. Deliberately does NOT drain the queue afterwards:
+   * editing what is waiting must not be the act that sends it, or a half-typed
+   * correction to the front task goes to the session the moment it is saved.
+   */
+  editTask(projectId: string, id: string, text: string): void {
+    this.repos.taskQueue.update(id, text)
+    this.callbacks.onQueueChanged(projectId)
+  }
+
   removeTask(projectId: string, id: string): void {
     this.repos.taskQueue.remove(id)
     this.callbacks.onQueueChanged(projectId)
@@ -629,7 +639,35 @@ export class SessionManager {
   // and never left spinning (FR-047).
   private verifyWatch = new Map<string, { runId: string; kind: 'suites' | 'evidence' }>()
 
+  /**
+   * Watch a session for one run's report line.
+   *
+   * One watch per session, so a second run started before the first has reported
+   * MUST close the first out rather than replace it. Without that, the next marker
+   * to arrive was attributed to whichever run happened to be in the map: an
+   * evidence report could be read as a suites report, finish a run that was still
+   * going as "inconclusive", and consume the watch — so the real report arrived to
+   * find nothing listening and was dropped. A run left permanently claiming it
+   * proved nothing, when it had.
+   *
+   * Both buttons that reach here are clickable the moment a run finishes (Run
+   * verification and Capture evidence), so this is a sequence a developer can
+   * produce with two ordinary clicks, not a race that needs bad luck.
+   */
   watchVerifyReport(sessionId: string, runId: string, kind: 'suites' | 'evidence'): void {
+    const existing = this.verifyWatch.get(sessionId)
+    if (existing && existing.runId !== runId) {
+      const entry = this.hosted.get(sessionId)
+      if (existing.kind === 'suites') {
+        this.repos.verifyRuns.finish(
+          existing.runId,
+          'inconclusive',
+          null,
+          'Another verification pass was started before this one reported, so its result line was never read.',
+        )
+        if (entry) this.callbacks.onVerifyChanged(entry.row.projectId)
+      }
+    }
     this.verifyWatch.set(sessionId, { runId, kind })
   }
 

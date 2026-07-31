@@ -378,6 +378,17 @@ const MIGRATIONS: Migration[] = [
       `)
     },
   },
+  {
+    // Which environment the calls went to. Needed on the ROW rather than derived
+    // from the URL later: the second half of a run re-resolves its host from
+    // settings, and a QA URL the developer has since edited would leave the app
+    // deciding whether it may start a server against a deployed environment on a
+    // string comparison. Existing rows are local, which is what they were.
+    name: '017-api-runs-target',
+    up: (db) => {
+      db.exec(`ALTER TABLE api_runs ADD COLUMN target TEXT NOT NULL DEFAULT 'local';`)
+    },
+  },
 ]
 
 /**

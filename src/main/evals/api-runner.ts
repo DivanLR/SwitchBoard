@@ -55,10 +55,19 @@ export async function runApiCalls(
 
   if (!alreadyUp) {
     if (!host.startCmd) {
+      // A deployed environment that does not answer is news about the environment,
+      // not a missing setting, so it is not reported as one.
+      const reason =
+        host.target === 'qa'
+          ? `${host.baseUrl} did not answer, so nothing was called`
+          : `nothing is listening on ${host.baseUrl} and no start command is set`
       return {
-        calls: notRun(requests, `nothing is listening on ${host.baseUrl} and no start command is set`),
+        calls: notRun(requests, reason),
         launched: false,
-        note: `Nothing is listening on ${host.baseUrl}. Start the API, or set a start command for this project.`,
+        note:
+          host.target === 'qa'
+            ? `${host.baseUrl} did not answer. Check the URL, the network and whether that environment is up — nothing was started for you, and nothing should be.`
+            : `Nothing is listening on ${host.baseUrl}. Start the API, or set a start command for this project.`,
       }
     }
     child = spawn(host.startCmd, {
@@ -92,22 +101,66 @@ export async function runApiCalls(
 
   try {
     const calls: ApiCall[] = []
-    for (const request of requests) calls.push(await sendOne(host.baseUrl, request))
-    return { calls, launched: child !== null, note: null }
+    for (const request of requests) {
+      calls.push(blockedWrite(host, request) ?? (await sendOne(host, request)))
+    }
+    const blocked = calls.filter((c) => c.detail === WRITE_BLOCKED).length
+    return {
+      calls,
+      launched: child !== null,
+      note:
+        blocked > 0
+          ? `${blocked} write ${blocked === 1 ? 'request was' : 'requests were'} not sent: this run ` +
+            'targets a shared QA environment, where the eval set exercises reads only.'
+          : null,
+    }
   } finally {
     if (child) stop(child)
   }
 }
 
+const WRITE_BLOCKED =
+  'not sent: a write against a shared QA environment is blocked, so the eval set exercises reads only'
+
+/**
+ * A write the run refuses to send against a deployed environment.
+ *
+ * The prompt asks the session to plan reads only for QA, and that is the right
+ * place to ask — but a request is only ever a request. The panel tells the
+ * developer that a QA run is "reads only", and a promise about what this app does
+ * to someone else's environment has to be kept by the code that opens the socket,
+ * not by the model that proposed the plan. One mis-planned DELETE against a shared
+ * environment is not a test result, it is an incident, and prose cannot prevent it.
+ *
+ * Reported as 'not_run' rather than 'fail', because the endpoint was never asked:
+ * nothing here says anything about whether that write works.
+ */
+function blockedWrite(host: ApiHost, request: ApiRequestPlan): ApiCall | null {
+  if (host.target !== 'qa' || request.method === 'GET' || request.method === 'HEAD') return null
+  return {
+    request,
+    status: null,
+    ms: null,
+    body: null,
+    outcome: 'not_run',
+    detail: WRITE_BLOCKED,
+  }
+}
+
 /** One request: sent, timed, and judged. */
-async function sendOne(baseUrl: string, request: ApiRequestPlan): Promise<ApiCall> {
-  const url = `${baseUrl.replace(/\/+$/, '')}${request.path.startsWith('/') ? '' : '/'}${request.path}`
+async function sendOne(host: ApiHost, request: ApiRequestPlan): Promise<ApiCall> {
+  const url = `${host.baseUrl.replace(/\/+$/, '')}${request.path.startsWith('/') ? '' : '/'}${request.path}`
   const started = Date.now()
   try {
     const response = await fetch(url, {
       method: request.method,
       headers: {
         ...(request.body ? { 'content-type': 'application/json' } : {}),
+        // The environment's own headers first, the request's second, so a request
+        // can still drop or blank the API key on purpose — the "absent auth should
+        // be 401" case is one the eval set is asked for, and a project header that
+        // always won would make it impossible to write.
+        ...(host.headers ?? {}),
         ...(request.headers ?? {}),
       },
       body: request.body ?? undefined,
@@ -115,9 +168,20 @@ async function sendOne(baseUrl: string, request: ApiRequestPlan): Promise<ApiCal
       redirect: 'manual',
     })
     const ms = Date.now() - started
-    const text = (await response.text().catch(() => '')).slice(0, BODY_LIMIT)
-    const { outcome, detail } = checkCall(request.expect, response.status, text)
-    return { request, status: response.status, ms, body: text, outcome, detail }
+    // Judged on the WHOLE body, stored truncated. Checking the truncated copy made
+    // the verdict depend on the response's length: a correct JSON array longer than
+    // BODY_LIMIT no longer parsed, so checkCall reported "the body is not an array"
+    // and a working endpoint failed for having a lot to say.
+    const full = await response.text().catch(() => '')
+    const { outcome, detail } = checkCall(request.expect, response.status, full)
+    return {
+      request,
+      status: response.status,
+      ms,
+      body: full.slice(0, BODY_LIMIT),
+      outcome,
+      detail,
+    }
   } catch (error) {
     // A call that never completed is 'not_run', never 'fail': a socket that
     // refused or timed out says nothing about whether the endpoint is correct.
@@ -229,9 +293,13 @@ export async function completeApiRun(deps: {
     if (!project) throw new Error('the project is no longer registered')
     const settings = repos.settings.get()
     const host = resolveApiHost(project.path, {
-      // The run's own base URL wins: it is what the developer was told the calls
-      // would go to when they started it.
+      // The run's own base URL and target win: they are what the developer was
+      // told the calls would go to when they started it, and re-deciding the
+      // environment now would let an edited setting move a run mid-flight.
+      target: run.target,
       baseUrl: run.baseUrl,
+      qaBaseUrl: run.baseUrl,
+      qaHeaders: settings.projectApiQaHeaders[projectId],
       startCmd: settings.projectApiStart[projectId],
     })
     if ('error' in host) throw new Error(host.error)

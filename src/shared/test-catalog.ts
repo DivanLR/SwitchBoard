@@ -525,6 +525,32 @@ function suitesFor(stack: TestStack, shapes: readonly AppShape[]): readonly Test
 }
 
 /**
+ * Whether a Node project can actually collect coverage.
+ *
+ * Vitest does not ship a coverage provider: `vitest run --coverage` without
+ * `@vitest/coverage-v8` or `@vitest/coverage-istanbul` installed fails outright.
+ * That matters more than a missing figure, because a verification run stops at its
+ * first failing suite — so a suite the project was never equipped for aborted the
+ * whole ordered run, and everything after it reported as "not run". An environment
+ * limit swallowing the developer's actual results is the failure mode this product
+ * exists to prevent, so the suite is not offered where it cannot work. The coverage
+ * gate then reads "—" with no source, which is the honest state: nothing measured
+ * it. Installing a provider brings the suite back with no further change.
+ *
+ * Jest, nyc and c8 count too: each collects coverage on its own.
+ */
+export function hasCoverageProvider(
+  entries: readonly string[],
+  read: (entry: string) => string | null,
+): boolean {
+  for (const entry of entries.filter((e) => /(^|[\\/])package\.json$/i.test(e)).slice(0, 8)) {
+    const text = read(entry)
+    if (text && /"@vitest\/coverage-[a-z0-9]+"|"jest"|"nyc"|"c8"/.test(text)) return true
+  }
+  return false
+}
+
+/**
  * The stacks whose marker files are present, in catalog order. A project holding
  * several stacks reports all of them (FR-033), so an API and its front end both
  * get their suites.
@@ -549,10 +575,15 @@ export function detectStacks(
       : lower.some((entry) => entry === needle || entry.endsWith(`/${needle}`))
   }
   const shapes = read ? detectAppShapes(entries, read) : []
+  // Only asked when the files can be read at all: without `read` every suite is
+  // offered, which is what the sandbox-image decision wants.
+  const coverage = read ? hasCoverageProvider(entries, read) : true
   return TEST_STACKS.filter((stack) => stack.detect.some(present)).map((stack) => ({
     stackId: stack.id,
     stackLabel: stack.id === 'dotnet' ? dotnetLabel(shapes) : stack.label,
-    suites: suitesFor(stack, shapes),
+    suites: suitesFor(stack, shapes).filter(
+      (suite) => coverage || suite.id !== 'node-coverage',
+    ),
   }))
 }
 

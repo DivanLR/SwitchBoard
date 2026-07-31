@@ -451,6 +451,27 @@ export interface Settings {
   /** Command that starts the project's API, when the app has to launch it.
    *  Absent means `dotnet run --project <the project holding launchSettings>`. */
   projectApiStart: Record<string, string>
+  /**
+   * A deployed environment the same eval set can be run against — the QA URL for
+   * an API that already exists somewhere.
+   *
+   * Separate from `projectApiBase` rather than replacing it, because the two are
+   * used differently and confusing them is what makes a run dangerous: a local
+   * run may be launched by the app and may write, whereas this one is a shared
+   * environment nobody asked us to restart. Absent means the project has no QA
+   * target and the choice is not offered.
+   */
+  projectApiQa: Record<string, string>
+  /**
+   * Headers every call to that environment carries, as `Name: value` lines —
+   * usually the API key a deployed environment requires and a local one does not.
+   *
+   * A value may reference an environment variable as `${NAME}`, which is resolved
+   * when the call is made. That is the supported way to supply a key: the app
+   * stores the reference, never the secret, so the credential stays in the
+   * developer's own environment and never lands in this database or in a report.
+   */
+  projectApiQaHeaders: Record<string, string>
   /** Auto-approve requests by risk level (Allowed list tab): recorded as rule_approved. */
   autoApproveLow: boolean
   autoApproveMedium: boolean
@@ -507,6 +528,8 @@ export const DEFAULT_SETTINGS: Settings = {
   projectTestStacks: {},
   projectApiBase: {},
   projectApiStart: {},
+  projectApiQa: {},
+  projectApiQaHeaders: {},
   autoApproveLow: false,
   autoApproveMedium: false,
   projectGroups: [],
@@ -762,6 +785,92 @@ export function verifyVerdict(report: VerifyReport): Exclude<VerifyStatus, 'runn
   // A run that only made endpoint calls still proved something; one where nothing
   // executed at all proved nothing, whatever it reported.
   return executed.length > 0 || calls.length > 0 ? 'pass' : 'inconclusive'
+}
+
+/**
+ * How long this run is likely to take, learned from the runs before it.
+ *
+ * The app measures nothing else it does not measure, so the shape of this matters:
+ * it is an ESTIMATE, labelled as one, and it says what it is made of. `basis` is
+ * the sentence the panel shows, so the developer can weigh it — four past runs of
+ * the same suites is worth trusting; one run of a different selection is worth
+ * knowing about and not much more. No history at all returns null, and the panel
+ * says nothing rather than inventing a first guess.
+ *
+ * The median, not the mean: the distribution is skewed by the occasional run that
+ * sat waiting on a permission prompt, and one twenty-minute outlier must not move
+ * the number a developer plans their next ten minutes around.
+ *
+ * `sameWork` marks the past runs that covered the same work as the one being
+ * estimated. Those are preferred, and the rest are only used when there are too
+ * few of them — a mutation run and a unit run are not the same question, but
+ * "roughly a couple of minutes" from any past run beats no answer.
+ */
+export interface RunEstimate {
+  /** Milliseconds, median of the runs the estimate was drawn from. */
+  ms: number
+  /** How the figure was arrived at, in the developer's words. */
+  basis: string
+  /** True when every run behind it covered the same work. */
+  comparable: boolean
+}
+
+export function estimateRunMs(
+  runs: readonly { startedAt: string; finishedAt: string | null }[],
+  sameWork?: (run: { startedAt: string; finishedAt: string | null }) => boolean,
+): RunEstimate | null {
+  const durations = (
+    candidates: readonly { startedAt: string; finishedAt: string | null }[],
+  ): number[] =>
+    candidates
+      .map((run) => {
+        if (!run.finishedAt) return null
+        const ms = Date.parse(run.finishedAt) - Date.parse(run.startedAt)
+        // A negative or absurd span is a clock change or a corrupted row, not a
+        // duration, and averaging it in would poison every later estimate.
+        return Number.isFinite(ms) && ms > 0 && ms < 6 * 60 * 60 * 1000 ? ms : null
+      })
+      .filter((ms): ms is number => ms !== null)
+
+  const all = durations(runs)
+  const matching = sameWork ? durations(runs.filter(sameWork)) : all
+  // Same work if there is any, everything otherwise. One matching run is a weaker
+  // basis than four, which is exactly what `basis` says out loud rather than the
+  // function quietly choosing for the developer.
+  const chosen = matching.length > 0 ? matching : all
+  if (chosen.length === 0) return null
+  const comparable = sameWork !== undefined && matching.length > 0
+  const ms = median(chosen)
+  const many = chosen.length > 1
+  return {
+    ms,
+    basis: comparable
+      ? `median of ${chosen.length} past ${many ? 'runs' : 'run'} of the same suites`
+      : sameWork
+        ? `median of ${chosen.length} past ${many ? 'runs' : 'run'}, which covered different suites`
+        : `median of ${chosen.length} past ${many ? 'runs' : 'run'}`,
+    comparable,
+  }
+}
+
+function median(values: readonly number[]): number {
+  const sorted = [...values].sort((a, b) => a - b)
+  const middle = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 1 ? sorted[middle] : Math.round((sorted[middle - 1] + sorted[middle]) / 2)
+}
+
+/** A duration as a developer says it: "40s", "2m 30s", "1h 5m". */
+export function humanDuration(ms: number): string {
+  const seconds = Math.max(1, Math.round(ms / 1000))
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) {
+    const rest = seconds % 60
+    return rest === 0 ? `${minutes}m` : `${minutes}m ${rest}s`
+  }
+  const hours = Math.floor(minutes / 60)
+  const restMinutes = minutes % 60
+  return restMinutes === 0 ? `${hours}h` : `${hours}h ${restMinutes}m`
 }
 
 /** The empty report a run starts from, so every panel can render before results. */

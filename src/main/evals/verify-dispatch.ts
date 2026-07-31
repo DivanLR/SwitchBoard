@@ -118,6 +118,10 @@ function endpointSection(apiSuites: PlannedSuite[], dbServers: readonly string[]
         'guessed table name fails in a way that looks like the API is broken when it is not. ' +
         'If a query errors, say so in "detail" and set "outcome" to "not_run" rather than ' +
         'reporting a call you never made.\n' +
+        '- Where the endpoint is served by EF Core — a LINQ query over a DbContext rather than a ' +
+        'stored procedure — reproduce that query as SQL through the same server and compare its ' +
+        'rows with the response. That is the strongest check available on that path, and it is ' +
+        'only available there: do not try to reproduce a stored procedure as SQL.\n' +
         '- Then check the response back against the data. Read the row counts or field values ' +
         'from the database and say in "dataAssertion" what they proved, e.g. "customer 4417 ' +
         'has 3 contracts; the response listed 3". An endpoint that answers 200 with an empty ' +

@@ -27,7 +27,7 @@ import {
 } from '@main/projects/discovery'
 import { defaultRiskRules } from '@main/inbox/risk-rules'
 import { defaultSwallowRules } from '@main/stream/swallow-rules'
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { detectStacks, stackById, stackEntries } from '@shared/test-catalog'
 import { attemptsPrompt, checkPrompt, judgePrompt } from '@main/evals/eval-dispatch'
@@ -35,6 +35,7 @@ import { evidencePrompt, planSuites, verifyPrompt } from '@main/evals/verify-dis
 import { apiDataPrompt } from '@main/evals/api-dispatch'
 import { resolveApiHost, scanProjectEndpoints } from '@main/evals/api-scan'
 import { recentEndpoints } from '@shared/api-endpoints'
+import { apiReportFileName, apiReportMarkdown } from '@shared/api-report'
 import { sandboxToolsFor } from '@main/sessions/docker-sandbox'
 import { comboDocPath, readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
 import { comboKey } from '@shared/mcp-combo'
@@ -429,6 +430,18 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         baseUrl: settings.projectApiBase[req.projectId],
         startCmd: settings.projectApiStart[req.projectId],
       })
+      const qaUrl = settings.projectApiQa[req.projectId] ?? null
+      const qaHeaders = settings.projectApiQaHeaders[req.projectId] ?? null
+      // Resolved now so an unset environment variable is a sentence in the panel
+      // before the run, not a wall of 401s after it. Only the error travels — the
+      // resolved values stay in the main process.
+      const qa = qaUrl
+        ? resolveApiHost(project.path, {
+            target: 'qa',
+            qaBaseUrl: qaUrl,
+            qaHeaders: qaHeaders ?? undefined,
+          })
+        : null
       return {
         endpoints: scan.endpoints,
         recent: recentEndpoints(repos.apiRuns.listForProject(req.projectId)),
@@ -438,6 +451,11 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
           'error' in host
             ? { baseUrl: null, startCmd: null, from: null, error: host.error }
             : { baseUrl: host.baseUrl, startCmd: host.startCmd, from: host.from, error: null },
+        qa: {
+          baseUrl: qaUrl,
+          headers: qaHeaders,
+          error: qa && 'error' in qa ? qa.error : null,
+        },
       }
     },
     'api.runs': (req) => repos.apiRuns.listForProject(req.projectId),
@@ -448,11 +466,17 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         throw { code: 'INVALID_PATH', message: 'Choose at least one endpoint to test.' } satisfies IpcError
       }
       const settings = repos.settings.get()
+      const target = req.target ?? 'local'
       // Resolved BEFORE the session is touched: a project with nowhere to call is
       // a sentence the developer can act on, not a run that starts and then fails.
+      // For QA that includes the headers, so a missing API-key variable is caught
+      // here rather than after the environment has rejected every call.
       const host = resolveApiHost(project.path, {
+        target,
         baseUrl: settings.projectApiBase[req.projectId],
         startCmd: settings.projectApiStart[req.projectId],
+        qaBaseUrl: settings.projectApiQa[req.projectId],
+        qaHeaders: settings.projectApiQaHeaders[req.projectId],
       })
       if ('error' in host) throw { code: 'INVALID_PATH', message: host.error } satisfies IpcError
       let session = repos.sessions.activeForProject(req.projectId)
@@ -460,6 +484,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       const run = repos.apiRuns.start({
         projectId: req.projectId,
         baseUrl: host.baseUrl,
+        target: host.target,
         sessionId: session.id,
       })
       manager.watchApiRequests(session.id, run.id)
@@ -469,13 +494,18 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         session.id,
         settings.databaseMcpServers ?? [],
       )
-      manager.sendMessage(session.id, apiDataPrompt(req.endpoints, dbServers))
+      manager.sendMessage(
+        session.id,
+        apiDataPrompt(req.endpoints, dbServers, { target: host.target, baseUrl: host.baseUrl }),
+      )
       return { sessionId: session.id, runs: repos.apiRuns.listForProject(req.projectId) }
     },
     'api.setHost': (req) => {
       const settings = repos.settings.get()
       const base = { ...settings.projectApiBase }
       const start = { ...settings.projectApiStart }
+      const qa = { ...settings.projectApiQa }
+      const qaHeaders = { ...settings.projectApiQaHeaders }
       // An empty string clears the override, which is what an emptied field means.
       if (req.baseUrl !== undefined) {
         if (req.baseUrl.trim()) base[req.projectId] = req.baseUrl.trim()
@@ -485,11 +515,63 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         if (req.startCmd.trim()) start[req.projectId] = req.startCmd.trim()
         else delete start[req.projectId]
       }
-      return repos.settings.set({ projectApiBase: base, projectApiStart: start })
+      if (req.qaBaseUrl !== undefined) {
+        if (req.qaBaseUrl.trim()) qa[req.projectId] = req.qaBaseUrl.trim()
+        else delete qa[req.projectId]
+      }
+      if (req.qaHeaders !== undefined) {
+        // Not trimmed to a single line: these are `Name: value` lines, and the
+        // whole block is what the developer typed.
+        if (req.qaHeaders.trim()) qaHeaders[req.projectId] = req.qaHeaders.trim()
+        else delete qaHeaders[req.projectId]
+      }
+      return repos.settings.set({
+        projectApiBase: base,
+        projectApiStart: start,
+        projectApiQa: qa,
+        projectApiQaHeaders: qaHeaders,
+      })
+    },
+    // The report for a finished run: written from the recorded calls alone, so it
+    // is a transcript of what happened rather than an account of it.
+    'api.report': (req) => {
+      const project = repos.projects.byId(req.projectId)
+      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
+      const run = req.runId
+        ? repos.apiRuns.byId(req.runId)
+        : (repos.apiRuns.listForProject(req.projectId)[0] ?? null)
+      if (!run) {
+        throw {
+          code: 'NOT_FOUND',
+          message: 'Run an API eval set first — a report is written from a run.',
+        } satisfies IpcError
+      }
+      if (run.status === 'running') {
+        throw {
+          code: 'INVALID_PATH',
+          message: 'That run is still going. Its report is written once the calls are in.',
+        } satisfies IpcError
+      }
+      const dir = join(project.path, '.switchboard', 'reports')
+      mkdirSync(dir, { recursive: true })
+      const path = join(dir, apiReportFileName(run))
+      writeFileSync(
+        path,
+        apiReportMarkdown(run, {
+          projectName: project.name,
+          dbServers: repos.settings.get().databaseMcpServers ?? [],
+        }),
+        'utf8',
+      )
+      return { path }
     },
     'queue.list': (req) => manager.listQueue(req.projectId),
     'queue.add': (req) => {
       manager.enqueueTask(req.projectId, req.text)
+      return manager.listQueue(req.projectId)
+    },
+    'queue.edit': (req) => {
+      manager.editTask(req.projectId, req.id, req.text)
       return manager.listQueue(req.projectId)
     },
     'queue.remove': (req) => {

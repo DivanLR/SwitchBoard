@@ -4,7 +4,7 @@
 // before anything is started and without asking a model what the routes are.
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
-import { scanEndpoints, type DiscoveredEndpoint } from '@shared/api-endpoints'
+import { scanEndpoints, type ApiTarget, type DiscoveredEndpoint } from '@shared/api-endpoints'
 
 const SKIP = new Set([
   'node_modules',
@@ -100,6 +100,58 @@ export interface ApiHost {
   cwd: string
   /** Where these values came from, shown in the panel so nothing is magic. */
   from: string
+  /** Which environment this is, so the run knows what it may do to it. */
+  target: ApiTarget
+  /**
+   * Headers every call carries, already resolved — the deployed environment's API
+   * key, typically. Null for a local run, which needs none.
+   */
+  headers: Record<string, string> | null
+}
+
+/**
+ * `Name: value` lines with `${VAR}` resolved from the environment.
+ *
+ * Unresolved is an ERROR, never a header sent as written. A literal `${QA_API_KEY}`
+ * would reach the environment as an API key, be rejected, and the whole run would
+ * read as "QA rejects every call" when the real fault is a variable that is not
+ * set in this process. Naming the variable is the difference between a five-second
+ * fix and an afternoon.
+ */
+export function resolveHeaders(
+  text: string | undefined,
+  env: Record<string, string | undefined>,
+): { headers: Record<string, string> | null } | { error: string } {
+  const lines = (text ?? '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+  if (lines.length === 0) return { headers: null }
+  const headers: Record<string, string> = {}
+  const missing: string[] = []
+  for (const line of lines) {
+    const at = line.indexOf(':')
+    if (at <= 0) continue
+    const name = line.slice(0, at).trim()
+    const value = line.slice(at + 1).trim()
+    headers[name] = value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_whole, variable: string) => {
+      const found = env[variable]
+      if (found === undefined || found === '') {
+        missing.push(variable)
+        return ''
+      }
+      return found
+    })
+  }
+  if (missing.length > 0) {
+    return {
+      error:
+        `The header for this environment references ${[...new Set(missing)].join(', ')}, which ` +
+        'is not set in this process. Set it where Switchboard is launched from and try again — ' +
+        'the value itself is never stored here.',
+    }
+  }
+  return { headers: Object.keys(headers).length > 0 ? headers : null }
 }
 
 /**
@@ -114,8 +166,41 @@ export interface ApiHost {
  */
 export function resolveApiHost(
   root: string,
-  override: { baseUrl?: string; startCmd?: string },
+  override: {
+    baseUrl?: string
+    startCmd?: string
+    /** 'qa' resolves the deployed environment instead of the local one. */
+    target?: ApiTarget
+    /** The QA base URL for this project, and the headers it needs. */
+    qaBaseUrl?: string
+    qaHeaders?: string
+    /** Process environment the `${VAR}` references resolve against. */
+    env?: Record<string, string | undefined>
+  },
 ): ApiHost | { error: string } {
+  // A deployed environment is resolved on its own terms and nothing else's: no
+  // launchSettings fallback, no start command, so there is no path by which a run
+  // against QA can start a server. That is a safety property of this branch being
+  // separate, not a detail of it.
+  if (override.target === 'qa') {
+    const qaUrl = override.qaBaseUrl?.trim().replace(/\/+$/, '') || null
+    if (!qaUrl) {
+      return {
+        error:
+          'No QA URL set for this project. Add one in the API panel — a deployed environment is never guessed.',
+      }
+    }
+    const resolved = resolveHeaders(override.qaHeaders, override.env ?? process.env)
+    if ('error' in resolved) return resolved
+    return {
+      baseUrl: qaUrl,
+      startCmd: null,
+      cwd: root,
+      from: 'the QA URL set for this project',
+      target: 'qa',
+      headers: resolved.headers,
+    }
+  }
   const chosenUrl = override.baseUrl?.trim().replace(/\/+$/, '') || null
   const chosenCmd = override.startCmd?.trim() || null
   // Looked up even when a base URL is set: a developer who typed a URL still
@@ -136,6 +221,8 @@ export function resolveApiHost(
     from: chosenUrl
       ? 'the base URL set for this project'
       : `${(launch as LaunchSettings).source} (profile ${(launch as LaunchSettings).profile})`,
+    target: 'local',
+    headers: null,
   }
 }
 

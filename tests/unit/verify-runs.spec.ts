@@ -186,11 +186,61 @@ describe('startup reconciliation of orphaned runs (FR-022)', () => {
     const run = repos.apiRuns.start({
       projectId,
       baseUrl: 'http://localhost:5000',
+      target: 'local',
       sessionId: 'gone',
     })
     expect(repos.apiRuns.byId(run.id)?.status).toBe('running')
     manager.reconcileOnStartup()
     // api_runs has no 'inconclusive'; 'error' is its word for a run that proved nothing.
     expect(repos.apiRuns.byId(run.id)?.status).toBe('error')
+  })
+})
+
+// One watch per session, so starting a second pass before the first has reported
+// must close the first out rather than silently inherit its marker. Two ordinary
+// clicks produce this: both buttons become live the moment a run finishes.
+describe('a second pass started before the first reported', () => {
+  const REPORT = '{"suites":[{"id":"node-unit","status":"pass","detail":"12 passed"}]}'
+
+  it('closes the abandoned run instead of misattributing the next report to it', () => {
+    const { repos, manager, start, scan } = setup()
+    const first = start()
+    manager.watchVerifyReport('s1', first.id, 'suites')
+    const second = start()
+    manager.watchVerifyReport('s1', second.id, 'suites')
+
+    const abandoned = repos.verifyRuns.byId(first.id)
+    expect(abandoned?.status).toBe('inconclusive')
+    expect(abandoned?.note).toContain('Another verification pass was started')
+    // And it says so rather than sitting on a spinner forever.
+    expect(abandoned?.finishedAt).not.toBeNull()
+
+    scan('assistant_text', line(REPORT))
+    const landed = repos.verifyRuns.byId(second.id)
+    expect(landed?.status).toBe('pass')
+    expect(landed?.report?.suites[0].detail).toBe('12 passed')
+    // The first run keeps the honest outcome, never the second's figures.
+    expect(repos.verifyRuns.byId(first.id)?.report).toBeNull()
+  })
+
+  it('leaves a run alone when the same run is watched again', () => {
+    const { repos, manager, start, scan } = setup()
+    const run = start()
+    manager.watchVerifyReport('s1', run.id, 'suites')
+    manager.watchVerifyReport('s1', run.id, 'suites')
+    expect(repos.verifyRuns.byId(run.id)?.status).toBe('running')
+    scan('assistant_text', line(REPORT))
+    expect(repos.verifyRuns.byId(run.id)?.status).toBe('pass')
+  })
+
+  it('does not finish a run when the evidence pass is what gets abandoned', () => {
+    // An evidence watch has nothing to finish: the run it attaches to has already
+    // reported, so replacing that watch must not mark anything inconclusive.
+    const { repos, manager, start } = setup()
+    const finished = start()
+    manager.watchVerifyReport('s1', finished.id, 'evidence')
+    const next = start()
+    manager.watchVerifyReport('s1', next.id, 'suites')
+    expect(repos.verifyRuns.byId(finished.id)?.status).toBe('running')
   })
 })

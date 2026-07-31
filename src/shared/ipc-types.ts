@@ -25,7 +25,7 @@ import type {
   VerifyRun,
 } from './domain'
 import type { AvailableSuites } from './test-catalog'
-import type { ApiEvalRun, DiscoveredEndpoint } from './api-endpoints'
+import type { ApiEvalRun, ApiTarget, DiscoveredEndpoint } from './api-endpoints'
 
 // --- Error model ---
 
@@ -238,6 +238,12 @@ export interface InvokeMap {
       truncated: boolean
       /** Where a run would call, or why it cannot yet. */
       host: { baseUrl: string | null; startCmd: string | null; from: string | null; error: string | null }
+      /**
+       * The deployed environment the same set can be run against: the URL as
+       * stored, the header lines as stored (references, never resolved values),
+       * and the reason a QA run would fail right now if there is one.
+       */
+      qa: { baseUrl: string | null; headers: string | null; error: string | null }
     }
   }
   /** API eval sets for a project, newest first. */
@@ -246,19 +252,47 @@ export interface InvokeMap {
    * Run an automated eval set over the chosen endpoints. The session is asked for
    * the request data only; the app then starts the API if needed, sends every
    * request itself, and judges each response in code.
+   *
+   * `target` picks the environment: absent means the local API, 'qa' the deployed
+   * one, which is never started and never stopped by the app.
    */
   'api.start': {
-    req: { projectId: string; endpoints: { method: string; template: string }[] }
+    req: {
+      projectId: string
+      endpoints: { method: string; template: string }[]
+      target?: ApiTarget
+    }
     res: { sessionId: string; runs: ApiEvalRun[] }
   }
   /** Set where a project's API lives. An empty string clears the override. */
   'api.setHost': {
-    req: { projectId: string; baseUrl?: string; startCmd?: string }
+    req: {
+      projectId: string
+      baseUrl?: string
+      startCmd?: string
+      /** The deployed environment's URL, and its `Name: value` header lines. */
+      qaBaseUrl?: string
+      qaHeaders?: string
+    }
     res: Settings
+  }
+  /**
+   * Write the test report for a finished run and answer with the file it wrote.
+   *
+   * On demand rather than on every run: the report is a document the developer
+   * keeps, so it appears when they ask for one instead of accumulating a file per
+   * run in their working tree. Everything in it is derived from the recorded run,
+   * so an old run can still produce its report.
+   */
+  'api.report': {
+    req: { projectId: string; runId?: string }
+    res: { path: string }
   }
   /** Planned task queue: prompts/goals that auto-run in sequence (FR-023). */
   'queue.list': { req: { projectId: string }; res: QueuedTask[] }
   'queue.add': { req: { projectId: string; text: string }; res: QueuedTask[] }
+  /** Reword a task that has not run yet. Empty text removes it. */
+  'queue.edit': { req: { projectId: string; id: string; text: string }; res: QueuedTask[] }
   'queue.remove': { req: { projectId: string; id: string }; res: QueuedTask[] }
   'inbox.pending': { req: void; res: PermissionRequest[] }
   'inbox.decide': {

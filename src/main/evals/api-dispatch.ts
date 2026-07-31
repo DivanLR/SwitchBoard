@@ -8,7 +8,7 @@
 // The reason the model is in the loop at all: an endpoint called with an invented
 // id answers 200 with an empty body and looks healthy, so the inputs have to come
 // from rows that actually exist. Only the project's database knows which ones do.
-import type { ApiExpect, ApiRequestPlan } from '@shared/api-endpoints'
+import type { ApiExpect, ApiRequestPlan, ApiTarget } from '@shared/api-endpoints'
 
 /** Sentinel the session emits once, on its own line. */
 export const API_DATA_MARKER = 'SWB_APIDATA'
@@ -32,6 +32,32 @@ const SCHEMA = `{
 }`
 
 /**
+ * Which environment the calls are bound for.
+ *
+ * It changes the data, not just the URL. A QA environment has its own database,
+ * so an id read from a local one is worthless there, and it is shared with other
+ * people, so a write nobody sanctioned is not a test — it is an incident. Both
+ * facts have to reach the session that chooses the identifiers, because by the
+ * time the app is sending requests it is too late to choose different ones.
+ */
+function environmentSection(environment: { target: ApiTarget; baseUrl: string }): string {
+  if (environment.target !== 'qa') return ''
+  return (
+    `These calls go to a DEPLOYED QA environment: ${environment.baseUrl}. It is shared, it is ` +
+    'already running, and the application will not start or stop anything.\n' +
+    '- Read the identifiers from the database that environment uses, not a local one. If the ' +
+    'connected server points somewhere else, say so in "note" and leave the endpoint out rather ' +
+    'than sending an id that does not exist there.\n' +
+    '- Cover READS. Do not plan a write, a delete or anything that changes state in a shared ' +
+    'environment unless the endpoint under test is itself the write and you say in "note" why it ' +
+    'is safe there.\n' +
+    '- The application already attaches the headers that environment needs, so do not invent an ' +
+    'API key or a token. Set "headers" only for a case that deliberately tests missing or wrong ' +
+    'auth.\n\n'
+  )
+}
+
+/**
  * Ask for request data for the chosen endpoints, and for nothing else.
  *
  * The prohibitions are the point of this prompt. Every previous version of this
@@ -42,6 +68,8 @@ const SCHEMA = `{
 export function apiDataPrompt(
   endpoints: readonly { method: string; template: string }[],
   dbServers: readonly string[],
+  /** Which environment the app will send these to, so the data matches it. */
+  environment: { target: ApiTarget; baseUrl: string } = { target: 'local', baseUrl: '' },
 ): string {
   const named = dbServers.length > 0
   return (
@@ -49,6 +77,7 @@ export function apiDataPrompt(
     'requests itself and judge the responses itself.\n\n' +
     'Do NOT call any endpoint. Do NOT start the application. Do NOT run the tests. Do NOT ' +
     'edit any file. Your entire job is to say what to send and what the answer should be.\n\n' +
+    environmentSection(environment) +
     'The endpoints to cover:\n' +
     endpoints.map((e) => `- ${e.method} ${e.template}`).join('\n') +
     '\n\n' +
@@ -62,7 +91,18 @@ export function apiDataPrompt(
         'the whole call worthless, because an empty 200 then reads as a pass.\n' +
         '- Set "expect" from the data you just read, so the check is real: if the row count for ' +
         'that customer is 3, set "minItems" to 3; if a name is on the row, put it in ' +
-        '"mustContain". Record the query verbatim in "dataQuery".\n'
+        '"mustContain". Record the query verbatim in "dataQuery".\n' +
+        // The strongest check this feature can make, and it only exists for the
+        // EF Core path: when the endpoint's own answer IS a query, that query can
+        // be run directly and the response checked against its rows. A stored
+        // procedure cannot be reproduced that way, so it is not pretended.
+        '- If the endpoint is served by EF Core — a LINQ query over a DbContext rather than a ' +
+        'stored procedure — open that query, reproduce it as SQL through the same server, and ' +
+        'set "expect" from the rows it returns: the count as "minItems", a value off the first ' +
+        'row as "mustContain". Say in "note" what those rows prove. That makes the check a ' +
+        'comparison against the data rather than a look at a status code. If the endpoint calls ' +
+        'a stored procedure instead, say so in "note" and expect only what the procedure ' +
+        'contract states — do not reproduce a procedure as SQL.\n'
       : 'No database MCP server is connected for this project, so you have no source of real ' +
         'identifiers.\n' +
         '- Use whatever the project itself provides: a seed script, an .http file, appsettings, ' +

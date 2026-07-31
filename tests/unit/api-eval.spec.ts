@@ -53,6 +53,36 @@ describe('scanEndpoints', () => {
     expect(found[0].source).toBe('Api/CustomersController.cs:6')
   })
 
+  it('substitutes the API version, so a versioned route is callable', () => {
+    // The shape Asp.Versioning writes, and the shape every controller in the real
+    // Pepkor External API uses. Left as a placeholder, every route it found was
+    // uncallable and the version became something a model had to guess.
+    const versioned = `
+[ApiVersion("2")]
+[Route("v{version:apiVersion}/[controller]")]
+public class PosV2Controller : ApiControllerBase
+{
+    [HttpPost("payment")]
+    public Task<IActionResult> Payment() => throw null;
+}
+`
+    const found = scanEndpoints([{ path: 'Controllers/PosV2Controller.cs', text: versioned }])
+    expect(found.map((e) => `${e.method} ${e.template}`)).toEqual(['POST /v2/PosV2/payment'])
+  })
+
+  it('leaves the version alone when the file never states one', () => {
+    const noVersion = `
+[Route("v{version:apiVersion}/[controller]")]
+public class ThingController : ControllerBase
+{
+    [HttpGet]
+    public Task<IActionResult> All() => throw null;
+}
+`
+    const found = scanEndpoints([{ path: 'Controllers/ThingController.cs', text: noVersion }])
+    expect(found[0].template).toBe('/v{version:apiVersion}/Thing')
+  })
+
   it('finds minimal API and router registrations', () => {
     const found = scanEndpoints([
       {
@@ -179,9 +209,12 @@ describe('apiVerdict', () => {
     expect(apiVerdict([call('not_run')])).toBe('error')
   })
 
-  it('fails on any failed call and passes only when none failed', () => {
+  it('fails on any failed call, and passes only when every call completed', () => {
     expect(apiVerdict([call('pass'), call('fail')])).toBe('fail')
-    expect(apiVerdict([call('pass'), call('not_run')])).toBe('pass')
+    // A call that never went out takes PASS away: one endpoint answering while
+    // four time out is a run that mostly did not happen, and the badge is what a
+    // developer reads before anything else.
+    expect(apiVerdict([call('pass'), call('not_run')])).toBe('error')
     expect(apiVerdict([call('pass')])).toBe('pass')
   })
 })
@@ -231,6 +264,7 @@ describe('recentEndpoints', () => {
     id: paths.join(),
     projectId: 'p',
     baseUrl: 'http://localhost:1',
+    target: 'local',
     launched: false,
     sessionId: null,
     status: 'pass',

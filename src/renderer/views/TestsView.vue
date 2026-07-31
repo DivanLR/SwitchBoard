@@ -21,8 +21,13 @@ import {
   type TestSuite,
   type VerifyGate,
 } from '@shared/test-catalog'
-import type { Measured, VerifyRun } from '@shared/domain'
-import { searchEndpoints, type ApiExpect, type DiscoveredEndpoint } from '@shared/api-endpoints'
+import { estimateRunMs, humanDuration, type Measured, type VerifyRun } from '@shared/domain'
+import {
+  searchEndpoints,
+  type ApiExpect,
+  type ApiTarget,
+  type DiscoveredEndpoint,
+} from '@shared/api-endpoints'
 import { evals } from '@renderer/stores/evals'
 import { verify } from '@renderer/stores/verify'
 import { api } from '@renderer/stores/api'
@@ -348,6 +353,11 @@ const picked = ref<{ method: string; template: string }[]>([])
 const search = ref('')
 const baseUrlField = ref('')
 const startCmdField = ref('')
+const qaUrlField = ref('')
+const qaHeadersField = ref('')
+// Which environment the next run goes to. Local by default, always: a deployed
+// environment is a deliberate choice, never the one made for the developer.
+const apiTarget = ref<ApiTarget>('local')
 
 const apiRun = computed(() => api.latestFor(props.projectId))
 const apiRunning = computed(() => apiRun.value?.status === 'running')
@@ -386,22 +396,50 @@ watch(
   { immediate: true },
 )
 
+const apiQa = computed(() => api.qaFor(props.projectId))
+
+watch(
+  apiQa,
+  (qa) => {
+    qaUrlField.value = qa?.baseUrl ?? ''
+    qaHeadersField.value = qa?.headers ?? ''
+  },
+  { immediate: true },
+)
+
+/** No QA URL means no QA choice: the chip is not offered until there is one. */
+const qaReady = computed(() => !!apiQa.value?.baseUrl)
+
+watch(qaReady, (ready) => {
+  if (!ready) apiTarget.value = 'local'
+})
+
 async function saveApiHost(): Promise<void> {
-  await api.setHost(props.projectId, baseUrlField.value, startCmdField.value)
+  await api.setHost(props.projectId, {
+    baseUrl: baseUrlField.value,
+    startCmd: startCmdField.value,
+    qaBaseUrl: qaUrlField.value,
+    qaHeaders: qaHeadersField.value,
+  })
 }
 
 async function runApi(): Promise<void> {
   if (picked.value.length === 0) return
-  await api.start(props.projectId, picked.value)
+  await api.start(props.projectId, picked.value, apiTarget.value)
+}
+
+async function writeApiReport(): Promise<void> {
+  await api.writeReport(props.projectId, apiRun.value?.id)
 }
 
 const apiSummary = computed(() => {
   const run = apiRun.value
   if (!run) return 'No API eval set yet.'
   const when = new Date(run.startedAt).toLocaleString()
-  if (run.status === 'running') return `Running since ${when}`
+  const where = run.target === 'qa' ? ' · QA' : ''
+  if (run.status === 'running') return `Running since ${when}${where}`
   const passed = run.calls.filter((c) => c.outcome === 'pass').length
-  return `${when} · ${passed}/${run.calls.length} calls passed · ${run.baseUrl}`
+  return `${when}${where} · ${passed}/${run.calls.length} calls passed · ${run.baseUrl}`
 })
 
 /** The check the app performed, in the terms it performed it. */
@@ -468,6 +506,38 @@ const runSummary = computed(() => {
   return run.status === 'running' ? `Running since ${when}${where}` : `${when}${where}`
 })
 
+// How long this will take, learned from this project's own past runs. Shown
+// BEFORE the run as well as during it: the useful moment for "this is a four
+// minute job" is while deciding whether to start it, and a developer who knows
+// that goes and does something else instead of watching a spinner.
+//
+// A verification run's length is dominated by which suites are in it — mutation
+// testing is minutes where a unit pass is seconds — so past runs covering the
+// same selection are preferred, and the basis line says which kind it used.
+// The run in progress carries no finishedAt, so estimateRunMs ignores it without
+// this needing to filter it out.
+const verifyEstimate = computed(() => {
+  const chosen = [...(selected.value ?? [])].sort().join(',')
+  return estimateRunMs(
+    verify.listFor(props.projectId),
+    (run) => [...((run as VerifyRun).requested ?? [])].sort().join(',') === chosen,
+  )
+})
+
+const verifyEstimateLine = computed(() => {
+  const estimate = verifyEstimate.value
+  if (!estimate) return null
+  const lead = running.value ? 'expected' : 'usually takes'
+  return `${lead} ~${humanDuration(estimate.ms)} · ${estimate.basis}`
+})
+
+/** The same learning for API eval sets, where the suite question does not arise. */
+const apiEstimateLine = computed(() => {
+  const estimate = estimateRunMs(api.runsFor(props.projectId))
+  if (!estimate) return null
+  return `${apiRunning.value ? 'expected' : 'usually takes'} ~${humanDuration(estimate.ms)} · ${estimate.basis}`
+})
+
 function statusWord(run: VerifyRun): string {
   return run.status === 'running' ? 'running' : run.status
 }
@@ -525,6 +595,16 @@ function statusWord(run: VerifyRun): string {
           role="status"
         >
           {{ running ? 'Running…' : `Last run ${statusWord(latest)}` }} · {{ runSummary }}
+        </div>
+
+        <!-- What this run costs in time, learned from this project's own history.
+             Before the run as much as during it: the moment that matters for "this
+             is a four minute job" is while deciding whether to start it. Nothing is
+             shown until there is a finished run to learn from — the app does not
+             guess a first duration any more than it guesses a coverage figure. -->
+        <div v-if="verifyEstimateLine" class="prof-meta mono" data-testid="tests-estimate">
+          {{ verifyEstimateLine
+          }}<span v-if="verifyEstimate && !verifyEstimate.comparable"> — treat it loosely</span>
         </div>
 
         <!-- Suite picker: heavy suites are opt-in, and what the environment
@@ -657,12 +737,41 @@ function statusWord(run: VerifyRun): string {
               data-testid="tests-api-start"
             />
           </label>
+        </div>
+        <!-- The deployed environment. Separate row because it is a different kind
+             of thing: never started, never stopped, and the same eval set run
+             against an API that already exists somewhere. -->
+        <div class="host">
+          <label class="host-field">
+            <span class="host-lbl mono">QA URL</span>
+            <input
+              v-model="qaUrlField"
+              class="host-in mono"
+              placeholder="https://qa.example.com"
+              data-testid="tests-api-qa"
+            />
+          </label>
+          <label class="host-field">
+            <span class="host-lbl mono">QA headers</span>
+            <input
+              v-model="qaHeadersField"
+              class="host-in mono"
+              placeholder="x-api-key: ${QA_API_KEY}"
+              data-testid="tests-api-qa-headers"
+            />
+          </label>
           <button class="chip" data-testid="tests-api-save-host" @click="saveApiHost()">Save</button>
         </div>
         <div class="host-from mono" data-testid="tests-api-host-from">
           {{
             apiHost?.error ??
             (apiHost?.from ? `from ${apiHost.from} · started only if nothing answers there` : '')
+          }}
+        </div>
+        <div class="host-from mono" data-testid="tests-api-qa-from">
+          {{
+            apiQa?.error ??
+            'A QA header value written as ${VAR} is read from the environment when the call is made — the key itself is never stored here or written into a report.'
           }}
         </div>
 
@@ -719,6 +828,32 @@ function statusWord(run: VerifyRun): string {
 
         <div class="targets">
           <span class="lbl">{{ picked.length }} selected</span>
+          <button
+            class="chip"
+            :class="{ on: apiTarget === 'local' }"
+            data-testid="tests-api-target-local"
+            title="The API on this machine — started for you if nothing answers"
+            @click="apiTarget = 'local'"
+          >
+            Local
+          </button>
+          <button
+            class="chip"
+            :class="{ on: apiTarget === 'qa', dev: !qaReady }"
+            :disabled="!qaReady"
+            :title="
+              qaReady
+                ? 'The deployed QA environment — never started, never stopped, reads only'
+                : 'Set a QA URL above to run against a deployed environment'
+            "
+            data-testid="tests-api-target-qa"
+            @click="apiTarget = 'qa'"
+          >
+            QA
+          </button>
+          <span v-if="apiEstimateLine" class="lbl mono" data-testid="tests-api-estimate">
+            {{ apiEstimateLine }}
+          </span>
           <span style="flex: 1"></span>
           <button
             class="run"
@@ -726,12 +861,29 @@ function statusWord(run: VerifyRun): string {
             data-testid="tests-api-run"
             @click="runApi()"
           >
-            {{ apiRunning ? '● Running…' : '▷ Run automated test' }}
+            {{ apiRunning ? '● Running…' : `▷ Run against ${apiTarget === 'qa' ? 'QA' : 'local'}` }}
           </button>
         </div>
         <div v-if="api.error" class="err" data-testid="tests-api-error">{{ api.error }}</div>
 
-        <div class="sec mono">EVAL SET</div>
+        <div class="targets">
+          <span class="sec mono">EVAL SET</span>
+          <span style="flex: 1"></span>
+          <!-- The report is written from the recorded calls, so it is offered for
+               any finished run rather than only the one just made. -->
+          <button
+            class="chip"
+            :disabled="!apiRun || apiRunning"
+            data-testid="tests-api-report"
+            title="Write the full test report for this run into .switchboard/reports"
+            @click="writeApiReport()"
+          >
+            Write test report
+          </button>
+        </div>
+        <p v-if="api.reportPath" class="note mono" data-testid="tests-api-report-path">
+          Report written to {{ api.reportPath }}
+        </p>
         <p v-if="apiRun?.note" class="note" data-testid="tests-api-note">{{ apiRun.note }}</p>
         <p v-if="!apiRun" class="empty">
           Nothing called yet. Pick endpoints above and run - every result below is a request this app

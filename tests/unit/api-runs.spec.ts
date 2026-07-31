@@ -13,6 +13,8 @@ import { SessionManager } from '@main/sessions/session-manager'
 import { API_DATA_MARKER } from '@main/evals/api-dispatch'
 import { completeApiRun, runApiCalls } from '@main/evals/api-runner'
 import type { ApiRequestPlan } from '@shared/api-endpoints'
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import type { AddressInfo } from 'node:net'
 
 function setup() {
   const db = openDatabase(':memory:')
@@ -47,6 +49,7 @@ function setup() {
         // Port 1 is never listening, which is what makes the honest-failure path
         // testable without a server.
         baseUrl: 'http://127.0.0.1:1',
+        target: 'local',
         sessionId: 's1',
       }),
     scan: drive('scanApiRequests'),
@@ -128,7 +131,14 @@ describe('runApiCalls', () => {
 
   it('says nothing is listening instead of marking the endpoint failed', async () => {
     const outcome = await runApiCalls(
-      { baseUrl: 'http://127.0.0.1:1', startCmd: null, cwd: process.cwd(), from: 'test' },
+      {
+        baseUrl: 'http://127.0.0.1:1',
+        startCmd: null,
+        cwd: process.cwd(),
+        from: 'test',
+        target: 'local' as const,
+        headers: null,
+      },
       [request],
     )
     expect(outcome.launched).toBe(false)
@@ -140,10 +150,142 @@ describe('runApiCalls', () => {
 
   it('reports an empty request set rather than a passing run', async () => {
     const outcome = await runApiCalls(
-      { baseUrl: 'http://127.0.0.1:1', startCmd: null, cwd: process.cwd(), from: 'test' },
+      {
+        baseUrl: 'http://127.0.0.1:1',
+        startCmd: null,
+        cwd: process.cwd(),
+        from: 'test',
+        target: 'local' as const,
+        headers: null,
+      },
       [],
     )
     expect(outcome.calls).toEqual([])
     expect(outcome.note).toContain('No request data')
+  })
+})
+
+/**
+ * A stand-in for a deployed environment: a real socket, so the run takes the same
+ * path it takes against QA, and a record of what actually arrived — which is the
+ * only way to prove a blocked write was never sent rather than merely reported as
+ * blocked.
+ */
+async function withServer(
+  handler: (req: IncomingMessage, res: ServerResponse) => void,
+  work: (baseUrl: string, seen: string[]) => Promise<void>,
+): Promise<void> {
+  // The run's own reachability probe (a bare GET /) is dropped: it is how the
+  // runner decides whether a server is there at all, not a planned call.
+  const seen: string[] = []
+  const server = createServer((req, res) => {
+    const line = `${req.method} ${req.url}`
+    if (line !== 'GET /') seen.push(line)
+    handler(req, res)
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = (server.address() as AddressInfo).port
+  try {
+    await work(`http://127.0.0.1:${port}`, seen)
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
+}
+
+const qaHost = (baseUrl: string) => ({
+  baseUrl,
+  startCmd: null,
+  cwd: process.cwd(),
+  from: 'test',
+  target: 'qa' as const,
+  headers: { 'x-api-key': 'k' },
+})
+
+describe('a run against a deployed QA environment', () => {
+  const request: ApiRequestPlan = {
+    template: '/api/x',
+    method: 'GET',
+    path: '/api/x',
+    body: null,
+    headers: null,
+    expect: { status: 200, minItems: null, mustContain: null },
+    note: null,
+    dataSource: null,
+    dataQuery: null,
+  }
+
+  it('never puts a write on the wire, whatever the plan says', async () => {
+    await withServer(
+      (_req, res) => {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end('[]')
+      },
+      async (baseUrl, seen) => {
+        const outcome = await runApiCalls(qaHost(baseUrl), [
+          { ...request, method: 'GET', path: '/api/x' },
+          { ...request, method: 'DELETE', path: '/api/x/1', expect: { status: 204, minItems: null, mustContain: null } },
+          { ...request, method: 'POST', path: '/api/x', body: '{}', expect: { status: 201, minItems: null, mustContain: null } },
+        ])
+        // The read happened; neither write reached the server at all.
+        expect(seen).toEqual(['GET /api/x'])
+        expect(outcome.calls[1].outcome).toBe('not_run')
+        expect(outcome.calls[2].outcome).toBe('not_run')
+        expect(outcome.calls[1].detail).toContain('blocked')
+        expect(outcome.note).toContain('2 write requests were not sent')
+        // Blocked, not failed: nothing here says the write endpoint is broken.
+        expect(outcome.calls[1].status).toBeNull()
+      },
+    )
+  })
+
+  it('sends the same writes on a local run, which the developer owns', async () => {
+    await withServer(
+      (_req, res) => {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end('[]')
+      },
+      async (baseUrl, seen) => {
+        await runApiCalls({ ...qaHost(baseUrl), target: 'local', headers: null }, [
+          { ...request, method: 'DELETE', path: '/api/x/1', expect: { status: 200, minItems: null, mustContain: null } },
+        ])
+        expect(seen).toEqual(['DELETE /api/x/1'])
+      },
+    )
+  })
+
+  it('judges the whole body, so a long correct response is not failed for its length', async () => {
+    // 400 items is comfortably past the 2000-character display limit: the check
+    // used to run on the truncated copy, which no longer parsed as JSON.
+    const items = Array.from({ length: 400 }, (_, i) => ({ id: i, name: `row ${i}` }))
+    await withServer(
+      (_req, res) => {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify(items))
+      },
+      async (baseUrl) => {
+        const outcome = await runApiCalls({ ...qaHost(baseUrl), target: 'local', headers: null }, [
+          { ...request, expect: { status: 200, minItems: 400, mustContain: null } },
+        ])
+        expect(outcome.calls[0].outcome).toBe('pass')
+        expect(outcome.calls[0].detail).toBeNull()
+        // Stored truncated all the same: the report is evidence, not an archive.
+        expect((outcome.calls[0].body ?? '').length).toBeLessThanOrEqual(2_000)
+      },
+    )
+  })
+
+  it('carries the environment headers on every call it does send', async () => {
+    let apiKey: string | undefined
+    await withServer(
+      (req, res) => {
+        apiKey = req.headers['x-api-key'] as string | undefined
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end('[]')
+      },
+      async (baseUrl) => {
+        await runApiCalls(qaHost(baseUrl), [request])
+        expect(apiKey).toBe('k')
+      },
+    )
   })
 })

@@ -253,3 +253,37 @@ describe('what kind of .NET application a project holds', () => {
     expect(suiteIds(entries, files)).not.toContain('blazor-ui')
   })
 })
+
+// A suite the project is not equipped for is worse than a missing figure: a
+// verification run stops at its first failure, so one suite that cannot work took
+// the rest of the run down with it and every later suite reported "not run".
+describe('a coverage suite the project cannot run', () => {
+  const nodeSuites = (manifest: string): string[] => {
+    const stacks = detectStacks(['package.json'], () => manifest)
+    return stacks.find((s) => s.stackId === 'node')?.suites.map((s) => s.id) ?? []
+  }
+
+  it('is not offered when no coverage provider is installed', () => {
+    const ids = nodeSuites('{"devDependencies":{"vitest":"^4.1.0"}}')
+    expect(ids).not.toContain('node-coverage')
+    // Everything else the stack offers is untouched.
+    expect(ids).toContain('node-unit')
+    expect(ids).toContain('node-types')
+  })
+
+  it('is offered as soon as a provider is there', () => {
+    expect(nodeSuites('{"devDependencies":{"@vitest/coverage-v8":"^4.1.0"}}')).toContain(
+      'node-coverage',
+    )
+    expect(nodeSuites('{"devDependencies":{"jest":"^30.0.0"}}')).toContain('node-coverage')
+  })
+
+  it('offers everything when the files cannot be read at all', () => {
+    // No reader is the sandbox-image question, which only asks whether .NET is
+    // needed. Hiding a suite on no evidence would be a guess.
+    const stacks = detectStacks(['package.json'])
+    expect(stacks.find((s) => s.stackId === 'node')?.suites.map((s) => s.id)).toContain(
+      'node-coverage',
+    )
+  })
+})
