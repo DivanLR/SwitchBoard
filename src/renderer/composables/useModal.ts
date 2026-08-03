@@ -1,5 +1,49 @@
 import { onMounted, onUnmounted, type Ref } from 'vue'
 
+const TABBABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+/** Tabbable descendants of `root`, in document order, skipping anything hidden. */
+function tabbableIn(root: HTMLElement): HTMLElement[] {
+  return [...root.querySelectorAll<HTMLElement>(TABBABLE)].filter(
+    (el) => el.offsetParent !== null || el === document.activeElement,
+  )
+}
+
+/**
+ * Keeps Tab inside `root`, wrapping at both ends.
+ *
+ * Shared rather than written per overlay: without a trap, Tab walks out and the
+ * user is operating a window they cannot see, which matters most when what is
+ * on top is a destructive confirmation. Exported because Sidebar's overlays are
+ * `v-if` blocks in a component that mounts once, so they cannot use the
+ * mount-time hook below and would otherwise keep a second copy of this.
+ */
+export function trapTabWithin(root: HTMLElement, event: KeyboardEvent): void {
+  const items = tabbableIn(root)
+  if (items.length === 0) {
+    // Nothing to move to, so keep focus here rather than losing it to the
+    // window behind.
+    event.preventDefault()
+    return
+  }
+  const first = items[0]
+  const last = items[items.length - 1]
+  const active = document.activeElement
+  if (!event.shiftKey && active === last) {
+    event.preventDefault()
+    first.focus()
+  } else if (event.shiftKey && (active === first || active === root)) {
+    event.preventDefault()
+    last.focus()
+  } else if (!items.includes(active as HTMLElement) && active !== root) {
+    // Focus was outside entirely (a click on the scrim, say): pull it back in
+    // rather than letting Tab continue through the window behind.
+    event.preventDefault()
+    first.focus()
+  }
+}
+
 /**
  * Makes a modal operable without a mouse: Escape closes it, Tab cycles inside it
  * rather than escaping to the window behind, focus lands in it on open, and the
@@ -20,48 +64,20 @@ export function useModal(
 ): void {
   let previouslyFocused: HTMLElement | null = null
 
-  /** Tabbable descendants, in document order, skipping anything hidden. */
-  function tabbable(): HTMLElement[] {
-    if (!dialog.value) return []
-    const selector =
-      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    return [...dialog.value.querySelectorAll<HTMLElement>(selector)].filter(
-      (el) => el.offsetParent !== null || el === document.activeElement,
-    )
-  }
-
   function onKeydown(event: KeyboardEvent): void {
     if (event.key === 'Escape') {
       event.stopPropagation()
       close()
       return
     }
-    if (event.key !== 'Tab') return
-    const items = tabbable()
-    if (items.length === 0) {
-      // Nothing to move to, so keep focus on the dialog rather than losing it
-      // to the window behind.
-      event.preventDefault()
-      return
-    }
-    const first = items[0]
-    const last = items[items.length - 1]
-    const active = document.activeElement
-    // Wrap at both ends. Without this, Tab walks out of the dialog and the user
-    // is editing the window they cannot see.
-    if (!event.shiftKey && active === last) {
-      event.preventDefault()
-      first.focus()
-    } else if (event.shiftKey && (active === first || active === dialog.value)) {
-      event.preventDefault()
-      last.focus()
-    }
+    if (event.key !== 'Tab' || !dialog.value) return
+    trapTabWithin(dialog.value, event)
   }
 
   onMounted(() => {
     previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null
     // Focus the first real control, else the dialog itself so Escape still lands.
-    const items = tabbable()
+    const items = dialog.value ? tabbableIn(dialog.value) : []
     if (items.length > 0) items[0].focus()
     else dialog.value?.focus()
     // Capture phase: a nested input that stops propagation must not swallow Escape.

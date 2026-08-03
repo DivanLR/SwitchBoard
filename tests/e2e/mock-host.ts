@@ -9,6 +9,9 @@
 // hand-copied duplicate that silently drifts.
 import { DEFAULT_SETTINGS, type Settings } from '../../src/shared/domain'
 import { detectStacks, type AvailableSuites } from '../../src/shared/test-catalog'
+// Type-only, so nothing is referenced at runtime inside the serialised function.
+// This is what keeps the mock's method table honest: see invokeHandlers below.
+import type { InvokeMethod } from '../../src/shared/ipc-types'
 
 export interface MockSessionSeed {
   id: string
@@ -217,8 +220,6 @@ export function installMockHost(scenario: MockScenario): void {
   const swallowRules: AnyRecord[] = [
     {
       id: 'sw-1',
-      scope: 'global',
-      projectId: null,
       position: 0,
       eventKindMatcher: 'raw_output',
       pattern: '(Compiling|Building|Bundling|webpack|vite v|added \\d+ packages)',
@@ -227,8 +228,6 @@ export function installMockHost(scenario: MockScenario): void {
     },
     {
       id: 'sw-2',
-      scope: 'global',
-      projectId: null,
       position: 1,
       eventKindMatcher: '*',
       pattern: '(\\d{1,3}\\s?%|Downloading|Installing)',
@@ -237,8 +236,6 @@ export function installMockHost(scenario: MockScenario): void {
     },
     {
       id: 'sw-3',
-      scope: 'global',
-      projectId: null,
       position: 2,
       eventKindMatcher: 'tool_activity',
       pattern: '^(Read|Glob|Grep|LS)\\b',
@@ -246,6 +243,72 @@ export function installMockHost(scenario: MockScenario): void {
       enabled: true,
     },
   ]
+  /**
+   * The rules editor's data.
+   *
+   * A small representative set rather than the app's real shipped defaults, which
+   * is the one place this file cannot follow its own no-hand-copied-data rule: the
+   * defaults and the merge live in src/main, and tsconfig.web.json deliberately
+   * keeps main-process code out of this project.
+   *
+   * The trade is sound because the split is clean. Which rules ship, and how an
+   * override merges over them, is covered against the real code by
+   * tests/unit/rule-prefs.spec.ts and rule-prefs-repo.spec.ts. What the e2e specs
+   * need from here is only that the editor lists rows, toggles them, and adds and
+   * removes a rule — behaviour that does not depend on which rules are real.
+   */
+  const rules: { risk: AnyRecord[]; swallow: AnyRecord[] } = {
+    risk: [
+      {
+        id: 'builtin:bash-destructive',
+        builtin: true,
+        label: 'Destructive shell commands',
+        toolMatcher: 'Bash',
+        pattern: '\\b(rm|rmdir|del)\\b',
+        risk: 'high',
+        overridden: false,
+        disabled: false,
+      },
+      {
+        id: 'builtin:tool-read',
+        builtin: true,
+        label: 'Read a file',
+        toolMatcher: 'Read',
+        pattern: null,
+        risk: 'low',
+        overridden: false,
+        disabled: false,
+      },
+    ],
+    swallow: [
+      {
+        id: 'builtin:build-output',
+        builtin: true,
+        eventKindMatcher: 'raw_output',
+        pattern: '(Compiling|Building)',
+        noiseKind: 'build output',
+        disabled: false,
+      },
+      {
+        id: 'builtin:progress',
+        builtin: true,
+        eventKindMatcher: 'raw_output',
+        pattern: '(Downloading|Installing)',
+        noiseKind: 'progress',
+        disabled: false,
+      },
+    ],
+  }
+
+  const rulesView = (): AnyRecord => ({
+    risk: rules.risk.map((r) => ({ ...r })),
+    swallow: rules.swallow.map((r) => ({ ...r })),
+  })
+
+  /** Mirrors the real host: a shipped rule resets, a custom rule is deleted. */
+  const findRule = (id: string, kind: string): AnyRecord | undefined =>
+    (kind === 'risk' ? rules.risk : rules.swallow).find((r) => r.id === id)
+
   // The real DEFAULT_SETTINGS, handed in as data by the scenario.
   let settings: AnyRecord = { ...(scenario.settings as unknown as AnyRecord) }
   /** API eval sets per project, newest first (mirrors verifyByProject). */
@@ -389,7 +452,20 @@ export function installMockHost(scenario: MockScenario): void {
     return { delivered: true }
   }
 
-  const invokeHandlers: Record<string, (req: AnyRecord) => unknown> = {
+  /**
+   * Every real IPC method, checked by the compiler.
+   *
+   * Keyed on `InvokeMethod` rather than `string`: as a loose Record this table
+   * could silently fall behind the real bridge, and it had — three methods the
+   * app ships were missing entirely, so those flows had no e2e coverage at all
+   * and nothing failed to say so. A method added to InvokeMap now breaks this
+   * build until the mock answers it too.
+   *
+   * Responses stay `unknown` on purpose. The specs assert on rendered UI, so
+   * pinning each mock's return shape to InvokeMap[M]['res'] would force every
+   * fixture to spell out fields no assertion reads, for no extra safety.
+   */
+  const invokeHandlers: Record<InvokeMethod, (req: AnyRecord) => unknown> = {
     'projects.list': () => ({
       projects: projects
         .filter((p) => !p.archivedAt)
@@ -429,6 +505,25 @@ export function installMockHost(scenario: MockScenario): void {
     'projects.rename': (req) => {
       const project = projects.find((p) => p.id === req.projectId)
       if (project) project.name = String(req.name).trim()
+    },
+    // Same four refusals as the real host, in the same order (discovery.ts):
+    // live session, missing folder, no change, another project's folder.
+    'projects.repoint': (req) => {
+      const project = projects.find((p) => p.id === req.projectId)
+      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
+      if (project.session && !project.session.endedAt) {
+        throw { code: 'ALREADY_ACTIVE', message: 'Stop the session before changing the folder' }
+      }
+      const path = String(req.path).trim()
+      if (path.includes('missing')) {
+        throw { code: 'INVALID_PATH', message: 'The folder does not exist' }
+      }
+      if (path === project.path) return { ...project, session: undefined }
+      if (projects.some((p) => p.id !== project.id && p.path === path)) {
+        throw { code: 'DUPLICATE', message: 'The folder is already registered' }
+      }
+      project.path = path
+      return { ...project, session: undefined }
     },
     'projects.move': (req) => {
       const from = projects.findIndex((p) => p.id === req.projectId)
@@ -581,6 +676,29 @@ export function installMockHost(scenario: MockScenario): void {
       }
       return { eventId: event.id, queued }
     },
+    // Mirrors the real host including its refusal: once completeTurn has flushed
+    // the queue the message has gone, and saying otherwise would let a spec pass
+    // against behaviour the app does not have.
+    'sessions.editQueued': (req) => {
+      const sessionId = String(req.sessionId)
+      const list = queuedBySession.get(sessionId) ?? []
+      const at = list.findIndex((q) => q.eventId === req.eventId)
+      if (at === -1) {
+        throw {
+          code: 'NOT_FOUND',
+          message: 'That message has already been sent, so it can no longer be changed.',
+        }
+      }
+      const text = String(req.text).trim()
+      if (!text) {
+        const [gone] = list.splice(at, 1)
+        updateEvent(sessionId, gone.eventId, { text: gone.text, pending: false, withdrawn: true })
+      } else {
+        list[at] = { eventId: list[at].eventId, text }
+        updateEvent(sessionId, list[at].eventId, { text, pending: true })
+      }
+      queuedBySession.set(sessionId, list)
+    },
     'sessions.answerQuestion': (req) => {
       const sessionId = String(req.sessionId)
       const list = eventsBySession.get(sessionId) ?? []
@@ -730,6 +848,26 @@ export function installMockHost(scenario: MockScenario): void {
       },
     }),
     'api.runs': (req) => [...(apiRunsByProject.get(String(req.projectId)) ?? [])],
+    // The real host writes a markdown file under .switchboard/reports and returns
+    // its path. There is no filesystem here, so this reports the path it would
+    // have written and refuses in the same two cases: no run, or one still going.
+    'api.report': (req) => {
+      const runs = apiRunsByProject.get(String(req.projectId)) ?? []
+      const run = req.runId ? runs.find((r) => r.id === req.runId) : runs[0]
+      if (!run) {
+        throw {
+          code: 'NOT_FOUND',
+          message: 'Run an API eval set first — a report is written from a run.',
+        }
+      }
+      if (run.status === 'running') {
+        throw {
+          code: 'INVALID_PATH',
+          message: 'That run is still going. Its report is written once the calls are in.',
+        }
+      }
+      return { path: `C:\\mock\\.switchboard\\reports\\api-${run.id}.md` }
+    },
     'api.start': (req) => {
       const projectId = String(req.projectId)
       const endpoints = (req.endpoints ?? []) as { method: string; template: string }[]
@@ -790,6 +928,19 @@ export function installMockHost(scenario: MockScenario): void {
         maybeDrainQueue(projectId)
       }
       return [...(taskQueueByProject.get(projectId) ?? [])]
+    },
+    'queue.edit': (req) => {
+      const projectId = String(req.projectId)
+      const text = String(req.text).trim()
+      const list = taskQueueByProject.get(projectId) ?? []
+      // Empty text is a no-op, matching the real manager: an edit never deletes.
+      if (text.length > 0) {
+        const task = list.find((t) => t.id === req.id)
+        if (task) task.text = text
+      }
+      taskQueueByProject.set(projectId, list)
+      push('push.queueChanged', { projectId, items: [...list] })
+      return [...list]
     },
     'queue.remove': (req) => {
       const projectId = String(req.projectId)
@@ -882,6 +1033,70 @@ export function installMockHost(scenario: MockScenario): void {
     },
     'inbox.history': (req) =>
       decisions.filter((d) => !req?.projectId || d.projectId === req.projectId),
+    'rules.list': () => rulesView(),
+    'rules.setDisabled': (req) => {
+      const rule = findRule(String(req.id), String(req.kind))
+      if (rule) rule.disabled = Boolean(req.disabled)
+      return rulesView()
+    },
+    'rules.setRisk': (req) => {
+      const rule = findRule(String(req.id), 'risk')
+      if (rule) {
+        // null restores the shipped level; the mock has no separate copy of it, so
+        // it only clears the marker the editor reads.
+        rule.risk = req.risk === null ? rule.risk : String(req.risk)
+        rule.overridden = req.risk !== null
+      }
+      return rulesView()
+    },
+    'rules.addRisk': (req) => {
+      const toolMatcher = String(req.toolMatcher).trim()
+      if (!toolMatcher) throw { code: 'INVALID_PATH', message: 'Name a tool, or * for every tool' }
+      const pattern = req.pattern ? String(req.pattern).trim() : null
+      rules.risk.unshift({
+        id: nextId('rule'),
+        builtin: false,
+        label: `${toolMatcher}${pattern ? ` matching ${pattern}` : ''}`,
+        toolMatcher,
+        pattern,
+        risk: String(req.risk),
+        overridden: false,
+        disabled: false,
+      })
+      return rulesView()
+    },
+    'rules.addSwallow': (req) => {
+      const pattern = String(req.pattern).trim()
+      const noiseKind = String(req.noiseKind).trim()
+      if (!pattern) throw { code: 'INVALID_PATH', message: 'Enter a pattern' }
+      if (!noiseKind) {
+        throw { code: 'INVALID_PATH', message: 'Name what this hides, e.g. "build output"' }
+      }
+      rules.swallow.unshift({
+        id: nextId('rule'),
+        builtin: false,
+        eventKindMatcher: String(req.eventKindMatcher),
+        pattern,
+        noiseKind,
+        disabled: false,
+      })
+      return rulesView()
+    },
+    'rules.remove': (req) => {
+      const id = String(req.id)
+      const list = String(req.kind) === 'risk' ? rules.risk : rules.swallow
+      const at = list.findIndex((r) => r.id === id)
+      if (at !== -1) {
+        // A shipped rule cannot be deleted, only reset: clear its override markers.
+        if (list[at].builtin) {
+          list[at].disabled = false
+          list[at].overridden = false
+        } else {
+          list.splice(at, 1)
+        }
+      }
+      return rulesView()
+    },
     'rules.standing.list': (req) =>
       standingRules.filter((r) => r.projectId === req.projectId && (req.includeRevoked || !r.revokedAt)),
     'rules.standing.revoke': (req) => {
@@ -905,11 +1120,10 @@ export function installMockHost(scenario: MockScenario): void {
       standingRules.push(rule)
       return { ...rule }
     },
-    // No rules.risk.* or rules.swallow.* here: those channels do not exist in the
-    // real InvokeMap (see shared/ipc-types.ts — risk and swallow rules are
-    // main-process seeded defaults with no editing UI and therefore no IPC), so
-    // stubbing them invented a contract no spec ever called. swallowRules itself
-    // stays: classify() below reads it to drive the real clean-view behaviour.
+    // The rules.* editing channels are above. `swallowRules` here is separate and
+    // stays: classify() reads it to drive the clean-view behaviour the other specs
+    // assert on, which is about how tagged output renders rather than about which
+    // rules did the tagging.
     'settings.get': () => ({ ...settings }),
     'settings.set': (req) => {
       settings = { ...settings, ...req }
@@ -921,7 +1135,7 @@ export function installMockHost(scenario: MockScenario): void {
 
   window.switchboard = {
     invoke: (method: string, req: unknown) => {
-      const handler = invokeHandlers[method]
+      const handler = invokeHandlers[method as InvokeMethod]
       if (!handler) return Promise.reject({ code: 'NOT_FOUND', message: `Unknown method ${method}` })
       // The real boundary is structuredClone, and it rejects a Proxy — which is
       // what Vue wraps every array and object in. A store handing its own

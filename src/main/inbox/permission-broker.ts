@@ -5,7 +5,9 @@
 // items shaped by FR-007a; AskUserQuestion routes to the stream, never the
 // inbox (FR-020).
 import { win32 } from 'node:path'
-import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk'
+// Through sessions/, not from the SDK directly: src/main/sessions/ is the SDK's
+// only home (CLAUDE.md), and eslint.config.mjs enforces that.
+import type { PermissionResult } from '@main/sessions/session'
 import {
   isDangerousCommand,
   type PermissionRequest,
@@ -16,6 +18,7 @@ import type { InboxChangedPush } from '@shared/ipc-types'
 import { newId, nowIso, type Repositories } from '@main/store/repositories'
 import type { SessionManager } from '@main/sessions/session-manager'
 import { classifyRisk } from './risk-rules'
+import { RuleSet } from './rule-set'
 import { deriveMatcher, evaluateStandingRules, isPathWithinProject, pathOf } from './standing-rules'
 
 /** File tools auto-approved without a prompt when their target is inside the
@@ -149,11 +152,20 @@ export class PermissionBroker {
   /** question event id -> its group */
   private questions = new Map<string, QuestionGroup>()
 
+  /**
+   * The rules in force. Built here rather than injected so the six existing test
+   * harnesses keep working, and exposed because the noise classifier needs the
+   * SAME instance: one reload then reaches both hot paths (see rule-set.ts).
+   */
+  readonly rules: RuleSet
+
   constructor(
     private repos: Repositories,
     private manager: SessionManager,
     private callbacks: BrokerCallbacks,
-  ) {}
+  ) {
+    this.rules = new RuleSet(repos)
+  }
 
   /** The PermissionGate bound into every hosted session. */
   async handle(context: CanUseToolContext): Promise<PermissionResult> {
@@ -186,7 +198,7 @@ export class PermissionBroker {
       project !== undefined &&
       isPathWithinProject(project.path, context.input)
     const described = describeTool(context.toolName, context.input)
-    const risk = classifyRisk(this.repos.riskRules.list(), context.toolName, context.input)
+    const risk = classifyRisk(this.rules.riskRules(), context.toolName, context.input)
     const settings = this.repos.settings.get()
     const autoApproved =
       Boolean(standing) ||

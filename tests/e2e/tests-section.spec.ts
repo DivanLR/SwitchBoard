@@ -497,13 +497,15 @@ test('Manual QA keeps the eval loop, and the gates jump to the panel behind them
   await expect(page.getByTestId('tests-dev-skill')).toContainText('in development')
 })
 
-test('only the working tree is scopeable; the other targets are marked', async ({ page }) => {
+test('the working tree is the only verify target offered', async ({ page }) => {
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
   await expect(page.getByTestId('tests-target-tree')).toBeEnabled()
-  await expect(page.getByTestId('tests-target-head')).toBeDisabled()
-  await expect(page.getByTestId('tests-target-head')).toContainText('in development')
-  await expect(page.getByTestId('tests-target-spec')).toBeDisabled()
+  // Last-commit and spec-criteria targets were advertised as "in development" and
+  // permanently disabled. A target the app cannot verify is not offered at all:
+  // an inert control on the screen that reports what a run measured only misleads.
+  await expect(page.getByTestId('tests-target-head')).toHaveCount(0)
+  await expect(page.getByTestId('tests-target-spec')).toHaveCount(0)
 })
 
 test('the stack choice persists per project and can be changed', async ({ page }) => {

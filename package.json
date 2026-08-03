@@ -1,6 +1,6 @@
 {
   "name": "terminal-switchboard",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Switchboard: one desktop window hosting every Claude Code session, with a central permission inbox, clean output views, and per-project context.",
   "private": true,
   "type": "module",
@@ -11,6 +11,9 @@
     "build": "electron-vite build",
     "package": "npm run build && electron-builder --win",
     "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "npm run typecheck && npm run lint && npm test && npm run test:e2e",
     "typecheck": "npm run typecheck:node && npm run typecheck:web && npm run typecheck:realapp",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json",
@@ -22,6 +25,9 @@
   },
   "author": "Haefele Software",
   "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.5"
+  },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.215",
     "electron-updater": "^6.8.9",

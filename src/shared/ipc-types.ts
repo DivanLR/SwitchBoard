@@ -17,6 +17,8 @@ import type {
   ProjectCommand,
   ProjectRef,
   QueuedTask,
+  RiskLevel,
+  RuleKind,
   Session,
   SessionEvent,
   Settings,
@@ -26,6 +28,48 @@ import type {
 } from './domain'
 import type { AvailableSuites } from './test-catalog'
 import type { ApiEvalRun, ApiTarget, DiscoveredEndpoint } from './api-endpoints'
+
+// --- Rules editor ---
+
+/**
+ * One risk rule as the editor shows it.
+ *
+ * Flattened from RiskClassificationRule on purpose: the editor needs the input
+ * pattern as a string to display and to accept, and `inputMatcher.field` is always
+ * the tool's own argument, so nesting it would be a shape the UI has to unwrap for
+ * no decision it can make.
+ *
+ * Disabled rules ARE included, unlike the list the classifier runs on. The editor
+ * has to be able to switch one back on, so it must be able to see it.
+ */
+export interface RiskRuleView {
+  id: string
+  /** False for a rule the developer wrote; those can be deleted, shipped ones reset. */
+  builtin: boolean
+  /** Shipped rules carry a written label; a custom rule shows its own matcher. */
+  label: string
+  toolMatcher: string
+  pattern: string | null
+  risk: RiskLevel
+  /** The developer changed this shipped rule's level. */
+  overridden: boolean
+  disabled: boolean
+}
+
+/** One noise rule as the editor shows it. Disabled rules included, as above. */
+export interface SwallowRuleView {
+  id: string
+  builtin: boolean
+  eventKindMatcher: string
+  pattern: string
+  noiseKind: string
+  disabled: boolean
+}
+
+export interface RulesView {
+  risk: RiskRuleView[]
+  swallow: SwallowRuleView[]
+}
 
 // --- Error model ---
 
@@ -51,6 +95,32 @@ export function isIpcError(value: unknown): value is IpcError {
     typeof (value as IpcError).code === 'string' &&
     typeof (value as IpcError).message === 'string'
   )
+}
+
+/**
+ * Every code, as data, so an unrecognised one can be caught at runtime.
+ *
+ * `isIpcError` only checks that `code` is a string, which is all it can do across
+ * a wire — so a typo, or a throw from a module that never imported IpcError, used
+ * to be cast straight through to the renderer. The renderer switches on these, so
+ * an unknown code falls through every branch and the developer sees nothing.
+ *
+ * An exhaustive `Record` rather than an array: adding a code to IpcErrorCode
+ * without adding it here is a compile error, the same guard PUSH_CHANNELS uses.
+ */
+const IPC_ERROR_CODE_KEYS: Record<IpcErrorCode, true> = {
+  NOT_FOUND: true,
+  ALREADY_ACTIVE: true,
+  SESSION_ENDED: true,
+  CONFIRM_REQUIRED: true,
+  RULE_NOT_ALLOWED: true,
+  INVALID_PATH: true,
+  DUPLICATE: true,
+  INTERNAL: true,
+}
+
+export function isIpcErrorCode(value: unknown): value is IpcErrorCode {
+  return typeof value === 'string' && Object.hasOwn(IPC_ERROR_CODE_KEYS, value)
 }
 
 /**
@@ -93,6 +163,9 @@ export interface ProjectSuggestion {
 /** Project decorated with its live session for the sidebar (FR-003/004/005). */
 export interface ProjectListItem extends Project {
   session: Session | null
+  /** Why git will not work in this project's bypass container (no .git directory
+   *  at the root), or null when it will — the header's "No git" pill. */
+  gitNotice: string | null
   /** Pending composer drafts preserved from a previous run, if any. */
   drafts: Draft[]
   /** True only for the single reserved, project-less row backing the global
@@ -119,6 +192,8 @@ export interface InvokeMap {
   'projects.suggestions': { req: void; res: ProjectSuggestion[] }
   'projects.register': { req: { path: string; name?: string }; res: Project }
   'projects.rename': { req: { projectId: string; name: string }; res: void }
+  /** Point a project at a different folder; keeps id, sessions, and history. */
+  'projects.repoint': { req: { projectId: string; path: string }; res: Project }
   'projects.move': { req: { projectId: string; toIndex: number }; res: void }
   'projects.refs.add': {
     // `target` is a folder path or the name of another registered project.
@@ -332,8 +407,38 @@ export interface InvokeMap {
   'rules.standing.restore': { req: { ruleId: string }; res: void }
   // User-authored allowed command (Allowed list tab): a Bash command-prefix rule.
   'rules.standing.add': { req: { projectId: string; pattern: string }; res: PermissionRule }
-  // Risk and swallow rules are seeded defaults read by the main process only.
-  // They have no editing UI, so they carry no IPC surface either.
+  /**
+   * Risk classification and noise rules (PRODUCT.md Principle 3: the developer
+   * owns the rules).
+   *
+   * Every mutation answers with the whole list, as the queue methods do, so the
+   * editor never has to re-ask and cannot render a half-applied change.
+   *
+   * The shipped defaults live in code; only what the developer changed is stored.
+   * `remove` therefore means "delete" for a rule they wrote and "back to the
+   * shipped default" for one they overrode — the same operation either way.
+   */
+  /**
+   * Reword a composer message still queued behind the running turn, or withdraw it
+   * by sending empty text — the same convention `queue.edit` uses.
+   *
+   * Fails with NOT_FOUND once the turn has finished and the message has gone,
+   * which is a race the developer cannot see coming.
+   */
+  'sessions.editQueued': { req: { sessionId: string; eventId: string; text: string }; res: void }
+  'rules.list': { req: void; res: RulesView }
+  'rules.setDisabled': { req: { id: string; kind: RuleKind; disabled: boolean }; res: RulesView }
+  /** null restores the shipped level. */
+  'rules.setRisk': { req: { id: string; risk: RiskLevel | null }; res: RulesView }
+  'rules.addRisk': {
+    req: { toolMatcher: string; pattern: string | null; risk: RiskLevel }
+    res: RulesView
+  }
+  'rules.addSwallow': {
+    req: { eventKindMatcher: string; pattern: string; noiseKind: string }
+    res: RulesView
+  }
+  'rules.remove': { req: { id: string; kind: RuleKind }; res: RulesView }
   'settings.get': { req: void; res: Settings }
   'settings.set': { req: Partial<Settings>; res: Settings }
   /** Models this subscription can select, read from the CLI (probed on first ask
@@ -418,19 +523,39 @@ export interface PushMap {
 
 export type PushChannel = keyof PushMap
 
-export const PUSH_CHANNELS: readonly PushChannel[] = [
-  'push.event',
-  'push.sessionStatus',
-  'push.counters',
-  'push.inboxChanged',
-  'push.queueChanged',
-  'push.evalsChanged',
-  'push.verifyChanged',
-  'push.apiChanged',
-  'push.projectCommands',
-  'push.focusRequest',
-  'push.updateStatus',
-]
+/**
+ * The preload validates every subscription against this list, so a channel in
+ * `PushMap` that is missing here is rejected at runtime — the push simply never
+ * arrives, with nothing to read in either process.
+ *
+ * Written as an exhaustive `Record` rather than an array so that is a COMPILE
+ * error instead: `Record<PushChannel, true>` rejects a missing key and an unknown
+ * one alike, which a `readonly PushChannel[]` literal cannot do.
+ */
+const PUSH_CHANNEL_KEYS: Record<PushChannel, true> = {
+  'push.event': true,
+  'push.sessionStatus': true,
+  'push.counters': true,
+  'push.inboxChanged': true,
+  'push.queueChanged': true,
+  'push.evalsChanged': true,
+  'push.verifyChanged': true,
+  'push.apiChanged': true,
+  'push.projectCommands': true,
+  'push.focusRequest': true,
+  'push.updateStatus': true,
+}
+
+export const PUSH_CHANNELS: readonly PushChannel[] = Object.keys(
+  PUSH_CHANNEL_KEYS,
+) as PushChannel[]
+
+/**
+ * The single `ipcRenderer.invoke` channel every request rides on. Shared because
+ * the preload and the main handler must agree on it exactly, and a typo in either
+ * copy is a silent dead bridge rather than a build failure.
+ */
+export const INVOKE_CHANNEL = 'switchboard:invoke'
 
 // --- The bridge exposed as `window.switchboard` ---
 

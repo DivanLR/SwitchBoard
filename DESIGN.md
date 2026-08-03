@@ -18,9 +18,9 @@ colors:
   ink-tab: "#9B9A94"
   ink-ghost: "#97968F"
   ink-on-wash: "#AEADA6"
-  foil-gold: "#D4AF37"
-  foil-gold-hover: "#E2C25C"
-  foil-gold-ink: "#17181B"
+  foil-green: "#4DC97E"
+  foil-green-hover: "#6FD695"
+  foil-green-ink: "#17181B"
   valley-blue: "#8CB8E4"
   valley-blue-ink: "#17181B"
   red-pencil: "#E8705C"
@@ -93,13 +93,13 @@ spacing:
   5xl: "24px"
 components:
   button-primary:
-    backgroundColor: "{colors.foil-gold}"
-    textColor: "{colors.foil-gold-ink}"
+    backgroundColor: "{colors.foil-green}"
+    textColor: "{colors.foil-green-ink}"
     typography: "{typography.mono}"
     rounded: "{rounded.content}"
     padding: "6px 14px"
   button-primary-hover:
-    backgroundColor: "{colors.foil-gold-hover}"
+    backgroundColor: "{colors.foil-green-hover}"
   button-armed:
     backgroundColor: "{colors.valley-blue}"
     textColor: "{colors.valley-blue-ink}"
@@ -142,14 +142,14 @@ components:
 
 The thesis is a sheet, scored and folded flat, deployed by one pull. It is a deliberate double refusal: not the dark-IDE-plus-neon default, not the white SaaS dashboard, and not this project's own previous world either, which drew every state as music notation (a fermata, a beamed note, a struck bar) and asked the developer to learn that vocabulary first. This world asks the developer to learn nothing. A fold is a cut, so nothing in the interface is rounded except three small point markers that are explicitly exempted because they are round for a different reason: a spinner rotates, and a connection light and a tally dot read better as dots than as squares.
 
-The material is the same physical object in two lights, not two designs. In carbon fibre (`#17181B`), the ground reads as dense composite under a faint sixty-degree crease lattice; on paper (`#F7F7F7`), the same lattice scores darker, because ink marking paper is a subtractive act while a crease catching light on carbon is additive. Three semantic accents carry meaning and meaning alone: foil gold is the one action colour, for every action that deploys or advances a lane; valley blue is attention owed, meaning a lane is held and awaiting a decision; the red-pencil mark is a correction, meaning error. A finished lane earns no hue at all, drawing a locked fold instead of a coloured badge. Project identity is a separate concern from state and is carried by a third mechanism entirely, a one-pixel fold tick coloured from a six-way rotation that happens to reuse the same accent tokens (see Colors, Named Rules).
+The material is the same physical object in two lights, not two designs. In carbon fibre (`#17181B`), the ground reads as dense composite under a faint sixty-degree crease lattice; on paper (`#F7F7F7`), the same lattice scores darker, because ink marking paper is a subtractive act while a crease catching light on carbon is additive. Three semantic accents carry meaning and meaning alone: foil green is the one action colour, for every action that deploys or advances a lane; valley blue is attention owed, meaning a lane is held and awaiting a decision; the red-pencil mark is a correction, meaning error. A finished lane earns no hue at all, drawing a locked fold instead of a coloured badge. Project identity is a separate concern from state and is carried by a third mechanism entirely, a one-pixel fold tick coloured from a six-way rotation that happens to reuse the same accent tokens (see Colors, Named Rules).
 
 This build's own finish clause, written into the direction contract, states that "unreviewed and undocumented is unfinished." This document is that review. Where the contract's own language promised something the shipped code does not yet do, that gap is recorded here as open rather than smoothed over, most visibly in Typography's Named Rules and in Shapes.
 
 **Key Characteristics:**
 
 - Two token sets, one object: `html.sb-light` and `:root` are the same sheet under carbon-fibre and paper light, sharing all 17 files that consume the semantic accent tokens by name.
-- Three accents carry state (foil gold for action/working, valley blue for attention owed, red-pencil for error); a finished lane carries none.
+- Three accents carry state (foil green for action/working, valley blue for attention owed, red-pencil for error); a finished lane carries none.
 - Corners are cut, not rounded: `--rc` and `--rp` are both `0px`, with three named, deliberate circle exceptions.
 - Project identity is a 1px fold tick in the lane's own colour, never a coloured edge bar.
 - Every translucent accent wash is derived from its solid token with `color-mix()`, never a hardcoded accent `rgba()` triplet.
@@ -157,11 +157,15 @@ This build's own finish clause, written into the direction contract, states that
 
 ## Colors
 
-Three accents plus one identity mechanism, all named for the fold-and-plate material rather than for generic "success/warning/danger" language. The token *names* in the CSS (`--green`, `--amber`, `--red`, `--teal`, `--purple`, `--blue`) are unchanged from the two previous worlds this codebase has carried, so all 17 files that reference them by name kept working through both rebuilds; only the values moved. Reading `--green` as "foil gold" is correct for this world; reading it as anything from an earlier world is not.
+Three accents plus one identity mechanism, all named for the fold-and-plate material rather than for generic "success/warning/danger" language. The token *names* in the CSS (`--green`, `--amber`, `--red`, `--teal`, `--purple`, `--blue`) are unchanged from the two previous worlds this codebase has carried, so all 17 files that reference them by name kept working through both rebuilds; only the values moved. Reading `--green` as "foil green" is correct for this world. The name and the hue agree again as of the amendment recorded under Primary, below, but they did not for two worlds, so treat the token comment as authority rather than the name.
 
 ### Primary
 
-- **Foil Gold** (`#D4AF37`, `--green`): the one action colour, and every action that deploys or advances a lane, the primary button fill, the focus outline on every input, text selection. Working *is* the action state, so the working status also takes this hue rather than a fourth colour. 8.44:1 against the carbon ground, independently recomputed with the WCAG relative-luminance formula against the current token values (not copied from the in-code comment, though it agrees with it here).
+- **Foil Green** (`#4DC97E`, `--green`): the one action colour, and every action that deploys or advances a lane, the primary button fill, the focus outline on every input, text selection. Working *is* the action state, so the working status also takes this hue rather than a fourth colour. 8.43:1 against the carbon ground, computed with the WCAG relative-luminance formula against the current token value.
+
+  **Contract amendment.** The direction contract at the top of `src/renderer/index.html` names foil *gold* in this slot, and the owner has since directed green. The amendment is recorded here and in the token's own comment rather than applied silently, following the Contract Amendment Rule below. The replacement luminance was matched to the gold it supersedes, 8.43:1 against 8.44:1, so this is a hue move alone and no other token needed retuning.
+
+  The swap also resolves a collision the gold carried. Foil gold sat 37 degrees of hue from the red-pencil error mark, both of them warm, which is the same warm-on-warm failure that cost the contract's original ochre its slot at `--amber`. Foil green sits 135 degrees from red-pencil. The cost is on the other side: it sits 66 degrees from valley blue where the gold sat 164, though the two separate on saturation as well as hue, a saturated green against a pale desaturated blue. This project's own earlier green, `#3FB27F`, was the obvious candidate and was rejected on measurement: 6.67:1, which would have made the action colour the dimmest of the three accents, and only 57 degrees from valley blue.
 
 ### Secondary
 
@@ -185,7 +189,7 @@ Three accents plus one identity mechanism, all named for the fold-and-plate mate
 
 ### The Proof Sheet (light theme)
 
-`html.sb-light` is a genuine second theme, not a filter over the dark one. Text darkens to graphite and all three accents darken independently so each clears contrast on paper at its own value: foil gold becomes `#7A5F14` (5.64:1, recomputed), valley blue becomes `#2C5F94` (6.18:1), red-pencil becomes `#A02A1B` (6.90:1), graphite steel becomes `#3F5A6B` (6.79:1), identity violet becomes `#5B4E77` (7.00:1). `--bg-active` (the selected-row wash) is not redefined for the light theme at all; it stays the same hardcoded carbon-tuned mountain-gray mix in both themes, which is a minor but real gap in "add explicit dark and light values for any new token" (see Do's and Don'ts).
+`html.sb-light` is a genuine second theme, not a filter over the dark one. Text darkens to graphite and all three accents darken independently so each clears contrast on paper at its own value: foil green becomes `#1F6E44` (5.81:1, recomputed), valley blue becomes `#2C5F94` (6.18:1), red-pencil becomes `#A02A1B` (6.90:1), graphite steel becomes `#3F5A6B` (6.79:1), identity violet becomes `#5B4E77` (7.00:1). `--bg-active` (the selected-row wash) is not redefined for the light theme at all; it stays the same hardcoded carbon-tuned mountain-gray mix in both themes, which is a minor but real gap in "add explicit dark and light values for any new token" (see Do's and Don'ts).
 
 ### Named Rules
 
@@ -289,16 +293,16 @@ Borders are uniformly 1px, drawn in translucent ink. A dashed border is reserved
 ### Buttons
 
 - **Shape:** `--rc` (0px) on every variant; nothing here is rounded.
-- **Primary** (`.btn-solid`, `.send-btn`): a 135-degree foil-gold gradient (`var(--green)` to `var(--green2)`) under a shallow top-left raking highlight and the shared `--gloss` layer, 11.5px JetBrains Mono at weight 600, 6px by 14px padding, a foil-coloured glow shadow (`--green-glow`).
-- **Hover:** the gradient flattens to `--green-hover`, a brighter flat foil gold.
+- **Primary** (`.btn-solid`, `.send-btn`): a 135-degree foil-green gradient (`var(--green)` to `var(--green2)`) under a shallow top-left raking highlight and the shared `--gloss` layer, 11.5px JetBrains Mono at weight 600, 6px by 14px padding, a foil-coloured glow shadow (`--green-glow`).
+- **Hover:** the gradient flattens to `--green-hover`, a brighter flat foil green.
 - **Armed** (`.btn-armed`): the same geometry filled valley blue, for the second step of a destructive confirmation, entering with a 0.2s rise-and-fade (`sbIn`) so the state change is visible.
 - **Outline** (`.btn-outline`): transparent with a strong hairline border and tab-tier text; hovering turns the border and text red-pencil, making outline the cancel-and-destroy idiom rather than a neutral secondary.
-- **Quiet** (`.btn-quiet`): identical geometry, hovering to a foil-gold border and brighter text, the true neutral secondary.
+- **Quiet** (`.btn-quiet`): identical geometry, hovering to a foil-green border and brighter text, the true neutral secondary.
 
 ### Chips
 
 - **Risk chips** (`.chip-risk`): 10px mono, sharp corners, 1px by 6px padding. Low is a bare hairline border; medium adds valley-blue text and border; high adds a faint red-pencil wash behind a red-pencil border, three readable escalation steps.
-- **Marker chips** (`.chip-marker`): the decision record in the stream; approved is foil gold on a 7% wash, denied is red-pencil, pending is valley blue, expired falls back to a bare border.
+- **Marker chips** (`.chip-marker`): the decision record in the stream; approved is foil green on a 7% wash, denied is red-pencil, pending is valley blue, expired falls back to a bare border.
 - **Count badge** (`.badge-count`): valley-blue text on a 13% valley-blue wash with a 35% border, sharp corners now rather than the pill shape a "badge" name might suggest, `white-space: nowrap`.
 
 ### Cards / Containers
@@ -312,9 +316,9 @@ Borders are uniformly 1px, drawn in translucent ink. A dashed border is reserved
 ### Inputs / Fields
 
 - **Style:** code-plate background (`--bg-code`), Border Strong, sharp corners, 6px by 10px padding, the 13px sans body face.
-- **Focus:** a 1px foil-gold outline, the only focus treatment in the system, applied globally to inputs, textareas and selects, including the composer's own multi-line field (a prior `outline: none` override on the composer input was deliberately deleted so it would pick up this same ring).
-- **Filter field:** a variant with no fill, whose border turns foil gold both on focus and whenever a query is active.
-- **Inline rename:** panel background with a full foil-gold border, marking the field as a live edit of the row it replaces.
+- **Focus:** a 1px foil-green outline, the only focus treatment in the system, applied globally to inputs, textareas and selects, including the composer's own multi-line field (a prior `outline: none` override on the composer input was deliberately deleted so it would pick up this same ring).
+- **Filter field:** a variant with no fill, whose border turns foil green both on focus and whenever a query is active.
+- **Inline rename:** panel background with a full foil-green border, marking the field as a live edit of the row it replaces.
 
 ### Navigation: the sidebar
 
@@ -323,7 +327,7 @@ The sidebar's project list is the application's real navigation, and it is where
 - **The fold tick** (`.brace` in the markup, described in its own comment as "a fold tick, not a brace"): part identity as a 1px SVG stroke in the project's rotated accent colour, standing in for the coloured edge bar this and the previous world both refused.
 - **The status mark** (`.mark`): five real geometric folds, each paired with a plain-language word via `markTitle()` so the shape only narrows a guess the word already settles.
   - **Held** (needs you), valley blue: one crease scored but not yet folded either way.
-  - **Deploying** (working), foil gold: three facets opening out of the packet.
+  - **Deploying** (working), foil green: three facets opening out of the packet.
   - **Misfold** (error), red-pencil: two creases crossing where they cannot both hold.
   - **Packed flat** (session ended), ghost-tier ink: the sheet folded back to a packet.
   - **Locked** (done), no hue at all: the fold seated.

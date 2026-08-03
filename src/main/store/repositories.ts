@@ -19,19 +19,19 @@ import type {
   ProjectCommand,
   ProjectRef,
   ProjectSource,
-  RiskClassificationRule,
   QueuedTask,
   Session,
   SessionEndReason,
   SessionEvent,
   SessionStatus,
+  RiskLevel,
   Settings,
-  SwallowRule,
   VerifyReport,
   VerifyRun,
 } from '@shared/domain'
 import { DEFAULT_SETTINGS, emptyVerifyReport } from '@shared/domain'
 import type { ApiCall, ApiEvalRun, ApiTarget } from '@shared/api-endpoints'
+import type { RulePref, RuleKind } from '@main/inbox/rule-prefs'
 
 export function newId(): string {
   return randomUUID()
@@ -207,6 +207,12 @@ export class ProjectsRepo {
   /** Restore a previously removed project (re-adding the same folder). */
   unarchive(id: string): void {
     this.db.prepare('UPDATE projects SET archivedAt = NULL WHERE id = ?').run(id)
+  }
+
+  /** Repoints a project at another folder (discovery.repointProject, which does
+   *  the validating: path is UNIQUE, so a clashing folder throws here). */
+  setPath(id: string, path: string): void {
+    this.db.prepare('UPDATE projects SET path = ? WHERE id = ?').run(path, id)
   }
 
   rename(id: string, name: string): void {
@@ -513,83 +519,90 @@ export class StandingRulesRepo {
   }
 }
 
-export class RiskRulesRepo {
+/**
+ * What the developer changed about the risk and noise rules.
+ *
+ * Holds the DIFFERENCE from the shipped defaults, never a copy of them: an empty
+ * table means shipped behaviour, and editing a default in code reaches every
+ * install that has not overridden that exact rule. main/inbox/rule-prefs.ts
+ * explains why the obvious alternative failed here.
+ */
+export class RulePrefsRepo {
   constructor(private db: AppDatabase) {}
 
-  list(): RiskClassificationRule[] {
-    const rows = this.db.prepare('SELECT * FROM risk_rules ORDER BY position').all() as (Omit<
-      RiskClassificationRule,
-      'inputMatcher' | 'builtin'
-    > & { inputMatcher: string | null; builtin: number })[]
-    return rows.map((r) => ({
-      ...r,
-      inputMatcher: r.inputMatcher ? JSON.parse(r.inputMatcher) : null,
-      builtin: r.builtin === 1,
-    }))
+  /**
+   * Columns listed rather than `SELECT *`: `createdAt` is kept for diagnostics but
+   * is not part of a rule's meaning, and this list crosses IPC to the editor.
+   */
+  list(): RulePref[] {
+    const rows = this.db
+      .prepare('SELECT id, kind, disabled, risk, body, position FROM rule_prefs')
+      .all() as (Omit<RulePref, 'disabled'> & { disabled: number })[]
+    return rows.map((r) => ({ ...r, disabled: r.disabled === 1 }))
   }
 
   /**
-   * Seed the defaults, once. Not `replaceAll`: risk rules have no editing UI and
-   * therefore no IPC surface (see shared/ipc-types.ts), so nothing ever replaced
-   * or reordered them and the DELETE-then-reinsert existed for a flow that does
-   * not exist. The guard lives here rather than at each call site.
+   * Switches a rule off or back on.
    *
-   * Still transactional: a half-written seed would leave count() > 0, so it would
-   * never re-seed and the classifier would run on partial rules forever.
+   * Upsert rather than insert-or-update at the call site: a shipped rule has no row
+   * until the moment it is first touched, which is what keeps "untouched" and
+   * "explicitly left alone" the same state.
    */
-  seedIfEmpty(rules: RiskClassificationRule[]): void {
-    if (this.count() > 0) return
-    const insert = this.db.prepare(
-      `INSERT INTO risk_rules (id, scope, position, toolMatcher, inputMatcher, risk, builtin)
-       VALUES (@id, @scope, @position, @toolMatcher, @inputMatcher, @risk, @builtin)`,
-    )
-    transaction(this.db, () =>
-      rules.forEach((rule, index) =>
-        insert.run({
-          ...rule,
-          position: index,
-          inputMatcher: rule.inputMatcher ? JSON.stringify(rule.inputMatcher) : null,
-          builtin: rule.builtin ? 1 : 0,
-        }),
-      ),
-    )
+  setDisabled(id: string, kind: RuleKind, disabled: boolean): void {
+    this.db
+      .prepare(
+        `INSERT INTO rule_prefs (id, kind, disabled, risk, body, position, createdAt)
+         VALUES (?, ?, ?, NULL, NULL, NULL, ?)
+         ON CONFLICT (id, kind) DO UPDATE SET disabled = excluded.disabled`,
+      )
+      .run(id, kind, disabled ? 1 : 0, nowIso())
   }
 
-  count(): number {
-    return (this.db.prepare('SELECT COUNT(*) AS n FROM risk_rules').get() as { n: number }).n
-  }
-}
-
-export class SwallowRulesRepo {
-  constructor(private db: AppDatabase) {}
-
-  list(projectId?: string): SwallowRule[] {
-    const rows = (
-      projectId
-        ? this.db
-            .prepare(
-              "SELECT * FROM swallow_rules WHERE scope = 'global' OR projectId = ? ORDER BY scope DESC, position",
-            )
-            .all(projectId)
-        : this.db.prepare("SELECT * FROM swallow_rules ORDER BY scope DESC, position").all()
-    ) as (Omit<SwallowRule, 'enabled'> & { enabled: number })[]
-    return rows.map((r) => ({ ...r, enabled: r.enabled === 1 }))
+  /** The risk level chosen instead of the shipped one; null restores the default. */
+  setRisk(id: string, risk: RiskLevel | null): void {
+    this.db
+      .prepare(
+        `INSERT INTO rule_prefs (id, kind, disabled, risk, body, position, createdAt)
+         VALUES (?, 'risk', 0, ?, NULL, NULL, ?)
+         ON CONFLICT (id, kind) DO UPDATE SET risk = excluded.risk`,
+      )
+      .run(id, risk, nowIso())
   }
 
-  /** Seed the defaults, once. Same reasoning as RiskRulesRepo.seedIfEmpty. */
-  seedIfEmpty(rules: SwallowRule[]): void {
-    if (this.count() > 0) return
-    const insert = this.db.prepare(
-      `INSERT INTO swallow_rules (id, scope, projectId, position, eventKindMatcher, pattern, noiseKind, enabled)
-       VALUES (@id, @scope, @projectId, @position, @eventKindMatcher, @pattern, @noiseKind, @enabled)`,
-    )
-    transaction(this.db, () =>
-      rules.forEach((rule, index) => insert.run({ ...rule, position: index, enabled: rule.enabled ? 1 : 0 })),
-    )
+  /** A rule the developer wrote. `body` is the whole rule as JSON. */
+  addCustom(kind: RuleKind, body: string): RulePref {
+    const next =
+      (
+        this.db
+          .prepare('SELECT COALESCE(MAX(position), -1) AS p FROM rule_prefs WHERE kind = ?')
+          .get(kind) as { p: number }
+      ).p + 1
+    const pref: RulePref = {
+      id: newId(),
+      kind,
+      disabled: false,
+      risk: null,
+      body,
+      position: next,
+    }
+    this.db
+      .prepare(
+        `INSERT INTO rule_prefs (id, kind, disabled, risk, body, position, createdAt)
+         VALUES (?, ?, 0, NULL, ?, ?, ?)`,
+      )
+      .run(pref.id, kind, body, next, nowIso())
+    return pref
   }
 
-  count(): number {
-    return (this.db.prepare('SELECT COUNT(*) AS n FROM swallow_rules').get() as { n: number }).n
+  /**
+   * Forgets a row.
+   *
+   * For a rule the developer wrote this deletes it. For a shipped rule it clears
+   * the override, which restores the default — the same operation, because a
+   * missing row IS the default.
+   */
+  remove(id: string, kind: RuleKind): void {
+    this.db.prepare('DELETE FROM rule_prefs WHERE id = ? AND kind = ?').run(id, kind)
   }
 }
 
@@ -874,6 +887,30 @@ export class EvalsRepo {
 }
 
 /**
+ * Keeps only the newest `keep` rows for one project, dropping the rest.
+ *
+ * Shared by verify_runs and api_runs, which held byte-identical copies of this
+ * statement. `table` is a closed union rather than a string, so the interpolation
+ * cannot become an injection point: only these two names type-check.
+ *
+ * Ties on `startedAt` (several runs inside the same millisecond) break on insert
+ * order via `rowid` — `id` is a random UUID, so ordering by it would drop an
+ * arbitrary run instead of the oldest.
+ */
+function pruneToLast(
+  db: AppDatabase,
+  table: 'verify_runs' | 'api_runs',
+  projectId: string,
+  keep: number,
+): void {
+  db.prepare(
+    `DELETE FROM ${table} WHERE projectId = ? AND id NOT IN (
+       SELECT id FROM ${table} WHERE projectId = ? ORDER BY startedAt DESC, rowid DESC LIMIT ?
+     )`,
+  ).run(projectId, projectId, keep)
+}
+
+/**
  * Verification runs. History is bounded by count per project (FR-043): the last
  * VERIFY_HISTORY runs survive, older ones are dropped oldest-first on insert.
  *
@@ -920,16 +957,7 @@ export class VerifyRunsRepo {
         JSON.stringify(run.requested),
         run.startedAt,
       )
-    this.db
-      .prepare(
-        // Ties on `startedAt` (several runs inside the same millisecond) break on
-        // insert order — `id` is a random UUID, so ordering by it would drop an
-        // arbitrary run instead of the oldest.
-        `DELETE FROM verify_runs WHERE projectId = ? AND id NOT IN (
-           SELECT id FROM verify_runs WHERE projectId = ? ORDER BY startedAt DESC, rowid DESC LIMIT ?
-         )`,
-      )
-      .run(input.projectId, input.projectId, VERIFY_HISTORY)
+    pruneToLast(this.db, 'verify_runs', input.projectId, VERIFY_HISTORY)
     return run
   }
 
@@ -1074,13 +1102,7 @@ export class ApiRunsRepo {
          VALUES (?, ?, ?, ?, 0, ?, 'running', NULL, '[]', ?, NULL)`,
       )
       .run(run.id, run.projectId, run.baseUrl, run.target, run.sessionId, run.startedAt)
-    this.db
-      .prepare(
-        `DELETE FROM api_runs WHERE projectId = ? AND id NOT IN (
-           SELECT id FROM api_runs WHERE projectId = ? ORDER BY startedAt DESC, rowid DESC LIMIT ?
-         )`,
-      )
-      .run(input.projectId, input.projectId, API_HISTORY)
+    pruneToLast(this.db, 'api_runs', input.projectId, API_HISTORY)
     return run
   }
 
@@ -1147,8 +1169,7 @@ export interface Repositories {
   events: EventsRepo
   requests: RequestsRepo
   standingRules: StandingRulesRepo
-  riskRules: RiskRulesRepo
-  swallowRules: SwallowRulesRepo
+  rulePrefs: RulePrefsRepo
   settings: SettingsRepo
   drafts: DraftsRepo
   commandHistory: CommandHistoryRepo
@@ -1167,8 +1188,7 @@ export function createRepositories(db: AppDatabase): Repositories {
     events: new EventsRepo(db),
     requests: new RequestsRepo(db),
     standingRules: new StandingRulesRepo(db),
-    riskRules: new RiskRulesRepo(db),
-    swallowRules: new SwallowRulesRepo(db),
+    rulePrefs: new RulePrefsRepo(db),
     settings: new SettingsRepo(db),
     drafts: new DraftsRepo(db),
     commandHistory: new CommandHistoryRepo(db),

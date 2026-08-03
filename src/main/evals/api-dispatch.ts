@@ -9,6 +9,7 @@
 // id answers 200 with an empty body and looks healthy, so the inputs have to come
 // from rows that actually exist. Only the project's database knows which ones do.
 import type { ApiExpect, ApiRequestPlan, ApiTarget } from '@shared/api-endpoints'
+import { str } from './parse'
 
 /** Sentinel the session emits once, on its own line. */
 export const API_DATA_MARKER = 'SWB_APIDATA'
@@ -193,13 +194,6 @@ function toHeaders(raw: unknown): Record<string, string> | null {
     if (text) out[key] = text
   }
   return Object.keys(out).length > 0 ? out : null
-}
-
-function str(value: unknown): string | null {
-  if (typeof value === 'number') return String(value)
-  if (typeof value !== 'string') return null
-  const trimmed = value.trim()
-  return trimmed && !/^(null|n\/a|none|unknown)$/i.test(trimmed) ? trimmed : null
 }
 
 function int(value: unknown): number | null {

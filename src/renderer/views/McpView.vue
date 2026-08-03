@@ -7,7 +7,8 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { relativeTime } from '@renderer/relative-time'
 import { isIpcError, type ProjectListItem } from '@shared/ipc-types'
-import type { AgentScopedPayload, McpScan, QuestionPayload, SessionEvent } from '@shared/domain'
+import { agentIdOf } from '@shared/domain'
+import type { McpScan, QuestionPayload, SessionEvent } from '@shared/domain'
 import { comboDocRelPath, comboKey } from '@shared/mcp-combo'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useProjectsStore } from '@renderer/stores/projects'
@@ -42,13 +43,7 @@ const serverRows = computed(() =>
 )
 
 function toggleServer(name: string): void {
-  if (!settings.settings) return
-  const current = settings.settings.mcpActiveServers
-  const next = current.includes(name) ? current.filter((n) => n !== name) : [...current, name]
-  // Apply locally at once so a second quick click reads this array rather than
-  // the pre-save snapshot — otherwise the later save would drop the first toggle.
-  settings.settings.mcpActiveServers = next
-  void settings.save({ mcpActiveServers: next })
+  settings.toggleMcpActiveServer(name)
 }
 
 // --- Scan history: one row per combination ever scanned ---
@@ -66,12 +61,7 @@ const currentScan = computed(
 
 /** Re-activate a previously scanned combination (its doc loads with it). */
 function activateCombo(scan: McpScan): void {
-  if (!settings.settings) return
-  // Anything in the combo must be on the roster to be tickable again.
-  const roster = new Set([...settings.settings.databaseMcpServers, ...scan.servers])
-  settings.settings.databaseMcpServers = [...roster]
-  settings.settings.mcpActiveServers = [...scan.servers]
-  void settings.save({ databaseMcpServers: [...roster], mcpActiveServers: [...scan.servers] })
+  settings.activateMcpCombo(scan.servers)
 }
 
 /** Shared with InboxView. Static: an MCP scan's age does not need a live tick. */
@@ -157,7 +147,7 @@ const scanned = computed(() => schemaDoc.value !== null)
  */
 const MAX_RENDER = 500
 const dbEvents = computed<SessionEvent[]>(() => {
-  const all = active.events.filter((e) => (e.payload as AgentScopedPayload).agentId === undefined)
+  const all = active.events.filter((e) => agentIdOf(e) === undefined)
   return all.length > MAX_RENDER ? all.slice(all.length - MAX_RENDER) : all
 })
 const hasEvents = computed(() => dbEvents.value.length > 0)
@@ -225,6 +215,20 @@ function scanPrompt(names: string[]): string {
     `re-scanning. Reply with a one-line summary when done.`
   )
 }
+
+/**
+ * Nothing to send, or nowhere to send it.
+ *
+ * A slash command is the exception that needs stating: it goes to the session
+ * raw, so it stays available even with no server ticked — which is how the
+ * developer runs /mcp or a plugin skill to fix the very state that is blocking
+ * everything else.
+ */
+const sendDisabled = computed(() => {
+  const text = composer.value.trim()
+  if (!liveSession.value || text.length === 0) return true
+  return activeServers.value.length === 0 && !text.startsWith('/')
+})
 
 function askPrompt(names: string[], q: string): string {
   const list = names.map((n) => `"${n}"`).join(', ')
@@ -472,6 +476,7 @@ function answer(eventId: string, choice: string): void {
               :key="cmd"
               class="suggest-item"
               :class="{ active: index === suggestIndex }"
+              :data-testid="`mcp-suggest-item-${index}`"
               @mousedown.prevent="acceptSuggestion(cmd)"
               @mouseenter="suggestIndex = index"
             >
@@ -506,11 +511,7 @@ function answer(eventId: string, choice: string): void {
         <button
           class="send-btn mono"
           data-testid="mcp-send"
-          :disabled="
-            !liveSession ||
-            composer.trim().length === 0 ||
-            (activeServers.length === 0 && !composer.trim().startsWith('/'))
-          "
+          :disabled="sendDisabled"
           @click="ask()"
         >
           Send ⏎
@@ -532,7 +533,7 @@ function answer(eventId: string, choice: string): void {
   padding: 14px 18px 0;
   border-bottom: 1px solid var(--border);
   background: var(--gloss), var(--bg-panel);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  box-shadow: var(--hairline-shine);
 }
 
 .head-row {
@@ -680,7 +681,7 @@ function answer(eventId: string, choice: string): void {
   padding: 0 16px;
   border-bottom: 1px solid var(--border);
   background: var(--gloss), var(--bg-panel);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  box-shadow: var(--hairline-shine);
 }
 
 .tab {

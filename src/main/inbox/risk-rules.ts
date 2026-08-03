@@ -1,9 +1,14 @@
 // Risk classification rule engine (FR-008a): ordered, first match wins,
-// unmatched actions fail safe to high. Ships editable seeded defaults that
-// follow the spec assumption: read-only inspection low, file modification
-// medium, destructive or outward-facing actions high.
+// unmatched actions fail safe to high. The defaults below follow the spec
+// assumption: read-only inspection low, file modification medium, destructive or
+// outward-facing actions high.
+//
+// These are DEFAULTS, not policy (PRODUCT.md Principle 3). The developer can
+// switch any of them off, change its level, or add their own, and what they
+// changed is stored separately — see inbox/rule-prefs.ts. This file stays the
+// authority on what ships, which is what makes editing one a normal code change
+// rather than a migration.
 import type { RiskClassificationRule, RiskInputMatcher, RiskLevel } from '@shared/domain'
-import { newId } from '@main/store/repositories'
 
 function inputValue(input: Record<string, unknown>, field: string): string {
   const value = input[field]
@@ -11,7 +16,7 @@ function inputValue(input: Record<string, unknown>, field: string): string {
   return typeof value === 'string' ? value : JSON.stringify(value)
 }
 
-export function matchesInput(matcher: RiskInputMatcher, input: Record<string, unknown>): boolean {
+function matchesInput(matcher: RiskInputMatcher, input: Record<string, unknown>): boolean {
   // Bound the tested length: this runs on the main thread on every permission
   // check, so a pathological user pattern against a long tool input cannot hang
   // the app. (See the note in swallow-rules for the residual short-input case.)
@@ -39,14 +44,31 @@ export function classifyRisk(
 }
 
 interface DefaultRuleSeed {
+  /**
+   * Stable slug, never a generated id.
+   *
+   * This is what a developer's override is keyed to, so it has to survive a
+   * restart and an app upgrade. The rules themselves stay in code and the database
+   * holds only what was changed about them — the reason the earlier seeded-table
+   * design failed is that a shipped default, once written to a row, could not be
+   * changed again without a bespoke migration per change.
+   *
+   * Renaming a slug therefore orphans that rule's override, which is the same as
+   * the developer never having touched it. Retire a rule rather than rename it.
+   */
+  id: string
   toolMatcher: string
   inputMatcher?: RiskInputMatcher
   risk: RiskLevel
+  /** Shown in the rules editor: what this rule is for, in the developer's terms. */
+  label: string
 }
 
 const DEFAULT_RULE_SEEDS: DefaultRuleSeed[] = [
   // Destructive commands first: order matters, first match wins.
   {
+    id: 'bash-destructive',
+    label: 'Destructive shell commands',
     toolMatcher: 'Bash',
     inputMatcher: {
       field: 'command',
@@ -57,6 +79,8 @@ const DEFAULT_RULE_SEEDS: DefaultRuleSeed[] = [
   },
   // Read-only inspection commands.
   {
+    id: 'bash-readonly',
+    label: 'Read-only shell commands',
     toolMatcher: 'Bash',
     inputMatcher: {
       field: 'command',
@@ -67,6 +91,8 @@ const DEFAULT_RULE_SEEDS: DefaultRuleSeed[] = [
   },
   // Package and build commands change the working tree but are routine.
   {
+    id: 'bash-build',
+    label: 'Package and build commands',
     toolMatcher: 'Bash',
     inputMatcher: {
       field: 'command',
@@ -76,23 +102,28 @@ const DEFAULT_RULE_SEEDS: DefaultRuleSeed[] = [
     risk: 'medium',
   },
   // Read-only tools.
-  { toolMatcher: 'Read', risk: 'low' },
-  { toolMatcher: 'Glob', risk: 'low' },
-  { toolMatcher: 'Grep', risk: 'low' },
-  { toolMatcher: 'NotebookRead', risk: 'low' },
-  { toolMatcher: 'TodoWrite', risk: 'low' },
+  { id: 'tool-read', label: 'Read a file', toolMatcher: 'Read', risk: 'low' },
+  { id: 'tool-glob', label: 'Find files by name', toolMatcher: 'Glob', risk: 'low' },
+  { id: 'tool-grep', label: 'Search file contents', toolMatcher: 'Grep', risk: 'low' },
+  { id: 'tool-notebook-read', label: 'Read a notebook', toolMatcher: 'NotebookRead', risk: 'low' },
+  { id: 'tool-todowrite', label: 'Update the task list', toolMatcher: 'TodoWrite', risk: 'low' },
   // File modification.
-  { toolMatcher: 'Edit', risk: 'medium' },
-  { toolMatcher: 'Write', risk: 'medium' },
-  { toolMatcher: 'NotebookEdit', risk: 'medium' },
+  { id: 'tool-edit', label: 'Edit a file', toolMatcher: 'Edit', risk: 'medium' },
+  { id: 'tool-write', label: 'Write a file', toolMatcher: 'Write', risk: 'medium' },
+  { id: 'tool-notebook-edit', label: 'Edit a notebook', toolMatcher: 'NotebookEdit', risk: 'medium' },
   // Outward-facing actions are high per the spec assumption.
-  { toolMatcher: 'WebFetch', risk: 'high' },
-  { toolMatcher: 'WebSearch', risk: 'high' },
+  { id: 'tool-webfetch', label: 'Fetch a URL', toolMatcher: 'WebFetch', risk: 'high' },
+  { id: 'tool-websearch', label: 'Search the web', toolMatcher: 'WebSearch', risk: 'high' },
 ]
+
+/** Label for a shipped rule, for the rules editor. Empty for a custom rule. */
+export function riskRuleLabel(id: string): string {
+  return DEFAULT_RULE_SEEDS.find((s) => `builtin:${s.id}` === id)?.label ?? ''
+}
 
 export function defaultRiskRules(): RiskClassificationRule[] {
   return DEFAULT_RULE_SEEDS.map((seed, index) => ({
-    id: newId(),
+    id: `builtin:${seed.id}`,
     scope: 'global',
     position: index,
     toolMatcher: seed.toolMatcher,

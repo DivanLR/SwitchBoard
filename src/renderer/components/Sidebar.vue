@@ -12,6 +12,11 @@ import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useInboxStore } from '@renderer/stores/inbox'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { accentFor, GROUP_COLORS } from '@renderer/project-accent'
+import { elapsedClock } from '@renderer/relative-time'
+import { useProjectGroups } from '@renderer/composables/useProjectGroups'
+import { UNGROUPED, useProjectDragDrop } from '@renderer/composables/useProjectDragDrop'
+import { trapTabWithin } from '@renderer/composables/useModal'
+import { useNow } from '@renderer/composables/useNow'
 
 const projects = useProjectsStore()
 const activeSession = useActiveSessionStore()
@@ -71,26 +76,19 @@ function initials(name: string): string {
 
 // Stable per-project accent colour on the fold tick (shared with the
 // session header dot) — identifies the project at a glance in the collapsed rail.
-const now = ref(Date.now())
-let timer: ReturnType<typeof setInterval> | undefined
+const now = useNow(1000)
 onMounted(() => {
-  timer = setInterval(() => {
-    now.value = Date.now()
-  }, 1000)
   if (!settings.settings) void settings.load()
   document.addEventListener('keydown', onOverlayKeydown, true)
 })
 onUnmounted(() => {
-  clearInterval(timer)
   document.removeEventListener('keydown', onOverlayKeydown, true)
 })
 
 const collisions = computed(() => projects.nameCollisions)
 
 function timerOf(startedAt: string): string {
-  const sec = Math.max(0, Math.floor((now.value - Date.parse(startedAt)) / 1000))
-  const pad = (n: number): string => String(n).padStart(2, '0')
-  return `${pad(Math.floor(sec / 3600))}:${pad(Math.floor((sec % 3600) / 60))}:${pad(sec % 60)}`
+  return elapsedClock(startedAt, now.value)
 }
 
 function statusOf(item: (typeof projects.items)[number]): string {
@@ -98,6 +96,20 @@ function statusOf(item: (typeof projects.items)[number]): string {
   if (item.session.endedAt) return 'ended'
   return item.session.status
 }
+
+/**
+ * Each project's lane status, resolved once per change instead of per read.
+ *
+ * The row template asks for this nine times — the class, two data attributes,
+ * the title, and a five-way branch picking the fold mark — so calling the
+ * function inline re-derived the same answer nine times per row, on every
+ * render of a list that redraws whenever any session ticks.
+ */
+const statusById = computed<Record<string, string>>(() => {
+  const out: Record<string, string> = {}
+  for (const item of projects.items) out[item.id] = statusOf(item)
+  return out
+})
 
 /** Plain language, no vocabulary to learn. Hover and screen readers get the same
  *  words, and the mark beside them only narrows the guess. */
@@ -185,10 +197,24 @@ function mcpDot(status: string): string {
   return 'var(--amber)'
 }
 
-// --- Collapsible project groups (sidebar-only organisation, kept in Settings
-// beside the other per-project maps, so it persists with no schema change) ---
-const groups = computed<ProjectGroup[]>(() => settings.settings?.projectGroups ?? [])
-const groupOf = computed<Record<string, string>>(() => settings.settings?.projectGroupOf ?? {})
+// Collapsible project groups (sidebar-only organisation, kept in Settings
+// beside the other per-project maps, so it persists with no schema change).
+// The inline-rename refs are declared here because the same pair also renames
+// PROJECTS, which is the context menu's business rather than the group CRUD's.
+const renamingGroupId = ref<string | null>(null)
+const renameVal = ref('')
+const {
+  groups,
+  groupOf,
+  ungroupedFolded,
+  saveGroups,
+  assignGroup,
+  toggleGroup,
+  newGroup,
+  removeGroup,
+  moveGroup,
+} = useProjectGroups({ renamingGroupId, renameVal })
+
 /** Sidebar filter (design: the ⌕ box under the logo). Narrows the list by name
  *  or branch — with a dozen projects, scanning beats scrolling. */
 const filterQuery = ref('')
@@ -199,10 +225,6 @@ const filtered = computed(() => {
     (p) => p.name.toLowerCase().includes(q) || (p.session?.branch ?? '').toLowerCase().includes(q),
   )
 })
-
-/** Whether the ungrouped tail is folded. Not persisted like a real group's fold:
- *  it is a view preference on a section the developer never created. */
-const ungroupedFolded = ref(false)
 
 /**
  * The sections as the sidebar draws them: colour, fold state, count and pending
@@ -239,72 +261,6 @@ const sections = computed(() => {
     .filter((section) => !filtering || section.items.length > 0)
 })
 
-function saveGroups(next: ProjectGroup[]): void {
-  void settings.save({ projectGroups: next })
-}
-
-/** Move a project into a group, or out of all groups with null. */
-function assignGroup(projectId: string, groupId: string | null): void {
-  const map = { ...groupOf.value }
-  if (groupId) map[projectId] = groupId
-  else delete map[projectId]
-  void settings.save({ projectGroupOf: map })
-}
-
-/** Folds a group, or the ungrouped tail when there is no id. */
-function toggleGroup(id: string | null): void {
-  if (!id) {
-    ungroupedFolded.value = !ungroupedFolded.value
-    return
-  }
-  saveGroups(groups.value.map((g) => (g.id === id ? { ...g, collapsed: !g.collapsed } : g)))
-}
-
-/** A default name no existing group already has, so a second group reads as a
- *  second group rather than a duplicate of the first. */
-function defaultGroupName(): string {
-  const taken = new Set(groups.value.map((g) => g.name))
-  let name = 'New group'
-  for (let n = 2; taken.has(name); n += 1) name = `New group ${n}`
-  return name
-}
-
-/** Adds a group and drops straight into inline naming. */
-function newGroup(projectId?: string): void {
-  const group: ProjectGroup = {
-    id: crypto.randomUUID(),
-    name: defaultGroupName(),
-    collapsed: false,
-    color: GROUP_COLORS[groups.value.length % GROUP_COLORS.length],
-  }
-  saveGroups([...groups.value, group])
-  if (projectId) assignGroup(projectId, group.id)
-  renamingGroupId.value = group.id
-  renameVal.value = group.name
-}
-
-/** Removing a group never removes projects: they fall back to ungrouped. */
-function removeGroup(id: string): void {
-  const map = { ...groupOf.value }
-  for (const [projectId, groupId] of Object.entries(map)) {
-    if (groupId === id) delete map[projectId]
-  }
-  void settings.save({
-    projectGroups: groups.value.filter((g) => g.id !== id),
-    projectGroupOf: map,
-  })
-}
-
-function moveGroup(id: string, delta: number): void {
-  const from = groups.value.findIndex((g) => g.id === id)
-  const to = from + delta
-  if (from === -1 || to < 0 || to >= groups.value.length) return
-  const next = [...groups.value]
-  const [moved] = next.splice(from, 1)
-  next.splice(to, 0, moved)
-  saveGroups(next)
-}
-
 // --- Context menu (right-click) + inline rename ---
 const ctx = ref<{
   kind: 'project' | 'group'
@@ -314,8 +270,6 @@ const ctx = ref<{
   y: number
 } | null>(null)
 const renamingId = ref<string | null>(null)
-const renamingGroupId = ref<string | null>(null)
-const renameVal = ref('')
 
 // Function refs run on every re-render (each keystroke updates renameVal), so
 // only focus+select when the input isn't already focused — otherwise typing
@@ -403,96 +357,19 @@ function ctxRemoveGroup(): void {
   ctx.value = null
 }
 
-// --- Drag & drop (design): drag a row to REORDER only. Referencing another
-// project is done by dragging it into the session pane (the chat), never by
-// dropping one project onto another. OS files dropped on a row insert their
-// @path into that project's composer. ---
-const dragId = ref<string | null>(null)
-const rowDrop = ref<{ id: string; zone: 'before' | 'after' | 'file' } | null>(null)
-/** Group header highlighted as the drop target for the dragged project. */
-const groupDrop = ref<string | null>(null)
-
-// The ungrouped tail is a drop target too (it takes a project back out of its
-// group), so it needs a key of its own in `groupDrop` — it has no id.
-const UNGROUPED = '__ungrouped'
-
-function onGroupDragOver(group: ProjectGroup | null, event: DragEvent): void {
-  if (!(event.dataTransfer?.types ?? []).includes('text/x-sb-project')) return
-  event.preventDefault()
-  groupDrop.value = group?.id ?? UNGROUPED
-}
-
-function onGroupDrop(group: ProjectGroup | null, event: DragEvent): void {
-  event.preventDefault()
-  groupDrop.value = null
-  const dragged = event.dataTransfer?.getData('text/x-sb-project') || dragId.value
-  dragId.value = null
-  if (dragged) assignGroup(dragged, group?.id ?? null)
-}
-
-function onDragStart(item: (typeof projects.items)[number], event: DragEvent): void {
-  dragId.value = item.id
-  event.dataTransfer?.setData('text/x-sb-project', item.id)
-  event.dataTransfer?.setData('text/x-sb-project-path', item.path)
-  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
-}
-
-// Project drags reorder: top half inserts before, bottom half after — no
-// drop-onto-reference zone. OS-file drags highlight the whole row.
-function onRowDragOver(item: (typeof projects.items)[number], event: DragEvent): void {
-  const types = event.dataTransfer?.types ?? []
-  if (types.includes('Files')) {
-    event.preventDefault()
-    rowDrop.value = { id: item.id, zone: 'file' }
-    return
-  }
-  if (!types.includes('text/x-sb-project')) return
-  if (dragId.value === item.id) return
-  event.preventDefault()
-  const el = event.currentTarget as HTMLElement
-  const rect = el.getBoundingClientRect()
-  const y = (event.clientY - rect.top) / Math.max(1, rect.height)
-  rowDrop.value = { id: item.id, zone: y < 0.5 ? 'before' : 'after' }
-}
-
-async function onRowDrop(item: (typeof projects.items)[number], event: DragEvent): Promise<void> {
-  event.preventDefault()
-  const drop = rowDrop.value
-  rowDrop.value = null
-  // An OS file dropped on a project: open it and point the composer at the path.
-  const files = [...(event.dataTransfer?.files ?? [])]
-  if (files.length > 0) {
-    const paths = files
-      .map((f) => window.switchboard.pathForFile?.(f))
-      .filter((p): p is string => Boolean(p))
-      .map((p) => `@${p}`)
-    if (paths.length > 0) {
-      projects.select(item.id)
-      activeSession.requestComposerInsert(paths.join(' '))
-    }
-    dragId.value = null
-    return
-  }
-  const dragged = event.dataTransfer?.getData('text/x-sb-project') || dragId.value
-  dragId.value = null
-  if (!drop || !dragged || dragged === item.id) return
-  const fromIndex = projects.items.findIndex((p) => p.id === dragged)
-  if (fromIndex === -1) return
-  const targetIndex = projects.items.findIndex((p) => p.id === item.id)
-  let toIndex = drop.zone === 'before' ? targetIndex : targetIndex + 1
-  if (fromIndex < toIndex) toIndex -= 1
-  // Dropping among a group's rows also joins that group, so dragging into the
-  // middle of a group does the obvious thing instead of only reordering.
-  const targetGroup = groupOf.value[item.id] ?? null
-  if ((groupOf.value[dragged] ?? null) !== targetGroup) assignGroup(dragged, targetGroup)
-  await projects.move(dragged, toIndex)
-}
-
-function onDragEnd(): void {
-  dragId.value = null
-  rowDrop.value = null
-  groupDrop.value = null
-}
+// Drag & drop (design): drag a row to REORDER only; dropping into a group's
+// header or rows also joins it, and OS files dropped on a row insert their
+// @path into that project's composer.
+const {
+  rowDrop,
+  groupDrop,
+  onGroupDragOver,
+  onGroupDrop,
+  onDragStart,
+  onRowDragOver,
+  onRowDrop,
+  onDragEnd,
+} = useProjectDragDrop({ groupOf, assignGroup })
 
 // --- Remove (archive) a project, via a confirmation popup ---
 const confirmRemoveId = ref<string | null>(null)
@@ -513,13 +390,56 @@ function cancelRemove(): void {
   removeError.value = null
 }
 
+// --- Change folder (repoint): declared before the shared overlay keydown/watch
+// below, which read repointId at setup time ---
+const repointId = ref<string | null>(null)
+const repointVal = ref('')
+const repointError = ref<string | null>(null)
+
+const repointTarget = computed(() =>
+  repointId.value ? (projects.items.find((p) => p.id === repointId.value) ?? null) : null,
+)
+
+function startRepoint(): void {
+  if (!ctx.value || ctx.value.kind !== 'project') return
+  repointVal.value = projects.items.find((p) => p.id === ctx.value?.id)?.path ?? ''
+  repointError.value = null
+  repointId.value = ctx.value.id
+  ctx.value = null
+}
+
+function cancelRepoint(): void {
+  repointId.value = null
+  repointError.value = null
+}
+
+async function commitRepoint(): Promise<void> {
+  if (!repointId.value) return
+  const path = repointVal.value.trim()
+  if (!path) return
+  repointError.value = null
+  busy.value = true
+  try {
+    await projects.repoint(repointId.value, path)
+    repointId.value = null
+  } catch (e) {
+    repointError.value = isIpcError(e)
+      ? e.code === 'ALREADY_ACTIVE'
+        ? 'Stop the session before changing the folder.'
+        : e.message
+      : String(e)
+  } finally {
+    busy.value = false
+  }
+}
+
 // Escape closes whichever overlay is open, and opening one moves focus into it.
 // These live in Sidebar rather than in useModal because both are v-if blocks
 // inside a component that mounts once, so a composable's onMounted would fire
 // long before either overlay exists. Without this the context menu could only be
 // dismissed with the mouse, and the remove dialogue could not be reached at all.
 function onOverlayKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Tab' && confirmRemoveId.value) {
+  if (event.key === 'Tab' && (confirmRemoveId.value || repointId.value)) {
     trapTab(event)
     return
   }
@@ -527,43 +447,33 @@ function onOverlayKeydown(event: KeyboardEvent): void {
   if (confirmRemoveId.value) {
     event.stopPropagation()
     cancelRemove()
+  } else if (repointId.value) {
+    event.stopPropagation()
+    cancelRepoint()
   } else if (ctx.value) {
     event.stopPropagation()
     closeCtx()
   }
 }
 
-/** Keeps Tab inside the open remove dialog. Without it, Tab walks out to the
- *  window behind and the developer is operating a surface they cannot see while a
- *  destructive confirmation is still up. */
+/** Keeps Tab inside the open remove/repoint dialog, using the same trap useModal
+ *  applies — shared so the two cannot drift apart, even though this overlay
+ *  cannot use the mount-time composable itself (see the note above). */
 function trapTab(event: KeyboardEvent): void {
-  const dialog = document.querySelector<HTMLElement>('[data-testid="remove-dialog"]')
-  if (!dialog) return
-  const items = [
-    ...dialog.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex]:not([tabindex="-1"])'),
-  ].filter((el) => el.offsetParent !== null)
-  if (items.length === 0) return
-  const first = items[0]
-  const last = items[items.length - 1]
-  const active = document.activeElement
-  if (!event.shiftKey && active === last) {
-    event.preventDefault()
-    first.focus()
-  } else if (event.shiftKey && (active === first || active === dialog)) {
-    event.preventDefault()
-    last.focus()
-  } else if (!items.includes(active as HTMLElement)) {
-    // Focus was outside the dialog entirely (a click on the scrim, say): pull it
-    // back in rather than letting Tab continue through the window behind.
-    event.preventDefault()
-    first.focus()
-  }
+  const dialog = document.querySelector<HTMLElement>(
+    '[data-testid="remove-dialog"], [data-testid="repoint-dialog"]',
+  )
+  if (dialog) trapTabWithin(dialog, event)
 }
 
-watch([ctx, confirmRemoveId], async ([menu, removing]) => {
-  if (!menu && !removing) return
+watch([ctx, confirmRemoveId, repointId], async ([menu, removing, repointing]) => {
+  if (!menu && !removing && !repointing) return
   await nextTick()
-  const selector = removing ? '[data-testid="remove-cancel"]' : '.ctx-item'
+  const selector = removing
+    ? '[data-testid="remove-cancel"]'
+    : repointing
+      ? '[data-testid="repoint-input"]'
+      : '.ctx-item'
   document.querySelector<HTMLElement>(selector)?.focus()
 })
 
@@ -584,6 +494,7 @@ async function confirmRemoveNow(): Promise<void> {
     busy.value = false
   }
 }
+
 </script>
 
 <template>
@@ -785,32 +696,32 @@ async function confirmRemoveNow(): Promise<void> {
                  MISFOLD is two creases crossing, PACKED FLAT is the sheet
                  folded away, and LOCKED is the fold seated, done. -->
             <span
-              v-if="statusOf(item) !== 'none'"
+              v-if="statusById[item.id] !== 'none'"
               class="mark"
-              :class="statusOf(item)"
+              :class="statusById[item.id]"
               :data-testid="`status-badge-${item.name}`"
-              :data-status="statusOf(item)"
-              :title="markTitle(statusOf(item))"
+              :data-status="statusById[item.id]"
+              :title="markTitle(statusById[item.id])"
             >
               <!-- Folds in a scored sheet, at the world's 60-degree crease angle.
                    Deliberately plain geometry: the mark narrows the guess, the word
                    beside it settles it, so nobody has to learn a symbol. -->
               <svg viewBox="0 0 16 14" width="16" height="14" aria-hidden="true">
-                <template v-if="statusOf(item) === 'needs_you'">
+                <template v-if="statusById[item.id] === 'needs_you'">
                   <!-- Held: one crease scored but not yet folded either way. -->
                   <path d="M3 12 L8 2 L13 12" fill="none" stroke="currentColor" stroke-width="1.7" />
                 </template>
-                <template v-else-if="statusOf(item) === 'working'">
+                <template v-else-if="statusById[item.id] === 'working'">
                   <!-- Deploying: three facets opening out of the packet. -->
                   <path d="M2 12 L5.6 2.6 L8 12 Z" fill="currentColor" opacity=".55" />
                   <path d="M8 12 L10.4 2.6 L14 12 Z" fill="currentColor" />
                 </template>
-                <template v-else-if="statusOf(item) === 'error'">
+                <template v-else-if="statusById[item.id] === 'error'">
                   <!-- Misfold: two creases crossing where they cannot both hold. -->
                   <path d="M2.6 2.6 L13.4 11.4" stroke="currentColor" stroke-width="1.7" />
                   <path d="M13.4 2.6 L2.6 11.4" stroke="currentColor" stroke-width="1.7" />
                 </template>
-                <template v-else-if="statusOf(item) === 'ended'">
+                <template v-else-if="statusById[item.id] === 'ended'">
                   <!-- Packed flat: the sheet folded back to a packet. -->
                   <path d="M2.5 8.6 L5 5.4 L13.5 5.4 L11 8.6 Z" fill="currentColor" opacity=".5" />
                 </template>
@@ -1032,6 +943,9 @@ async function confirmRemoveNow(): Promise<void> {
         <span>↓</span>Move down
       </button>
       <template v-if="ctx.kind === 'project'">
+        <button class="ctx-item mono" data-testid="ctx-repoint" @click="startRepoint">
+          <span style="color: var(--green)">⇄</span>Change folder…
+        </button>
         <div class="ctx-sep"></div>
         <button class="ctx-item mono" data-testid="ctx-new-group" @click="ctxNewGroup">
           <span style="color: var(--green)">⊞</span>New group with this
@@ -1066,6 +980,51 @@ async function confirmRemoveNow(): Promise<void> {
       >
         <span>🗑</span>Remove group (keeps projects)
       </button>
+    </div>
+  </div>
+
+  <!-- Change-folder (repoint) popup: same shell as the remove dialog. -->
+  <div v-if="repointTarget" class="overlay" @click.self="cancelRepoint">
+    <div
+      class="dialog remove-dialog"
+      data-testid="repoint-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="repoint-dialog-title"
+    >
+      <div class="rd-icon" aria-hidden="true">⇄</div>
+      <div id="repoint-dialog-title" class="rd-title mono">
+        Change folder for {{ repointTarget.name }}
+      </div>
+      <div class="rd-body">
+        <input
+          v-model="repointVal"
+          class="mono repoint-input"
+          data-testid="repoint-input"
+          spellcheck="false"
+          @keydown.enter="commitRepoint"
+        />
+        <p class="rd-note dim">
+          Sessions, history, and folder access move to the new folder. The name stays
+          {{ repointTarget.name }}.
+        </p>
+        <p v-if="repointError" class="rd-error mono" data-testid="repoint-error">
+          {{ repointError }}
+        </p>
+      </div>
+      <div class="rd-actions">
+        <button
+          class="btn-solid"
+          data-testid="repoint-confirm"
+          :disabled="busy || repointVal.trim().length === 0"
+          @click="commitRepoint"
+        >
+          Change folder
+        </button>
+        <button class="btn-outline" data-testid="repoint-cancel" @click="cancelRepoint">
+          Cancel
+        </button>
+      </div>
     </div>
   </div>
 
@@ -1117,7 +1076,7 @@ async function confirmRemoveNow(): Promise<void> {
   width: 252px;
   min-width: 252px;
   background: var(--bg-panel);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  box-shadow: var(--hairline-shine);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -1656,6 +1615,19 @@ async function confirmRemoveNow(): Promise<void> {
   font-size: 11px;
   color: var(--red);
   margin: 8px 0 0;
+}
+
+/* The repoint dialog's path input: the registration dialog's folder input,
+   inside the remove dialog's shell. */
+.repoint-input {
+  width: 100%;
+  font-size: 12.5px;
+  padding: 9px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--rc);
+  color: var(--text-strong);
+  margin-bottom: 10px;
 }
 
 .rd-actions {

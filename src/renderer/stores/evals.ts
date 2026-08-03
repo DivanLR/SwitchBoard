@@ -98,4 +98,4 @@ const store = reactive({
   },
 })
 
-export const evals = store
+export const useEvalsStore = (): typeof store => store

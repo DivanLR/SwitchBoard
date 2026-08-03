@@ -24,3 +24,24 @@ test('the Cleanup tab lists grouped commands and runs one in the session', async
   const sends = await page.evaluate(() => window.__mock.state().sends)
   expect(sends.some((s) => s.text === '/de-sloppify')).toBe(true)
 })
+
+test('a stack-specific plugin is not advertised to a project that has not installed it', async ({
+  page,
+}) => {
+  // Once the session reports its real command list, the app knows what is
+  // installed. The .NET toolkit used to be offered, with a download button, to
+  // every project whatever its language; only ponytail is ecosystem-neutral.
+  await page.evaluate(() => window.__mock.setCommands('p-alpha', ['ponytail-review', 'ponytail-audit']))
+  await page.getByTestId('tab-cleanup').click()
+
+  await expect(page.getByTestId('cleanup-view')).toContainText('ponytail')
+  await expect(page.getByTestId('cleanup-view')).not.toContainText('dotnet-claude-kit')
+})
+
+test('an installed stack-specific plugin still shows its commands', async ({ page }) => {
+  await page.evaluate(() => window.__mock.setCommands('p-alpha', ['code-review', 'de-sloppify']))
+  await page.getByTestId('tab-cleanup').click()
+
+  await expect(page.getByTestId('cleanup-view')).toContainText('dotnet-claude-kit')
+  await expect(page.getByTestId('cleanup-cmd-code-review')).toBeVisible()
+})

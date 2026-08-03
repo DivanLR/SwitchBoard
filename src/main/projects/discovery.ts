@@ -47,6 +47,42 @@ export function registerProject(
 }
 
 /**
+ * Points an existing project at a different folder (context menu "Change
+ * folder…"). Exists because fixing a project registered at the wrong folder — a
+ * wrapper above the real clone, say — used to mean closing the app and editing
+ * the database by hand. The project keeps its id, sessions, and eval history;
+ * the seeded folder-access rules move with the folder, since a glob scoped to
+ * the old one would make every read in the new one prompt.
+ */
+export function repointProject(repos: Repositories, projectId: string, rawPath: string): Project {
+  const project = repos.projects.byId(projectId)
+  if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
+  if (repos.sessions.activeForProject(projectId)) {
+    // A live session (native cwd or container bind mount) is standing in the old
+    // folder; repointing under it would leave the row lying about where it ran.
+    throw { code: 'ALREADY_ACTIVE', message: 'Stop the session before changing the folder' } satisfies IpcError
+  }
+  const path = resolve(rawPath.trim().replace(/^~(?=$|[\\/])/, homedir()))
+  if (!isAbsolute(path) || !existsSync(path) || !statSync(path).isDirectory()) {
+    throw { code: 'INVALID_PATH', message: 'The folder does not exist' } satisfies IpcError
+  }
+  if (path === project.path) return project
+  const owner = repos.projects.byPath(path)
+  if (owner && owner.id !== projectId) {
+    // Archived rows count too: path is UNIQUE, so the update would throw anyway.
+    throw { code: 'DUPLICATE', message: 'The folder is already registered' } satisfies IpcError
+  }
+  repos.projects.setPath(projectId, path)
+  // Only the auto-seeded access rules move; rules the developer created from
+  // real permission requests are theirs and stay put.
+  for (const rule of repos.standingRules.listForProject(projectId)) {
+    if (rule.createdFromRequestId === 'auto:folder-access') repos.standingRules.revoke(rule.id)
+  }
+  seedFolderAccessRules(repos, projectId, path)
+  return { ...project, path }
+}
+
+/**
  * Adds a REFS entry (design: header chips): `target` is a folder path or the
  * name of another registered project. Returns the updated ref list.
  */

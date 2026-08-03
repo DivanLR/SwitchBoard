@@ -103,8 +103,13 @@ const ADHD_APPEND =
 // standing in — without this it treats a missing /mnt/c as "the repo is
 // unreachable" and asks the developer to git clone something already mounted.
 
-/** The container-layout append for a bypass session, else null. */
-export function sandboxSystemPromptAppend(mounts: readonly { container: string }[] = []): string | null {
+/** The container-layout append for a bypass session, else null. `gitNote` is
+ *  gitNotice()'s verdict — stated here so the agent never reads a missing .git
+ *  at /workspace as "the history was deleted". */
+export function sandboxSystemPromptAppend(
+  mounts: readonly { container: string }[] = [],
+  gitNote: string | null = null,
+): string | null {
   if (mounts.length === 0) return null
   const refs = mounts.filter((m) => m.container !== '/workspace').map((m) => m.container)
   return (
@@ -123,6 +128,7 @@ export function sandboxSystemPromptAppend(mounts: readonly { container: string }
         `  rg -n "pattern" /workspace ${refs.join(' ')}\n`
       : '- No referenced folders are mounted. REFS chips added after the session started only ' +
         'mount from the next session, so ask for a restart rather than a clone.\n') +
+    (gitNote ? `- Git: ${gitNote}\n` : '') +
     'A path in the developer\'s message has already been translated to its container path, so use ' +
     'it as given.'
   )

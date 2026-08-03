@@ -2,7 +2,7 @@
 // One clean-view stream event — 1:1 with the design reference: ❯ prompts,
 // ✦ SUMMARY cards, approval marker rows, ✗ ERROR cards, ✓ result lines, and
 // mono tool/raw lines (FR-014).
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import MarkdownText from '@renderer/components/MarkdownText.vue'
 import UsageCard from '@renderer/components/UsageCard.vue'
 import { parseUsageReport } from '@shared/usage-report'
@@ -19,7 +19,33 @@ import type {
 } from '@shared/domain'
 
 const props = defineProps<{ event: SessionEvent; stamps?: boolean }>()
-const emit = defineEmits<{ (e: 'open-inbox', requestId: string): void }>()
+const emit = defineEmits<{
+  (e: 'open-inbox', requestId: string): void
+  /** Reword a queued message, or withdraw it when the text is empty. */
+  (e: 'edit-queued', eventId: string, text: string): void
+}>()
+
+// Editing a message that is still queued. Local because it is one line of text
+// and the same idiom the UP NEXT queue uses: click the text, Enter saves, Escape
+// abandons, leaving the field saves, and clearing it withdraws the message.
+const editing = ref(false)
+const draft = ref('')
+
+function beginEdit(text: string): void {
+  editing.value = true
+  draft.value = text
+}
+
+function save(): void {
+  if (!editing.value) return
+  editing.value = false
+  emit('edit-queued', props.event.id, draft.value)
+}
+
+function cancel(): void {
+  editing.value = false
+  draft.value = ''
+}
 
 const kind = computed(() => props.event.kind)
 
@@ -139,10 +165,37 @@ const toolLabel = computed(() => {
   <div v-if="hasContent" class="event" :class="{ stamped: stamp }" :data-testid="`stream-event-${kind}`" :data-event-id="event.id">
     <span v-if="stamp" class="stamp mono" data-testid="event-stamp">{{ stamp }}</span>
     <!-- ❯ prompt -->
-    <div v-if="prompt" class="prompt mono">
+    <div v-if="prompt" class="prompt mono" :class="{ 'prompt-withdrawn': prompt.withdrawn }">
       <span class="caret">❯</span>
-      <span class="prompt-text">{{ prompt.text }}</span>
+      <!-- Only a QUEUED message is editable: once it has gone, the record of what
+           the session was actually told must not be rewritable. -->
+      <textarea
+        v-if="editing"
+        ref="editor"
+        v-model="draft"
+        class="prompt-edit mono"
+        rows="2"
+        data-testid="prompt-edit"
+        :aria-label="'Edit queued message'"
+        @keydown.enter.exact.prevent="save()"
+        @keydown.esc.prevent="cancel()"
+        @blur="save()"
+      ></textarea>
+      <button
+        v-else-if="prompt.pending"
+        type="button"
+        class="prompt-text prompt-editable"
+        data-testid="prompt-editable"
+        title="Click to edit before it is sent — clear it to withdraw"
+        @click="beginEdit(prompt.text)"
+      >
+        {{ prompt.text }}
+      </button>
+      <span v-else class="prompt-text">{{ prompt.text }}</span>
       <span v-if="prompt.pending" class="pending mono" data-testid="prompt-pending"> queued </span>
+      <span v-else-if="prompt.withdrawn" class="withdrawn mono" data-testid="prompt-withdrawn">
+        withdrawn
+      </span>
     </div>
 
     <!-- /usage response: structured meters + dotted lists instead of prose -->
@@ -268,6 +321,56 @@ html.sb-light .prompt {
   font-size: 10px;
   color: var(--amber);
   border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
+  border-radius: var(--rc);
+  padding: 0 6px;
+}
+
+/* A queued message can still be changed, so it has to look changeable. Matches
+   the UP NEXT queue's dotted-underline cue rather than inventing a second one. */
+.prompt-editable {
+  text-align: left;
+}
+
+.prompt-editable:hover {
+  color: var(--text);
+  text-decoration: underline dotted;
+}
+
+/* Same type and wash as the text it replaces, so opening the editor does not
+   move the message or resize the row it sits in. */
+.prompt-edit {
+  flex: 1;
+  min-width: 0;
+  resize: vertical;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--rc);
+  padding: 2px 6px;
+}
+
+/* Withdrawn: the row stays because events are append-only, but it must never
+   read as something the session was told. Struck and dimmed, no accent wash. */
+.prompt-withdrawn {
+  background: transparent;
+  border-left-color: var(--border);
+}
+
+.prompt-withdrawn .prompt-text {
+  color: var(--text-ghost);
+  text-decoration: line-through;
+}
+
+.prompt-withdrawn .caret {
+  color: var(--text-ghost);
+}
+
+.withdrawn {
+  font-size: 10px;
+  color: var(--text-ghost);
+  border: 1px solid var(--border);
   border-radius: var(--rc);
   padding: 0 6px;
 }

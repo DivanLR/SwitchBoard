@@ -5,6 +5,7 @@
 // the timing is measured, and the verdict comes from checkCall() — so a green
 // eval set means the endpoints answered, not that something reported they did.
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
+import { setTimeout as delay } from 'node:timers/promises'
 import {
   apiVerdict,
   checkCall,
@@ -232,10 +233,6 @@ async function waitForServer(baseUrl: string, child: ChildProcess): Promise<bool
   return false
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
 /**
  * Kill the server and everything it started.
  *
@@ -292,7 +289,7 @@ export async function completeApiRun(deps: {
     const project = repos.projects.byId(projectId)
     if (!project) throw new Error('the project is no longer registered')
     const settings = repos.settings.get()
-    const host = resolveApiHost(project.path, {
+    const host = await resolveApiHost(project.path, {
       // The run's own base URL and target win: they are what the developer was
       // told the calls would go to when they started it, and re-deciding the
       // environment now would let an edited setting move a run mid-flight.

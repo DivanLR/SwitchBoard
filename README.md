@@ -107,7 +107,7 @@ Development runs on Claude Code with [`i-have-adhd`](https://github.com/ayghri/i
 
 ## Getting started
 
-**Prerequisites:** Node.js 20+, npm, and an authenticated
+**Prerequisites:** Node.js 22.5+ (the store uses `node:sqlite`), npm, and an authenticated
 [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) installation on Windows.
 
 ```powershell

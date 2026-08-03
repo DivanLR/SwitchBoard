@@ -38,10 +38,10 @@ import { parseApiRequests } from '@main/evals/api-dispatch'
 import type { ApiRequestPlan } from '@shared/api-endpoints'
 import { mainLoopModel } from './model-routing'
 import { resolveClaudeExecutable } from './claude-executable'
-import { ensureSandboxImage, refMounts, sweepOrphanedContainers } from './docker-sandbox'
+import { ensureSandboxImage, gitNotice, refMounts, sweepOrphanedContainers } from './docker-sandbox'
 
 /** Classifier hook installed by the swallow rule engine (FR-015a); null until then. */
-type NoiseClassifier = (event: SessionEvent, projectId: string) => string | null
+type NoiseClassifier = (event: SessionEvent) => string | null
 
 interface SessionManagerCallbacks {
   onEvent: (event: SessionEvent) => void
@@ -127,7 +127,7 @@ function evictStaleLive(entry: HostedEntry): void {
   }
 }
 
-export async function readGitBranch(projectPath: string): Promise<string | null> {
+async function readGitBranch(projectPath: string): Promise<string | null> {
   try {
     // --show-current returns the branch even on an unborn branch (no commits)
     // and empty on detached HEAD, unlike rev-parse --abbrev-ref. Async
@@ -145,7 +145,7 @@ export async function readGitBranch(projectPath: string): Promise<string | null>
 }
 
 /** Working-tree line changes (git diff --shortstat), shown in the header (design reference). */
-export async function readGitDiffStat(
+async function readGitDiffStat(
   projectPath: string,
 ): Promise<{ adds: number; dels: number } | null> {
   let stdout: string
@@ -369,10 +369,12 @@ export class SessionManager {
     // A bypass session's CLI runs in a container: tell it the layout, or it hunts
     // for host paths that cannot exist and calls mounted refs unreachable.
     const sandboxAppend = bypassPermissions
-      ? sandboxSystemPromptAppend([
-          { container: '/workspace' },
-          ...refMounts(project.refs.map((r) => r.path)),
-        ])
+      ? sandboxSystemPromptAppend(
+          [{ container: '/workspace' }, ...refMounts(project.refs.map((r) => r.path))],
+          // Only a .git DIRECTORY at the root survives the mount; anything else
+          // reads as "history deleted" unless stated here (see gitNotice).
+          gitNotice(project.path),
+        )
       : null
     entry.session = new HostedSession({
       sessionId: row.id,
@@ -380,6 +382,9 @@ export class SessionManager {
       projectPath: project.path,
       // ponytail: refs added mid-session apply from the next session start.
       refDirs: project.refs.map((r) => r.path),
+      // Read at session start, like the models: a Settings change applies to
+      // the NEXT bypass session (the container's cap is fixed at docker run).
+      sandboxMemory: settings.sandboxMemory,
       resumeSdkSessionId,
       systemPromptAppend:
         [sandboxAppend, adhdAppend, terseAppend, modesAppend, schemaAppend]
@@ -515,6 +520,23 @@ export class SessionManager {
     this.sendMessage(entry.row.id, next.text)
   }
 
+  /**
+   * Rewords a queued composer message, or withdraws it when `text` is empty.
+   *
+   * Refuses rather than no-ops when the message has already been delivered: the
+   * turn finishing is a race the developer cannot see, and telling them it worked
+   * when the session already has the old text would be the worse failure.
+   */
+  editQueuedSend(sessionId: string, eventId: string, text: string): void {
+    const entry = this.requireLive(sessionId)
+    if (!entry.session.editQueuedSend(eventId, text)) {
+      throw {
+        code: 'NOT_FOUND',
+        message: 'That message has already been sent, so it can no longer be changed.',
+      } satisfies IpcError
+    }
+  }
+
   sendMessage(sessionId: string, text: string, agentId?: string): { eventId: string; queued: boolean } {
     const entry = this.requireLive(sessionId)
     const send = entry.session.send(text)
@@ -551,7 +573,7 @@ export class SessionManager {
     }
     await Promise.allSettled(entries.map((entry) => entry.session.stop()))
     for (const entry of entries) {
-      if (!entry.row.endedAt) this.finaliseRow(entry, 'app_exit')
+      this.finaliseRow(entry, 'app_exit') // no-op for any the run loop already ended
     }
     this.hosted.clear()
   }
@@ -616,6 +638,23 @@ export class SessionManager {
   // Only assistant-authored kinds: the dispatch prompt itself names the sentinels,
   // so scanning a 'prompt' event would read the instruction as the answer.
   private static readonly EVAL_SCAN_KINDS = new Set<EventKind>(['assistant_text', 'summary', 'result'])
+
+  /**
+   * The turn ended without the reported result line, so the watch is dropped.
+   *
+   * Nothing is written, because nothing is known: the dispatch already reset the
+   * row to 'not_run' (check) or cleared the verdict (judge), and that unverified
+   * state is the honest outcome of a run that never reported (FR-047).
+   *
+   * Dropping it matters for the same reason the verify watch is closed here. One
+   * watch per session, keyed by session id: left in place it outlives its turn,
+   * so the next marker to arrive — from a completely unrelated later turn — was
+   * attributed to this row and stamped a result onto an acceptance line nobody
+   * had re-run. Every ended session also leaked its entry.
+   */
+  private closeUnreportedEval(entry: HostedEntry): void {
+    this.evalWatch.delete(entry.row.id)
+  }
 
   private scanEvalMarker(entry: HostedEntry, kind: EventKind, payload: unknown): void {
     const watch = this.evalWatch.get(entry.row.id)
@@ -829,7 +868,7 @@ export class SessionManager {
           createdAt: nowIso(),
         }
         if (SWALLOWABLE_KINDS.includes(kind) && this.classifier) {
-          event.noiseKind = this.classifier(event, entry.row.projectId)
+          event.noiseKind = this.classifier(event)
         }
         const persist = options?.persist !== false
         if (persist) this.repos.events.insert(event)
@@ -856,7 +895,7 @@ export class SessionManager {
         // now-non-swallowable event is never hidden by a stale noiseKind.
         liveEntry.event.noiseKind =
           SWALLOWABLE_KINDS.includes(liveEntry.event.kind) && this.classifier
-            ? this.classifier(liveEntry.event, entry.row.projectId)
+            ? this.classifier(liveEntry.event)
             : null
         if (liveEntry.persisted) {
           this.repos.events.setNoiseKind(eventId, liveEntry.event.noiseKind)
@@ -885,6 +924,7 @@ export class SessionManager {
     if (status === 'done' || status === 'error') {
       this.closeUnreportedVerify(entry)
       this.closeUnreportedApi(entry)
+      this.closeUnreportedEval(entry)
     }
     entry.row.status = status
     entry.row.statusDetail = detail ?? null
@@ -920,6 +960,7 @@ export class SessionManager {
   private handleExit(entry: HostedEntry, reason: 'completed' | 'stopped' | 'crashed', detail?: string): void {
     this.closeUnreportedVerify(entry)
     this.closeUnreportedApi(entry)
+    this.closeUnreportedEval(entry)
     if (reason === 'crashed') {
       entry.row.status = 'error'
       entry.row.statusDetail = detail ?? 'Session process ended unexpectedly'
@@ -931,6 +972,12 @@ export class SessionManager {
   }
 
   private finaliseRow(entry: HostedEntry, reason: Session['endReason']): void {
+    // A session ends once. Both callers can reach this for the same entry —
+    // endAllForAppExit finalises what stop() left open, and the run loop's own
+    // onExit lands afterwards — and on the app-exit path that second write would
+    // hit a closed database. Guarding here rather than at each call site because
+    // this is the only place the row is written.
+    if (entry.row.endedAt) return
     entry.row.endedAt = nowIso()
     entry.row.endReason = reason
     this.repos.sessions.update(entry.row.id, {

@@ -16,6 +16,13 @@ import { toAvailableModels } from './model-catalog'
 import { classifyWorkload, effortForRole, mainLoopModel, nextStrongestModel } from './model-routing'
 import { modeAgents } from './session-shaping'
 
+/**
+ * How long stop() waits for the SDK message loop to drain before giving up and
+ * letting the app quit. Long enough for a normal turn teardown, short enough that
+ * a wedged CLI cannot hold the window open.
+ */
+const EXIT_GRACE_MS = 5_000
+
 /** Streaming input queue the SDK consumes; `end()` closes the session gracefully. */
 class AsyncPushQueue<T> implements AsyncIterable<T> {
   private values: T[] = []
@@ -54,6 +61,16 @@ class AsyncPushQueue<T> implements AsyncIterable<T> {
 
 type CanUseToolOptions = Parameters<CanUseTool>[2]
 
+/**
+ * Re-exported so the rest of the main process never imports the SDK itself.
+ *
+ * `src/main/sessions/` is the SDK's only home (CLAUDE.md), and the permission
+ * broker needs this one type because it IS what a gate resolves to. Surfacing it
+ * here keeps the boundary real: an SDK upgrade that renames or reshapes this type
+ * lands in this directory, not scattered across the inbox.
+ */
+export type { PermissionResult }
+
 /** The permission broker's entry point, bound per session by the manager (R3). */
 export type PermissionGate = (context: {
   sessionId: string
@@ -70,6 +87,8 @@ interface HostedSessionOptions {
   projectPath: string
   /** Referenced folders (REFS chips) granted as additional directories. */
   refDirs?: string[]
+  /** Settings → Sandbox memory: the bypass container's --memory cap. */
+  sandboxMemory?: string
   /** SDK session id of a prior conversation to resume (R2). */
   resumeSdkSessionId?: string
   /** Terse-mode instruction appended to the Claude Code system prompt, if enabled. */
@@ -154,13 +173,13 @@ export function explainExit(raw: string, bypass: boolean): string {
     return bypass
       ? 'The bypass sandbox container was killed from outside the process: exit 137 is ' +
           'SIGKILL, so nothing inside it got to report why. It ran out of memory, and there ' +
-          'are two ceilings it could have hit. The container now runs with a limit of its ' +
-          'own (6 GiB by default), so a build that genuinely needs more stops here rather ' +
-          'than taking every other session down with it: raise it by setting ' +
-          'SWITCHBOARD_SANDBOX_MEMORY (e.g. 12g) where Switchboard is launched from. If ' +
-          'that is not it, the shared WSL virtual machine itself is too small — add a ' +
-          'memory= line to %USERPROFILE%\\.wslconfig and restart Docker Desktop. The ' +
-          'conversation is kept and resumes on the next start.'
+          'are two ceilings it could have hit. The container runs with a limit of its own ' +
+          '(6 GiB by default), so a build that genuinely needs more stops here rather than ' +
+          'taking every other session down with it: raise it in Settings → Terminals → ' +
+          'Sandbox memory (e.g. 12g; the SWITCHBOARD_SANDBOX_MEMORY environment variable ' +
+          'still overrides it). If that is not it, the shared WSL virtual machine itself is ' +
+          'too small — add a memory= line to %USERPROFILE%\\.wslconfig and restart Docker ' +
+          'Desktop. The conversation is kept and resumes on the next start.'
       : 'The Claude Code process was killed from outside: exit 137 is SIGKILL, so it got ' +
           'no chance to report a reason. The host most likely ran out of memory.'
   }
@@ -189,6 +208,8 @@ export class HostedSession {
   private backgroundTasks: { taskId: string; description: string }[] = []
   private stopping = false
   private fatal = false
+  /** The message loop, so stop() can await its real end (see stop()). */
+  private runLoop: Promise<void> | undefined
   /** Set for a bypass session: its host→container mounts (see deliverNow). */
   private sandbox: SandboxPlan | null = null
 
@@ -214,6 +235,7 @@ export class HostedSession {
           projectId: this.options.projectId,
           projectPath: this.options.projectPath,
           refDirs: this.options.refDirs ?? [],
+          sandboxMemory: this.options.sandboxMemory,
         })
       : null
     this.sandbox = sandbox
@@ -267,7 +289,9 @@ export class HostedSession {
           }),
       },
     })
-    void this.run()
+    // Kept rather than fire-and-forgotten: stop() has to await this, or app exit
+    // races the loop's onExit (see stop()).
+    this.runLoop = this.run()
     // Slash commands are available the moment the CLI boots — don't wait for
     // the init message (which only arrives with the first turn), so typing "/"
     // in a fresh session already lists every command and plugin skill.
@@ -607,6 +631,39 @@ export class HostedSession {
     if (next) this.deliverNow(next.eventId, next.text)
   }
 
+  /**
+   * Rewords a message still waiting for the turn to finish, or withdraws it when
+   * `text` is empty. Returns false when it has already gone.
+   *
+   * A queued send is written before the work in front of it has finished, so by
+   * the time its turn comes the developer often knows something they did not. The
+   * same reasoning that put in-place editing on the planned-task queue applies
+   * here, and empty-means-remove is the convention that queue already set.
+   *
+   * The false return is the important part rather than an afterthought. This races
+   * the turn ending: `flushQueuedSends` can deliver the message between the
+   * developer opening the editor and saving it, and at that point the session has
+   * already been told. Reporting that plainly lets the caller say so, where
+   * silently succeeding would leave them believing they had changed what ran.
+   */
+  editQueuedSend(eventId: string, text: string): boolean {
+    const at = this.queuedSends.findIndex((q) => q.eventId === eventId)
+    if (at === -1) return false
+    const trimmed = text.trim()
+    if (!trimmed) {
+      const [withdrawn] = this.queuedSends.splice(at, 1)
+      this.options.sink.update(
+        eventId,
+        { text: withdrawn.text, pending: false, withdrawn: true },
+        { persist: true },
+      )
+    } else {
+      this.queuedSends[at] = { eventId, text: trimmed }
+      this.options.sink.update(eventId, { text: trimmed, pending: true }, { persist: true })
+    }
+    return true
+  }
+
   /** SDK interrupt (FR-019a); reports composer messages still queued locally. */
   async interrupt(): Promise<{ stillQueued: number }> {
     try {
@@ -630,6 +687,18 @@ export class HostedSession {
         // Ending anyway.
       }
     }
+    // Wait for the for-await loop to actually drain, not just for the interrupt
+    // to be acknowledged. Without this, stop() resolved while the loop was still
+    // running, so endAllForAppExit() finalised the row and let db.close() and
+    // app.quit() proceed — and the loop's onExit then wrote to a closed handle.
+    //
+    // Bounded, because a hung CLI must not hold the app open: past the grace
+    // period we stop waiting and quit anyway. A late onExit after that is
+    // harmless, since finaliseRow ignores an already-finalised row.
+    await Promise.race([
+      this.runLoop,
+      new Promise<void>((resolve) => setTimeout(resolve, EXIT_GRACE_MS)),
+    ])
   }
 
   /** Composer messages never delivered; preserved as drafts on app exit. */

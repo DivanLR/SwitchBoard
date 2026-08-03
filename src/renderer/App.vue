@@ -185,7 +185,9 @@ const dbProject = computed(() => projects.dbProject)
         />
         <div v-else class="no-project">
           <div class="mono faint" style="font-size: 12px">no project selected</div>
-          <button class="btn-solid" @click="showRegistration = true">add a project</button>
+          <button class="btn-solid" data-testid="add-project-empty" @click="showRegistration = true">
+            add a project
+          </button>
         </div>
       </main>
 
@@ -304,7 +306,7 @@ const dbProject = computed(() => projects.dbProject)
   padding-top: 12px;
   background: var(--gloss), var(--bg-panel);
   border-left: 1px solid var(--border);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  box-shadow: var(--hairline-shine);
 }
 
 .inbox-peek {

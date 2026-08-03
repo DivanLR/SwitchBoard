@@ -2,8 +2,11 @@
 // message text points at nothing. The composer appends `@<host path>` per REFS
 // chip, so without translation the agent hunts for /mnt/c, finds nothing, and
 // reports a repo unreachable that is in fact mounted read-only at /refs/<name>.
-import { describe, expect, it } from 'vitest'
-import { refMounts, toContainerPaths } from '@main/sessions/docker-sandbox'
+import { afterEach, describe, expect, it } from 'vitest'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { gitNotice, refMounts, sandboxMemoryArg, toContainerPaths } from '@main/sessions/docker-sandbox'
 import { sandboxSystemPromptAppend } from '@main/sessions/session-shaping'
 import {
   needsBrowser,
@@ -102,6 +105,104 @@ describe('sandboxSystemPromptAppend', () => {
 
   it('is absent for a non-sandboxed session', () => {
     expect(sandboxSystemPromptAppend([])).toBeNull()
+  })
+
+  it('carries the git notice as its own line, and omits the line without one', () => {
+    const note = 'The project is not a git repository — there is no git history to diff.'
+    expect(sandboxSystemPromptAppend(MOUNTS, note)).toContain(`- Git: ${note}`)
+    expect(sandboxSystemPromptAppend(MOUNTS)).not.toContain('- Git:')
+  })
+})
+
+// The container mounts ONLY the project folder at /workspace, so git works there
+// exactly when a real .git directory sits at the project root. Every other shape
+// (repo nested one level down, project inside a larger repo, worktree gitfile,
+// no repo at all) looks to the agent like "history was deleted" — the notice says
+// what is actually true BEFORE it goes hunting, the same stated-up-front rule as
+// "browser is not in the bypass container".
+describe('gitNotice', () => {
+  const dirs: string[] = []
+  const scratch = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'gitnotice-'))
+    dirs.push(dir)
+    return dir
+  }
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
+  })
+
+  it('is null when a real .git directory sits at the project root', () => {
+    const root = scratch()
+    mkdirSync(join(root, 'proj', '.git'), { recursive: true })
+    expect(gitNotice(join(root, 'proj'))).toBeNull()
+  })
+
+  it('points at a repository nested one level down (the wrapper-folder shape)', () => {
+    const root = scratch()
+    mkdirSync(join(root, 'proj', 'Ppl.Einstein.External.Api', '.git'), { recursive: true })
+    mkdirSync(join(root, 'proj', 'docs'))
+    const note = gitNotice(join(root, 'proj'))
+    expect(note).toContain('./Ppl.Einstein.External.Api')
+    expect(note).toContain('run git commands from there')
+  })
+
+  it('says the repository root is outside the mount for a project inside a larger repo', () => {
+    const root = scratch()
+    mkdirSync(join(root, 'repo', '.git'), { recursive: true })
+    mkdirSync(join(root, 'repo', 'src', 'api'), { recursive: true })
+    const note = gitNotice(join(root, 'repo', 'src', 'api'))
+    expect(note).toContain(join(root, 'repo'))
+    expect(note).toContain('outside the container mount')
+  })
+
+  it('flags a .git file (worktree/submodule), whose real git dir is outside the mount', () => {
+    const root = scratch()
+    mkdirSync(join(root, 'proj'))
+    writeFileSync(join(root, 'proj', '.git'), 'gitdir: ../somewhere/.git/worktrees/proj\n')
+    expect(gitNotice(join(root, 'proj'))).toContain('worktree')
+  })
+
+  it('says plainly there is no history when there is no repository anywhere', () => {
+    const root = scratch()
+    mkdirSync(join(root, 'proj', 'src'), { recursive: true })
+    expect(gitNotice(join(root, 'proj'))).toContain('not a git repository')
+  })
+
+  it('stays quiet on an unreadable folder rather than warning wrongly', () => {
+    expect(gitNotice(join(scratch(), 'does-not-exist'))).toBeNull()
+  })
+})
+
+// The container memory cap became a Settings field because the env-var escape
+// hatch asks a desktop-app user to "set it where Switchboard is launched from",
+// which is nowhere they can reach. The env var still wins so existing setups
+// keep behaving.
+describe('sandboxMemoryArg', () => {
+  const saved = process.env.SWITCHBOARD_SANDBOX_MEMORY
+  afterEach(() => {
+    if (saved === undefined) delete process.env.SWITCHBOARD_SANDBOX_MEMORY
+    else process.env.SWITCHBOARD_SANDBOX_MEMORY = saved
+  })
+
+  it('defaults to 6g with no setting and no env var', () => {
+    delete process.env.SWITCHBOARD_SANDBOX_MEMORY
+    expect(sandboxMemoryArg(undefined)).toEqual(['--memory', '6g'])
+    expect(sandboxMemoryArg('   ')).toEqual(['--memory', '6g'])
+  })
+
+  it('uses the Settings value', () => {
+    delete process.env.SWITCHBOARD_SANDBOX_MEMORY
+    expect(sandboxMemoryArg('12g')).toEqual(['--memory', '12g'])
+  })
+
+  it("removes the cap entirely for '0'", () => {
+    delete process.env.SWITCHBOARD_SANDBOX_MEMORY
+    expect(sandboxMemoryArg('0')).toEqual([])
+  })
+
+  it('lets the env var override the setting', () => {
+    process.env.SWITCHBOARD_SANDBOX_MEMORY = '9g'
+    expect(sandboxMemoryArg('12g')).toEqual(['--memory', '9g'])
   })
 })
 

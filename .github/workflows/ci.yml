@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          # node:sqlite: needs 22.5+; 24 is where it stopped being experimental.
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm run lint
+
+      # No format:check gate yet: 106 files predate Prettier being wired up.
+      # Run `npm run format` once on a clean tree, then add the gate here.
+
+      - run: npm test
+
+      # The e2e suite drives the Vue SPA on the Vite dev server against the mock
+      # IPC host, so it needs a browser but not Electron and not a display.
+      - run: npx playwright install --with-deps chromium
+
+      - run: npm run test:e2e
+
+      - uses: actions/upload-artifact@v5
+        if: failure()
+        with:
+          name: playwright-traces
+          path: test-results/
+          retention-days: 7
+
+  # Proves the production bundle still compiles on Windows, which the typecheck
+  # does not cover: electron-vite resolves the real entry points, the preload as
+  # CommonJS, and the app:// asset layout.
+  #
+  # It deliberately stops short of `npm run package`. That step runs
+  # electron-builder and NSIS, so it is slow and depends on signing config, and
+  # nothing here would exercise the installer it produces. A broken installer
+  # (a bad asarUnpack glob, say) therefore still passes: package and smoke-test
+  # a release manually, or add a tag-triggered job that does it.
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build

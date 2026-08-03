@@ -4,10 +4,11 @@
 // tabs (spec.md / plan.md / tasks.md / Clarify / Commands), the Commands tab
 // with SUGGESTED NEXT + ALL COMMANDS, and the SUGGEST AN EDIT bar. When Spec
 // Kit is not installed, an install button scaffolds it per-project.
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
 import type { SpecPhase, SpecStatus } from '@shared/domain'
-import { SPEC_KIT_COMMANDS } from '@shared/domain'
+import { SPEC_KIT_COMMANDS } from '@shared/command-catalog'
 import { useSpecsStore } from '@renderer/stores/specs'
+import { trapTabWithin } from '@renderer/composables/useModal'
 import MarkdownText from '@renderer/components/MarkdownText.vue'
 
 const props = defineProps<{ projectId: string }>()
@@ -35,6 +36,30 @@ function cancelNewSpec(): void {
   showNewSpec.value = false
   newSpecDesc.value = ''
 }
+
+// Keeps Tab inside the new-spec dialog and lets Escape close it from anywhere,
+// not just from the textarea. Written here rather than through useModal because
+// the dialog is a `v-if` block in a view that mounts once, so the composable's
+// onMounted would fire long before the dialog exists — the same reason Sidebar's
+// overlays call trapTabWithin directly. Without this, Tab walks out of an open
+// modal into the spec list behind it.
+const newSpecDialog = useTemplateRef<HTMLElement>('newSpecDialog')
+
+function onNewSpecKeydown(event: KeyboardEvent): void {
+  if (!showNewSpec.value) return
+  if (event.key === 'Escape') {
+    event.stopPropagation()
+    cancelNewSpec()
+    return
+  }
+  if (event.key !== 'Tab' || !newSpecDialog.value) return
+  trapTabWithin(newSpecDialog.value, event)
+}
+
+onMounted(() => {
+  // Capture phase: the textarea must not swallow Escape before we see it.
+  document.addEventListener('keydown', onNewSpecKeydown, true)
+})
 
 // Read the spec aloud (design: "listen in on a spec") via the native Web Speech
 // API — title, description, then each section. Click again to stop.
@@ -82,7 +107,10 @@ function listen(): void {
   synth.speak(utter)
 }
 
-onUnmounted(() => window.speechSynthesis.cancel())
+onUnmounted(() => {
+  window.speechSynthesis.cancel()
+  document.removeEventListener('keydown', onNewSpecKeydown, true)
+})
 
 // The spec/project can change out from under a running narration (chip click or
 // project switch reuse this same component instance) — stop it so the audio
@@ -207,6 +235,10 @@ const docSections = computed(() => {
   return part.value === 'plan' ? (d.plan ?? []) : d.sections
 })
 
+// `id` is the display label (Q1, Q2 …) and is positional by design — it is what
+// the card shows and what a Refine target names. It is deliberately NOT the
+// v-for key: keying by position means Vue reuses a card for a different question
+// when the list shifts. The question text is the stable identity.
 const openQs = computed(() =>
   (detail.value?.clarifications ?? []).map((q, i) => ({ id: `Q${i + 1}`, q })),
 )
@@ -423,7 +455,7 @@ const partTabs: { id: Part; label: string }[] = [
 
           <div v-if="openQs.length > 0" class="q-label open mono">OPEN · {{ openQs.length }}</div>
           <div class="q-list">
-            <div v-for="qq in openQs" :key="qq.id" class="q-card open">
+            <div v-for="qq in openQs" :key="qq.q" class="q-card open">
               <div class="q-tags">
                 <span class="q-tag mono">[NEEDS CLARIFICATION]</span>
                 <span class="q-id mono">{{ qq.id }}</span>
@@ -533,6 +565,7 @@ const partTabs: { id: Part; label: string }[] = [
                 <span class="task-label" :class="{ done: task.done }">{{ task.label }}</span>
                 <button
                   class="task-refine mono"
+                  :data-testid="`task-refine-${task.id || task.label}`"
                   title="Target an edit at this task"
                   @click="setTarget(`${detail.id}/tasks.md · ${task.id}`)"
                 >
@@ -554,7 +587,13 @@ const partTabs: { id: Part; label: string }[] = [
       @click.self="cancelNewSpec"
       @keydown.esc="cancelNewSpec"
     >
-      <div class="ns-box" role="dialog" aria-modal="true" aria-labelledby="new-spec-title">
+      <div
+        ref="newSpecDialog"
+        class="ns-box"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-spec-title"
+      >
         <div id="new-spec-title" class="ns-title mono">New spec</div>
         <div class="ns-sub">
           Describe the feature in a sentence — <span class="mono">/speckit.specify</span> scaffolds it

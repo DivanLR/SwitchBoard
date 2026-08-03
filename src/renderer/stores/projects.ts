@@ -1,51 +1,65 @@
 // Sidebar state (FR-003/004/005): projects with live sessions, selection,
 // suggestions, and aggregate counters.
-import { reactive } from 'vue'
+import { computed, reactive, toRefs } from 'vue'
 import type { McpScan, Project, ProjectCommand, Session } from '@shared/domain'
 import type { Counters, ProjectListItem, ProjectSuggestion, SessionStatusPush } from '@shared/ipc-types'
 import { useActiveSessionStore } from './activeSession'
 import { invoke } from '@renderer/ipc'
 
-const store = reactive({
+// State and derivations are declared separately so the derivations can be real
+// `computed()`s. A plain `get` on a reactive object is NOT cached by Vue — it
+// re-runs on every read, so `nameCollisions` rebuilt a Map and a Set, and
+// `selected`/`dbProject` re-scanned the list, once per render of every template
+// that touched them. Spread back in through `toRefs`, the public shape of the
+// store is unchanged (reactive unwraps refs and computeds on read).
+const state = reactive({
   items: [] as ProjectListItem[],
   suggestions: [] as ProjectSuggestion[],
   selectedProjectId: null as string | null,
   counters: { running: 0, needsYou: 0, costTodayUsd: 0, tokensToday: 0 } as Counters,
   loaded: false,
+})
 
-  get selected(): ProjectListItem | null {
-    return this.items.find((p) => p.id === this.selectedProjectId) ?? null
-  },
-  /** Real, user-registered projects (the reserved Database row excluded). */
-  get visibleItems(): ProjectListItem[] {
-    return this.items.filter((p) => !p.reserved)
-  },
-  /** The single reserved row backing the global Database MCP session. */
-  get dbProject(): ProjectListItem | null {
-    return this.items.find((p) => p.reserved) ?? null
-  },
-  get nameCollisions(): Set<string> {
-    const seen = new Map<string, number>()
-    for (const item of this.items) {
-      if (item.reserved) continue // never collides with a user project named "Database"
-      seen.set(item.name, (seen.get(item.name) ?? 0) + 1)
-    }
-    return new Set([...seen.entries()].filter(([, n]) => n > 1).map(([name]) => name))
-  },
+const selected = computed(
+  (): ProjectListItem | null =>
+    state.items.find((p) => p.id === state.selectedProjectId) ?? null,
+)
+
+/** Real, user-registered projects (the reserved Database row excluded). */
+const visibleItems = computed((): ProjectListItem[] => state.items.filter((p) => !p.reserved))
+
+/** The single reserved row backing the global Database MCP session. */
+const dbProject = computed((): ProjectListItem | null => state.items.find((p) => p.reserved) ?? null)
+
+const nameCollisions = computed((): Set<string> => {
+  const seen = new Map<string, number>()
+  for (const item of state.items) {
+    if (item.reserved) continue // never collides with a user project named "Database"
+    seen.set(item.name, (seen.get(item.name) ?? 0) + 1)
+  }
+  return new Set([...seen.entries()].filter(([, n]) => n > 1).map(([name]) => name))
+})
+
+const store = reactive({
+  ...toRefs(state),
+  selected,
+  visibleItems,
+  dbProject,
+  nameCollisions,
 
   async refresh(): Promise<void> {
     const snapshot = await invoke('projects.list', undefined)
-    this.items = snapshot.projects
-    this.counters = snapshot.counters
-    this.loaded = true
+    state.items = snapshot.projects
+    state.counters = snapshot.counters
+    state.loaded = true
     // The reserved Database row must never become the default selection.
-    if (!this.selectedProjectId) {
-      this.selectedProjectId = this.items.find((p) => !p.reserved)?.id ?? null
+    if (!state.selectedProjectId) {
+      state.selectedProjectId = state.items.find((p) => !p.reserved)?.id ?? null
     }
   },
 
   async loadSuggestions(): Promise<void> {
-    this.suggestions = await invoke('projects.suggestions', undefined)
+    state.suggestions = await invoke('projects.suggestions', undefined)
   },
 
   async register(path: string, name?: string): Promise<Project> {
@@ -83,14 +97,21 @@ const store = reactive({
 
   async archive(projectId: string): Promise<void> {
     await invoke('projects.archive', { projectId })
-    if (this.selectedProjectId === projectId) this.selectedProjectId = null
+    if (state.selectedProjectId === projectId) state.selectedProjectId = null
     await this.refresh()
   },
 
   async rename(projectId: string, name: string): Promise<void> {
     await invoke('projects.rename', { projectId, name })
-    const item = this.items.find((p) => p.id === projectId)
+    const item = state.items.find((p) => p.id === projectId)
     if (item) item.name = name
+  },
+
+  /** Point a project at a different folder. Full refresh rather than a patch:
+   *  the path changes gitNotice, drafts, and suggestions along with it. */
+  async repoint(projectId: string, path: string): Promise<void> {
+    await invoke('projects.repoint', { projectId, path })
+    await this.refresh()
   },
 
   async move(projectId: string, toIndex: number): Promise<void> {
@@ -100,13 +121,13 @@ const store = reactive({
 
   async addRef(projectId: string, target: string): Promise<void> {
     const refs = await invoke('projects.refs.add', { projectId, target })
-    const item = this.items.find((p) => p.id === projectId)
+    const item = state.items.find((p) => p.id === projectId)
     if (item) item.refs = refs
   },
 
   async removeRef(projectId: string, path: string): Promise<void> {
     const refs = await invoke('projects.refs.remove', { projectId, path })
-    const item = this.items.find((p) => p.id === projectId)
+    const item = state.items.find((p) => p.id === projectId)
     if (item) item.refs = refs
   },
 
@@ -125,7 +146,7 @@ const store = reactive({
   },
 
   select(projectId: string): void {
-    this.selectedProjectId = projectId
+    state.selectedProjectId = projectId
     // Selecting a project leaves the global Database MCP view, so the chat
     // swaps to that project's session — same as switching between projects.
     // The reserved MCP session stays alive; the MCP row reopens its view.
@@ -133,12 +154,12 @@ const store = reactive({
   },
 
   applyStatusPush(push: SessionStatusPush): void {
-    const item = this.items.find((p) => p.id === push.projectId)
+    const item = state.items.find((p) => p.id === push.projectId)
     if (item?.session && item.session.id === push.id) item.session = { ...push }
   },
 
   setCounters(counters: Counters): void {
-    this.counters = counters
+    state.counters = counters
   },
 })
 

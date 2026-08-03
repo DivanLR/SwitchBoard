@@ -15,6 +15,9 @@ describe('explainExit', () => {
     // ceiling they hit is an afternoon wasted.
     expect(msg).toContain('SWITCHBOARD_SANDBOX_MEMORY')
     expect(msg).toContain('.wslconfig')
+    // The cap is a Settings field now — the fix must be reachable from the app,
+    // not "an env var where Switchboard is launched from".
+    expect(msg).toContain('Settings')
     // The developer must know their work is not lost.
     expect(msg).toContain('resumes')
     // And it must not read as their code crashing.

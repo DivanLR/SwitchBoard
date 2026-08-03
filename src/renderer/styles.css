@@ -51,9 +51,11 @@ html.sb-light {
   --text-ghost: #605E57;
   /* 5.49:1 on a --bg-hover card, 4.88:1 on a --bg-active row. See :root. */
   --text-on-wash: #4E4C46;
-  --green: #7A5F14;
-  --green-hover: #634D10;
-  --green2: #6B5312;
+  /* Foil green on paper, measured on the sheet rather than derived from the dark
+     value. 5.81:1, hue 148 — a shade clear of the 5.64:1 the gold held here. */
+  --green: #1F6E44;
+  --green-hover: #175A37;
+  --green2: #1A6039;
   --green-ink: #FBFAF6;
   --blue: #2C5F94;
   --amber: #2C5F94;
@@ -98,13 +100,13 @@ html.sb-light {
 :root {
   /* THE DEPLOYABLE SHEET — a Miura-fold sheet, scored and folded flat.
      Ground is carbon-fibre near-black. Semantic accents come from the fold
-     vocabulary and never from expression: foil gold is the one action colour,
+     vocabulary and never from expression: foil green is the one action colour,
      for every action that deploys or advances a lane; valley blue is
      attention owed, meaning a lane is held awaiting release; a red-pencil mark
      is a correction, meaning error. A finished lane gets NO hue: it draws a
      locked fold. Token NAMES are unchanged from the previous world so all 17
      consuming files keep working; only the values moved. That is why --green
-     now holds foil gold and --amber holds valley blue. Direction contract
+     now holds foil green and --amber holds valley blue. Direction contract
      lives at the top of App.vue. */
   --bg: #17181B;
   /* The margin pane is dense, not glassy: it is a heavier ply of the same
@@ -160,7 +162,7 @@ html.sb-light {
    * The text ramp above was measured against the flat sheet, where Ghost sits
    * at 4.53:1. It was never re-measured on the two surfaces derived from it: a
    * --bg-hover card (6% text tone over the sheet) drops Ghost to 3.85:1, and a
-   * --bg-active row (12% foil gold over the panel) drops it to 4.32:1. Both fail
+   * --bg-active row (12% mountain gray over the panel) drops it to 4.32:1. Both fail
    * AA on real content — gate targets, provenance lines, the selected lane's own
    * timer and branch.
    *
@@ -170,12 +172,30 @@ html.sb-light {
    * shade from the nearest existing tier so the palette is unchanged.
    */
   --text-on-wash: #AEADA6;
-  /* Foil gold: the one action colour, and every action that deploys or advances a lane. 8.44:1 */
-  --green: #D4AF37;
-  --green-hover: #E2C25C;
+  /*
+   * Foil green: the one action colour, and every action that deploys or advances
+   * a lane. 8.43:1, hue 144.
+   *
+   * CONTRACT AMENDMENT: the direction contract names foil GOLD here, and the
+   * owner has since called for green instead. The luminance is matched to the
+   * gold it replaces (8.43 against 8.44) so this is a hue move only and nothing
+   * else in the system needed retuning.
+   *
+   * The swap also fixes a collision the gold carried. Gold sat 37deg from the
+   * red-pencil error mark, both warm — the same warm-on-warm failure recorded in
+   * --amber's own amendment below, which is why ochre lost that slot. Green sits
+   * 135deg from red. It sits 66deg from valley blue rather than the gold's
+   * 164deg, which is the cost, but the two differ sharply in saturation as well
+   * as hue (a saturated green against a desaturated pale blue), so the two
+   * signals stay separable. Restoring this project's older green (#3FB27F) was
+   * the obvious move and was rejected on measurement: 6.67:1, and only 57deg
+   * from valley blue.
+   */
+  --green: #4DC97E;
+  --green-hover: #6FD695;
   /* Darker second stop of the action fill, so the button reads as stamped rather
-     than flat. This was the accent's own value before the contrast retune. */
-  --green2: #B8952A;
+     than flat. */
+  --green2: #39AC68;
   --green-ink: #17181B;
   --green-glow: 0 6px 18px -6px color-mix(in srgb, var(--green) 45%, transparent);
   /* Working IS the action state, so it borrows the action colour's own hue rather
@@ -225,6 +245,14 @@ html.sb-light {
      is deliberately a no-op gradient in dark; light adds the sheen. */
   --elev: inset 0 1px 0 rgba(244,244,242,.05),0 1px 2px rgba(0,0,0,.4);
   --gloss: linear-gradient(rgba(244,244,242,.03),rgba(244,244,242,0));
+  /* The lip of light along a pane's own top edge, used where a surface butts
+     against the one above it (pane headers, the sidebar, the inbox rail, the
+     composer). Eight declarations across five files each spelled this value out
+     by hand; it is one token so the sheet's edges cannot drift apart.
+     Deliberately theme-neutral: the value is what both themes already rendered,
+     so extracting it changed nothing. Give html.sb-light its own if paper should
+     ever catch this edge differently. */
+  --hairline-shine: inset 0 1px 0 rgba(255, 255, 255, 0.06);
   /* A fold is a cut, not a curve, so corners stay sharp at 0. The outgoing
      world's 10px-everywhere was the loudest single signal of the look being
      replaced. */
@@ -345,7 +373,7 @@ a:hover {
   color: var(--green-hover);
 }
 
-/* Selecting text marks the sheet in foil gold. One rule serves both themes,
+/* Selecting text marks the sheet in foil green. One rule serves both themes,
    because --green is already theme-scoped. */
 ::selection {
   background: color-mix(in srgb, var(--green) 30%, transparent);

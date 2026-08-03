@@ -13,9 +13,11 @@ import type {
   ProjectListItem,
   PushChannel,
   PushMap,
+  RulesView,
   WireResult,
 } from '@shared/ipc-types'
-import { isIpcError } from '@shared/ipc-types'
+import { INVOKE_CHANNEL, isIpcError, isIpcErrorCode } from '@shared/ipc-types'
+import { rulesView } from '@main/inbox/rule-prefs'
 import type { Repositories } from '@main/store/repositories'
 import type { SessionManager } from '@main/sessions/session-manager'
 import type { PermissionBroker } from '@main/inbox/permission-broker'
@@ -23,10 +25,9 @@ import {
   addProjectRef,
   registerProject,
   removeProjectRef,
+  repointProject,
   suggestProjects,
 } from '@main/projects/discovery'
-import { defaultRiskRules } from '@main/inbox/risk-rules'
-import { defaultSwallowRules } from '@main/stream/swallow-rules'
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { detectStacks, stackById, stackEntries } from '@shared/test-catalog'
@@ -36,7 +37,7 @@ import { apiDataPrompt } from '@main/evals/api-dispatch'
 import { resolveApiHost, scanProjectEndpoints } from '@main/evals/api-scan'
 import { recentEndpoints } from '@shared/api-endpoints'
 import { apiReportFileName, apiReportMarkdown } from '@shared/api-report'
-import { sandboxToolsFor } from '@main/sessions/docker-sandbox'
+import { gitNotice, sandboxToolsFor } from '@main/sessions/docker-sandbox'
 import { comboDocPath, readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
 import { comboKey } from '@shared/mcp-combo'
 import { installSpecKit, readSpecDetail, readSpecKitState } from '@main/specs/spec-kit'
@@ -44,6 +45,16 @@ import { check as checkForUpdates, installNow } from '@main/updater'
 
 const EVENT_FLUSH_INTERVAL_MS = 33 // >= 30 Hz (contract)
 const COUNTER_DEBOUNCE_MS = 50
+
+/** A pattern the engines can actually use; they treat an invalid one as no match. */
+function isValidRegExp(pattern: string): boolean {
+  try {
+    new RegExp(pattern)
+    return true
+  } catch {
+    return false
+  }
+}
 
 /** Owns every main -> renderer push channel, including event batching. */
 export class RendererPush {
@@ -120,17 +131,22 @@ export function computeCounters(repos: Repositories): Counters {
   }
 }
 
-export function seedDefaultRules(repos: Repositories): void {
-  repos.riskRules.seedIfEmpty(defaultRiskRules())
-  repos.swallowRules.seedIfEmpty(defaultSwallowRules())
-}
-
 type Handlers = {
   [M in InvokeMethod]: (req: InvokeMap[M]['req']) => InvokeMap[M]['res'] | Promise<InvokeMap[M]['res']>
 }
 
 function toIpcError(error: unknown): IpcError {
-  if (isIpcError(error)) return { code: error.code as IpcError['code'], message: error.message }
+  if (isIpcError(error)) {
+    // Normalise rather than cast. This used to be `error.code as IpcError['code']`,
+    // which asserted away the one thing that could not be known: isIpcError checks
+    // only that `code` is a string, so a typo here or a throw from a module that
+    // never imported IpcError reached the renderer as an unrecognised code, fell
+    // through every branch of its switch, and surfaced as nothing at all.
+    return {
+      code: isIpcErrorCode(error.code) ? error.code : 'INTERNAL',
+      message: error.message,
+    }
+  }
   const message = error instanceof Error ? error.message : String(error)
   return { code: 'INTERNAL', message }
 }
@@ -148,9 +164,21 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
           .find((s) => s && s.projectId === project.id) ??
         repos.sessions.latestForProject(project.id) ??
         null,
+      gitNotice: gitNotice(project.path),
       drafts: repos.drafts.listForProject(project.id),
       reserved: project.id === dbProjectId,
     }))
+
+  /**
+   * Puts a rule change into force, then reports the new list.
+   *
+   * The reload is the point: the broker and the noise classifier both read a
+   * cached set, so without it an edit would only take effect on the next launch.
+   */
+  const applyRules = (): RulesView => {
+    broker.rules.reload()
+    return rulesView(repos.rulePrefs.list())
+  }
 
   const handlers: Handlers = {
     'projects.list': () => ({ projects: projectList(), counters: computeCounters(repos) }),
@@ -167,12 +195,15 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     },
     'projects.rename': (req) => {
       if (!repos.projects.byId(req.projectId)) {
-        throw { code: 'NOT_FOUND', message: 'Project not found' }
+        throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
       }
       const name = req.name.trim()
-      if (name.length === 0) throw { code: 'INVALID_PATH', message: 'Name cannot be empty' }
+      if (name.length === 0) {
+        throw { code: 'INVALID_PATH', message: 'Name cannot be empty' } satisfies IpcError
+      }
       repos.projects.rename(req.projectId, name)
     },
+    'projects.repoint': (req) => repointProject(repos, req.projectId, req.path),
     'projects.move': (req) => {
       repos.projects.move(req.projectId, req.toIndex)
     },
@@ -181,10 +212,13 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'projects.archive': (req) => {
       const active = repos.sessions.activeForProject(req.projectId)
       if (active) {
-        throw { code: 'ALREADY_ACTIVE', message: 'Stop the session before archiving the project' }
+        throw {
+          code: 'ALREADY_ACTIVE',
+          message: 'Stop the session before archiving the project',
+        } satisfies IpcError
       }
       if (!repos.projects.byId(req.projectId)) {
-        throw { code: 'NOT_FOUND', message: 'Project not found' }
+        throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
       }
       repos.projects.archive(req.projectId)
     },
@@ -206,28 +240,31 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'sessions.answerQuestion': (req) => {
       broker.answerQuestion(req.sessionId, req.eventId, req.choice)
     },
+    'sessions.editQueued': (req) => {
+      manager.editQueuedSend(req.sessionId, req.eventId, req.text)
+    },
     'sessions.events': (req) => repos.events.page(req.sessionId, req.beforeSeq, req.limit),
     'sessions.promptHistory': (req) => repos.commandHistory.recent(req.projectId, req.limit),
     'projects.commands': (req) => repos.projectCommands.get(req.projectId),
     'specs.state': (req) => {
       const project = repos.projects.byId(req.projectId)
-      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
+      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
       return readSpecKitState(project.path)
     },
     'specs.detail': (req) => {
       const project = repos.projects.byId(req.projectId)
-      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
+      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
       return readSpecDetail(project.path, req.specId)
     },
     'specs.install': async (req) => {
       const project = repos.projects.byId(req.projectId)
-      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
+      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
       await installSpecKit(project.path)
       return readSpecKitState(project.path)
     },
     'mcp.readSchema': (req) => {
       const project = repos.projects.byId(req.projectId)
-      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
+      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
       const content = req.servers?.length
         ? readComboDoc(project.path, req.servers)
         : readSchemaDoc(project.path)
@@ -236,7 +273,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'mcp.scanHistory': (req) => repos.mcpScans.listForProject(req.projectId),
     'mcp.recordScan': (req) => {
       const project = repos.projects.byId(req.projectId)
-      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
+      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
       // Only record when the scan actually produced the combination's doc, and
       // date the row from the doc's mtime — a re-scan that wrote nothing keeps
       // the honest older timestamp instead of passing itself off as fresh.
@@ -421,12 +458,12 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     // source, the calls are made by the app, and the verdict is computed from the
     // statuses that came back. The session is used for one thing only — request
     // data drawn from real rows (api-dispatch.ts).
-    'api.endpoints': (req) => {
+    'api.endpoints': async (req) => {
       const project = repos.projects.byId(req.projectId)
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
-      const scan = scanProjectEndpoints(project.path)
+      const scan = await scanProjectEndpoints(project.path)
       const settings = repos.settings.get()
-      const host = resolveApiHost(project.path, {
+      const host = await resolveApiHost(project.path, {
         baseUrl: settings.projectApiBase[req.projectId],
         startCmd: settings.projectApiStart[req.projectId],
       })
@@ -436,7 +473,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       // before the run, not a wall of 401s after it. Only the error travels — the
       // resolved values stay in the main process.
       const qa = qaUrl
-        ? resolveApiHost(project.path, {
+        ? await resolveApiHost(project.path, {
             target: 'qa',
             qaBaseUrl: qaUrl,
             qaHeaders: qaHeaders ?? undefined,
@@ -471,7 +508,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       // a sentence the developer can act on, not a run that starts and then fails.
       // For QA that includes the headers, so a missing API-key variable is caught
       // here rather than after the environment has rejected every call.
-      const host = resolveApiHost(project.path, {
+      const host = await resolveApiHost(project.path, {
         target,
         baseUrl: settings.projectApiBase[req.projectId],
         startCmd: settings.projectApiStart[req.projectId],
@@ -594,6 +631,69 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'inbox.clearHistory': () => {
       repos.requests.clearHistory()
     },
+    // Rules the developer owns (PRODUCT.md Principle 3). Every mutation reloads
+    // the cached rule set before answering, so the change reaches sessions that
+    // are already running: a noise rule switched off stops hiding output now.
+    'rules.list': () => rulesView(repos.rulePrefs.list()),
+    'rules.setDisabled': (req) => {
+      repos.rulePrefs.setDisabled(req.id, req.kind, req.disabled)
+      return applyRules()
+    },
+    'rules.setRisk': (req) => {
+      repos.rulePrefs.setRisk(req.id, req.risk)
+      return applyRules()
+    },
+    'rules.addRisk': (req) => {
+      const toolMatcher = req.toolMatcher.trim()
+      if (!toolMatcher) {
+        throw { code: 'INVALID_PATH', message: 'Name a tool, or * for every tool' } satisfies IpcError
+      }
+      const pattern = req.pattern?.trim() || null
+      // Rejected here rather than at match time: classifyRisk swallows a bad
+      // pattern as "never matches", so an unusable rule would look saved and
+      // silently do nothing.
+      if (pattern !== null && !isValidRegExp(pattern)) {
+        throw { code: 'INVALID_PATH', message: 'That pattern is not a valid regular expression' } satisfies IpcError
+      }
+      repos.rulePrefs.addCustom(
+        'risk',
+        JSON.stringify({
+          scope: 'global',
+          position: 0,
+          toolMatcher,
+          inputMatcher: pattern ? { field: 'command', pattern } : null,
+          risk: req.risk,
+          builtin: false,
+        }),
+      )
+      return applyRules()
+    },
+    'rules.addSwallow': (req) => {
+      const pattern = req.pattern.trim()
+      const noiseKind = req.noiseKind.trim()
+      if (!pattern) throw { code: 'INVALID_PATH', message: 'Enter a pattern' } satisfies IpcError
+      if (!isValidRegExp(pattern)) {
+        throw { code: 'INVALID_PATH', message: 'That pattern is not a valid regular expression' } satisfies IpcError
+      }
+      if (!noiseKind) {
+        throw { code: 'INVALID_PATH', message: 'Name what this hides, e.g. "build output"' } satisfies IpcError
+      }
+      repos.rulePrefs.addCustom(
+        'swallow',
+        JSON.stringify({
+          position: 0,
+          eventKindMatcher: req.eventKindMatcher,
+          pattern,
+          noiseKind,
+          enabled: true,
+        }),
+      )
+      return applyRules()
+    },
+    'rules.remove': (req) => {
+      repos.rulePrefs.remove(req.id, req.kind)
+      return applyRules()
+    },
     'rules.standing.list': (req) =>
       repos.standingRules.listForProject(req.projectId, req.includeRevoked ?? false),
     'rules.standing.revoke': (req) => {
@@ -604,7 +704,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     },
     'rules.standing.add': (req) => {
       const pattern = req.pattern.trim()
-      if (!pattern) throw { code: 'INVALID_PATH', message: 'Enter a command' }
+      if (!pattern) throw { code: 'INVALID_PATH', message: 'Enter a command' } satisfies IpcError
       return repos.standingRules.insert({
         projectId: req.projectId,
         toolName: 'Bash',
@@ -620,12 +720,22 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
   }
 
   ipcMain.handle(
-    'switchboard:invoke',
+    INVOKE_CHANNEL,
     async (event, method: InvokeMethod, req: unknown): Promise<WireResult<unknown>> => {
-      // Accept IPC only from the app's own main window webContents (A17): any
-      // other sender (a stray frame, a compromised context) is rejected.
+      // Accept IPC only from the app's own main window, and only from its TOP
+      // frame (A17). The webContents check alone is not the whole answer: any
+      // frame inside those contents — an iframe, an embed — shares the same
+      // webContents id and would have passed it. Comparing the sending frame to
+      // mainFrame is what makes "the app's own UI" the actual test.
+      //
+      // Fails closed: senderFrame is null once a frame has been disposed, which
+      // is not something the app's live window is, so it is rejected too.
       const trusted = deps.getWindow()
-      if (!trusted || event.sender.id !== trusted.webContents.id) {
+      if (
+        !trusted ||
+        event.sender.id !== trusted.webContents.id ||
+        event.senderFrame !== trusted.webContents.mainFrame
+      ) {
         return { ok: false, error: { code: 'INTERNAL', message: 'Untrusted IPC sender' } }
       }
       const handler = handlers[method]

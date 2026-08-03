@@ -9,9 +9,9 @@
 // inside the container. A named volume persists the container-side ~/.claude
 // between runs (transcripts, so bypass→bypass resume works).
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 import type { SpawnOptions as SdkSpawnOptions, SpawnedProcess } from '@anthropic-ai/claude-agent-sdk'
 import {
@@ -69,11 +69,16 @@ const HOME_VOLUME_PREFIX = 'switchboard-claude-home-'
  * comfortably inside it while leaving room in a default 8–16 GiB allowance for
  * a second session. Docker also permits swap up to the same figure again when
  * only --memory is set, so a brief spike slows down instead of being killed.
- * SWITCHBOARD_SANDBOX_MEMORY overrides it (any Docker size, e.g. "12g", or "0"
- * to remove the cap) — the honest escape hatch for a machine or a build this
- * default does not suit.
+ *
+ * The knob is Settings → Sandbox memory (any Docker size, e.g. "12g", or "0" to
+ * remove the cap): an env var "where Switchboard is launched from" is nowhere a
+ * desktop-app user can reach. SWITCHBOARD_SANDBOX_MEMORY still wins when set,
+ * so pre-Settings setups keep behaving.
  */
-const SANDBOX_MEMORY = process.env.SWITCHBOARD_SANDBOX_MEMORY?.trim() || '6g'
+export function sandboxMemoryArg(setting?: string): string[] {
+  const value = process.env.SWITCHBOARD_SANDBOX_MEMORY?.trim() || setting?.trim() || '6g'
+  return value === '0' ? [] : ['--memory', value]
+}
 
 // Built via stdin (`docker build -`): no build context, nothing to package.
 // ponytail: the CLI version is whatever npm had at image-build time; to pick
@@ -143,6 +148,13 @@ ENTRYPOINT ["/entrypoint.sh"]
 // the other image is built on — one node version to reason about, and no second
 // apt repository to keep working.
 //
+// MSBUILDDISABLENODEREUSE / UseSharedCompilation: MSBuild worker nodes and the
+// VBCSCompiler server deliberately linger after a build to speed up the next one.
+// On a host they idle out in ~15 minutes; in this container they live for the
+// whole session, stacking 1–2 GiB of cache on top of every real peak inside a
+// hard --memory cap. Rebuilds get a few seconds slower per project; sessions stop
+// dying at the cap. That trade is the point.
+//
 // `node` is created at uid 1000 with -o (non-unique): the SDK image is Ubuntu and
 // already parks its own `ubuntu` user there. The uid is what matters, not the
 // name — a project that gains a .sln flips to this image and must still write the
@@ -160,6 +172,8 @@ USER node
 ENV HOME=/home/node
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
 ENV DOTNET_NOLOGO=1
+ENV MSBUILDDISABLENODEREUSE=1
+ENV UseSharedCompilation=false
 ${browserEnv(browser)}WORKDIR /workspace
 ENTRYPOINT ["/entrypoint.sh"]
 `
@@ -169,7 +183,7 @@ ENTRYPOINT ["/entrypoint.sh"]
  * section shows. Unreadable folder → the small image: a wrong guess there costs
  * a "dotnet is not in the bypass container" message, not a broken session.
  */
-export function imageFor(projectPath: string): {
+function imageFor(projectPath: string): {
   image: string
   dotnet: boolean
   browser: boolean
@@ -205,6 +219,50 @@ export function imageFor(projectPath: string): {
 export function sandboxToolsFor(projectPath: string): readonly SuiteTool[] {
   const { dotnet, browser } = imageFor(projectPath)
   return sandboxTools(dotnet, browser)
+}
+
+/**
+ * Why git will not work at /workspace, or null when it will.
+ *
+ * The container mounts ONLY the project folder, so git works there exactly when
+ * a real .git directory sits at the project root. Every other shape reads to the
+ * agent as "the history was deleted", and it reports exactly that mid-task. The
+ * notice states the truth up front instead — same rule as "browser is not in the
+ * bypass container". Unreadable folder → null: a wrong warning is worse than none.
+ */
+export function gitNotice(projectPath: string): string | null {
+  try {
+    const dotGit = join(projectPath, '.git')
+    if (existsSync(dotGit)) {
+      if (statSync(dotGit).isDirectory()) return null
+      // A .git FILE is a worktree/submodule checkout: its gitdir points at the
+      // real repository, which is a host path outside the mount.
+      return (
+        '.git here is a worktree/submodule pointer file whose real git directory is ' +
+        'outside the container mount — git will not work in this session.'
+      )
+    }
+    for (let dir = dirname(projectPath), prev = projectPath; dir !== prev; prev = dir, dir = dirname(dir)) {
+      if (existsSync(join(dir, '.git'))) {
+        return (
+          `The project folder sits inside the repository at ${dir}, which is ` +
+          'outside the container mount — git history is not visible in this session.'
+        )
+      }
+    }
+    const sub = readdirSync(projectPath, { withFileTypes: true }).find(
+      (entry) => entry.isDirectory() && existsSync(join(projectPath, entry.name, '.git')),
+    )
+    if (sub) {
+      return (
+        `The project root is not a git repository; the repository lives at ./${sub.name} — ` +
+        'run git commands from there.'
+      )
+    }
+    return 'The project is not a git repository — there is no git history to diff.'
+  } catch {
+    return null
+  }
 }
 
 function credsPath(): string {
@@ -340,6 +398,8 @@ export function sandboxSpawn(config: {
   projectId: string
   projectPath: string
   refDirs: string[]
+  /** Settings → Sandbox memory; the env var still wins (see sandboxMemoryArg). */
+  sandboxMemory?: string
 }): SandboxPlan {
   const refs = refMounts(config.refDirs)
   const safe = (value: string): string => value.replace(/[^a-zA-Z0-9_.-]/g, '')
@@ -387,9 +447,9 @@ export function sandboxSpawn(config: {
         '--pids-limit',
         '1024',
         // The same argument for memory: one session's appetite must not take the
-        // shared virtual machine down with it (see SANDBOX_MEMORY). '0' removes
+        // shared virtual machine down with it (see sandboxMemoryArg). '0' removes
         // the cap, which is what a developer setting it to 0 is asking for.
-        ...(SANDBOX_MEMORY === '0' ? [] : ['--memory', SANDBOX_MEMORY]),
+        ...sandboxMemoryArg(config.sandboxMemory),
         // The bind mount looks foreign-owned to git inside the container.
         '-e',
         'GIT_CONFIG_COUNT=1',

@@ -42,7 +42,7 @@ export interface ReportContext {
  * mentions a person, and pretending otherwise would be a false promise — which is
  * why the report says out loud that it holds live data.
  */
-export function maskIdentifiers(text: string): string {
+function maskIdentifiers(text: string): string {
   return text.replace(/\d{8,}/g, (run) => `<redacted:${run.length} digits>`)
 }
 

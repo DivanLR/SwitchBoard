@@ -17,6 +17,7 @@ import {
   type VerifyReport,
 } from '@shared/domain'
 import { unavailableReason, type SandboxEnv, type TestSuite } from '@shared/test-catalog'
+import { str } from './parse'
 
 /** Sentinel the session is told to emit, once, on its own line. */
 export const VERIFY_MARKER = 'SWB_VERIFY'
@@ -360,13 +361,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : []
-}
-
-function str(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-  const trimmed = value.trim()
-  // "null"/"n/a" reach us as strings often enough to be worth collapsing here.
-  return trimmed && !/^(null|n\/a|none|unknown)$/i.test(trimmed) ? trimmed : null
 }
 
 function isText(value: string | null): value is string {

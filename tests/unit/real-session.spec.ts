@@ -16,7 +16,6 @@ import { openDatabase } from '@main/store/db'
 import { createRepositories } from '@main/store/repositories'
 import { SessionManager } from '@main/sessions/session-manager'
 import { PermissionBroker } from '@main/inbox/permission-broker'
-import { defaultRiskRules } from '@main/inbox/risk-rules'
 
 const enabled = process.env.REAL_SESSION === '1'
 
@@ -35,8 +34,7 @@ describe.runIf(enabled)('real Claude Code session (quickstart smoke)', () => {
 
       const db = openDatabase(':memory:')
       const repos = createRepositories(db)
-      repos.riskRules.seedIfEmpty(defaultRiskRules())
-      const project = repos.projects.insert({ name: 'smoke', path: projectDir, source: 'manual' })
+          const project = repos.projects.insert({ name: 'smoke', path: projectDir, source: 'manual' })
 
       const events: SessionEvent[] = []
       const approvedRequests: string[] = []
@@ -110,8 +108,7 @@ describe.runIf(enabled)('real AskUserQuestion routing (T021 watch item)', () => 
       const projectDir = mkdtempSync(join(tmpdir(), 'switchboard-question-'))
       const db = openDatabase(':memory:')
       const repos = createRepositories(db)
-      repos.riskRules.seedIfEmpty(defaultRiskRules())
-      const project = repos.projects.insert({ name: 'q-smoke', path: projectDir, source: 'manual' })
+          const project = repos.projects.insert({ name: 'q-smoke', path: projectDir, source: 'manual' })
 
       const events: SessionEvent[] = []
       const late: { broker: PermissionBroker | null } = { broker: null }

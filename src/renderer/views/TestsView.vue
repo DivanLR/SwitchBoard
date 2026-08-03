@@ -16,23 +16,18 @@ import {
   suiteById,
   TEST_STACKS,
   unavailableReason,
-  VERIFY_GATES,
   type SandboxEnv,
   type TestSuite,
-  type VerifyGate,
 } from '@shared/test-catalog'
-import { estimateRunMs, humanDuration, type Measured, type VerifyRun } from '@shared/domain'
-import {
-  searchEndpoints,
-  type ApiExpect,
-  type ApiTarget,
-  type DiscoveredEndpoint,
-} from '@shared/api-endpoints'
-import { evals } from '@renderer/stores/evals'
-import { verify } from '@renderer/stores/verify'
-import { api } from '@renderer/stores/api'
+import { estimateRunMs, humanDuration, type VerifyRun } from '@shared/domain'
+import { type ApiExpect } from '@shared/api-endpoints'
+import { useEvalsStore } from '@renderer/stores/evals'
+import { useVerifyStore } from '@renderer/stores/verify'
+import { useApiStore } from '@renderer/stores/api'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { useSettingsStore } from '@renderer/stores/settings'
+import { useApiEvalSet } from '@renderer/composables/useApiEvalSet'
+import { pct, round, sourceOf, unmeasured, useVerifyGates } from '@renderer/composables/useVerifyGates'
 import EvalsView from '@renderer/views/EvalsView.vue'
 
 const props = defineProps<{ projectId: string; projectName: string; branch?: string | null }>()
@@ -44,6 +39,9 @@ const emit = defineEmits<{
 
 const settingsStore = useSettingsStore()
 const projectsStore = useProjectsStore()
+const evals = useEvalsStore()
+const verify = useVerifyStore()
+const api = useApiStore()
 
 type SubTab = 'api' | 'coverage' | 'quality' | 'evidence' | 'qa' | 'skill'
 // Manual QA is the landing panel: with nothing run yet it is the one with
@@ -173,140 +171,10 @@ function chooseStack(id: string): void {
 }
 
 // --- Gates -------------------------------------------------------------------
-
-/** What a tile shows once the run has (or has not) measured it. */
-interface GateFace {
-  status: 'pass' | 'fail' | 'warn' | 'none'
-  value: string
-  sub: string
-  /**
-   * True when the app read this out of the runner's own artefact file, rather than
-   * taking the session's word for it. The distinction is worth a mark on the tile:
-   * a report line is schema-valid whether or not it is true, so a figure the app
-   * checked itself is different evidence from the same figure typed into a report.
-   */
-  verified?: boolean
-}
-
-type GateView = VerifyGate & GateFace
-
-/** The figure nothing measured — rendered as "—" everywhere it appears. */
-const unmeasured: Measured = { value: null, source: null }
-
-const round = (n: number): number => Math.round(n * 10) / 10
-const pct = (m: Measured): string => (m.value === null ? '—' : `${round(m.value)}%`)
-const sourceOf = (m: Measured, fallback = 'nothing measured it'): string => m.source ?? fallback
-
-/** Suites of the latest run whose catalog kind matches, ignoring ones that never
- *  executed — a skipped suite is not a pass and not a failure. */
-function suiteGate(kinds: readonly string[]): GateFace {
-  const results = (latest.value?.report?.suites ?? []).filter((r) => {
-    const kind = suiteById(r.id)?.kind
-    return kind !== undefined && kinds.includes(kind)
-  })
-  const executed = results.filter((r) => r.status === 'pass' || r.status === 'fail')
-  if (executed.length === 0) {
-    const skipped = results.find((r) => r.status === 'skipped' || r.status === 'unavailable')
-    if (skipped) return { status: 'warn', value: 'skipped', sub: skipped.detail || 'not run here' }
-    return { status: 'none', value: '—', sub: latest.value ? 'not in this run' : 'no run yet' }
-  }
-  const failed = executed.filter((r) => r.status === 'fail')
-  // Only when EVERY executed suite was settled by an artefact: one unverified
-  // suite in the set means the tile as a whole was not checked against a file.
-  const verified = executed.every((r) => r.verified === true)
-  if (failed.length > 0) {
-    return {
-      status: 'fail',
-      value: 'failed',
-      sub: failed[0].detail || `${failed.length} suite(s) failed`,
-      verified,
-    }
-  }
-  return { status: 'pass', value: 'passed', sub: `${executed.length} suite(s)`, verified }
-}
-
-/** A measured figure against its threshold. Under target is a warning, never a
- *  failure: quality never flips a run's verdict (FR-071). */
-function figureGate(m: Measured, minimum: number, sub?: string): GateFace {
-  if (m.value === null) {
-    return { status: 'none', value: '—', sub: latest.value ? 'not measured in this run' : 'no run yet' }
-  }
-  const meets = m.value >= minimum
-  return {
-    status: meets ? 'pass' : 'warn',
-    value: pct(m),
-    // The word, not just the hue: a figure gate's only state cue was green vs
-    // amber, and amber sits 27 degrees from the red used for failure.
-    sub: `${meets ? 'meets target' : 'under target'} · ${sub ?? sourceOf(m)}`,
-    verified: m.verified === true,
-  }
-}
-
-const gates = computed<GateView[]>(() =>
-  VERIFY_GATES.map((gate) => {
-    const report = latest.value?.report
-    const quality = report?.quality
-    switch (gate.id) {
-      case 'unit':
-        return { ...gate, ...suiteGate(['unit']) }
-      case 'integration': {
-        // The integration gate answers "does the API work", so a failed real call
-        // fails it even when the suite that made the call reported pass. Without
-        // this the headline gate is green while the call that proves the API is
-        // broken sits red in the panel below it.
-        const face = suiteGate(['api'])
-        const failed = (report?.endpoints ?? []).filter((e) => e.outcome === 'fail')
-        if (failed.length === 0) return { ...gate, ...face }
-        return {
-          ...gate,
-          status: 'fail',
-          value: 'failed',
-          sub:
-            failed.length === 1
-              ? `${failed[0].method} ${failed[0].path}`
-              : `${failed.length} real endpoint calls failed`,
-        }
-      }
-      case 'architecture': {
-        const violations = quality?.archViolations
-        if (!violations || violations.value === null) return { ...gate, ...suiteGate(['quality']) }
-        return {
-          ...gate,
-          status: violations.value === 0 ? 'pass' : 'fail',
-          value: String(violations.value),
-          sub: violations.value === 0 ? sourceOf(violations) : quality?.findings[0] ?? 'rule violations',
-        }
-      }
-      case 'mutation':
-        return { ...gate, ...figureGate(quality?.mutation ?? unmeasured, 70) }
-      case 'coverage': {
-        const changed = quality ? report?.coverage.changed : null
-        const line = report?.coverage.line ?? unmeasured
-        if (changed && changed.value !== null) {
-          return { ...gate, ...figureGate(changed, 90, `${pct(changed)} of changed lines · line ${pct(line)}`) }
-        }
-        return { ...gate, ...figureGate(line, 80) }
-      }
-      default: {
-        if (!quality?.gate || quality.gate === 'not_configured') {
-          return {
-            ...gate,
-            status: 'none',
-            value: '—',
-            sub: latest.value ? 'no quality service connected' : 'no run yet',
-          }
-        }
-        const dup = quality.duplication
-        return {
-          ...gate,
-          status: quality.gate === 'pass' ? 'pass' : 'fail',
-          value: quality.gate === 'pass' ? 'passed' : 'failed',
-          sub: `${quality.gateSource ?? 'quality service'}${dup.value === null ? '' : ` · ${pct(dup)} duplication`}`,
-        }
-      }
-    }
-  }),
-)
+// The six tiles, and the two rules that decide what each one may claim: an
+// unmeasured figure reads "—" with its reason, and a skipped suite is a warning
+// rather than a pass (see the composable).
+const { gates } = useVerifyGates(latest)
 
 // --- Run ---------------------------------------------------------------------
 
@@ -343,104 +211,31 @@ async function captureEvidence(): Promise<void> {
   }
 }
 
-// --- API eval set ------------------------------------------------------------
-// The deterministic path, and the reason this panel exists: the endpoints come
-// from a scan of the project's own source, the calls are made by the app, and
-// pass or fail is computed from the status that came back. The session is asked
-// for one thing only - identifiers that really exist - and nothing it says
-// decides a verdict.
-const picked = ref<{ method: string; template: string }[]>([])
-const search = ref('')
-const baseUrlField = ref('')
-const startCmdField = ref('')
-const qaUrlField = ref('')
-const qaHeadersField = ref('')
-// Which environment the next run goes to. Local by default, always: a deployed
-// environment is a deliberate choice, never the one made for the developer.
-const apiTarget = ref<ApiTarget>('local')
-
-const apiRun = computed(() => api.latestFor(props.projectId))
-const apiRunning = computed(() => apiRun.value?.status === 'running')
-const apiHost = computed(() => api.hostFor(props.projectId))
-const apiScan = computed(() => api.scan[props.projectId] ?? null)
-
-/** The last five endpoints actually tested - or, before anything has run, the
- *  first few the scan found, so the panel is never an empty search box. */
-const apiShortlist = computed<{ method: string; template: string }[]>(() => {
-  const recent = api.recentFor(props.projectId)
-  return recent.length > 0 ? recent : api.endpointsFor(props.projectId).slice(0, 5)
-})
-
-const apiMatches = computed<DiscoveredEndpoint[]>(() =>
-  searchEndpoints(api.endpointsFor(props.projectId), search.value),
-)
-
-const endpointKey = (e: { method: string; template: string }): string => `${e.method} ${e.template}`
-const isPicked = (e: { method: string; template: string }): boolean =>
-  picked.value.some((p) => endpointKey(p) === endpointKey(e))
-
-function togglePick(e: { method: string; template: string }): void {
-  picked.value = isPicked(e)
-    ? picked.value.filter((p) => endpointKey(p) !== endpointKey(e))
-    : [...picked.value, { method: e.method, template: e.template }]
-}
-
-// The fields show what a run would use right now, resolved or overridden, so
-// saving pins exactly what is on screen rather than something implied.
-watch(
-  apiHost,
-  (host) => {
-    baseUrlField.value = host?.baseUrl ?? ''
-    startCmdField.value = host?.startCmd ?? ''
-  },
-  { immediate: true },
-)
-
-const apiQa = computed(() => api.qaFor(props.projectId))
-
-watch(
-  apiQa,
-  (qa) => {
-    qaUrlField.value = qa?.baseUrl ?? ''
-    qaHeadersField.value = qa?.headers ?? ''
-  },
-  { immediate: true },
-)
-
-/** No QA URL means no QA choice: the chip is not offered until there is one. */
-const qaReady = computed(() => !!apiQa.value?.baseUrl)
-
-watch(qaReady, (ready) => {
-  if (!ready) apiTarget.value = 'local'
-})
-
-async function saveApiHost(): Promise<void> {
-  await api.setHost(props.projectId, {
-    baseUrl: baseUrlField.value,
-    startCmd: startCmdField.value,
-    qaBaseUrl: qaUrlField.value,
-    qaHeaders: qaHeadersField.value,
-  })
-}
-
-async function runApi(): Promise<void> {
-  if (picked.value.length === 0) return
-  await api.start(props.projectId, picked.value, apiTarget.value)
-}
-
-async function writeApiReport(): Promise<void> {
-  await api.writeReport(props.projectId, apiRun.value?.id)
-}
-
-const apiSummary = computed(() => {
-  const run = apiRun.value
-  if (!run) return 'No API eval set yet.'
-  const when = new Date(run.startedAt).toLocaleString()
-  const where = run.target === 'qa' ? ' · QA' : ''
-  if (run.status === 'running') return `Running since ${when}${where}`
-  const passed = run.calls.filter((c) => c.outcome === 'pass').length
-  return `${when}${where} · ${passed}/${run.calls.length} calls passed · ${run.baseUrl}`
-})
+// The API eval set: picked endpoints, where the calls go, and running them.
+const {
+  picked,
+  search,
+  baseUrlField,
+  startCmdField,
+  qaUrlField,
+  qaHeadersField,
+  apiTarget,
+  apiRun,
+  apiRunning,
+  apiScan,
+  apiShortlist,
+  apiMatches,
+  apiFoundCount,
+  apiHostLine,
+  apiQaLine,
+  qaReady,
+  isPicked,
+  togglePick,
+  saveApiHost,
+  runApi,
+  writeApiReport,
+  apiSummary,
+} = useApiEvalSet(() => props.projectId)
 
 /** The check the app performed, in the terms it performed it. */
 function expectWords(e: ApiExpect): string {
@@ -452,6 +247,21 @@ function expectWords(e: ApiExpect): string {
 
 const report = computed(() => latest.value?.report ?? null)
 const evidence = computed(() => report.value?.evidence ?? [])
+
+// The two quality tiles whose text is a decision rather than a value: an absent
+// figure and a figure of "not configured" mean different things and must not
+// read the same, and debt only has a source when there is a debt figure at all.
+const qualityGateLabel = computed(() => {
+  const gate = report.value?.quality.gate
+  if (gate === 'not_configured') return 'not connected'
+  return gate ?? '—'
+})
+
+const qualityDebtSource = computed(() =>
+  report.value?.quality.debt
+    ? (report.value?.quality.gateSource ?? 'quality service')
+    : 'nothing measured it',
+)
 
 // Real HTTP calls the run made, with the rows they were drawn from. Only API
 // suites produce these, so an empty list means one of four different things and
@@ -629,12 +439,6 @@ function statusWord(run: VerifyRun): string {
         <div class="targets">
           <span class="lbl">verify</span>
           <button class="chip on" data-testid="tests-target-tree">Working tree</button>
-          <button class="chip dev" disabled title="Not built yet" data-testid="tests-target-head">
-            Last commit <span class="dev-tag">in development</span>
-          </button>
-          <button class="chip dev" disabled title="Not built yet" data-testid="tests-target-spec">
-            Spec criteria <span class="dev-tag">in development</span>
-          </button>
           <span style="flex: 1"></span>
           <button
             class="chip"
@@ -762,18 +566,8 @@ function statusWord(run: VerifyRun): string {
           </label>
           <button class="chip" data-testid="tests-api-save-host" @click="saveApiHost()">Save</button>
         </div>
-        <div class="host-from mono" data-testid="tests-api-host-from">
-          {{
-            apiHost?.error ??
-            (apiHost?.from ? `from ${apiHost.from} · started only if nothing answers there` : '')
-          }}
-        </div>
-        <div class="host-from mono" data-testid="tests-api-qa-from">
-          {{
-            apiQa?.error ??
-            'A QA header value written as ${VAR} is read from the environment when the call is made — the key itself is never stored here or written into a report.'
-          }}
-        </div>
+        <div class="host-from mono" data-testid="tests-api-host-from">{{ apiHostLine }}</div>
+        <div class="host-from mono" data-testid="tests-api-qa-from">{{ apiQaLine }}</div>
 
         <div class="sec mono">LAST TESTED</div>
         <p v-if="apiShortlist.length === 0" class="empty">
@@ -796,9 +590,7 @@ function statusWord(run: VerifyRun): string {
         </div>
 
         <div class="sec mono">
-          SEARCH · {{ api.endpointsFor(projectId).length }} FOUND{{
-            apiScan?.truncated ? ' (SCAN LIMIT REACHED)' : ''
-          }}
+          SEARCH · {{ apiFoundCount }} FOUND{{ apiScan?.truncated ? ' (SCAN LIMIT REACHED)' : '' }}
         </div>
         <input
           v-model="search"
@@ -971,7 +763,12 @@ function statusWord(run: VerifyRun): string {
           No evidence captured. "Capture evidence" executes the changed code and records the real
           inputs and the real results — nothing here is ever written from reading the code.
         </p>
-        <div v-for="(e, i) in evidence" :key="i" class="ev" :data-testid="`tests-evidence-${i}`">
+        <div
+          v-for="(e, i) in evidence"
+          :key="`${e.kind}:${e.what}`"
+          class="ev"
+          :data-testid="`tests-evidence-${i}`"
+        >
           <span class="ev-kind mono">{{ e.kind }}</span>
           <div class="ev-body">
             <div class="ev-what">{{ e.what }}</div>
@@ -1019,7 +816,7 @@ function statusWord(run: VerifyRun): string {
         <div class="figs">
           <div class="fig" data-testid="tests-quality-gate">
             <span class="fig-name mono">QUALITY GATE</span>
-            <span class="fig-value">{{ report?.quality.gate === 'not_configured' ? 'not connected' : (report?.quality.gate ?? '—') }}</span>
+            <span class="fig-value">{{ qualityGateLabel }}</span>
             <span class="fig-src mono">{{ report?.quality.gateSource ?? 'no quality service reported' }}</span>
           </div>
           <div class="fig" data-testid="tests-quality-duplication">
@@ -1030,7 +827,7 @@ function statusWord(run: VerifyRun): string {
           <div class="fig" data-testid="tests-quality-debt">
             <span class="fig-name mono">DEBT</span>
             <span class="fig-value">{{ report?.quality.debt ?? '—' }}</span>
-            <span class="fig-src mono">{{ report?.quality.debt ? (report?.quality.gateSource ?? 'quality service') : 'nothing measured it' }}</span>
+            <span class="fig-src mono">{{ qualityDebtSource }}</span>
           </div>
           <div class="fig" data-testid="tests-quality-mutation">
             <span class="fig-name mono">MUTATION</span>
@@ -1047,7 +844,7 @@ function statusWord(run: VerifyRun): string {
               : 'No architecture findings in this run — include an architecture suite to get them.'
           }}
         </p>
-        <div v-for="(f, i) in report?.quality.findings ?? []" :key="i" class="row">
+        <div v-for="f in report?.quality.findings ?? []" :key="f" class="row">
           <span class="row-status mono fail">rule</span>
           <span class="row-name">{{ f }}</span>
         </div>
@@ -1057,7 +854,7 @@ function statusWord(run: VerifyRun): string {
           No surviving mutants reported. Mutation testing is a slow suite — tick it above to include
           it in a run.
         </p>
-        <div v-for="(s, i) in report?.quality.survivors ?? []" :key="i" class="row">
+        <div v-for="s in report?.quality.survivors ?? []" :key="s" class="row">
           <span class="row-status mono warn">survived</span>
           <span class="row-name mono">{{ s }}</span>
         </div>
@@ -1344,13 +1141,7 @@ function statusWord(run: VerifyRun): string {
   opacity: 0.62;
 }
 
-/* Not-built treatment: readable, obviously inert, and labelled. */
-.chip.dev {
-  opacity: 0.45;
-  cursor: not-allowed;
-  border-style: dashed;
-}
-
+/* Labels a suite the current environment cannot run (blockedReason). */
 .dev-tag {
   font-size: 9.5px;
   text-transform: uppercase;

@@ -8,7 +8,6 @@ import type { InboxChangedPush } from '@shared/ipc-types'
 import { openDatabase } from '@main/store/db'
 import { createRepositories, newId, nowIso, type Repositories } from '@main/store/repositories'
 import { PermissionBroker, BrokerError } from '@main/inbox/permission-broker'
-import { defaultRiskRules } from '@main/inbox/risk-rules'
 import type { SessionManager } from '@main/sessions/session-manager'
 import type { EventSink } from '@main/sessions/message-mapper'
 
@@ -55,7 +54,6 @@ interface Harness {
 function makeHarness(): Harness {
   const db = openDatabase(':memory:')
   const repos = createRepositories(db)
-  repos.riskRules.seedIfEmpty(defaultRiskRules())
 
   const project = repos.projects.insert({ name: 'alpha', path: 'C:\\proj\\alpha', source: 'manual' })
   const sessionId = newId()

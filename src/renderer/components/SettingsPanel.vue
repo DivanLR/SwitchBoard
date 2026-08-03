@@ -3,14 +3,15 @@
 // (Models / This project / Terminals / General) with a Plan/Build footer,
 // card + toggle + segmented controls, and a "Changes apply immediately · Done"
 // footer. State and transport live in the settings store.
-import { useTemplateRef, computed, onMounted, ref, watch } from 'vue'
-import { invoke } from '@renderer/ipc'
+import { useTemplateRef, computed, onMounted, onWatcherCleanup, ref, watch } from 'vue'
 import { useModal } from '@renderer/composables/useModal'
-import type { AvailableModel, ModelChoice, PermissionRule, Settings, TerseLevel } from '@shared/domain'
+import { MATCHER_KIND_LABEL, useAllowedRules } from '@renderer/composables/useAllowedRules'
+import type { ModelChoice, RiskLevel, Settings, TerseLevel } from '@shared/domain'
 import { modelLabel, modelPrice } from '@shared/domain'
+import { errorMessage } from '@shared/ipc-types'
+import { useRulesStore } from '@renderer/stores/rules'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { useProjectsStore } from '@renderer/stores/projects'
-import { useInboxStore } from '@renderer/stores/inbox'
 import { useUpdatesStore } from '@renderer/stores/updates'
 
 // The prop deliberately omits 'mcp' even though the Tab union below includes it:
@@ -24,20 +25,69 @@ const dialogEl = useTemplateRef<HTMLElement>('dialog')
 useModal(dialogEl, () => emit('close'))
 const store = useSettingsStore()
 const projects = useProjectsStore()
-const inbox = useInboxStore()
 const updates = useUpdatesStore()
 const settings = computed(() => store.settings)
 
-type Tab = 'models' | 'proj' | 'mcp' | 'allowed' | 'term' | 'gen'
+type Tab = 'models' | 'proj' | 'mcp' | 'allowed' | 'rules' | 'term' | 'gen'
 const tab = ref<Tab>(props.initialTab ?? 'models')
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'models', label: 'Models', icon: '✦' },
   { id: 'proj', label: 'This project', icon: '▣' },
   { id: 'mcp', label: 'MCP', icon: '⛁' },
   { id: 'allowed', label: 'Allowed list', icon: '✓' },
+  { id: 'rules', label: 'Rules', icon: '⚖' },
   { id: 'term', label: 'Terminals', icon: '❯' },
   { id: 'gen', label: 'General', icon: '⚙' },
 ]
+
+// --- Rules tab: the risk and noise rules are the developer's, not fixed policy
+// (PRODUCT.md Principle 3). The shipped set is the default, and this edits the
+// difference from it, so switching a rule off here is undoable by definition.
+const rules = useRulesStore()
+const RISK_LEVELS: RiskLevel[] = ['low', 'medium', 'high']
+const newRiskTool = ref('')
+const newRiskPattern = ref('')
+const newRiskLevel = ref<RiskLevel>('medium')
+const newNoiseKindMatcher = ref('raw_output')
+const newNoisePattern = ref('')
+const newNoiseLabel = ref('')
+const ruleError = ref('')
+
+/** Loaded when the tab is first opened rather than with the panel: most sessions
+ *  never open it, and the list is only ever read here. */
+watch(
+  tab,
+  (t) => {
+    if (t === 'rules' && !rules.loaded) void run(() => rules.load())
+  },
+  { immediate: true },
+)
+
+/** Every rule mutation reports the same way, so failures surface in one place. */
+async function run(action: () => Promise<void>): Promise<void> {
+  ruleError.value = ''
+  try {
+    await action()
+  } catch (error) {
+    ruleError.value = errorMessage(error, 'That change could not be saved')
+  }
+}
+
+async function addRiskRule(): Promise<void> {
+  await run(async () => {
+    await rules.addRisk(newRiskTool.value, newRiskPattern.value.trim() || null, newRiskLevel.value)
+    newRiskTool.value = ''
+    newRiskPattern.value = ''
+  })
+}
+
+async function addNoiseRule(): Promise<void> {
+  await run(async () => {
+    await rules.addSwallow(newNoiseKindMatcher.value, newNoisePattern.value, newNoiseLabel.value)
+    newNoisePattern.value = ''
+    newNoiseLabel.value = ''
+  })
+}
 
 // "This project": which project the tab configures (defaults to the selected one).
 const projId = ref<string | null>(null)
@@ -51,7 +101,16 @@ const plugins = ref<string[]>([])
 watch(
   () => proj.value?.id,
   async (id) => {
-    plugins.value = id ? (await projects.commands(id)).map((c) => c.name) : []
+    // Guarded because the picker can change faster than a reply arrives: without
+    // this, an earlier project's commands landing second would be listed under
+    // the project now selected. onWatcherCleanup runs when this watcher re-fires
+    // or stops, so it covers unmount as well as the next change.
+    let superseded = false
+    onWatcherCleanup(() => {
+      superseded = true
+    })
+    const names = id ? (await projects.commands(id)).map((c) => c.name) : []
+    if (!superseded) plugins.value = names
   },
   { immediate: true },
 )
@@ -59,15 +118,28 @@ watch(
 onMounted(() => {
   void store.load()
   projId.value = projects.selectedProjectId
-  void invoke('models.available', undefined)
-    .then((models) => (availableModels.value = models))
-    .catch(() => {
-      /* no session initialised yet — keep the curated fallback */
-    })
+  void store.loadAvailableModels()
 })
 
 function save(patch: Partial<Settings>): void {
   void store.save(patch)
+}
+
+// Sandbox memory: edited locally, saved on Enter/blur — saving per keystroke
+// would persist half-typed sizes like "1" on the way to "12g".
+const sandboxMemVal = ref('')
+watch(
+  () => settings.value?.sandboxMemory,
+  (v) => {
+    sandboxMemVal.value = v ?? '6g'
+  },
+  { immediate: true },
+)
+
+function saveSandboxMemory(): void {
+  const value = sandboxMemVal.value.trim()
+  if (!value || value === settings.value?.sandboxMemory) return
+  save({ sandboxMemory: value })
 }
 
 // Per-project model overrides ('global' follows the Models tab). Data-driven so
@@ -102,16 +174,27 @@ function saveProjModelFor(field: ProjModelField, modelId: string): void {
   save(field === 'projectModels' ? { projectModels: map } : { projectWorkerModels: map })
 }
 
+// Hoisted like TABS / MODE_CHOICES / MODEL_SECTIONS: an array literal written
+// inline in a v-for is rebuilt on every render, and these never change.
+const FONT_SIZES = [
+  ['sm', 'Small'],
+  ['md', 'Medium'],
+  ['lg', 'Large'],
+] as const satisfies readonly (readonly [Settings['fontSize'], string])[]
+
+const TERSE_LEVELS = ['lite', 'full', 'ultra'] as const satisfies readonly TerseLevel[]
+
 const terseExplain: Record<TerseLevel, string> = {
   lite: 'Light touch: drops filler and pleasantries, keeps full sentences.',
   full: 'Compact: fragments and bullets, conclusion first, no preamble.',
   ultra: 'Maximum: telegraphic notes only. Densest, least conversational.',
 }
 
-// Models this subscription can select, read from the CLI by the main process.
-// The cards are built from that list alone — no hardcoded catalogue — so a model
-// released today is selectable today, and a retired one stops being offered.
-const availableModels = ref<AvailableModel[]>([])
+// Models this subscription can select, read from the CLI by the main process
+// and owned by the settings store. The cards are built from that list alone —
+// no hardcoded catalogue — so a model released today is selectable today, and a
+// retired one stops being offered.
+const availableModels = computed(() => store.availableModels)
 const modelChoices = computed<ModelChoice[]>(() => [
   {
     id: 'default',
@@ -167,45 +250,11 @@ function setModel(key: 'intelligentModel' | 'workerModel', id: string): void {
   save(key === 'intelligentModel' ? { intelligentModel: id } : { workerModel: id })
 }
 
-// --- Allowed list tab (design): risk auto-approve + per-project command rules ---
-const allowedRules = ref<PermissionRule[]>([])
-const newCmd = ref('')
-
-const MATCHER_KIND_LABEL: Record<string, string> = {
-  command_prefix: 'Commands starting with this',
-  path_glob: 'Files under this folder',
-  exact_input: 'This exact action only',
-  tool_only: 'Any use of this tool',
-}
-
-async function loadAllowedRules(): Promise<void> {
-  allowedRules.value = proj.value ? await inbox.listStandingRules(proj.value.id, true) : []
-}
-
-watch(
-  [() => proj.value?.id, tab],
-  () => {
-    if (tab.value === 'allowed') void loadAllowedRules()
-  },
-  { immediate: true },
-)
-
-async function setRuleMode(rule: PermissionRule, mode: 'ask' | 'auto'): Promise<void> {
-  if (mode === 'ask' && rule.revokedAt === null) {
-    await inbox.revokeStandingRule(rule.id)
-  } else if (mode === 'auto' && rule.revokedAt !== null) {
-    await inbox.restoreStandingRule(rule.id)
-  }
-  await loadAllowedRules()
-}
-
-async function addAllowedCommand(): Promise<void> {
-  const pattern = newCmd.value.trim()
-  if (!pattern || !proj.value) return
-  newCmd.value = ''
-  await inbox.addStandingRule(proj.value.id, pattern)
-  await loadAllowedRules()
-}
+// Allowed list tab (design): risk auto-approve + per-project command rules.
+const { allowedRules, newCmd, setRuleMode, addAllowedCommand } = useAllowedRules({
+  projectId: () => proj.value?.id,
+  active: () => tab.value === 'allowed',
+})
 
 // --- Database MCP (General tab): designate which reported MCP server is the DB.
 // Options are the union of MCP servers reported by any live session, plus the
@@ -425,6 +474,7 @@ const updateLine = computed(() => {
                       :key="p.id"
                       class="dd-item"
                       :class="{ sel: p.id === proj.id }"
+                      :data-testid="`proj-settings-option-${p.id}`"
                       @click="((projId = p.id), (projDd = false))"
                     >
                       <span class="dd-check mono">{{ p.id === proj.id ? '✓' : '' }}</span>
@@ -649,6 +699,165 @@ const updateLine = computed(() => {
             </div>
           </template>
 
+          <!-- RULES: risk classification and clean-view noise, both editable -->
+          <template v-else-if="tab === 'rules'">
+            <div v-if="ruleError" class="rule-error mono" data-testid="rules-error">
+              {{ ruleError }}
+            </div>
+
+            <div class="group-label mono">RISK CLASSIFICATION</div>
+            <div class="group-desc">
+              Ordered, first match wins. Anything no rule matches is treated as high risk. Your own
+              rules sit above the shipped ones, so they win. Switching a shipped rule off never
+              deletes it — Reset puts it back. To add one: name a tool, or <span class="mono">*</span>
+              for every tool, and optionally a pattern its input must match.
+            </div>
+            <div class="cards" data-testid="risk-rules">
+              <div v-for="r in rules.risk" :key="r.id" class="card-opt static">
+                <div class="opt-body">
+                  <div class="opt-name mono">{{ r.label || r.toolMatcher }}</div>
+                  <div class="opt-sub">
+                    {{ r.toolMatcher }}<template v-if="r.pattern"> · {{ r.pattern }}</template>
+                    <template v-if="!r.builtin"> · yours</template>
+                    <template v-else-if="r.overridden"> · changed</template>
+                  </div>
+                </div>
+                <div class="seg mono">
+                  <button
+                    v-for="level in RISK_LEVELS"
+                    :key="level"
+                    class="seg-opt"
+                    :class="{ on: r.risk === level }"
+                    :disabled="r.disabled"
+                    :data-testid="`risk-level-${r.id}-${level}`"
+                    @click="run(() => rules.setRisk(r.id, level))"
+                  >
+                    {{ level }}
+                  </button>
+                </div>
+                <button
+                  class="switch"
+                  :class="{ on: !r.disabled }"
+                  :data-testid="`risk-toggle-${r.id}`"
+                  role="switch"
+                  :aria-checked="!r.disabled"
+                  @click="run(() => rules.setDisabled(r.id, 'risk', !r.disabled))"
+                >
+                  <span class="knob"></span>
+                </button>
+                <button
+                  class="btn-quiet rule-reset mono"
+                  :data-testid="`risk-remove-${r.id}`"
+                  @click="run(() => rules.remove(r.id, 'risk'))"
+                >
+                  {{ r.builtin ? 'Reset' : 'Delete' }}
+                </button>
+              </div>
+            </div>
+            <div class="add-cmd">
+              <span class="add-cmd-plus mono">＋</span>
+              <input
+                v-model="newRiskTool"
+                class="add-cmd-input mono"
+                data-testid="risk-add-tool"
+                placeholder="Tool, or *"
+              />
+              <input
+                v-model="newRiskPattern"
+                class="add-cmd-input mono"
+                data-testid="risk-add-pattern"
+                placeholder="Pattern (optional)"
+              />
+              <div class="seg mono">
+                <button
+                  v-for="level in RISK_LEVELS"
+                  :key="level"
+                  class="seg-opt"
+                  :class="{ on: newRiskLevel === level }"
+                  :data-testid="`risk-add-level-${level}`"
+                  @click="newRiskLevel = level"
+                >
+                  {{ level }}
+                </button>
+              </div>
+              <button class="add-cmd-btn mono" data-testid="risk-add-btn" @click="addRiskRule">
+                Add
+              </button>
+            </div>
+
+            <div class="group-label mono" style="margin-top: 8px">CLEAN VIEW — WHAT IS HIDDEN</div>
+            <div class="group-desc">
+              These label low-value output so the clean view can fold it away. Nothing is ever
+              dropped: the raw view stays complete. A change applies to output from now on, not to
+              lines already on screen. To add one: pick output or tool use, give a pattern, and name
+              what it hides.
+            </div>
+            <div class="cards" data-testid="noise-rules">
+              <div v-for="r in rules.swallow" :key="r.id" class="card-opt static">
+                <div class="opt-body">
+                  <div class="opt-name mono">{{ r.noiseKind }}</div>
+                  <div class="opt-sub">
+                    {{ r.eventKindMatcher }} · {{ r.pattern }}
+                    <template v-if="!r.builtin"> · yours</template>
+                  </div>
+                </div>
+                <button
+                  class="switch"
+                  :class="{ on: !r.disabled }"
+                  :data-testid="`noise-toggle-${r.id}`"
+                  role="switch"
+                  :aria-checked="!r.disabled"
+                  @click="run(() => rules.setDisabled(r.id, 'swallow', !r.disabled))"
+                >
+                  <span class="knob"></span>
+                </button>
+                <button
+                  class="btn-quiet rule-reset mono"
+                  :data-testid="`noise-remove-${r.id}`"
+                  @click="run(() => rules.remove(r.id, 'swallow'))"
+                >
+                  {{ r.builtin ? 'Reset' : 'Delete' }}
+                </button>
+              </div>
+            </div>
+            <div class="add-cmd">
+              <span class="add-cmd-plus mono">＋</span>
+              <div class="seg mono">
+                <button
+                  class="seg-opt"
+                  :class="{ on: newNoiseKindMatcher === 'raw_output' }"
+                  data-testid="noise-add-kind-raw"
+                  @click="newNoiseKindMatcher = 'raw_output'"
+                >
+                  output
+                </button>
+                <button
+                  class="seg-opt"
+                  :class="{ on: newNoiseKindMatcher === 'tool_activity' }"
+                  data-testid="noise-add-kind-tool"
+                  @click="newNoiseKindMatcher = 'tool_activity'"
+                >
+                  tool use
+                </button>
+              </div>
+              <input
+                v-model="newNoisePattern"
+                class="add-cmd-input mono"
+                data-testid="noise-add-pattern"
+                placeholder="Pattern"
+              />
+              <input
+                v-model="newNoiseLabel"
+                class="add-cmd-input mono"
+                data-testid="noise-add-label"
+                placeholder="Call it"
+              />
+              <button class="add-cmd-btn mono" data-testid="noise-add-btn" @click="addNoiseRule">
+                Hide
+              </button>
+            </div>
+          </template>
+
           <!-- TERMINALS -->
           <template v-else-if="tab === 'term'">
             <div class="group-label mono">OUTPUT</div>
@@ -661,7 +870,7 @@ const updateLine = computed(() => {
               </div>
               <div class="seg mono">
                 <button
-                  v-for="[v, label] in ([['sm', 'Small'], ['md', 'Medium'], ['lg', 'Large']] as const)"
+                  v-for="[v, label] in FONT_SIZES"
                   :key="v"
                   class="seg-opt"
                   :class="{ on: settings.fontSize === v }"
@@ -799,7 +1008,7 @@ const updateLine = computed(() => {
               <div class="group-desc">How aggressively replies are compressed.</div>
               <div class="cards">
                 <button
-                  v-for="level in (['lite', 'full', 'ultra'] as const)"
+                  v-for="level in TERSE_LEVELS"
                   :key="level"
                   class="card-opt"
                   :class="{ sel: settings.terseLevel === level }"
@@ -813,6 +1022,30 @@ const updateLine = computed(() => {
                   </div>
                 </button>
               </div>
+            </div>
+
+            <div class="group-label mono" style="margin-top: 8px">BYPASS SANDBOX</div>
+            <div class="group-desc">
+              Bypass sessions run in a Docker container capped at this much memory, so one
+              hungry build stops alone instead of killing every session (exit 137). Any Docker
+              size — <span class="mono">6g</span>, <span class="mono">12g</span> — or
+              <span class="mono">0</span> for no cap. Applies from the next bypass session.
+            </div>
+            <div class="setting-row">
+              <div class="sr-text">
+                <div class="sr-label">Sandbox memory</div>
+                <div class="sr-desc">
+                  Raise it if bypass sessions die with exit 137 during builds or test runs
+                </div>
+              </div>
+              <input
+                v-model="sandboxMemVal"
+                class="add-cmd-input mono sandbox-mem-input"
+                data-testid="setting-sandbox-memory"
+                spellcheck="false"
+                @keydown.enter="saveSandboxMemory"
+                @blur="saveSandboxMemory"
+              />
             </div>
           </template>
 
@@ -1129,9 +1362,12 @@ html.sb-light .overlay {
   flex-shrink: 0;
   width: 18px;
   height: 18px;
-  /* 3px, the documented content radius. It was 5px, which is on no scale: a
-     leftover from the replaced world's softer corners. */
-  border-radius: 3px;
+  /* A fold is a cut: corners are square. The comment that used to sit here
+     called 3px "the documented content radius", which was never true — the
+     content radius is --rc, and it is 0. Both this and EvalsView's callout were
+     leftovers from the replaced world's softer corners, missed when the token
+     changed (DESIGN.md, Shapes: "drift to fix, not a third named exception"). */
+  border-radius: var(--rc);
   border: 1.5px solid var(--border-strong);
   color: var(--green-ink);
   font-size: 11px;
@@ -1155,6 +1391,22 @@ html.sb-light .overlay {
 .mcp-opt {
   padding: 11px 13px;
   gap: 12px;
+}
+
+/* Rules tab: the per-row Reset/Delete action, and the one place a failed rule
+   change is reported (an invalid pattern is refused rather than saved dead). */
+.rule-reset {
+  font-size: 10.5px;
+  flex-shrink: 0;
+}
+
+.rule-error {
+  font-size: 11.5px;
+  color: var(--red);
+  border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
+  border-radius: var(--rc);
+  padding: 6px 10px;
+  margin-bottom: 10px;
 }
 
 .lock-chip {
@@ -1191,6 +1443,17 @@ html.sb-light .overlay {
   border: none;
   color: var(--text-name);
   outline: none;
+}
+
+/* The sandbox memory field: a short boxed input on the setting row's right,
+   where the other rows put their toggle or segmented control. */
+.sandbox-mem-input {
+  flex: 0 0 72px;
+  text-align: right;
+  padding: 5px 9px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--rc);
 }
 
 .add-cmd-btn {

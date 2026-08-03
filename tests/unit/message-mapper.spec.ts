@@ -370,7 +370,7 @@ class ClassifyingSink implements EventSink {
   rules = defaultSwallowRules()
   private classify(event: SessionEvent): void {
     if (SWALLOWABLE_KINDS.includes(event.kind)) {
-      event.noiseKind = classifyNoise(this.rules, event, 'p1')
+      event.noiseKind = classifyNoise(this.rules, event)
     }
   }
   append<K extends EventKind>(kind: K, payload: EventPayloadMap[K]): SessionEvent<K> {

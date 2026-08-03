@@ -65,4 +65,4 @@ const store = reactive({
   },
 })
 
-export const verify = store
+export const useVerifyStore = (): typeof store => store

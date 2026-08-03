@@ -32,7 +32,11 @@ function setup() {
       kind,
       payload,
     )
-  return { repos, manager, projectId: project.id, changed, scan }
+  // What handleStatusChange('done'/'error') and handleExit call when the turn is
+  // over — the point at which an unreported watch must stop listening.
+  const endTurn = (): void =>
+    (manager as unknown as { closeUnreportedEval(e: unknown): void }).closeUnreportedEval(entry)
+  return { repos, manager, projectId: project.id, changed, scan, endTurn }
 }
 
 describe('verifier gate watch', () => {
@@ -69,6 +73,34 @@ describe('verifier gate watch', () => {
     // A later turn talking about checks must not overwrite the recorded result.
     scan('assistant_text', { text: 'EVAL_CHECK: PASS' })
     expect(repos.evals.byId(run.id)?.checkStatus).toBe('fail')
+  })
+
+  it('stops listening when the turn ends without a result line', () => {
+    const { repos, manager, projectId, scan, endTurn } = setup()
+    const run = repos.evals.add(projectId, 'the bar shows', 'npm test')
+    manager.watchEvalMarker('s1', run.id, 'check')
+
+    // The turn finished and said nothing about the check, so the line stays
+    // unverified — which is the honest outcome, and the whole point of FR-047.
+    endTurn()
+    expect(repos.evals.byId(run.id)?.checkStatus).toBe('not_run')
+
+    // A later, unrelated turn mentions a check. Before the watch was closed here
+    // it was still listening, so this stamped PASS onto a line nobody re-ran.
+    scan('assistant_text', { text: 'EVAL_CHECK: PASS' })
+    expect(repos.evals.byId(run.id)?.checkStatus).toBe('not_run')
+  })
+
+  it('keeps a result that already arrived, even though the turn then ends', () => {
+    const { repos, manager, projectId, scan, endTurn } = setup()
+    const run = repos.evals.add(projectId, 'the bar shows', 'npm test')
+    manager.watchEvalMarker('s1', run.id, 'check')
+
+    // The marker lands during the turn (the sink appends before the status
+    // change), so closing the watch afterwards must not undo it.
+    scan('assistant_text', { text: 'EVAL_CHECK: PASS' })
+    endTurn()
+    expect(repos.evals.byId(run.id)?.checkStatus).toBe('pass')
   })
 
   it('keeps a check watch from swallowing a judge line, and the reverse', () => {

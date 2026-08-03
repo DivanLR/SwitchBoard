@@ -3,11 +3,12 @@
 // amber count badge, per-project groups (status dot, name, "N pending",
 // "approve all"), item cards with risk chip / explanation / detail box /
 // approve+deny, and the history list of ✓/✗ rows (FR-007..013, SC-004).
-import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { nextTick, onMounted, onWatcherCleanup, ref, watch } from 'vue'
 import { isDangerousCommand, type DecisionRecord, type PermissionRequest } from '@shared/domain'
 import { useInboxStore } from '@renderer/stores/inbox'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { relativeTime } from '@renderer/relative-time'
+import { useNow } from '@renderer/composables/useNow'
 
 const RISK_LABEL: Record<'low' | 'medium' | 'high', string> = { low: 'Low', medium: 'Medium', high: 'High' }
 
@@ -29,15 +30,10 @@ function toggleHistory(id: string): void {
   else set.add(id)
 }
 
-const now = ref(Date.now())
-let timer: ReturnType<typeof setInterval> | undefined
-onMounted(() => {
-  void inbox.refresh()
-  timer = setInterval(() => {
-    now.value = Date.now()
-  }, 5000)
-})
-onUnmounted(() => clearInterval(timer))
+// 5s, not 1s: these stamps are minute-grained, so a faster tick would re-render
+// four times out of five for no visible change.
+const now = useNow(5000)
+onMounted(() => void inbox.refresh())
 
 // Covered bases are needed on BOTH tabs now: history for the right-click menu,
 // inbox for the "Always allow similar" button. Reload whenever the pending
@@ -48,10 +44,17 @@ watch(
   { immediate: true },
 )
 watch(tab, async (value) => {
-  if (value === 'history') {
-    await inbox.loadHistory()
-    await loadCoveredBases()
-  }
+  if (value !== 'history') return
+  // Toggling tabs faster than the load returns must not leave a superseded run
+  // finishing its second step. The store ticket already protects the history
+  // list itself; this stops the follow-up from running for an abandoned switch.
+  let superseded = false
+  onWatcherCleanup(() => {
+    superseded = true
+  })
+  await inbox.loadHistory()
+  if (superseded) return
+  await loadCoveredBases()
 })
 
 watch(
@@ -61,7 +64,7 @@ watch(
     tab.value = 'inbox'
     void nextTick(() => {
       document.querySelector(`[data-request-id="${requestId}"]`)?.scrollIntoView({ block: 'center' })
-      inbox.focusRequestId = null
+      inbox.clearFocusRequest()
     })
   },
 )
@@ -300,7 +303,9 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
 
     <div v-if="inbox.undeliverableNotice" class="notice mono" data-testid="undeliverable-notice">
       {{ inbox.undeliverableNotice }}
-      <button class="notice-dismiss" @click="inbox.dismissNotice()">Dismiss</button>
+      <button class="notice-dismiss" data-testid="notice-dismiss" @click="inbox.dismissNotice()">
+        Dismiss
+      </button>
     </div>
 
     <!-- Inbox tab. aria-live=polite on the list itself, because items arrive from
@@ -536,7 +541,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   width: var(--inbox-w, 332px);
   min-width: var(--inbox-w, 332px);
   background: var(--gloss), var(--bg-panel);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  box-shadow: var(--hairline-shine);
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;

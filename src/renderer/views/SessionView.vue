@@ -12,20 +12,26 @@ const composerDrafts = new Map<string, string>()
 // status pill, clean/raw segments, meta line), clean stream with swallowed
 // blocks and a live status line, dark raw log, and the ❯ composer bar
 // (FR-014..019a, R2 resume).
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, onWatcherCleanup, ref, watch } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
-import { modelLabel } from '@shared/domain'
-import type { AgentScopedPayload, SessionEvent, CleanupGroup } from '@shared/domain'
+import { agentIdOf } from '@shared/domain'
+import type { SessionEvent } from '@shared/domain'
+import type { CleanupGroup } from '@shared/command-catalog'
 import { activeAgents } from '@shared/agents'
 import { parseInlineQuestion } from '@shared/inline-question'
-import { errorMessage } from '@renderer/ipc'
-import { isIpcError, type ProjectListItem } from '@shared/ipc-types'
+import { errorMessage, isIpcError, type ProjectListItem } from '@shared/ipc-types'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { useInboxStore } from '@renderer/stores/inbox'
 import { useQueueStore } from '@renderer/stores/queue'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { useCommandSuggestions } from '@renderer/composables/useCommandSuggestions'
+import { useProjectRefs } from '@renderer/composables/useProjectRefs'
+import { formatTokens as fmtTok, useSessionUsage } from '@renderer/composables/useSessionUsage'
+import { useQueuedTasks } from '@renderer/composables/useQueuedTasks'
+import { useNow } from '@renderer/composables/useNow'
+import { elapsedClock } from '@renderer/relative-time'
+import { toRawLines } from '@shared/stream-lines'
 import { useSpecsStore } from '@renderer/stores/specs'
 import { accentFor } from '@renderer/project-accent'
 import StreamEvent from '@renderer/components/StreamEvent.vue'
@@ -142,8 +148,7 @@ const pendingCount = computed(
 )
 
 // Session timer (HH:MM:SS, ticking) and usage figures from loaded result events.
-const now = ref(Date.now())
-let tick: ReturnType<typeof setInterval> | undefined
+const now = useNow(1000)
 
 // Ctrl+C stop-confirm: the first Ctrl+C (composer focused, session working)
 // shows a confirmation above the input; a second Ctrl+C (or the Stop button)
@@ -186,9 +191,6 @@ function onGlobalKeydown(event: KeyboardEvent): void {
 
 let unsubscribeCommands: (() => void) | undefined
 onMounted(() => {
-  tick = setInterval(() => {
-    now.value = Date.now()
-  }, 1000)
   window.addEventListener('keydown', onGlobalKeydown)
   // A session's init message delivers its slash commands / skills after start;
   // pick them up live so a newly-added project's suggestions load without a
@@ -198,7 +200,7 @@ onMounted(() => {
   })
 })
 onUnmounted(() => {
-  clearInterval(tick)
+  clearTimeout(stopConfirmTimer)
   window.removeEventListener('keydown', onGlobalKeydown)
   unsubscribeCommands?.()
   // Opening another view (MCP, no selection) unmounts us without firing the
@@ -206,15 +208,9 @@ onUnmounted(() => {
   composerDrafts.set(props.project.id, composer.value)
 })
 
-/** Two-digit clock field. Module scope: the session timer and hhmm() both need
- *  it and previously declared it byte-for-byte identically. */
-const pad = (n: number): string => String(n).padStart(2, '0')
-
-const sessionTimer = computed(() => {
-  if (!liveSession.value) return null
-  const sec = Math.max(0, Math.floor((now.value - Date.parse(liveSession.value.startedAt)) / 1000))
-  return `${pad(Math.floor(sec / 3600))}:${pad(Math.floor((sec % 3600) / 60))}:${pad(sec % 60)}`
-})
+const sessionTimer = computed(() =>
+  liveSession.value ? elapsedClock(liveSession.value.startedAt, now.value) : null,
+)
 
 // Subagents still working this turn — listed under the live line (goal: see
 // the agents when multiple are running).
@@ -279,70 +275,26 @@ const sendTo = computed(
   () => selectedAgent.value?.task || selectedAgent.value?.name || props.project.name,
 )
 
-function agentIdOf(event: SessionEvent): string | undefined {
-  return (event.payload as AgentScopedPayload).agentId
-}
-
-// Subscription rate-limit usage (the same signal the sidebar meter shows) — a
-// truer picture of "current session usage" than a per-run token/cost estimate.
-const usagePct = computed(() => {
-  const u = liveSession.value?.usageUtilization
-  return u != null ? Math.max(0, Math.min(100, Math.round(u))) : null
-})
-const usageColor = computed(() => {
-  const p = usagePct.value ?? 0
-  return p > 85 ? 'var(--red)' : p > 60 ? 'var(--amber)' : 'var(--green)'
-})
-const usageLimitLabel = computed(() => {
-  // 7d for a weekly window; otherwise the 5h label (also the pre-report placeholder).
-  const t = liveSession.value?.usageLimitType
-  return t?.startsWith('seven_day') ? '7d limit' : '5h limit'
+/** What the composer invites: a spec edit, a message, or nothing yet. */
+const composerPlaceholder = computed(() => {
+  if (editTarget.value) return `Describe the change for ${editTarget.value}…`
+  return liveSession.value ? `Send a message to ${sendTo.value}…` : 'Start a session first'
 })
 
-// Prompt-cache hit rate for the latest completed turn: cache_read /
-// (cache_read + cache_creation + fresh input). A high number means the
-// conversation prefix is being reused instead of re-billed at full price.
-const cacheHitPct = computed(() => {
-  for (let i = active.events.length - 1; i >= 0; i -= 1) {
-    const event = active.events[i]
-    if (event.kind !== 'result') continue
-    const usage = (event.payload as { usage?: Record<string, unknown> }).usage ?? {}
-    const num = (key: string): number => (typeof usage[key] === 'number' ? (usage[key] as number) : 0)
-    const read = num('cache_read_input_tokens')
-    const total = read + num('cache_creation_input_tokens') + num('input_tokens')
-    if (total === 0) return null
-    return Math.round((read / total) * 100)
-  }
-  return null
-})
+/** Nothing to send. Both buttons ask the same question, so they ask it once. */
+const composerEmpty = computed(() => composer.value.trim().length === 0)
 
-// The model the SDK reported for the latest turn (reflects intent routing live).
-const currentModelLabel = computed(() => {
-  const id = liveSession.value?.currentModel
-  return id ? modelLabel(id) : null
-})
-
-// --- Session usage widget: total tokens + the 2 most-used models, clickable
-// for the full picture (runs /usage in the session → the ✦ USAGE card). ---
-function fmtTok(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${Math.round(n / 1_000)}k`
-  return String(n)
-}
-
-const sessionUsage = computed(() => {
-  const totals = liveSession.value?.modelTotals
-  if (!totals) return null
-  const models = Object.entries(totals).sort((a, b) => b[1].tokens - a[1].tokens)
-  if (models.length === 0) return null
-  const total = models.reduce((sum, [, u]) => sum + u.tokens, 0)
-  const cost = models.reduce((sum, [, u]) => sum + u.costUsd, 0)
-  return {
-    total,
-    cost,
-    top: models.slice(0, 2).map(([id, u]) => ({ id, label: modelLabel(id), tokens: u.tokens })),
-  }
-})
+// The header's usage strip: rate-limit meter, prompt-cache hit rate, per-model
+// totals. All reported figures, never estimates (see the composable).
+const {
+  usagePct,
+  usageColor,
+  usageLimitLabel,
+  cacheHitPct,
+  cacheColor,
+  sessionUsage,
+  currentModelLabel,
+} = useSessionUsage(liveSession)
 
 /** The full view = exactly what /usage reports, rendered as the ✦ USAGE card. */
 async function openFullUsage(): Promise<void> {
@@ -356,7 +308,16 @@ watch(
   () => liveSession.value?.id ?? null,
   async (sessionId) => {
     interimSummaries.value = new Set() // reset per session
+    // A session can be superseded while its history is still loading (starting a
+    // session, switching project, a restart). Everything after the await touches
+    // the COMPOSER, so an unguarded late callback restores one session's draft
+    // over another's, then scrolls a stream that has already moved on.
+    let superseded = false
+    onWatcherCleanup(() => {
+      superseded = true
+    })
     await active.open(sessionId)
+    if (superseded) return
     if (!draftRestored.value && props.project.drafts.length > 0 && composer.value === '') {
       composer.value = props.project.drafts.map((d) => d.text).join('\n')
       draftRestored.value = true
@@ -412,6 +373,11 @@ watch(
     startError.value = null
     busy.value = false
     bypassRestart.value = false
+    // Also per-project: this component instance is reused across projects, so an
+    // armed "press Ctrl+C again to stop" left over from the project being left
+    // would otherwise sit above the composer of the project being entered, where
+    // a second Ctrl+C means to stop a session the developer never asked about.
+    cancelStop()
     // Per-project too: a window widened by paging through one long session must
     // not carry into the next project and derive over its whole history.
     deriveWindow.value = DERIVE_WINDOW
@@ -529,68 +495,9 @@ function showEarlier(): void {
 }
 
 // --- Raw view: complete session output as mono lines (FR-018) ---
-function rawLinesOf(event: SessionEvent): string[] {
-  // The payload is the EventPayloadMap union; this raw-view formatter reads a
-  // fixed set of optional string fields across kinds, so type it as exactly that
-  // rather than an untyped `unknown` cast.
-  const p = event.payload as Partial<{
-    text: string
-    toolName: string
-    inputPreview: string
-    resultPreview: string
-    status: string
-    title: string
-  }>
-  switch (event.kind) {
-    case 'prompt':
-      return [`❯ ${p.text}`]
-    case 'assistant_text':
-    case 'summary':
-      return String(p.text ?? '')
-        .split('\n')
-        .map((line, i) => (event.kind === 'summary' && i === 0 ? `✦ ${line}` : line))
-    case 'tool_activity': {
-      const lines = [`⏺ ${p.toolName}(${p.inputPreview ?? ''})`]
-      if (p.resultPreview) lines.push(`  ⎿ ${p.resultPreview}`)
-      return lines
-    }
-    case 'permission_marker':
-    case 'plan_marker': {
-      const status = String(p.status)
-      if (status === 'pending') return [`? Permission: ${p.title}`, '⏸ Waiting for approval…']
-      const mark = status === 'approved' || status === 'rule_approved' ? '✓' : '✗'
-      return [`${mark} ${status} · ${p.title}`]
-    }
-    case 'question':
-      return [`? ${p.text}`]
-    case 'error':
-      return [`✗ ${p.text}`]
-    case 'result':
-      return ['✓ turn complete']
-    default:
-      return String(p.text ?? '').split('\n')
-  }
-}
-
-function hhmm(iso: string): string {
-  const d = new Date(iso)
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
-// Stable keys per raw line (event id + line offset) so streaming updates key
-// correctly rather than by array index. When Timestamps is on, the event's HH:MM
-// sits in a gutter on its first line (matching the clean view).
-const rawLines = computed(() => {
-  const stamps = outputPrefs.value.timestamps
-  return derivedFrom.value.flatMap((event) => {
-    const stamp = stamps ? hhmm(event.createdAt) : null
-    return rawLinesOf(event).map((text, i) => ({
-      key: `${event.id}:${i}`,
-      text,
-      stamp: i === 0 ? stamp : '',
-    }))
-  })
-})
+// The per-kind formatting is pure, so it lives in stream-lines.ts with its own
+// tests; this is only the reactive wrapper around it.
+const rawLines = computed(() => toRawLines(derivedFrom.value, outputPrefs.value.timestamps))
 
 function scrollToBottom(): void {
   void nextTick(() => {
@@ -621,7 +528,7 @@ watch(
     void nextTick(() => {
       const el = streamEl.value?.querySelector(`[data-event-id="${eventId}"]`)
       el?.scrollIntoView({ block: 'center' })
-      active.focusEventId = null
+      active.clearFocusEvent()
     })
   },
 )
@@ -641,6 +548,12 @@ function onSetTarget(label: string): void {
 function runInSession(text: string): void {
   mainTab.value = 'session'
   void specs.runInSession(props.project.id, text)
+}
+
+/** A child tab reports it dispatched something: show the stream and follow it. */
+function onRanInSession(): void {
+  mainTab.value = 'session'
+  scrollToBottom()
 }
 
 // "Download to project" adds the plugin's marketplace then installs it — two
@@ -691,37 +604,9 @@ async function send(): Promise<void> {
 async function enqueue(): Promise<void> {
   const text = composer.value.trim()
   if (!text) return
-  await queue.add(props.project.id, text)
+  await addQueued(text)
   composer.value = ''
   resetSuggestions()
-}
-
-async function removeQueued(id: string): Promise<void> {
-  await queue.remove(props.project.id, id)
-}
-
-// Editing a queued task in place. A planned task is written before the work in
-// front of it has finished, so by the time its turn comes the developer usually
-// knows something they did not: the alternative to editing it is deleting it and
-// typing the whole thing again, which is why they end up not correcting it at all.
-const editingQueued = ref<string | null>(null)
-const queuedDraft = ref('')
-
-function beginEditQueued(task: { id: string; text: string }): void {
-  editingQueued.value = task.id
-  queuedDraft.value = task.text
-}
-
-async function saveQueued(): Promise<void> {
-  const id = editingQueued.value
-  if (!id) return
-  editingQueued.value = null
-  await queue.edit(props.project.id, id, queuedDraft.value)
-}
-
-function cancelEditQueued(): void {
-  editingQueued.value = null
-  queuedDraft.value = ''
 }
 
 async function start(resume: boolean): Promise<void> {
@@ -807,88 +692,61 @@ function openInbox(requestId: string): void {
   inbox.focusRequest(requestId)
 }
 
+/** Queued-message edit. Empty text withdraws it, as in the UP NEXT queue. */
+const queuedEditError = ref('')
+async function editQueued(eventId: string, text: string): Promise<void> {
+  queuedEditError.value = ''
+  try {
+    await active.editQueued(eventId, text)
+  } catch (error) {
+    // The turn can finish mid-edit and deliver the message. Say so rather than
+    // failing quietly: the developer would otherwise believe they changed what ran.
+    queuedEditError.value = errorMessage(error, 'That message could not be changed')
+  }
+}
+
 // A file dropped on this project's sidebar row lands here as @path text.
 watch(
   () => active.composerInsert,
   (text) => {
     if (!text) return
     composer.value = composer.value ? `${composer.value} ${text}` : text
-    active.composerInsert = null
+    active.clearComposerInsert()
     composerEl.value?.focus()
   },
 )
 
-// --- REFS row (design): folders this project's sessions may read ---
-const addingRef = ref(false)
-const refInput = ref('')
-const refError = ref<string | null>(null)
+// REFS row and the pane's drop target (design): folders this project's sessions
+// may read, typed or dragged in. A dropped FILE is the one case that is not a
+// reference — its path goes to the composer, which this view owns.
+const {
+  addingRef,
+  refInput,
+  refError,
+  commitRef,
+  cancelRef,
+  removeRef,
+  dragKind,
+  onPaneDragOver,
+  onPaneDragLeave,
+  onPaneDrop,
+} = useProjectRefs({
+  projectId: () => props.project.id,
+  onInsertPath: (path) => {
+    composer.value = composer.value ? `${composer.value} @${path}` : `@${path}`
+  },
+})
 
-async function commitRef(): Promise<void> {
-  const target = refInput.value.trim()
-  addingRef.value = false
-  refInput.value = ''
-  if (!target) return
-  try {
-    refError.value = null
-    await projects.addRef(props.project.id, target)
-  } catch (e) {
-    refError.value = errorMessage(e)
-  }
-}
-
-function cancelRef(): void {
-  addingRef.value = false
-  refInput.value = ''
-}
-
-async function removeRef(path: string): Promise<void> {
-  await projects.removeRef(props.project.id, path)
-}
-
-// --- Drag & drop onto the pane (design): sidebar project → REF chip;
-// OS file → its path inserted into the composer as @path. ---
-const dragKind = ref<null | 'project' | 'file'>(null)
-
-function onPaneDragOver(event: DragEvent): void {
-  const types = event.dataTransfer?.types ?? []
-  const kind = types.includes('text/x-sb-project')
-    ? 'project'
-    : types.includes('Files')
-      ? 'file'
-      : null
-  if (!kind) return
-  event.preventDefault()
-  dragKind.value = kind
-}
-
-function onPaneDragLeave(event: DragEvent): void {
-  const related = event.relatedTarget as Node | null
-  if (!related || !(event.currentTarget as Node).contains(related)) dragKind.value = null
-}
-
-async function onPaneDrop(event: DragEvent): Promise<void> {
-  event.preventDefault()
-  const kind = dragKind.value
-  dragKind.value = null
-  if (kind === 'project') {
-    const path = event.dataTransfer?.getData('text/x-sb-project-path') ?? ''
-    if (path) await projects.addRef(props.project.id, path).catch(() => {})
-  } else if (kind === 'file') {
-    // A dropped FOLDER becomes a reference; a dropped FILE inserts its @path.
-    for (const item of [...(event.dataTransfer?.items ?? [])]) {
-      if (item.kind !== 'file') continue
-      const isDir = item.webkitGetAsEntry?.()?.isDirectory ?? false
-      const file = item.getAsFile()
-      const path = file ? window.switchboard.pathForFile?.(file) : undefined
-      if (!path) continue
-      if (isDir) {
-        await projects.addRef(props.project.id, path).catch(() => {})
-      } else {
-        composer.value = composer.value ? `${composer.value} @${path}` : `@${path}`
-      }
-    }
-  }
-}
+// UP NEXT strip: planned tasks, editable in place.
+const {
+  editingQueued,
+  queuedDraft,
+  addQueued,
+  removeQueued,
+  beginEditQueued,
+  saveQueued,
+  cancelEditQueued,
+} = useQueuedTasks(() => props.project.id)
 </script>
 
 <template>
@@ -912,6 +770,17 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
           title="Started with --dangerously-skip-permissions"
         >
           ⚠ Bypass
+        </span>
+        <!-- Stated before the agent is asked for a diff, not discovered mid-task:
+             the container mounts only this folder, so git works there exactly
+             when .git sits at the project root. -->
+        <span
+          v-if="liveSession?.bypassPermissions && project.gitNotice"
+          class="pill nogit-pill"
+          data-testid="nogit-pill"
+          :title="project.gitNotice"
+        >
+          ⚠ No git
         </span>
         <span
           v-if="workingAgents.length > 1"
@@ -1038,7 +907,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
           title="Prompt-cache hit rate for the latest turn (cached prefix reused vs. re-billed)"
         >
           cache
-          <span :style="{ color: cacheHitPct > 50 ? 'var(--green)' : 'var(--amber)' }">{{ cacheHitPct }}%</span>
+          <span :style="{ color: cacheColor }">{{ cacheHitPct }}%</span>
         </span>
         <button
           v-if="sessionUsage"
@@ -1108,7 +977,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
       v-if="mainTab === 'specs'"
       :project-id="project.id"
       @set-target="onSetTarget"
-      @ran="((mainTab = 'session'), scrollToBottom())"
+      @ran="onRanInSession"
     />
     <TestsView
       v-else-if="mainTab === 'tests'"
@@ -1116,7 +985,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
       :project-name="project.name"
       :branch="liveSession?.branch ?? endedSession?.branch ?? null"
       @run="runInSession"
-      @ran="((mainTab = 'session'), scrollToBottom())"
+      @ran="onRanInSession"
     />
     <CleanupView
       v-else-if="mainTab === 'cleanup'"
@@ -1228,6 +1097,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
             :event="item.event"
             :stamps="outputPrefs.timestamps"
             @open-inbox="openInbox"
+            @edit-queued="editQueued"
           />
         </template>
 
@@ -1455,6 +1325,9 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
         </span>
         <span class="queue-note mono">Runs automatically when the current goal finishes</span>
       </div>
+      <div v-if="queuedEditError" class="queued-edit-error mono" data-testid="queued-edit-error">
+        {{ queuedEditError }}
+      </div>
       <div v-if="draftRestored && composer" class="draft-note mono" data-testid="draft-note">
         Restored draft from the previous run — send to deliver it.
       </div>
@@ -1513,13 +1386,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
             :class="{ 'is-command': isCommandMatch }"
             data-testid="composer-input"
             rows="1"
-            :placeholder="
-              editTarget
-                ? `Describe the change for ${editTarget}…`
-                : liveSession
-                  ? `Send a message to ${sendTo}…`
-                  : 'Start a session first'
-            "
+            :placeholder="composerPlaceholder"
             :disabled="!liveSession && !editTarget"
             spellcheck="false"
             autocomplete="off"
@@ -1534,7 +1401,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
           class="queue-btn mono"
           data-testid="composer-queue"
           title="Add to the queue — runs after the current goal finishes"
-          :disabled="composer.trim().length === 0"
+          :disabled="composerEmpty"
           @click="enqueue()"
         >
           + Queue
@@ -1542,7 +1409,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
         <button
           class="send-btn mono"
           data-testid="composer-send"
-          :disabled="(!liveSession && !editTarget) || busy || composer.trim().length === 0"
+          :disabled="(!liveSession && !editTarget) || busy || composerEmpty"
           @click="send()"
         >
           Send ⏎
@@ -1565,7 +1432,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   padding: 14px 22px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  box-shadow: var(--hairline-shine);
 }
 
 .main-tabs {
@@ -1574,7 +1441,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   padding: 0 16px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  box-shadow: var(--hairline-shine);
 }
 
 .mt {
@@ -1727,6 +1594,13 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
   color: var(--red);
   background: color-mix(in srgb, var(--red) 9%, transparent);
   border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
+}
+
+/* Amber, not red: the session works, only git history is absent (hover says why). */
+.pill.nogit-pill {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
 }
 
 /* REFS row (design): chips + dashed add pill under the meta line. */
@@ -2162,7 +2036,7 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 /* Positioning context for the floating REFS row; base composer chrome is global. */
 .composer {
   position: relative;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  box-shadow: var(--hairline-shine);
 }
 
 .composer-row {
@@ -2214,6 +2088,14 @@ async function onPaneDrop(event: DragEvent): Promise<void> {
 .draft-note {
   font-size: 11px;
   color: var(--amber);
+  margin-bottom: 6px;
+}
+
+/* The turn finished while the editor was open and the message went as typed.
+   Red because the developer's intent was not carried out. */
+.queued-edit-error {
+  font-size: 11px;
+  color: var(--red);
   margin-bottom: 6px;
 }
 

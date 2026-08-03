@@ -473,7 +473,7 @@ export interface AvailableSuites {
  * `stackEntries` produced them. Only project and startup files are opened, and at
  * most `MAX_READS` of them, so detection stays a handful of small reads.
  */
-export function detectAppShapes(
+function detectAppShapes(
   entries: readonly string[],
   read: (entry: string) => string | null,
 ): AppShape[] {
@@ -539,7 +539,7 @@ function suitesFor(stack: TestStack, shapes: readonly AppShape[]): readonly Test
  *
  * Jest, nyc and c8 count too: each collects coverage on its own.
  */
-export function hasCoverageProvider(
+function hasCoverageProvider(
   entries: readonly string[],
   read: (entry: string) => string | null,
 ): boolean {

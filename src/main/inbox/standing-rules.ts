@@ -22,7 +22,7 @@ function globBaseDir(glob: string): string {
  * rule (or cwd) whose casing differs from the tool's reported path silently
  * fails to match.
  */
-export function isWithinDir(dir: string, candidate: string): boolean {
+function isWithinDir(dir: string, candidate: string): boolean {
   const resolvedDir = resolve(dir).replace(/[/\\]+$/, '')
   const resolvedCandidate = isAbsolute(candidate)
     ? resolve(candidate)

@@ -318,34 +318,36 @@ describe('resolveApiHost', () => {
     return root
   }
 
-  it('takes the http URL from launchSettings and derives the start command', () => {
-    const host = resolveApiHost(project(), {})
+  it('takes the http URL from launchSettings and derives the start command', async () => {
+    const host = await resolveApiHost(project(), {})
     expect(host).toMatchObject({ baseUrl: 'http://localhost:5057' })
     // https first in the file, http chosen: a dev certificate the run does not
     // trust would fail as if the API were broken.
     expect('startCmd' in host && host.startCmd).toContain('dotnet run --project')
   })
 
-  it('prefers an explicit base URL but keeps the derived start command', () => {
-    const host = resolveApiHost(project(), { baseUrl: 'http://127.0.0.1:9100/' })
+  it('prefers an explicit base URL but keeps the derived start command', async () => {
+    const host = await resolveApiHost(project(), { baseUrl: 'http://127.0.0.1:9100/' })
     expect(host).toMatchObject({ baseUrl: 'http://127.0.0.1:9100' })
     expect('startCmd' in host && host.startCmd).toContain('dotnet run --project')
   })
 
-  it('asks for a base URL rather than guessing a port', () => {
+  it('asks for a base URL rather than guessing a port', async () => {
     const bare = mkdtempSync(join(tmpdir(), 'swb-bare-'))
-    expect(resolveApiHost(bare, {})).toEqual({ error: expect.stringContaining('No base URL') })
+    await expect(resolveApiHost(bare, {})).resolves.toEqual({
+      error: expect.stringContaining('No base URL'),
+    })
   })
 })
 
 describe('scanProjectEndpoints', () => {
-  it('finds routes on disk with paths relative to the project root', () => {
+  it('finds routes on disk with paths relative to the project root', async () => {
     const root = mkdtempSync(join(tmpdir(), 'swb-scan-'))
     mkdirSync(join(root, 'src'), { recursive: true })
     mkdirSync(join(root, 'node_modules', 'junk'), { recursive: true })
     writeFileSync(join(root, 'src', 'Program.cs'), 'app.MapGet("/api/ping", Ping);')
     writeFileSync(join(root, 'node_modules', 'junk', 'index.js'), "app.get('/skipped', x)")
-    const scan = scanProjectEndpoints(root)
+    const scan = await scanProjectEndpoints(root)
     expect(scan.endpoints).toEqual([
       { method: 'GET', template: '/api/ping', source: 'src/Program.cs:1' },
     ])

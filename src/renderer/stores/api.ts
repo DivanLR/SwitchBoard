@@ -135,4 +135,4 @@ const store = reactive({
   },
 })
 
-export const api = store
+export const useApiStore = (): typeof store => store

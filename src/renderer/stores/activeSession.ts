@@ -48,6 +48,17 @@ const store = reactive({
   /** Whether the combined Database MCP view is open (vs. the session view). */
   mcpOpen: false,
 
+  /**
+   * Deliberately a plain getter, not a `computed()`.
+   *
+   * The store rule exists because an uncached derivation that does real WORK
+   * (projects.ts's nameCollisions rebuilt a Map and a Set) re-runs on every read.
+   * This one is a null check and a single record lookup, read five times from
+   * SessionView's template and never inside a v-for or a per-event derivation.
+   * Making it a computed would mean splitting state out of this store and
+   * rewriting all fifteen methods that use `this` — in the code that owns event
+   * ordering, in-place updates and paging — to buy nothing measurable.
+   */
   get view(): 'clean' | 'raw' {
     if (!this.sessionId) return this.defaultView
     return this.viewBySession[this.sessionId] ?? this.defaultView
@@ -141,6 +152,19 @@ const store = reactive({
     if (open) this.selectedAgentId = null
   },
 
+  /**
+   * Reword a queued composer message, or withdraw it with empty text.
+   *
+   * Deliberately not optimistic. The turn can finish while the editor is open, in
+   * which case the main process refuses and the push that already delivered the
+   * message stands — showing the new text first and reverting it would flash a
+   * change that never happened.
+   */
+  async editQueued(eventId: string, text: string): Promise<void> {
+    if (!this.sessionId) return
+    await invoke('sessions.editQueued', { sessionId: this.sessionId, eventId, text })
+  },
+
   async answerQuestion(eventId: string, choice: string): Promise<void> {
     if (!this.sessionId) return
     await invoke('sessions.answerQuestion', {
@@ -165,9 +189,19 @@ const store = reactive({
     this.focusEventId = eventId
   },
 
+  /** Clear the "scroll to this event" signal once the view has consumed it. */
+  clearFocusEvent(): void {
+    this.focusEventId = null
+  },
+
   /** Ask the composer to append text (file drops from the sidebar). */
   requestComposerInsert(text: string): void {
     this.composerInsert = text
+  },
+
+  /** Clear the pending composer insert once the composer has taken it. */
+  clearComposerInsert(): void {
+    this.composerInsert = null
   },
 })
 

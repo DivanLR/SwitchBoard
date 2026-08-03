@@ -244,3 +244,29 @@ test('two group creations in the same tick both survive, distinctly named', asyn
   await expect(page.getByTestId('group-head-New group 2')).toBeVisible()
   expect(await groupNames()).toEqual(['New group', 'New group 2'])
 })
+
+// The UI is served from its own scheme rather than file://, so that "'self'" in
+// the policy names one real, bounded origin. Every other test above only proves
+// the app renders; these two say WHERE it renders from and that the policy is
+// actually live there — the pair that would catch the protocol handler being
+// dropped or the CSP quietly ceasing to apply to it.
+test('the UI runs on its own origin, not file://', async () => {
+  const origin = await page.evaluate(() => window.location.origin)
+  expect(origin).toBe('app://bundle')
+})
+
+test('the content security policy is live on that origin', async () => {
+  // An inline <script> appended to the document, which is what script-src 'self'
+  // exists to stop. Deliberately NOT an eval() check: page.evaluate runs through
+  // the debugger protocol, which is not subject to the page's policy, so an eval
+  // test passes whether or not a CSP is present and proves nothing. A real
+  // element in the real document is governed by the real policy.
+  const escaped = await page.evaluate(() => {
+    const script = document.createElement('script')
+    script.textContent = 'window.__cspEscaped = true'
+    document.head.appendChild(script)
+    script.remove()
+    return (window as unknown as { __cspEscaped?: boolean }).__cspEscaped === true
+  })
+  expect(escaped).toBe(false)
+})

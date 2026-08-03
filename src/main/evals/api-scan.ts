@@ -2,7 +2,7 @@
 //
 // Both answers come from the project's own files, so the API panel is populated
 // before anything is started and without asking a model what the routes are.
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { readdir, readFile, stat } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
 import { scanEndpoints, type ApiTarget, type DiscoveredEndpoint } from '@shared/api-endpoints'
 
@@ -40,20 +40,26 @@ const MAX_BYTES = 512 * 1024
  * Deliberately bounded rather than exhaustive: past MAX_FILES the scan stops and
  * says how many files it read, because a truncated list the developer can search
  * is useful and a five-second scan of a monorepo is not.
+ *
+ * Asynchronous because it runs in the main process, on the thread that draws the
+ * window. The bound above caps the work but not its cost: reading 1500 files
+ * synchronously froze the whole app — every window, every other session's stream
+ * — for as long as the disk took. Awaiting yields between files instead, so a
+ * slow scan makes the API panel late rather than making the app stop.
  */
-export function scanProjectEndpoints(root: string): {
+export async function scanProjectEndpoints(root: string): Promise<{
   endpoints: DiscoveredEndpoint[]
   filesRead: number
   truncated: boolean
-} {
+}> {
   const files: { path: string; text: string }[] = []
   let truncated = false
 
-  const walk = (dir: string, depth: number): void => {
+  const walk = async (dir: string, depth: number): Promise<void> => {
     if (depth > MAX_DEPTH || files.length >= MAX_FILES) return
     let entries: string[]
     try {
-      entries = readdirSync(dir)
+      entries = await readdir(dir)
     } catch {
       return
     }
@@ -66,12 +72,12 @@ export function scanProjectEndpoints(root: string): {
       const full = join(dir, name)
       let stats
       try {
-        stats = statSync(full)
+        stats = await stat(full)
       } catch {
         continue
       }
       if (stats.isDirectory()) {
-        walk(full, depth + 1)
+        await walk(full, depth + 1)
         continue
       }
       if (!EXTENSIONS.some((ext) => name.toLowerCase().endsWith(ext))) continue
@@ -79,7 +85,7 @@ export function scanProjectEndpoints(root: string): {
       try {
         files.push({
           path: relative(root, full).split(sep).join('/'),
-          text: readFileSync(full, 'utf8'),
+          text: await readFile(full, 'utf8'),
         })
       } catch {
         // Unreadable file: a scan is a convenience, never a blocker.
@@ -87,7 +93,7 @@ export function scanProjectEndpoints(root: string): {
     }
   }
 
-  walk(root, 0)
+  await walk(root, 0)
   return { endpoints: scanEndpoints(files), filesRead: files.length, truncated }
 }
 
@@ -164,7 +170,15 @@ export function resolveHeaders(
  * when neither exists the failure is a sentence asking for a base URL, never a
  * guessed port.
  */
-export function resolveApiHost(
+/**
+ * Where to call this project's API, and what starts it.
+ *
+ * Asynchronous for the same reason scanProjectEndpoints is: the local branch walks
+ * the project tree looking for launchSettings.json, and doing that synchronously
+ * blocks the thread that draws the window — every other session's stream with it.
+ * The QA branch touches no disk and returns before any of that.
+ */
+export async function resolveApiHost(
   root: string,
   override: {
     baseUrl?: string
@@ -177,7 +191,7 @@ export function resolveApiHost(
     /** Process environment the `${VAR}` references resolve against. */
     env?: Record<string, string | undefined>
   },
-): ApiHost | { error: string } {
+): Promise<ApiHost | { error: string }> {
   // A deployed environment is resolved on its own terms and nothing else's: no
   // launchSettings fallback, no start command, so there is no path by which a run
   // against QA can start a server. That is a safety property of this branch being
@@ -206,7 +220,7 @@ export function resolveApiHost(
   // Looked up even when a base URL is set: a developer who typed a URL still
   // wants the API started for them, and launchSettings is where the command
   // that starts it comes from.
-  const launch = findLaunchSettings(root)
+  const launch = await findLaunchSettings(root)
   const baseUrl = chosenUrl ?? launch?.url ?? null
   if (!baseUrl) {
     return {
@@ -239,18 +253,19 @@ interface LaunchSettings {
  * http rather than https on purpose: a dev HTTPS certificate the run does not
  * trust fails in a way that reads as the API being broken when it is not.
  */
-function findLaunchSettings(root: string, depth = 4): LaunchSettings | null {
+async function findLaunchSettings(root: string): Promise<LaunchSettings | null> {
+  const depth = 4
   const queue: { dir: string; depth: number }[] = [{ dir: root, depth: 0 }]
   while (queue.length > 0) {
     const { dir, depth: level } = queue.shift() as { dir: string; depth: number }
     let entries: string[]
     try {
-      entries = readdirSync(dir)
+      entries = await readdir(dir)
     } catch {
       continue
     }
     if (entries.includes('launchSettings.json') && dir.toLowerCase().endsWith(`${sep}properties`)) {
-      const parsed = readLaunchProfile(join(dir, 'launchSettings.json'))
+      const parsed = await readLaunchProfile(join(dir, 'launchSettings.json'))
       if (parsed) {
         const projectDir = join(dir, '..')
         return {
@@ -265,7 +280,7 @@ function findLaunchSettings(root: string, depth = 4): LaunchSettings | null {
       if (SKIP.has(name) || name.startsWith('.')) continue
       const full = join(dir, name)
       try {
-        if (statSync(full).isDirectory()) queue.push({ dir: full, depth: level + 1 })
+        if ((await stat(full)).isDirectory()) queue.push({ dir: full, depth: level + 1 })
       } catch {
         // Not a directory, or gone since the listing.
       }
@@ -274,10 +289,10 @@ function findLaunchSettings(root: string, depth = 4): LaunchSettings | null {
   return null
 }
 
-function readLaunchProfile(file: string): { url: string; profile: string } | null {
+async function readLaunchProfile(file: string): Promise<{ url: string; profile: string } | null> {
   let parsed: unknown
   try {
-    parsed = JSON.parse(readFileSync(file, 'utf8'))
+    parsed = JSON.parse(await readFile(file, 'utf8'))
   } catch {
     return null
   }

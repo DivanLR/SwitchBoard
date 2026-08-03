@@ -389,6 +389,71 @@ const MIGRATIONS: Migration[] = [
       db.exec(`ALTER TABLE api_runs ADD COLUMN target TEXT NOT NULL DEFAULT 'local';`)
     },
   },
+  {
+    // Risk and noise rules go back to being code.
+    //
+    // Both tables shipped as "editable" but never got an IPC method or a screen,
+    // so they only ever held the seeded defaults — and because seedIfEmpty() will
+    // not re-seed a non-empty table, changing a default meant hand-writing a
+    // migration against seeded rows (009-progress-rule-scope did exactly that).
+    // risk-rules.ts and swallow-rules.ts are now the only copy, which is what the
+    // classifiers read. Dropping the tables cannot lose an edit, because no code
+    // path could ever have written one.
+    name: '018-drop-seeded-rule-tables',
+    up: (db) => {
+      db.exec(`
+        DROP TABLE IF EXISTS risk_rules;
+        DROP TABLE IF EXISTS swallow_rules;
+      `)
+    },
+  },
+  {
+    // Serves retention's two `resolvedAt < ?` statements, which previously
+    // scanned the whole table (verified with EXPLAIN QUERY PLAN: both now
+    // SEARCH via this index). Partial, because pending rows have a null
+    // resolvedAt and are already served by idx_requests_pending.
+    //
+    // It does NOT help RequestsRepo.history(), which still scans and sorts
+    // through a temp B-tree: `status != 'pending'` is an inequality SQLite
+    // cannot seek on, and it does not imply this index's IS NOT NULL predicate.
+    // Left that way deliberately. history() is capped at 100 rows over a table
+    // retention keeps to 30 days of human approvals, so a second index earns
+    // nothing but write cost.
+    name: '019-requests-resolved-index',
+    up: (db) => {
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_requests_resolved
+          ON permission_requests (resolvedAt DESC)
+          WHERE resolvedAt IS NOT NULL;
+      `)
+    },
+  },
+  {
+    // Developer ownership of the risk and noise rules (PRODUCT.md Principle 3),
+    // stored as the DIFFERENCE from the shipped defaults rather than as a copy of
+    // them. That distinction is the whole design: migration 018 dropped the
+    // earlier tables precisely because holding copies made a shipped default
+    // unchangeable without a migration per change. See main/inbox/rule-prefs.ts.
+    //
+    // A row exists only for a rule the developer touched, so an empty table means
+    // "shipped behaviour", and `body` is non-null only for a rule they wrote
+    // themselves.
+    name: '020-rule-prefs',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS rule_prefs (
+          id TEXT NOT NULL,
+          kind TEXT NOT NULL CHECK (kind IN ('risk', 'swallow')),
+          disabled INTEGER NOT NULL DEFAULT 0,
+          risk TEXT CHECK (risk IS NULL OR risk IN ('low', 'medium', 'high')),
+          body TEXT,
+          position INTEGER,
+          createdAt TEXT NOT NULL,
+          PRIMARY KEY (id, kind)
+        );
+      `)
+    },
+  },
 ]
 
 /**

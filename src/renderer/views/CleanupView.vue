@@ -5,7 +5,7 @@
 // rows; otherwise it shows a "download to project" card that installs it. A
 // command row sends its slash command to the session (output streams there).
 import { computed } from 'vue'
-import { CLEANUP_GROUPS, type CleanupGroup } from '@shared/domain'
+import { CLEANUP_GROUPS, type CleanupGroup } from '@shared/command-catalog'
 import { normalizeForMatch } from '@renderer/composables/useCommandSuggestions'
 
 const props = defineProps<{
@@ -28,6 +28,15 @@ function isInstalled(g: CleanupGroup): boolean {
   return g.commands.some((c) => availableKeys.value.has(normalizeForMatch(c.command)))
 }
 
+/**
+ * A stack-specific plugin appears only once it is installed.
+ *
+ * Before this, the .NET toolkit was offered with a download button on every
+ * project whatever its language. Installation is the signal that a developer
+ * wants it, and it is a signal the app already has.
+ */
+const groups = computed(() => CLEANUP_GROUPS.filter((g) => !g.stackSpecific || isInstalled(g)))
+
 function run(command: string): void {
   emit('run', `/${command}`)
 }
@@ -40,7 +49,7 @@ function run(command: string): void {
       <span class="proj">{{ projectName }}</span>. Click any command to run it in the session.
     </div>
 
-    <div v-for="g in CLEANUP_GROUPS" :key="g.source" class="group">
+    <div v-for="g in groups" :key="g.source" class="group">
       <div class="group-head">
         <span class="group-name mono">{{ g.source }}</span>
         <span class="group-tag">{{ g.tag }}</span>

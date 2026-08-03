@@ -10,7 +10,7 @@ import type {
   SwitchboardApi,
   WireResult,
 } from '@shared/ipc-types'
-import { PUSH_CHANNELS } from '@shared/ipc-types'
+import { INVOKE_CHANNEL, PUSH_CHANNELS } from '@shared/ipc-types'
 
 // In-flight invoke tracking so the renderer can show a global loading spinner
 // whenever anything is loading — one chokepoint covers every IPC call.
@@ -28,7 +28,7 @@ const api: SwitchboardApi = {
     pending += 1
     notifyLoading()
     try {
-      const result = (await ipcRenderer.invoke('switchboard:invoke', method, req)) as WireResult<
+      const result = (await ipcRenderer.invoke(INVOKE_CHANNEL, method, req)) as WireResult<
         InvokeMap[M]['res']
       >
       if (result.ok) return result.value

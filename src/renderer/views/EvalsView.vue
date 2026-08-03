@@ -7,7 +7,9 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { canPassEval, evalStage, EVAL_RELOOP_RATING, type EvalRun } from '@shared/domain'
 import type { TestSuite } from '@shared/test-catalog'
-import { evals } from '@renderer/stores/evals'
+import { useEvalsStore } from '@renderer/stores/evals'
+
+const evals = useEvalsStore()
 
 const props = defineProps<{ projectId: string; projectName: string }>()
 
@@ -33,6 +35,7 @@ const meanRating = computed(() =>
 
 const suites = computed(() => evals.suitesFor(props.projectId))
 
+let stopPush: (() => void) | null = null
 onMounted(() => {
   void evals.load(props.projectId)
   // The gate result arrives from the session, not from a click.
@@ -40,7 +43,6 @@ onMounted(() => {
     evals.applyPush(push.projectId, push.runs)
   })
 })
-let stopPush: (() => void) | null = null
 onUnmounted(() => stopPush?.())
 watch(() => props.projectId, (id) => void evals.load(id))
 
@@ -459,7 +461,9 @@ const shortDate = (iso: string): string =>
   background: color-mix(in srgb, var(--amber) 7%, transparent);
   /* 1px: same refused side-tab pattern as StreamEvent's prompt callout. */
   border-left: 1px solid var(--amber);
-  border-radius: 3px;
+  /* Square, like every other surface: the 3px here was the second of the two
+     unmigrated leftovers DESIGN.md names under Shapes. */
+  border-radius: var(--rc);
   text-wrap: pretty;
 }
 

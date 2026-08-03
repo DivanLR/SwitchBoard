@@ -21,13 +21,19 @@ export type EventKind =
 
 export type RiskLevel = 'low' | 'medium' | 'high'
 
+/**
+ * Which engine a developer's rule override belongs to (the `kind` column of
+ * rule_prefs). Here rather than in the main process because it travels in a
+ * request: the editor names the rule it is changing.
+ */
+export type RuleKind = 'risk' | 'swallow'
+
 export type PermissionRequestType = 'tool_permission' | 'plan_approval'
 
 export type PermissionRequestStatus = 'pending' | 'approved' | 'denied' | 'expired' | 'rule_approved'
 
 export type DecisionOutcome = Exclude<PermissionRequestStatus, 'pending'>
 
-export type SwallowScope = 'global' | 'project'
 
 /** A folder a project's sessions may read for context (header REFS chips). */
 export interface ProjectRef {
@@ -108,6 +114,14 @@ export interface PromptPayload extends AgentScopedPayload {
   text: string
   /** True while the message is queued and not yet delivered to the session (FR-019). */
   pending?: boolean
+  /**
+   * The developer took this queued message back before it was delivered.
+   *
+   * The row stays rather than disappearing, because events are append-only: what
+   * was typed is part of the record even when it was never sent. The stream
+   * renders it as withdrawn so it cannot be mistaken for something the session saw.
+   */
+  withdrawn?: boolean
 }
 
 export interface AssistantTextPayload extends AgentScopedPayload {
@@ -207,6 +221,19 @@ export interface SessionEvent<K extends EventKind = EventKind> {
   createdAt: string
 }
 
+/**
+ * The subagent an event was produced inside, or undefined for a main-loop event.
+ *
+ * Shared because both the session view (which hides agent-tagged events from the
+ * main stream) and the MCP view (which shows only main-loop events) need the same
+ * answer. The `in` check narrows the payload union to the kinds that actually
+ * carry `agentId`, so no kind is asked for a field it does not have.
+ */
+export function agentIdOf(event: SessionEvent): string | undefined {
+  const payload: EventPayloadMap[EventKind] = event.payload
+  return 'agentId' in payload ? payload.agentId : undefined
+}
+
 /** Event kinds the swallow classifier may tag; all others are categorically exempt (FR-015a, FR-017). */
 export const SWALLOWABLE_KINDS: readonly EventKind[] = ['tool_activity', 'raw_output', 'assistant_text']
 
@@ -292,9 +319,7 @@ export interface RiskClassificationRule {
 
 export interface SwallowRule {
   id: string
-  scope: SwallowScope
-  projectId: string | null
-  /** Ordered; first match wins. Project-scope rules take precedence over global. */
+  /** Ordered; first match wins. */
   position: number
   /** Event kind the rule may tag (`tool_activity`, `raw_output`, `assistant_text`, or `*`). */
   eventKindMatcher: string
@@ -495,6 +520,12 @@ export interface Settings {
    * combination. Each distinct combination gets its own scan doc + history row.
    */
   mcpActiveServers: string[]
+  /**
+   * Memory cap for each bypass sandbox container (docker --memory): any Docker
+   * size ("6g", "12g"), or "0" for no cap. The SWITCHBOARD_SANDBOX_MEMORY env
+   * var still overrides it — see sandboxMemoryArg for why both exist.
+   */
+  sandboxMemory: string
 }
 
 /** One scanned MCP combination (history row for "have I scanned this before?"). */
@@ -537,6 +568,7 @@ export const DEFAULT_SETTINGS: Settings = {
   disabledCommands: {},
   databaseMcpServers: [],
   mcpActiveServers: [],
+  sandboxMemory: '6g',
 }
 
 /** A slash command / skill a project's sessions can run (composer suggestions). */
@@ -926,81 +958,8 @@ export interface ResolvedClarification {
   answer: string
 }
 
-/**
- * Spec Kit stage commands (the Commands part tab). `label` is the design's
- * display form (/speckit.clarify); `command` is the real installed skill the
- * session receives (/speckit-clarify).
- */
-export interface SpecKitCommand {
-  command: string // e.g. "speckit-clarify"
-  label: string
-  hint: string
-}
-
-export const SPEC_KIT_COMMANDS: readonly SpecKitCommand[] = [
-  { command: 'speckit-clarify', label: '/speckit.clarify', hint: 'Scan the spec for ambiguity and ask up to 5 new clarification questions' },
-  { command: 'speckit-plan', label: '/speckit.plan', hint: 'Regenerate plan.md from the current spec and answers' },
-  { command: 'speckit-tasks', label: '/speckit.tasks', hint: 'Rebuild tasks.md from the plan, phase by phase' },
-  { command: 'speckit-analyze', label: '/speckit.analyze', hint: 'Cross-check spec, plan, and tasks for drift or contradictions' },
-  { command: 'speckit-implement', label: '/speckit.implement', hint: 'Execute every remaining task in tasks.md' },
-  { command: 'speckit-checklist', label: '/speckit.checklist', hint: 'Generate a review checklist for the finished work' },
-]
-
-/**
- * Curated code-review / cleanup commands for the Cleanup section, sourced from
- * the Ponytail and Dotnet Claude Kit plugins. `command` is the dash-form slash
- * command the session receives (the section sends `/${command}`); availability
- * depends on the project having the relevant plugin installed.
- */
-export interface CleanupCommand {
-  command: string
-  label: string
-  hint: string
-}
-
-export interface CleanupGroup {
-  /** Plugin slug, shown as the group name (design: "dotnet-claude-kit"). */
-  source: string
-  /** Short tag line shown after the name. */
-  tag: string
-  blurb: string
-  /** `/plugin marketplace add …` — adds the plugin's marketplace to the project. */
-  marketplace: string
-  /** `/plugin install …` — installs the plugin. */
-  pkg: string
-  commands: readonly CleanupCommand[]
-}
-
-export const CLEANUP_GROUPS: readonly CleanupGroup[] = [
-  {
-    source: 'dotnet-claude-kit',
-    tag: 'Roslyn-powered · .NET review & quality',
-    blurb: 'Multi-dimensional review, health grading, and systematic cleanup for .NET projects.',
-    marketplace: '/plugin marketplace add codewithmukesh/dotnet-claude-kit',
-    pkg: '/plugin install dotnet-claude-kit',
-    commands: [
-      { command: 'code-review', label: '/code-review', hint: 'Blast-radius-prioritized code review' },
-      { command: 'de-sloppify', label: '/de-sloppify', hint: 'Format, remove dead code, fix analyzers, seal types' },
-      { command: 'security-scan', label: '/security-scan', hint: 'OWASP, secrets, and CVE auditing' },
-      { command: 'verify', label: '/verify', hint: 'Build, analyzers, tests, and security in one pass' },
-      { command: 'health-check', label: '/health-check', hint: 'Letter-grade project assessment (A–F)' },
-      { command: 'outdated', label: '/outdated', hint: 'Dependency health: CVEs and licensing traps' },
-      { command: 'arch-check', label: '/arch-check', hint: 'Architecture conformance validation' },
-    ],
-  },
-  {
-    source: 'ponytail',
-    tag: 'the laziest senior dev · kill over-engineering',
-    blurb: 'Find and delete code that never needed to exist — the best code is the code you never wrote.',
-    marketplace: '/plugin marketplace add DietrichGebert/ponytail',
-    pkg: '/plugin install ponytail@ponytail',
-    commands: [
-      { command: 'ponytail-review', label: '/ponytail-review', hint: 'Review the current diff for over-engineering' },
-      { command: 'ponytail-audit', label: '/ponytail-audit', hint: 'Audit the whole repo, not just the diff' },
-      { command: 'ponytail-debt', label: '/ponytail-debt', hint: 'Collect deferred ponytail: shortcuts into a ledger' },
-    ],
-  },
-]
+// Spec Kit stage commands and the cleanup/review plugin catalogue live in
+// command-catalog.ts: they are display copy, not persisted shapes.
 
 export interface SpecTask {
   id: string // e.g. "T001"

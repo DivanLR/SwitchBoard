@@ -2,9 +2,11 @@
 // (window close hides, sessions keep running — FR-022a), application-exit
 // confirmation and graceful shutdown (FR-022, T045), and composition of the
 // store, session manager, permission broker, notifier, and IPC layer.
-import { app, BrowserWindow, dialog, Menu, nativeImage, session, Tray } from 'electron'
+import { app, BrowserWindow, dialog, Menu, nativeImage, net, protocol, session, Tray } from 'electron'
 import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { mkdirSync, renameSync } from 'node:fs'
+import { resolveBundlePath } from './bundle-path'
 import { openDatabase } from './store/db'
 import { createRepositories, type Repositories } from './store/repositories'
 import { runRetention, scheduleRetention } from './store/retention'
@@ -14,10 +16,9 @@ import { classifyNoise } from './stream/swallow-rules'
 import { createNotifier } from './notifications'
 import { parseDeepLink, PROTOCOL_SCHEME } from './deep-link'
 import { registerProject } from './projects/discovery'
-import { computeCounters, registerIpcHandlers, RendererPush, seedDefaultRules } from './ipc/handlers'
+import { computeCounters, registerIpcHandlers, RendererPush } from './ipc/handlers'
 import { initUpdater } from './updater'
 import { completeApiRun } from './evals/api-runner'
-import type { SwallowRule } from '@shared/domain'
 
 const TRAY_ICON_DATA_URL =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAE7SURBVDhPY2CgJYhP+6SRnP7eISXlvQG6HE4QH/+fIyX1Y3ty2ofvyWkf/6Ph5fFZXyTQ9cAByKbk1A/XsWhE4NQPz0GuQtcLtjk59eN9DA3Y8XsMlySnf5yOrnDxku//9+77+X/Xnp/oBvxPSv24HdV2ND8XlXz6/+vXfzjo6vmKYUh8+nsFsAFgv6NJnjv/G6zx0eM/EPrRn/8Z2WiuSHsfADYgKeVDBrJE/8SvYE0gF5RVfPr//PlfMH/Fyu+orkj92AD1/3sHmCDIFnQNyAaCvAZ3Qcr7BGgYvBeACeYWfPq//+BPDCeDvHT5ym8UA1ASWFLax/3IzkP3LzofFOVwzWBXgJIt9tSHHWNLTEmpHyKIMSQx7X0Bul44ALkkKe3DcXRNYIwrGWMDKSkfLcDRm/qxAWQjLo0AbJPd8XqLsGkAAAAASUVORK5CYII='
@@ -26,6 +27,48 @@ let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let quitting = false
 let shutdownComplete = false
+
+// The packaged UI is served from app://bundle/ rather than file:// (Electron
+// checklist A18). A file:// document has an opaque origin, which makes "'self'"
+// in the CSP mean something the app cannot state precisely and leaves the
+// renderer sharing an origin with the rest of the disk. A scheme of our own
+// gives the UI one real, bounded origin, and the handler below decides what may
+// be read through it — nothing outside the bundle directory.
+const APP_SCHEME = 'app'
+const APP_ORIGIN = `${APP_SCHEME}://bundle`
+
+/**
+ * The renderer's locality rule (FR-021b), stated once.
+ *
+ * script-src stays strict ('self', no unsafe-inline/eval). style-src carries
+ * 'unsafe-inline' because the renderer uses inline :style bindings (project
+ * accent colour, stream zoom) and Vue injects scoped-style tags at runtime; that
+ * permits styles only, never script.
+ *
+ * base-uri and form-action do NOT inherit from default-src, so they default
+ * permissive unless stated. object-src is stated for the same reason of not
+ * relying on inheritance. Defence in depth: the only v-html sink (MarkdownText)
+ * escapes first and reintroduces a fixed, attribute-free tag set, so there is no
+ * injection path today.
+ */
+const CONTENT_SECURITY_POLICY =
+  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; base-uri 'none'; object-src 'none'; form-action 'none'"
+
+// Must run before the app is ready. `standard` gives the scheme a real origin so
+// relative asset URLs and 'self' resolve; `secure` makes it a secure context,
+// as the UI would be over https.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: APP_SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true },
+  },
+])
+
+// No menu-driven UI. Dropped BEFORE the app is ready, which is the point: after
+// ready the default template has already been built and its accelerators
+// registered (Ctrl+R reload, Ctrl+Shift+I DevTools, zoom), so clearing it later
+// only removed the bar. The tray context menu is separate and unaffected.
+Menu.setApplicationMenu(null)
 
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
@@ -108,7 +151,7 @@ function createWindow(): void {
   if (process.env.ELECTRON_RENDERER_URL) {
     void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
-    void mainWindow.loadFile(join(import.meta.dirname, '../renderer/index.html'))
+    void mainWindow.loadURL(`${APP_ORIGIN}/index.html`)
   }
 }
 
@@ -126,6 +169,36 @@ function createTray(): void {
   tray.on('click', () => showWindow())
 }
 
+/**
+ * Serve the built renderer over app://bundle/, and nothing else.
+ *
+ * The traversal guard is the whole point of preferring this to file://: the
+ * requested path is resolved FIRST and then tested against the bundle directory,
+ * because only a resolved path can be compared honestly — `/../../` and its
+ * encoded spellings all collapse before the check rather than after it. The
+ * separator matters too, or a sibling directory sharing the prefix (renderer-old)
+ * would pass a bare startsWith.
+ *
+ * The CSP is attached here rather than left to the webRequest hook alone, and
+ * that is load-bearing rather than belt-and-braces: with the header set only on
+ * this response the policy is live (proven by the real-app suite), so this is
+ * the mechanism actually carrying it. A policy that silently stopped applying is
+ * exactly the kind of regression nobody notices, which is why the suite asserts
+ * it directly instead of trusting that a hook fires for a custom scheme.
+ */
+function registerAppProtocol(): void {
+  const root = resolve(import.meta.dirname, '../renderer')
+  protocol.handle(APP_SCHEME, async (request) => {
+    const target = resolveBundlePath(root, new URL(request.url).pathname)
+    if (!target) return new Response('Forbidden', { status: 403 })
+    const file = await net.fetch(pathToFileURL(target).toString())
+    // A fetched Response carries immutable headers, so the policy goes on a copy.
+    const headers = new Headers(file.headers)
+    headers.set('Content-Security-Policy', CONTENT_SECURITY_POLICY)
+    return new Response(file.body, { status: file.status, statusText: file.statusText, headers })
+  })
+}
+
 function applyContentSecurityPolicy(): void {
   // The app needs no web permissions (camera/mic/geolocation/notifications are
   // handled natively in the main process). Deny every renderer permission
@@ -135,23 +208,16 @@ function applyContentSecurityPolicy(): void {
 
   // Locality hardening (FR-021b): the renderer may only load itself.
   // Dev mode is exempt so Vite HMR (inline styles, ws) keeps working.
+  //
+  // The protocol handler already stamps the same policy on everything it serves;
+  // this covers the session as a whole, so a response that never went through
+  // that handler is not left uncovered either.
   if (process.env.ELECTRON_RENDERER_URL) return
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
-        // script-src stays strict ('self', no unsafe-inline/eval). style-src
-        // carries 'unsafe-inline' because the renderer uses inline :style
-        // bindings (e.g. project accent colour, stream zoom) and Vue injects
-        // scoped-style tags at runtime; this permits styles only, never script.
-        'Content-Security-Policy': [
-          // base-uri and form-action do NOT inherit from default-src, so they
-          // default permissive unless stated. object-src is stated for the same
-          // reason of not relying on inheritance. Defence in depth: the only
-          // v-html sink (MarkdownText) escapes first and reintroduces a fixed,
-          // attribute-free tag set, so there is no injection path today.
-          "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; base-uri 'none'; object-src 'none'; form-action 'none'",
-        ],
+        'Content-Security-Policy': [CONTENT_SECURITY_POLICY],
       },
     })
   })
@@ -196,10 +262,8 @@ function openCorruptSafe(dbPath: string): ReturnType<typeof openDatabase> {
 
 async function main(): Promise<void> {
   await app.whenReady()
-  // No menu-driven UI: drop the default application menu so its accelerators
-  // (Ctrl+R reload, Ctrl+Shift+I DevTools, zoom) are not registered. The tray
-  // context menu is separate and unaffected. (autoHideMenuBar only hid the bar.)
-  Menu.setApplicationMenu(null)
+  // Before any window: createWindow loads app://bundle/index.html straight away.
+  if (!process.env.ELECTRON_RENDERER_URL) registerAppProtocol()
   applyContentSecurityPolicy()
 
   const db = openCorruptSafe(join(app.getPath('userData'), 'switchboard.db'))
@@ -207,7 +271,6 @@ async function main(): Promise<void> {
   // References are ephemeral: every launch starts with none (they persist only
   // within a run so they survive project switches, never across a restart).
   repos.projects.clearAllRefs()
-  seedDefaultRules(repos)
 
   // Late-bound so the manager's gate can reference the broker (composition root).
   let broker: PermissionBroker | null = null
@@ -268,9 +331,11 @@ async function main(): Promise<void> {
     onNeedsYou: (context) => notify(context),
   })
 
-  // Read once: swallow rules are seeded defaults with no editing surface.
-  const swallowRules: SwallowRule[] = repos.swallowRules.list()
-  manager.setNoiseClassifier((event, projectId) => classifyNoise(swallowRules, event, projectId))
+  // Read through the broker's rule set, not captured once: the developer can
+  // switch a noise rule off while sessions are streaming, and it has to stop
+  // hiding output immediately rather than after a restart. The set caches, so this
+  // is a field read per event, not a query (see inbox/rule-set.ts).
+  manager.setNoiseClassifier((event) => classifyNoise(broker.rules.swallowRules(), event))
 
   // Database MCP: a reserved project row gives it cwd/permissions/history
   // through the existing per-project machinery. ipc/handlers.ts marks it
