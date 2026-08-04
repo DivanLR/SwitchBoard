@@ -24,6 +24,7 @@ function setup() {
     onEvalsChanged: () => {},
     onVerifyChanged: (projectId) => changed.push(projectId),
     onApiRequests: () => {},
+    onApiChanged: () => {},
     onProjectCommands: () => {},
     gate: (async () => ({ behavior: 'allow', updatedInput: {} })) as never,
   })
@@ -47,6 +48,15 @@ function setup() {
     start,
     scan: drive('scanVerifyReport'),
     endTurn: () => drive('closeUnreportedVerify')(),
+    sweep: (deadlineMs: number): void =>
+      (manager as unknown as Record<string, (ms: number) => void>).sweepStaleRuns(deadlineMs),
+    /** Push a run's start time into the past, which is what the sweep reads. */
+    backdate: (runId: string, minutes: number): void => {
+      db.prepare('UPDATE verify_runs SET startedAt = ? WHERE id = ?').run(
+        new Date(Date.now() - minutes * 60_000).toISOString(),
+        runId,
+      )
+    },
   }
 }
 
@@ -88,6 +98,34 @@ describe('a verification run', () => {
     expect(repos.verifyRuns.byId(run.id)?.status).toBe('inconclusive')
   })
 
+  // "Never reported" and "reported something unreadable" used to close with the
+  // same note, which sent the developer looking for output that was right there.
+  it('says the report line was unreadable, rather than that none arrived', () => {
+    const { repos, manager, start, scan, endTurn } = setup()
+    const run = start()
+    manager.watchVerifyReport('s1', run.id, 'suites')
+
+    scan('assistant_text', line('{"suites": [oops}'))
+    // The watch stays open: a clean line may still be a moment behind.
+    expect(repos.verifyRuns.byId(run.id)?.status).toBe('running')
+
+    endTurn()
+    const stored = repos.verifyRuns.byId(run.id)
+    expect(stored?.status).toBe('inconclusive')
+    expect(stored?.note).toContain('could not read as JSON')
+  })
+
+  it('still takes a clean report line that arrives after a broken one', () => {
+    const { repos, manager, start, scan } = setup()
+    const run = start()
+    manager.watchVerifyReport('s1', run.id, 'suites')
+
+    scan('assistant_text', line('{"suites": [oops}'))
+    scan('assistant_text', line('{"suites":[{"id":"node-unit","status":"pass","detail":"142 passed"}]}'))
+
+    expect(repos.verifyRuns.byId(run.id)?.status).toBe('pass')
+  })
+
   it('ignores the dispatch prompt, which names the sentinel itself', () => {
     const { repos, manager, start, scan } = setup()
     const run = start()
@@ -114,6 +152,64 @@ describe('a verification run', () => {
     expect(stored?.status).toBe('pass')
     expect(stored?.report?.evidence).toHaveLength(1)
     expect(stored?.report?.suites[0].detail).toBe('142 passed')
+  })
+
+  // The failure this exists for: a container killed by SIGKILL produces no turn
+  // end, so nothing closed the run, and the launch-time reconcile could not reach
+  // it while the app stayed up. The row read Running — with the Run button
+  // disabled behind it — until the developer restarted the app.
+  it('closes a run whose session went quiet, without waiting for a restart', () => {
+    const { repos, manager, projectId, changed, start, sweep, backdate } = setup()
+    const run = start()
+    manager.watchVerifyReport('s1', run.id, 'suites')
+    backdate(run.id, 90)
+
+    sweep(45 * 60 * 1000)
+
+    const stored = repos.verifyRuns.byId(run.id)
+    expect(stored?.status).toBe('inconclusive')
+    expect(stored?.note).toContain('presumed dead')
+    expect(stored?.finishedAt).not.toBeNull()
+    expect(changed).toEqual([projectId])
+  })
+
+  it('leaves a run inside the deadline alone, however slow the suite is', () => {
+    const { repos, changed, start, sweep, backdate } = setup()
+    const run = start()
+    backdate(run.id, 20)
+
+    sweep(45 * 60 * 1000)
+
+    expect(repos.verifyRuns.byId(run.id)?.status).toBe('running')
+    expect(changed).toEqual([])
+  })
+
+  // Before this, a run the developer no longer wanted had to be waited out.
+  it('closes a cancelled run saying you stopped it, not that the session gave up', async () => {
+    const { repos, manager, projectId, changed, start } = setup()
+    const run = start()
+    manager.watchVerifyReport('s1', run.id, 'suites')
+
+    // No hosted session here, so the interrupt fails — deliberately swallowed,
+    // because the row still needs closing whether or not the session is alive.
+    await manager.cancelVerifyRun(run.id)
+
+    const stored = repos.verifyRuns.byId(run.id)
+    expect(stored?.status).toBe('inconclusive')
+    expect(stored?.note).toContain('You stopped this run')
+    expect(changed).toEqual([projectId])
+  })
+
+  it('leaves a run that already finished exactly as it was', async () => {
+    const { repos, manager, start } = setup()
+    const run = start()
+    repos.verifyRuns.finish(run.id, 'pass', null, null)
+
+    await manager.cancelVerifyRun(run.id)
+
+    const stored = repos.verifyRuns.byId(run.id)
+    expect(stored?.status).toBe('pass')
+    expect(stored?.note).toBeNull()
   })
 
   it('keeps the last 20 runs per project and drops the oldest first', () => {

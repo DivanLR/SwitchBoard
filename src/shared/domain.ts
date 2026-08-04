@@ -84,6 +84,20 @@ export interface Session {
    * look for that transcript in the wrong place and silently find nothing.
    */
   bypassPermissions?: boolean
+  /**
+   * Asked to START in plan mode: read-only until a plan is approved. Persisted
+   * for one reason only — the restart toggle pre-fills from it — and it records
+   * how the session began, never where it is now. Plan mode can be switched at
+   * runtime, so a column claiming to hold the current mode would go stale the
+   * first time a toggle did not reach it, and a stale persisted value is worse
+   * than none because the sidebar and the next launch would believe it.
+   */
+  planMode?: boolean
+  /**
+   * In plan mode RIGHT NOW (in-memory only): the session may read but not act,
+   * until it proposes a plan and the developer approves it in the inbox.
+   */
+  inPlanMode?: boolean
   /** MCP servers reported in the session init message (in-memory only). */
   mcpServers?: McpServer[]
   /** Model the SDK reported for the latest main-loop turn (in-memory only). */
@@ -470,6 +484,18 @@ export interface Settings {
    *  id). Absent means nothing chosen yet, so the section shows the picker with
    *  whatever detection found. */
   projectTestStacks: Record<string, string>
+  /**
+   * Per-project overrides for a suite's command, keyed by project id and then by
+   * suite id.
+   *
+   * The catalogue's command is a good guess about a conventional layout, and a
+   * guess is all it can be: a monorepo where `npm test` at the root reaches
+   * nothing, or a solution needing `--project`, had no way to correct it short of
+   * editing this application's own source. An absent entry means the catalogue's
+   * own command, and clearing the field deletes the entry rather than storing an
+   * empty string.
+   */
+  projectSuiteCommands: Record<string, Record<string, string>>
   /** Base URL an API eval set calls for a project, e.g. http://localhost:5057.
    *  Absent means it is read from the project's launchSettings.json instead. */
   projectApiBase: Record<string, string>
@@ -557,6 +583,7 @@ export const DEFAULT_SETTINGS: Settings = {
   projectModels: {},
   projectWorkerModels: {},
   projectTestStacks: {},
+  projectSuiteCommands: {},
   projectApiBase: {},
   projectApiStart: {},
   projectApiQa: {},

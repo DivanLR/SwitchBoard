@@ -382,6 +382,10 @@ export class PermissionBroker {
     this.settleEntry(entry, status)
     if (decision === 'approve') {
       entry.resolve({ behavior: 'allow', updatedInput: entry.input })
+      // Approving an ExitPlanMode IS leaving plan mode, by the tool's own
+      // contract — there is no second step. Denying deliberately leaves the
+      // session in plan mode, so the model revises and proposes again.
+      if (request.type === 'plan_approval') this.manager.planExited(request.sessionId)
     } else {
       entry.resolve({ behavior: 'deny', message: 'Denied by the developer in Switchboard' })
     }

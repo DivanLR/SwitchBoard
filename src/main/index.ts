@@ -301,6 +301,8 @@ async function main(): Promise<void> {
         requests,
         changed: (id) => pusher.push('push.apiChanged', { projectId: id, runs: repos.apiRuns.listForProject(id) }),
       }),
+    onApiChanged: (projectId) =>
+      pusher.push('push.apiChanged', { projectId, runs: repos.apiRuns.listForProject(projectId) }),
     onProjectCommands: (projectId, commands) => pusher.push('push.projectCommands', { projectId, commands }),
     gate: (context) => {
       if (!broker) throw new Error('Broker not initialised')
@@ -308,6 +310,9 @@ async function main(): Promise<void> {
     },
   })
   manager.reconcileOnStartup()
+  // The same repair on a timer, for the runs a launch-time sweep can never
+  // reach: a session that dies while the app stays up.
+  manager.startWatchdog()
   // Warm the model list (one short-lived CLI query) so the settings picker is
   // populated the first time it opens, before any session has reported.
   void manager.models()

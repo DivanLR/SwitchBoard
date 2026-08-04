@@ -51,6 +51,19 @@ const store = reactive({
     }
   },
 
+  /** Stop a run in progress. The row closes as inconclusive saying you stopped
+   *  it, which is a different thing from a session that gave up on its own. */
+  async cancel(projectId: string, runId: string): Promise<boolean> {
+    this.error = null
+    try {
+      this.byProject[projectId] = await invoke('verify.cancel', { projectId, runId })
+      return true
+    } catch (error) {
+      this.error = errorMessage(error)
+      return false
+    }
+  },
+
   /** Capture evidence against the newest run, without re-running its suites. */
   async captureEvidence(projectId: string, runId?: string): Promise<boolean> {
     this.error = null

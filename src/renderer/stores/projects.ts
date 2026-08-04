@@ -18,6 +18,11 @@ const state = reactive({
   selectedProjectId: null as string | null,
   counters: { running: 0, needsYou: 0, costTodayUsd: 0, tokensToday: 0 } as Counters,
   loaded: false,
+  // A session start is in flight. Held here rather than in the caller because
+  // three places start sessions (the New session dialog, the ended-session
+  // banner, the Database MCP view) and the full-page waiting state that reads
+  // this is rendered once, in the shell.
+  starting: false,
 })
 
 const selected = computed(
@@ -135,14 +140,23 @@ const store = reactive({
     projectId: string,
     resume = false,
     bypassPermissions = false,
+    planMode = false,
   ): Promise<Session> {
-    const session = await invoke('sessions.start', {
-      projectId,
-      resume,
-      bypassPermissions,
-    })
-    await this.refresh()
-    return session
+    state.starting = true
+    try {
+      const session = await invoke('sessions.start', {
+        projectId,
+        resume,
+        bypassPermissions,
+        planMode,
+      })
+      // Refresh is inside the wait: the session row is what the view renders,
+      // so clearing the waiting state before it lands shows an empty stream.
+      await this.refresh()
+      return session
+    } finally {
+      state.starting = false
+    }
   },
 
   select(projectId: string): void {

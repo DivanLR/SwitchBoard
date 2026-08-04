@@ -21,6 +21,7 @@ function setup() {
     onEvalsChanged: (projectId) => changed.push(projectId),
     onVerifyChanged: () => {},
     onApiRequests: () => {},
+    onApiChanged: () => {},
     onProjectCommands: () => {},
     gate: (async () => ({ behavior: 'allow', updatedInput: {} })) as never,
   })

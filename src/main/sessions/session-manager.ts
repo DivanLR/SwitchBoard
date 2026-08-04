@@ -31,7 +31,7 @@ import {
   terseSystemPromptAppend,
 } from './session-shaping'
 import { parseEvalMarker } from '@main/evals/eval-dispatch'
-import { parseVerifyReport } from '@main/evals/verify-dispatch'
+import { parseVerifyReport, verifyMarkerBroken } from '@main/evals/verify-dispatch'
 import { reconcile } from '@main/evals/artefacts'
 import { scanArtefacts } from '@main/evals/artefact-scan'
 import { parseApiRequests } from '@main/evals/api-dispatch'
@@ -62,6 +62,9 @@ interface SessionManagerCallbacks {
    * then makes the calls itself — this callback carries data, never a result.
    */
   onApiRequests: (projectId: string, runId: string, requests: ApiRequestPlan[]) => void
+  /** Fired when an API run's row changes without the runner writing it — today
+   *  only the stale sweep, which finishes a run the app itself never closed. */
+  onApiChanged: (projectId: string) => void
   /** Fired when a session reports its available slash commands / skills (init message). */
   onProjectCommands: (projectId: string, commands: ProjectCommand[]) => void
   gate: PermissionGate
@@ -80,6 +83,24 @@ interface HostedEntry {
   /** Events that may still be updated in place (partials, tool pairs, markers, questions). */
   live: Map<string, LiveEventEntry>
 }
+
+/**
+ * How long a verification or API run may go without reporting before the
+ * watchdog presumes its session is dead and closes it.
+ *
+ * ponytail: a flat wall-clock ceiling, not history-aware. It cannot tell a stuck
+ * run from a genuinely slow one, so it is set well past any real run — mutation
+ * testing takes minutes where a unit pass takes seconds. Its job is to notice a
+ * process that obviously died, not to police how long a run may take. Upgrade it
+ * to a per-selection estimate (estimateRunMs, already computed for the Tests
+ * panel) only if a real slow run is ever swept.
+ */
+const RUN_DEADLINE_MS = 45 * 60 * 1000
+const SWEEP_INTERVAL_MS = 60 * 1000
+
+/** Why a cancelled run proved nothing — distinct from a session that gave up on
+ *  its own, which reads the same on the row without this. */
+const CANCEL_NOTE = 'You stopped this run before it reported, so nothing it measured is known.'
 
 const UPDATABLE_KINDS: ReadonlySet<EventKind> = new Set([
   'prompt',
@@ -233,6 +254,43 @@ export class SessionManager {
   }
 
   /**
+   * The same repair as reconcileOnStartup, on a timer, for the case that one
+   * could never reach: a session that dies or stalls while the app stays up.
+   *
+   * A run is otherwise closed only by its session's turn ending, and a SIGKILLed
+   * container produces no turn end. Before this, the row read Running until the
+   * next launch — with the Run button disabled behind it — so the only recovery
+   * was to restart the app.
+   */
+  startWatchdog(deadlineMs = RUN_DEADLINE_MS, intervalMs = SWEEP_INTERVAL_MS): void {
+    if (this.watchdog) return
+    this.watchdog = setInterval(() => this.sweepStaleRuns(deadlineMs), intervalMs)
+    // Never hold the process open for a sweep: this is housekeeping, and Electron
+    // should be free to quit between ticks.
+    this.watchdog.unref?.()
+  }
+
+  stopWatchdog(): void {
+    if (!this.watchdog) return
+    clearInterval(this.watchdog)
+    this.watchdog = null
+  }
+
+  private watchdog: ReturnType<typeof setInterval> | null = null
+
+  private sweepStaleRuns(deadlineMs: number): void {
+    const deadline = new Date(Date.now() - deadlineMs).toISOString()
+    const note =
+      'This run went quiet for long enough that its session is presumed dead, so nothing it measured is known.'
+    for (const projectId of this.repos.verifyRuns.reconcileStale(deadline, note)) {
+      this.callbacks.onVerifyChanged(projectId)
+    }
+    for (const projectId of this.repos.apiRuns.reconcileStale(deadline, note)) {
+      this.callbacks.onApiChanged(projectId)
+    }
+  }
+
+  /**
    * The model routing a project's session should use RIGHT NOW: the INTELLIGENT
    * model (plans, questions, orchestrator loops, the advisor) and the WORKER
    * model (advisor-mode executor + orchestrator workers), each taking the
@@ -268,13 +326,18 @@ export class SessionManager {
    * rather than the awaited call keeps this correct if the body later grows
    * another await.
    */
-  async startSession(projectId: string, resume = false, bypassPermissions = false): Promise<Session> {
+  async startSession(
+    projectId: string,
+    resume = false,
+    bypassPermissions = false,
+    planMode = false,
+  ): Promise<Session> {
     if (this.starting.has(projectId)) {
       throw { code: 'ALREADY_ACTIVE', message: 'The project already has an active session' } satisfies IpcError
     }
     this.starting.add(projectId)
     try {
-      return await this.launchSession(projectId, resume, bypassPermissions)
+      return await this.launchSession(projectId, resume, bypassPermissions, planMode)
     } finally {
       this.starting.delete(projectId)
     }
@@ -284,6 +347,7 @@ export class SessionManager {
     projectId: string,
     resume: boolean,
     bypassPermissions: boolean,
+    planMode: boolean,
   ): Promise<Session> {
     const project = this.repos.projects.byId(projectId)
     if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
@@ -332,6 +396,13 @@ export class SessionManager {
       // ends it is the only record of whether the transcript went to the host or
       // to this project's container volume — which resume has to match.
       bypassPermissions,
+      // The two are one SDK setting, so they cannot both apply. Bypass wins, and
+      // silently: a bypass session never reaches the permission gate at all, so a
+      // plan under it would raise no approval and the developer would be waiting
+      // on a review that could never arrive. The UI keeps them mutually
+      // exclusive; this is the guard for a request that arrives with both.
+      planMode: bypassPermissions ? false : planMode,
+      inPlanMode: bypassPermissions ? false : planMode,
     }
     this.repos.sessions.insert(row)
 
@@ -410,6 +481,15 @@ export class SessionManager {
         this.pushStatus(entry)
       },
       bypassPermissions,
+      planMode: row.planMode,
+      // What the CLI itself reports, not what was asked for: a CLI too old to
+      // honour 'plan' would otherwise leave the header claiming a restriction
+      // that is not in force.
+      onPlanModeChange: (inPlanMode) => {
+        if (entry.row.inPlanMode === inPlanMode) return
+        entry.row.inPlanMode = inPlanMode
+        this.pushStatus(entry)
+      },
       summaries: settings.summaries,
       sink: this.makeSink(entry),
       gate: this.callbacks.gate,
@@ -554,6 +634,75 @@ export class SessionManager {
     return entry.session.interrupt()
   }
 
+  /**
+   * Switch a live session into or out of plan mode, no restart.
+   *
+   * Refused for a bypass session: it never reaches the permission gate, so the
+   * plan approval this mode exists to produce could never be raised, and the
+   * developer would be waiting on a review that cannot arrive.
+   */
+  setPlanMode(sessionId: string, enabled: boolean): void {
+    const entry = this.requireLive(sessionId)
+    if (entry.row.bypassPermissions) {
+      throw {
+        code: 'RULE_NOT_ALLOWED',
+        message: 'A bypass session approves everything, so it has nothing to plan against.',
+      } satisfies IpcError
+    }
+    entry.session.setPlanMode(enabled)
+    entry.row.inPlanMode = enabled
+    this.pushStatus(entry)
+  }
+
+  /**
+   * The plan was approved, so plan mode is over — that is what ExitPlanMode's
+   * approval means by the tool's own contract, and the broker calls this when it
+   * settles one. Acting on the approval rather than waiting for the CLI to report
+   * the change: the header claiming "Planning" for a session that has resumed
+   * work is the more visible of the two possible errors, and the reported mode
+   * still corrects this if it disagrees.
+   */
+  planExited(sessionId: string): void {
+    const entry = this.hosted.get(sessionId)
+    if (!entry || !entry.row.inPlanMode) return
+    entry.row.inPlanMode = false
+    this.pushStatus(entry)
+  }
+
+  /**
+   * Stop a run the developer no longer wants.
+   *
+   * Interrupting the session is what actually stops the work; the row is then
+   * closed here rather than left to the interrupt's own turn-end path, so the
+   * note says the developer stopped it instead of "the session finished without
+   * reporting", which is true of a very different situation. The interrupt is
+   * best-effort: a session already gone still leaves a row that needs closing,
+   * and cancelling a run that finished on its own in the meantime is a no-op
+   * rather than an error — the intent is satisfied either way.
+   */
+  async cancelVerifyRun(runId: string): Promise<void> {
+    const run = this.repos.verifyRuns.byId(runId)
+    if (!run) throw { code: 'NOT_FOUND', message: 'Run not found' } satisfies IpcError
+    if (run.status !== 'running') return
+    if (run.sessionId) await this.interruptSession(run.sessionId).catch(() => {})
+    this.verifyWatch.delete(run.sessionId ?? '')
+    this.repos.verifyRuns.finish(runId, 'inconclusive', null, CANCEL_NOTE)
+    this.callbacks.onVerifyChanged(run.projectId)
+  }
+
+  /** The API-set twin of cancelVerifyRun. Note the limit: this stops the session
+   *  being asked for request data. Once the app itself is mid-loop making the
+   *  real calls, there is nothing here to interrupt. */
+  async cancelApiRun(runId: string): Promise<void> {
+    const run = this.repos.apiRuns.byId(runId)
+    if (!run) throw { code: 'NOT_FOUND', message: 'Run not found' } satisfies IpcError
+    if (run.status !== 'running') return
+    if (run.sessionId) await this.interruptSession(run.sessionId).catch(() => {})
+    this.apiWatch.delete(run.sessionId ?? '')
+    this.repos.apiRuns.finish(runId, 'error', run.calls, CANCEL_NOTE, run.launched)
+    this.callbacks.onApiChanged(run.projectId)
+  }
+
   async stopSession(sessionId: string): Promise<void> {
     const entry = this.requireLive(sessionId)
     // Same as app exit (FR-022): undelivered composer sends survive as drafts.
@@ -676,7 +825,10 @@ export class SessionManager {
   // output, so they are read back out of it. A run whose session finishes the
   // turn without reporting is INCONCLUSIVE with the reason kept — never a pass,
   // and never left spinning (FR-047).
-  private verifyWatch = new Map<string, { runId: string; kind: 'suites' | 'evidence' }>()
+  private verifyWatch = new Map<
+    string,
+    { runId: string; kind: 'suites' | 'evidence'; sawBrokenMarker?: boolean }
+  >()
 
   /**
    * Watch a session for one run's report line.
@@ -754,7 +906,15 @@ export class SessionManager {
     const text = (payload as { text?: string }).text
     if (!text) return
     const report = parseVerifyReport(text)
-    if (!report) return
+    if (!report) {
+      // A report line arrived and could not be read. The watch stays open — the
+      // turn may still produce a clean one, and closing here would throw away a
+      // real report that was only a moment behind — but the fact is remembered,
+      // so if the turn ends the developer is told the line was unreadable rather
+      // than that the session never reported at all.
+      if (verifyMarkerBroken(text)) watch.sawBrokenMarker = true
+      return
+    }
     this.verifyWatch.delete(entry.row.id)
     if (watch.kind === 'evidence') {
       this.repos.verifyRuns.attachEvidence(watch.runId, report.evidence)
@@ -819,7 +979,9 @@ export class SessionManager {
         watch.runId,
         'inconclusive',
         null,
-        'The session finished the turn without reporting a result line — open its output to see what ran.',
+        watch.sawBrokenMarker
+          ? 'The session reported a result line this app could not read as JSON — open its output to see what it sent.'
+          : 'The session finished the turn without reporting a result line — open its output to see what ran.',
       )
     }
     this.callbacks.onVerifyChanged(entry.row.projectId)

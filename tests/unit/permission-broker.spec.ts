@@ -49,6 +49,8 @@ interface Harness {
   pushes: InboxChangedPush[]
   attention: { raised: number; cleared: number }
   gate: (toolName: string, input: Record<string, unknown>, signal?: AbortSignal) => Promise<PermissionResult>
+  /** Sessions the broker told to leave plan mode, in order. */
+  planExited: string[]
 }
 
 function makeHarness(): Harness {
@@ -76,6 +78,7 @@ function makeHarness(): Harness {
 
   const sink = new FakeSink()
   const attention = { raised: 0, cleared: 0 }
+  const planExited: string[] = []
   const manager = {
     sinkFor: () => sink,
     attentionRaised: () => {
@@ -84,6 +87,7 @@ function makeHarness(): Harness {
     attentionCleared: () => {
       attention.cleared += 1
     },
+    planExited: (id: string) => planExited.push(id),
   } as unknown as SessionManager
 
   const pushes: InboxChangedPush[] = []
@@ -101,7 +105,7 @@ function makeHarness(): Harness {
       options: { signal: signal ?? new AbortController().signal },
     })
 
-  return { repos, broker, sink, sessionId, projectId: project.id, pushes, attention, gate }
+  return { repos, broker, sink, sessionId, projectId: project.id, pushes, attention, gate, planExited }
 }
 
 async function settle(): Promise<void> {
@@ -366,6 +370,24 @@ describe('PermissionBroker lifecycle', () => {
     await expect(promise).resolves.toMatchObject({ behavior: 'allow' })
     const marker = h.sink.events.find((e) => e.kind === 'plan_marker')
     expect(marker).toBeDefined()
+    // Approving the plan IS leaving plan mode, by ExitPlanMode's own contract.
+    expect(h.planExited).toEqual([h.sessionId])
+  })
+
+  it('leaves a denied plan in plan mode, so the model revises rather than acts', async () => {
+    void h.gate('ExitPlanMode', { plan: 'Rewrite everything' })
+    await settle()
+    const [plan] = h.repos.requests.pending()
+    h.broker.decide(plan.id, 'deny')
+    expect(h.planExited).toEqual([])
+  })
+
+  it('does not touch plan mode when an ordinary tool permission is approved', async () => {
+    void h.gate('Bash', { command: 'git status' })
+    await settle()
+    const [req] = h.repos.requests.pending()
+    h.broker.decide(req.id, 'approve')
+    expect(h.planExited).toEqual([])
   })
 
   it('approve-all approves pending non-high items only (FR-011)', async () => {

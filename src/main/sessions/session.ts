@@ -122,6 +122,10 @@ interface HostedSessionOptions {
   onTurnMode?: (mode: 'advisor' | 'orchestrator' | null) => void
   /** Bypass all permission checks for this session (auto-approve every tool). */
   bypassPermissions?: boolean
+  /** Start read-only: research, then a plan the developer approves in the inbox. */
+  planMode?: boolean
+  /** The live plan-mode state, whenever the CLI reports it or a toggle changes it. */
+  onPlanModeChange?: (inPlanMode: boolean) => void
   /** Relabel a turn's closing message as ✦ SUMMARY (off = raw response). */
   summaries?: boolean
   sink: EventSink
@@ -189,6 +193,32 @@ export function explainExit(raw: string, bypass: boolean): string {
       'broken or interrupted install of the CLI.'
   }
   return `Session process ended unexpectedly: ${raw}`
+}
+
+/**
+ * The one permission mode a session spawns with, from the two flags that can ask
+ * for one. They are mutually exclusive because this is a single SDK enum, and the
+ * manager has already resolved a request carrying both in bypass's favour.
+ *
+ *  - `bypassPermissions` approves everything and needs the dangerous-skip flag;
+ *    the canUseTool gate is never invoked, and the session runs containerised.
+ *  - `plan` blocks execution until the model calls ExitPlanMode, which the broker
+ *    routes to the inbox as a plan approval.
+ *  - `auto` is the ordinary case at the owner's direction: the CLI's own model
+ *    classifier approves or denies, rather than every call reaching the inbox.
+ *    Note what this costs, because it is not the same as the app's own
+ *    autoApproveLow/Medium settings — those decide by the developer's risk rules
+ *    and record every outcome in history, whereas this hands the decision to a
+ *    classifier inside the CLI. The SDK groups it with bypassPermissions and
+ *    acceptEdits as an "escalating" mode for that reason.
+ */
+export function resolvePermissionMode(options: {
+  bypassPermissions?: boolean
+  planMode?: boolean
+}): 'bypassPermissions' | 'plan' | 'auto' {
+  if (options.bypassPermissions) return 'bypassPermissions'
+  if (options.planMode) return 'plan'
+  return 'auto'
 }
 
 export class HostedSession {
@@ -263,9 +293,7 @@ export class HostedSession {
           this.options.mainModel && this.options.mainModel !== 'default'
             ? this.options.mainModel
             : undefined,
-        // Bypass mode auto-approves every tool (no inbox prompts); requires the
-        // dangerous-skip flag. The canUseTool gate simply is never invoked then.
-        permissionMode: this.options.bypassPermissions ? 'bypassPermissions' : 'default',
+        permissionMode: resolvePermissionMode(this.options),
         allowDangerouslySkipPermissions: this.options.bypassPermissions ? true : undefined,
         // Append-only: keeps Claude Code's own system prompt and adds the terse
         // output-style instruction on top when terse mode is enabled.
@@ -347,6 +375,7 @@ export class HostedSession {
     this.captureInitCommands(message)
     this.captureInitMcp(message)
     this.captureBackgroundTasks(message)
+    this.capturePermissionMode(message)
     this.captureModel(message)
     this.captureUsage(message)
     this.maybeDowngradeOnLimit(message)
@@ -438,6 +467,41 @@ export class HostedSession {
     void this.q?.applyFlagSettings({ effortLevel: wanted }).catch(() => {
       // Older CLI without applyFlagSettings, or a model without effort support.
     })
+  }
+
+  /**
+   * Switch this session into or out of plan mode without restarting it.
+   *
+   * Best-effort, like setModel: a CLI too old to switch modes at runtime keeps
+   * the one it started in, and the next system message it reports corrects what
+   * the app claims — which is why the reported mode, not the requested one, is
+   * what the header reads.
+   */
+  setPlanMode(enabled: boolean): void {
+    // Leaving plan mode returns to whatever an ordinary session spawns with, not
+    // to 'default': otherwise one visit to planning would silently turn asking
+    // back on for the rest of the session.
+    const mode = enabled ? 'plan' : resolvePermissionMode({ planMode: false })
+    void this.q?.setPermissionMode(mode).catch(() => {
+      // Older CLI without runtime mode switching.
+    })
+  }
+
+  /**
+   * The permission mode the CLI itself reports.
+   *
+   * `init` always carries it, which is what catches a CLI that silently declined
+   * the 'plan' this session asked to start in; `status` messages carry it later,
+   * so a mode that changed underneath the app is corrected rather than assumed.
+   */
+  private lastPermissionMode: string | null = null
+  private capturePermissionMode(message: SDKMessage): void {
+    const msg = message as { type?: string; subtype?: string; permissionMode?: string }
+    if (msg.type !== 'system') return
+    if (msg.subtype !== 'init' && msg.subtype !== 'status') return
+    if (!msg.permissionMode || msg.permissionMode === this.lastPermissionMode) return
+    this.lastPermissionMode = msg.permissionMode
+    this.options.onPlanModeChange?.(msg.permissionMode === 'plan')
   }
 
   /** Report the model the SDK actually used for the latest MAIN-LOOP turn

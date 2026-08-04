@@ -703,10 +703,11 @@ async function confirmRemoveNow(): Promise<void> {
               :data-status="statusById[item.id]"
               :title="markTitle(statusById[item.id])"
             >
-              <!-- Folds in a scored sheet, at the world's 60-degree crease angle.
+              <!-- Folds in a scored sheet, at the world's 60-degree crease angle,
+                   drawn small inside the plate that carries the state colour.
                    Deliberately plain geometry: the mark narrows the guess, the word
                    beside it settles it, so nobody has to learn a symbol. -->
-              <svg viewBox="0 0 16 14" width="16" height="14" aria-hidden="true">
+              <svg viewBox="0 0 16 14" width="14" height="12" aria-hidden="true">
                 <template v-if="statusById[item.id] === 'needs_you'">
                   <!-- Held: one crease scored but not yet folded either way. -->
                   <path d="M3 12 L8 2 L13 12" fill="none" stroke="currentColor" stroke-width="1.7" />
@@ -859,8 +860,9 @@ async function confirmRemoveNow(): Promise<void> {
     <!-- Footer (design): the counters as one inline run, a hairline usage bar,
          and Settings as the last row — one block, not three stacked cards. -->
     <div v-if="!collapsed" class="foot">
-      <!-- One run of numbers, not a grid of labelled cells: the four counters
-           read left to right and the meter below owns the limit story. -->
+      <!-- One run of numbers, and only the ones that describe the sessions
+           themselves. The token total used to trail this line and collided with
+           the cost beside it once the count ran to six figures. -->
       <div class="foot-line mono">
         <span class="foot-stat" data-testid="counter-running">
           <span class="foot-dot" style="background: var(--blue)"></span>
@@ -875,7 +877,15 @@ async function confirmRemoveNow(): Promise<void> {
         <span class="foot-stat" data-testid="counter-cost">
           <span data-testid="counter-cost-value">{{ costLabel }}</span>
         </span>
-        <span class="foot-stat" data-testid="usage-tokens">{{ tokensLabel }} tok</span>
+      </div>
+
+      <!-- It heads the consumption block instead, where it belongs: tokens and
+           the limit meter are one story. Outside the meter's own v-if on
+           purpose — the total is true whether or not the SDK has reported a
+           rate-limit window yet. -->
+      <div class="tokens mono">
+        <span class="tokens-total" data-testid="usage-tokens"><span class="tokens-figure">{{ tokensLabel }}</span> tok</span>
+        <span class="tokens-when">today</span>
       </div>
 
       <div v-if="usageSession" class="usage" data-testid="usage-meter">
@@ -910,7 +920,7 @@ async function confirmRemoveNow(): Promise<void> {
     </div>
 
     <div
-      v-else
+      v-if="collapsed"
       class="settings-row rail"
       data-testid="open-settings"
       role="button"
@@ -1480,11 +1490,20 @@ async function confirmRemoveNow(): Promise<void> {
 /* The lane's current sign. Colour comes from meaning: amber for held (needs
    you), green for deploying (working), red for a misfold (error), and no hue
    at all for locked, because a done fold needs none. */
+/* The fold sits on a plate rather than bare on the panel. A 1px stroke of
+   geometry at 16px read as lint at the edge of vision; the plate gives the state
+   colour an area to carry it, which is what makes one lane's mark tell itself
+   apart from the next at a glance. The wash is derived from the mark's own
+   currentColor, so a retuned state token reaches it without a second edit, and
+   the corners stay cut like everything else. */
 .mark {
   flex-shrink: 0;
   display: flex;
   align-items: center;
   color: var(--text-meta);
+  padding: 3px;
+  border: 1px solid currentColor;
+  background: color-mix(in srgb, currentColor 14%, transparent);
 }
 
 .mark.needs_you {
@@ -1943,6 +1962,38 @@ async function confirmRemoveNow(): Promise<void> {
   font-size: 10.5px;
   color: var(--text-ghost);
   margin-top: 4px;
+}
+
+/* The token total heads the meter rather than trailing the counter run: the
+   figure takes the Title step so it reads first, and the unit and the day scope
+   stay on the label and caption tiers beside it. */
+.tokens {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tokens-total {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  /* Same reason as .foot-stat: the unit never wraps under its own number. */
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-ghost);
+}
+
+.tokens-figure {
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-strong);
+}
+
+.tokens-when {
+  font-size: 10px;
+  color: var(--text-ghost);
 }
 
 /* Settings is the last row of the footer block, highlighted only on hover. */

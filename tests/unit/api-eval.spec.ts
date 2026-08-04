@@ -251,6 +251,18 @@ describe('parseApiRequests', () => {
     expect(parseApiRequests(`${API_DATA_MARKER}: not json`)).toBeNull()
   })
 
+  // Same defect the verify reader had: slicing to the LAST brace in the turn let
+  // one brace in a closing sentence swallow the whole request set, and the run
+  // then reported that nothing was called.
+  it('is not derailed by a closing brace in the prose after the data line', () => {
+    const text =
+      `${API_DATA_MARKER}: {"requests":[{"method":"GET","path":"/api/orders"}]}\n` +
+      'The id comes from the route template (see /api/orders/{id}).'
+    expect(parseApiRequests(text)).toEqual([
+      expect.objectContaining({ method: 'GET', path: '/api/orders' }),
+    ])
+  })
+
   it('defaults a missing expectation to "any 2xx" rather than to something that always passes', () => {
     const parsed = parseApiRequests(
       `${API_DATA_MARKER}: {"requests":[{"method":"GET","path":"/x"}]}`,

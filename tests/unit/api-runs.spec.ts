@@ -21,6 +21,7 @@ function setup() {
   const repos = createRepositories(db)
   const project = repos.projects.insert({ name: 'a', path: 'C:\\a', source: 'manual' })
   const handed: { runId: string; requests: ApiRequestPlan[] }[] = []
+  const changed: string[] = []
   const manager = new SessionManager(repos, {
     onEvent: () => {},
     onSessionStatus: () => {},
@@ -30,6 +31,7 @@ function setup() {
     onEvalsChanged: () => {},
     onVerifyChanged: () => {},
     onApiRequests: (_projectId, runId, requests) => handed.push({ runId, requests }),
+    onApiChanged: (projectId) => changed.push(projectId),
     onProjectCommands: () => {},
     gate: (async () => ({ behavior: 'allow', updatedInput: {} })) as never,
   })
@@ -43,6 +45,16 @@ function setup() {
     manager,
     projectId: project.id,
     handed,
+    changed,
+    sweep: (deadlineMs: number): void =>
+      (manager as unknown as Record<string, (ms: number) => void>).sweepStaleRuns(deadlineMs),
+    /** Push a run's start time into the past, which is what the sweep reads. */
+    backdate: (runId: string, minutes: number): void => {
+      db.prepare('UPDATE api_runs SET startedAt = ? WHERE id = ?').run(
+        new Date(Date.now() - minutes * 60_000).toISOString(),
+        runId,
+      )
+    },
     start: () =>
       repos.apiRuns.start({
         projectId: project.id,
@@ -113,6 +125,40 @@ describe('an API eval set', () => {
     const list = repos.apiRuns.listForProject(projectId)
     expect(list).toHaveLength(20)
     expect(list[0].startedAt >= list[19].startedAt).toBe(true)
+  })
+
+  it('closes a cancelled eval set saying you stopped it', async () => {
+    const { repos, manager, projectId, changed, start } = setup()
+    const run = start()
+    manager.watchApiRequests('s1', run.id)
+
+    await manager.cancelApiRun(run.id)
+
+    const stored = repos.apiRuns.byId(run.id)
+    expect(stored?.status).toBe('error')
+    expect(stored?.note).toContain('You stopped this run')
+    expect(changed).toEqual([projectId])
+
+    // And a second click cannot rewrite what the first one recorded.
+    await manager.cancelApiRun(run.id)
+    expect(repos.apiRuns.byId(run.id)?.note).toContain('You stopped this run')
+    expect(changed).toEqual([projectId])
+  })
+
+  // Same orphan as a verification run, same cause, and the same repair: without
+  // the sweep the row read Running until the app was restarted.
+  it('closes a run whose session went quiet, and leaves a fresh one alone', () => {
+    const { repos, projectId, changed, start, sweep, backdate } = setup()
+    const stale = start()
+    const fresh = start()
+    backdate(stale.id, 90)
+
+    sweep(45 * 60 * 1000)
+
+    expect(repos.apiRuns.byId(stale.id)?.status).toBe('error')
+    expect(repos.apiRuns.byId(stale.id)?.note).toContain('presumed dead')
+    expect(repos.apiRuns.byId(fresh.id)?.status).toBe('running')
+    expect(changed).toEqual([projectId])
   })
 })
 

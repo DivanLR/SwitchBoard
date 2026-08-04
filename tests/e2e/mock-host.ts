@@ -25,6 +25,8 @@ export interface MockSessionSeed {
   /** A bypass session runs inside the sandbox container, which ships node and
    *  nothing else — the Tests section reads this to say what cannot run there. */
   bypassPermissions?: boolean
+  /** Started read-only, planning before acting. */
+  planMode?: boolean
 }
 
 export interface MockProjectSeed {
@@ -104,7 +106,14 @@ export interface MockDriver {
     interrupts: string[]
     answers: { eventId: string; choice: string }[]
     decisions: { requestId: string; decision: string }[]
-    starts: { projectId: string; deniedMcpServers?: string[] }[]
+    starts: {
+      projectId: string
+      deniedMcpServers?: string[]
+      bypassPermissions?: boolean
+      planMode?: boolean
+    }[]
+    /** Every live plan-mode switch asked for, in order. */
+    planModeChanges: { sessionId: string; enabled: boolean }[]
   }
 }
 
@@ -130,6 +139,9 @@ export function installMockHost(scenario: MockScenario): void {
     usageResetsAt: number | null
     usageLimitType: string | null
     bypassPermissions: boolean
+    /** How it started (persisted in the real host) vs where it is now (in-memory). */
+    planMode: boolean
+    inPlanMode: boolean
     mcpServers: { name: string; status: string }[]
     startedAt: string
     endedAt: string | null
@@ -173,6 +185,8 @@ export function installMockHost(scenario: MockScenario): void {
         usageResetsAt: null,
         usageLimitType: null,
         bypassPermissions: p.session.bypassPermissions ?? false,
+        planMode: p.session.planMode ?? false,
+        inPlanMode: p.session.planMode ?? false,
         mcpServers: p.session.mcpServers ?? [],
         startedAt: p.session.startedAt ?? now(),
         endedAt: null,
@@ -393,7 +407,13 @@ export function installMockHost(scenario: MockScenario): void {
 
   const sends: { sessionId: string; text: string }[] = []
   const interrupts: string[] = []
-  const starts: { projectId: string; deniedMcpServers?: string[] }[] = []
+  const starts: {
+    projectId: string
+    deniedMcpServers?: string[]
+    bypassPermissions?: boolean
+    planMode?: boolean
+  }[] = []
+  const planModeChanges: { sessionId: string; enabled: boolean }[] = []
   const answers: { eventId: string; choice: string }[] = []
   const decisionLog: { requestId: string; decision: string }[] = []
   const queuedBySession = new Map<string, { eventId: string; text: string }[]>()
@@ -449,6 +469,16 @@ export function installMockHost(scenario: MockScenario): void {
     }
     decisionLog.push({ requestId, decision })
     resolveRequest(request, decision === 'approve' ? 'approved' : 'denied')
+    // Approving an ExitPlanMode IS leaving plan mode, which is what the real
+    // broker does through SessionManager.planExited. Denying keeps it, so the
+    // model revises and proposes again.
+    if (decision === 'approve' && request.type === 'plan_approval') {
+      const session = sessions.get(String(request.sessionId))
+      if (session?.inPlanMode) {
+        session.inPlanMode = false
+        push('push.sessionStatus', { ...session })
+      }
+    }
     return { delivered: true }
   }
 
@@ -601,26 +631,37 @@ export function installMockHost(scenario: MockScenario): void {
       row.scannedAt = new Date().toISOString()
       return row
     },
-    'specs.runInSession': (req) => {
+    'specs.runInSession': async (req) => {
       let session = [...sessions.values()].find(
         (s) => s.projectId === req.projectId && !s.endedAt,
       )
-      if (!session) session = invokeHandlers['sessions.start']({ projectId: req.projectId }) as MockSession
+      // sessions.start is async (it simulates spawn latency), so this must await
+      // it — the un-awaited Promise used to be cast straight to a session.
+      if (!session) session = (await invokeHandlers['sessions.start']({ projectId: req.projectId })) as MockSession
       sends.push({ sessionId: session.id, text: String(req.text) })
       appendEvent(session.id, 'prompt', { text: String(req.text), pending: false })
       return { sessionId: session.id }
     },
     'updates.check': () => ({ status: 'none' }),
     'updates.install': () => undefined,
-    'sessions.start': (req) => {
+    'sessions.start': async (req) => {
       const project = projects.find((p) => p.id === req.projectId)
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
       if (project.session && !project.session.endedAt) {
         throw { code: 'ALREADY_ACTIVE', message: 'Already active' }
       }
+      // A real start spawns the CLI (and builds a container for a bypass
+      // session); the delay keeps the full-window waiting state observable
+      // instead of resolving inside a single frame. Same reason as stop.
+      await new Promise((resolve) => setTimeout(resolve, 250))
+      // Bypass wins over plan, as the real manager resolves it: they are one SDK
+      // setting, and a bypass session never reaches the gate a plan needs.
+      const planMode = req.bypassPermissions === true ? false : req.planMode === true
       starts.push({
         projectId: String(req.projectId),
         deniedMcpServers: req.deniedMcpServers as string[] | undefined,
+        bypassPermissions: req.bypassPermissions === true,
+        planMode,
       })
       const session: MockSession = {
         id: nextId('sess'),
@@ -635,6 +676,8 @@ export function installMockHost(scenario: MockScenario): void {
         usageResetsAt: null,
         usageLimitType: null,
         bypassPermissions: req.bypassPermissions === true,
+        planMode,
+        inPlanMode: planMode,
         mcpServers: [],
         startedAt: now(),
         endedAt: null,
@@ -659,6 +702,19 @@ export function installMockHost(scenario: MockScenario): void {
       interrupts.push(String(req.sessionId))
       setStatus(String(req.sessionId), 'done')
       return { stillQueued: (queuedBySession.get(String(req.sessionId)) ?? []).length }
+    },
+    'sessions.setPlanMode': (req) => {
+      const session = sessions.get(String(req.sessionId))
+      if (!session) throw { code: 'SESSION_ENDED', message: 'Session has ended' }
+      if (session.bypassPermissions) {
+        throw {
+          code: 'RULE_NOT_ALLOWED',
+          message: 'A bypass session approves everything, so it has nothing to plan against.',
+        }
+      }
+      planModeChanges.push({ sessionId: session.id, enabled: req.enabled === true })
+      session.inPlanMode = req.enabled === true
+      push('push.sessionStatus', { ...session })
     },
     'sessions.send': (req) => {
       const sessionId = String(req.sessionId)
@@ -794,12 +850,16 @@ export function installMockHost(scenario: MockScenario): void {
     'verify.list': (req) => [...(verifyByProject.get(String(req.projectId)) ?? [])],
     // A run occupies the session and stays 'running' until the session reports —
     // exactly like the real host, where the report is read off session output.
-    'verify.start': (req) => {
+    'verify.start': async (req) => {
       const projectId = String(req.projectId)
       const suiteIds = (req.suiteIds ?? []) as string[]
       if (suiteIds.length === 0) throw { code: 'INVALID_PATH', message: 'Choose at least one suite to run.' }
       const text = `Verify the working tree of this project.\n${suiteIds.join('\n')}\nSWB_VERIFY`
-      const result = invokeHandlers['specs.runInSession']({ projectId, text }) as { sessionId: string }
+      // Awaited: runInSession may have to start a session, which is async here
+      // exactly as it is in the real host.
+      const result = (await invokeHandlers['specs.runInSession']({ projectId, text })) as {
+        sessionId: string
+      }
       const list = verifyByProject.get(projectId) ?? []
       list.unshift({
         id: `verify-${list.length + 1}`,
@@ -817,15 +877,36 @@ export function installMockHost(scenario: MockScenario): void {
       verifyByProject.set(projectId, list)
       return { sessionId: result.sessionId, runs: [...list] }
     },
-    'verify.evidence': (req) => {
+    'verify.evidence': async (req) => {
       const projectId = String(req.projectId)
       const list = verifyByProject.get(projectId) ?? []
       if (list.length === 0) throw { code: 'NOT_FOUND', message: 'Run a verification pass first — evidence attaches to a run.' }
-      const result = invokeHandlers['specs.runInSession']({
+      const result = (await invokeHandlers['specs.runInSession']({
         projectId,
         text: 'Capture evidence that the change in this working tree actually works.\nSWB_VERIFY',
-      }) as { sessionId: string }
+      })) as { sessionId: string }
       return { sessionId: result.sessionId, runs: [...list] }
+    },
+    // Cancelling closes the row the way the real host does: inconclusive, with a
+    // note saying the developer stopped it. A finished run is left alone.
+    'verify.cancel': (req) => {
+      const projectId = String(req.projectId)
+      const list = verifyByProject.get(projectId) ?? []
+      const at = list.findIndex((r) => r.id === req.runId)
+      if (at < 0) throw { code: 'NOT_FOUND', message: 'Run not found' }
+      // Replaced, never mutated in place, for the reason reportVerifyResult below
+      // states: the real host rebuilds the run from its row, and mutating here
+      // hands the renderer an identity it already holds and hides a stale view.
+      if (list[at].status === 'running') {
+        list[at] = {
+          ...list[at],
+          status: 'inconclusive',
+          note: 'You stopped this run before it reported, so nothing it measured is known.',
+          finishedAt: new Date().toISOString(),
+        }
+        verifyByProject.set(projectId, list)
+      }
+      return [...list]
     },
     // The API eval set. The real host scans the project's source for routes and
     // then makes the calls itself; the mock supplies a fixed catalogue and leaves
@@ -848,6 +929,22 @@ export function installMockHost(scenario: MockScenario): void {
       },
     }),
     'api.runs': (req) => [...(apiRunsByProject.get(String(req.projectId)) ?? [])],
+    'api.cancel': (req) => {
+      const projectId = String(req.projectId)
+      const runs = apiRunsByProject.get(projectId) ?? []
+      const at = runs.findIndex((r) => r.id === req.runId)
+      if (at < 0) throw { code: 'NOT_FOUND', message: 'Run not found' }
+      if (runs[at].status === 'running') {
+        runs[at] = {
+          ...runs[at],
+          status: 'error',
+          note: 'You stopped this run before it reported, so nothing it measured is known.',
+          finishedAt: new Date().toISOString(),
+        }
+        apiRunsByProject.set(projectId, runs)
+      }
+      return [...runs]
+    },
     // The real host writes a markdown file under .switchboard/reports and returns
     // its path. There is no filesystem here, so this reports the path it would
     // have written and refuses in the same two cases: no run, or one still going.
@@ -1332,6 +1429,7 @@ export function installMockHost(scenario: MockScenario): void {
       answers: [...answers],
       decisions: [...decisionLog],
       starts: [...starts],
+      planModeChanges: [...planModeChanges],
     }),
   }
 }

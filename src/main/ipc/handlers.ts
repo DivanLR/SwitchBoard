@@ -223,7 +223,15 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       repos.projects.archive(req.projectId)
     },
     'sessions.start': (req) =>
-      manager.startSession(req.projectId, req.resume ?? false, req.bypassPermissions ?? false),
+      manager.startSession(
+        req.projectId,
+        req.resume ?? false,
+        req.bypassPermissions ?? false,
+        req.planMode ?? false,
+      ),
+    'sessions.setPlanMode': (req) => {
+      manager.setPlanMode(req.sessionId, req.enabled)
+    },
     'sessions.stop': (req) => manager.stopSession(req.sessionId),
     'sessions.interrupt': (req) => manager.interruptSession(req.sessionId),
     'sessions.send': (req) => {
@@ -399,7 +407,15 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       const project = repos.projects.byId(req.projectId)
       const sandboxed =
         session.bypassPermissions === true && project ? sandboxToolsFor(project.path) : null
-      const plan = planSuites(stack.suites, req.suiteIds, sandboxed)
+      // A command the developer corrected for this project's layout replaces the
+      // catalogue's guess. Applied here as well as in the panel so what runs is
+      // exactly what the chip said it would run; suite ids are untouched, so gate
+      // matching is unaffected.
+      const overrides = repos.settings.get().projectSuiteCommands?.[req.projectId] ?? {}
+      const suites = stack.suites.map((suite) =>
+        overrides[suite.id] ? { ...suite, command: overrides[suite.id] } : suite,
+      )
+      const plan = planSuites(suites, req.suiteIds, sandboxed)
       if (plan.length === 0) {
         throw { code: 'INVALID_PATH', message: 'Choose at least one suite to run.' } satisfies IpcError
       }
@@ -452,6 +468,14 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       manager.watchVerifyReport(session.id, run.id, 'evidence')
       manager.sendMessage(session.id, evidencePrompt(hints, session.bypassPermissions === true))
       return { sessionId: session.id, runs: repos.verifyRuns.listForProject(req.projectId) }
+    },
+    'verify.cancel': async (req) => {
+      await manager.cancelVerifyRun(req.runId)
+      return repos.verifyRuns.listForProject(req.projectId)
+    },
+    'api.cancel': async (req) => {
+      await manager.cancelApiRun(req.runId)
+      return repos.apiRuns.listForProject(req.projectId)
     },
     // The API eval set (deterministic path). Everything the app can establish
     // itself, it establishes itself: the routes come from a scan of the project's

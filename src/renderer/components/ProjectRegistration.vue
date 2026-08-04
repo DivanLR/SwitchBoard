@@ -17,6 +17,20 @@ useModal(dialogEl, () => emit('close'))
 
 const folder = ref('')
 const bypass = ref(false)
+const plan = ref(false)
+
+// One SDK setting, two ends of it: bypass approves everything, plan approves
+// nothing until a plan is reviewed. Selecting either clears the other, because a
+// plan under bypass would raise no approval at all and read as simply not working.
+function toggleBypass(): void {
+  bypass.value = !bypass.value
+  if (bypass.value) plan.value = false
+}
+
+function togglePlan(): void {
+  plan.value = !plan.value
+  if (plan.value) bypass.value = false
+}
 const error = ref<string | null>(null)
 const busy = ref(false)
 
@@ -39,7 +53,7 @@ async function startSession(): Promise<void> {
   try {
     const project = await projects.register(path)
     projects.select(project.id)
-    await projects.startSession(project.id, false, bypass.value)
+    await projects.startSession(project.id, false, bypass.value, plan.value)
     emit('close')
   } catch (e) {
     if (isIpcError(e) && e.code === 'DUPLICATE') {
@@ -52,7 +66,7 @@ async function startSession(): Promise<void> {
         projects.select(existing.id)
         if (!existing.session || existing.session.endedAt) {
           try {
-            await projects.startSession(existing.id, false, bypass.value)
+            await projects.startSession(existing.id, false, bypass.value, plan.value)
           } catch (startError) {
             // Starting can fail on its own terms (a bypass session needs Docker
             // running). Report it here rather than letting it escape this catch
@@ -122,6 +136,28 @@ async function startSession(): Promise<void> {
         </div>
       </div>
 
+      <!-- Plan mode adds a restriction rather than removing one, so it carries no
+           warning and its switch is not the danger variant. -->
+      <div class="bypass-row">
+        <div class="bypass-text">
+          <div class="bypass-label">Plan first</div>
+          <div class="bypass-desc">
+            Reads and researches without changing anything, then proposes a plan that arrives in
+            your inbox to approve or deny
+          </div>
+        </div>
+        <button
+          class="switch"
+          :class="{ on: plan }"
+          data-testid="plan-toggle"
+          role="switch"
+          :aria-checked="plan"
+          @click="togglePlan"
+        >
+          <span class="knob"></span>
+        </button>
+      </div>
+
       <div class="bypass-row">
         <div class="bypass-text">
           <div class="bypass-label">Bypass permissions</div>
@@ -136,7 +172,7 @@ async function startSession(): Promise<void> {
           data-testid="bypass-toggle"
           role="switch"
           :aria-checked="bypass"
-          @click="bypass = !bypass"
+          @click="toggleBypass"
         >
           <span class="knob"></span>
         </button>

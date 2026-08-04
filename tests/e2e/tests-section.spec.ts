@@ -104,6 +104,50 @@ test('a run sends the chosen suites to the session, and its report fills the gat
   await expect(page.getByTestId('tests-result-node-unit')).toContainText('142 passed')
 })
 
+// A run whose session dies used to leave the button disabled with no way back
+// inside the app: the only recovery was to restart it.
+test('a run in progress can be stopped, and the panel says who stopped it', async ({ page }) => {
+  await openTests(page)
+  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-run').click()
+  await expect(page.getByTestId('tests-run')).toContainText('Running')
+
+  await page.getByTestId('tests-cancel').click()
+
+  // The Run button comes back without a restart, and the row says why it proved
+  // nothing — which is a different reason from a session that gave up on its own.
+  await expect(page.getByTestId('tests-run')).toContainText('Run verification')
+  await expect(page.getByTestId('tests-run')).toBeEnabled()
+  await expect(page.getByTestId('tests-run-state')).toContainText('inconclusive')
+  await expect(page.getByTestId('tests-cancel')).toHaveCount(0)
+})
+
+// The catalogue's command is a guess about a conventional layout. Before this,
+// a layout it did not fit could only be corrected by editing this app's source.
+test('a suite command can be corrected, and that is what the run sends', async ({ page }) => {
+  await openTests(page)
+  await page.getByTestId('tests-stack-node').click()
+
+  await page.getByTestId('tests-suite-edit-node-unit').click()
+  const field = page.getByTestId('tests-suite-command-node-unit')
+  await expect(field).toHaveValue('npm test')
+  await field.fill('npm test --workspace packages/api')
+  await field.blur()
+
+  await expect(page.getByTestId('tests-suite-node-unit')).toContainText('edited')
+  await expect(page.getByTestId('tests-suite-node-unit')).toHaveAttribute(
+    'title',
+    'npm test --workspace packages/api',
+  )
+
+  // Emptying it restores the catalogue default rather than storing a blank.
+  await page.getByTestId('tests-suite-edit-node-unit').click()
+  await page.getByTestId('tests-suite-command-node-unit').fill('')
+  await page.getByTestId('tests-suite-command-node-unit').blur()
+  await expect(page.getByTestId('tests-suite-node-unit')).not.toContainText('edited')
+  await expect(page.getByTestId('tests-suite-node-unit')).toHaveAttribute('title', 'npm test')
+})
+
 test('a figure the run did not measure stays a dash and names why', async ({ page }) => {
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()

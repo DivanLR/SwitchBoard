@@ -165,10 +165,16 @@ test('the manual start runs a normal session with no MCP server denied', async (
   await page.evaluate(() => window.__mock.endSession('s-db'))
   await page.getByTestId('mcp-start-session').click()
 
-  // The database session starts like any project session — no deny-list.
+  // The database session starts like any project session — no deny-list. The
+  // start resolves asynchronously (the mock spends time in it, as a real spawn
+  // does), so poll for the recorded call rather than reading state once.
+  await expect
+    .poll(async () =>
+      (await page.evaluate(() => window.__mock.state().starts)).some((s) => s.projectId === 'p-db'),
+    )
+    .toBe(true)
   const starts = await page.evaluate(() => window.__mock.state().starts)
   const dbStart = starts.find((s) => s.projectId === 'p-db')
-  expect(dbStart).toBeTruthy()
   expect(dbStart?.deniedMcpServers ?? []).toEqual([])
 })
 
