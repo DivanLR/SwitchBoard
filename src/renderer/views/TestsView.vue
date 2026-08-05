@@ -1285,6 +1285,8 @@ function statusWord(run: VerifyRun): string {
   gap: 6px;
   padding: 7px 12px;
   font-size: 11.5px;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
   color: var(--text-tab);
   border-bottom: 2px solid transparent;
   cursor: pointer;

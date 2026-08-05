@@ -111,6 +111,8 @@ export interface MockDriver {
       deniedMcpServers?: string[]
       bypassPermissions?: boolean
       planMode?: boolean
+      /** The session id whose transcript was carried in as context, if any. */
+      carryTranscriptFrom?: string
     }[]
     /** Every live plan-mode switch asked for, in order. */
     planModeChanges: { sessionId: string; enabled: boolean }[]
@@ -169,6 +171,8 @@ export function installMockHost(scenario: MockScenario): void {
   const nextId = (prefix: string): string => `${prefix}-${++idCounter}`
 
   const sessions = new Map<string, MockSession>()
+  /** Transcripts the mock has "written", newest first. Never touches disk. */
+  let transcripts: AnyRecord[] = []
   const projects = scenario.projects.map((p) => {
     let session: MockSession | null = null
     if (p.session) {
@@ -412,6 +416,7 @@ export function installMockHost(scenario: MockScenario): void {
     deniedMcpServers?: string[]
     bypassPermissions?: boolean
     planMode?: boolean
+    carryTranscriptFrom?: string
   }[] = []
   const planModeChanges: { sessionId: string; enabled: boolean }[] = []
   const answers: { eventId: string; choice: string }[] = []
@@ -662,6 +667,9 @@ export function installMockHost(scenario: MockScenario): void {
         deniedMcpServers: req.deniedMcpServers as string[] | undefined,
         bypassPermissions: req.bypassPermissions === true,
         planMode,
+        // Recorded so a test can prove the previous session's transcript was
+        // actually asked for, rather than that a toggle merely looked on.
+        carryTranscriptFrom: req.carryTranscriptFrom as string | undefined,
       })
       const session: MockSession = {
         id: nextId('sess'),
@@ -767,6 +775,36 @@ export function installMockHost(scenario: MockScenario): void {
       setStatus(sessionId, 'working')
     },
     'sessions.events': (req) => [...(eventsBySession.get(String(req.sessionId)) ?? [])],
+    // Transcripts: the real host writes a markdown file into the OS temp
+    // directory, continuously and on demand. Here the file is only ever named,
+    // never written — the app's contract is the summary it gets back and the list
+    // it can offer, and a test that touched the real temp directory would leak.
+    'transcripts.save': (req) => {
+      const sessionId = String(req.sessionId)
+      const session = sessions.get(sessionId)
+      if (!session) throw { code: 'NOT_FOUND', message: 'Session not found' }
+      const project = projects.find((p) => p.id === session.projectId)
+      const own = eventsBySession.get(sessionId) ?? []
+      const payloadOf = (e: AnyRecord): AnyRecord => (e.payload as AnyRecord | undefined) ?? {}
+      const prompts = own.filter((e) => e.kind === 'prompt' && !payloadOf(e).pending)
+      const replies = own.filter((e) => e.kind === 'assistant_text' || e.kind === 'summary')
+      const savedAt = now()
+      const summary = {
+        sessionId,
+        projectId: session.projectId,
+        projectName: project?.name ?? session.projectId,
+        savedAt,
+        expiresAt: new Date(Date.parse(savedAt) + 12 * 60 * 60 * 1000).toISOString(),
+        path: `/tmp/switchboard-transcripts/${sessionId}.md`,
+        prompts: prompts.length,
+        replies: replies.length,
+        lastPrompt: prompts.length > 0 ? String(payloadOf(prompts[prompts.length - 1]).text ?? '') : null,
+        digest: `Previous session on ${project?.name ?? session.projectId} (${sessionId}).`,
+      }
+      transcripts = [summary, ...transcripts.filter((t) => t.sessionId !== sessionId)]
+      return { ...summary }
+    },
+    'transcripts.list': () => transcripts.map((t) => ({ ...t })),
     'sessions.promptHistory': (req) => {
       const seen = new Set<string>()
       const out: string[] = []

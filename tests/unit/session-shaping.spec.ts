@@ -2,9 +2,25 @@
 // Advisor/Orchestrator mode protocol.
 import { describe, expect, it } from 'vitest'
 import {
+  heavySubagentSystemPromptAppend,
   modesSystemPromptAppend,
   terseSystemPromptAppend,
 } from '@main/sessions/session-shaping'
+
+describe('heavySubagentSystemPromptAppend', () => {
+  it('adds nothing unless the setting is on', () => {
+    expect(heavySubagentSystemPromptAppend(false)).toBeNull()
+  })
+
+  it('demands one batched dispatch, and names where fanning out is wrong', () => {
+    const append = heavySubagentSystemPromptAppend(true)
+    expect(append).toContain('FAN OUT BY DEFAULT')
+    // Sequential single dispatches are the failure this instruction exists to stop.
+    expect(append).toContain('ONE batch')
+    // Without the counter-case it produces an agent spawned to read one line.
+    expect(append).toContain('Do NOT fan out')
+  })
+})
 
 describe('terseSystemPromptAppend', () => {
   it('returns null when terse mode is off', () => {

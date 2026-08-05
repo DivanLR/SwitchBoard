@@ -228,7 +228,10 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         req.resume ?? false,
         req.bypassPermissions ?? false,
         req.planMode ?? false,
+        req.carryTranscriptFrom,
       ),
+    'transcripts.save': (req) => manager.saveTranscript(req.sessionId),
+    'transcripts.list': () => manager.listTranscripts(),
     'sessions.setPlanMode': (req) => {
       manager.setPlanMode(req.sessionId, req.enabled)
     },

@@ -151,7 +151,7 @@ This build's own finish clause, written into the direction contract, states that
 - Two token sets, one object: `html.sb-light` and `:root` are the same sheet under carbon-fibre and paper light, sharing all 17 files that consume the semantic accent tokens by name.
 - Three accents carry state (foil green for action/working, valley blue for attention owed, red-pencil for error); a finished lane carries none.
 - Corners are cut, not rounded: `--rc` and `--rp` are both `0px`, with three named, deliberate circle exceptions.
-- Project identity is a 1px fold tick in the lane's own colour, never a coloured edge bar.
+- Project identity is a 2px bar in the lane's own colour, running the row's full height 3px in from its left edge, with the lane's two edges ruled by inset hairlines. The 26px fold tick and the 1px ceiling that preceded it are both gone, by request rather than by drift.
 - Every translucent accent wash is derived from its solid token with `color-mix()`, never a hardcoded accent `rgba()` triplet.
 - Essentially no authored motion. The system's one animated signature from the previous world, a shared "now-line" breath, was deleted outright and nothing replaced it.
 
@@ -234,7 +234,9 @@ A fifth glyph of the same kind exists and is not yet in that carve-out: `McpView
 
 ### Named Rules
 
-**The Earned Monospace Rule.** JetBrains Mono is for content that is genuinely code, a command, a path, or terminal output, plus the button/pill/chip idiom that borrows its voice. The `.mono` CSS *class* resolves to the sans face (`font-family: var(--sans)`), a historical name kept for many call sites still using it; reaching for `.mono` expecting monospace is the mistake this rule exists to name.
+**The Machine-Read Rule.** This replaces the Earned Monospace Rule, which confined JetBrains Mono to genuine code, commands, paths, terminal output, and the button/pill/chip idiom. The remit is now the whole machine-read stratum: those things, plus labels, counters, timers, ids, branches, statuses, model names, tab and segment labels, and the composer the operator types into. What stays in the system sans is prose: sentences addressed to the reader, rendered message bodies, empty-state copy, notes, hints, and warnings.
+
+The `.mono` CSS *class* now resolves to `var(--mono)` and means what it says. It previously resolved to `var(--sans)` while roughly four hundred call sites applied it expecting monospace, which made it a trap rather than a utility; flipping the declaration gave those call sites what they had always asked for, and the dozen prose sentences that carried the class by habit had it removed instead. The one deliberate judgement inside the split: `.scan-banner` keeps mono because it is a terminal status line with a block caret, sentence or not.
 
 **The Available But Unadopted Rule.** The direction contract states, in the present tense, "identifiers carry mono spec labels the way a crease carries M-128." The stylesheet declares a `.spec-label` utility and a `--track-label: 0.11em` token specifically to deliver that. Neither is applied anywhere: a repository-wide search (including the production build output in `out/`) found `.spec-label` defined once in `styles.css` and consumed by zero templates, across zero `.vue` files. No project id, session id, or branch renders through it. The label-tracking drift the utility was built to close (see Hierarchy, above) is therefore unchanged from before the utility existed, 12 distinct hand-set values still in play. This is a present-tense sentence in the contract that is false of the shipped app today, not a subtle gap: the fix was written and never wired in. The same pattern recurs for hairline angling in Shapes, below.
 
@@ -324,8 +326,14 @@ Borders are uniformly 1px, drawn in translucent ink. A dashed border is reserved
 
 The sidebar's project list is the application's real navigation, and it is where this world's signature marks live.
 
-- **The fold tick** (`.brace` in the markup, described in its own comment as "a fold tick, not a brace"): part identity as a 1px SVG stroke in the project's rotated accent colour, standing in for the coloured edge bar this and the previous world both refused.
-- **The status mark** (`.mark`): five real geometric folds, each paired with a plain-language word via `markTitle()` so the shape only narrows a guess the word already settles.
+- **The lane bar** (`.brace` in the markup, a name left over from the fold tick it replaced): part identity as a 2px CSS bar in the project's rotated accent colour, run the full height of the row. The SVG fold tick it replaced is deleted; a hairline that must match the row's height exactly is a worse job for artwork than for a border.
+- **The lane rules** (`.project::before` / `::after`): a hairline at each edge of every row, inset 13px to where the reading starts, so the bar stands clear of them and the list reads as a table of lanes. Rows carry a 2px gap, so adjacent lanes show both their rules 2px apart; that doubling is the accepted reading.
+- **The status bar** (`components/StatusBar.vue`): one 25px rule under every pane carrying the board's readings, running and waiting counts, spend today, tokens today, and the limit meter, plus the real key bindings on the right. These were a stacked card in the sidebar footer; a control room keeps its gauges along the bottom edge. The footer that remains carries Settings and the work model, nothing else.
+- **The binding badge** (`.ctl-key`, `styles.css`): a control that has a keyboard shortcut prints it on its own face in the mono badge idiom, inheriting the control's colour so it follows hover. Only bindings that exist get one, and the status bar's `⌃C interrupt` hint appears only while a session is mid-turn, because that is the only time the binding does anything.
+- **The run stamp** (`.head-stamp`): the session's id quoted to eight characters at the ghost tier, the way a commit hash is quoted, with the full id on the title. It is what you need to name one specific run or match the pane against a log.
+- **The block caret**: the composer sets `caret-shape: block` with `caret-color: var(--green)`, so the cursor in the field you type into is a terminal's cursor rather than a text bar. Chromium 139 and up honour it; older engines keep the bar caret, which is a fallback rather than a fault.
+- **Lane height**: a selected lane is about 43px and a plain one about 28px, down from 50px and 36px. The sidebar is the surface that runs out of room first, and this is a tool for holding more than six projects at once.
+- **The status mark** (`.mark`): one JetBrains Mono character in the state colour with nothing behind it, paired with a plain-language word via `markTitle()` so the glyph only narrows a guess the word already settles. The five geometric folds it replaced, and the tinted plate they sat on, are both gone by request.
   - **Held** (needs you), valley blue: one crease scored but not yet folded either way.
   - **Deploying** (working), foil green: three facets opening out of the packet.
   - **Misfold** (error), red-pencil: two creases crossing where they cannot both hold.
@@ -339,15 +347,16 @@ The sidebar's project list is the application's real navigation, and it is where
 ### Do:
 
 - **Do** call the attention-owed colour Valley Blue, and the error colour Red-Pencil. Do not use "ochre" or "red" loosely for either; the direction contract's original ochre could not survive contact with the error colour on this ground, and that amendment is recorded in the code, not just in this document.
-- **Do** treat `--rc` and `--rp` as `0px` for everything except the three named round point-markers (`.gs-ring`, `.mcp-dot`, `.foot-dot`) and the small interactive-patch exceptions (6px, 8px, 2px) catalogued in Shapes.
+- **Do** treat `--rc` and `--rp` as `0px` for everything except the three named round point-markers (`.gs-ring`, `.mcp-dot`, `.foot-dot`). The small interactive-patch exceptions once catalogued in Shapes (6px on the glyph buttons and the group drop target, 2px on the group swatch, 8px on the active-row wash, the settings row, the remove button and the confirm/cancel pair) are gone: all eight now take `var(--rc)`, so the only curve left in the interface is a point-marker that is meant to read as a dot.
 - **Do** derive every wash from its solid token with `color-mix(in srgb, var(--token) N%, transparent)`. Never hardcode an accent `rgba()` triplet; a repository scan confirms none currently exist.
-- **Do** keep JetBrains Mono for terminal output, commands, and the button/pill/chip/badge idiom. Everything else is the system sans stack; there is no serif face anywhere in this world.
+- **Do** set anything the machine reports in JetBrains Mono: terminal output, commands, paths, the button/pill/chip/badge idiom, and now labels, figures, timers, ids, branches and statuses too. Sentences addressed to the reader stay in the system sans stack; there is no serif face anywhere in this world.
+- **Do** leave figures on tabular numerals. `html, #app` sets `font-variant-numeric: tabular-nums` for the whole interface, so a ticking timer or cost holds its column instead of shuffling the text beside it. Do not override it locally.
 - **Do** add explicit dark and light values for any new token. The paper theme is a real second theme with its own darkened accents, not a filter, with the one known exception of `--bg-active`, which is unthemed for light and should be treated as a gap to close rather than a pattern to copy.
 - **Do** pair any new status mark with a plain-language title or label, the way `markTitle()` does for the sidebar's fold marks, so a shape never has to be learned before it can be understood.
 
 ### Don't:
 
-- **Don't** reintroduce a coloured edge bar for project identity. A fold tick is a 1px stroke; anything thicker is the habit both this world and the one before it refused.
+- **Don't** grow the lane bar past 2px, and don't move it to the row's outer edge. The old rule here banned anything thicker than a 1px stroke; that was overruled on request, because 1px could not hold a lane once the row was ruled at both edges. What the old rule was protecting against still stands: the bar is a mark inside the row, not a filled band on its boundary, and it never gains a background, a gradient or a second colour.
 - **Don't** reintroduce `backdrop-filter` blur on a panel or a sticky heading. It appears exactly once in the renderer, on the modal scrim, and should stay that isolated.
 - **Don't** add a media query or a percentage-based breakpoint. The target is one fixed desktop window (`min-width: 1080px` on `.panes`, matched in `BrowserWindow`), and the sidebar collapse is a user toggle, not responsive behaviour.
 - **Don't** assume `.spec-label`, `.scored-rule`, or the `.chamfer` utility are live just because they are declared in `styles.css`. None of the three is applied anywhere in the current templates or build output; treat each as available but unadopted (see Typography and Shapes) rather than as an established pattern to extend. The parallelogram shear and corner tabs from the source world's component board are a step further still: not merely unadopted, but absent from the codebase entirely.

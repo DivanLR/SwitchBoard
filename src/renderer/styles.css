@@ -283,6 +283,11 @@ html,
   font-family: var(--sans);
   font-size: 13px;
   overflow: hidden;
+  /* Every figure in the interface is a reading that changes under you: timers,
+     costs, token counts, percentages, queue depths. Tabular figures hold their
+     column so a ticking number stops shuffling the text beside it, which is both
+     the terminal register and the reason to do it. */
+  font-variant-numeric: tabular-nums;
 }
 
 /* A scored sheet in carbon fibre. The 60-degree crease lattice is this world's
@@ -510,16 +515,33 @@ button {
    fills red on hover in both light and dark. */
 .stop-btn {
   flex-shrink: 0;
-  width: 26px;
+  min-width: 26px;
   height: 26px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  /* Auto width, because the control now names its binding beside the glyph. It
+     stays a 26px square wherever it is used without one. */
+  gap: 6px;
+  padding: 0 6px;
   font-size: 9.5px;
   color: var(--red);
   border: 1px solid var(--border-strong);
-  border-radius: 8px;
+  border-radius: var(--rc);
   cursor: pointer;
+}
+
+/* A control with a keyboard binding says so on its own face, in the mono badge
+   idiom, inheriting the control's colour so it follows every state including
+   hover. Only real bindings get one: advertising a shortcut that does nothing is
+   worse than advertising none. */
+.ctl-key {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  line-height: 1;
+  padding: 2px 3px;
+  border: 1px solid currentColor;
+  opacity: 0.7;
 }
 
 .stop-btn:hover {
@@ -539,8 +561,14 @@ button {
    This comment named Instrument Sans until now, which was wrong through both the
    engraved-score world and this one — that face was removed as a known
    training-data default and never replaced by another webfont. */
+/* The class now means what it says. It was declared as var(--sans) while several
+   hundred call sites applied it expecting monospace, which made `.mono` a trap
+   rather than a utility. The remit is the machine-read stratum: labels, counters,
+   timers, ids, paths, branches, statuses, commands, and the button, pill and chip
+   idiom. Sentences do not take it; the exceptions below name the prose that had
+   the class applied by habit. */
 .mono {
-  font-family: var(--sans);
+  font-family: var(--mono);
 }
 
 .dim {
@@ -730,6 +758,11 @@ button {
   color: var(--text);
   font-size: 13px;
   padding: 0;
+  /* A terminal's cursor is a block, in the colour of its prompt. Chromium 139
+     and up honour caret-shape; anything older ignores it and keeps the bar,
+     which is a perfectly good fallback rather than a broken state. */
+  caret-shape: block;
+  caret-color: var(--green);
 }
 
 /* No :focus override here on purpose. This is the field every message to Claude
@@ -908,9 +941,14 @@ button {
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
-  /* Bottom-pinned row: sit the text line level with the buttons' text. The
-     ghost mirror below must keep the identical padding. */
-  padding-bottom: 6px;
+  /* Symmetric, so the typed line sits in the middle of its own box. It was 6px
+     on the bottom alone, which dropped the line onto the buttons' text and left
+     it visibly high in the field — the row's flex-end alignment was doing that
+     job by hand. The ghost mirror below and the ❯ sigil keep the identical
+     figure; a mirror padded differently from the field puts its ghost text off
+     the real caret. */
+  padding-top: 3px;
+  padding-bottom: 3px;
 }
 
 /* Typed text exactly matches a known /command — tint it so the match is clear. */
@@ -947,7 +985,8 @@ button {
   overflow: hidden;
   pointer-events: none;
   /* Mirrors .composer-input exactly — keep the paddings in lockstep. */
-  padding-bottom: 6px;
+  padding-top: 3px;
+  padding-bottom: 3px;
 }
 
 .ghost-typed {

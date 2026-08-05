@@ -177,7 +177,7 @@ async function startSession(): Promise<void> {
           <span class="knob"></span>
         </button>
       </div>
-      <div v-if="bypass" class="bypass-warn mono" data-testid="bypass-warning">
+      <div v-if="bypass" class="bypass-warn" data-testid="bypass-warning">
         ⚠ Nothing will ask for approval — only use this in throwaway or fully trusted folders.
       </div>
 

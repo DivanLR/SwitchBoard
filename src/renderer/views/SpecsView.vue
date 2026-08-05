@@ -463,7 +463,7 @@ const partTabs: { id: Part; label: string }[] = [
               <div class="q-text">{{ qq.q }}</div>
               <div class="q-chips">
                 <button
-                  class="q-answer mono"
+                  class="q-answer"
                   :data-testid="`answer-${qq.id}`"
                   @click="setTarget(`${detail.id}/clarify · ${qq.id}`)"
                 >
@@ -488,7 +488,7 @@ const partTabs: { id: Part; label: string }[] = [
                 <span class="q-id mono">Q{{ openQs.length + i + 1 }}</span>
               </div>
               <div class="q-text dim">{{ c.question }}</div>
-              <div class="q-answered mono">✓ {{ c.answer }} — written into spec.md</div>
+              <div class="q-answered">✓ {{ c.answer }} — written into spec.md</div>
             </div>
           </div>
         </div>
@@ -925,6 +925,8 @@ const partTabs: { id: Part; label: string }[] = [
 .pt {
   padding: 8px 13px;
   font-size: 11.5px;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
   color: var(--text-tab);
   cursor: pointer;
   display: flex;

@@ -141,6 +141,8 @@ const store = reactive({
     resume = false,
     bypassPermissions = false,
     planMode = false,
+    /** A previous session id whose transcript seeds the new session's context. */
+    carryTranscriptFrom?: string,
   ): Promise<Session> {
     state.starting = true
     try {
@@ -149,6 +151,7 @@ const store = reactive({
         resume,
         bypassPermissions,
         planMode,
+        carryTranscriptFrom,
       })
       // Refresh is inside the wait: the session row is what the view renders,
       // so clearing the waiting state before it lands shows an empty stream.

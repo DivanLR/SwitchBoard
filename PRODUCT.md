@@ -49,9 +49,10 @@ reason about it, or answer it on the developer's behalf.
 ## Operating Context
 
 - Windows desktop. Requires an authenticated Claude Code installation and Node
-  20 or newer.
-- Exactly one session per project. Parallel sessions within one project remain
-  an explicitly undecided extension.
+  22.5 or newer (`package.json` engines).
+- Exactly one session per project. This is a deliberate product boundary, not a
+  pending question: parallel sessions within a single project were considered and
+  decided against, so future work should not treat the limit as a gap to close.
 - Closing the window hides the application to the system tray and sessions keep
   running, with notifications and the inbox still live. An explicit quit warns
   when sessions are mid-task, then ends them, and their conversation context
@@ -62,7 +63,9 @@ reason about it, or answer it on the developer's behalf.
   cryptography.
 - Sessions granted bypass permissions run inside a disposable Docker Linux
   container, because no operating system sandbox exists on native Windows. This
-  requires Docker Desktop to be running.
+  requires Docker Desktop to be running. The container's memory ceiling is a
+  setting, read at session start, so a change applies to the next bypass session
+  rather than the running one.
 - Retention runs automatically: raw output for the current and previous session
   per project, and decision history for 30 days.
 - Updates arrive in-app from the GitHub release feed.
@@ -97,6 +100,23 @@ Confirmed functionality:
 - A verification section that dispatches test suites through the session and
   reports what the run measured.
 
+Present but provisional, recorded so future work knows they exist and knows they
+are not yet load-bearing. Neither has been lived with long enough to confirm, and
+either may be withdrawn:
+
+- **Session transcripts.** Each session exports a markdown copy of its prompt and
+  reply spine, plus a mechanically counted digest, to a temporary file that is
+  rewritten as the conversation lands and expires twelve hours after its last
+  write. A developer can save one on demand and carry the newest one into a new
+  session, which receives the digest inline and the file path for detail. The
+  export reads the already-persisted events rather than keeping a second live log,
+  so the file cannot disagree with the database; that constraint holds for as long
+  as the feature does.
+- **Heavy subagent mode.** An off-by-default setting that instructs every hosted
+  session to decompose work and dispatch the independent parts in one batch across
+  as many subagents as the work allows. It spends more total tokens than a single
+  thread, which is the trade the setting exists to make.
+
 Terminology and standing rules the code enforces:
 
 - A figure no run measured is reported as unmeasured. The application never
@@ -113,8 +133,9 @@ Technical constraints:
 - No native modules, so there is no rebuild step. The store uses the runtime's
   own `node:sqlite`.
 
-Explicitly undecided: parallel sessions per project, and code signing for
-distributed builds.
+Explicitly undecided: code signing for distributed builds. Public distribution
+remains the goal, so an unsigned installer is a known open question rather than a
+settled position.
 
 ## Brand Commitments
 
@@ -123,6 +144,13 @@ distributed builds.
 - The shipped application is the visual authority. The original mockup exports
   that seeded the design are historical evidence, not a specification, and the
   application has deliberately moved past them in places.
+- **The terminal register is binding**, pinned by the developer on 2026-08-05:
+  monospace for machine-read text, square corners, tabular figures, hairline
+  rules, and state that reads without relying on colour. A full replacement of
+  the visual world was considered on the same day and set aside in favour of this
+  commitment, so later work refines inside this register rather than proposing a
+  different one. DESIGN.md holds the detail; this line records only that the
+  register itself is a commitment and not a passing preference.
 - Voice: action first, numbered when there are steps, no preamble and no
   closing pleasantries. This applies both to the application's own copy and to
   the sessions it hosts.
@@ -135,9 +163,13 @@ Real artefacts available to future work:
   model, contracts, and tasks, including a recorded clarification session that
   settled the scope questions above.
 - `specs/002-tests-qa-section/` for the verification surface.
-- `docs/security-review.md` and `docs/screenshot.png`.
-- A test suite of 235 passing unit tests, plus Playwright end-to-end tests that
-  run against a mock session host rather than live sessions.
+- `docs/security-review.md`, `docs/verification-research.md`, and
+  `docs/screenshot.png`.
+- A test suite of 487 passing unit tests across 52 files (2 skipped), plus 162
+  Playwright end-to-end tests that run against the mock session host in
+  `tests/e2e/mock-host.ts` rather than against live sessions. A separate
+  `npm run test:real` suite is the only one that exercises the real IPC bridge.
+  These counts are a snapshot; treat the suites as the authority, not the figures.
 
 Absences that future work must not fabricate: there are no testimonials, no
 user research, no adoption figures, no performance benchmarks, and no published
@@ -161,11 +193,13 @@ pricing. None of these exist, and none may be invented or implied.
 
 ## Accessibility & Inclusion
 
-Keyboard operation and screen reader support are product requirements. Every
-action must be reachable by keyboard with a visible focus indicator, and
-components carry labels, roles, and live regions where state changes without
-focus moving. No external standard has been adopted as the named target.
+**WCAG 2.2 level AA is the named target.** Keyboard operation and screen reader
+support are product requirements underneath it: every action reachable by keyboard
+with a visible focus indicator, and labels, roles and live regions wherever state
+changes without focus moving.
 
-This records the requirement, not the present state. Accessibility attributes
-currently appear in only 5 of 17 renderer components, so existing surfaces are
-expected to fall short until they are revisited.
+This records the target, not conformance. Nothing has been audited against WCAG
+2.2 AA, and no conformance claim may be made or implied on the strength of this
+line. Accessibility attributes currently appear in 10 of 17 renderer components,
+up from 5, so surfaces are expected to fall short until they are revisited and
+measured.

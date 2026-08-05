@@ -25,6 +25,7 @@ import { useProjectsStore } from '@renderer/stores/projects'
 import { useInboxStore } from '@renderer/stores/inbox'
 import { useQueueStore } from '@renderer/stores/queue'
 import { useSettingsStore } from '@renderer/stores/settings'
+import { useTranscriptsStore } from '@renderer/stores/transcripts'
 import { useCommandSuggestions } from '@renderer/composables/useCommandSuggestions'
 import { useProjectRefs } from '@renderer/composables/useProjectRefs'
 import { formatTokens as fmtTok, useSessionUsage } from '@renderer/composables/useSessionUsage'
@@ -194,6 +195,9 @@ function onGlobalKeydown(event: KeyboardEvent): void {
 let unsubscribeCommands: (() => void) | undefined
 onMounted(() => {
   window.addEventListener('keydown', onGlobalKeydown)
+  // Which transcripts are still in temp, so the start panel can offer to carry
+  // the last one. Expired files are swept by the main process on every read.
+  void transcripts.refresh()
   // A session's init message delivers its slash commands / skills after start;
   // pick them up live so a newly-added project's suggestions load without a
   // project switch.
@@ -213,6 +217,17 @@ onUnmounted(() => {
 const sessionTimer = computed(() =>
   liveSession.value ? elapsedClock(liveSession.value.startedAt, now.value) : null,
 )
+
+/**
+ * The run's id, quoted short the way a commit hash is. Eight characters is
+ * enough to name one run in conversation or to match this pane against a log
+ * line; the header keeps the full id on its title attribute rather than
+ * spending header width on it.
+ */
+const sessionStamp = computed(() => {
+  const id = liveSession.value?.id ?? endedSession.value?.id ?? null
+  return id ? { short: id.slice(0, 8), full: id } : null
+})
 
 // Subagents still working this turn — listed under the live line (goal: see
 // the agents when multiple are running).
@@ -616,6 +631,28 @@ async function enqueue(): Promise<void> {
   resetSuggestions()
 }
 
+// --- Transcripts ---
+// Every session writes one continuously in the main process, so a crash leaves a
+// file behind; these two are the manual half: save one now, and carry the last
+// one into the next session as context.
+const transcripts = useTranscriptsStore()
+const carryTranscript = ref(false)
+const savingTranscript = ref(false)
+
+/** The newest unexpired transcript for this project, if one is still in temp. */
+const lastTranscript = computed(() => transcripts.latestFor(props.project.id))
+
+async function saveTranscript(): Promise<void> {
+  const id = liveSession.value?.id ?? endedSession.value?.id
+  if (!id) return
+  savingTranscript.value = true
+  try {
+    await transcripts.save(id)
+  } finally {
+    savingTranscript.value = false
+  }
+}
+
 async function start(resume: boolean): Promise<void> {
   // This view is reused across projects and a bypass start can take minutes
   // (first-run image build), so the call is pinned to the project it was made
@@ -625,7 +662,13 @@ async function start(resume: boolean): Promise<void> {
   busy.value = true
   startError.value = null
   try {
-    await projects.startSession(target, resume, bypassRestart.value, planRestart.value)
+    await projects.startSession(
+      target,
+      resume,
+      bypassRestart.value,
+      planRestart.value,
+      carryTranscript.value ? (lastTranscript.value?.sessionId ?? undefined) : undefined,
+    )
   } catch (e) {
     // Docker down / not logged in (bypass sessions run containerised) — show
     // it in the ended banner instead of dying as an unhandled rejection.
@@ -840,6 +883,24 @@ const {
           @click="interrupt()"
         >
           ■
+          <!-- The binding is real (onGlobalKeydown), so the control names it
+               rather than hiding it in a tooltip. -->
+          <kbd class="ctl-key">⌃C</kbd>
+        </button>
+        <!-- The transcript is written continuously anyway; this is for the moment
+             before something risky, when you want the file on disk now. -->
+        <!-- A glyph, not a label: the header row is the tightest strip in the app,
+             and spelling this one out truncated the project name beside it. -->
+        <button
+          v-if="liveSession || endedSession"
+          class="ctl mono ctl-glyph"
+          data-testid="save-transcript"
+          title="Write this session's transcript to a temporary file (expires in 12 hours)"
+          aria-label="Save transcript"
+          :disabled="savingTranscript"
+          @click="saveTranscript()"
+        >
+          ⤓
         </button>
         <button
           v-if="liveSession"
@@ -850,8 +911,28 @@ const {
           @click="stop()"
         >
           {{ ending ? 'Ending' : 'End' }}
-          <span v-if="ending" class="ending-bar" data-testid="ending-bar"></span>
         </button>
+        <!-- The window is blocked for the whole teardown, but lightly: the work
+             stays visible behind a veil and one strip low on the window carries the
+             state, so ending a session never hides where you were. Teleported to the
+             body so no ancestor of this header can clip it. `ending` spans the whole
+             stop: sessions.stop resolves in main only once the SDK has drained and
+             the container is down, and this unmounts with liveSession either way. -->
+        <Teleport to="body">
+          <div
+            v-if="ending"
+            class="end-veil"
+            data-testid="ending-overlay"
+            role="status"
+            aria-live="polite"
+            aria-busy="true"
+          >
+            <div class="end-strip">
+              <span class="end-eyebrow">Ending {{ project.name }}</span>
+              <span class="end-rule" data-testid="ending-bar"></span>
+            </div>
+          </div>
+        </Teleport>
         <button
           class="ctl mono"
           data-testid="open-proj-settings"
@@ -947,6 +1028,28 @@ const {
           <span v-for="m in sessionUsage.top" :key="m.id" class="uw-model">
             {{ m.label }} <span class="uw-model-tok">{{ fmtTok(m.tokens) }}</span>
           </span>
+        </button>
+        <!-- The run's own id, quoted short the way a commit is. It is what you
+             need when you are naming one specific run, or matching this pane
+             against a log; the full id sits on the title. -->
+        <span
+          v-if="sessionStamp"
+          class="head-stamp"
+          data-testid="session-stamp"
+          :title="sessionStamp.full"
+        >
+          #{{ sessionStamp.short }}
+        </span>
+        <!-- Where a manual save landed. The path is the point: it is what you hand
+             to anything outside this app, so it is shown rather than announced. -->
+        <button
+          v-if="transcripts.lastSavedPath"
+          class="head-stamp saved-path"
+          data-testid="transcript-saved"
+          :title="`${transcripts.lastSavedPath} — click to dismiss`"
+          @click="transcripts.clearLastSaved()"
+        >
+          ⤓ {{ transcripts.lastSavedPath }}
         </button>
       </div>
     </header>
@@ -1100,6 +1203,23 @@ const {
                 <span class="knob"></span>
               </button>
               <span :class="{ armed: bypassRestart }">Bypass permissions</span>
+            </span>
+            <!-- Only when a transcript is actually still in temp: an offer to carry
+                 context that has expired would be a lie about what the new session
+                 will know. -->
+            <span v-if="lastTranscript" class="bypass-inline mono">
+              <button
+                class="switch"
+                :class="{ on: carryTranscript }"
+                data-testid="carry-transcript-toggle"
+                role="switch"
+                :aria-checked="carryTranscript"
+                :title="`Seed the new session with the previous one's transcript — ${lastTranscript.prompts} prompts, saved ${lastTranscript.savedAt.slice(11, 16)}`"
+                @click="carryTranscript = !carryTranscript"
+              >
+                <span class="knob"></span>
+              </button>
+              <span>Carry last transcript</span>
             </span>
           </div>
           <div v-if="startError" class="mono" style="color: var(--red)" data-testid="start-error">
@@ -1363,12 +1483,12 @@ const {
             ✕
           </button>
         </span>
-        <span class="queue-note mono">Runs automatically when the current goal finishes</span>
+        <span class="queue-note">Runs automatically when the current goal finishes</span>
       </div>
       <div v-if="queuedEditError" class="queued-edit-error mono" data-testid="queued-edit-error">
         {{ queuedEditError }}
       </div>
-      <div v-if="draftRestored && composer" class="draft-note mono" data-testid="draft-note">
+      <div v-if="draftRestored && composer" class="draft-note" data-testid="draft-note">
         Restored draft from the previous run — send to deliver it.
       </div>
 
@@ -1484,9 +1604,14 @@ const {
   box-shadow: var(--hairline-shine);
 }
 
+/* Tabs name places, so they take the label idiom rather than reading as prose.
+   One voice across every tab strip in the app: these, the view segments below,
+   the inbox's pane tabs, the Tests sub-tabs and the Specs part tabs. */
 .mt {
   padding: 9px 13px;
   font-size: 11.5px;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
   color: var(--text-tab);
   cursor: pointer;
   display: flex;
@@ -1567,6 +1692,9 @@ const {
 
 .seg {
   padding: 5px 12px;
+  font-size: 11.5px;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
   color: var(--text-tab);
   cursor: pointer;
 }
@@ -1595,28 +1723,89 @@ const {
   border-color: var(--border-strong);
 }
 
+/* A control whose whole label is one glyph: square, so it reads as a key in the
+   row rather than as a word that lost its letters. */
+.ctl-glyph {
+  min-width: 24px;
+  padding: 3px 0;
+  text-align: center;
+}
+
 .ctl:disabled {
   opacity: 0.7;
   cursor: default;
 }
 
-/* Indeterminate progress bar under the End label while the session tears down. */
-.ending-bar {
-  display: block;
-  height: 2px;
-  margin: 3px -5px 0;
-  border-radius: 2px;
-  background: linear-gradient(90deg, transparent, var(--green), transparent) no-repeat;
-  background-size: 60% 100%;
-  animation: ending-slide 0.9s linear infinite;
-}
-
+/* Drives the ending overlay's rule, below; the End button no longer carries a bar
+   of its own now that the whole window says the session is closing. */
 @keyframes ending-slide {
   from {
     background-position: -60% 0;
   }
   to {
     background-position: 160% 0;
+  }
+}
+
+/* The whole window while a session tears down. Fixed and teleported to the body,
+   at 60 so it sits over the dialogues at 40 and under the update banner at 100.
+   The veil is the app ground at 82%: enough to say "not now" while leaving the
+   work legible behind it. */
+.end-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.end-veil::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--bg);
+  opacity: 0.82;
+}
+
+.end-strip {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 260px;
+  margin-bottom: 22vh;
+  padding: 12px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  box-shadow: var(--shadow-dd);
+}
+
+.end-eyebrow {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-meta);
+}
+
+/* The teardown's own indeterminate rule, on the animation the End button used to
+   carry, so this view has one waiting idiom rather than two. It keeps the
+   ending-bar test id: the bar moved off the button, it did not go away. */
+.end-rule {
+  display: block;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--green), transparent) no-repeat;
+  background-size: 45% 100%;
+  animation: ending-slide 1.1s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .end-rule {
+    animation: none;
+    background-size: 100% 100%;
+    opacity: 0.45;
   }
 }
 
@@ -1784,6 +1973,24 @@ const {
   font-size: 11.5px;
   color: var(--text-meta);
   flex-wrap: wrap;
+}
+
+/* The run's short id: machine truth, so it sits at the ghost tier and never
+   competes with the readings beside it. */
+.head-stamp {
+  font-size: 10.5px;
+  color: var(--text-ghost);
+  white-space: nowrap;
+}
+
+/* The saved transcript's path, in the same ghost register. It is a control only
+   so it can be dismissed; it never looks like a button. */
+.saved-path {
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--green2);
+  cursor: pointer;
 }
 
 /* Pairing-mode chip (Advisor/Orchestrator) for the latest work turn. */
@@ -2102,6 +2309,7 @@ const {
   align-items: flex-end;
 }
 
+
 /* Ctrl+C stop confirmation bubble above the composer. */
 .stop-confirm {
   display: flex;
@@ -2129,7 +2337,7 @@ const {
   color: var(--red-ink);
   background: var(--red);
   border: none;
-  border-radius: 8px;
+  border-radius: var(--rc);
   padding: 3px 12px;
   cursor: pointer;
 }
@@ -2138,7 +2346,7 @@ const {
   font-size: 11px;
   color: var(--text-tab);
   border: 1px solid var(--border-strong);
-  border-radius: 8px;
+  border-radius: var(--rc);
   padding: 3px 12px;
   background: transparent;
   cursor: pointer;
@@ -2258,15 +2466,18 @@ const {
   flex-shrink: 0;
   color: var(--green);
   font-weight: 600;
-  /* Bottom-pinned row: lift the caret to the buttons' text line. */
-  padding-bottom: 6px;
+  /* Matches the field's own 3px, so the sigil stays level with the typed line
+     now that the line is centred rather than dropped to the row's foot. */
+  padding-bottom: 3px;
 }
 
 .caret.target {
   /* ✎ (a dingbat) renders higher in its line box than ❯, so it needs less
-     bottom lift to land on the composer's baseline. */
+     bottom lift to land on the composer's baseline. It was 5px below ❯; with ❯
+     now at 3px that difference cannot be kept, so it floors here at 0 and sits
+     3px below instead. */
   color: var(--amber);
-  padding-bottom: 1px;
+  padding-bottom: 0;
 }
 
 /* Spec-edit target chip in the composer (design ✎ → file). */

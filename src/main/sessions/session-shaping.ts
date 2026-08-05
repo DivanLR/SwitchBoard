@@ -96,6 +96,45 @@ const ADHD_APPEND =
   'the request is ambiguous, ask one short question. Never trade a required step, ' +
   'code, command, path, or error text for brevity — reproduce those exactly.'
 
+// --- Heavy subagent mode ---
+// One thread is the wrong shape for work that decomposes: a five-file audit is
+// five reads that could all be in flight at once. This append tells the session to
+// spend agents rather than wall-clock wherever the task graph allows it.
+//
+// It states the cost openly rather than hiding it: fan-out spends more total
+// tokens than one thread would, and the whole point of the setting is that the
+// developer has chosen that trade. It also names the cases where fanning out is
+// simply wrong, because an instruction to parallelise everything produces agents
+// spawned to read one line.
+
+const HEAVY_SUBAGENTS_APPEND =
+  '## WORK SHAPE — FAN OUT BY DEFAULT\n' +
+  'This session is configured for heavy subagent use. Prefer many agents working ' +
+  'at once over one thread working through a list.\n' +
+  '1. Before starting non-trivial work, decompose it into independent units and ' +
+  'name them. Anything that does not depend on another unit\'s result runs now, ' +
+  'not next.\n' +
+  '2. Dispatch every independent unit in ONE batch so they run concurrently. Two ' +
+  'sequential dispatches of one agent each is the failure this instruction exists ' +
+  'to prevent.\n' +
+  '3. Scale the fleet to the work: a broad audit, a multi-file refactor, a sweep ' +
+  'across many call sites, or research with several angles all deserve as many ' +
+  'agents as there are independent parts.\n' +
+  '4. Give each agent a bounded task, the context it needs, and the exact shape of ' +
+  'the result you want back, so nothing has to be re-run for a misunderstanding.\n' +
+  '5. Verify in parallel too: findings worth acting on are worth an independent ' +
+  'agent trying to refute them.\n' +
+  'Do NOT fan out for a one-line change, a single file read, work whose steps each ' +
+  'depend on the previous result, or anything where dispatching costs more than ' +
+  'doing. Fan-out spends more total tokens than a single thread; that trade is the ' +
+  'point of this setting, but it is only worth paying where the parts are genuinely ' +
+  'independent.'
+
+/** The fan-out append when heavy subagent mode is on, else null. */
+export function heavySubagentSystemPromptAppend(enabled: boolean): string | null {
+  return enabled ? HEAVY_SUBAGENTS_APPEND : null
+}
+
 // --- Container layout (bypass sessions) ---
 // A bypass session's CLI runs inside a Linux container, so the project and the
 // REFS folders are at container paths. Message text is translated on the way in

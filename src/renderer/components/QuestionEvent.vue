@@ -89,7 +89,7 @@ function cleanLabel(label: string): string {
         </button>
       </template>
     </div>
-    <div v-else class="open-hint mono">Answer through the composer below.</div>
+    <div v-else class="open-hint">Answer through the composer below.</div>
     <div v-if="payload.answered" class="answered mono" data-testid="question-answered">
       ✓ Answered: {{ cleanLabel(payload.answer ?? '') }}
     </div>

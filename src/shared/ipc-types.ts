@@ -24,6 +24,7 @@ import type {
   Settings,
   SpecDetail,
   SpecKitState,
+  TranscriptSummary,
   VerifyRun,
 } from './domain'
 import type { AvailableSuites } from './test-catalog'
@@ -211,6 +212,12 @@ export interface InvokeMap {
        *  arrives in the inbox for approval. Ignored when bypassPermissions is
        *  set, which approves everything and so has nothing to plan against. */
       planMode?: boolean
+      /**
+       * Seed the new session with a previous session's transcript: its digest
+       * goes into the system prompt and the full file is named there for the
+       * model to read on demand. Ignored when that transcript has expired.
+       */
+      carryTranscriptFrom?: string
     }
     res: Session
   }
@@ -230,6 +237,14 @@ export interface InvokeMap {
   }
   /** Recent distinct commands (past composer messages) for terminal-style suggestions. */
   'sessions.promptHistory': { req: { projectId: string; limit?: number }; res: string[] }
+  /**
+   * Write this session's transcript now. Sessions also write continuously as
+   * events land, so this is for the moment a developer wants the file on disk
+   * before doing something risky, not the only way one gets written.
+   */
+  'transcripts.save': { req: { sessionId: string }; res: TranscriptSummary }
+  /** Unexpired transcripts, newest first. Expired files are swept on every read. */
+  'transcripts.list': { req: Record<string, never>; res: TranscriptSummary[] }
   /** Available slash commands / skills (plugins) for the project, for composer suggestions. */
   'projects.commands': { req: { projectId: string }; res: ProjectCommand[] }
   /** Spec Kit state for a project: installed? plus the spec summaries. */

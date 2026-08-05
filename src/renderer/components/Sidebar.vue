@@ -74,7 +74,7 @@ function initials(name: string): string {
   return (words.length > 1 ? `${words[0][0]}${words[1][0]}` : name.slice(0, 2)).toLowerCase()
 }
 
-// Stable per-project accent colour on the fold tick (shared with the
+// Stable per-project accent colour on the lane rule (shared with the
 // session header dot) — identifies the project at a glance in the collapsed rail.
 const now = useNow(1000)
 onMounted(() => {
@@ -124,60 +124,6 @@ function markTitle(status: string): string {
 function pendingFor(projectId: string): number {
   return inbox.pending.filter((p) => p.projectId === projectId).length
 }
-
-const costLabel = computed(() => `$${projects.counters.costTodayUsd.toFixed(2)}`)
-
-const tokensLabel = computed(() =>
-  // Compact notation; lowercase the 'K' suffix to keep the design's "1.2k" style.
-  Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 })
-    .format(projects.counters.tokensToday)
-    .replace('K', 'k'),
-)
-
-// --- Session usage meter (subscription rate limit from the SDK) ---
-// Shown for ANY live session; the % fills in once the SDK reports a
-// rate_limit_event (until then the meter shows a — placeholder).
-const usageSession = computed(() => {
-  const selected = projects.selected?.session
-  if (selected && !selected.endedAt && selected.usageUtilization != null) return selected
-  const live = projects.items.map((p) => p.session).filter((s) => s && !s.endedAt)
-  return (
-    live.find((s) => s!.usageUtilization != null) ??
-    (selected && !selected.endedAt ? selected : null) ??
-    live[0] ??
-    null
-  )
-})
-
-const usagePct = computed(() =>
-  usageSession.value?.usageUtilization != null
-    ? Math.max(0, Math.min(100, Math.round(usageSession.value.usageUtilization)))
-    : null,
-)
-
-const usageColor = computed(() => {
-  const p = usagePct.value ?? 0
-  return p > 85 ? 'var(--red)' : p > 60 ? 'var(--amber)' : 'var(--green)'
-})
-
-const usageLimitLabel = computed(() => {
-  const t = usageSession.value?.usageLimitType
-  if (t === 'five_hour') return '5h limit'
-  if (t?.startsWith('seven_day')) return '7d limit'
-  // Before the SDK reports a window, show the primary (5h) label as a placeholder.
-  return '5h limit'
-})
-
-const usageReset = computed(() => {
-  const at = usageSession.value?.usageResetsAt
-  if (!at) return ''
-  const ms = at * 1000 - now.value
-  if (ms <= 0) return 'now'
-  const mins = Math.floor(ms / 60000)
-  const h = Math.floor(mins / 60)
-  const m = mins % 60
-  return h > 0 ? `${h}h ${m}m` : `${m}m`
-})
 
 // --- Global database session (design: one project-less MCP chat, bound to the
 // reserved "Database" project — see main/index.ts — rather than to whichever
@@ -562,16 +508,31 @@ async function confirmRemoveNow(): Promise<void> {
           <span class="section-count mono" data-testid="project-count">{{ filtered.length }}</span>
         </template>
         <span style="flex: 1"></span>
-        <!-- Single line, no surrounding whitespace: a text node around the glyph
-             becomes a flex text run with trailing space that shifts + off-centre. -->
+        <!-- The plus leads and the stack sits under it, so the mark reads add
+             first. The words belong to the row rather than to the button: they
+             borrow the heading's own label voice and sit out in the margin, where
+             no amount of text can push the row's controls around. -->
         <button
           v-if="!collapsed"
-          class="add mono"
+          class="add add-caption"
           data-testid="new-group"
-          title="New group"
-          aria-label="New group"
+          aria-label="Add group"
           @click="newGroup()"
-        >⊞</button>
+        >
+          <svg viewBox="0 0 14 14" width="13" height="13" aria-hidden="true">
+            <path
+              d="M7 1.4 L7 7.2 M4.1 4.3 L9.9 4.3"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+            />
+            <rect x="2.6" y="9.2" width="8.8" height="1.5" fill="currentColor" opacity=".6" />
+            <rect x="4.2" y="11.8" width="5.6" height="1.5" fill="currentColor" opacity=".4" />
+          </svg>
+          <span class="caption section-label">Add group</span>
+        </button>
+        <!-- Single line, no surrounding whitespace: a text node around the glyph
+             becomes a flex text run with trailing space that shifts + off-centre. -->
         <button class="add mono" data-testid="add-project" title="New session" @click="emit('add-project')">+</button>
       </div>
 
@@ -634,7 +595,7 @@ async function confirmRemoveNow(): Promise<void> {
         <!-- An empty open group says what it is for, and takes the drop itself. -->
         <div
           v-if="section.emptyOpen && !collapsed"
-          class="group-empty mono"
+          class="group-empty"
           :data-testid="`group-empty-${section.name}`"
           @dragover="onGroupDragOver(section.group, $event)"
           @drop="onGroupDrop(section.group, $event)"
@@ -669,32 +630,24 @@ async function confirmRemoveNow(): Promise<void> {
         @dragend="onDragEnd"
       >
         <div class="active-bg"></div>
-        <!-- Lane identity is a 1px stroke in the lane's own colour, never a
-             coloured edge bar. -->
+        <!-- Lane identity is a 1px stroke in the lane's own colour, run the full
+             height of the row: still a stroke, never a coloured edge bar. The
+             scored fold tick this replaced stood 26px in a 51px row, so it read as
+             a fragment of a rule rather than as the lane's own edge. Drawn in CSS,
+             because a hairline that has to match the row's height exactly is a
+             worse job for artwork than for a border. -->
         <span
           class="brace"
           :data-testid="`project-accent-${item.name}`"
           :style="{ color: accentFor(item.id) }"
           aria-hidden="true"
-        >
-          <!-- A fold tick, not a brace: two scored segments meeting at the
-               world's 60-degree crease angle, in the project's own colour. -->
-          <svg viewBox="0 0 5 26" width="5" height="26">
-            <path
-              d="M4.2 1.5 L1.2 8 L1.2 18 L4.2 24.5"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.2"
-              stroke-linejoin="miter"
-            />
-          </svg>
-        </span>
+        ></span>
         <div class="content">
           <div class="row">
-            <!-- The lane's current sign. Every state is a real mark: HELD is a
-                 crease scored but not folded, DEPLOYING is facets opening,
-                 MISFOLD is two creases crossing, PACKED FLAT is the sheet
-                 folded away, and LOCKED is the fold seated, done. -->
+            <!-- The lane's current sign: one set character in the state colour,
+                 nothing behind it. HELD asks for you, DEPLOYING advances, MISFOLD
+                 contradicts itself, PACKED FLAT closes to a point, and LOCKED is a
+                 seated rule. The word beside it still settles it. -->
             <span
               v-if="statusById[item.id] !== 'none'"
               class="mark"
@@ -703,35 +656,13 @@ async function confirmRemoveNow(): Promise<void> {
               :data-status="statusById[item.id]"
               :title="markTitle(statusById[item.id])"
             >
-              <!-- Folds in a scored sheet, at the world's 60-degree crease angle,
-                   drawn small inside the plate that carries the state colour.
-                   Deliberately plain geometry: the mark narrows the guess, the word
-                   beside it settles it, so nobody has to learn a symbol. -->
-              <svg viewBox="0 0 16 14" width="14" height="12" aria-hidden="true">
-                <template v-if="statusById[item.id] === 'needs_you'">
-                  <!-- Held: one crease scored but not yet folded either way. -->
-                  <path d="M3 12 L8 2 L13 12" fill="none" stroke="currentColor" stroke-width="1.7" />
-                </template>
-                <template v-else-if="statusById[item.id] === 'working'">
-                  <!-- Deploying: three facets opening out of the packet. -->
-                  <path d="M2 12 L5.6 2.6 L8 12 Z" fill="currentColor" opacity=".55" />
-                  <path d="M8 12 L10.4 2.6 L14 12 Z" fill="currentColor" />
-                </template>
-                <template v-else-if="statusById[item.id] === 'error'">
-                  <!-- Misfold: two creases crossing where they cannot both hold. -->
-                  <path d="M2.6 2.6 L13.4 11.4" stroke="currentColor" stroke-width="1.7" />
-                  <path d="M13.4 2.6 L2.6 11.4" stroke="currentColor" stroke-width="1.7" />
-                </template>
-                <template v-else-if="statusById[item.id] === 'ended'">
-                  <!-- Packed flat: the sheet folded back to a packet. -->
-                  <path d="M2.5 8.6 L5 5.4 L13.5 5.4 L11 8.6 Z" fill="currentColor" opacity=".5" />
-                </template>
-                <template v-else>
-                  <!-- Locked: the fold seated, no hue of its own. -->
-                  <path d="M3 9.6 L8 3.4 L13 9.6" fill="none" stroke="currentColor" stroke-width="1.6" />
-                  <path d="M3 12.2 L13 12.2" stroke="currentColor" stroke-width="1.6" />
-                </template>
-              </svg>
+              <span class="glyph" aria-hidden="true"
+                ><template v-if="statusById[item.id] === 'needs_you'">!</template
+                ><template v-else-if="statusById[item.id] === 'working'">&#187;</template
+                ><template v-else-if="statusById[item.id] === 'error'">&#215;</template
+                ><template v-else-if="statusById[item.id] === 'ended'">&#183;</template
+                ><template v-else>&#8212;</template></span
+              >
             </span>
             <!-- Collapsed rail: initials (+ pending badge). One template so the
                  v-else below always pairs with the collapsed check itself. -->
@@ -815,7 +746,7 @@ async function confirmRemoveNow(): Promise<void> {
       </div>
         </template>
       </template>
-      <div v-if="projects.loaded && projects.visibleItems.length === 0" class="empty mono">
+      <div v-if="projects.loaded && projects.visibleItems.length === 0" class="empty">
         No projects yet — press + to add one.
       </div>
     </div>
@@ -857,53 +788,12 @@ async function confirmRemoveNow(): Promise<void> {
     >
       {{ theme === 'light' ? '☾' : '☀' }}
     </button>
-    <!-- Footer (design): the counters as one inline run, a hairline usage bar,
-         and Settings as the last row — one block, not three stacked cards. -->
+    <!-- Footer: Settings and the current work model, and nothing else. The
+         counters, the token total and the limit meter moved to the window's
+         status bar (components/StatusBar.vue): they describe the whole board, not
+         this pane, and stacking them here cost the lane list a sixth of its
+         height. -->
     <div v-if="!collapsed" class="foot">
-      <!-- One run of numbers, and only the ones that describe the sessions
-           themselves. The token total used to trail this line and collided with
-           the cost beside it once the count ran to six figures. -->
-      <div class="foot-line mono">
-        <span class="foot-stat" data-testid="counter-running">
-          <span class="foot-dot" style="background: var(--blue)"></span>
-          <span data-testid="counter-running-value">{{ projects.counters.running }}</span> running
-        </span>
-        <span class="foot-stat" data-testid="counter-needsyou">
-          <span class="foot-dot" style="background: var(--amber)"></span>
-          <span class="amber" data-testid="counter-needsyou-value">{{ projects.counters.needsYou }}</span>
-          waiting
-        </span>
-        <span style="flex: 1"></span>
-        <span class="foot-stat" data-testid="counter-cost">
-          <span data-testid="counter-cost-value">{{ costLabel }}</span>
-        </span>
-      </div>
-
-      <!-- It heads the consumption block instead, where it belongs: tokens and
-           the limit meter are one story. Outside the meter's own v-if on
-           purpose — the total is true whether or not the SDK has reported a
-           rate-limit window yet. -->
-      <div class="tokens mono">
-        <span class="tokens-total" data-testid="usage-tokens"><span class="tokens-figure">{{ tokensLabel }}</span> tok</span>
-        <span class="tokens-when">today</span>
-      </div>
-
-      <div v-if="usageSession" class="usage" data-testid="usage-meter">
-        <div class="usage-bar">
-          <div
-            class="usage-fill"
-            :style="{ '--fill': (usagePct ?? 0) / 100, background: usageColor }"
-          ></div>
-        </div>
-        <div class="usage-foot mono">
-          <span v-if="usagePct !== null" :style="{ color: usageColor }">
-            {{ usagePct }}% of {{ usageLimitLabel }}
-          </span>
-          <span v-else>— of {{ usageLimitLabel }}</span>
-          <span v-if="usageReset">Resets in {{ usageReset }}</span>
-        </div>
-      </div>
-
       <div
         class="settings-row"
         data-testid="open-settings"
@@ -1173,13 +1063,6 @@ async function confirmRemoveNow(): Promise<void> {
   gap: 5px;
 }
 
-/* On the rail there is no room for anything else, so the mark shrinks to its
-   glyph and carries the whole state on its own. */
-.sidebar.collapsed .mark svg {
-  width: 13px;
-  height: 11px;
-}
-
 .collapsed-badge {
   font-size: 9.5px;
   background: color-mix(in srgb, var(--amber) 15%, transparent);
@@ -1311,12 +1194,44 @@ async function confirmRemoveNow(): Promise<void> {
   color: var(--text-faint);
   line-height: 1;
   padding: 0 5px;
-  border-radius: 6px;
+  border-radius: var(--rc);
 }
 
 .add:hover {
   color: var(--green);
   background: var(--bg-hover);
+}
+
+/* The row explains its own control. Hover or keyboard focus prints the words out
+   in the margin beside the button, borrowing .section-label so the caption is
+   literally the heading voice rather than a second one. Absolute, because this
+   row is sticky and holds the section height every group header offsets from:
+   nothing here may change width when a label appears. */
+.add-caption {
+  position: relative;
+}
+
+.add-caption .caption {
+  position: absolute;
+  right: calc(100% + 7px);
+  top: 50%;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  text-transform: uppercase;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 110ms ease;
+}
+
+.add-caption:hover .caption,
+.add-caption:focus-visible .caption {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .add-caption .caption {
+    transition: none;
+  }
 }
 
 .project-list {
@@ -1363,7 +1278,7 @@ async function confirmRemoveNow(): Promise<void> {
   bottom: 0;
   border: 1px dashed var(--green);
   background: color-mix(in srgb, var(--green) 8%, transparent);
-  border-radius: 6px;
+  border-radius: var(--rc);
 }
 
 .group-caret {
@@ -1377,7 +1292,7 @@ async function confirmRemoveNow(): Promise<void> {
   width: 6px;
   min-width: 6px;
   height: 6px;
-  border-radius: 2px;
+  border-radius: var(--rc);
 }
 
 .group-name {
@@ -1419,10 +1334,14 @@ async function confirmRemoveNow(): Promise<void> {
 
 /* A lane is full-bleed and square: a fold is a cut, and a cut has no corners.
    This is where the outgoing world's inset 8px-radius card row was. */
+/* Lane height is the sidebar's real budget: at 50px a full board scrolled after
+   six projects, and this is a tool for running more than six at once. 5px of
+   vertical padding puts a selected lane at about 40px and an unselected one at
+   about 30px, which is two more lanes on screen with nothing removed. */
 .project {
   position: relative;
   margin: 0 0 2px;
-  padding: 8px 18px 8px 13px;
+  padding: 5px 18px 5px 13px;
   cursor: pointer;
   transition: background 0.12s ease;
 }
@@ -1441,7 +1360,7 @@ async function confirmRemoveNow(): Promise<void> {
 /* The five-hairline staff that used to be ruled across each lane is gone. Behind
    12px text in a 252px margin it read as guitar strings rather than as a staff,
    which is the opposite of what the metaphor was for. The lane still reads as a
-   part through the marks that survived: its fold tick and its status glyph. */
+   part through the marks that survived: its edge rule and its status glyph. */
 
 /* The now-line — one shared animated rule that used to cross every lane — is
    gone with the score it belonged to: it was that world's one authored motion,
@@ -1449,20 +1368,47 @@ async function confirmRemoveNow(): Promise<void> {
    reduced-motion block could stop every animation without losing information.
    Nothing replaces it; a sheet at rest does not pulse. */
 
-/* Lane identity: a fold tick in the lane's colour. A 1px stroke, because a coloured
-   edge bar above 1px on a list item is exactly the habit this world refuses. */
+/* Lane identity: one bar in the lane's own colour, top to bottom of the row, 3px
+   in from its left edge. It is 2px, asked for directly after the 1px version was
+   judged too faint to hold a lane; DESIGN.md's ban on anything thicker than a 1px
+   stroke was rewritten to match rather than left contradicting this. The scored
+   fold tick it replaced stood 26px inside a 51px row, which read as a fragment of
+   a rule rather than as the lane's edge. */
 .brace {
   position: absolute;
-  left: 1px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
+  left: 3px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: currentColor;
   pointer-events: none;
   opacity: 0.75;
 }
 
 .project.active .brace {
   opacity: 1;
+}
+
+/* Lane separation: a hairline at each edge of every row, inset to where the
+   reading starts so the identity bar stands clear of it and the list reads as a
+   table of lanes. The 2px gap between rows means adjacent lanes show both their
+   rules, 2px apart; that is the accepted reading, not an oversight. */
+.project::before,
+.project::after {
+  content: '';
+  position: absolute;
+  left: 13px;
+  right: 0;
+  height: 1px;
+  background: var(--border-soft);
+}
+
+.project::before {
+  top: 0;
+}
+
+.project::after {
+  bottom: 0;
 }
 
 .active-bg {
@@ -1474,7 +1420,7 @@ async function confirmRemoveNow(): Promise<void> {
   position: absolute;
   inset: 0;
   background: var(--bg-active);
-  border-radius: 8px;
+  border-radius: var(--rc);
 }
 
 .content {
@@ -1489,21 +1435,35 @@ async function confirmRemoveNow(): Promise<void> {
 
 /* The lane's current sign. Colour comes from meaning: amber for held (needs
    you), green for deploying (working), red for a misfold (error), and no hue
-   at all for locked, because a done fold needs none. */
-/* The fold sits on a plate rather than bare on the panel. A 1px stroke of
-   geometry at 16px read as lint at the edge of vision; the plate gives the state
-   colour an area to carry it, which is what makes one lane's mark tell itself
-   apart from the next at a glance. The wash is derived from the mark's own
-   currentColor, so a retuned state token reaches it without a second edit, and
-   the corners stay cut like everything else. */
+   at all for locked, because a done fold needs none.
+
+   There is no plate, by decision rather than by drift: the tinted wash and the
+   cut frame that used to sit under the mark were both taken out on request, so
+   the state now rests on the set character and its hue alone. DESIGN.md still
+   argues for the plate on the grounds that 1px geometry read as lint at the edge
+   of vision; that argument was answered by setting the state rather than drawing
+   it. The padding stays, as the mark's own room away from the name beside it. */
 .mark {
   flex-shrink: 0;
   display: flex;
   align-items: center;
   color: var(--text-meta);
-  padding: 3px;
-  border: 1px solid currentColor;
-  background: color-mix(in srgb, currentColor 14%, transparent);
+  padding: 2px;
+}
+
+/* The state is set, not drawn. The glyph box is a fixed 14x12, so the mark takes
+   the same room down the lane whichever of the five characters lands in it, on
+   the collapsed rail as well as in the list. The size is a glyph size, tuned to
+   optical weight rather than to the type ramp (DESIGN.md, "Glyph sizing is not
+   type sizing"). */
+.mark .glyph {
+  width: 14px;
+  height: 12px;
+  font-family: var(--mono);
+  font-size: 13.8px;
+  font-weight: 600;
+  line-height: 12px;
+  text-align: center;
 }
 
 .mark.needs_you {
@@ -1691,11 +1651,11 @@ async function confirmRemoveNow(): Promise<void> {
   justify-content: space-between;
   gap: 8px;
   padding-left: 17px;
-  margin-top: 2px;
+  margin-top: 1px;
 }
 
 .branch {
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--text-faint);
   white-space: nowrap;
   overflow: hidden;
@@ -1898,104 +1858,13 @@ async function confirmRemoveNow(): Promise<void> {
   color: var(--red);
 }
 
-/* Footer: one block hairlined off from the list (design), not a stack of cards. */
+/* Footer: one row, hairlined off from the list. It carries Settings and the
+   work model only; every reading moved to the status bar. */
 .foot {
   flex-shrink: 0;
   border-top: 1px solid var(--border);
-  padding: 11px 14px 13px 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  padding: 6px 14px 7px 18px;
 }
-
-.foot-line {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  font-size: 11px;
-  color: var(--text-faint);
-}
-
-.foot-stat {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  /* The four counters share one line, so a stat must never wrap its unit onto a
-     second row ("0" above "tok") when the sidebar is at its narrowest. */
-  white-space: nowrap;
-}
-
-.foot-stat .amber {
-  color: var(--amber);
-}
-
-.foot-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-}
-
-/* A 3px hairline, not a meter: it reports, it does not demand attention. */
-.usage-bar {
-  height: 3px;
-  border-radius: var(--rp);
-  background: var(--bg-seg);
-  overflow: hidden;
-}
-
-/* Scaled, not widened: animating width is a layout property, and .usage-bar above
-   already carries the 99px radius plus overflow:hidden, so it supplies the pill
-   ends and the fill needs no radius of its own. That is what makes scaleX safe
-   here — on a fill with its own rounded ends it would stretch them. */
-.usage-fill {
-  height: 100%;
-  width: 100%;
-  transform-origin: left;
-  transform: scaleX(var(--fill, 0));
-  transition: transform 0.3s ease;
-}
-
-.usage-foot {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 10.5px;
-  color: var(--text-ghost);
-  margin-top: 4px;
-}
-
-/* The token total heads the meter rather than trailing the counter run: the
-   figure takes the Title step so it reads first, and the unit and the day scope
-   stay on the label and caption tiers beside it. */
-.tokens {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.tokens-total {
-  display: flex;
-  align-items: baseline;
-  gap: 5px;
-  /* Same reason as .foot-stat: the unit never wraps under its own number. */
-  white-space: nowrap;
-  font-size: 11px;
-  color: var(--text-ghost);
-}
-
-.tokens-figure {
-  font-size: 13.5px;
-  font-weight: 600;
-  line-height: 1;
-  color: var(--text-strong);
-}
-
-.tokens-when {
-  font-size: 10px;
-  color: var(--text-ghost);
-}
-
 /* Settings is the last row of the footer block, highlighted only on hover. */
 .settings-row {
   display: flex;
@@ -2003,7 +1872,7 @@ async function confirmRemoveNow(): Promise<void> {
   gap: 9px;
   margin: 0 -8px -3px;
   padding: 7px 8px;
-  border-radius: 8px;
+  border-radius: var(--rc);
   cursor: pointer;
   user-select: none;
 }

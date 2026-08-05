@@ -1003,6 +1003,29 @@ const updateLine = computed(() => {
               </button>
             </div>
 
+            <div class="setting-row">
+              <div class="sr-text">
+                <div class="sr-label">Heavy subagents</div>
+                <div class="sr-desc">
+                  Instructs every session to break work into independent parts and dispatch them to
+                  as many subagents as the work allows, in one batch, instead of doing it in one
+                  thread. Faster on anything that decomposes, and cheaper when the workers run the
+                  cheap model. It spends more total tokens than a single thread would, and it is the
+                  wrong shape for a one-line fix, so it is off until you ask for it.
+                </div>
+              </div>
+              <button
+                class="switch"
+                :class="{ on: settings.heavySubagents }"
+                data-testid="setting-heavy-subagents"
+                role="switch"
+                :aria-checked="settings.heavySubagents"
+                @click="save({ heavySubagents: !settings.heavySubagents })"
+              >
+                <span class="knob"></span>
+              </button>
+            </div>
+
             <div v-if="settings.terseMode" class="group">
               <div class="group-label mono">TERSE LEVEL</div>
               <div class="group-desc">How aggressively replies are compressed.</div>

@@ -10,6 +10,7 @@ import { useQueueStore } from '@renderer/stores/queue'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { useUpdatesStore } from '@renderer/stores/updates'
 import Sidebar from '@renderer/components/Sidebar.vue'
+import StatusBar from '@renderer/components/StatusBar.vue'
 import SessionView from '@renderer/views/SessionView.vue'
 import McpView from '@renderer/views/McpView.vue'
 import InboxView from '@renderer/views/InboxView.vue'
@@ -135,7 +136,7 @@ const dbProject = computed(() => projects.dbProject)
   <div v-else class="shell">
     <div
       v-if="updates.active && !updateDismissed"
-      class="update-banner mono"
+      class="update-banner"
       data-testid="update-banner"
     >
       <span class="ub-dot"></span>
@@ -218,6 +219,11 @@ const dbProject = computed(() => projects.dbProject)
       </div>
     </div>
 
+    <!-- The board's own readings, on one rule under every pane. They were a card
+         in the sidebar footer; a control room keeps its gauges along the bottom
+         edge, where they are always legible and never in the way. -->
+    <StatusBar />
+
     <ProjectRegistration v-if="showRegistration" @close="showRegistration = false" />
     <SettingsPanel v-if="showSettings" :initial-tab="settingsTab" @close="showSettings = false" />
 
@@ -234,7 +240,7 @@ const dbProject = computed(() => projects.dbProject)
     >
       <span class="sw-ring"></span>
       <div class="sw-text mono">Starting session…</div>
-      <div class="sw-sub mono">First bypass start builds its container — this can take a few minutes.</div>
+      <div class="sw-sub">First bypass start builds its container — this can take a few minutes.</div>
     </div>
   </div>
 

@@ -301,7 +301,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
       </button>
     </div>
 
-    <div v-if="inbox.undeliverableNotice" class="notice mono" data-testid="undeliverable-notice">
+    <div v-if="inbox.undeliverableNotice" class="notice" data-testid="undeliverable-notice">
       {{ inbox.undeliverableNotice }}
       <button class="notice-dismiss" data-testid="notice-dismiss" @click="inbox.dismissNotice()">
         Dismiss
@@ -332,7 +332,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
           <span class="group-count mono">· {{ group.items.length }} pending</span>
           <span style="flex: 1"></span>
           <template v-if="approveAllConfirmId === group.projectId">
-            <span class="approve-all-warn mono" data-testid="approve-all-warn">
+            <span class="approve-all-warn" data-testid="approve-all-warn">
               Includes {{ groupHighRiskCount(group.items) }} high-risk. Sure?
             </span>
             <button
@@ -583,10 +583,14 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   display: block;
 }
 
+/* Pane tabs are names of places, not prose: the label idiom, so all three panes
+   head themselves the same way. */
 .tab {
   padding: 11px 12px;
-  font-family: var(--sans);
-  font-size: 12px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
   color: var(--text-tab);
   cursor: pointer;
   display: flex;

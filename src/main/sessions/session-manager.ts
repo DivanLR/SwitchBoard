@@ -15,6 +15,7 @@ import type {
   Session,
   SessionEvent,
   SessionStatus,
+  TranscriptSummary,
   VerifyReport,
 } from '@shared/domain'
 import { SWALLOWABLE_KINDS, verifyVerdict } from '@shared/domain'
@@ -26,10 +27,18 @@ import { probeAvailableModels } from './model-catalog'
 import { foldModelTotals, type EventSink } from './message-mapper'
 import {
   adhdSystemPromptAppend,
+  heavySubagentSystemPromptAppend,
   modesSystemPromptAppend,
   sandboxSystemPromptAppend,
   terseSystemPromptAppend,
 } from './session-shaping'
+import {
+  TRANSCRIPT_EVENT_CAP,
+  listTranscripts,
+  transcriptContextAppend,
+  transcriptFor,
+  writeTranscript,
+} from './transcript'
 import { parseEvalMarker } from '@main/evals/eval-dispatch'
 import { parseVerifyReport, verifyMarkerBroken } from '@main/evals/verify-dispatch'
 import { reconcile } from '@main/evals/artefacts'
@@ -132,6 +141,17 @@ const STREAM_LOCAL_KINDS: ReadonlySet<EventKind> = new Set([
  */
 const MAX_LIVE_STREAM_EVENTS = 200
 
+/** The kinds the transcript body carries, and so the only ones worth rewriting
+ *  the file for. Tool calls are counted in its digest but not transcribed. */
+const TRANSCRIBED_KINDS: ReadonlySet<EventKind> = new Set(['prompt', 'assistant_text', 'summary'])
+
+/**
+ * How long after the last transcribed event the transcript is rewritten. Long
+ * enough that a streaming turn costs one write rather than dozens, short enough
+ * that a crash loses seconds of conversation rather than a session's worth.
+ */
+const TRANSCRIPT_DEBOUNCE_MS = 3000
+
 function evictStaleLive(entry: HostedEntry): void {
   let streamLocal = 0
   for (const { event } of entry.live.values()) {
@@ -197,6 +217,8 @@ export class SessionManager {
    *  window — two concurrent starts would both pass it and run two sessions. */
   private starting = new Set<string>()
   private classifier: NoiseClassifier | null = null
+  /** Pending debounced transcript writes, keyed by session id. */
+  private transcriptTimers = new Map<string, ReturnType<typeof setTimeout>>()
   /** Models this subscription can select, captured from the SDK's supportedModels()
    *  on any session start, or probed on demand by `models()`. Account-global and
    *  in-memory: the account's model list is whatever the CLI reports today. */
@@ -331,13 +353,20 @@ export class SessionManager {
     resume = false,
     bypassPermissions = false,
     planMode = false,
+    carryTranscriptFrom?: string,
   ): Promise<Session> {
     if (this.starting.has(projectId)) {
       throw { code: 'ALREADY_ACTIVE', message: 'The project already has an active session' } satisfies IpcError
     }
     this.starting.add(projectId)
     try {
-      return await this.launchSession(projectId, resume, bypassPermissions, planMode)
+      return await this.launchSession(
+        projectId,
+        resume,
+        bypassPermissions,
+        planMode,
+        carryTranscriptFrom,
+      )
     } finally {
       this.starting.delete(projectId)
     }
@@ -348,6 +377,7 @@ export class SessionManager {
     resume: boolean,
     bypassPermissions: boolean,
     planMode: boolean,
+    carryTranscriptFrom?: string,
   ): Promise<Session> {
     const project = this.repos.projects.byId(projectId)
     if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
@@ -437,6 +467,14 @@ export class SessionManager {
       : null
     // Advisor/Orchestrator protocol (static text — prompt-cache friendly).
     const modesAppend = modesSystemPromptAppend(settings.modelMode ?? 'auto')
+    // Fan-out by default when the developer has asked for it (static text, so it
+    // sits in the cached prefix like the other shaping appends).
+    const heavyAppend = heavySubagentSystemPromptAppend(settings.heavySubagents === true)
+    // A carried-over transcript: the digest inline, the full file named. Expired
+    // transcripts resolve to null, so a stale carry request is simply ignored
+    // rather than starting a session that claims context it does not have.
+    const carried = carryTranscriptFrom ? transcriptFor(carryTranscriptFrom) : null
+    const transcriptAppend = carried ? transcriptContextAppend(carried) : null
     // A bypass session's CLI runs in a container: tell it the layout, or it hunts
     // for host paths that cannot exist and calls mounted refs unreachable.
     const sandboxAppend = bypassPermissions
@@ -458,7 +496,18 @@ export class SessionManager {
       sandboxMemory: settings.sandboxMemory,
       resumeSdkSessionId,
       systemPromptAppend:
-        [sandboxAppend, adhdAppend, terseAppend, modesAppend, schemaAppend]
+        // The carried transcript goes last: it is the only part of this that is
+        // about one specific run, so the static shaping text stays in the cached
+        // prefix ahead of it.
+        [
+          sandboxAppend,
+          adhdAppend,
+          terseAppend,
+          modesAppend,
+          heavyAppend,
+          schemaAppend,
+          transcriptAppend,
+        ]
           .filter((s): s is string => Boolean(s))
           .join('\n\n') || undefined,
       claudeExecutablePath,
@@ -1039,6 +1088,10 @@ export class SessionManager {
           evictStaleLive(entry)
         }
         this.scanMarkers(entry, kind, payload)
+        // Keep the transcript current as the conversation lands, so a crash leaves
+        // a usable file behind. Only the kinds the transcript body carries: tool
+        // chatter would cost writes without changing what a following session reads.
+        if (persist && TRANSCRIBED_KINDS.has(kind)) this.scheduleTranscript(entry.row.id)
         this.callbacks.onEvent({ ...event })
         return event as SessionEvent<K>
       },
@@ -1133,6 +1186,60 @@ export class SessionManager {
     this.callbacks.onCountersChanged()
   }
 
+  /**
+   * Write one session's transcript to the temp directory now.
+   *
+   * Reads what is already persisted rather than keeping a second live log, so the
+   * file can never disagree with the database. A session longer than the event cap
+   * is transcribed from its most recent activity.
+   */
+  saveTranscript(sessionId: string): TranscriptSummary {
+    const row = this.hosted.get(sessionId)?.row ?? this.repos.sessions.byId(sessionId)
+    if (!row) throw { code: 'NOT_FOUND', message: 'Session not found' } satisfies IpcError
+    const project = this.repos.projects.byId(row.projectId)
+    const events = this.repos.events.page(sessionId, undefined, TRANSCRIPT_EVENT_CAP)
+    return writeTranscript(row, project?.name ?? row.projectId, events)
+  }
+
+  listTranscripts(): TranscriptSummary[] {
+    return listTranscripts()
+  }
+
+  /**
+   * Rewrite the transcript a beat after activity settles.
+   *
+   * A crash cannot announce itself, so the only way to have a file when one
+   * happens is to keep one current. Debounced because a single turn produces many
+   * events and they would otherwise cost a write each; failures are swallowed
+   * because a convenience copy must never take a session down with it.
+   */
+  private scheduleTranscript(sessionId: string): void {
+    const pending = this.transcriptTimers.get(sessionId)
+    if (pending) clearTimeout(pending)
+    const timer = setTimeout(() => {
+      this.transcriptTimers.delete(sessionId)
+      try {
+        this.saveTranscript(sessionId)
+      } catch {
+        // Disk full, temp directory gone, session already pruned: none of these
+        // are worth interrupting the run for.
+      }
+    }, TRANSCRIPT_DEBOUNCE_MS)
+    timer.unref?.()
+    this.transcriptTimers.set(sessionId, timer)
+  }
+
+  private flushTranscript(sessionId: string): void {
+    const pending = this.transcriptTimers.get(sessionId)
+    if (pending) clearTimeout(pending)
+    this.transcriptTimers.delete(sessionId)
+    try {
+      this.saveTranscript(sessionId)
+    } catch {
+      // Same reasoning as the debounced path: never fail an ending session.
+    }
+  }
+
   private finaliseRow(entry: HostedEntry, reason: Session['endReason']): void {
     // A session ends once. Both callers can reach this for the same entry —
     // endAllForAppExit finalises what stop() left open, and the run loop's own
@@ -1148,6 +1255,9 @@ export class SessionManager {
       endedAt: entry.row.endedAt,
       endReason: reason,
     })
+    // The last write of the transcript, with the row's end time in it, so the file
+    // a following session reads says when this one finished.
+    this.flushTranscript(entry.row.id)
     this.pushStatus(entry)
   }
 

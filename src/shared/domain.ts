@@ -460,6 +460,14 @@ export interface Settings {
   terseMode: boolean
   terseLevel: TerseLevel
   /**
+   * Heavy subagent mode: instructs every hosted session to decompose work and
+   * fan it out across as many subagents as the task graph allows, rather than
+   * doing it in one thread. Faster wall-clock on anything parallel, and cheaper
+   * when the workers run the cheap model; it costs more total tokens than one
+   * thread would, which is the trade being made deliberately.
+   */
+  heavySubagents: boolean
+  /**
    * Relabel each turn's closing message as a ✦ SUMMARY. Off shows that message
    * as ordinary assistant text — the raw response (e.g. the full /usage report)
    * with no summary styling. A display choice only; no extra model call.
@@ -574,6 +582,9 @@ export const DEFAULT_SETTINGS: Settings = {
   modelMode: 'auto',
   terseMode: true,
   terseLevel: 'full',
+  // Off by default: fan-out is the right default for big work and the wrong one
+  // for a one-line fix, and the user is the one who knows which this is.
+  heavySubagents: false,
   summaries: true,
   fontSize: 'md',
   // Clean view is narrative + approvals by default; tool rows live in Raw.
@@ -596,6 +607,30 @@ export const DEFAULT_SETTINGS: Settings = {
   databaseMcpServers: [],
   mcpActiveServers: [],
   sandboxMemory: '6g',
+}
+
+/**
+ * A saved session transcript: the temp-file export of one session's prompt and
+ * reply spine, plus the digest a following session can be seeded with.
+ *
+ * Written continuously while a session runs, so a crash leaves one behind, and
+ * expires 12 hours after its last write.
+ */
+export interface TranscriptSummary {
+  sessionId: string
+  projectId: string
+  projectName: string
+  /** ISO of the last write. */
+  savedAt: string
+  /** ISO of savedAt + 12h; the sweep deletes the file after this. */
+  expiresAt: string
+  /** Absolute path to the markdown file in the OS temp directory. */
+  path: string
+  prompts: number
+  replies: number
+  lastPrompt: string | null
+  /** The facts block a new session is given inline when this is carried over. */
+  digest: string
 }
 
 /** A slash command / skill a project's sessions can run (composer suggestions). */
