@@ -41,6 +41,7 @@ import { gitNotice, sandboxToolsFor } from '@main/sessions/docker-sandbox'
 import { comboDocPath, readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
 import { comboKey } from '@shared/mcp-combo'
 import { installSpecKit, readSpecDetail, readSpecKitState } from '@main/specs/spec-kit'
+import { readDiffList, readFileDiff } from '@main/sessions/session-manager'
 import { check as checkForUpdates, installNow } from '@main/updater'
 
 const EVENT_FLUSH_INTERVAL_MS = 33 // >= 30 Hz (contract)
@@ -261,6 +262,22 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
       await installSpecKit(project.path)
       return readSpecKitState(project.path)
+    },
+    'diff.list': (req) => {
+      const project = repos.projects.byId(req.projectId)
+      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
+      if (!manager.liveEntryForProject(req.projectId)) {
+        throw { code: 'NOT_LIVE', message: 'No live session for this project' } satisfies IpcError
+      }
+      return readDiffList(project.path)
+    },
+    'diff.file': (req) => {
+      const project = repos.projects.byId(req.projectId)
+      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
+      if (!manager.liveEntryForProject(req.projectId)) {
+        throw { code: 'NOT_LIVE', message: 'No live session for this project' } satisfies IpcError
+      }
+      return readFileDiff(project.path, req.path)
     },
     'mcp.readSchema': (req) => {
       const project = repos.projects.byId(req.projectId)

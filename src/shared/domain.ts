@@ -993,3 +993,39 @@ export interface SpecKitState {
   installed: boolean // `.specify/` present
   specs: SpecSummary[]
 }
+
+// --- Diff tab (working-tree changes) ---
+
+export type DiffFileStatus = 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked'
+
+/** One changed file in the project's working tree, tracked or not. */
+export interface DiffFileEntry {
+  /** Project-relative, forward-slash separated. */
+  path: string
+  status: DiffFileStatus
+  /** Null when counts are unavailable (binary content). */
+  addedLines: number | null
+  removedLines: number | null
+  binary: boolean
+}
+
+/** Response for `diff.list`: the change list plus whether it could be read at
+ *  all — `gitNotice` travels inline rather than as a separate error, the same
+ *  way it already does on `ProjectListItem`. */
+export interface DiffListResult {
+  /** Non-null means the working tree could not be read; `files` is not meaningful. */
+  gitNotice: string | null
+  files: DiffFileEntry[]
+}
+
+export interface DiffLine {
+  type: 'context' | 'add' | 'del'
+  text: string
+}
+
+/** Response for `diff.file`. `binary: true` carries no lines — the view
+ *  states no text diff is available instead of rendering one. */
+export interface FileDiffContent {
+  binary: boolean
+  lines: DiffLine[]
+}

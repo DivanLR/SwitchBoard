@@ -3,12 +3,19 @@
 // subscribes to (T012). Also owns git branch observation (FR-003).
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 
 const execFileAsync = promisify(execFile)
+const GIT_EXEC_OPTS = { timeout: 8000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 } as const
 import type {
   AvailableModel,
+  DiffFileEntry,
+  DiffFileStatus,
+  DiffListResult,
   EventKind,
   EventPayloadMap,
+  FileDiffContent,
   ModelMode,
   ProjectCommand,
   QueuedTask,
@@ -72,7 +79,7 @@ interface LiveEventEntry {
   persisted: boolean
 }
 
-interface HostedEntry {
+export interface HostedEntry {
   session: HostedSession
   row: Session
   projectPath: string
@@ -167,6 +174,193 @@ async function readGitDiffStat(
     dels += Number.parseInt(d, 10) || 0
   }
   return { adds, dels }
+}
+
+/** First 8000 bytes containing a NUL byte — the same heuristic git itself
+ *  uses to decide whether to print "Binary files ... differ". */
+function isBinaryContent(buf: Buffer): boolean {
+  return buf.subarray(0, 8000).includes(0)
+}
+
+/** Per-file line counts from `git diff --numstat`, keyed by path. Binary
+ *  files report "-" for both counts (git's own convention) and are mapped to
+ *  null/null here rather than 0/0, so they read as "unavailable" and not as
+ *  "no change". Tracked changes only — untracked files never appear here. */
+async function readNumstatByPath(
+  projectPath: string,
+): Promise<Map<string, { adds: number | null; dels: number | null; binary: boolean }>> {
+  const result = new Map<string, { adds: number | null; dels: number | null; binary: boolean }>()
+  let stdout: string
+  try {
+    ;({ stdout } = await execFileAsync(
+      'git',
+      ['-C', projectPath, 'diff', '--numstat'],
+      GIT_EXEC_OPTS,
+    ))
+  } catch {
+    return result
+  }
+  for (const line of stdout.split('\n')) {
+    const [a, d, path] = line.split('\t')
+    if (path === undefined) continue
+    const binary = a === '-' && d === '-'
+    result.set(path, {
+      adds: binary ? null : Number.parseInt(a, 10) || 0,
+      dels: binary ? null : Number.parseInt(d, 10) || 0,
+      binary,
+    })
+  }
+  return result
+}
+
+/** A new, untracked file has no git-tracked baseline: its whole readable
+ *  content counts as added lines (research.md decision 4 — no `--no-index`,
+ *  no index mutation). */
+async function readUntrackedEntry(projectPath: string, path: string): Promise<DiffFileEntry> {
+  try {
+    const content = await readFile(join(projectPath, path))
+    if (isBinaryContent(content)) {
+      return { path, status: 'untracked', addedLines: null, removedLines: null, binary: true }
+    }
+    const text = content.toString('utf8')
+    const lineCount = text.length === 0 ? 0 : text.split('\n').length - (text.endsWith('\n') ? 1 : 0)
+    return { path, status: 'untracked', addedLines: lineCount, removedLines: 0, binary: false }
+  } catch {
+    // Vanished between the status read and this read — counts unavailable
+    // rather than a fabricated zero.
+    return { path, status: 'untracked', addedLines: null, removedLines: null, binary: false }
+  }
+}
+
+/**
+ * Every file with an uncommitted change in the project's working tree,
+ * tracked and untracked alike (FR-002). `git status --porcelain=v1 -z` is
+ * the one call that reports both in a single, unambiguous (NUL-terminated)
+ * read; `git diff --numstat` then supplies line counts for the tracked ones.
+ */
+export async function readDiffList(projectPath: string): Promise<DiffListResult> {
+  const notice = gitNotice(projectPath)
+  if (notice) return { gitNotice: notice, files: [] }
+
+  let statusOut: string
+  try {
+    ;({ stdout: statusOut } = await execFileAsync(
+      'git',
+      ['-C', projectPath, 'status', '--porcelain=v1', '-z'],
+      GIT_EXEC_OPTS,
+    ))
+  } catch {
+    return { gitNotice: 'Unable to read this project’s working tree.', files: [] }
+  }
+
+  const numstat = await readNumstatByPath(projectPath)
+  const tokens = statusOut.split('\0').filter((t) => t.length > 0)
+  const files: DiffFileEntry[] = []
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]
+    const code = token.slice(0, 2)
+    const path = token.slice(3)
+    // A rename/copy status carries a second NUL-terminated field (the
+    // original path) that this tab has no use for (spec.md edge cases: no
+    // dedicated rename-detection UI) — consume and discard it.
+    if (code[0] === 'R' || code[0] === 'C') i++
+    const status: DiffFileStatus =
+      code === '??'
+        ? 'untracked'
+        : code.includes('D')
+          ? 'deleted'
+          : code[0] === 'R'
+            ? 'renamed'
+            : code.includes('A')
+              ? 'added'
+              : 'modified'
+
+    if (status === 'untracked') {
+      files.push(await readUntrackedEntry(projectPath, path))
+      continue
+    }
+    const counts = numstat.get(path)
+    files.push({
+      path,
+      status,
+      addedLines: counts?.adds ?? null,
+      removedLines: counts?.dels ?? null,
+      binary: counts?.binary ?? false,
+    })
+  }
+  files.sort((a, b) => a.path.localeCompare(b.path))
+  return { gitNotice: null, files }
+}
+
+/** Unified-diff body → typed lines, skipping the header/hunk noise. Detects
+ *  git's own "Binary files ... differ" line rather than trying to decode
+ *  binary content as text. */
+function parseUnifiedDiff(diffText: string): FileDiffContent {
+  if (/^Binary files /m.test(diffText)) return { binary: true, lines: [] }
+  const lines: FileDiffContent['lines'] = []
+  for (const raw of diffText.split('\n')) {
+    if (
+      raw.startsWith('diff --git') ||
+      raw.startsWith('index ') ||
+      raw.startsWith('+++') ||
+      raw.startsWith('---') ||
+      raw.startsWith('@@') ||
+      raw.startsWith('new file mode') ||
+      raw.startsWith('deleted file mode') ||
+      raw.startsWith('similarity index') ||
+      raw.startsWith('rename from') ||
+      raw.startsWith('rename to')
+    ) {
+      continue
+    }
+    if (raw.startsWith('+')) lines.push({ type: 'add', text: raw.slice(1) })
+    else if (raw.startsWith('-')) lines.push({ type: 'del', text: raw.slice(1) })
+    else if (raw.startsWith(' ')) lines.push({ type: 'context', text: raw.slice(1) })
+    // A trailing split artefact or "\ No newline at end of file" — neither is a line.
+  }
+  return { binary: false, lines }
+}
+
+/**
+ * One file's diff content, fetched only on selection (FR-006). `git status`
+ * for that single path decides the branch: no current entry → null (nothing
+ * to show); `??` → the untracked whole-file-as-additions path; anything else
+ * → an ordinary tracked `git diff`.
+ */
+export async function readFileDiff(projectPath: string, path: string): Promise<FileDiffContent | null> {
+  let statusOut: string
+  try {
+    ;({ stdout: statusOut } = await execFileAsync(
+      'git',
+      ['-C', projectPath, 'status', '--porcelain=v1', '--', path],
+      GIT_EXEC_OPTS,
+    ))
+  } catch {
+    return null
+  }
+  if (statusOut.trim().length === 0) return null // no current change for this path
+
+  if (statusOut.startsWith('??')) {
+    const entry = await readUntrackedEntry(projectPath, path)
+    if (entry.binary) return { binary: true, lines: [] }
+    if (entry.addedLines === null) return null // vanished since the status read
+    const content = await readFile(join(projectPath, path), 'utf8')
+    const rawLines = content.length === 0 ? [] : content.split('\n')
+    if (content.endsWith('\n')) rawLines.pop()
+    return { binary: false, lines: rawLines.map((text) => ({ type: 'add', text })) }
+  }
+
+  let diffOut: string
+  try {
+    ;({ stdout: diffOut } = await execFileAsync(
+      'git',
+      ['-C', projectPath, 'diff', '--', path],
+      GIT_EXEC_OPTS,
+    ))
+  } catch {
+    return { binary: false, lines: [] }
+  }
+  return parseUnifiedDiff(diffOut)
 }
 
 export class SessionManager {
@@ -506,13 +700,20 @@ export class SessionManager {
     this.callbacks.onQueueChanged(projectId)
   }
 
+  /** The project's hosted entry, or undefined when no session is live for it
+   *  (the Diff tab, and anything else that must confirm liveness rather than
+   *  trust the renderer's own belief, calls this). */
+  liveEntryForProject(projectId: string): HostedEntry | undefined {
+    return [...this.hosted.values()].find((e) => e.row.projectId === projectId)
+  }
+
   /**
    * Delivers the front-of-queue task when the project's session is live and
    * idle (turn finished, nothing blocking on the developer). No-op otherwise,
    * so the queue simply waits for the current turn or a decision to clear.
    */
   private maybeDrainQueue(projectId: string): void {
-    const entry = [...this.hosted.values()].find((e) => e.row.projectId === projectId)
+    const entry = this.liveEntryForProject(projectId)
     if (!entry || entry.session.currentStatus !== 'done') return
     const next = this.repos.taskQueue.takeNext(projectId)
     if (!next) return
