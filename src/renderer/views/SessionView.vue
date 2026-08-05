@@ -1673,10 +1673,15 @@ const {
   line-height: 15px;
 }
 
+/* 10px, not 12px. The name and path both truncate, so the row's true floor is its
+   unshrinkable right-hand group: two pills, the transcript glyph, End, the gear
+   and the CLEAN/RAW segments. At the window's 1080px minimum that group overran
+   the pane by 15px, and eight gaps at 2px less than before is more than enough to
+   pay for it without removing a control or narrowing the label voice. */
 .head-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .h-dot {

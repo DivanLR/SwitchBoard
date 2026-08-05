@@ -169,11 +169,12 @@ Real artefacts available to future work:
 - `specs/002-tests-qa-section/` for the verification surface.
 - `docs/security-review.md`, `docs/verification-research.md`, and
   `docs/screenshot.png`.
-- A test suite of 487 passing unit tests across 52 files (2 skipped), plus 162
+- A test suite of 500 passing unit tests across 54 files (2 skipped), plus 166
   Playwright end-to-end tests that run against the mock session host in
   `tests/e2e/mock-host.ts` rather than against live sessions. A separate
   `npm run test:real` suite is the only one that exercises the real IPC bridge.
-  These counts are a snapshot; treat the suites as the authority, not the figures.
+  These counts are a snapshot, measured after the Diff tab merged on 2026-08-05;
+  treat the suites as the authority, not the figures.
 
 Absences that future work must not fabricate: there are no testimonials, no
 user research, no adoption figures, no performance benchmarks, and no published
@@ -204,6 +205,6 @@ changes without focus moving.
 
 This records the target, not conformance. Nothing has been audited against WCAG
 2.2 AA, and no conformance claim may be made or implied on the strength of this
-line. Accessibility attributes currently appear in 10 of 17 renderer components,
-up from 5, so surfaces are expected to fall short until they are revisited and
-measured.
+line. Accessibility attributes currently appear in 11 of 18 renderer components
+and views, up from 5, counted after the Diff tab merged on 2026-08-05. Surfaces
+are expected to fall short until they are revisited and measured.
