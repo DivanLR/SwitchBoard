@@ -53,6 +53,7 @@ function setup() {
     onEvalsChanged: () => {},
     onVerifyChanged: () => {},
     onApiRequests: () => {},
+    onApiChanged: () => {},
     onProjectCommands: () => {},
     gate: (async () => ({ behavior: 'allow', updatedInput: {} })) as never,
   })
