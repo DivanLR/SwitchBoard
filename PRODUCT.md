@@ -50,9 +50,25 @@ reason about it, or answer it on the developer's behalf.
 
 - Windows desktop. Requires an authenticated Claude Code installation and Node
   22.5 or newer (`package.json` engines).
-- Exactly one session per project. This is a deliberate product boundary, not a
-  pending question: parallel sessions within a single project were considered and
-  decided against, so future work should not treat the limit as a gap to close.
+- A project may run as many sessions as the developer starts. They appear as
+  subsession rows inside the project's own row in the sidebar, and one of them is
+  focused at a time: the focused session is what the centre pane, the composer and
+  the header show, and clicking another row moves the focus.
+
+  This reverses the previous boundary, and the reversal is recorded rather than
+  quietly applied. Until 2026-08-05 this section read "exactly one session per
+  project", described that as a deliberate decision rather than a pending question,
+  and told future work not to treat the limit as a gap to close. The owner directed
+  the change on that date. Anything reading the old rule as still binding is reading
+  a superseded document.
+
+  Two consequences are open rather than settled, and should not be mistaken for
+  finished thinking. There is no ceiling on the number of concurrent sessions: each
+  one is a CLI child process and each bypass session is a Docker container, so a
+  ceiling is a product decision nobody has taken yet, and the code deliberately does
+  not invent one. And retention still speaks of "the current and previous session per
+  project", which was unambiguous when a project had one at a time; with several
+  running, what that phrase should keep is undecided.
 - Closing the window hides the application to the system tray and sessions keep
   running, with notifications and the inbox still live. An explicit quit warns
   when sessions are mid-task, then ends them, and their conversation context
@@ -80,9 +96,19 @@ Confirmed functionality:
 - A central inbox holding every blocking decision, meaning tool permission
   requests and plan approvals. Questions from a session are deliberately not in
   the inbox; they render in the session stream and drive the "needs you" status.
+- A session type chosen per project when the project is added, and changeable
+  afterwards in Settings: default, auto, accept edits, plan first, or bypass. It
+  is one value because the underlying SDK takes one permission mode, so the
+  earlier pair of independent bypass and plan toggles could describe a session
+  that could not be spawned. Which one is in force decides how much of the
+  inbox's work reaches the inbox at all: under default every tool call arrives,
+  under auto the CLI's own classifier decides first, and under bypass nothing
+  arrives because nothing is gated. Projects that predate the setting were
+  backfilled to auto, which is what every session already ran as.
 - Risk classification as low, medium, or high, by first-match rules the
   developer edits. Anything no rule matches is treated as high risk. High-risk
-  approvals require an explicit confirmation step.
+  approvals require an explicit confirmation step. This applies to the requests
+  that reach the inbox, so the session type above governs how much it sees.
 - Standing "always allow" rules scoped to a project, by command prefix, path
   glob, exact input, or tool. There are no global rules, and high-risk actions
   cannot become standing rules.
@@ -148,13 +174,23 @@ settled position.
 - The shipped application is the visual authority. The original mockup exports
   that seeded the design are historical evidence, not a specification, and the
   application has deliberately moved past them in places.
-- **The terminal register is binding**, pinned by the developer on 2026-08-05:
-  monospace for machine-read text, square corners, tabular figures, hairline
-  rules, and state that reads without relying on colour. A full replacement of
-  the visual world was considered on the same day and set aside in favour of this
-  commitment, so later work refines inside this register rather than proposing a
-  different one. DESIGN.md holds the detail; this line records only that the
-  register itself is a commitment and not a passing preference.
+- **No visual register is binding.** The terminal register (monospace for
+  machine-read text, square corners, tabular figures, hairline rules, state
+  readable without colour) was pinned on 2026-08-05 and released in full by the
+  developer on the same day, who directed a complete redesign and chose to
+  release every part of it. Nothing in the shipped look is therefore protected
+  by product truth: monospace, square corners and hairline rules are all
+  replaceable, and the incumbent world is evidence rather than specification.
+  A future pass may pin a register again, and that pin belongs here rather than
+  only in DESIGN.md.
+- One requirement the release does not reach: state must remain readable
+  without relying on colour alone. That constraint outlives the register because
+  it is carried by the WCAG 2.2 AA target recorded under Accessibility &
+  Inclusion, which the developer separately confirmed as current on 2026-08-05.
+  Success Criterion 1.4.1 Use of Colour sits at level A inside that target, so
+  releasing the aesthetic commitment did not release the accessibility one.
+  Changing this needs an explicit change to the accessibility target, not to
+  this section.
 - Voice: action first, numbered when there are steps, no preamble and no
   closing pleasantries. This applies both to the application's own copy and to
   the sessions it hosts.
@@ -169,12 +205,12 @@ Real artefacts available to future work:
 - `specs/002-tests-qa-section/` for the verification surface.
 - `docs/security-review.md`, `docs/verification-research.md`, and
   `docs/screenshot.png`.
-- A test suite of 500 passing unit tests across 54 files (2 skipped), plus 166
+- A test suite of 512 passing unit tests across 56 files (2 skipped), plus 181
   Playwright end-to-end tests that run against the mock session host in
   `tests/e2e/mock-host.ts` rather than against live sessions. A separate
-  `npm run test:real` suite is the only one that exercises the real IPC bridge.
-  These counts are a snapshot, measured after the Diff tab merged on 2026-08-05;
-  treat the suites as the authority, not the figures.
+  `npm run test:real` suite of 9 tests is the only one that exercises the real IPC
+  bridge. These counts are a snapshot, re-measured for the 0.15.0 release on
+  2026-08-05; treat the suites as the authority, not the figures.
 
 Absences that future work must not fabricate: there are no testimonials, no
 user research, no adoption figures, no performance benchmarks, and no published

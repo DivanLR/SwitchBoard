@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { openDatabase, type AppDatabase } from '@main/store/db'
 import { createRepositories, newId, nowIso, type Repositories } from '@main/store/repositories'
 import { HostedSession, resolvePermissionMode } from '@main/sessions/session'
+import { DEFAULT_SESSION_MODE, SESSION_MODES } from '@shared/domain'
 import type { Session } from '@shared/domain'
 
 function setup(): { repos: Repositories; projectId: string; db: AppDatabase } {
@@ -44,6 +45,9 @@ function hosted(onPlanModeChange: (inPlanMode: boolean) => void): HostedSession 
     projectPath: 'C:\\a',
     claudeExecutablePath: 'C:\\claude.exe',
     input: 'hello',
+    // The fixture is cast, so this is not enforced by the compiler here: a real
+    // session always carries a resolved mode, and leaving plan mode returns to it.
+    mode: 'auto',
     onPlanModeChange,
     sink: { append: () => ({ id: 'e1' }) } as never,
     gate: (async () => ({ behavior: 'allow', updatedInput: {} })) as never,
@@ -94,19 +98,37 @@ describe('the plan-mode flag a session starts with', () => {
 })
 
 describe('the mode a session spawns with', () => {
-  it('is auto for an ordinary session, so a normal turn does not stop to ask', () => {
-    expect(resolvePermissionMode({})).toBe('auto')
-    expect(resolvePermissionMode({ bypassPermissions: false, planMode: false })).toBe('auto')
+  // The pair of booleans this replaces could ask for bypass AND plan at once,
+  // which is a session the SDK cannot spawn, so the manager had to drop one
+  // silently. One value cannot express the contradiction, and the old test for
+  // "bypass wins over plan" has nothing left to assert.
+  it('passes every app mode through under the SDK name for it', () => {
+    expect(resolvePermissionMode('default')).toBe('default')
+    expect(resolvePermissionMode('auto')).toBe('auto')
+    expect(resolvePermissionMode('acceptEdits')).toBe('acceptEdits')
+    expect(resolvePermissionMode('plan')).toBe('plan')
   })
 
-  it('is plan when planning was asked for', () => {
-    expect(resolvePermissionMode({ planMode: true })).toBe('plan')
+  it('renames only bypass, which the SDK spells in full', () => {
+    expect(resolvePermissionMode('bypass')).toBe('bypassPermissions')
   })
 
-  it('lets bypass win over plan, because one enum cannot carry both', () => {
-    expect(resolvePermissionMode({ bypassPermissions: true, planMode: true })).toBe(
-      'bypassPermissions',
-    )
+  it('covers every mode the app offers, so a new one cannot be added silently', () => {
+    for (const { value } of SESSION_MODES) {
+      expect(resolvePermissionMode(value)).toBeTruthy()
+    }
+    expect(SESSION_MODES.map((m) => m.value)).toEqual([
+      'default',
+      'auto',
+      'acceptEdits',
+      'plan',
+      'bypass',
+    ])
+  })
+
+  it('keeps auto as the app default, so migration 022 changed no behaviour', () => {
+    expect(DEFAULT_SESSION_MODE).toBe('auto')
+    expect(resolvePermissionMode(DEFAULT_SESSION_MODE)).toBe('auto')
   })
 })
 
@@ -123,8 +145,9 @@ describe('the live plan-mode switch', () => {
 
     session.setPlanMode(true)
     session.setPlanMode(false)
-    // Back to 'auto', not 'default': one visit to planning must not turn asking
-    // back on for the rest of the session.
+    // Back to the mode the session was started in, which is 'auto' for this
+    // fixture — never to 'default'. One visit to planning must not turn asking
+    // back on for the rest of the session, and must not change what it may do.
     expect(asked).toEqual(['plan', 'auto'])
   })
 

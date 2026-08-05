@@ -397,9 +397,12 @@ const dbProject = computed(() => projects.dbProject)
     var(--bg);
 }
 
-/* Ink on paper is subtractive, so the same creases score darker in the light (paper) theme. */
+/* Same crease, matched by eye rather than by alpha: a dark hairline on paper
+   carries about twice the step a pale one carries on carbon, so 0.05 turned the
+   world's ground into its foreground on the one pane with the most empty sheet.
+   See the matching note on html.sb-light body in styles.css. */
 html.sb-light .main {
-  --crease: rgba(10, 10, 10, 0.05);
+  --crease: rgba(10, 10, 10, 0.028);
 }
 
 /* Drag handle on the inbox's left edge (design seam sits on the inbox border). */

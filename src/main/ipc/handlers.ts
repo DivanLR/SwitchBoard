@@ -3,7 +3,7 @@
 // error codes survive Electron's error serialisation. Push channels batch
 // stream events at >= 30 Hz flushes (SC-007).
 import { ipcMain, type BrowserWindow } from 'electron'
-import type { SessionEvent } from '@shared/domain'
+import type { Session, SessionEvent } from '@shared/domain'
 import { canPassEval } from '@shared/domain'
 import type {
   Counters,
@@ -156,19 +156,27 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
   const { repos, manager, broker, dbProjectId } = deps
 
   const projectList = (): ProjectListItem[] =>
-    repos.projects.listActive().map((project) => ({
-      ...project,
-      session:
-        manager
-          .liveSessionIds()
-          .map((id) => manager.liveSessionRow(id))
-          .find((s) => s && s.projectId === project.id) ??
-        repos.sessions.latestForProject(project.id) ??
-        null,
-      gitNotice: gitNotice(project.path),
-      drafts: repos.drafts.listForProject(project.id),
-      reserved: project.id === dbProjectId,
-    }))
+    repos.projects.listActive().map((project) => {
+      // Live rows come from the manager rather than the database because only it
+      // holds the in-flight status; liveSessionIds is insertion-ordered, which is
+      // start order. A project running nothing falls back to its most recent ended
+      // session, which is exactly what the sidebar showed when a project could only
+      // ever have one.
+      const live = manager
+        .liveSessionIds()
+        .map((id) => manager.liveSessionRow(id))
+        .filter((s): s is Session => !!s && s.projectId === project.id)
+      const latest = live.length === 0 ? repos.sessions.latestForProject(project.id) : undefined
+      const sessions = live.length > 0 ? live : latest ? [latest] : []
+      return {
+        ...project,
+        session: sessions[0] ?? null,
+        sessions,
+        gitNotice: gitNotice(project.path),
+        drafts: repos.drafts.listForProject(project.id),
+        reserved: project.id === dbProjectId,
+      }
+    })
 
   /**
    * Puts a rule change into force, then reports the new list.
@@ -192,7 +200,14 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         path: req.path,
         name: req.name,
         source: suggested ? 'suggested' : 'manual',
+        defaultSessionMode: req.defaultSessionMode,
       })
+    },
+    'projects.setSessionMode': (req) => {
+      if (!repos.projects.byId(req.projectId)) {
+        throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
+      }
+      repos.projects.setSessionMode(req.projectId, req.mode)
     },
     'projects.rename': (req) => {
       if (!repos.projects.byId(req.projectId)) {
@@ -224,13 +239,9 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       repos.projects.archive(req.projectId)
     },
     'sessions.start': (req) =>
-      manager.startSession(
-        req.projectId,
-        req.resume ?? false,
-        req.bypassPermissions ?? false,
-        req.planMode ?? false,
-        req.carryTranscriptFrom,
-      ),
+      // No mode default here: undefined has to reach the manager as "unspecified"
+      // so it can fall back to the project's own choice.
+      manager.startSession(req.projectId, req.resume ?? false, req.mode, req.carryTranscriptFrom),
     'transcripts.save': (req) => manager.saveTranscript(req.sessionId),
     'transcripts.list': () => manager.listTranscripts(),
     'sessions.setPlanMode': (req) => {

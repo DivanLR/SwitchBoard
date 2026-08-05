@@ -21,6 +21,7 @@ import type {
   QueuedTask,
   Session,
   SessionEvent,
+  SessionMode,
   SessionStatus,
   TranscriptSummary,
   VerifyReport,
@@ -406,10 +407,9 @@ export async function readFileDiff(projectPath: string, path: string): Promise<F
 
 export class SessionManager {
   private hosted = new Map<string, HostedEntry>()
-  /** Projects with a start in flight. startSession now awaits before inserting
-   *  its row, so the DB's "already active" check alone no longer closes the
-   *  window — two concurrent starts would both pass it and run two sessions. */
-  private starting = new Set<string>()
+  /* The `starting` reservation that used to live here is gone with the
+     one-session-per-project limit: it existed only to stop two concurrent starts
+     both passing the "already active" check, and two sessions is now the intent. */
   private classifier: NoiseClassifier | null = null
   /** Pending debounced transcript writes, keyed by session id. */
   private transcriptTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -536,49 +536,44 @@ export class SessionManager {
   }
 
   /**
-   * Reserves the project for the whole start, so a second concurrent start can
-   * never slip through the "already active" check while the first is still
-   * awaiting (the DB row only appears at the very end). Guarding the wrapper
-   * rather than the awaited call keeps this correct if the body later grows
-   * another await.
+   * A project may run as many sessions as the developer starts. The per-project
+   * reservation that used to wrap this is gone with the limit it enforced: it
+   * existed so a second concurrent start could not slip past the "already active"
+   * check while the first was still awaiting, and two concurrent starts are now the
+   * point rather than the race. Nothing else depended on it — the sessions table
+   * has always been keyed by session id, not by project.
+   *
+   * Deliberately uncapped. Each session is a CLI child process, and a bypass session
+   * is a Docker container, so a developer who starts twenty will feel it; a ceiling
+   * is a product decision rather than a safety one, and inventing a number here
+   * would be guessing at where it belongs.
    */
   async startSession(
     projectId: string,
     resume = false,
-    bypassPermissions = false,
-    planMode = false,
+    /** Omitted means "use the project's own defaultSessionMode", the normal path. */
+    mode?: SessionMode,
     carryTranscriptFrom?: string,
   ): Promise<Session> {
-    if (this.starting.has(projectId)) {
-      throw { code: 'ALREADY_ACTIVE', message: 'The project already has an active session' } satisfies IpcError
-    }
-    this.starting.add(projectId)
-    try {
-      return await this.launchSession(
-        projectId,
-        resume,
-        bypassPermissions,
-        planMode,
-        carryTranscriptFrom,
-      )
-    } finally {
-      this.starting.delete(projectId)
-    }
+    return this.launchSession(projectId, resume, mode, carryTranscriptFrom)
   }
 
   private async launchSession(
     projectId: string,
     resume: boolean,
-    bypassPermissions: boolean,
-    planMode: boolean,
+    requestedMode: SessionMode | undefined,
     carryTranscriptFrom?: string,
   ): Promise<Session> {
     const project = this.repos.projects.byId(projectId)
     if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
-    const active = this.repos.sessions.activeForProject(projectId)
-    if (active) {
-      throw { code: 'ALREADY_ACTIVE', message: 'The project already has an active session' } satisfies IpcError
-    }
+    // The project owns the mode; a request may override it for one session (the
+    // restart controls do). Resolved once, here, so everything below reads one
+    // value rather than re-deciding.
+    const mode = requestedMode ?? project.defaultSessionMode
+    const bypassPermissions = mode === 'bypass'
+    // No "already active" refusal: a project runs as many sessions as it is asked to.
+    // resume is the one thing that still reads the project's history, and it still
+    // means "the last session that ended here", not "the only one".
     // Bypass sessions run containerised (docker-sandbox): fail here, before a
     // row exists, when Docker is down or not logged in. First call builds the
     // image for this project's stack, which can take minutes (tens of them for
@@ -620,13 +615,14 @@ export class SessionManager {
       // ends it is the only record of whether the transcript went to the host or
       // to this project's container volume — which resume has to match.
       bypassPermissions,
-      // The two are one SDK setting, so they cannot both apply. Bypass wins, and
-      // silently: a bypass session never reaches the permission gate at all, so a
-      // plan under it would raise no approval and the developer would be waiting
-      // on a review that could never arrive. The UI keeps them mutually
-      // exclusive; this is the guard for a request that arrives with both.
-      planMode: bypassPermissions ? false : planMode,
-      inPlanMode: bypassPermissions ? false : planMode,
+      // Both are projections of the one resolved mode now, not inputs of their
+      // own, so the pair can no longer describe a session the SDK cannot spawn:
+      // bypass-and-plan-at-once used to be reachable and had to be silently
+      // resolved here. They stay persisted because each answers a question the
+      // mode alone does not — where the transcript lives, and how the session
+      // began — and because the header pill and the restart toggle read them.
+      planMode: mode === 'plan',
+      inPlanMode: mode === 'plan',
     }
     this.repos.sessions.insert(row)
 
@@ -723,8 +719,7 @@ export class SessionManager {
         entry.row.currentMode = mode
         this.pushStatus(entry)
       },
-      bypassPermissions,
-      planMode: row.planMode,
+      mode,
       // What the CLI itself reports, not what was asked for: a CLI too old to
       // honour 'plan' would otherwise leave the header claiming a restriction
       // that is not in force.

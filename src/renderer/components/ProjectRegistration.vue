@@ -6,6 +6,7 @@
 import { useTemplateRef, computed, onMounted, ref } from 'vue'
 import { useModal } from '@renderer/composables/useModal'
 import { isIpcError } from '@shared/ipc-types'
+import { DEFAULT_SESSION_MODE, SESSION_MODES, type SessionMode } from '@shared/domain'
 import { useProjectsStore } from '@renderer/stores/projects'
 
 const projects = useProjectsStore()
@@ -16,21 +17,14 @@ const dialogEl = useTemplateRef<HTMLElement>('dialog')
 useModal(dialogEl, () => emit('close'))
 
 const folder = ref('')
-const bypass = ref(false)
-const plan = ref(false)
 
-// One SDK setting, two ends of it: bypass approves everything, plan approves
-// nothing until a plan is reviewed. Selecting either clears the other, because a
-// plan under bypass would raise no approval at all and read as simply not working.
-function toggleBypass(): void {
-  bypass.value = !bypass.value
-  if (bypass.value) plan.value = false
-}
-
-function togglePlan(): void {
-  plan.value = !plan.value
-  if (plan.value) bypass.value = false
-}
+// One control for one SDK setting. This was a pair of switches (bypass, plan)
+// that each had to clear the other, because a plan under bypass raises no
+// approval at all and reads as simply not working. A single choice cannot
+// express that contradiction, and it is now the project's own setting rather
+// than this dialogue's: it persists and applies to every session the project
+// starts, changeable later in Settings.
+const mode = ref<SessionMode>(DEFAULT_SESSION_MODE)
 const error = ref<string | null>(null)
 const busy = ref(false)
 
@@ -51,9 +45,12 @@ async function startSession(): Promise<void> {
   error.value = null
   busy.value = true
   try {
-    const project = await projects.register(path)
+    // The mode is registered ON the project, so the start call names nothing: it
+    // reads the project's own setting. That way the session the dialogue starts
+    // and every session after it agree by construction.
+    const project = await projects.register(path, undefined, mode.value)
     projects.select(project.id)
-    await projects.startSession(project.id, false, bypass.value, plan.value)
+    await projects.startSession(project.id)
     emit('close')
   } catch (e) {
     if (isIpcError(e) && e.code === 'DUPLICATE') {
@@ -64,9 +61,14 @@ async function startSession(): Promise<void> {
       const existing = projects.items.find((p) => norm(p.path) === norm(path))
       if (existing) {
         projects.select(existing.id)
+        // Pointing the dialogue at a registered folder is still a mode choice, so
+        // it lands on the project before anything starts.
+        if (existing.defaultSessionMode !== mode.value) {
+          await projects.setSessionMode(existing.id, mode.value)
+        }
         if (!existing.session || existing.session.endedAt) {
           try {
-            await projects.startSession(existing.id, false, bypass.value, plan.value)
+            await projects.startSession(existing.id)
           } catch (startError) {
             // Starting can fail on its own terms (a bypass session needs Docker
             // running). Report it here rather than letting it escape this catch
@@ -136,50 +138,39 @@ async function startSession(): Promise<void> {
         </div>
       </div>
 
-      <!-- Plan mode adds a restriction rather than removing one, so it carries no
-           warning and its switch is not the danger variant. -->
-      <div class="bypass-row">
-        <div class="bypass-text">
-          <div class="bypass-label">Plan first</div>
-          <div class="bypass-desc">
-            Reads and researches without changing anything, then proposes a plan that arrives in
-            your inbox to approve or deny
-          </div>
-        </div>
-        <button
-          class="switch"
-          :class="{ on: plan }"
-          data-testid="plan-toggle"
-          role="switch"
-          :aria-checked="plan"
-          @click="togglePlan"
+      <!-- One choice, five values, because the SDK takes one permission mode. Native
+           radios rather than buttons: arrow-key navigation, a single tab stop and the
+           group semantics all come for free. The input IS the mark — appearance: none
+           and styled square like everything else in this world — so there is no second
+           element mirroring its state, and what a test clicks is what a user clicks. -->
+      <div class="section-label mono">SESSION TYPE</div>
+      <div class="mode-list">
+        <label
+          v-for="m in SESSION_MODES"
+          :key="m.value"
+          class="mode-row"
+          :class="{ on: mode === m.value, danger: m.value === 'bypass' }"
         >
-          <span class="knob"></span>
-        </button>
+          <input
+            v-model="mode"
+            class="mode-input"
+            type="radio"
+            name="session-mode"
+            :value="m.value"
+            :data-testid="`session-mode-${m.value}`"
+          />
+          <span class="bypass-text">
+            <span class="bypass-label">{{ m.label }}</span>
+            <span class="bypass-desc">{{ m.detail }}</span>
+          </span>
+        </label>
       </div>
-
-      <div class="bypass-row">
-        <div class="bypass-text">
-          <div class="bypass-label">Bypass permissions</div>
-          <div class="bypass-desc">
-            Skips every approval — runs commands, edits, and deletes without asking
-            (<span class="mono bypass-code">--dangerously-skip-permissions</span>)
-          </div>
-        </div>
-        <button
-          class="switch danger"
-          :class="{ on: bypass }"
-          data-testid="bypass-toggle"
-          role="switch"
-          :aria-checked="bypass"
-          @click="toggleBypass"
-        >
-          <span class="knob"></span>
-        </button>
-      </div>
-      <div v-if="bypass" class="bypass-warn" data-testid="bypass-warning">
+      <div v-if="mode === 'bypass'" class="bypass-warn" data-testid="bypass-warning">
         ⚠ Nothing will ask for approval — only use this in throwaway or fully trusted folders.
       </div>
+      <p class="mode-note">
+        Saved on the project: every session it starts uses this, and you can change it in Settings.
+      </p>
 
       <template v-if="projects.suggestions.length > 0">
         <div class="section-label mono">SUGGESTED · Claude Code has been used here</div>
@@ -271,15 +262,9 @@ async function startSession(): Promise<void> {
   margin: 18px 0 6px;
 }
 
-/* Design's toggle track/knob is a rounded rect (var(--rc)), not a pill —
-   scoped here so it only reshapes the bypass switch this dialog renders. */
-.switch {
-  border-radius: var(--rc);
-}
-
-.switch .knob {
-  border-radius: var(--rc);
-}
+/* The scoped .switch / .knob radius override that used to live here is gone with
+   the two switches it reshaped: this dialogue renders no switch now, and the shared
+   ones in styles.css already take var(--rp). */
 
 .folder-input {
   width: 100%;
@@ -343,20 +328,95 @@ async function startSession(): Promise<void> {
   color: var(--amber);
 }
 
-.bypass-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 12px;
-  padding: 12px 14px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-card);
-  border-radius: var(--rc);
-}
-
+/* The two switch rows this dressed are gone; the label and description classes
+   below survive because the mode rows carry the same two-line shape. They are
+   spans inside a mode row now, so the column has to be declared here. */
 .bypass-text {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The five session types. Rows sit flush in one stack rather than as five separate
+   cards: they are one choice, and five bordered boxes read as five decisions. */
+.mode-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-card);
+  border-radius: var(--rc);
+  background: var(--bg-card);
+  overflow: hidden;
+}
+
+.mode-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+}
+
+.mode-row + .mode-row {
+  border-top: 1px solid var(--border-soft);
+}
+
+.mode-row:hover {
+  background: var(--bg-hover);
+}
+
+.mode-row.on {
+  background: var(--bg-active);
+}
+
+/* The real radio, drawn rather than replaced: appearance: none strips the platform
+   dot and the box below is square like every other mark in this world. Keeping the
+   input as the visible control means the accessible name, the arrow keys and the
+   focus ring belong to the thing being clicked, with no second element to keep in
+   sync. */
+.mode-input {
+  appearance: none;
+  flex-shrink: 0;
+  width: 11px;
+  height: 11px;
+  margin: 4px 0 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--rc);
+  background: transparent;
+  cursor: pointer;
+}
+
+/* Selection reads as a filled centre, so it survives without colour: the inner
+   ring is the row's own surface and the fill is the accent behind it. */
+.mode-input:checked {
+  border-color: var(--green);
+  box-shadow:
+    inset 0 0 0 2px var(--bg-card),
+    inset 0 0 0 11px var(--green);
+}
+
+.mode-row.danger .mode-input:checked {
+  border-color: var(--red);
+  box-shadow:
+    inset 0 0 0 2px var(--bg-card),
+    inset 0 0 0 11px var(--red);
+}
+
+/* On the row, not the 11px box: a focus ring that size is easy to miss. */
+.mode-row:has(.mode-input:focus-visible) {
+  outline: 1px solid var(--green);
+  outline-offset: -1px;
+}
+
+.mode-row.on .bypass-label {
+  color: var(--text-bright);
+}
+
+.mode-note {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-faint);
 }
 
 .bypass-label {
@@ -370,10 +430,6 @@ async function startSession(): Promise<void> {
   color: var(--text-tab);
   margin-top: 2px;
   line-height: 1.5;
-}
-
-.bypass-code {
-  font-size: 10.5px;
 }
 
 .bypass-warn {

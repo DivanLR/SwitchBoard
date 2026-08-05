@@ -23,6 +23,7 @@ import type {
   RuleKind,
   Session,
   SessionEvent,
+  SessionMode,
   Settings,
   SpecDetail,
   SpecKitState,
@@ -167,7 +168,24 @@ export interface ProjectSuggestion {
 
 /** Project decorated with its live session for the sidebar (FR-003/004/005). */
 export interface ProjectListItem extends Project {
+  /**
+   * The FOCUSED session: the one the centre pane, the composer and the header are
+   * showing. It is `sessions[0]` as the main process builds it, and the renderer
+   * repoints it when the developer picks a different subsession — which is why it
+   * stays a single field rather than an index. Null only for a project that has
+   * never had a session.
+   */
   session: Session | null
+  /**
+   * Every session this project currently has running, in the order they were
+   * started, oldest first — the same order the inbox uses within a group. A project
+   * with none running carries its most recent ended session instead, so the sidebar
+   * still shows what last happened there.
+   *
+   * A project used to be limited to one session at a time. That limit is gone at the
+   * owner's direction; see PRODUCT.md's Operating Context.
+   */
+  sessions: Session[]
   /** Why git will not work in this project's bypass container (no .git directory
    *  at the root), or null when it will — the header's "No git" pill. */
   gitNotice: string | null
@@ -195,7 +213,13 @@ export interface ProjectsSnapshot {
 export interface InvokeMap {
   'projects.list': { req: void; res: ProjectsSnapshot }
   'projects.suggestions': { req: void; res: ProjectSuggestion[] }
-  'projects.register': { req: { path: string; name?: string }; res: Project }
+  'projects.register': {
+    req: { path: string; name?: string; defaultSessionMode?: SessionMode }
+    res: Project
+  }
+  /** Change an existing project's session mode. Takes effect on its next start,
+   *  never on a session already running: the SDK mode is fixed at spawn. */
+  'projects.setSessionMode': { req: { projectId: string; mode: SessionMode }; res: void }
   'projects.rename': { req: { projectId: string; name: string }; res: void }
   /** Point a project at a different folder; keeps id, sessions, and history. */
   'projects.repoint': { req: { projectId: string; path: string }; res: Project }
@@ -211,11 +235,16 @@ export interface InvokeMap {
     req: {
       projectId: string
       resume?: boolean
-      bypassPermissions?: boolean
-      /** Start read-only: the session researches, then proposes a plan that
-       *  arrives in the inbox for approval. Ignored when bypassPermissions is
-       *  set, which approves everything and so has nothing to plan against. */
-      planMode?: boolean
+      /**
+       * Override the project's own `defaultSessionMode` for this one session.
+       * Omit it and the project's choice applies, which is the normal path: the
+       * mode is a per-project setting, and only the restart controls send this.
+       *
+       * One value, not the two booleans it replaces, because the SDK takes a
+       * single permissionMode — `bypass` plus `plan` was a state no session
+       * could actually spawn in, and the manager had to silently drop one.
+       */
+      mode?: SessionMode
       /**
        * Seed the new session with a previous session's transcript: its digest
        * goes into the system prompt and the full file is named there for the

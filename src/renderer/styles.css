@@ -7,22 +7,28 @@
    authored per token, not boosted afterwards. Removing it also stops the filter
    creating a containing block that broke fixed-position overlays. */
 
-/* Light theme: the same sheet, deployed on sheet white instead of carbon
-   fibre. Text darkens to graphite, and the three accents darken so they hold
-   contrast on paper; nothing else changes, because the light and dark themes
-   are the same folded sheet under different light. */
+/* Light theme: the same sheet, deployed on paper instead of carbon fibre. The
+   ground is warm paper and the ink is cool graphite, the exact inversion of the
+   dark sheet's warm ink on cool carbon: on both, the mark and the material are
+   never the same temperature. The neutral #F7F7F7 ground this replaces sat
+   between warm panels and warm ink, and that agreement is what made paper read
+   as dirty rather than as paper. The three accents darken so they hold contrast;
+   nothing else changes. */
 html.sb-light {
-  --bg: #F7F7F7;
+  --bg: #F6F4EF;
   /* Paper is opaque. The margin is a sheet laid on the sheet, not glass. */
-  --bg-panel: #F1F0EC;
-  --bg-sticky: #EDECE7;
-  --bg-card: #FBFBFA;
-  --bg-card-alt: #F8F7F4;
-  --bg-code: #F4F3F0;
+  --bg-panel: #EFEDE6;
+  --bg-sticky: #EAE7DF;
+  --bg-card: #FCFBF7;
+  --bg-card-alt: #F9F7F2;
+  --bg-code: #F1EFE8;
   --bg-hover: rgba(10,10,10, 0.05);
-  /* --bg-active and --green-glow are NOT overridden here: both derive from
-     var(--green) in :root, and --green is theme-scoped, so they follow on their
-     own. Two fewer values to keep in sync. */
+  /* --bg-active DOES need overriding on paper, and the note that said otherwise
+     had the wrong reason: it mixes mountain gray, not --green. Over a paper
+     panel that landed at 234 while --bg-hover lands at 229, so the selected lane
+     read as the weaker of the two washes. A mark on paper subtracts, so the
+     selected wash is graphite and sits below hover where it belongs. */
+  --bg-active: color-mix(in srgb, #1A1C20 9%, transparent);
   --bg-seg: rgba(10,10,10, 0.09);
   --bg-chip: rgba(10,10,10, 0.05);
   --border: rgba(10,10,10, 0.13);
@@ -33,49 +39,61 @@ html.sb-light {
   --border-strong: rgba(10,10,10, 0.26);
   --border-seg: rgba(10,10,10, 0.15);
   --border-hist: rgba(10,10,10, 0.09);
-  /* Graphite text on paper. */
-  --text-bright: #0A0A0A;
-  --text-strong: #1C1B19;
-  --text-title: #2A2926;
-  --text: #1C1B19;
-  --text-body: #3B3934;
-  --text-name: #262521;
-  --text-prompt: #33322E;
-  /* Same measurement applied on paper: meta and ghost were 4.4 and 4.2. */
-  --text-mid: #55534D;
-  --text-meta: #5E5C55;
-  --text-tab: #605E57;
-  --text-noise: #666459;
-  --text-label: #666459;
-  --text-faint: #605E57;
-  --text-ghost: #605E57;
-  /* 5.49:1 on a --bg-hover card, 4.88:1 on a --bg-active row. See :root. */
-  --text-on-wash: #4E4C46;
+  /* Cool graphite on warm paper. The previous ramp was warm on both sides, so
+     ink and sheet read as one beige material; pencil on paper is the cooler of
+     the two. Same measurement discipline as the dark ramp: every tier below
+     carries real content, so every tier clears 4.5:1. */
+  --text-bright: #0B0C0E;
+  --text-strong: #1A1C20;
+  --text-title: #262A2F;
+  --text: #1A1C20;
+  --text-body: #34383E;
+  --text-name: #22262B;
+  --text-prompt: #2E3238;
+  /* 5.6:1 at the palest tier on the ground, 6.4:1 on a card. */
+  --text-mid: #4F545B;
+  --text-meta: #565B62;
+  --text-tab: #585D64;
+  --text-noise: #5D6269;
+  --text-label: #5D6269;
+  --text-faint: #585D64;
+  --text-ghost: #585D64;
+  /* 6.4:1 on a --bg-hover card, 6.0:1 on a --bg-active row. See :root. */
+  --text-on-wash: #494E55;
   /* Foil green on paper, measured on the sheet rather than derived from the dark
      value. 5.81:1, hue 148 — a shade clear of the 5.64:1 the gold held here. */
   --green: #1F6E44;
   --green-hover: #175A37;
   --green2: #1A6039;
-  --green-ink: #FBFAF6;
+  /* Paper does not glow. A green halo under a green button reads as a smudge on
+     a pale ground, so the action button is lifted by ink: offset and blur, the
+     same subtractive rule the crease follows. */
+  --green-glow: 0 6px 16px -8px rgba(26,28,32, 0.26), 0 1px 2px rgba(26,28,32, 0.13);
   --blue: #2C5F94;
   --amber: #2C5F94;
   --amber-hover: #234C77;
-  --amber-ink: #FBFCFE;
   --red: #A02A1B;
   --red-hover: #822116;
-  --red-ink: #FEF7F5;
-  --detail: #55534D;
+  /* One paper white on every filled control, not three. The warm, the cool and
+     the pink-tinted whites these replace disagreed on a surface whose whole job
+     is to be one sheet. 6.0:1 on foil green, 6.3:1 on valley blue, 7.1:1 on
+     red-pencil. */
+  --green-ink: #FCFBF7;
+  --amber-ink: #FCFBF7;
+  --red-ink: #FCFBF7;
+  --detail: #4F545B;
   /* Graphite steel, darkened for paper. */
   --teal: #3F5A6B;
   --purple: #5B4E77;
-  --surface-inset: #FBFBFA;
-  --surface-inset-line: #D9D7D0;
-  --surface-line: #D9D7D0;
-  --surface-raised: #F1F0EC;
-  --surface-hover: #EAE8E2;
-  --surface-hover-line: #D9D7D0;
-  --surface-sunken: #F4F3F0;
-  --bg-panel-2: #EFEEE9;
+  /* These mirror the grounds above tier for tier, so they move with them. */
+  --surface-inset: #FCFBF7;
+  --surface-inset-line: #DCD8CD;
+  --surface-line: #DCD8CD;
+  --surface-raised: #EFEDE6;
+  --surface-hover: #E8E5DC;
+  --surface-hover-line: #DCD8CD;
+  --surface-sunken: #F1EFE8;
+  --bg-panel-2: #EDEAE3;
   /* On paper the lip of light inverts: the sheet catches light on its top edge. */
   --elev: inset 0 1px 0 rgba(255,255,255,.7),0 1px 2px rgba(10,10,10,.09);
   /* A whisper, not a sheen. At .5 this read as a glossy 2000s gradient button,
@@ -90,7 +108,11 @@ html.sb-light {
   /* One tracking value for every spec label, replacing fourteen ad-hoc ones. */
   --track-label: 0.11em;
   --sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --scrim: rgba(233,231,225, 0.72);
+  /* A veil on paper subtracts too. The pale veil this replaces was the same tone
+     as the sheet it covered, so a pale dialogue floated on it with nothing
+     between them; 30% graphite seats the dialogue without borrowing dark mode's
+     blackout. */
+  --scrim: rgba(26,28,32, 0.30);
   --shadow-dlg: 0 28px 70px rgba(10,10,10, 0.2), 0 0 0 1px rgba(10,10,10, 0.06) inset;
   --shadow-dd: 0 14px 36px rgba(10,10,10, 0.17);
   --shadow-menu: 0 14px 36px rgba(10,10,10, 0.19);
@@ -308,15 +330,17 @@ body {
     #17181b;
 }
 
-/* The light theme's version of the same sheet: the creases score darker on paper
-   because the mark is subtractive there, and the ground is the sheet white the
-   world names. */
+/* The light theme's version of the same sheet. The crease is scored, not
+   printed: a dark hairline on a bright field carries roughly twice the step a
+   pale one carries on carbon, so at the old 0.045 the lattice stopped being the
+   ground and became the pattern. The alpha comes down until the whisper matches
+   the dark sheet's — same signature, same loudness, honest arithmetic. */
 html.sb-light body {
-  --crease: rgba(10, 10, 10, 0.045);
+  --crease: rgba(10, 10, 10, 0.026);
   background:
     repeating-linear-gradient(60deg, var(--crease) 0 1px, transparent 1px 84px),
     repeating-linear-gradient(-60deg, var(--crease) 0 1px, transparent 1px 84px),
-    #f7f7f7;
+    #f6f4ef;
 }
 
 /* A fold is a cut, so a sheet's corner is chamfered rather than rounded. Applied
@@ -395,6 +419,14 @@ a:hover {
   border-radius: var(--rp);
 }
 
+/* A wash has to be checked for DIRECTION per theme, not only for value: lightening
+   the thumb by 10% over paper moves it about one luminance unit, so the scrollbar
+   had no visible thumb on the light sheet at all. Ink, subtractive, like every other
+   light-theme wash in this file. */
+html.sb-light ::-webkit-scrollbar-thumb {
+  background: rgba(10, 10, 10, 0.15);
+}
+
 ::-webkit-scrollbar-track {
   background: transparent;
 }
@@ -452,7 +484,7 @@ button {
   box-shadow: var(--green-glow);
 }
 
-.btn-solid:hover {
+.btn-solid:hover:not(:disabled) {
   background: var(--green-hover);
 }
 
@@ -469,7 +501,7 @@ button {
   animation: sbIn 0.2s ease;
 }
 
-.btn-armed:hover {
+.btn-armed:hover:not(:disabled) {
   background: var(--amber-hover);
 }
 
@@ -486,14 +518,30 @@ button {
   background: transparent;
 }
 
-.btn-outline:hover {
+.btn-outline:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--red) 50%, transparent);
   color: var(--red);
 }
 
-.btn-quiet:hover {
+.btn-quiet:hover:not(:disabled) {
   border-color: var(--green);
   color: var(--text-strong);
+}
+
+/* Disabled. Every one of these classes had a :disabled binding in the templates and
+   no rule to render it, so a button that could not be pressed looked identical to one
+   that could: Start session with an empty folder, Save with no change, the risk-level
+   segments of a switched-off rule. The value is not new — .send-btn:disabled already
+   settled the convention at 0.45 and a default cursor — it just never reached the
+   other four. :not(:disabled) on the hovers stops a dead control lighting up under
+   the pointer, which is the other half of the same defect. */
+.btn-solid:disabled,
+.btn-armed:disabled,
+.btn-outline:disabled,
+.btn-quiet:disabled,
+.seg-opt:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .link-green {
@@ -552,15 +600,6 @@ button {
   border-color: var(--red);
 }
 
-/* UI chrome is set in the system UI stack (--sans); only genuine code and terminal
-   content (raw output, tool activity, swallowed lines, code blocks) keeps the mono
-   face, via explicit `font-family: var(--mono)` rules. That is why the
-   historically-ubiquitous `.mono` class resolves to the SANS face and has done for
-   two design generations: the name is a leftover, not a description.
-
-   This comment named Instrument Sans until now, which was wrong through both the
-   engraved-score world and this one — that face was removed as a known
-   training-data default and never replaced by another webfont. */
 /* The class now means what it says. It was declared as var(--sans) while several
    hundred call sites applied it expecting monospace, which made `.mono` a trap
    rather than a utility. The remit is the machine-read stratum: labels, counters,
@@ -589,10 +628,16 @@ button {
   border-radius: var(--rp);
 }
 
+/* Foil green, not --blue. Working IS the action state and borrows the action colour
+   rather than a fourth one, which is what --blue's own comment and DESIGN.md both
+   say and what Sidebar.vue's .mark.working already does for the same status field.
+   Because --blue is currently byte-identical to --amber, this pill rendered "working"
+   in exactly the colour that means "attention owed", so the header's two most
+   important states were the same colour while the sidebar told the truth. */
 .pill.working {
-  color: var(--blue);
-  background: color-mix(in srgb, var(--blue) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--blue) 30%, transparent);
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--green) 30%, transparent);
 }
 
 .pill.needs_you {
@@ -601,10 +646,14 @@ button {
   border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
 }
 
+/* The Fine Gets No Hue Rule: a finished lane draws no colour, so it cannot compete
+   with a lane that still needs the developer. This pill was foil green, which is now
+   the working state's colour — done and working would have been the same green.
+   Neutral ink, matching Sidebar.vue's .mark.done. */
 .pill.done {
-  color: var(--green);
-  background: color-mix(in srgb, var(--green) 8%, transparent);
-  border: 1px solid color-mix(in srgb, var(--green) 32%, transparent);
+  color: var(--text-mid);
+  background: color-mix(in srgb, var(--text-mid) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text-mid) 28%, transparent);
 }
 
 /* .pill.ended is deliberately NOT in this group: it has its own rule below at the
@@ -855,14 +904,32 @@ button {
   z-index: 40;
 }
 
+/* clip-path clips the element's shadow along with its corner, so every dialogue in
+   the app was painting box-shadow into nothing: not the base --elev here, and not the
+   --shadow-dlg each consumer overrode it with. The dialogue tier is the ONE tier the
+   Earned Shadow Rule grants a real shadow, and it was the only tier not getting one.
+   The cut now belongs to a pseudo-element that carries the surface, leaving the outer
+   element unclipped and free to cast. */
 .dialog {
+  position: relative;
+  border-radius: var(--rc);
+  padding: 16px;
+  box-shadow: var(--shadow-dlg);
+  /* isolation, because the ::before below is painted beneath the dialogue's own
+     content and must not be lifted out of this element's stacking context. */
+  isolation: isolate;
+}
+
+.dialog::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
   background: var(--gloss), var(--bg-panel);
   border: 1px solid var(--border-strong);
   border-radius: var(--rc);
-  padding: 16px;
-  box-shadow: var(--elev);
   /* A sheet laid on the sheet. Nothing inside a dialog takes focus through this
-     element, so the cut corner is safe here. */
+     pseudo-element, so the cut corner is safe here. */
   clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
 }
 
@@ -1024,9 +1091,11 @@ button {
   text-overflow: ellipsis;
 }
 
-/* Light theme: a solid white sheet (the pale-blue panel tone read as see-through). */
+/* Light theme: an opaque sheet, so the list does not read as see-through. Pure
+   #fff was the one cold surface in a warm-paper world; the card tier is the
+   same sheet the dropdown is laid on. */
 html.sb-light .suggest-list {
-  background: #fff;
+  background: var(--bg-card);
 }
 
 .suggest-item.active {

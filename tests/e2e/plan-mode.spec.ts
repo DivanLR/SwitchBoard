@@ -11,27 +11,35 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
 })
 
-test('Plan and Bypass clear each other, because they are one setting', async ({ page }) => {
+// The pair of switches that used to sit here (Plan, Bypass) had to clear each
+// other, because a bypass session approves everything before the gate a plan
+// needs is ever reached: the two together did nothing while the developer waited
+// on a review. One choice cannot express that, so the test is now that choosing
+// is exclusive rather than that two controls fight.
+test('the session type is one choice, so plan and bypass cannot both be asked for', async ({
+  page,
+}) => {
   await page.getByTestId('add-project').click()
 
-  await page.getByTestId('plan-toggle').click()
-  await expect(page.getByTestId('plan-toggle')).toHaveAttribute('aria-checked', 'true')
+  await page.getByTestId('session-mode-plan').check()
+  await expect(page.getByTestId('session-mode-plan')).toBeChecked()
 
-  // Turning bypass on drops plan: a bypass session approves everything before the
-  // gate a plan needs is ever reached, so the two together would silently do
-  // nothing while the developer waited on a review.
-  await page.getByTestId('bypass-toggle').click()
-  await expect(page.getByTestId('bypass-toggle')).toHaveAttribute('aria-checked', 'true')
-  await expect(page.getByTestId('plan-toggle')).toHaveAttribute('aria-checked', 'false')
+  await page.getByTestId('session-mode-bypass').check()
+  await expect(page.getByTestId('session-mode-bypass')).toBeChecked()
+  await expect(page.getByTestId('session-mode-plan')).not.toBeChecked()
+  // Bypass is the one mode that carries a warning, because it is the one that
+  // removes every gate rather than moving one.
+  await expect(page.getByTestId('bypass-warning')).toBeVisible()
 
-  await page.getByTestId('plan-toggle').click()
-  await expect(page.getByTestId('bypass-toggle')).toHaveAttribute('aria-checked', 'false')
+  await page.getByTestId('session-mode-plan').check()
+  await expect(page.getByTestId('session-mode-bypass')).not.toBeChecked()
+  await expect(page.getByTestId('bypass-warning')).toBeHidden()
 })
 
 test('a session started with Plan on says it is planning, and asks for it', async ({ page }) => {
   await page.getByTestId('add-project').click()
   await page.getByTestId('suggestion-gamma').click()
-  await page.getByTestId('plan-toggle').click()
+  await page.getByTestId('session-mode-plan').check()
   await page.getByTestId('start-session').click()
 
   // The pill first: the sidebar row appears at registration, which is before the

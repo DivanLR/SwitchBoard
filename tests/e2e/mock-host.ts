@@ -36,6 +36,9 @@ export interface MockProjectSeed {
   session?: MockSessionSeed
   /** The reserved, project-less row backing the global Database MCP session. */
   reserved?: boolean
+  /** The project's session mode. Omit for 'auto', which is what migration 022
+   *  backfilled onto every project that predates the setting. */
+  defaultSessionMode?: string
   /** Diff tab (specs/003-diff-tab) seed data — set at scenario construction so
    *  it is in place before the app's own initial load, rather than racing it
    *  the way a later __mock.setDiff() call would for a project already
@@ -119,6 +122,8 @@ export interface MockDriver {
     starts: {
       projectId: string
       deniedMcpServers?: string[]
+      /** The one resolved mode the start asked for (request override or project default). */
+      mode?: string
       bypassPermissions?: boolean
       planMode?: boolean
       /** The session id whose transcript was carried in as context, if any. */
@@ -226,7 +231,14 @@ export function installMockHost(scenario: MockScenario): void {
       archivedAt: null as string | null,
       refs: [] as { path: string; label: string }[],
       reserved: !!p.reserved,
+      // NOT NULL with a DEFAULT of 'auto' in the real schema (migration 022), so a
+      // scenario that says nothing gets what an existing project got.
+      defaultSessionMode: p.defaultSessionMode ?? 'auto',
       session,
+      // A project runs as many sessions as it is asked to. "session" stays the most
+      // recently started one, which is what the real host's activeForProject returns
+      // and what this file's own internal checks read; "sessions" is the whole list.
+      sessions: session ? [session] : [],
     }
   })
 
@@ -433,6 +445,8 @@ export function installMockHost(scenario: MockScenario): void {
   const starts: {
     projectId: string
     deniedMcpServers?: string[]
+    /** The one resolved mode the start asked for (request override or project default). */
+    mode?: string
     bypassPermissions?: boolean
     planMode?: boolean
     carryTranscriptFrom?: string
@@ -526,7 +540,17 @@ export function installMockHost(scenario: MockScenario): void {
         .map((p) => ({
           ...p,
           reserved: !!p.reserved,
-          session: p.session ? { ...p.session } : null,
+          // Mirrors handlers.ts's projectList exactly: every live session oldest
+          // first, or the most recent ended one when the project is running nothing.
+          ...(() => {
+            const live = p.sessions.filter((s) => !s.endedAt)
+            const latest = p.sessions[p.sessions.length - 1]
+            const listed = live.length > 0 ? live : latest ? [latest] : []
+            return {
+              sessions: listed.map((s) => ({ ...s })),
+              session: listed[0] ? { ...listed[0] } : null,
+            }
+          })(),
           drafts: [],
         })),
       counters: counters(),
@@ -540,6 +564,9 @@ export function installMockHost(scenario: MockScenario): void {
         // Mirrors the real host: an archived row is restored, an active one is a duplicate.
         if (!existing.archivedAt) throw { code: 'DUPLICATE', message: 'The folder is already registered' }
         existing.archivedAt = null
+        // Mirrors discovery.ts: re-adding through the dialogue is a mode choice,
+        // so a mode in the request wins over the archived row's own.
+        if (req.defaultSessionMode) existing.defaultSessionMode = String(req.defaultSessionMode)
         return { ...existing, session: undefined }
       }
       const project = {
@@ -551,10 +578,18 @@ export function installMockHost(scenario: MockScenario): void {
         archivedAt: null as string | null,
         refs: [] as { path: string; label: string }[],
         reserved: false,
-        session: null,
+        // NOT NULL with a DEFAULT of 'auto' in the real schema (migration 022).
+        defaultSessionMode: String(req.defaultSessionMode ?? 'auto'),
+        session: null as MockSession | null,
+        sessions: [] as MockSession[],
       }
       projects.push(project)
       return { ...project, session: undefined }
+    },
+    'projects.setSessionMode': (req) => {
+      const project = projects.find((p) => p.id === req.projectId)
+      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
+      project.defaultSessionMode = String(req.mode)
     },
     'projects.rename': (req) => {
       const project = projects.find((p) => p.id === req.projectId)
@@ -687,20 +722,24 @@ export function installMockHost(scenario: MockScenario): void {
     'sessions.start': async (req) => {
       const project = projects.find((p) => p.id === req.projectId)
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
-      if (project.session && !project.session.endedAt) {
-        throw { code: 'ALREADY_ACTIVE', message: 'Already active' }
-      }
+      // No refusal here any more: starting a second session alongside a live one is
+      // the point, and the real manager dropped the same guard.
       // A real start spawns the CLI (and builds a container for a bypass
       // session); the delay keeps the full-window waiting state observable
       // instead of resolving inside a single frame. Same reason as stop.
       await new Promise((resolve) => setTimeout(resolve, 250))
-      // Bypass wins over plan, as the real manager resolves it: they are one SDK
-      // setting, and a bypass session never reaches the gate a plan needs.
-      const planMode = req.bypassPermissions === true ? false : req.planMode === true
+      // One resolved mode, exactly as the real manager does it: the request may
+      // override for a single session, and otherwise the project's own setting
+      // applies. The two session booleans are projections of that one value, so
+      // bypass-and-plan-at-once is no longer expressible.
+      const mode = String(req.mode ?? project.defaultSessionMode ?? 'auto')
+      const planMode = mode === 'plan'
       starts.push({
         projectId: String(req.projectId),
         deniedMcpServers: req.deniedMcpServers as string[] | undefined,
-        bypassPermissions: req.bypassPermissions === true,
+        // Recorded so a test can assert which mode a start actually asked for.
+        mode,
+        bypassPermissions: mode === 'bypass',
         planMode,
         // Recorded so a test can prove the previous session's transcript was
         // actually asked for, rather than that a toggle merely looked on.
@@ -718,7 +757,7 @@ export function installMockHost(scenario: MockScenario): void {
         usageUtilization: null,
         usageResetsAt: null,
         usageLimitType: null,
-        bypassPermissions: req.bypassPermissions === true,
+        bypassPermissions: mode === 'bypass',
         planMode,
         inPlanMode: planMode,
         mcpServers: [],
@@ -727,6 +766,7 @@ export function installMockHost(scenario: MockScenario): void {
         endReason: null,
       }
       sessions.set(session.id, session)
+      project.sessions.push(session)
       project.session = session
       pushCounters()
       return { ...session }

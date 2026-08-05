@@ -809,9 +809,14 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   word-break: break-word;
 }
 
+/* The dark theme's translucent plate has no light equivalent: 50% graphite over
+   a paper card lands on mid-grey, and the command printed on it fell to about
+   2.3:1 — the least legible text in the interface, on the line that says what is
+   about to be run. On paper the plate is sunken rather than translucent, which is
+   the code tier this app already has. 6.6:1. */
 html.sb-light .detail-box {
-  background: color-mix(in srgb, var(--text-strong) 50%, transparent);
-  border-color: color-mix(in srgb, var(--detail) 7%, transparent);
+  background: var(--bg-code);
+  border-color: var(--border-code);
 }
 
 .item-detail {

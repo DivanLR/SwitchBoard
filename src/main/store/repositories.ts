@@ -23,13 +23,14 @@ import type {
   Session,
   SessionEndReason,
   SessionEvent,
+  SessionMode,
   SessionStatus,
   RiskLevel,
   Settings,
   VerifyReport,
   VerifyRun,
 } from '@shared/domain'
-import { DEFAULT_SETTINGS, emptyVerifyReport } from '@shared/domain'
+import { DEFAULT_SESSION_MODE, DEFAULT_SETTINGS, emptyVerifyReport } from '@shared/domain'
 import type { ApiCall, ApiEvalRun, ApiTarget } from '@shared/api-endpoints'
 import type { RulePref, RuleKind } from '@main/inbox/rule-prefs'
 
@@ -51,6 +52,8 @@ interface ProjectRow {
   createdAt: string
   archivedAt: string | null
   refs: string | null
+  /** NOT NULL with a DEFAULT since migration 022, so this is never null. */
+  defaultSessionMode: SessionMode
 }
 
 function toProject(row: ProjectRow): Project {
@@ -130,7 +133,12 @@ function toRequest(row: RequestRow): PermissionRequest {
 export class ProjectsRepo {
   constructor(private db: AppDatabase) {}
 
-  insert(input: { name: string; path: string; source: ProjectSource }): Project {
+  insert(input: {
+    name: string
+    path: string
+    source: ProjectSource
+    defaultSessionMode?: SessionMode
+  }): Project {
     const project: Project = {
       id: newId(),
       name: input.name,
@@ -139,11 +147,12 @@ export class ProjectsRepo {
       createdAt: nowIso(),
       archivedAt: null,
       refs: [],
+      defaultSessionMode: input.defaultSessionMode ?? DEFAULT_SESSION_MODE,
     }
     this.db
       .prepare(
-        `INSERT INTO projects (id, name, path, source, createdAt, archivedAt, position)
-         VALUES (@id, @name, @path, @source, @createdAt, @archivedAt,
+        `INSERT INTO projects (id, name, path, source, createdAt, archivedAt, defaultSessionMode, position)
+         VALUES (@id, @name, @path, @source, @createdAt, @archivedAt, @defaultSessionMode,
                  (SELECT COALESCE(MAX(position), -1) + 1 FROM projects))`,
       )
       .run({
@@ -153,8 +162,14 @@ export class ProjectsRepo {
         source: project.source,
         createdAt: project.createdAt,
         archivedAt: project.archivedAt,
+        defaultSessionMode: project.defaultSessionMode,
       })
     return project
+  }
+
+  /** Takes effect on the project's next session; the SDK mode is fixed at spawn. */
+  setSessionMode(id: string, mode: SessionMode): void {
+    this.db.prepare('UPDATE projects SET defaultSessionMode = ? WHERE id = ?').run(mode, id)
   }
 
   byId(id: string): Project | undefined {

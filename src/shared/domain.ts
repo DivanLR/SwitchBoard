@@ -34,6 +34,64 @@ export type PermissionRequestStatus = 'pending' | 'approved' | 'denied' | 'expir
 
 export type DecisionOutcome = Exclude<PermissionRequestStatus, 'pending'>
 
+/**
+ * How a session decides what it may do, chosen per project and used every time
+ * that project starts one.
+ *
+ * One value rather than the pair of booleans (`bypassPermissions`, `planMode`)
+ * this replaces, because the SDK takes exactly one `permissionMode` and two
+ * booleans could describe a state it has no way to spawn in. The names are this
+ * app's own, and `resolvePermissionMode` in `src/main/sessions/session.ts` maps
+ * them onto the SDK's enum; the only one that differs is `bypass`, which the SDK
+ * spells `bypassPermissions`.
+ */
+export type SessionMode = 'default' | 'auto' | 'acceptEdits' | 'plan' | 'bypass'
+
+/**
+ * The mode a project takes when nothing else says otherwise, and the value the
+ * 022 migration backfilled onto every project that existed before the choice
+ * did. It is `auto` rather than `default` because `auto` is what every session
+ * in this app already ran as, so the migration changed no behaviour.
+ */
+export const DEFAULT_SESSION_MODE: SessionMode = 'auto'
+
+/**
+ * The five modes in escalation order, with the copy the pickers render. Shared
+ * rather than per-component because two surfaces choose a mode (the new-session
+ * dialogue and the per-project setting) and a mode explained two different ways
+ * is a mode the developer has to learn twice.
+ */
+export const SESSION_MODES: readonly {
+  value: SessionMode
+  label: string
+  detail: string
+}[] = [
+  {
+    value: 'default',
+    label: 'Default',
+    detail: 'Every tool call waits for you in the inbox.',
+  },
+  {
+    value: 'auto',
+    label: 'Auto',
+    detail: "Claude Code's own classifier decides, and only what it will not judge reaches you.",
+  },
+  {
+    value: 'acceptEdits',
+    label: 'Accept edits',
+    detail: 'File edits go through without asking. Commands and deletes still come to you.',
+  },
+  {
+    value: 'plan',
+    label: 'Plan first',
+    detail: 'Reads and researches without changing anything, then sends a plan to your inbox.',
+  },
+  {
+    value: 'bypass',
+    label: 'Bypass',
+    detail: 'Nothing asks for approval. Runs inside a disposable Docker container.',
+  },
+]
 
 /** A folder a project's sessions may read for context (header REFS chips). */
 export interface ProjectRef {
@@ -50,6 +108,13 @@ export interface Project {
   archivedAt: string | null
   /** Extra folders granted to sessions as additional directories (REFS row). */
   refs: ProjectRef[]
+  /**
+   * The mode this project's sessions start in, chosen when the project is added
+   * and changeable afterwards. Always present: the 022 migration added the column
+   * NOT NULL with a DEFAULT, so there is no such thing as a project without one
+   * and no caller needs a fallback.
+   */
+  defaultSessionMode: SessionMode
 }
 
 /** An MCP server the session reported in its init message (sidebar MCP row). */

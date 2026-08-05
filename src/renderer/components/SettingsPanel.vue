@@ -6,8 +6,8 @@
 import { useTemplateRef, computed, onMounted, onWatcherCleanup, ref, watch } from 'vue'
 import { useModal } from '@renderer/composables/useModal'
 import { MATCHER_KIND_LABEL, useAllowedRules } from '@renderer/composables/useAllowedRules'
-import type { ModelChoice, RiskLevel, Settings, TerseLevel } from '@shared/domain'
-import { modelLabel, modelPrice } from '@shared/domain'
+import type { ModelChoice, RiskLevel, SessionMode, Settings, TerseLevel } from '@shared/domain'
+import { modelLabel, modelPrice, SESSION_MODES } from '@shared/domain'
 import { errorMessage } from '@shared/ipc-types'
 import { useRulesStore } from '@renderer/stores/rules'
 import { useSettingsStore } from '@renderer/stores/settings'
@@ -97,6 +97,13 @@ const proj = computed(
 )
 // Plugins / skills the project's sessions can load (from the session init message).
 const plugins = ref<string[]>([])
+
+/** Applies to the project's NEXT session: the SDK permission mode is fixed at spawn. */
+async function saveSessionMode(mode: SessionMode): Promise<void> {
+  const target = proj.value
+  if (!target || target.defaultSessionMode === mode) return
+  await projects.setSessionMode(target.id, mode)
+}
 
 watch(
   () => proj.value?.id,
@@ -484,6 +491,34 @@ const updateLine = computed(() => {
                 </div>
                 <div class="proj-note">
                   Everything below applies only to <span class="mono proj-name">{{ proj.name }}</span>
+                </div>
+              </div>
+
+              <!-- The mode chosen when the project was added, changeable here. Same
+                   card idiom as the model sections below rather than a second kind of
+                   picker, so one project tab reads as one list of settings. -->
+              <div class="group">
+                <div class="group-label mono">SESSION TYPE</div>
+                <div class="group-desc">
+                  What this project's sessions may do without asking. Applies to the next session
+                  it starts, not one already running.
+                </div>
+                <div class="cards" data-testid="proj-session-mode">
+                  <button
+                    v-for="m in SESSION_MODES"
+                    :key="m.value"
+                    class="card-opt"
+                    :class="{ sel: proj.defaultSessionMode === m.value }"
+                    :data-testid="`proj-session-mode-${m.value}`"
+                    @click="saveSessionMode(m.value)"
+                  >
+                    <span class="opt-dot" :class="{ on: proj.defaultSessionMode === m.value }"></span>
+                    <div class="opt-body">
+                      <div class="opt-name mono">{{ m.label }}</div>
+                      <div class="opt-sub">{{ m.detail }}</div>
+                    </div>
+                    <span class="opt-price mono">{{ m.value === 'bypass' ? '⚠' : '—' }}</span>
+                  </button>
                 </div>
               </div>
 
@@ -1170,8 +1205,12 @@ html.sb-light .settings {
   -webkit-backdrop-filter: blur(3px);
 }
 
+/* On paper this was 62% graphite: a near-blackout under one dialogue while every
+   other dialogue in the theme used the pale --scrim, so light mode dimmed two
+   different ways depending on which control you opened. --scrim is now itself a
+   graphite veil, so this tier can just use it. */
 html.sb-light .overlay {
-  background: color-mix(in srgb, var(--text-strong) 62%, transparent);
+  background: var(--scrim);
 }
 
 .s-head {

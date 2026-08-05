@@ -62,3 +62,6 @@ AGENTS.md
 .impeccable/questions/
 .impeccable/live/sessions/
 .impeccable/sketches/
+# Design review screenshots, regenerated on demand by tests/e2e/shots.spec.ts.
+# Generated output, so the same rule as out/ and release/ applies.
+.impeccable/shots/

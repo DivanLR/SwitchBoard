@@ -694,8 +694,10 @@ async function start(resume: boolean): Promise<void> {
     await projects.startSession(
       target,
       resume,
-      bypassRestart.value,
-      planRestart.value,
+      // The restart toggles override the project's mode for this one session.
+      // Neither ticked sends nothing, so the project's own setting applies —
+      // which is why this is undefined rather than a default.
+      bypassRestart.value ? 'bypass' : planRestart.value ? 'plan' : undefined,
       carryTranscript.value ? (lastTranscript.value?.sessionId ?? undefined) : undefined,
     )
   } catch (e) {

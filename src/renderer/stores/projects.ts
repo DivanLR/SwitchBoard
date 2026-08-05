@@ -1,7 +1,7 @@
 // Sidebar state (FR-003/004/005): projects with live sessions, selection,
 // suggestions, and aggregate counters.
 import { computed, reactive, toRefs } from 'vue'
-import type { McpScan, Project, ProjectCommand, Session } from '@shared/domain'
+import type { McpScan, Project, ProjectCommand, Session, SessionMode } from '@shared/domain'
 import type { Counters, ProjectListItem, ProjectSuggestion, SessionStatusPush } from '@shared/ipc-types'
 import { useActiveSessionStore } from './activeSession'
 import { invoke } from '@renderer/ipc'
@@ -23,7 +23,29 @@ const state = reactive({
   // banner, the Database MCP view) and the full-page waiting state that reads
   // this is rendered once, in the shell.
   starting: false,
+  // Which of a project's sessions the centre pane is showing, keyed by project id.
+  // It lives here rather than on the item because every refresh replaces the items
+  // wholesale from the main process, which always hands back sessions[0] as the
+  // focused one — without this, choosing a subsession would last until the next
+  // status push. A project absent from this map shows its first session.
+  focusedSessionIds: {} as Record<string, string>,
 })
+
+/**
+ * Points each item's `session` at the subsession the developer chose. Called after
+ * every refresh, because the snapshot cannot know the renderer's focus, and a stale
+ * id (its session ended and is gone from the list) falls back to the first rather
+ * than leaving the pane pointed at nothing.
+ */
+function applyFocus(): void {
+  for (const item of state.items) {
+    const wanted = state.focusedSessionIds[item.id]
+    if (!wanted) continue
+    const match = item.sessions.find((s) => s.id === wanted)
+    if (match) item.session = match
+    else delete state.focusedSessionIds[item.id]
+  }
+}
 
 const selected = computed(
   (): ProjectListItem | null =>
@@ -57,6 +79,7 @@ const store = reactive({
     state.items = snapshot.projects
     state.counters = snapshot.counters
     state.loaded = true
+    applyFocus()
     // The reserved Database row must never become the default selection.
     if (!state.selectedProjectId) {
       state.selectedProjectId = state.items.find((p) => !p.reserved)?.id ?? null
@@ -67,11 +90,18 @@ const store = reactive({
     state.suggestions = await invoke('projects.suggestions', undefined)
   },
 
-  async register(path: string, name?: string): Promise<Project> {
-    const project = await invoke('projects.register', { path, name })
+  async register(path: string, name?: string, defaultSessionMode?: SessionMode): Promise<Project> {
+    const project = await invoke('projects.register', { path, name, defaultSessionMode })
     await this.refresh()
     await this.loadSuggestions()
     return project
+  },
+
+  /** Change a project's session mode. Applies to its next session, not a live one. */
+  async setSessionMode(projectId: string, mode: SessionMode): Promise<void> {
+    await invoke('projects.setSessionMode', { projectId, mode })
+    const item = state.items.find((p) => p.id === projectId)
+    if (item) item.defaultSessionMode = mode
   },
 
   /** A project's available slash commands / skills (composer + settings). */
@@ -139,8 +169,8 @@ const store = reactive({
   async startSession(
     projectId: string,
     resume = false,
-    bypassPermissions = false,
-    planMode = false,
+    /** Override the project's own mode for this one session; omit for its default. */
+    mode?: SessionMode,
     /** A previous session id whose transcript seeds the new session's context. */
     carryTranscriptFrom?: string,
   ): Promise<Session> {
@@ -149,13 +179,15 @@ const store = reactive({
       const session = await invoke('sessions.start', {
         projectId,
         resume,
-        bypassPermissions,
-        planMode,
+        mode,
         carryTranscriptFrom,
       })
       // Refresh is inside the wait: the session row is what the view renders,
       // so clearing the waiting state before it lands shows an empty stream.
       await this.refresh()
+      // Focus what was just started. A project can now be running several, and the
+      // one the developer asked for is the one they want to be looking at.
+      this.focusSession(projectId, session.id)
       return session
     } finally {
       state.starting = false
@@ -170,9 +202,22 @@ const store = reactive({
     useActiveSessionStore().openMcp(false)
   },
 
+  /** Show a different one of a project's sessions in the centre pane. */
+  focusSession(projectId: string, sessionId: string): void {
+    state.focusedSessionIds[projectId] = sessionId
+    applyFocus()
+  },
+
   applyStatusPush(push: SessionStatusPush): void {
     const item = state.items.find((p) => p.id === push.projectId)
-    if (item?.session && item.session.id === push.id) item.session = { ...push }
+    if (!item) return
+    // Both, and in this order: the list is what the sidebar's subsession rows read,
+    // and `session` is what the centre pane reads. Patching only the focused one
+    // used to be enough when a project had exactly one session; now a status push
+    // for a background session would never reach its row.
+    const index = item.sessions.findIndex((s) => s.id === push.id)
+    if (index !== -1) item.sessions[index] = { ...push }
+    if (item.session?.id === push.id) item.session = { ...push }
   },
 
   setCounters(counters: Counters): void {

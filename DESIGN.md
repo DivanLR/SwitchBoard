@@ -3,13 +3,13 @@ name: Switchboard
 description: A Miura-fold sheet, scored and folded flat, deployed by one pull.
 colors:
   sheet-carbon: "#17181B"
-  sheet-white: "#F7F7F7"
+  sheet-white: "#F6F4EF"
   panel-carbon: "#131417"
-  panel-paper: "#F1F0EC"
+  panel-paper: "#EFEDE6"
   card-carbon: "#1D1F23"
-  card-paper: "#FBFBFA"
+  card-paper: "#FCFBF7"
   code-plate-carbon: "#141518"
-  code-plate-paper: "#F4F3F0"
+  code-plate-paper: "#F1EFE8"
   border: "rgba(244,244,242,0.11)"
   border-strong: "rgba(244,244,242,0.22)"
   ink-bright: "#F4F4F2"
@@ -142,7 +142,7 @@ components:
 
 The thesis is a sheet, scored and folded flat, deployed by one pull. It is a deliberate double refusal: not the dark-IDE-plus-neon default, not the white SaaS dashboard, and not this project's own previous world either, which drew every state as music notation (a fermata, a beamed note, a struck bar) and asked the developer to learn that vocabulary first. This world asks the developer to learn nothing. A fold is a cut, so nothing in the interface is rounded except three small point markers that are explicitly exempted because they are round for a different reason: a spinner rotates, and a connection light and a tally dot read better as dots than as squares.
 
-The material is the same physical object in two lights, not two designs. In carbon fibre (`#17181B`), the ground reads as dense composite under a faint sixty-degree crease lattice; on paper (`#F7F7F7`), the same lattice scores darker, because ink marking paper is a subtractive act while a crease catching light on carbon is additive. Three semantic accents carry meaning and meaning alone: foil green is the one action colour, for every action that deploys or advances a lane; valley blue is attention owed, meaning a lane is held and awaiting a decision; the red-pencil mark is a correction, meaning error. A finished lane earns no hue at all, drawing a locked fold instead of a coloured badge. Project identity is a separate concern from state and is carried by a third mechanism entirely, a one-pixel fold tick coloured from a six-way rotation that happens to reuse the same accent tokens (see Colors, Named Rules).
+The material is the same physical object in two lights, not two designs. In carbon fibre (`#17181B`), the ground reads as dense composite under a faint sixty-degree crease lattice; on warm paper (`#F6F4EF`), the same lattice is scored subtractively rather than caught in light, and at a *lower* alpha, because a dark hairline on a bright field carries roughly twice the step a pale one carries on carbon. The rule is that the two grounds read equally faint, not that they share a number. Three semantic accents carry meaning and meaning alone: foil green is the one action colour, for every action that deploys or advances a lane; valley blue is attention owed, meaning a lane is held and awaiting a decision; the red-pencil mark is a correction, meaning error. A finished lane earns no hue at all, drawing a locked fold instead of a coloured badge. Project identity is a separate concern from state and is carried by a third mechanism entirely, a one-pixel fold tick coloured from a six-way rotation that happens to reuse the same accent tokens (see Colors, Named Rules).
 
 This build's own finish clause, written into the direction contract, states that "unreviewed and undocumented is unfinished." This document is that review. Where the contract's own language promised something the shipped code does not yet do, that gap is recorded here as open rather than smoothed over, most visibly in Typography's Named Rules and in Shapes.
 
@@ -151,7 +151,7 @@ This build's own finish clause, written into the direction contract, states that
 - Two token sets, one object: `html.sb-light` and `:root` are the same sheet under carbon-fibre and paper light, sharing all 17 files that consume the semantic accent tokens by name.
 - Three accents carry state (foil green for action/working, valley blue for attention owed, red-pencil for error); a finished lane carries none.
 - Corners are cut, not rounded: `--rc` and `--rp` are both `0px`, with three named, deliberate circle exceptions.
-- Project identity is a 2px bar in the lane's own colour, running the row's full height 3px in from its left edge, with the lane's two edges ruled by inset hairlines. The 26px fold tick and the 1px ceiling that preceded it are both gone, by request rather than by drift.
+- Project identity is a 2px bar in the lane's own colour, running the full height of the lane on its own left edge, at full opacity on every lane rather than only the selected one. The lane itself floats: a sheet inset from both panel edges with the ruled hairlines gone. The 26px fold tick, the 1px ceiling and the inset edge rules that preceded it are all gone, by request rather than by drift.
 - Every translucent accent wash is derived from its solid token with `color-mix()`, never a hardcoded accent `rgba()` triplet.
 - Essentially no authored motion. The system's one animated signature from the previous world, a shared "now-line" breath, was deleted outright and nothing replaced it.
 
@@ -179,17 +179,19 @@ Three accents plus one identity mechanism, all named for the fold-and-plate mate
 
 ### Neutral
 
-- **Carbon** (`#17181B`, `--bg`) and **Sheet White** (`#F7F7F7`, `html.sb-light --bg`): the ground itself in each theme.
-- **Panel** (`#131417` dark / `#F1F0EC` light, `--bg-panel`): the sidebar and composer, a deliberate step darker (dark theme) than the ground it sits within so the seam between plate and panel reads.
-- **Card** (`#1D1F23` dark / `#FBFBFA` light, `--bg-card`) and **Code Plate** (`#141518` dark / `#F4F3F0` light, `--bg-code`): the content-object tier and the terminal/code-text tier respectively.
+- **Carbon** (`#17181B`, `--bg`) and **Paper** (`#F6F4EF`, `html.sb-light --bg`): the ground itself in each theme. The light ground was a neutral `#F7F7F7` until it was warmed to sit in the same family as its own panels and cards; a neutral ground between warm panels and warm ink was the single largest reason the paper theme read as dirty rather than as paper.
+- **Panel** (`#131417` dark / `#EFEDE6` light, `--bg-panel`): the sidebar and composer, a deliberate step darker (dark theme) than the ground it sits within so the seam between plate and panel reads.
+- **Card** (`#1D1F23` dark / `#FCFBF7` light, `--bg-card`) and **Code Plate** (`#141518` dark / `#F1EFE8` light, `--bg-code`): the content-object tier and the terminal/code-text tier respectively.
 - **Ink ramp** (dark theme, on carbon): Bright `#F4F4F2` (16.12:1), Strong `#E6E5E1` (14.08:1, also `--text`, the default body colour), Title `#D8D7D2` (12.32:1), Body `#B7B6B0` (8.73:1), Meta `#A3A29C` (6.94:1), Mid and Tab both `#9B9A94` (6.29:1, identical hex for two different-named roles in the dark theme only; the light theme gives them distinct values, `#55534D` and `#605E57`), Ghost `#97968F` (5.98:1). All figures independently recomputed against the current hex values.
 - **`--text-on-wash`**: a role, not a ramp step. It exists because the standard ink ramp was measured against the flat ground, and the in-code comment argues that `--text-ghost` fails AA once it sits on a lightened wash surface (`--bg-hover` or `--bg-active`). Recomputing the wash composites against their actual backing surfaces (`--bg-hover` and `--bg-active` laid over the sidebar's own `--bg-panel`) gives figures noticeably higher than the specific numbers quoted in the comment (roughly 5.0 to 5.4:1 for Ghost, not the 3.85 to 4.32:1 the comment states), though still consistent with the *conclusion* that Ghost is the tightest tier and a dedicated, slightly lighter role tier is the safer choice. Treat the role and its existence as verified; treat the specific decimal figures printed in the comment as unconfirmed under the current token values, which is exactly the kind of stale in-code figure this document was asked to catch rather than repeat.
-- **Mountain Gray** (`#B9B6AE`): the direction contract's fifth named material colour ("mountain gray as structure"). It has exactly one built expression: the hardcoded hex inside `--bg-active` (`color-mix(in srgb, #B9B6AE 12%, transparent)`), the wash behind a selected sidebar lane. It is not a named CSS custom property of its own and has no other consumer.
+- **Mountain Gray** (`#B9B6AE`): the direction contract's fifth named material colour ("mountain gray as structure"). It has exactly one built expression, and now only in the dark theme: the hardcoded hex inside `--bg-active` (`color-mix(in srgb, #B9B6AE 12%, transparent)`), the wash behind a selected sidebar lane. It is not a named CSS custom property of its own and has no other consumer. On paper that mix landed *lighter* than the hover wash sitting above it in the same list, so the light theme now overrides `--bg-active` with a graphite mix instead and mountain gray no longer appears there.
 - **Border** (`rgba(244,244,242,0.11)` dark / `rgba(10,10,10,0.13)` light) and **Border Strong** (`rgba(244,244,242,0.22)` dark / `rgba(10,10,10,0.26)` light): every rule scored into the sheet, from card edges to input strokes.
 
 ### The Proof Sheet (light theme)
 
-`html.sb-light` is a genuine second theme, not a filter over the dark one. Text darkens to graphite and all three accents darken independently so each clears contrast on paper at its own value: foil green becomes `#1F6E44` (5.81:1, recomputed), valley blue becomes `#2C5F94` (6.18:1), red-pencil becomes `#A02A1B` (6.90:1), graphite steel becomes `#3F5A6B` (6.79:1), identity violet becomes `#5B4E77` (7.00:1). `--bg-active` (the selected-row wash) is not redefined for the light theme at all; it stays the same hardcoded carbon-tuned mountain-gray mix in both themes, which is a minor but real gap in "add explicit dark and light values for any new token" (see Do's and Don'ts).
+`html.sb-light` is a genuine second theme, not a filter over the dark one. Text darkens to graphite and all three accents darken independently so each clears contrast on paper at its own value: foil green becomes `#1F6E44` (5.81:1, recomputed), valley blue becomes `#2C5F94` (6.18:1), red-pencil becomes `#A02A1B` (6.90:1), graphite steel becomes `#3F5A6B` (6.79:1), identity violet becomes `#5B4E77` (7.00:1). Ink and sheet are deliberately opposite temperatures, as they are on carbon: where the dark sheet sets warm ink on a cool ground, paper sets cool graphite (`--text` `#1A1C20`, palest tier `#5D6269` at 5.6:1) on a warm ground. The ramp was warm on both sides until it was cooled, which is what let ink and sheet read as one beige material.
+
+Three light-only rules follow the same subtractive principle rather than inheriting the dark theme's additive one. `--bg-active` is a graphite mix (`#1A1C20` at 9%), because the carbon-tuned mountain-gray wash landed at 234 over a paper panel while `--bg-hover` lands at 229, making the selected lane the weaker of the two. `--green-glow` is an ink shadow rather than a green halo, because paper does not glow. `--scrim` is a 30% graphite veil rather than a pale one the same tone as the sheet it covers.
 
 ### Named Rules
 
@@ -226,6 +228,11 @@ Counted directly by grepping every `font-size:` declaration in `src/renderer` at
 **Glyph sizing is not type sizing.** Icon and symbol glyphs are sized to optical weight, not to this ramp, and fall outside it by design. Four of these are the exact selectors an automated design-detector hook currently flags as font-size findings on every run of this codebase; the carve-out below is what should keep them from being treated as drift:
 
 - `.group-caret` (8px, `Sidebar.vue`): the section-fold disclosure triangle.
+- `.dfo-caret` (8px, `DiffView.vue`): the folder-fold disclosure triangle in the Diff
+  tab's file list, added with that grouping. Deliberately the same 8px as
+  `.group-caret` rather than a size of its own: they are the same gesture, and the
+  app's two disclosure triangles reading at two sizes would be the drift, not the
+  shared value.
 - `.rd-icon` (17px, `Sidebar.vue`): the remove-project dialogue's warning glyph.
 - `.empty-icon` (22px, `InboxView.vue`): the inbox-zero checkmark.
 - `.ni-icon` (20px, `SpecsView.vue`): the Spec Kit not-installed glyph.
@@ -246,7 +253,7 @@ One fixed desktop window, unchanged in structure across rebuilds: zero `@media` 
 
 The direction contract calls this arrangement "the peg rail": the centre is reserved for the work in hand, and the sidebar and inbox hang off the two edges. That framing is realised as three flex panes, not as anything more literal.
 
-Rhythm: rows carry 8px by 13 to 18px padding; the recurring spacing steps measured across the renderer are 2, 4, 6, 8, 10, 13, 14, 18, 22 and 24px. A sixty-degree crease lattice (two repeating diagonal gradients at faint alpha) is painted on `body` and again, independently, on `App.vue`'s `.main` pane, because the three panes fully cover `body` and `.main` is the largest field the developer actually looks at; the light theme's crease scores darker (`rgba(10,10,10,0.045)` on `body`, `rgba(10,10,10,0.05)` on `.main`) than the dark theme's (`rgba(244,244,242,0.028)` / `0.03`), because a mark on paper is subtractive.
+Rhythm: rows carry 8px by 13 to 18px padding, the sidebar's own floating lanes excepted at 6px by 10 to 12px inside an 8px inset; the recurring spacing steps measured across the renderer are 2, 4, 6, 8, 10, 13, 14, 18, 22 and 24px. A sixty-degree crease lattice (two repeating diagonal gradients at faint alpha) is painted on `body` and again, independently, on `App.vue`'s `.main` pane, because the three panes fully cover `body` and `.main` is the largest field the developer actually looks at; the light theme's crease is subtractive where the dark theme's is additive, and is set *below* it in alpha (`rgba(10,10,10,0.026)` on `body` and `0.028` on `.main`, against the dark theme's `rgba(244,244,242,0.028)` / `0.03`) because a dark hairline on a bright field carries about twice the step. At the `0.045` / `0.05` it used to carry, the lattice stopped being the ground and became the pattern, most obviously on the empty part of the centre pane.
 
 List headings stick and stack: the sidebar's `PROJECTS` bar pins at the scroll container's top, and each project-group heading pins beneath it at an offset now computed from `--section-row-h` (the add-button height plus its own padding) rather than a hardcoded pixel value repeated in two places, which is how it used to be and used to drift.
 
@@ -265,6 +272,8 @@ No glass. `backdrop-filter: blur()` appears exactly once in the entire renderer,
 ### Named Rules
 
 **The Earned Shadow Rule.** Only the overlay/dialogue tier casts a real shadow (`--shadow-dlg`, `--shadow-dd`, `--shadow-menu` for dropdowns and menus). A card that wants to lift off its panel is asking for the wrong tier.
+
+**Amendment, by direction rather than by drift.** One surface below the dialogue tier now casts: the sidebar lane. The owner asked for the project list to be separated and "maybe even floating", picked the floating variant in live mode over two alternatives that spent no vertical room, and that brief outranks this rule; PRODUCT.md's Brand Commitments already record that no visual register here is binding. The exception is deliberately narrow, and is one token, `--lane-cast` on `.project-list`, so it cannot spread by copy-paste without being named. It also does not work the way the dialogue tier does: `--elev` leads the value, because a dark cast on carbon is almost invisible and the lanes were measured separating on fill alone, so the lip of light is additive on carbon exactly where the cast is subtractive on paper. Any further surface that wants to cast still needs a direction, not a precedent.
 
 ## Shapes
 
@@ -327,12 +336,12 @@ Borders are uniformly 1px, drawn in translucent ink. A dashed border is reserved
 The sidebar's project list is the application's real navigation, and it is where this world's signature marks live.
 
 - **The lane bar** (`.brace` in the markup, a name left over from the fold tick it replaced): part identity as a 2px CSS bar in the project's rotated accent colour, run the full height of the row. The SVG fold tick it replaced is deleted; a hairline that must match the row's height exactly is a worse job for artwork than for a border.
-- **The lane rules** (`.project::before` / `::after`): a hairline at each edge of every row, inset 13px to where the reading starts, so the bar stands clear of them and the list reads as a table of lanes. Rows carry a 2px gap, so adjacent lanes show both their rules 2px apart; that doubling is the accepted reading.
+- **The floating lane** (`.project`): a lane is a sheet inset 8px from both panel edges, filled at the card tier, carrying `--lane-cast` and lifting further when selected. Square still, at `--rc`. The hairline that used to be ruled at each row edge (`.project::before` / `::after`) is deleted: with a 2px gap, adjacent lanes showed both their rules 2px apart, and that doubling read as a crowded list rather than as the table of lanes it was defending. Nothing replaces it, because a floating sheet does not need an edge drawn on it as well. On the 64px collapsed rail the inset drops to 4px and the padding to 4px, or a card would have 23px of content for a pair of initials and a pending count.
 - **The status bar** (`components/StatusBar.vue`): one 25px rule under every pane carrying the board's readings, running and waiting counts, spend today, tokens today, and the limit meter, plus the real key bindings on the right. These were a stacked card in the sidebar footer; a control room keeps its gauges along the bottom edge. The footer that remains carries Settings and the work model, nothing else.
 - **The binding badge** (`.ctl-key`, `styles.css`): a control that has a keyboard shortcut prints it on its own face in the mono badge idiom, inheriting the control's colour so it follows hover. Only bindings that exist get one, and the status bar's `⌃C interrupt` hint appears only while a session is mid-turn, because that is the only time the binding does anything.
 - **The run stamp** (`.head-stamp`): the session's id quoted to eight characters at the ghost tier, the way a commit hash is quoted, with the full id on the title. It is what you need to name one specific run or match the pane against a log.
 - **The block caret**: the composer sets `caret-shape: block` with `caret-color: var(--green)`, so the cursor in the field you type into is a terminal's cursor rather than a text bar. Chromium 139 and up honour it; older engines keep the bar caret, which is a fallback rather than a fault.
-- **Lane height**: a selected lane is about 43px and a plain one about 28px, down from 50px and 36px. The sidebar is the surface that runs out of room first, and this is a tool for holding more than six projects at once.
+- **Lane height**: the lane was cut to about 43px selected and 28px plain, down from 50px and 36px, because the sidebar is the surface that runs out of room first and this is a tool for holding more than six projects at once. Floating gave some of that back, and the figure is exact rather than estimated: 2px more padding and a 4px wider gap grow each lane's pitch by 6px, about one lane in every six. The trade was made knowingly, and the budget it spends from still stands.
 - **The status mark** (`.mark`): one JetBrains Mono character in the state colour with nothing behind it, paired with a plain-language word via `markTitle()` so the glyph only narrows a guess the word already settles. The five geometric folds it replaced, and the tinted plate they sat on, are both gone by request.
   - **Held** (needs you), valley blue: one crease scored but not yet folded either way.
   - **Deploying** (working), foil green: three facets opening out of the packet.
@@ -351,7 +360,7 @@ The sidebar's project list is the application's real navigation, and it is where
 - **Do** derive every wash from its solid token with `color-mix(in srgb, var(--token) N%, transparent)`. Never hardcode an accent `rgba()` triplet; a repository scan confirms none currently exist.
 - **Do** set anything the machine reports in JetBrains Mono: terminal output, commands, paths, the button/pill/chip/badge idiom, and now labels, figures, timers, ids, branches and statuses too. Sentences addressed to the reader stay in the system sans stack; there is no serif face anywhere in this world.
 - **Do** leave figures on tabular numerals. `html, #app` sets `font-variant-numeric: tabular-nums` for the whole interface, so a ticking timer or cost holds its column instead of shuffling the text beside it. Do not override it locally.
-- **Do** add explicit dark and light values for any new token. The paper theme is a real second theme with its own darkened accents, not a filter, with the one known exception of `--bg-active`, which is unthemed for light and should be treated as a gap to close rather than a pattern to copy.
+- **Do** add explicit dark and light values for any new token, and check the direction as well as the value: on carbon a wash, a glow and a veil all add light, and on paper all three subtract it. `--bg-active`, `--green-glow` and `--scrim` each needed a light override for exactly that reason, and each is a one-line answer to "what does this mark do to paper?"
 - **Do** pair any new status mark with a plain-language title or label, the way `markTitle()` does for the sidebar's fold marks, so a shape never has to be learned before it can be understood.
 
 ### Don't:

@@ -18,7 +18,12 @@ import type { Repositories } from '@main/store/repositories'
 
 export function registerProject(
   repos: Repositories,
-  input: { path: string; name?: string; source?: Project['source'] },
+  input: {
+    path: string
+    name?: string
+    source?: Project['source']
+    defaultSessionMode?: Project['defaultSessionMode']
+  },
 ): Project {
   const path = resolve(input.path.trim().replace(/^~(?=$|[\\/])/, homedir()))
   if (!isAbsolute(path) || !existsSync(path) || !statSync(path).isDirectory()) {
@@ -35,12 +40,23 @@ export function registerProject(
     repos.projects.unarchive(existing.id)
     const name = input.name?.trim()
     if (name) repos.projects.rename(existing.id, name)
-    return { ...existing, archivedAt: null, name: name || existing.name }
+    // Re-adding through the dialogue means the developer just chose a mode for
+    // this folder, so it wins over the one the archived row was carrying. Adding
+    // it back without choosing (no mode in the request) keeps what it had.
+    const mode = input.defaultSessionMode
+    if (mode) repos.projects.setSessionMode(existing.id, mode)
+    return {
+      ...existing,
+      archivedAt: null,
+      name: name || existing.name,
+      defaultSessionMode: mode ?? existing.defaultSessionMode,
+    }
   }
   const project = repos.projects.insert({
     name: input.name?.trim() || basename(path),
     path,
     source: input.source ?? 'manual',
+    defaultSessionMode: input.defaultSessionMode,
   })
   seedFolderAccessRules(repos, project.id, path)
   return project

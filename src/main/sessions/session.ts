@@ -4,12 +4,13 @@
 import {
   query,
   type CanUseTool,
+  type PermissionMode,
   type PermissionResult,
   type Query,
   type SDKMessage,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
-import { modelLabel, type AvailableModel, type McpServer, type ModelMode, type ProjectCommand, type SessionStatus } from '@shared/domain'
+import { DEFAULT_SESSION_MODE, modelLabel, type AvailableModel, type McpServer, type ModelMode, type ProjectCommand, type SessionMode, type SessionStatus } from '@shared/domain'
 import { sandboxSpawn, toContainerPaths, type SandboxPlan } from './docker-sandbox'
 import { MessageMapper, type EventSink } from './message-mapper'
 import { toAvailableModels } from './model-catalog'
@@ -120,10 +121,13 @@ interface HostedSessionOptions {
   }
   /** Pairing mode chosen for the latest work turn (header chip); null = plan turn. */
   onTurnMode?: (mode: 'advisor' | 'orchestrator' | null) => void
-  /** Bypass all permission checks for this session (auto-approve every tool). */
-  bypassPermissions?: boolean
-  /** Start read-only: research, then a plan the developer approves in the inbox. */
-  planMode?: boolean
+  /**
+   * The mode this session spawns in, already resolved by the manager from the
+   * request and the project's own default. One value: `bypass` and `plan` used to
+   * be separate booleans and the pair could ask for a state the SDK has no way to
+   * start in.
+   */
+  mode: SessionMode
   /** The live plan-mode state, whenever the CLI reports it or a toggle changes it. */
   onPlanModeChange?: (inPlanMode: boolean) => void
   /** Relabel a turn's closing message as ✦ SUMMARY (off = raw response). */
@@ -196,29 +200,27 @@ export function explainExit(raw: string, bypass: boolean): string {
 }
 
 /**
- * The one permission mode a session spawns with, from the two flags that can ask
- * for one. They are mutually exclusive because this is a single SDK enum, and the
- * manager has already resolved a request carrying both in bypass's favour.
+ * The one permission mode a session spawns with. A straight map now that the app
+ * carries a single SessionMode per project rather than two booleans that could
+ * describe a state the SDK cannot spawn in; the only name that differs is
+ * `bypass`, which the SDK spells `bypassPermissions`.
  *
- *  - `bypassPermissions` approves everything and needs the dangerous-skip flag;
- *    the canUseTool gate is never invoked, and the session runs containerised.
+ *  - `default` sends every tool call to the canUseTool gate, and so to the
+ *    inbox. This is the SDK's own default and the one mode where the app's risk
+ *    rules and decision history see every call.
+ *  - `auto` hands the decision to the CLI's own model classifier. Note what that
+ *    costs, because it is not the same as the app's autoApproveLow/Medium
+ *    settings — those decide by the developer's risk rules and record every
+ *    outcome in history, whereas this decides inside the CLI. The SDK groups it
+ *    with bypassPermissions and acceptEdits as an "escalating" mode.
+ *  - `acceptEdits` lets file edits through and still gates commands.
  *  - `plan` blocks execution until the model calls ExitPlanMode, which the broker
  *    routes to the inbox as a plan approval.
- *  - `auto` is the ordinary case at the owner's direction: the CLI's own model
- *    classifier approves or denies, rather than every call reaching the inbox.
- *    Note what this costs, because it is not the same as the app's own
- *    autoApproveLow/Medium settings — those decide by the developer's risk rules
- *    and record every outcome in history, whereas this hands the decision to a
- *    classifier inside the CLI. The SDK groups it with bypassPermissions and
- *    acceptEdits as an "escalating" mode for that reason.
+ *  - `bypass` approves everything and needs the dangerous-skip flag; the
+ *    canUseTool gate is never invoked, and the session runs containerised.
  */
-export function resolvePermissionMode(options: {
-  bypassPermissions?: boolean
-  planMode?: boolean
-}): 'bypassPermissions' | 'plan' | 'auto' {
-  if (options.bypassPermissions) return 'bypassPermissions'
-  if (options.planMode) return 'plan'
-  return 'auto'
+export function resolvePermissionMode(mode: SessionMode): PermissionMode {
+  return mode === 'bypass' ? 'bypassPermissions' : mode
 }
 
 export class HostedSession {
@@ -243,6 +245,13 @@ export class HostedSession {
   /** Set for a bypass session: its host→container mounts (see deliverNow). */
   private sandbox: SandboxPlan | null = null
 
+  /** Bypass is the one mode that changes where the session RUNS, not just what it
+   *  may do: no OS sandbox exists on native Windows, so it runs containerised and
+   *  its transcript lives in a container volume. Three call sites ask. */
+  private get bypassing(): boolean {
+    return this.options.mode === 'bypass'
+  }
+
   constructor(options: HostedSessionOptions) {
     this.sessionId = options.sessionId
     this.options = options
@@ -259,7 +268,7 @@ export class HostedSession {
     // sandbox exists on native Windows, so the container is the isolation
     // boundary (docker-sandbox.ts). Paths handed to the CLI must then be
     // container-side (/workspace, /refs/*), not host paths.
-    const sandbox = this.options.bypassPermissions
+    const sandbox = this.bypassing
       ? sandboxSpawn({
           sessionId: this.sessionId,
           projectId: this.options.projectId,
@@ -293,8 +302,8 @@ export class HostedSession {
           this.options.mainModel && this.options.mainModel !== 'default'
             ? this.options.mainModel
             : undefined,
-        permissionMode: resolvePermissionMode(this.options),
-        allowDangerouslySkipPermissions: this.options.bypassPermissions ? true : undefined,
+        permissionMode: resolvePermissionMode(this.options.mode),
+        allowDangerouslySkipPermissions: this.bypassing ? true : undefined,
         // Append-only: keeps Claude Code's own system prompt and adds the terse
         // output-style instruction on top when terse mode is enabled.
         systemPrompt: this.options.systemPromptAppend
@@ -363,7 +372,7 @@ export class HostedSession {
         return
       }
       const raw = error instanceof Error ? error.message : String(error)
-      const detail = explainExit(raw, this.options.bypassPermissions === true)
+      const detail = explainExit(raw, this.bypassing)
       this.fatal = true
       this.mapper.fatalError(detail)
       this.setStatus('error', detail)
@@ -478,10 +487,15 @@ export class HostedSession {
    * what the header reads.
    */
   setPlanMode(enabled: boolean): void {
-    // Leaving plan mode returns to whatever an ordinary session spawns with, not
-    // to 'default': otherwise one visit to planning would silently turn asking
-    // back on for the rest of the session.
-    const mode = enabled ? 'plan' : resolvePermissionMode({ planMode: false })
+    // Leaving plan mode returns to the mode this session was started in, so a
+    // visit to planning cannot silently change what the rest of the session may
+    // do. A session whose own mode IS plan has nothing to return to, so it falls
+    // back to the app default — which is what this did for every session before
+    // the mode became a per-project choice.
+    const own = this.options.mode
+    const mode = enabled
+      ? 'plan'
+      : resolvePermissionMode(own === 'plan' ? DEFAULT_SESSION_MODE : own)
     void this.q?.setPermissionMode(mode).catch(() => {
       // Older CLI without runtime mode switching.
     })

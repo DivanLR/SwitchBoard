@@ -465,6 +465,21 @@ const MIGRATIONS: Migration[] = [
       db.exec(`ALTER TABLE sessions ADD COLUMN planMode INTEGER;`)
     },
   },
+  {
+    // The mode a project's sessions start in, chosen when the project is added.
+    // NOT NULL with a DEFAULT so every existing project gets a value in one
+    // statement and no reader needs a fallback for a null. 'auto' is deliberate:
+    // it is what every session in this app already spawned as (see
+    // resolvePermissionMode), so this migration changes no behaviour for a
+    // project that existed before the setting did.
+    name: '022-project-session-mode',
+    up: (db) => {
+      db.exec(
+        `ALTER TABLE projects ADD COLUMN defaultSessionMode TEXT NOT NULL DEFAULT 'auto'
+           CHECK (defaultSessionMode IN ('default', 'auto', 'acceptEdits', 'plan', 'bypass'));`,
+      )
+    },
+  },
 ]
 
 /**

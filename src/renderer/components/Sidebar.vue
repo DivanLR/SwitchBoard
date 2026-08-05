@@ -4,7 +4,7 @@
 // and the running / needs-you / cost-today stats card (FR-003/004/005).
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { isIpcError } from '@shared/ipc-types'
-import { modelLabel, type ProjectGroup } from '@shared/domain'
+import { modelLabel, type ProjectGroup, type Session } from '@shared/domain'
 import { groupSections } from '@shared/project-groups'
 import { activeAgents } from '@shared/agents'
 import { useProjectsStore } from '@renderer/stores/projects'
@@ -91,10 +91,46 @@ function timerOf(startedAt: string): string {
   return elapsedClock(startedAt, now.value)
 }
 
+/**
+ * Which state matters most when a project is running several sessions at once. The
+ * project row can only draw one mark, and it must be the one that needs the developer:
+ * PRODUCT.md's whole premise is knowing at a glance which project is blocked, so a
+ * held session must not be hidden behind a focused one that happens to be idle.
+ *
+ * Lower index wins. Error before needs-you because a misfold is not going to clear
+ * itself; both before working, which needs nothing from anyone.
+ */
+const STATUS_URGENCY = ['error', 'needs_you', 'working', 'done', 'ended', 'none']
+
+/**
+ * The project row's own mark: the most urgent state across every session it is
+ * running, not the state of whichever one the pane happens to be showing. With one
+ * session — the only case that existed before subsessions — this is exactly the old
+ * answer, because the list holds that one session and nothing else.
+ */
 function statusOf(item: (typeof projects.items)[number]): string {
-  if (!item.session) return 'none'
-  if (item.session.endedAt) return 'ended'
-  return item.session.status
+  const states = item.sessions.map((s) => (s.endedAt ? 'ended' : s.status))
+  if (states.length === 0) return item.session ? statusOfSession(item.session) : 'none'
+  return states.reduce((worst, next) =>
+    STATUS_URGENCY.indexOf(next) < STATUS_URGENCY.indexOf(worst) ? next : worst,
+  )
+}
+
+function statusOfSession(session: Session): string {
+  return session.endedAt ? 'ended' : session.status
+}
+
+/**
+ * A lane reads expanded — its branch line showing — when it is selected OR when its
+ * session is still running. Selection alone was the old rule, which meant a project
+ * working away in the background collapsed to a single line the moment you looked at
+ * another one, and the board's busiest rows were the least legible. A lane that has
+ * ended, or never started, stays on one line: nothing about it is changing.
+ */
+function isExpanded(item: (typeof projects.items)[number]): boolean {
+  return (
+    item.id === projects.selectedProjectId || item.sessions.some((s) => !s.endedAt)
+  )
 }
 
 /**
@@ -119,6 +155,28 @@ function markTitle(status: string): string {
   if (status === 'error') return 'Error'
   if (status === 'ended') return 'Session ended'
   return 'Done'
+}
+
+/**
+ * The one set character that stands for a lane's state, per DESIGN.md's fold
+ * vocabulary. A function rather than the template's own v-if chain because a project
+ * row and each of its subsession rows now draw the same mark, and two copies of this
+ * mapping would be two places for a state to go missing.
+ */
+function glyphFor(status: string): string {
+  if (status === 'needs_you') return '!'
+  if (status === 'working') return '»'
+  if (status === 'error') return '×'
+  if (status === 'ended') return '·'
+  return '—'
+}
+
+/** A single session's lane state; see statusOfSession, which this simply names. */
+const sessionStatus = statusOfSession
+
+function focusSub(projectId: string, sessionId: string): void {
+  projects.select(projectId)
+  projects.focusSession(projectId, sessionId)
 }
 
 function pendingFor(projectId: string): number {
@@ -295,6 +353,20 @@ function ctxNewGroup(): void {
   const projectId = ctx.value.kind === 'project' ? ctx.value.id : undefined
   ctx.value = null
   newGroup(projectId)
+}
+
+/**
+ * Starts another session in this project, alongside whatever it is already running.
+ * It uses the project's own session mode, like every other start that names none.
+ * Failures land on the store's `starting` state and the ended-session banner the same
+ * way the other start paths do, so this deliberately does not grow its own error UI.
+ */
+async function ctxNewSession(): Promise<void> {
+  if (!ctx.value || ctx.value.kind !== 'project') return
+  const projectId = ctx.value.id
+  ctx.value = null
+  projects.select(projectId)
+  await projects.startSession(projectId).catch(() => {})
 }
 
 function ctxRemoveGroup(): void {
@@ -656,13 +728,7 @@ async function confirmRemoveNow(): Promise<void> {
               :data-status="statusById[item.id]"
               :title="markTitle(statusById[item.id])"
             >
-              <span class="glyph" aria-hidden="true"
-                ><template v-if="statusById[item.id] === 'needs_you'">!</template
-                ><template v-else-if="statusById[item.id] === 'working'">&#187;</template
-                ><template v-else-if="statusById[item.id] === 'error'">&#215;</template
-                ><template v-else-if="statusById[item.id] === 'ended'">&#183;</template
-                ><template v-else>&#8212;</template></span
-              >
+              <span class="glyph" aria-hidden="true">{{ glyphFor(statusById[item.id]) }}</span>
             </span>
             <!-- Collapsed rail: initials (+ pending badge). One template so the
                  v-else below always pairs with the collapsed check itself. -->
@@ -714,12 +780,43 @@ async function confirmRemoveNow(): Promise<void> {
               </button>
             </template>
           </div>
-          <!-- Branch belongs to the row you are working in: showing it on every
-               row turns the list into a wall of text (design). -->
-          <div v-if="!collapsed && item.id === projects.selectedProjectId" class="meta">
+          <!-- Branch belongs to the rows that are doing something: the one you are in,
+               and any whose session is still running. Showing it on EVERY row turns the
+               list into a wall of text, which is what the old selected-only rule was
+               defending against — but it also hid the branch of every project working in
+               the background, which is exactly when it is worth reading. -->
+          <div v-if="!collapsed && isExpanded(item)" class="meta">
             <span class="branch mono">⎇ {{ item.session?.branch ?? '—' }}</span>
           </div>
           <div v-if="!collapsed && collisions.has(item.name)" class="path mono">{{ item.path }}</div>
+          <!-- Subsessions. A project runs as many sessions as it is asked to, and each
+               gets a row inside the project's own card: the card is the project, the
+               rows in it are what that project is doing. Listed only when there is
+               more than one, because with a single session the lane already IS that
+               session and a lone child row would be noise. Nested inside .content, so
+               the whole group moves and floats as one sheet. -->
+          <div
+            v-if="!collapsed && item.sessions.length > 1"
+            class="subs"
+            :data-testid="`sidebar-subsessions-${item.name}`"
+          >
+            <button
+              v-for="s in item.sessions"
+              :key="s.id"
+              type="button"
+              class="sub-line"
+              :class="{ sel: item.session?.id === s.id }"
+              :data-testid="`sidebar-subsession-${s.id}`"
+              :title="`${markTitle(sessionStatus(s))} — ${s.branch ?? 'no branch'} · session ${s.id}`"
+              @click.stop="focusSub(item.id, s.id)"
+            >
+              <span class="mark sub-mark" :class="sessionStatus(s)">
+                <span class="glyph" aria-hidden="true">{{ glyphFor(sessionStatus(s)) }}</span>
+              </span>
+              <span class="sub-name mono">{{ s.branch ?? s.id.slice(0, 8) }}</span>
+              <span v-if="!s.endedAt" class="timer mono">{{ timerOf(s.startedAt) }}</span>
+            </button>
+          </div>
           <div
             v-if="!collapsed && agentsFor(item).length > 0"
             class="agents"
@@ -843,6 +940,13 @@ async function confirmRemoveNow(): Promise<void> {
         <span>↓</span>Move down
       </button>
       <template v-if="ctx.kind === 'project'">
+        <!-- A project can run more than one session; this is how a second one starts.
+             It leads the project menu because it is the only item here that makes the
+             project DO something rather than describe it. -->
+        <button class="ctx-item mono" data-testid="ctx-new-session" @click="ctxNewSession">
+          <span style="color: var(--green)">＋</span>New session here
+        </button>
+        <div class="ctx-sep"></div>
         <button class="ctx-item mono" data-testid="ctx-repoint" @click="startRepoint">
           <span style="color: var(--green)">⇄</span>Change folder…
         </button>
@@ -972,7 +1076,10 @@ async function confirmRemoveNow(): Promise<void> {
      symmetric padding. Change either part and the offset follows. */
   --add-h: 21px;
   --section-row-pad: 5px;
-  --section-row-h: calc(var(--add-h) + 2 * var(--section-row-pad));
+  /* The 1px is the seam ruled under the row (see .section-row): it is part of the
+     row's real height, so a group header sticking at this offset would otherwise
+     leave a one-pixel sliver of scrolling list showing above it. */
+  --section-row-h: calc(var(--add-h) + 2 * var(--section-row-pad) + 1px);
   width: 252px;
   min-width: 252px;
   background: var(--bg-panel);
@@ -1049,8 +1156,13 @@ async function confirmRemoveNow(): Promise<void> {
   color: var(--text-body);
 }
 
+/* The rail has 64px to spend, so a lane keeps its lift but gives most of the inset
+   back: 8px either side plus the expanded padding would leave a card 23px of content
+   to hold both a pair of initials and a pending count. */
 .sidebar.collapsed .project {
   text-align: center;
+  margin: 0 4px 5px;
+  padding: 6px 4px;
 }
 
 .sidebar.collapsed .content {
@@ -1073,21 +1185,33 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 /* Drag-and-drop states: green insertion line for reorder, dashed teal ring
-   for drop-to-reference (design reference). */
+   for drop-to-reference (design reference). Each carries --lane-cast alongside its
+   own mark, because box-shadow is one property and a lane must not fall to the panel
+   just because it is being dragged over. */
 .project.drop-before {
-  box-shadow: inset 0 2px 0 var(--green);
+  box-shadow:
+    inset 0 2px 0 var(--green),
+    var(--lane-cast);
 }
 
 .project.drop-after {
-  box-shadow: inset 0 -2px 0 var(--green);
+  box-shadow:
+    inset 0 -2px 0 var(--green),
+    var(--lane-cast);
 }
 
 /* Whole-row highlight while dragging an OS file onto a project (→ @path into
-   its composer). Project drags only ever reorder, never reference. */
+   its composer). Project drags only ever reorder, never reference. The wash layers
+   over the card fill for the same reason hover does. */
 .project.drop-file {
   outline: 1px dashed var(--green);
   outline-offset: -1px;
-  background: color-mix(in srgb, var(--green) 6%, transparent);
+  background:
+    linear-gradient(
+      color-mix(in srgb, var(--green) 12%, transparent),
+      color-mix(in srgb, var(--green) 12%, transparent)
+    ),
+    var(--bg-card);
 }
 
 .logo {
@@ -1162,9 +1286,21 @@ async function confirmRemoveNow(): Promise<void> {
      children within the band, but the band itself was high.
      The vertical padding is --section-row-pad and the buttons are --add-h, which
      is how var(--section-row-h) is computed — .group-head's sticky offset depends
-     on this row's height matching it exactly. */
+     on this row's height matching it exactly, and the seam below counts too. */
   padding: var(--section-row-pad) 14px var(--section-row-pad) 18px;
   background: var(--bg-sticky);
+}
+
+/* The seam: where the panel's heading hands over to the list. It runs the full width
+   rather than stopping at the lanes' 8px inset, so it reads as a table head ruling
+   off its body — everything below the line is the list. Chosen in live mode over an
+   inset shelf aligned to the floating lanes.
+
+   Not on .mcp-section: that row is static, sits further down with its own padding, and
+   was not part of what was reviewed. */
+.section-row:not(.mcp-section) {
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 7px;
 }
 
 .section-row.mcp-section {
@@ -1239,6 +1375,15 @@ async function confirmRemoveNow(): Promise<void> {
   flex: 1;
   overflow-y: auto;
   padding: 2px 0 8px;
+  /* The lift under a floating lane, and it takes two mechanisms because the two
+     grounds behave differently. The cast is built from --scrim, the one token that is
+     dark in both themes, so a single value deepens carbon and paper alike instead of
+     needing a light-theme twin that could drift from it. Offset and blur, never a
+     zero-offset halo. But a dark cast on carbon is nearly invisible, and measured on
+     the dark board the lanes were separating on fill alone, so --elev leads: this
+     world's own lip of light, which is additive on carbon exactly where the cast is
+     subtractive on paper. */
+  --lane-cast: var(--elev), 0 3px 7px -2px color-mix(in srgb, var(--scrim) 70%, transparent);
 }
 
 
@@ -1252,7 +1397,9 @@ async function confirmRemoveNow(): Promise<void> {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 8px 0 3px;
+  /* Opened with the lanes: a group header 3px above a floating sheet reads as
+     attached to it, and the header names the whole group rather than the first row. */
+  margin: 12px 0 6px;
   padding: 4px 18px 4px 16px;
   background: var(--bg-sticky);
   cursor: pointer;
@@ -1323,7 +1470,9 @@ async function confirmRemoveNow(): Promise<void> {
 
 /* An open group with nothing in it: the drop target IS the explanation. */
 .group-empty {
-  margin: 0 10px 2px;
+  /* Sits on the lanes' own inset and gap, so the drop target lines up with the
+     sheets it will be holding. */
+  margin: 0 8px 6px;
   padding: 9px 10px;
   border: 1px dashed var(--border-strong);
   border-radius: var(--rc);
@@ -1332,29 +1481,46 @@ async function confirmRemoveNow(): Promise<void> {
   text-align: center;
 }
 
-/* A lane is full-bleed and square: a fold is a cut, and a cut has no corners.
-   This is where the outgoing world's inset 8px-radius card row was. */
-/* Lane height is the sidebar's real budget: at 50px a full board scrolled after
-   six projects, and this is a tool for running more than six at once. 5px of
-   vertical padding puts a selected lane at about 40px and an unselected one at
-   about 30px, which is two more lanes on screen with nothing removed. */
+/* A lane is a sheet lifted clear of the panel: inset 8px from both edges, filled at
+   the card tier, floating on --lane-cast. Still square — a fold is a cut, and a cut
+   has no corners — so this is not the outgoing world's 8px-radius card row coming
+   back. Chosen in live mode over two alternatives that spent no vertical room at
+   all: bright sheets on a recessed field, and one lifted plate holding tight rows.
+
+   Lane height is the sidebar's real budget: at 50px a full board scrolled after six
+   projects, and this is a tool for running more than six at once. Floating costs
+   some of that back, and the figure is exact rather than estimated: 2px more padding
+   and a 4px wider gap grow each lane's pitch by 6px. Against a lane of roughly 30px
+   that is about one lane in every six off the screen. The trade is recorded here so
+   the next pass finds it stated rather than discovers it. */
 .project {
   position: relative;
-  margin: 0 0 2px;
-  padding: 5px 18px 5px 13px;
+  margin: 0 8px 6px;
+  /* Right padding is 10px rather than the 13px the lane carried while full-bleed: the
+     8px inset each side takes 16px off the row, and with a real board loaded that was
+     enough to ellipse "ml-pipeline" on the name that had fitted before. The 3px comes
+     back from the padding rather than from the inset, so the float is unchanged. */
+  padding: 6px 10px 6px 12px;
+  background: var(--bg-card);
+  box-shadow: var(--lane-cast);
   cursor: pointer;
   transition: background 0.12s ease;
 }
 
+/* The lane's fill is opaque now, so the hover wash layers over it instead of being
+   the whole background. Replacing it would drop the card back onto the panel tone. */
 .project:hover {
-  background: var(--bg-hover);
+  background: linear-gradient(var(--bg-hover), var(--bg-hover)), var(--bg-card);
 }
 
 /* Lanes are keyboard-operable (PRODUCT.md records keyboard and screen reader as
    requirements). Focus is an inset rule so it never shifts the lane's geometry. */
 .project:focus-visible {
   outline: none;
-  box-shadow: inset 0 0 0 1px var(--green);
+  /* The lift is carried through, or a focused lane would drop to the panel. */
+  box-shadow:
+    inset 0 0 0 1px var(--green),
+    var(--lane-cast);
 }
 
 /* The five-hairline staff that used to be ruled across each lane is gone. Behind
@@ -1368,47 +1534,42 @@ async function confirmRemoveNow(): Promise<void> {
    reduced-motion block could stop every animation without losing information.
    Nothing replaces it; a sheet at rest does not pulse. */
 
-/* Lane identity: one bar in the lane's own colour, top to bottom of the row, 3px
-   in from its left edge. It is 2px, asked for directly after the 1px version was
-   judged too faint to hold a lane; DESIGN.md's ban on anything thicker than a 1px
-   stroke was rewritten to match rather than left contradicting this. The scored
-   fold tick it replaced stood 26px inside a 51px row, which read as a fragment of
-   a rule rather than as the lane's edge. */
+/* Lane identity: one bar in the lane's own colour, top to bottom of the row, on the
+   card's own left edge. It sat 3px inside the row while lanes were full-bleed; now
+   that a lane is a sheet with a gap either side, the bar binds to the sheet's edge
+   instead of floating in from it. It is 2px, asked for directly after the 1px version
+   was judged too faint to hold a lane; DESIGN.md's ban on anything thicker than a 1px
+   stroke was rewritten to match rather than left contradicting this. The scored fold
+   tick it replaced stood 26px inside a 51px row, which read as a fragment of a rule
+   rather than as the lane's edge.
+
+   Full opacity on every lane, not only the selected one: at 0.75 the bar was reading
+   as a faded edge of the card rather than as the project's colour. Selection is
+   carried by the deeper lift, the wash and the brighter name. */
 .brace {
   position: absolute;
-  left: 3px;
+  left: 0;
   top: 0;
   bottom: 0;
   width: 2px;
   background: currentColor;
   pointer-events: none;
-  opacity: 0.75;
-}
-
-.project.active .brace {
   opacity: 1;
 }
 
-/* Lane separation: a hairline at each edge of every row, inset to where the
-   reading starts so the identity bar stands clear of it and the list reads as a
-   table of lanes. The 2px gap between rows means adjacent lanes show both their
-   rules, 2px apart; that is the accepted reading, not an oversight. */
-.project::before,
-.project::after {
-  content: '';
-  position: absolute;
-  left: 13px;
-  right: 0;
-  height: 1px;
-  background: var(--border-soft);
-}
+/* Lane separation is the sheet's own edge and the gap around it. The hairline that
+   used to be ruled at each row edge is gone: with a 2px gap, adjacent lanes showed
+   both their rules 2px apart, and that doubling read as a crowded list rather than
+   as the table of lanes it was defending. Nothing replaces it, because a floating
+   sheet does not also need an edge drawn on it. */
 
-.project::before {
-  top: 0;
-}
-
-.project::after {
-  bottom: 0;
+/* The picked lane lifts furthest. Selection is carried by three marks that agree —
+   this deeper cast, the --bg-active wash over the card, and the brighter name — so
+   it still reads for anyone who cannot see a shadow at all. */
+.project.active {
+  box-shadow:
+    var(--elev),
+    0 6px 13px -2px color-mix(in srgb, var(--scrim) 88%, transparent);
 }
 
 .active-bg {
@@ -1430,7 +1591,9 @@ async function confirmRemoveNow(): Promise<void> {
 .row {
   display: flex;
   align-items: center;
-  gap: 7px;
+  /* 6px, not 7: four gaps across the row, so this is 4px of name back. See the
+     padding note on .project. */
+  gap: 6px;
 }
 
 /* The lane's current sign. Colour comes from meaning: amber for held (needs
@@ -1681,6 +1844,67 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 /* Agents working in parallel, listed under the row (design). */
+/* Subsession rows. Same nested-child idiom as .agents below — indented under the
+   lane's reading edge, one line each, mono — because they are the same kind of thing
+   at a different level: what this project is doing right now. A session is a bigger
+   unit than a subagent, so it keeps a real status mark and a running clock, and it is
+   a <button> because clicking it repoints the whole centre pane. */
+.subs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 5px;
+  padding-left: 15px;
+}
+
+.sub-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 -4px;
+  padding: 2px 4px;
+  border: none;
+  border-radius: var(--rc);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.sub-line:hover {
+  background: var(--bg-hover);
+}
+
+/* The focused session, the one the pane is showing. A left rule rather than a fill:
+   the lane's own identity bar already owns the left edge of the card, and this is the
+   same gesture one level in. */
+.sub-line.sel {
+  background: var(--bg-active);
+  box-shadow: inset 2px 0 0 var(--green);
+}
+
+.sub-line:focus-visible {
+  outline: 1px solid var(--green);
+  outline-offset: -1px;
+}
+
+.sub-mark {
+  padding: 0;
+}
+
+.sub-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 10.5px;
+  color: var(--text-tab);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sub-line.sel .sub-name {
+  color: var(--text-strong);
+}
+
 .agents {
   display: flex;
   flex-direction: column;

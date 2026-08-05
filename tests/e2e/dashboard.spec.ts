@@ -16,14 +16,25 @@ test('sidebar shows name, branch, status dot and a ticking timer (FR-003/004)', 
   await expect(alpha).toContainText('alpha')
   await expect(page.getByTestId('status-badge-alpha')).toHaveAttribute('data-status', 'working')
 
-  // The branch belongs to the row being worked in: the selected project shows
-  // it, the rest stay one line (design), and selecting another moves it.
+  // The branch belongs to the rows that are DOING something, not only to the one
+  // you are looking at. Both of these have a live session, so both stay expanded
+  // and selecting one does not move the branch off the other. The rule this
+  // replaces was selected-only, which collapsed a project working away in the
+  // background the moment you looked at another one — the board's busiest rows
+  // were the least legible. Changed on the owner's direction, 2026-08-05.
   await expect(alpha).toContainText('main')
-  await expect(beta).not.toContainText('feature/x')
+  await expect(beta).toContainText('feature/x')
   await beta.click()
   await expect(beta).toContainText('feature/x')
-  await expect(alpha).not.toContainText('main')
+  await expect(alpha).toContainText('main')
   await alpha.click()
+
+  // The other half of the rule: a lane with nothing running stays on one line, so
+  // the list does not become a wall of text. Ending beta's session must collapse it
+  // while leaving the selected row alone.
+  await page.evaluate(() => window.__mock.endSession('s-beta'))
+  await expect(beta).not.toContainText('feature/x')
+  await expect(alpha).toContainText('main')
 
   const first = await page.getByTestId('timer-alpha').textContent()
   await expect
