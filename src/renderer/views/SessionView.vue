@@ -97,6 +97,8 @@ const busy = ref(false)
 // Ended-banner restart option: start the next session with all permissions
 // bypassed (--dangerously-skip-permissions), mirroring the New session dialog.
 const bypassRestart = ref(false)
+/** Ended-banner restart option: start the next session read-only, planning first. */
+const planRestart = ref(false)
 /** Session-start failure (e.g. Docker down for a bypass session), ended banner. */
 const startError = ref<string | null>(null)
 const streamEl = ref<HTMLElement | null>(null)
@@ -425,7 +427,12 @@ watch(
 watch(
   () => endedSession.value?.id ?? null,
   (id) => {
-    if (id) bypassRestart.value = endedSession.value?.bypassPermissions ?? false
+    if (!id) return
+    bypassRestart.value = endedSession.value?.bypassPermissions ?? false
+    // How the last one began, not where it ended up: a session that was toggled
+    // out of plan mode mid-flight still started as one, and offering that again
+    // is the choice the developer actually made.
+    planRestart.value = endedSession.value?.planMode ?? false
   },
   { immediate: true },
 )
@@ -647,7 +654,7 @@ async function start(resume: boolean): Promise<void> {
   busy.value = true
   startError.value = null
   try {
-    await projects.startSession(target, resume, bypassRestart.value)
+    await projects.startSession(target, resume, bypassRestart.value, planRestart.value)
   } catch (e) {
     // Docker down / not logged in (bypass sessions run containerised) — show
     // it in the ended banner instead of dying as an unhandled rejection.
@@ -800,6 +807,25 @@ const {
         >
           ⚠ Bypass
         </span>
+        <!-- Indicator and control in one: it reads the mode the CLI reports, and
+             clicking it asks for the other. Hidden on a bypass session, which
+             approves everything and so has nothing to plan against. -->
+        <button
+          v-if="liveSession && !liveSession.bypassPermissions"
+          class="pill plan-pill"
+          :class="{ on: liveSession.inPlanMode }"
+          data-testid="plan-mode-toggle"
+          role="switch"
+          :aria-checked="!!liveSession.inPlanMode"
+          :title="
+            liveSession.inPlanMode
+              ? 'Read-only until a plan is approved. Click to leave plan mode; it applies from the next tool call.'
+              : 'Switch to planning: read-only until a plan is approved. It applies from the next tool call.'
+          "
+          @click="active.setPlanMode(!liveSession.inPlanMode)"
+        >
+          {{ liveSession.inPlanMode ? '◱ Planning' : '◱ Plan' }}
+        </button>
         <!-- Stated before the agent is asked for a diff, not discovered mid-task:
              the container mounts only this folder, so git works there exactly
              when .git sits at the project root. -->
@@ -1083,13 +1109,27 @@ const {
             </button>
             <span class="bypass-inline mono">
               <button
+                class="switch"
+                :class="{ on: planRestart }"
+                data-testid="plan-restart-toggle"
+                role="switch"
+                :aria-checked="planRestart"
+                title="Start read-only: research first, then a plan you approve in the inbox"
+                @click="planRestart = !planRestart; if (planRestart) bypassRestart = false"
+              >
+                <span class="knob"></span>
+              </button>
+              <span>Plan first</span>
+            </span>
+            <span class="bypass-inline mono">
+              <button
                 class="switch danger"
                 :class="{ on: bypassRestart }"
                 data-testid="bypass-restart-toggle"
                 role="switch"
                 :aria-checked="bypassRestart"
                 title="Start with all permissions bypassed (--dangerously-skip-permissions)"
-                @click="bypassRestart = !bypassRestart"
+                @click="bypassRestart = !bypassRestart; if (bypassRestart) planRestart = false"
               >
                 <span class="knob"></span>
               </button>
@@ -1628,6 +1668,25 @@ const {
   color: var(--red);
   background: color-mix(in srgb, var(--red) 9%, transparent);
   border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
+}
+
+/* Off, it is an offer, so it stays in neutral ink like any quiet control. On, it
+   takes valley blue — the attention-owed hue — because a planning session is
+   holding, waiting on the developer to approve what it proposes. */
+.pill.plan-pill {
+  cursor: pointer;
+  color: var(--text-tab);
+  border: 1px solid var(--border-strong);
+}
+
+.pill.plan-pill:hover {
+  color: var(--text-strong);
+}
+
+.pill.plan-pill.on {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 9%, transparent);
+  border-color: color-mix(in srgb, var(--amber) 40%, transparent);
 }
 
 /* Amber, not red: the session works, only git history is absent (hover says why). */

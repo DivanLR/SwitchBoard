@@ -66,6 +66,22 @@ test('the New session dialog fills from suggestions, validates paths, and starts
   await expect(page.getByTestId('sidebar-project-gamma')).toBeVisible()
 })
 
+// Starting a session is not a background task: it spawns the CLI, and a bypass
+// start builds a container first. A corner spinner let the dialog sit there
+// looking idle, so the whole window says what it is waiting for.
+test('starting a session takes the whole window until the session is up', async ({ page }) => {
+  await page.getByTestId('add-project').click()
+  await page.getByTestId('suggestion-gamma').click()
+  await page.getByTestId('start-session').click()
+
+  const overlay = page.getByTestId('session-start-overlay')
+  await expect(overlay).toContainText('Starting session')
+
+  // It clears on its own once the session row has landed, not before.
+  await expect(overlay).toHaveCount(0)
+  await expect(page.getByTestId('sidebar-project-gamma')).toBeVisible()
+})
+
 test('aggregate counters are truthful (FR-005)', async ({ page }) => {
   await expect(page.getByTestId('counter-running-value')).toHaveText('2')
   await expect(page.getByTestId('counter-needsyou-value')).toHaveText('0')

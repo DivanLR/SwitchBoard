@@ -454,6 +454,17 @@ const MIGRATIONS: Migration[] = [
       `)
     },
   },
+  {
+    // Whether a session was asked to START in plan mode. Only the start value is
+    // stored, unlike bypassPermissions which is fixed for the session's life:
+    // plan mode can be switched at runtime (the SDK's setPermissionMode), so the
+    // current mode lives in memory on the session row and this column exists for
+    // one thing — the restart toggle pre-filling from how the last one began.
+    name: '021-session-plan-mode',
+    up: (db) => {
+      db.exec(`ALTER TABLE sessions ADD COLUMN planMode INTEGER;`)
+    },
+  },
 ]
 
 /**

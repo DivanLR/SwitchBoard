@@ -220,6 +220,22 @@ const dbProject = computed(() => projects.dbProject)
 
     <ProjectRegistration v-if="showRegistration" @close="showRegistration = false" />
     <SettingsPanel v-if="showSettings" :initial-tab="settingsTab" @close="showSettings = false" />
+
+    <!-- Starting a session takes the whole window: it is not a background task
+         the developer can work around, and a bypass start builds a container
+         the first time, which runs to minutes. Above the dialogs (z-index 40)
+         so the New session dialog it was triggered from waits behind it. -->
+    <div
+      v-if="projects.starting"
+      class="start-wait"
+      role="status"
+      aria-live="polite"
+      data-testid="session-start-overlay"
+    >
+      <span class="sw-ring"></span>
+      <div class="sw-text mono">Starting session…</div>
+      <div class="sw-sub mono">First bypass start builds its container — this can take a few minutes.</div>
+    </div>
   </div>
 
   <!-- Global loading spinner — shows while any IPC call is in flight. -->
@@ -402,6 +418,49 @@ html.sb-light .main {
   align-items: center;
   justify-content: center;
   gap: 14px;
+}
+
+/* Full-window waiting state for a session start. Same scrim and blur as a modal
+   overlay, one layer above it. */
+.start-wait {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: var(--scrim);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.sw-ring {
+  width: 26px;
+  height: 26px;
+  /* Circular for the same reason the global spinner is: it rotates, and a
+     rotating square reads as a glitch rather than as progress. */
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--green);
+  animation: sw-spin 0.7s linear infinite;
+}
+
+.sw-text {
+  font-size: 13px;
+  color: var(--text-bright);
+}
+
+.sw-sub {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+@keyframes sw-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .bridge-missing {

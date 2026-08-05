@@ -179,6 +179,13 @@ const store = reactive({
     return invoke('sessions.interrupt', { sessionId: this.sessionId })
   },
 
+  /** Move the live session into or out of plan mode. The header reads the mode
+   *  the CLI reports back, not this request, so it can never over-claim. */
+  async setPlanMode(enabled: boolean): Promise<void> {
+    if (!this.sessionId) return
+    await invoke('sessions.setPlanMode', { sessionId: this.sessionId, enabled })
+  },
+
   /** End the session for good (resumable later); queued sends survive as drafts. */
   async stop(): Promise<void> {
     if (!this.sessionId) return

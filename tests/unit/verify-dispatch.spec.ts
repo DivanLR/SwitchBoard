@@ -10,7 +10,13 @@ import {
   sandboxTools,
   unavailableReason,
 } from '@shared/test-catalog'
-import { parseVerifyReport, planSuites, verifyPrompt, VERIFY_MARKER } from '@main/evals/verify-dispatch'
+import {
+  parseVerifyReport,
+  planSuites,
+  verifyMarkerBroken,
+  verifyPrompt,
+  VERIFY_MARKER,
+} from '@main/evals/verify-dispatch'
 
 const dotnet = stackById('dotnet')!
 const node = stackById('node')!
@@ -112,6 +118,33 @@ describe('reading the report back', () => {
   it('returns nothing when there is no marker or the JSON is broken', () => {
     expect(parseVerifyReport('All tests passed!')).toBeNull()
     expect(parseVerifyReport(line('{"suites": [oops}'))).toBeNull()
+  })
+
+  // The old reader sliced from the first { to the LAST } in the rest of the turn,
+  // so one closing brace in a closing sentence swallowed the report and every
+  // gate read "not measured" — the opposite of what the run had just proved.
+  it('is not derailed by a closing brace in the prose after the report line', () => {
+    const report = parseVerifyReport(
+      `${VERIFY_MARKER}: {"suites":[{"id":"node-unit","status":"pass","detail":"41 passed"}],"coverage":{"line":88}}\n` +
+        'Note: the coverage gate lives in vitest.config.ts (see the thresholds block }).',
+    )
+    expect(report?.suites[0].status).toBe('pass')
+    expect(report?.coverage.line.value).toBe(88)
+  })
+
+  it('does not end the object early on a brace inside a string', () => {
+    const report = parseVerifyReport(
+      line('{"suites":[{"id":"node-unit","status":"fail","detail":"expected } got EOF"}]}'),
+    )
+    expect(report?.suites[0].detail).toBe('expected } got EOF')
+  })
+
+  // Two states that need opposite explanations: a session that never reported,
+  // and one whose report line could not be read.
+  it('tells a broken report line apart from no report line at all', () => {
+    expect(verifyMarkerBroken('All tests passed!')).toBe(false)
+    expect(verifyMarkerBroken(line('{"suites": [oops}'))).toBe(true)
+    expect(verifyMarkerBroken(line('{"suites":[]}'))).toBe(false)
   })
 
   it('fails the run when any executed suite failed, whatever the quality figures say', () => {

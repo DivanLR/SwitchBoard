@@ -211,9 +211,16 @@ export interface InvokeMap {
       projectId: string
       resume?: boolean
       bypassPermissions?: boolean
+      /** Start read-only: the session researches, then proposes a plan that
+       *  arrives in the inbox for approval. Ignored when bypassPermissions is
+       *  set, which approves everything and so has nothing to plan against. */
+      planMode?: boolean
     }
     res: Session
   }
+  /** Switch a live session into or out of plan mode without restarting it.
+   *  Refused for a bypass session (RULE_NOT_ALLOWED). */
+  'sessions.setPlanMode': { req: { sessionId: string; enabled: boolean }; res: void }
   'sessions.stop': { req: { sessionId: string }; res: void }
   'sessions.interrupt': { req: { sessionId: string }; res: { stillQueued: number } }
   'sessions.send': {
@@ -309,6 +316,12 @@ export interface InvokeMap {
     res: { sessionId: string; runs: VerifyRun[] }
   }
   /**
+   * Stop a run in progress: interrupts the session's current turn and closes the
+   * row as inconclusive, saying the developer stopped it. A run that already
+   * finished is left exactly as it is.
+   */
+  'verify.cancel': { req: { projectId: string; runId: string }; res: VerifyRun[] }
+  /**
    * The endpoints this project declares, scanned from its own source, plus the
    * ones most recently tested and where a run would call them. Nothing here needs
    * a session or a running API: the list is browsable and searchable cold.
@@ -350,6 +363,12 @@ export interface InvokeMap {
     }
     res: { sessionId: string; runs: ApiEvalRun[] }
   }
+  /**
+   * Stop an eval set in progress. This reaches the session being asked for
+   * request data; once the app itself is mid-loop sending the real calls there
+   * is nothing to interrupt, so the run finishes on its own.
+   */
+  'api.cancel': { req: { projectId: string; runId: string }; res: ApiEvalRun[] }
   /** Set where a project's API lives. An empty string clears the override. */
   'api.setHost': {
     req: {

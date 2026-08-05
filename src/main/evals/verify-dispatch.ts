@@ -17,7 +17,7 @@ import {
   type VerifyReport,
 } from '@shared/domain'
 import { unavailableReason, type SandboxEnv, type TestSuite } from '@shared/test-catalog'
-import { str } from './parse'
+import { firstJsonObject, markerTail, str } from './parse'
 
 /** Sentinel the session is told to emit, once, on its own line. */
 export const VERIFY_MARKER = 'SWB_VERIFY'
@@ -241,19 +241,28 @@ export function evidencePrompt(acceptanceHints: readonly string[], sandboxed: bo
  * restate it, so an early mention must never be mistaken for the answer.
  */
 export function parseVerifyReport(text: string): VerifyReport | null {
-  const at = text.lastIndexOf(`${VERIFY_MARKER}:`)
-  if (at < 0) return null
-  const tail = text.slice(at + VERIFY_MARKER.length + 1)
-  const start = tail.indexOf('{')
-  const end = tail.lastIndexOf('}')
-  if (start < 0 || end <= start) return null
+  const tail = markerTail(text, VERIFY_MARKER)
+  if (tail === null) return null
+  const json = firstJsonObject(tail)
+  if (json === null) return null
   let raw: unknown
   try {
-    raw = JSON.parse(tail.slice(start, end + 1))
+    raw = JSON.parse(json)
   } catch {
     return null
   }
   return normalizeReport(raw)
+}
+
+/**
+ * The turn carried a report line that could not be read.
+ *
+ * Distinct from "no marker at all", which is a session that simply never
+ * reported. The two need opposite explanations to the developer, and telling
+ * them apart is the whole reason `markerTail` returns null only on absence.
+ */
+export function verifyMarkerBroken(text: string): boolean {
+  return markerTail(text, VERIFY_MARKER) !== null && parseVerifyReport(text) === null
 }
 
 function normalizeReport(raw: unknown): VerifyReport | null {

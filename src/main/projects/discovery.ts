@@ -172,17 +172,23 @@ async function cwdFromJsonl(filePath: string): Promise<string | null> {
   return null
 }
 
+// ~/.claude/projects accumulates every folder Claude Code has ever run in, and
+// an add-project picker listing hundreds of them alphabetically buries the one
+// folder the developer actually means. Only the most recently used survive.
+const MAX_SUGGESTIONS = 10
+
 /**
- * Suggest Claude Code project folders from ~/.claude/projects. Fully async
- * (fs/promises) so this multi-directory scan never blocks the main-process
- * event loop, however many projects or how large their logs.
+ * Suggest Claude Code project folders from ~/.claude/projects, most recently
+ * used first, capped at MAX_SUGGESTIONS. Fully async (fs/promises) so this
+ * multi-directory scan never blocks the main-process event loop, however many
+ * projects or how large their logs.
  */
 export async function suggestProjects(
   repos: Repositories,
   claudeProjectsDir = join(homedir(), '.claude', 'projects'),
 ): Promise<ProjectSuggestion[]> {
   const registered = new Set(repos.projects.listActive().map((p) => p.path.toLowerCase()))
-  const suggestions = new Map<string, ProjectSuggestion>()
+  const suggestions = new Map<string, ProjectSuggestion & { mtime: number }>()
 
   let dirents
   try {
@@ -214,15 +220,25 @@ export async function suggestProjects(
       if (!cwd) continue
       const path = resolve(cwd)
       const key = path.toLowerCase()
-      if (registered.has(key) || suggestions.has(key)) break
+      if (registered.has(key)) break
+      const seen = suggestions.get(key)
+      if (seen) {
+        // Two ~/.claude/projects folders can decode to the same cwd (a renamed
+        // or re-cased path); the folder ranks by the newest session across both.
+        seen.mtime = Math.max(seen.mtime, file.mtime)
+        break
+      }
       const isDir = await stat(path)
         .then((s) => s.isDirectory())
         .catch(() => false)
       if (!isDir) break
-      suggestions.set(key, { path, name: basename(path) })
+      suggestions.set(key, { path, name: basename(path), mtime: file.mtime })
       break
     }
   }
 
-  return [...suggestions.values()].sort((a, b) => a.name.localeCompare(b.name))
+  return [...suggestions.values()]
+    .sort((a, b) => b.mtime - a.mtime)
+    .slice(0, MAX_SUGGESTIONS)
+    .map(({ path, name }) => ({ path, name }))
 }

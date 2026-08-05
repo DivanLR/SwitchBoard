@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Switchboard — design preview</title>
+  </head>
+  <body>
+    <!--
+      DEV-ONLY STYLING SURFACE. Not an application entry: no build has it as an
+      input (electron.vite.config.ts builds index.html and nothing else), and
+      nothing in src/ imports it.
+
+      It exists because the renderer cannot be styled in a plain browser on its
+      own. Every store talks through `window.switchboard`, which only the
+      Electron preload provides, so http://localhost:5199/ renders the
+      bridge-missing fallback and there is no interface to work on. Running the
+      real Electron app instead is not a substitute while the installed
+      Switchboard is running: a second instance sweeps orphaned bypass
+      containers on startup (src/main/sessions/docker-sandbox.ts) and would kill
+      the live one.
+
+      So this page installs the end-to-end mock host — the same one the
+      Playwright suite runs against, so it cannot drift from the real IPC
+      contract — seeds enough content that no pane is empty, then boots the same
+      application.
+
+          npm run dev:renderer   →   http://localhost:5199/design.html
+    -->
+    <div id="app"></div>
+    <script type="module">
+      import { installMockHost, twoProjectScenario } from '../../tests/e2e/mock-host'
+
+      installMockHost(twoProjectScenario())
+
+      // Seeded BEFORE the app boots, so the first refresh reads it: the mock
+      // keeps this in its own state, and pushing to listeners that do not exist
+      // yet would land nowhere.
+      const m = window.__mock
+      m.emitEvent('s-alpha', 'prompt', { text: 'Add the usage meter to the sidebar rows.', pending: false })
+      m.emitEvent('s-alpha', 'assistant_text', {
+        text: 'Reading the sidebar and the session status shape first.\n\nThe meter belongs on the row, not in the header: it is per session, and the header only ever shows the selected one.',
+        partial: false,
+      })
+      m.emitEvent('s-alpha', 'tool_activity', { toolName: 'Read', inputPreview: 'src/renderer/components/Sidebar.vue' })
+      m.emitEvent('s-alpha', 'tool_activity', { toolName: 'Bash', inputPreview: 'npm run typecheck' })
+      m.emitEvent('s-alpha', 'error', { text: 'vue-tsc: Property "usageUtilization" does not exist on type Session.', fatal: false })
+      m.emitEvent('s-alpha', 'assistant_text', {
+        text: 'The field was missing from the shared type. Added it to `Session` and the meter typechecks.',
+        partial: false,
+      })
+      m.setUsage('s-alpha', 0.62, 143, 'session')
+
+      m.raisePermission({
+        projectId: 'p-alpha',
+        toolName: 'Bash',
+        title: 'Run npm run check',
+        explanation: 'Typecheck, lint, unit and end-to-end suites.',
+        detail: 'npm run check',
+        risk: 'low',
+      })
+      m.raisePermission({
+        projectId: 'p-beta',
+        toolName: 'Bash',
+        title: 'Force-push feature/x',
+        explanation: 'Rewrites the remote branch history.',
+        detail: 'git push --force origin feature/x',
+        risk: 'high',
+      })
+      m.askQuestion('s-beta', 'The migration drops the old column. Keep a copy first?', ['Keep a copy', 'Drop it'])
+
+      import('./main.ts')
+    </script>
+  </body>
+</html>

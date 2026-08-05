@@ -109,9 +109,53 @@ const sandboxed = computed<SandboxEnv>(() =>
 // find is an override, and gets the whole catalog entry — that choice is theirs.
 const suites = computed<TestSuite[]>(() => {
   const found = detected.value.find((d) => d.stackId === chosenId.value)
-  return [...(found?.suites ?? stack.value?.suites ?? [])]
+  const catalogue = [...(found?.suites ?? stack.value?.suites ?? [])]
+  // The catalogue's command is a guess about a conventional layout. Where the
+  // developer has corrected it, that correction is what the chip shows and what
+  // the run dispatches — verify.start applies the same overlay, so the two can
+  // never say different things.
+  const overrides = commandOverrides.value
+  return catalogue.map((suite) =>
+    overrides[suite.id] ? { ...suite, command: overrides[suite.id] } : suite,
+  )
 })
 const blockedReason = (suite: TestSuite): string | null => unavailableReason(suite, sandboxed.value)
+
+const commandOverrides = computed<Record<string, string>>(
+  () => settingsStore.settings?.projectSuiteCommands?.[props.projectId] ?? {},
+)
+
+/** Which suite's command is open for editing; null when none is. */
+const editingCommand = ref<string | null>(null)
+const commandDraft = ref('')
+
+function editCommand(suite: TestSuite): void {
+  editingCommand.value = suite.id
+  commandDraft.value = suite.command
+}
+
+/**
+ * Save (or clear) one suite's command for this project.
+ *
+ * Both levels are spread deliberately: settings.set shallow-merges its patch, so
+ * writing the project key without spreading the map would drop every other
+ * project's overrides, and writing the suite key without spreading would drop
+ * every other suite's. Typing the catalogue's own command back in, or emptying
+ * the field, deletes the entry rather than storing a duplicate of the default.
+ */
+function saveCommand(suite: TestSuite): void {
+  editingCommand.value = null
+  const all = settingsStore.settings?.projectSuiteCommands ?? {}
+  const mine = { ...(all[props.projectId] ?? {}) }
+  const typed = commandDraft.value.trim()
+  const catalogue = detected.value
+    .find((d) => d.stackId === chosenId.value)
+    ?.suites.find((s) => s.id === suite.id)?.command ??
+    stack.value?.suites.find((s) => s.id === suite.id)?.command
+  if (!typed || typed === catalogue) delete mine[suite.id]
+  else mine[suite.id] = typed
+  void settingsStore.save({ projectSuiteCommands: { ...all, [props.projectId]: mine } })
+}
 
 // The default selection follows the environment: heavy suites are opt-in, and a
 // suite this environment cannot run starts unticked instead of failing later.
@@ -209,6 +253,14 @@ async function captureEvidence(): Promise<void> {
   if (await verify.captureEvidence(props.projectId, latest.value?.id)) {
     subTab.value = 'evidence'
   }
+}
+
+async function cancelVerify(): Promise<void> {
+  if (latest.value) await verify.cancel(props.projectId, latest.value.id)
+}
+
+async function cancelApi(): Promise<void> {
+  if (apiRun.value) await api.cancel(props.projectId, apiRun.value.id)
 }
 
 // The API eval set: picked endpoints, where the calls go, and running them.
@@ -420,20 +472,44 @@ function statusWord(run: VerifyRun): string {
         <!-- Suite picker: heavy suites are opt-in, and what the environment
              cannot run says so here rather than failing mid-run (FR-057). -->
         <div class="suites" data-testid="tests-suites">
-          <button
-            v-for="s in suites"
-            :key="s.id"
-            class="chip suite"
-            :class="{ on: isSelected(s), dev: !!blockedReason(s) }"
-            :disabled="!!blockedReason(s)"
-            :title="blockedReason(s) ?? s.command"
-            :data-testid="`tests-suite-${s.id}`"
-            @click="toggleSuite(s)"
-          >
-            {{ s.label }}
-            <span v-if="blockedReason(s)" class="dev-tag">{{ blockedReason(s) }}</span>
-            <span v-else-if="s.heavy" class="heavy-tag mono">slow</span>
-          </button>
+          <template v-for="s in suites" :key="s.id">
+            <button
+              class="chip suite"
+              :class="{ on: isSelected(s), dev: !!blockedReason(s) }"
+              :disabled="!!blockedReason(s)"
+              :title="blockedReason(s) ?? s.command"
+              :data-testid="`tests-suite-${s.id}`"
+              @click="toggleSuite(s)"
+            >
+              {{ s.label }}
+              <span v-if="blockedReason(s)" class="dev-tag">{{ blockedReason(s) }}</span>
+              <span v-else-if="s.heavy" class="heavy-tag mono">slow</span>
+              <span v-if="commandOverrides[s.id]" class="heavy-tag mono">edited</span>
+            </button>
+            <!-- The catalogue's command is a guess about a conventional layout;
+                 this is how a layout it does not fit gets corrected, rather than
+                 by editing this application's source. -->
+            <button
+              class="chip cmd-edit mono"
+              :data-testid="`tests-suite-edit-${s.id}`"
+              :title="`Edit the command for ${s.label}`"
+              @click="editCommand(s)"
+            >
+              ✎
+            </button>
+          </template>
+        </div>
+        <div v-if="editingCommand" class="cmd-row">
+          <input
+            v-model="commandDraft"
+            class="mono cmd-input"
+            :data-testid="`tests-suite-command-${editingCommand}`"
+            spellcheck="false"
+            @keydown.enter="saveCommand(suites.find((s) => s.id === editingCommand)!)"
+            @keydown.esc="editingCommand = null"
+            @blur="saveCommand(suites.find((s) => s.id === editingCommand)!)"
+          />
+          <span class="lbl mono">empty restores the default</span>
         </div>
 
         <div class="targets">
@@ -448,6 +524,18 @@ function statusWord(run: VerifyRun): string {
             @click="captureEvidence()"
           >
             Capture evidence
+          </button>
+          <!-- Only while a run is live: before this, a run the developer no longer
+               wanted had to be waited out, and one whose session had died could
+               only be cleared by restarting the app. -->
+          <button
+            v-if="running && latest"
+            class="chip"
+            data-testid="tests-cancel"
+            title="Stop the session's current turn and close this run. It stops whatever the session is doing, not only the tests."
+            @click="cancelVerify()"
+          >
+            Cancel
           </button>
           <button
             class="run"
@@ -647,6 +735,15 @@ function statusWord(run: VerifyRun): string {
             {{ apiEstimateLine }}
           </span>
           <span style="flex: 1"></span>
+          <button
+            v-if="apiRunning && apiRun"
+            class="chip"
+            data-testid="tests-api-cancel"
+            title="Stop the session's current turn and close this run. Calls the app has already started sending finish on their own."
+            @click="cancelApi()"
+          >
+            Cancel
+          </button>
           <button
             class="run"
             :disabled="api.starting || apiRunning || picked.length === 0"
@@ -1040,6 +1137,31 @@ function statusWord(run: VerifyRun): string {
 .heavy-tag {
   font-size: 9.5px;
   color: var(--text-ghost);
+}
+
+/* The edit affordance rides beside its suite chip rather than inside it: the
+   chip is the on/off target, and a control nested in it would swallow that. */
+.cmd-edit {
+  padding: 4px 7px;
+  margin-left: -4px;
+  color: var(--text-ghost);
+}
+
+.cmd-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 7px;
+}
+
+.cmd-input {
+  flex: 1;
+  font-size: 11.5px;
+  padding: 5px 8px;
+  background: var(--bg-code);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--rc);
+  color: var(--text-body);
 }
 
 .run {

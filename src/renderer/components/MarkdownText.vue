@@ -8,11 +8,42 @@ import { renderMarkdown } from '@shared/markdown'
 
 const props = defineProps<{ text: string }>()
 const html = computed(() => renderMarkdown(props.text))
+
+/**
+ * Click a code block to copy it.
+ *
+ * One delegated listener rather than a button per block: renderMarkdown emits a
+ * fixed, attribute-free tag set — which is exactly what makes the v-html above
+ * safe — so injecting controls into its output would give that up, and appending
+ * them afterwards would mean re-attaching on every streamed re-render.
+ *
+ * `app://` is registered as a secure scheme (see registerSchemesAsPrivileged in
+ * src/main/index.ts) and dev runs on localhost, so the clipboard API is
+ * available in both; no IPC, and no exception to the rule that only stores
+ * invoke.
+ */
+async function copyBlock(event: MouseEvent): Promise<void> {
+  const pre = (event.target as HTMLElement | null)?.closest?.('pre.md-pre')
+  if (!(pre instanceof HTMLElement)) return
+  // Selecting a few lines inside a block and releasing the mouse is a copy the
+  // developer is already making by hand; taking the whole block instead would
+  // overwrite what they just chose (SessionView guards Ctrl+C the same way).
+  if ((window.getSelection()?.toString() ?? '').length > 0) return
+  try {
+    await navigator.clipboard.writeText(pre.textContent ?? '')
+  } catch {
+    // Denied or unavailable: leave the block unmarked rather than claiming a
+    // copy that did not happen.
+    return
+  }
+  pre.classList.add('copied')
+  setTimeout(() => pre.classList.remove('copied'), 1200)
+}
 </script>
 
 <template>
   <!-- eslint-disable-next-line vue/no-v-html -- content is escaped + tag-whitelisted by renderMarkdown -->
-  <div class="md" v-html="html"></div>
+  <div class="md" data-testid="markdown-text" @click="copyBlock" v-html="html"></div>
 </template>
 
 <style scoped>
@@ -89,6 +120,40 @@ const html = computed(() => renderMarkdown(props.text))
   padding: 10px 12px;
   margin: 0 0 8px;
   overflow-x: auto;
+  /* Anchors the copy label below. */
+  position: relative;
+  cursor: pointer;
+}
+
+/* The affordance is a label drawn by CSS rather than a button in the markup, so
+   the rendered HTML stays the attribute-free set renderMarkdown guarantees. It
+   appears on hover, and states the outcome for the moment after the click. */
+.md :deep(pre.md-pre)::after {
+  content: 'copy';
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  color: var(--text-ghost);
+  background: var(--bg-code);
+  padding: 1px 5px;
+  border: 1px solid var(--border-soft);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  pointer-events: none;
+}
+
+.md :deep(pre.md-pre:hover)::after {
+  opacity: 1;
+}
+
+.md :deep(pre.md-pre.copied)::after {
+  content: 'copied';
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 45%, transparent);
+  opacity: 1;
 }
 
 .md :deep(pre.md-pre code) {

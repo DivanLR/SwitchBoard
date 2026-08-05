@@ -74,14 +74,21 @@ interface SessionRow {
   endReason: SessionEndReason | null
   /** SQLite has no boolean type, so this arrives as 0/1 (or null pre-migration). */
   bypassPermissions: number | null
+  /** How the session STARTED, never where it is now — see Session.planMode. */
+  planMode: number | null
 }
 
-/** SessionRow is the raw shape; Session wants a real boolean for the flag. */
+/** SessionRow is the raw shape; Session wants real booleans for the flags. */
 function toSession(row: SessionRow): Session
 function toSession(row: SessionRow | undefined): Session | undefined
 function toSession(row: SessionRow | undefined): Session | undefined {
   if (!row) return undefined
-  return { ...row, bypassPermissions: row.bypassPermissions === 1 }
+  // inPlanMode is deliberately absent: it is the live mode, which no row holds.
+  return {
+    ...row,
+    bypassPermissions: row.bypassPermissions === 1,
+    planMode: row.planMode === 1,
+  }
 }
 
 interface EventRow {
@@ -226,8 +233,8 @@ export class SessionsRepo {
   insert(session: Session): void {
     this.db
       .prepare(
-        `INSERT INTO sessions (id, projectId, sdkSessionId, status, statusDetail, branch, diffAdds, diffDels, usageUtilization, usageResetsAt, usageLimitType, startedAt, endedAt, endReason, bypassPermissions)
-         VALUES (@id, @projectId, @sdkSessionId, @status, @statusDetail, @branch, @diffAdds, @diffDels, @usageUtilization, @usageResetsAt, @usageLimitType, @startedAt, @endedAt, @endReason, @bypassPermissions)`,
+        `INSERT INTO sessions (id, projectId, sdkSessionId, status, statusDetail, branch, diffAdds, diffDels, usageUtilization, usageResetsAt, usageLimitType, startedAt, endedAt, endReason, bypassPermissions, planMode)
+         VALUES (@id, @projectId, @sdkSessionId, @status, @statusDetail, @branch, @diffAdds, @diffDels, @usageUtilization, @usageResetsAt, @usageLimitType, @startedAt, @endedAt, @endReason, @bypassPermissions, @planMode)`,
       )
       // SQLite takes no booleans, and the in-memory Session carries non-scalar
       // extras (mcpServers, backgroundTasks) that are not columns — so bind the
@@ -248,6 +255,9 @@ export class SessionsRepo {
         endedAt: session.endedAt,
         endReason: session.endReason,
         bypassPermissions: session.bypassPermissions ? 1 : 0,
+        // The start value only. A mid-session switch changes inPlanMode, which is
+        // in-memory and never written, so this stays true of how it began.
+        planMode: session.planMode ? 1 : 0,
       })
   }
 
@@ -995,6 +1005,30 @@ export class VerifyRunsRepo {
     return Number(result.changes ?? 0)
   }
 
+  /**
+   * The same repair, for a run that went stale while the app stayed up.
+   *
+   * `reconcileRunning` above only ever runs at launch, so the row it describes
+   * sat there reading Running — with the Run button disabled behind it — until
+   * the developer restarted the app. This is the sweep that closes it in place.
+   * Returns the projects affected so the caller can push; the launch-time version
+   * never needed that, because nothing is subscribed yet when it runs.
+   */
+  reconcileStale(deadlineIso: string, note: string): string[] {
+    const affected = this.db
+      .prepare(
+        "SELECT DISTINCT projectId FROM verify_runs WHERE status = 'running' AND startedAt < ?",
+      )
+      .all(deadlineIso) as { projectId: string }[]
+    if (affected.length === 0) return []
+    this.db
+      .prepare(
+        "UPDATE verify_runs SET status = 'inconclusive', note = ?, finishedAt = ? WHERE status = 'running' AND startedAt < ?",
+      )
+      .run(note, nowIso(), deadlineIso)
+    return affected.map((row) => row.projectId)
+  }
+
   /** The run a result belongs to when the session reports one: the newest still
    *  running, so a late report can never overwrite a finished run's figures. */
   runningFor(projectId: string): VerifyRun | null {
@@ -1074,6 +1108,21 @@ export class ApiRunsRepo {
       )
       .run(note, nowIso())
     return Number(result.changes ?? 0)
+  }
+
+  /** The in-flight sweep, matching VerifyRunsRepo.reconcileStale — see there for
+   *  why a launch-only repair was not enough. */
+  reconcileStale(deadlineIso: string, note: string): string[] {
+    const affected = this.db
+      .prepare("SELECT DISTINCT projectId FROM api_runs WHERE status = 'running' AND startedAt < ?")
+      .all(deadlineIso) as { projectId: string }[]
+    if (affected.length === 0) return []
+    this.db
+      .prepare(
+        "UPDATE api_runs SET status = 'error', note = ?, finishedAt = ? WHERE status = 'running' AND startedAt < ?",
+      )
+      .run(note, nowIso(), deadlineIso)
+    return affected.map((row) => row.projectId)
   }
 
   start(input: {

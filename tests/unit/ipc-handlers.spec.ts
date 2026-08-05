@@ -58,6 +58,7 @@ function setup() {
     onEvalsChanged: () => {},
     onVerifyChanged: () => {},
     onApiRequests: () => {},
+    onApiChanged: () => {},
     onProjectCommands: () => {},
     gate: (async () => ({ behavior: 'allow', updatedInput: {} })) as never,
   })
@@ -230,6 +231,7 @@ describe('the sender-trust check', () => {
       onEvalsChanged: () => {},
       onVerifyChanged: () => {},
       onApiRequests: () => {},
+    onApiChanged: () => {},
       onProjectCommands: () => {},
       gate: (async () => ({ behavior: 'allow', updatedInput: {} })) as never,
     })

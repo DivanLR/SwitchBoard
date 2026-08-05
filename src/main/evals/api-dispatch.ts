@@ -9,7 +9,7 @@
 // id answers 200 with an empty body and looks healthy, so the inputs have to come
 // from rows that actually exist. Only the project's database knows which ones do.
 import type { ApiExpect, ApiRequestPlan, ApiTarget } from '@shared/api-endpoints'
-import { str } from './parse'
+import { firstJsonObject, markerTail, str } from './parse'
 
 /** Sentinel the session emits once, on its own line. */
 export const API_DATA_MARKER = 'SWB_APIDATA'
@@ -134,15 +134,13 @@ export function apiDataPrompt(
  * restate it, so an early mention must never be read as the answer.
  */
 export function parseApiRequests(text: string): ApiRequestPlan[] | null {
-  const at = text.lastIndexOf(`${API_DATA_MARKER}:`)
-  if (at < 0) return null
-  const tail = text.slice(at + API_DATA_MARKER.length + 1)
-  const start = tail.indexOf('{')
-  const end = tail.lastIndexOf('}')
-  if (start < 0 || end <= start) return null
+  const tail = markerTail(text, API_DATA_MARKER)
+  if (tail === null) return null
+  const json = firstJsonObject(tail)
+  if (json === null) return null
   let raw: unknown
   try {
-    raw = JSON.parse(tail.slice(start, end + 1))
+    raw = JSON.parse(json)
   } catch {
     return null
   }

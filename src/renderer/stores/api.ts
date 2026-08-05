@@ -108,6 +108,19 @@ const store = reactive({
     }
   },
 
+  /** Stop an eval set in progress. Reaches the session being asked for request
+   *  data; a run already mid-flight in the app's own call loop finishes itself. */
+  async cancel(projectId: string, runId: string): Promise<boolean> {
+    this.error = null
+    try {
+      this.runs[projectId] = await invoke('api.cancel', { projectId, runId })
+      return true
+    } catch (error) {
+      this.error = errorMessage(error)
+      return false
+    }
+  },
+
   /** Set (or clear, with an empty string) where this project's API lives. */
   async setHost(
     projectId: string,

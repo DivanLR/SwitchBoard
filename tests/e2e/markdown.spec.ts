@@ -36,6 +36,51 @@ test('a Markdown response renders bold, inline code, and a fenced code block', a
   await expect(event.locator('p').filter({ hasText: 'One finding' })).toBeVisible()
 })
 
+// Code the session hands back is code the developer wants to run; before this
+// there was no way to lift it out of the stream but to select it by hand.
+test('a code block is copied by clicking it, and says so', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await page.evaluate(() => {
+    window.__mock.emitEvent('s-alpha', 'assistant_text', {
+      text: ['Run this:', '', '```', 'npm run check', '```'].join('\n'),
+      partial: false,
+    })
+  })
+
+  const block = page.getByTestId('stream-event-assistant_text').locator('pre.md-pre')
+  await block.click()
+
+  await expect(block).toHaveClass(/copied/)
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('npm run check')
+})
+
+test('selecting inside a code block is not overwritten by the copy', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await page.evaluate(async () => {
+    window.__mock.emitEvent('s-alpha', 'assistant_text', {
+      text: ['```', 'first line', 'second line', '```'].join('\n'),
+      partial: false,
+    })
+    await navigator.clipboard.writeText('what the developer already copied')
+  })
+
+  const block = page.getByTestId('stream-event-assistant_text').locator('pre.md-pre')
+  // A selection inside the block is a copy the developer is already making.
+  await page.evaluate(() => {
+    const code = document.querySelector('pre.md-pre code')
+    const range = document.createRange()
+    range.selectNodeContents(code!)
+    window.getSelection()?.removeAllRanges()
+    window.getSelection()?.addRange(range)
+  })
+  await block.click({ position: { x: 5, y: 5 } })
+
+  await expect(block).not.toHaveClass(/copied/)
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+    'what the developer already copied',
+  )
+})
+
 test('a Markdown response cannot inject HTML', async ({ page }) => {
   await page.evaluate(() => {
     window.__mock.emitEvent('s-alpha', 'assistant_text', {
