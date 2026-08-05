@@ -34,6 +34,7 @@ import { useNow } from '@renderer/composables/useNow'
 import { elapsedClock } from '@renderer/relative-time'
 import { toRawLines } from '@shared/stream-lines'
 import { useSpecsStore } from '@renderer/stores/specs'
+import { useDiffStore } from '@renderer/stores/diff'
 import { accentFor } from '@renderer/project-accent'
 import StreamEvent from '@renderer/components/StreamEvent.vue'
 import SwallowedBlock from '@renderer/components/SwallowedBlock.vue'
@@ -41,6 +42,7 @@ import QuestionEvent from '@renderer/components/QuestionEvent.vue'
 import SpecsView from '@renderer/views/SpecsView.vue'
 import CleanupView from '@renderer/views/CleanupView.vue'
 import TestsView from '@renderer/views/TestsView.vue'
+import DiffView from '@renderer/views/DiffView.vue'
 
 const props = defineProps<{ project: ProjectListItem }>()
 const emit = defineEmits<{ (e: 'open-proj-settings'): void }>()
@@ -51,6 +53,7 @@ const inbox = useInboxStore()
 const queue = useQueueStore()
 const settingsStore = useSettingsStore()
 const specs = useSpecsStore()
+const diff = useDiffStore()
 
 const queuedTasks = computed(() => queue.forProject(props.project.id))
 
@@ -79,10 +82,12 @@ function pillLabel(status: string): string {
   return PILL_LABELS[status] ?? status
 }
 
-// Main-area tab: the live session stream, the project's Spec Kit specs, or the
-// review/cleanup command launcher.
-const mainTab = ref<'session' | 'specs' | 'tests' | 'cleanup'>('session')
+// Main-area tab: the live session stream, the project's Spec Kit specs, the
+// verification section, the working-tree diff, or the review/cleanup command
+// launcher.
+const mainTab = ref<'session' | 'specs' | 'tests' | 'diff' | 'cleanup'>('session')
 const specCount = computed(() => specs.stateFor(props.project.id).specs.length)
+const diffCount = computed(() => diff.resultFor(props.project.id).files.length)
 
 const composer = ref('')
 // Spec-edit target (design ✎ chip): when set, the composer rewrites this spec
@@ -401,9 +406,33 @@ watch(
     resetSuggestions()
     void loadHistory(projectId)
     void specs.loadState(projectId)
+    void diff.loadList(projectId)
     void queue.load(projectId)
   },
   { immediate: true },
+)
+
+// Diff tab refresh: the same turn-complete cadence that already refreshes the
+// header's +adds/−dels counter (session-manager.ts observeBranch) re-derives
+// the per-file list too. A same-project refresh leaves the current selection
+// alone (see stores/diff.ts) so a session that keeps working doesn't yank the
+// developer's open diff out from under them.
+//
+// liveSession's id is watched too, and separately from diffAdds/diffDels:
+// starting a session on an already-open project changes neither counter (both
+// stay null until the first turn completes), so without this the tab would
+// sit on its pre-session "not live" read until then. The same id transition
+// covers ending a session, so a stale list doesn't linger once liveSession
+// drops to null.
+watch(
+  [
+    () => liveSession.value?.diffAdds ?? null,
+    () => liveSession.value?.diffDels ?? null,
+    () => liveSession.value?.id ?? null,
+  ],
+  () => {
+    void diff.loadList(props.project.id)
+  },
 )
 
 // The bypass toggle follows whatever session the banner is offering to resume:
@@ -1092,6 +1121,10 @@ const {
       >
         Tests
       </button>
+      <button class="mt" :class="{ sel: mainTab === 'diff' }" data-testid="tab-diff" @click="mainTab = 'diff'">
+        Diff
+        <span v-if="diffCount > 0" class="mt-badge">{{ diffCount }}</span>
+      </button>
       <button
         class="mt"
         :class="{ sel: mainTab === 'cleanup' }"
@@ -1116,6 +1149,7 @@ const {
       @run="runInSession"
       @ran="onRanInSession"
     />
+    <DiffView v-else-if="mainTab === 'diff'" :project-id="project.id" />
     <CleanupView
       v-else-if="mainTab === 'cleanup'"
       :project-name="project.name"

@@ -99,6 +99,10 @@ Confirmed functionality:
   clarifications.
 - A verification section that dispatches test suites through the session and
   reports what the run measured.
+- A Diff tab, live-session-only, listing every changed file in the project's
+  working tree (tracked and untracked alike) with added/removed line counts,
+  and showing one selected file's diff on demand. Read-only: no stage,
+  discard, or revert action.
 
 Present but provisional, recorded so future work knows they exist and knows they
 are not yet load-bearing. Neither has been lived with long enough to confirm, and

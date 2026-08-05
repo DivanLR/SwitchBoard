@@ -36,6 +36,11 @@ export interface MockProjectSeed {
   session?: MockSessionSeed
   /** The reserved, project-less row backing the global Database MCP session. */
   reserved?: boolean
+  /** Diff tab (specs/003-diff-tab) seed data — set at scenario construction so
+   *  it is in place before the app's own initial load, rather than racing it
+   *  the way a later __mock.setDiff() call would for a project already
+   *  selected on page load. */
+  diff?: { gitNotice: string | null; files: Record<string, unknown>[] }
 }
 
 export interface MockScenario {
@@ -64,6 +69,11 @@ export interface MockDriver {
   ) => void
   endSession: (sessionId: string) => void
   setSpecKit: (projectId: string, state: Record<string, unknown>) => void
+  /** Diff tab (specs/003-diff-tab): seeds what 'diff.list' answers for a
+   *  project — there is no real git repo behind this in-browser mock. */
+  setDiff: (projectId: string, result: { gitNotice: string | null; files: Record<string, unknown>[] }) => void
+  /** Seeds what 'diff.file' answers for one path within a project. */
+  setFileDiff: (projectId: string, path: string, content: Record<string, unknown>) => void
   setMcpSchema: (projectId: string, content: string, servers?: string[]) => void
   setUsage: (sessionId: string, utilization: number, resetsInMinutes: number, limitType: string) => void
   setAvailableModels: (models: { id: string; label: string; description: string }[]) => void
@@ -169,6 +179,15 @@ export function installMockHost(scenario: MockScenario): void {
   const now = (): string => new Date().toISOString()
   let idCounter = 0
   const nextId = (prefix: string): string => `${prefix}-${++idCounter}`
+
+  // Diff tab (specs/003-diff-tab): seeded from the scenario, like mcpServers
+  // above, or set later via __mock.setDiff/setFileDiff — there is no real
+  // git repo behind this in-browser mock.
+  const diffByProject = new Map<string, AnyRecord>()
+  const fileDiffByProject = new Map<string, AnyRecord>()
+  for (const p of scenario.projects) {
+    if (p.diff) diffByProject.set(p.id, p.diff)
+  }
 
   const sessions = new Map<string, MockSession>()
   /** Transcripts the mock has "written", newest first. Never touches disk. */
@@ -606,6 +625,22 @@ export function installMockHost(scenario: MockScenario): void {
         | { details?: Record<string, AnyRecord> }
         | undefined
       return state?.details?.[String(req.specId)] ?? null
+    },
+    'diff.list': (req) => {
+      const project = projects.find((p) => p.id === req.projectId)
+      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
+      if (!project.session || project.session.endedAt) {
+        throw { code: 'NOT_LIVE', message: 'No live session for this project' }
+      }
+      return diffByProject.get(String(req.projectId)) ?? { gitNotice: null, files: [] }
+    },
+    'diff.file': (req) => {
+      const project = projects.find((p) => p.id === req.projectId)
+      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
+      if (!project.session || project.session.endedAt) {
+        throw { code: 'NOT_LIVE', message: 'No live session for this project' }
+      }
+      return fileDiffByProject.get(`${String(req.projectId)}|${String(req.path)}`) ?? null
     },
     'specs.install': (req) => {
       const installed = {
@@ -1319,6 +1354,8 @@ export function installMockHost(scenario: MockScenario): void {
       availableModels = models
     },
     setSpecKit: (projectId, state) => specKitByProject.set(projectId, state),
+    setDiff: (projectId, result) => diffByProject.set(projectId, result),
+    setFileDiff: (projectId, path, content) => fileDiffByProject.set(`${projectId}|${path}`, content),
     setMcpSchema: (projectId, content, servers) =>
       mcpSchemaByProject.set(
         servers?.length ? `${projectId}|${[...servers].sort().join(' + ')}` : projectId,
