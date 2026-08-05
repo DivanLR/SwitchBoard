@@ -5,10 +5,12 @@
 import type {
   AvailableModel,
   DecisionRecord,
+  DiffListResult,
   Draft,
   EvalCheckStatus,
   EvalRun,
   EvalVerdict,
+  FileDiffContent,
   McpScan,
   PermissionRequest,
   PermissionRequestStatus,
@@ -81,6 +83,7 @@ export type IpcErrorCode =
   | 'RULE_NOT_ALLOWED'
   | 'INVALID_PATH'
   | 'DUPLICATE'
+  | 'NOT_LIVE'
   | 'INTERNAL'
 
 export interface IpcError {
@@ -116,6 +119,7 @@ const IPC_ERROR_CODE_KEYS: Record<IpcErrorCode, true> = {
   RULE_NOT_ALLOWED: true,
   INVALID_PATH: true,
   DUPLICATE: true,
+  NOT_LIVE: true,
   INTERNAL: true,
 }
 
@@ -238,6 +242,13 @@ export interface InvokeMap {
   'specs.detail': { req: { projectId: string; specId: string }; res: SpecDetail | null }
   /** Install Spec Kit into the project (ephemeral uvx; never global). */
   'specs.install': { req: { projectId: string }; res: SpecKitState }
+  /** Changed files in the project's working tree (tracked and untracked
+   *  together). Throws NOT_LIVE when the project has no live session — this
+   *  tab is live-session-only. */
+  'diff.list': { req: { projectId: string }; res: DiffListResult }
+  /** One file's diff content, fetched only on selection. Null when the file
+   *  no longer matches a current changed-file entry. */
+  'diff.file': { req: { projectId: string; path: string }; res: FileDiffContent | null }
   /** The cached MCP schema map, or null if unscanned. With `servers`, reads the
    *  combination's own scan doc (.switchboard/scans/<combo>.md); without, the
    *  legacy single db-schema.md. */
