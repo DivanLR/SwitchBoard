@@ -55,7 +55,7 @@ function barColor(pct: number): string {
 }
 
 .uc-label {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.13em;
   color: var(--green);
   margin-bottom: 9px;
@@ -71,7 +71,7 @@ function barColor(pct: number): string {
 }
 
 .uc-meter-label {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-body);
   white-space: nowrap;
   overflow: hidden;
@@ -79,7 +79,7 @@ function barColor(pct: number): string {
 }
 
 .uc-meter-pct {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   font-weight: 600;
   text-align: right;
 }
@@ -97,13 +97,13 @@ function barColor(pct: number): string {
 }
 
 .uc-meter-resets {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
   white-space: nowrap;
 }
 
 .uc-notes {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   line-height: 1.5;
   color: var(--text-faint);
   margin: 9px 0 2px;
@@ -122,13 +122,13 @@ function barColor(pct: number): string {
 }
 
 .uc-win-title {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.13em;
   color: var(--teal);
 }
 
 .uc-win-volume {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-meta);
 }
 
@@ -139,7 +139,7 @@ function barColor(pct: number): string {
 }
 
 .uc-list li {
-  font-size: 12px;
+  font-size: var(--fs-ui);
   line-height: 1.6;
   color: var(--text-body);
   margin: 2px 0;
@@ -155,7 +155,7 @@ function barColor(pct: number): string {
 }
 
 .uc-top-item {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-body);
   white-space: nowrap;
 }

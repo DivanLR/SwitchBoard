@@ -4,6 +4,31 @@
 import { expect, test } from '@playwright/test'
 import { installMockHost, twoProjectScenario } from './mock-host'
 
+/**
+ * The last thing dispatched to a session, once it has actually been dispatched.
+ *
+ * Tests-section work now runs in the project's OWN session rather than whichever
+ * session happens to be open, so the first run of a project has to spawn one
+ * before it can send anything. Reading `sends` in the same tick as the click used
+ * to work only because the dispatch reused a session that already existed.
+ */
+async function lastSend(
+  page: import('@playwright/test').Page,
+  /** Wait for a send carrying this, when a previous send would otherwise satisfy
+   *  "something was sent" and the poll would return the wrong one. */
+  contains?: string,
+): Promise<string> {
+  let text = ''
+  const poll = expect.poll(async () => {
+    text = (await page.evaluate(() => window.__mock.state().sends.at(-1)?.text)) ?? ''
+    return text
+  })
+  if (contains) await poll.toContain(contains)
+  else await poll.not.toBe('')
+  return text
+}
+
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(installMockHost, twoProjectScenario())
   await page.goto('/')
@@ -41,9 +66,9 @@ test('a line is added, verified through the session, judged and rated', async ({
   // Run check → dispatched to the session, and the view follows it there.
   await page.getByTestId(`eval-run-check-${id}`).click()
   await expect(page.getByTestId('stream')).toBeVisible()
-  const sent = await page.evaluate(() => window.__mock.state().sends.map((s) => s.text))
-  expect(sent.at(-1)).toContain('npx playwright test tests/e2e/project-actions.spec.ts')
-  expect(sent.at(-1)).toContain('Run exactly')
+  const sent = await lastSend(page)
+  expect(sent).toContain('npx playwright test tests/e2e/project-actions.spec.ts')
+  expect(sent).toContain('Run exactly')
 
   // The session reports FAIL: still gated, and it is not a pass.
   await page.evaluate(
@@ -66,7 +91,7 @@ test('a line is added, verified through the session, judged and rated', async ({
 
   // Judge pass: a second opinion lands on the row and the stage moves to review.
   await page.getByTestId(`eval-judge-run-${id}`).click()
-  expect(await page.evaluate(() => window.__mock.state().sends.at(-1)?.text)).toContain('Judge the current diff')
+  expect(await lastSend(page, 'Judge the current diff')).toContain('Judge the current diff')
   await page.evaluate(
     ([pid, rid]) => window.__mock.reportEvalResult(pid, rid, { judge: 'satisfies it; error path untested' }),
     ['p-alpha', id],
@@ -107,7 +132,7 @@ test('attempts asks for isolated parallel work', async ({ page }) => {
   await expect(page.getByTestId(`eval-attempts-chip-${id}`)).toHaveText('3 attempts')
 
   await page.getByTestId(`eval-attempts-run-${id}`).click()
-  const sent = await page.evaluate(() => window.__mock.state().sends.at(-1)?.text)
+  const sent = await lastSend(page)
   expect(sent).toContain('3 INDEPENDENT attempts')
   expect(sent).toContain('git worktree')
 })
@@ -122,7 +147,7 @@ test('a line with no check is gated by the manual pass instead', async ({ page }
   await expect(page.getByTestId(`eval-verdict-pass-${id}`)).toBeEnabled()
 
   await page.getByTestId(`eval-manual-${id}`).click()
-  const sent = await page.evaluate(() => window.__mock.state().sends.at(-1)?.text)
+  const sent = await lastSend(page)
   expect(sent).toContain('the model chip reads Opus 5 (1M)')
   expect(sent).toContain('npm run dev')
 })

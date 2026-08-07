@@ -5,6 +5,7 @@ import { reactive } from 'vue'
 import type { EvalCheckStatus, EvalRun, EvalVerdict } from '@shared/domain'
 import type { AvailableSuites } from '@shared/test-catalog'
 import { errorMessage, invoke } from '@renderer/ipc'
+import { useProjectsStore } from '@renderer/stores/projects'
 
 // Guards the shared list against a slower response from a project the developer
 // has already switched away from (mirrors specs.loadState).
@@ -51,6 +52,11 @@ const store = reactive({
     try {
       const { runs } = await invoke('evals.dispatch', { projectId, id, kind })
       this.byProject[projectId] = runs
+      // A Tests-section dispatch can spawn the project's dedicated tests session.
+      // The sidebar only patches a session it already knows, so refresh or the run
+      // happens in a session with no row on screen. refresh() re-applies focus, so
+      // this never moves the centre pane off the conversation.
+      await useProjectsStore().refresh()
     } catch (error) {
       this.error = errorMessage(error)
     }

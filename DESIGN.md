@@ -233,6 +233,11 @@ Counted directly by grepping every `font-size:` declaration in `src/renderer` at
   `.group-caret` rather than a size of its own: they are the same gesture, and the
   app's two disclosure triangles reading at two sizes would be the drift, not the
   shared value.
+- `.mode-dd-arrow` (8px, `SessionView.vue`): the session-mode picker's open/closed
+  triangle on the ended-session banner. A third instance of the same gesture, taking
+  the same 8px for the same reason — the shared value IS the convention here, so a
+  new disclosure triangle picking its own size would be the drift. Listed rather
+  than left to be re-flagged as a font-size finding on every run.
 - `.rd-icon` (17px, `Sidebar.vue`): the remove-project dialogue's warning glyph.
 - `.empty-icon` (22px, `InboxView.vue`): the inbox-zero checkmark.
 - `.ni-icon` (20px, `SpecsView.vue`): the Spec Kit not-installed glyph.
@@ -241,9 +246,18 @@ A fifth glyph of the same kind exists and is not yet in that carve-out: `McpView
 
 ### Named Rules
 
-**The Machine-Read Rule.** This replaces the Earned Monospace Rule, which confined JetBrains Mono to genuine code, commands, paths, terminal output, and the button/pill/chip idiom. The remit is now the whole machine-read stratum: those things, plus labels, counters, timers, ids, branches, statuses, model names, tab and segment labels, and the composer the operator types into. What stays in the system sans is prose: sentences addressed to the reader, rendered message bodies, empty-state copy, notes, hints, and warnings.
+**The Earned Monospace Rule, restored by direction.** For one release this slot held the opposite rule, the Machine-Read Rule, which extended JetBrains Mono from genuine code out across the whole "machine-read stratum": labels, counters, timers, ids, branches, statuses, model names, tab and segment labels, buttons, pills, chips and project names. With `.mono` on 406 call sites that set essentially the entire interface in a code face. The owner's verdict on the shipped result was that the text reads bulky, oversized and ugly, and directed a return to a proportional UI face.
 
-The `.mono` CSS *class* now resolves to `var(--mono)` and means what it says. It previously resolved to `var(--sans)` while roughly four hundred call sites applied it expecting monospace, which made it a trap rather than a utility; flipping the declaration gave those call sites what they had always asked for, and the dozen prose sentences that carried the class by habit had it removed instead. The one deliberate judgement inside the split: `.scan-banner` keeps mono because it is a terminal status line with a block caret, sentence or not.
+The verdict is a measurement rather than a preference, which is why it is recorded as a correction and not as a change of taste. A monospaced face fits a capital W and a lowercase i into one advance width, so at an identical pixel size it runs about a tenth wider per character and carries a taller x-height and heavier stems than a proportional UI face. No font-size grew when the Machine-Read Rule landed; every label simply got wider and heavier at once, which is exactly what "bigger" describes from the reading side.
+
+The remit is therefore back to text where the character grid carries meaning: code, commands, filesystem paths, ids and hashes, diffs, terminal output, and the composer, because what gets typed into it is slash commands and `@paths`. Everything else — labels, names, statuses, buttons, pills, chips, tabs — is interface chrome, and chrome is set in the UI face.
+
+Two classes, and the split is the whole rule:
+
+- `.mono` resolves to `var(--sans)`. The name is now a misnomer and is kept anyway: the class is applied at precisely the places that meant "not body prose", which is the same set under either rule, and renaming it would touch 406 call sites to change nothing that renders.
+- `.code` resolves to `var(--mono)` and is applied deliberately: the header's project path and session id, the sidebar's branch and path lines, the subsession branch, the composer. A surface that takes it because it feels technical does not take it.
+
+The shared idiom classes moved with the rule: `.btn-solid`, `.btn-armed`, `.btn-outline`, `.btn-quiet`, `.link-green`, `.pill`, `.chip-risk` and `.badge-count` no longer declare `var(--mono)`. Monospace on a button was the costume, not the content.
 
 **The Available But Unadopted Rule.** The direction contract states, in the present tense, "identifiers carry mono spec labels the way a crease carries M-128." The stylesheet declares a `.spec-label` utility and a `--track-label: 0.11em` token specifically to deliver that. Neither is applied anywhere: a repository-wide search (including the production build output in `out/`) found `.spec-label` defined once in `styles.css` and consumed by zero templates, across zero `.vue` files. No project id, session id, or branch renders through it. The label-tracking drift the utility was built to close (see Hierarchy, above) is therefore unchanged from before the utility existed, 12 distinct hand-set values still in play. This is a present-tense sentence in the contract that is false of the shipped app today, not a subtle gap: the fix was written and never wired in. The same pattern recurs for hairline angling in Shapes, below.
 
@@ -273,7 +287,13 @@ No glass. `backdrop-filter: blur()` appears exactly once in the entire renderer,
 
 **The Earned Shadow Rule.** Only the overlay/dialogue tier casts a real shadow (`--shadow-dlg`, `--shadow-dd`, `--shadow-menu` for dropdowns and menus). A card that wants to lift off its panel is asking for the wrong tier.
 
-**Amendment, by direction rather than by drift.** One surface below the dialogue tier now casts: the sidebar lane. The owner asked for the project list to be separated and "maybe even floating", picked the floating variant in live mode over two alternatives that spent no vertical room, and that brief outranks this rule; PRODUCT.md's Brand Commitments already record that no visual register here is binding. The exception is deliberately narrow, and is one token, `--lane-cast` on `.project-list`, so it cannot spread by copy-paste without being named. It also does not work the way the dialogue tier does: `--elev` leads the value, because a dark cast on carbon is almost invisible and the lanes were measured separating on fill alone, so the lip of light is additive on carbon exactly where the cast is subtractive on paper. Any further surface that wants to cast still needs a direction, not a precedent.
+**Amendment withdrawn: the sidebar lane no longer casts.** One surface below the dialogue tier used to, by direction rather than by precedent: the project lane was inset 8px from both panel edges, filled at the card tier and floated on a `--lane-cast` token, with a deeper cast again when selected. The owner asked for that, picked the floating variant in live mode over two alternatives, and has now withdrawn it: the list stopped reading as clean and minimal.
+
+The mechanism is legible in hindsight and is recorded so the next pass does not rediscover it. A sidebar holding eight projects drew eight filled rectangles, eight drop shadows and eight full-brightness identity bars, all at rest, none of them responding to anything. Every lane was emphasised equally, so no lane could take emphasis when it had news — which is the one job this pane has. The float also cost 6px of pitch per lane, roughly one project in six off a screen that is this tool's actual budget.
+
+A lane is a row again: full-bleed, transparent at rest, filled only on hover and on selection. The `--lane-cast` token is gone with it, so the Earned Shadow Rule is whole and only the overlay tier casts.
+
+The identity bar changed with it, and the two only work together. It is 1px rather than 2px, and it sits at 0.45 opacity on every lane except the one you are in. `project-accent.ts` hashes identity out of the same six hues that mean working, attention owed and error elsewhere, so eight bars at full strength put eight state-coloured marks on screen that carried no state — noise wearing the vocabulary of the signal. Dimmed, they read as a way of telling one row from another, and the one at full strength is the row you are in. Selection is carried by three marks that agree and none of them is a shadow: the `--bg-active` wash, the identity hairline at full strength, and the brighter name.
 
 ## Shapes
 

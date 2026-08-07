@@ -191,6 +191,31 @@ test('light theme', async ({ page }) => {
   await page.screenshot({ path: `${OUT}/board-light.png` })
 })
 
+// The start controls: one mode picker carrying every mode the SDK has, one
+// Resume switch, one Start button. Captured open, because the list is where the
+// descriptions live and a closed picker shows none of them.
+test('session start', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await seedBoard(page)
+  await page.getByTestId('sidebar-project-storefront').click()
+  await page.getByTestId('end-session').click()
+  await page.getByTestId('ended-banner').waitFor()
+  await page.getByTestId('start-mode-picker').click()
+  await page.getByTestId('start-mode-list').waitFor()
+  await page.waitForTimeout(200)
+  await page.screenshot({ path: `${OUT}/session-start.png` })
+})
+
+test('tests section', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await seedBoard(page)
+  await page.getByTestId('sidebar-project-storefront').click()
+  await page.getByTestId('tab-tests').click()
+  await page.getByTestId('tests-view').waitFor()
+  await page.waitForTimeout(300)
+  await page.screenshot({ path: `${OUT}/tests-section.png` })
+})
+
 test('settings', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 1000 })
   await seedBoard(page)

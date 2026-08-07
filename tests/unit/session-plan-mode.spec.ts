@@ -117,13 +117,29 @@ describe('the mode a session spawns with', () => {
     for (const { value } of SESSION_MODES) {
       expect(resolvePermissionMode(value)).toBeTruthy()
     }
+    // All six the SDK can spawn in, in escalation order. The list was four for a
+    // while, which is a picker deciding for you: 'dontAsk' in particular is the
+    // only mode that REDUCES what can happen — nothing interrupts, and anything
+    // not already approved is refused rather than asked.
     expect(SESSION_MODES.map((m) => m.value)).toEqual([
       'default',
+      'dontAsk',
       'auto',
       'acceptEdits',
       'plan',
       'bypass',
     ])
+  })
+
+  it('spells every mode exactly as the SDK does, except bypass', () => {
+    // The SDK union is 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' |
+    // 'dontAsk' | 'auto'. A mode this app spells differently would be rejected at
+    // spawn, and 'bypass' is the only rename the mapper is allowed to make.
+    const sdk = ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk', 'auto']
+    for (const { value } of SESSION_MODES) {
+      expect(sdk).toContain(resolvePermissionMode(value))
+    }
+    expect(new Set(SESSION_MODES.map((m) => resolvePermissionMode(m.value))).size).toBe(sdk.length)
   })
 
   it('keeps auto as the app default, so migration 022 changed no behaviour', () => {

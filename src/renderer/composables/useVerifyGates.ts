@@ -157,5 +157,35 @@ export function useVerifyGates(latest: ComputedRef<VerifyRun | null>) {
     }),
   )
 
-  return { gates, suiteGate, figureGate }
+  /**
+   * One headline figure for the run: the share of gates that passed.
+   *
+   * Counted, not estimated, which is the only way a single number is allowed to
+   * exist in this section (PRODUCT.md principle 2). Its denominator is the gates
+   * the run actually measured — a gate reading "—" is excluded from both halves
+   * rather than counted as a failure, for the same reason a skipped suite is
+   * neither a pass nor a failure. So the figure answers "of what this run
+   * measured, how much held", and `measured`/`total` are exposed beside it so the
+   * tile can say what it left out instead of implying full coverage.
+   *
+   * A warning counts against it. An under-target coverage figure does not fail
+   * the run (FR-071) but it is not a clean gate either, and a score that ignored
+   * warnings would sit at 100% while two tiles were amber.
+   *
+   * Null when the run measured nothing at all, which renders as "—" like every
+   * other unmeasured figure.
+   */
+  const score = computed(() => {
+    const measured = gates.value.filter((g) => g.status !== 'none')
+    if (measured.length === 0) return null
+    const passed = measured.filter((g) => g.status === 'pass').length
+    return {
+      pct: Math.round((passed / measured.length) * 100),
+      passed,
+      measured: measured.length,
+      total: gates.value.length,
+    }
+  })
+
+  return { gates, score, suiteGate, figureGate }
 }

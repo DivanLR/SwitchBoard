@@ -101,38 +101,66 @@ const ADHD_APPEND =
 // five reads that could all be in flight at once. This append tells the session to
 // spend agents rather than wall-clock wherever the task graph allows it.
 //
-// It states the cost openly rather than hiding it: fan-out spends more total
-// tokens than one thread would, and the whole point of the setting is that the
-// developer has chosen that trade. It also names the cases where fanning out is
-// simply wrong, because an instruction to parallelise everything produces agents
-// spawned to read one line.
+// The first version of this text read as balanced advice and was reported as not
+// working. Two things were wrong with it, and both are fixed below.
+//
+// The GUARD WAS WIDER THAN THE INSTRUCTION. It excused a model from fanning out
+// for "work whose steps each depend on the previous result" and "anything where
+// dispatching costs more than doing" — two clauses that fit almost any task if
+// you squint, and a model reading its own plan will squint. The exclusions are
+// now a short closed list of things that are genuinely one action.
+//
+// And it CONTRADICTED THE MODE PROTOCOL sitting a few paragraphs above it, which
+// in Advisor mode says in as many words to implement scoped work yourself. Two
+// instructions, one telling the loop to delegate and one telling it not to. That
+// is resolved at the call site rather than here: with this setting on, the mode
+// protocol is pinned to Orchestrator so the two texts agree (see
+// heavySubagentModelMode).
 
 const HEAVY_SUBAGENTS_APPEND =
-  '## WORK SHAPE — FAN OUT BY DEFAULT\n' +
-  'This session is configured for heavy subagent use. Prefer many agents working ' +
-  'at once over one thread working through a list.\n' +
-  '1. Before starting non-trivial work, decompose it into independent units and ' +
-  'name them. Anything that does not depend on another unit\'s result runs now, ' +
-  'not next.\n' +
-  '2. Dispatch every independent unit in ONE batch so they run concurrently. Two ' +
-  'sequential dispatches of one agent each is the failure this instruction exists ' +
-  'to prevent.\n' +
-  '3. Scale the fleet to the work: a broad audit, a multi-file refactor, a sweep ' +
-  'across many call sites, or research with several angles all deserve as many ' +
-  'agents as there are independent parts.\n' +
+  '## WORK SHAPE — DIVIDE AND CONQUER. THIS OVERRIDES YOUR DEFAULT TENDENCY TO WORK ALONE.\n' +
+  'This session is configured for heavy subagent use, and that is a hard directive for ' +
+  'every turn, not a hint. Use as many dynamic subagents as the work allows, split the ' +
+  'work between them, and get it done as fast as parallelism permits. A single thread ' +
+  'grinding through a list is the failure this setting exists to prevent.\n' +
+  '1. Before starting any non-trivial work, decompose it and NAME the parts. Anything ' +
+  "that does not need another part's result runs NOW, not next.\n" +
+  '2. Dispatch every independent part in ONE batch so they run concurrently. Two ' +
+  'sequential dispatches of one agent each is the exact failure mode to avoid.\n' +
+  '3. Scale the fleet to the work, not to your comfort. A broad audit, a multi-file ' +
+  'refactor, a sweep across call sites, or research with several angles each deserve ' +
+  'as many agents as there are independent parts. If you find yourself dispatching ' +
+  'one agent, ask what the other four are.\n' +
   '4. Give each agent a bounded task, the context it needs, and the exact shape of ' +
-  'the result you want back, so nothing has to be re-run for a misunderstanding.\n' +
-  '5. Verify in parallel too: findings worth acting on are worth an independent ' +
-  'agent trying to refute them.\n' +
-  'Do NOT fan out for a one-line change, a single file read, work whose steps each ' +
-  'depend on the previous result, or anything where dispatching costs more than ' +
-  'doing. Fan-out spends more total tokens than a single thread; that trade is the ' +
-  'point of this setting, but it is only worth paying where the parts are genuinely ' +
-  'independent.'
+  'the result you want back, so nothing is re-run over a misunderstanding.\n' +
+  '5. Verify in parallel too: a finding worth acting on is worth an independent agent ' +
+  'trying to refute it.\n' +
+  '6. Keep your own turns for planning, integrating and the genuinely hard part. Do ' +
+  'not read a large file wholesale when an agent can extract the part that matters.\n' +
+  'The ONLY work exempt from this is work that is a single action: one edit to one ' +
+  'file, one command, one lookup, or a chain where every step literally needs the ' +
+  'previous step\'s output. "It would be quicker to just do it" is not an exemption — ' +
+  'fan-out spends more tokens than one thread, and paying that for speed is precisely ' +
+  'the trade this setting was switched on to make.'
 
 /** The fan-out append when heavy subagent mode is on, else null. */
 export function heavySubagentSystemPromptAppend(enabled: boolean): string | null {
   return enabled ? HEAVY_SUBAGENTS_APPEND : null
+}
+
+/**
+ * The mode protocol to teach when heavy subagent mode is on.
+ *
+ * Orchestrator, whatever the Models tab says, because Advisor's own text ("SCOPED
+ * WORK … implement directly yourself") is the opposite instruction and sits in the
+ * same system prompt. Leaving both in was most of why the setting read as doing
+ * nothing: the model had licence either way and took the cheaper one.
+ *
+ * The Models tab still decides which MODEL runs the loop; this only decides which
+ * protocol the loop is taught. Those are separate levers (see mainLoopModel).
+ */
+export function heavySubagentModelMode(enabled: boolean, chosen: ModelMode): ModelMode {
+  return enabled ? 'orchestrator' : chosen
 }
 
 // --- Container layout (bypass sessions) ---

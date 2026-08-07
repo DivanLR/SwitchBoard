@@ -360,13 +360,21 @@ function ctxNewGroup(): void {
  * It uses the project's own session mode, like every other start that names none.
  * Failures land on the store's `starting` state and the ended-session banner the same
  * way the other start paths do, so this deliberately does not grow its own error UI.
+ *
+ * Reached from the row's own ＋ and from the context menu. The context menu used to
+ * be the only way, which meant a project could run as many sessions as it liked and
+ * nothing on screen ever said so.
  */
+async function startAnotherSession(projectId: string): Promise<void> {
+  projects.select(projectId)
+  await projects.startSession(projectId).catch(() => {})
+}
+
 async function ctxNewSession(): Promise<void> {
   if (!ctx.value || ctx.value.kind !== 'project') return
   const projectId = ctx.value.id
   ctx.value = null
-  projects.select(projectId)
-  await projects.startSession(projectId).catch(() => {})
+  await startAnotherSession(projectId)
 }
 
 function ctxRemoveGroup(): void {
@@ -770,6 +778,16 @@ async function confirmRemoveNow(): Promise<void> {
               >
                 {{ timerOf(item.session.startedAt) }}
               </span>
+              <!-- A project runs as many sessions as it is asked to. That was only
+                   reachable by right-clicking the row, so nothing on screen said so. -->
+              <button
+                class="row-add mono"
+                :data-testid="`new-session-${item.name}`"
+                title="Start another session in this project"
+                @click.stop="startAnotherSession(item.id)"
+              >
+                ＋
+              </button>
               <button
                 class="remove mono"
                 :data-testid="`remove-project-${item.name}`"
@@ -786,9 +804,9 @@ async function confirmRemoveNow(): Promise<void> {
                defending against — but it also hid the branch of every project working in
                the background, which is exactly when it is worth reading. -->
           <div v-if="!collapsed && isExpanded(item)" class="meta">
-            <span class="branch mono">⎇ {{ item.session?.branch ?? '—' }}</span>
+            <span class="branch code">⎇ {{ item.session?.branch ?? '—' }}</span>
           </div>
-          <div v-if="!collapsed && collisions.has(item.name)" class="path mono">{{ item.path }}</div>
+          <div v-if="!collapsed && collisions.has(item.name)" class="path code">{{ item.path }}</div>
           <!-- Subsessions. A project runs as many sessions as it is asked to, and each
                gets a row inside the project's own card: the card is the project, the
                rows in it are what that project is doing. Listed only when there is
@@ -801,7 +819,7 @@ async function confirmRemoveNow(): Promise<void> {
             :data-testid="`sidebar-subsessions-${item.name}`"
           >
             <button
-              v-for="s in item.sessions"
+              v-for="(s, i) in item.sessions"
               :key="s.id"
               type="button"
               class="sub-line"
@@ -813,7 +831,12 @@ async function confirmRemoveNow(): Promise<void> {
               <span class="mark sub-mark" :class="sessionStatus(s)">
                 <span class="glyph" aria-hidden="true">{{ glyphFor(sessionStatus(s)) }}</span>
               </span>
-              <span class="sub-name mono">{{ s.branch ?? s.id.slice(0, 8) }}</span>
+              <!-- Ordinal first: every session of a project runs against the same
+                   checkout, so the branch name is identical on all of them and two
+                   rows read as one repeated row without a number in front. The array
+                   is start-ordered, so the number is stable for a session's life. -->
+              <span class="sub-ord mono">{{ i + 1 }}</span>
+              <span class="sub-name code">{{ s.branch ?? s.id.slice(0, 8) }}</span>
               <span v-if="!s.endedAt" class="timer mono">{{ timerOf(s.startedAt) }}</span>
             </button>
           </div>
@@ -1114,12 +1137,12 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .sidebar.collapsed .logo {
-  font-size: 15px;
+  font-size: var(--fs-head);
 }
 
 .icon-btn {
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: var(--fs-meta);
   padding: 1px 6px;
   line-height: 17px;
   border: 1px solid var(--border-card-alt);
@@ -1152,7 +1175,7 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .initials {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-body);
 }
 
@@ -1176,7 +1199,7 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .collapsed-badge {
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   background: color-mix(in srgb, var(--amber) 15%, transparent);
   border-color: color-mix(in srgb, var(--amber) 40%, transparent);
   border-radius: 0;
@@ -1184,20 +1207,15 @@ async function confirmRemoveNow(): Promise<void> {
   line-height: 12px;
 }
 
-/* Drag-and-drop states: green insertion line for reorder, dashed teal ring
-   for drop-to-reference (design reference). Each carries --lane-cast alongside its
-   own mark, because box-shadow is one property and a lane must not fall to the panel
-   just because it is being dragged over. */
+/* Drag-and-drop states: green insertion line for reorder, dashed teal ring for
+   drop-to-reference (design reference). One mark each, now that there is no lift
+   to carry alongside it. */
 .project.drop-before {
-  box-shadow:
-    inset 0 2px 0 var(--green),
-    var(--lane-cast);
+  box-shadow: inset 0 2px 0 var(--green);
 }
 
 .project.drop-after {
-  box-shadow:
-    inset 0 -2px 0 var(--green),
-    var(--lane-cast);
+  box-shadow: inset 0 -2px 0 var(--green);
 }
 
 /* Whole-row highlight while dragging an OS file onto a project (→ @path into
@@ -1215,7 +1233,7 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .logo {
-  font-size: 13.5px;
+  font-size: var(--fs-body);
   font-weight: 700;
   color: var(--text-bright);
   letter-spacing: 0.02em;
@@ -1247,7 +1265,7 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .filter-icon {
-  font-size: 12px;
+  font-size: var(--fs-ui);
   color: var(--text-faint);
 }
 
@@ -1259,11 +1277,11 @@ async function confirmRemoveNow(): Promise<void> {
   outline: none;
   color: var(--text-name);
   font-family: var(--sans);
-  font-size: 12px;
+  font-size: var(--fs-ui);
 }
 
 .filter-clear {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-faint);
   cursor: pointer;
 }
@@ -1291,16 +1309,17 @@ async function confirmRemoveNow(): Promise<void> {
   background: var(--bg-sticky);
 }
 
-/* The seam: where the panel's heading hands over to the list. It runs the full width
-   rather than stopping at the lanes' 8px inset, so it reads as a table head ruling
-   off its body — everything below the line is the list. Chosen in live mode over an
-   inset shelf aligned to the floating lanes.
+/* The seam: where the panel's heading hands over to the list. It runs the full
+   width, so it reads as a table head ruling off its body — everything below the
+   line is the list. It used to clear a 7px gap below itself, which the floating
+   lanes needed so the first sheet did not butt into the rule; rows do not need
+   it, and the gap was reading as a dead band under the heading.
 
    Not on .mcp-section: that row is static, sits further down with its own padding, and
    was not part of what was reviewed. */
 .section-row:not(.mcp-section) {
   border-bottom: 1px solid var(--border);
-  margin-bottom: 7px;
+  margin-bottom: 2px;
 }
 
 .section-row.mcp-section {
@@ -1309,13 +1328,13 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .section-label {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   letter-spacing: 0.08em;
   color: var(--text-faint);
 }
 
 .section-count {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-ghost);
 }
 
@@ -1326,7 +1345,7 @@ async function confirmRemoveNow(): Promise<void> {
   justify-content: center;
   min-width: var(--add-h);
   height: var(--add-h);
-  font-size: 13px;
+  font-size: var(--fs-body);
   color: var(--text-faint);
   line-height: 1;
   padding: 0 5px;
@@ -1375,15 +1394,10 @@ async function confirmRemoveNow(): Promise<void> {
   flex: 1;
   overflow-y: auto;
   padding: 2px 0 8px;
-  /* The lift under a floating lane, and it takes two mechanisms because the two
-     grounds behave differently. The cast is built from --scrim, the one token that is
-     dark in both themes, so a single value deepens carbon and paper alike instead of
-     needing a light-theme twin that could drift from it. Offset and blur, never a
-     zero-offset halo. But a dark cast on carbon is nearly invisible, and measured on
-     the dark board the lanes were separating on fill alone, so --elev leads: this
-     world's own lip of light, which is additive on carbon exactly where the cast is
-     subtractive on paper. */
-  --lane-cast: var(--elev), 0 3px 7px -2px color-mix(in srgb, var(--scrim) 70%, transparent);
+  /* --lane-cast lived here: the one surface below the dialogue tier that DESIGN.md
+     let cast a real shadow, granted by direction rather than by precedent. The
+     direction has been withdrawn and the token with it, so the Earned Shadow Rule
+     is whole again and only the overlay tier casts. */
 }
 
 
@@ -1397,9 +1411,12 @@ async function confirmRemoveNow(): Promise<void> {
   display: flex;
   align-items: center;
   gap: 8px;
-  /* Opened with the lanes: a group header 3px above a floating sheet reads as
-     attached to it, and the header names the whole group rather than the first row. */
-  margin: 12px 0 6px;
+  /* A group header names the rows under it, so it sits closer to them than to the
+     group above. It was opened to 12px/6px when the lanes floated, because a header
+     3px above a shadowed sheet read as attached to that one sheet. With rows there
+     is nothing to detach from, and the extra 7px per group was pure height in the
+     one pane whose height is always spoken for. */
+  margin: 9px 0 2px;
   padding: 4px 18px 4px 16px;
   background: var(--bg-sticky);
   cursor: pointer;
@@ -1447,7 +1464,7 @@ async function confirmRemoveNow(): Promise<void> {
   min-width: 0;
   /* Group names are typed by the developer — shown as typed. Uppercasing and
      letter-spacing a name like "Work stuff" reads as a label, not a folder. */
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text-meta);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1455,7 +1472,7 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .group-count {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-faint);
 }
 
@@ -1470,57 +1487,57 @@ async function confirmRemoveNow(): Promise<void> {
 
 /* An open group with nothing in it: the drop target IS the explanation. */
 .group-empty {
-  /* Sits on the lanes' own inset and gap, so the drop target lines up with the
-     sheets it will be holding. */
-  margin: 0 8px 6px;
-  padding: 9px 10px;
+  /* Inset from the pane edges even though the lanes are not, because this is a
+     dashed target rather than a row: a dashed rule running edge to edge reads as a
+     torn panel, not as a place to drop something. */
+  margin: 0 10px 3px;
+  padding: 8px 10px;
   border: 1px dashed var(--border-strong);
   border-radius: var(--rc);
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-faint);
   text-align: center;
 }
 
-/* A lane is a sheet lifted clear of the panel: inset 8px from both edges, filled at
-   the card tier, floating on --lane-cast. Still square — a fold is a cut, and a cut
-   has no corners — so this is not the outgoing world's 8px-radius card row coming
-   back. Chosen in live mode over two alternatives that spent no vertical room at
-   all: bright sheets on a recessed field, and one lifted plate holding tight rows.
+/* A lane is a ROW, not a tile.
 
-   Lane height is the sidebar's real budget: at 50px a full board scrolled after six
-   projects, and this is a tool for running more than six at once. Floating costs
-   some of that back, and the figure is exact rather than estimated: 2px more padding
-   and a 4px wider gap grow each lane's pitch by 6px. Against a lane of roughly 30px
-   that is about one lane in every six off the screen. The trade is recorded here so
-   the next pass finds it stated rather than discovers it. */
+   It was a tile for one release: inset 8px from both edges, filled at the card
+   tier, floating on --lane-cast, with a deeper cast again when selected. The
+   owner's verdict is that the list stopped being clean and minimal, and the
+   mechanism is legible in hindsight. A sidebar of eight projects drew eight
+   filled rectangles, eight drop shadows and eight full-brightness colour bars,
+   all at rest, none of them reacting to anything. Every lane was saying the same
+   thing at the same volume, so no lane could raise its voice when it actually had
+   news — which is the entire job of this pane.
+
+   So a lane goes back to being a row in a list. No fill and no cast at rest; the
+   panel shows through. The list separates on rhythm and on its own left edge, and
+   the ink it spends goes to the two rows that earned it: the one under the
+   pointer and the one you are in.
+
+   Full-bleed again, so the row reclaims the 16px the inset was taking and long
+   project names stop being ellipsed. Pitch drops by the 6px the float cost, which
+   is roughly one more project on screen for every six. */
 .project {
   position: relative;
-  margin: 0 8px 6px;
-  /* Right padding is 10px rather than the 13px the lane carried while full-bleed: the
-     8px inset each side takes 16px off the row, and with a real board loaded that was
-     enough to ellipse "ml-pipeline" on the name that had fitted before. The 3px comes
-     back from the padding rather than from the inset, so the float is unchanged. */
-  padding: 6px 10px 6px 12px;
-  background: var(--bg-card);
-  box-shadow: var(--lane-cast);
+  margin: 0 0 1px;
+  padding: 6px 13px;
+  background: transparent;
   cursor: pointer;
   transition: background 0.12s ease;
 }
 
-/* The lane's fill is opaque now, so the hover wash layers over it instead of being
-   the whole background. Replacing it would drop the card back onto the panel tone. */
+/* Hover is the FIRST fill a lane ever gets now, so it does the work the card tier
+   used to do: it says "this row", and it is the only row saying it. */
 .project:hover {
-  background: linear-gradient(var(--bg-hover), var(--bg-hover)), var(--bg-card);
+  background: var(--bg-hover);
 }
 
 /* Lanes are keyboard-operable (PRODUCT.md records keyboard and screen reader as
    requirements). Focus is an inset rule so it never shifts the lane's geometry. */
 .project:focus-visible {
   outline: none;
-  /* The lift is carried through, or a focused lane would drop to the panel. */
-  box-shadow:
-    inset 0 0 0 1px var(--green),
-    var(--lane-cast);
+  box-shadow: inset 0 0 0 1px var(--green);
 }
 
 /* The five-hairline staff that used to be ruled across each lane is gone. Behind
@@ -1534,42 +1551,48 @@ async function confirmRemoveNow(): Promise<void> {
    reduced-motion block could stop every animation without losing information.
    Nothing replaces it; a sheet at rest does not pulse. */
 
-/* Lane identity: one bar in the lane's own colour, top to bottom of the row, on the
-   card's own left edge. It sat 3px inside the row while lanes were full-bleed; now
-   that a lane is a sheet with a gap either side, the bar binds to the sheet's edge
-   instead of floating in from it. It is 2px, asked for directly after the 1px version
-   was judged too faint to hold a lane; DESIGN.md's ban on anything thicker than a 1px
-   stroke was rewritten to match rather than left contradicting this. The scored fold
-   tick it replaced stood 26px inside a 51px row, which read as a fragment of a rule
-   rather than as the lane's edge.
+/* Lane identity: one hairline in the project's own colour, top to bottom, on the
+   pane's left edge.
 
-   Full opacity on every lane, not only the selected one: at 0.75 the bar was reading
-   as a faded edge of the card rather than as the project's colour. Selection is
-   carried by the deeper lift, the wash and the brighter name. */
+   Two things changed together and they only work together. It is 1px rather than
+   2px, and it is dim on every lane except the one you are in.
+
+   The colour here is IDENTITY, not state — project-accent.ts hashes it out of the
+   same six hues that elsewhere mean working, attention owed and error. Eight lanes
+   drawing eight of those at full strength put eight state-coloured bars on screen
+   that said nothing about state, which is worse than noise: it is noise wearing
+   the vocabulary of the signal. Dimmed, they read as what they are, a way of
+   telling one row from another at a glance, and the one at full strength is the
+   row you are in.
+
+   1px because that is what a rule beside a list item is. At 2px it stops being an
+   edge and becomes a coloured band. */
 .brace {
   position: absolute;
   left: 0;
   top: 0;
   bottom: 0;
-  width: 2px;
+  width: 1px;
   background: currentColor;
   pointer-events: none;
-  opacity: 1;
+  opacity: 0.45;
+  transition: opacity 0.12s ease;
 }
 
-/* Lane separation is the sheet's own edge and the gap around it. The hairline that
-   used to be ruled at each row edge is gone: with a 2px gap, adjacent lanes showed
-   both their rules 2px apart, and that doubling read as a crowded list rather than
-   as the table of lanes it was defending. Nothing replaces it, because a floating
-   sheet does not also need an edge drawn on it. */
+.project:hover .brace {
+  opacity: 0.75;
+}
 
-/* The picked lane lifts furthest. Selection is carried by three marks that agree —
-   this deeper cast, the --bg-active wash over the card, and the brighter name — so
-   it still reads for anyone who cannot see a shadow at all. */
-.project.active {
-  box-shadow:
-    var(--elev),
-    0 6px 13px -2px color-mix(in srgb, var(--scrim) 88%, transparent);
+/* Nothing separates one lane from the next but the 1px of air between them. No
+   rules, no edges, no cast: a list of rows in a narrow pane already reads as a
+   list, and every mark added to defend that is one more thing on screen.
+
+   Selection is carried by three marks that agree, none of them a shadow, so it
+   still reads for anyone who cannot see one: the --bg-active wash, the identity
+   hairline at full strength, and the brighter name. */
+.project.active .brace,
+.project.active:hover .brace {
+  opacity: 1;
 }
 
 .active-bg {
@@ -1655,7 +1678,7 @@ async function confirmRemoveNow(): Promise<void> {
 .name {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--fs-ui);
   font-weight: 500;
   color: var(--text-name);
   white-space: nowrap;
@@ -1685,7 +1708,7 @@ async function confirmRemoveNow(): Promise<void> {
   justify-content: center;
   width: 16px;
   height: 16px;
-  font-size: 12px;
+  font-size: var(--fs-ui);
   line-height: 1;
   color: var(--text-faint);
   opacity: 0;
@@ -1698,6 +1721,29 @@ async function confirmRemoveNow(): Promise<void> {
 
 .remove:hover {
   color: var(--red);
+}
+
+/* Same box as .remove so adding it does not move the row, and revealed by the
+   same hover, so the row is quiet until you are actually in it. */
+.row-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: var(--fs-ui);
+  line-height: 1;
+  color: var(--text-faint);
+  opacity: 0;
+  padding: 0;
+}
+
+.project:hover .row-add {
+  opacity: 1;
+}
+
+.row-add:hover {
+  color: var(--green);
 }
 
 /* Remove-project confirmation popup: the design renders this as its own
@@ -1728,7 +1774,7 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .rd-title {
-  font-size: 15.5px;
+  font-size: var(--fs-head);
   font-weight: 600;
   color: var(--text-bright);
   margin-top: 14px;
@@ -1739,7 +1785,7 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .rd-path {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   margin-top: 2px;
   white-space: nowrap;
   overflow: hidden;
@@ -1747,14 +1793,14 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .rd-note {
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
   line-height: 1.6;
   color: var(--text-meta);
   margin: 0;
 }
 
 .rd-error {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--red);
   margin: 8px 0 0;
 }
@@ -1763,7 +1809,7 @@ async function confirmRemoveNow(): Promise<void> {
    inside the remove dialog's shell. */
 .repoint-input {
   width: 100%;
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
   padding: 9px 12px;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -1786,7 +1832,7 @@ async function confirmRemoveNow(): Promise<void> {
   flex: 1;
   text-align: center;
   font-family: var(--sans);
-  font-size: 12px;
+  font-size: var(--fs-ui);
   padding: 9px 0;
 }
 
@@ -1818,7 +1864,7 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .branch {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
   white-space: nowrap;
   overflow: hidden;
@@ -1828,7 +1874,7 @@ async function confirmRemoveNow(): Promise<void> {
 /* Tabular figures so a ticking clock does not jitter the row's width. */
 .timer {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   font-variant-numeric: tabular-nums;
   color: var(--text-ghost);
 }
@@ -1836,7 +1882,7 @@ async function confirmRemoveNow(): Promise<void> {
 .path {
   padding-left: 17px;
   margin-top: 2px;
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-ghost);
   white-space: nowrap;
   overflow: hidden;
@@ -1891,10 +1937,19 @@ async function confirmRemoveNow(): Promise<void> {
   padding: 0;
 }
 
+/* The session's number in the project, dimmer than its branch: it is how you
+   tell two rows apart, not what either row is about. */
+.sub-ord {
+  flex-shrink: 0;
+  font-size: var(--fs-micro);
+  color: var(--text-ghost);
+  font-variant-numeric: tabular-nums;
+}
+
 .sub-name {
   flex: 1;
   min-width: 0;
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-tab);
   white-space: nowrap;
   overflow: hidden;
@@ -1939,7 +1994,7 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .agent-name {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-tab);
   white-space: nowrap;
   overflow: hidden;
@@ -1948,7 +2003,7 @@ async function confirmRemoveNow(): Promise<void> {
 
 .empty {
   padding: 16px;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-faint);
 }
 
@@ -1960,7 +2015,7 @@ async function confirmRemoveNow(): Promise<void> {
   border-radius: var(--rc);
   outline: none;
   color: var(--text-strong);
-  font-size: 12px;
+  font-size: var(--fs-ui);
   padding: 2px 7px;
 }
 
@@ -1994,7 +2049,7 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .mcp-ico {
-  font-size: 13px;
+  font-size: var(--fs-body);
   color: var(--teal);
   flex-shrink: 0;
 }
@@ -2002,7 +2057,7 @@ async function confirmRemoveNow(): Promise<void> {
 .mcp-name {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--fs-ui);
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
@@ -2045,7 +2100,7 @@ async function confirmRemoveNow(): Promise<void> {
 
 .ctx-name {
   padding: 8px 13px 6px;
-  font-size: 10px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.12em;
   color: var(--text-faint);
   border-bottom: 1px solid color-mix(in srgb, var(--green) 18%, transparent);
@@ -2066,7 +2121,7 @@ async function confirmRemoveNow(): Promise<void> {
   gap: 9px;
   width: 100%;
   padding: 9px 13px;
-  font-size: 12px;
+  font-size: var(--fs-ui);
   color: var(--text-body);
   cursor: pointer;
   background: transparent;
@@ -2117,18 +2172,18 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .gear {
-  font-size: 13px;
+  font-size: var(--fs-body);
   color: var(--text-meta);
 }
 
 .settings-label {
   flex: 1;
-  font-size: 12px;
+  font-size: var(--fs-ui);
   color: var(--text-body);
 }
 
 .model-summary {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-faint);
   white-space: nowrap;
   overflow: hidden;

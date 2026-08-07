@@ -411,8 +411,10 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
           : req.kind === 'attempts'
             ? attemptsPrompt(run.acceptance, run.checkCmd, run.attempts)
             : judgePrompt(run.acceptance)
-      let session = repos.sessions.activeForProject(req.projectId)
-      if (!session) session = await manager.startSession(req.projectId)
+      // Same dedicated session the verification runs use: a check or a judge pass
+      // is Tests-section work, and Tests-section work does not queue behind the
+      // developer's conversation.
+      const session = await manager.testsSessionFor(req.projectId)
       // Re-running a check clears the previous outcome, so a stale PASS can never
       // stand in for the run that is only just starting.
       if (req.kind === 'check') repos.evals.update(req.id, { checkStatus: 'not_run' })
@@ -429,8 +431,10 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'verify.start': async (req) => {
       const stack = stackById(req.stackId)
       if (!stack) throw { code: 'NOT_FOUND', message: 'Unknown stack.' } satisfies IpcError
-      let session = repos.sessions.activeForProject(req.projectId)
-      if (!session) session = await manager.startSession(req.projectId)
+      // The project's own verify session, not whichever session happens to be
+      // open. A run is a long turn; in the chat session it blocks the
+      // conversation for its whole duration. See SessionManager.verifySessionFor.
+      const session = await manager.testsSessionFor(req.projectId)
       // A bypass session runs in the sandbox container, which ships node (plus
       // .NET for a .NET project) and nothing else — the rest are named as
       // skipped up front rather than attempted and reported as failures of the
@@ -487,8 +491,12 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       if (!run) {
         throw { code: 'NOT_FOUND', message: 'Run a verification pass first — evidence attaches to a run.' } satisfies IpcError
       }
-      let session = repos.sessions.activeForProject(req.projectId)
-      if (!session) session = await manager.startSession(req.projectId)
+      // Evidence attaches to one specific run, so it goes back to the session
+      // that produced it while that session is still alive — the run is already
+      // in its context. Otherwise it takes a fresh verify session like any run.
+      const ran = run.sessionId ? repos.sessions.byId(run.sessionId) : undefined
+      const session =
+        ran && !ran.endedAt ? ran : await manager.testsSessionFor(req.projectId)
       // The acceptance lines still waiting on a verdict say what the evidence has
       // to show; without any, the session works from the diff alone.
       const hints = repos.evals
@@ -571,8 +579,9 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         qaHeaders: settings.projectApiQaHeaders[req.projectId],
       })
       if ('error' in host) throw { code: 'INVALID_PATH', message: host.error } satisfies IpcError
-      let session = repos.sessions.activeForProject(req.projectId)
-      if (!session) session = await manager.startSession(req.projectId)
+      // The Tests section's own session, shared with verification runs. See
+      // SessionManager.testsSessionFor.
+      const session = await manager.testsSessionFor(req.projectId)
       const run = repos.apiRuns.start({
         projectId: req.projectId,
         baseUrl: host.baseUrl,

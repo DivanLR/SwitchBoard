@@ -1,14 +1,18 @@
-// The session header's usage readouts: the subscription rate-limit meter, the
-// prompt-cache hit rate for the latest turn, and the per-model token/cost
-// totals. Extracted from SessionView so the view stays focused on rendering the
-// stream; these five figures are read together, in one strip, and share nothing
-// with the rest of it.
+// The session header's usage readouts: the prompt-cache hit rate for the latest
+// turn, and the per-model token/cost totals. Extracted from SessionView so the
+// view stays focused on rendering the stream; these figures are read together,
+// in one strip, and share nothing with the rest of it.
 //
-// Every figure here is REPORTED, never estimated. The rate-limit meter is the
-// subscription's own signal rather than a token guess, the cache rate comes off
-// the turn's own usage block, and the totals are what the SDK billed. An absent
+// Every figure here is REPORTED, never estimated. The cache rate comes off the
+// turn's own usage block, and the totals are what the SDK billed. An absent
 // figure stays null and renders as "—", because a placeholder number in a
 // spend readout is worse than no number.
+//
+// A subscription rate-limit meter used to live here as well, reading the SDK's
+// `rate_limit_event`. That event never arrived, so the meter only ever rendered
+// an em dash in two places; it was removed rather than left claiming a reading
+// nothing produces. `Session.usageUtilization` and friends are still written by
+// the main process (session.ts captureUsage) — nothing renders them.
 import { computed, type ComputedRef } from 'vue'
 import { modelLabel, type Session } from '@shared/domain'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
@@ -28,22 +32,6 @@ export interface SessionUsageTotals {
 
 export function useSessionUsage(liveSession: ComputedRef<Session | null>) {
   const active = useActiveSessionStore()
-
-  const usagePct = computed(() => {
-    const u = liveSession.value?.usageUtilization
-    return u != null ? Math.max(0, Math.min(100, Math.round(u))) : null
-  })
-
-  const usageColor = computed(() => {
-    const p = usagePct.value ?? 0
-    return p > 85 ? 'var(--red)' : p > 60 ? 'var(--amber)' : 'var(--green)'
-  })
-
-  const usageLimitLabel = computed(() => {
-    // 7d for a weekly window; otherwise the 5h label (also the pre-report placeholder).
-    const t = liveSession.value?.usageLimitType
-    return t?.startsWith('seven_day') ? '7d limit' : '5h limit'
-  })
 
   /**
    * Prompt-cache hit rate for the latest completed turn: cache_read /
@@ -65,7 +53,7 @@ export function useSessionUsage(liveSession: ComputedRef<Session | null>) {
     return null
   })
 
-  /** Same shape of threshold as usageColor, so both live in one place. */
+  /** Green once most of the prefix is being reused rather than re-billed. */
   const cacheColor = computed(() =>
     (cacheHitPct.value ?? 0) > 50 ? 'var(--green)' : 'var(--amber)',
   )
@@ -90,9 +78,6 @@ export function useSessionUsage(liveSession: ComputedRef<Session | null>) {
   })
 
   return {
-    usagePct,
-    usageColor,
-    usageLimitLabel,
     cacheHitPct,
     cacheColor,
     sessionUsage,

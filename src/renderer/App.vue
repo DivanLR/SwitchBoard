@@ -17,6 +17,7 @@ import InboxView from '@renderer/views/InboxView.vue'
 import ProjectRegistration from '@renderer/components/ProjectRegistration.vue'
 import SettingsPanel from '@renderer/components/SettingsPanel.vue'
 import GlobalSpinner from '@renderer/components/GlobalSpinner.vue'
+import SessionWaitOverlay from '@renderer/components/SessionWaitOverlay.vue'
 
 const projects = useProjectsStore()
 const active = useActiveSessionStore()
@@ -120,7 +121,7 @@ const dbProject = computed(() => projects.dbProject)
 
 <template>
   <div v-if="bridgeMissing" class="bridge-missing">
-    <div class="mono" style="font-size: 15.5px; font-weight: 600">
+    <div class="mono" style="font-size: var(--fs-head); font-weight: 600">
       <span style="color: var(--green)">▣</span> switchboard
     </div>
     <p class="dim">
@@ -179,13 +180,9 @@ const dbProject = computed(() => projects.dbProject)
           v-if="dbProject && active.mcpOpen"
           :project="dbProject"
         />
-        <SessionView
-          v-else-if="selectedProject"
-          :project="selectedProject"
-          @open-proj-settings="openSettings('proj')"
-        />
+        <SessionView v-else-if="selectedProject" :project="selectedProject" />
         <div v-else class="no-project">
-          <div class="mono faint" style="font-size: 12px">no project selected</div>
+          <div class="mono faint" style="font-size: var(--fs-ui)">no project selected</div>
           <button class="btn-solid" data-testid="add-project-empty" @click="showRegistration = true">
             add a project
           </button>
@@ -229,19 +226,14 @@ const dbProject = computed(() => projects.dbProject)
 
     <!-- Starting a session takes the whole window: it is not a background task
          the developer can work around, and a bypass start builds a container
-         the first time, which runs to minutes. Above the dialogs (z-index 40)
-         so the New session dialog it was triggered from waits behind it. -->
-    <div
+         the first time, which runs to minutes. The matching screen for ending a
+         session is the same component. -->
+    <SessionWaitOverlay
       v-if="projects.starting"
-      class="start-wait"
-      role="status"
-      aria-live="polite"
-      data-testid="session-start-overlay"
-    >
-      <span class="sw-ring"></span>
-      <div class="sw-text mono">Starting session…</div>
-      <div class="sw-sub">First bypass start builds its container — this can take a few minutes.</div>
-    </div>
+      testid="session-start-overlay"
+      title="Starting session…"
+      sub="First bypass start builds its container — this can take a few minutes."
+    />
   </div>
 
   <!-- Global loading spinner — shows while any IPC call is in flight. -->
@@ -267,7 +259,7 @@ const dbProject = computed(() => projects.dbProject)
   padding: 8px 16px;
   background: color-mix(in srgb, var(--green) 8%, transparent);
   border-bottom: 1px solid color-mix(in srgb, var(--green) 30%, transparent);
-  font-size: 12px;
+  font-size: var(--fs-ui);
   color: var(--text-body);
 }
 
@@ -287,7 +279,7 @@ const dbProject = computed(() => projects.dbProject)
   background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
   color: var(--green-ink);
   font-weight: 600;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   font-family: var(--sans);
   padding: 4px 12px;
   border-radius: var(--rc);
@@ -297,7 +289,7 @@ const dbProject = computed(() => projects.dbProject)
 
 .ub-dismiss {
   color: var(--text-tab);
-  font-size: 12px;
+  font-size: var(--fs-ui);
   padding: 2px 6px;
 }
 
@@ -343,7 +335,7 @@ const dbProject = computed(() => projects.dbProject)
   background: transparent;
   color: var(--text-tab);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--fs-ui);
   cursor: pointer;
 }
 
@@ -364,7 +356,7 @@ const dbProject = computed(() => projects.dbProject)
 /* Vertical "INBOX" label down the rail. */
 .inbox-rail-label {
   writing-mode: vertical-rl;
-  font-size: 10px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.18em;
   color: var(--text-faint);
   user-select: none;
@@ -427,49 +419,6 @@ html.sb-light .main {
   align-items: center;
   justify-content: center;
   gap: 14px;
-}
-
-/* Full-window waiting state for a session start. Same scrim and blur as a modal
-   overlay, one layer above it. */
-.start-wait {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  background: var(--scrim);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-}
-
-.sw-ring {
-  width: 26px;
-  height: 26px;
-  /* Circular for the same reason the global spinner is: it rotates, and a
-     rotating square reads as a glitch rather than as progress. */
-  border-radius: 50%;
-  border: 2px solid var(--border-strong);
-  border-top-color: var(--green);
-  animation: sw-spin 0.7s linear infinite;
-}
-
-.sw-text {
-  font-size: 13px;
-  color: var(--text-bright);
-}
-
-.sw-sub {
-  font-size: 11px;
-  color: var(--text-faint);
-}
-
-@keyframes sw-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .bridge-missing {

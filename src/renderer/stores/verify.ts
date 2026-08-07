@@ -4,6 +4,22 @@
 import { reactive } from 'vue'
 import type { VerifyRun } from '@shared/domain'
 import { errorMessage, invoke } from '@renderer/ipc'
+import { useProjectsStore } from '@renderer/stores/projects'
+
+/**
+ * A Tests-section dispatch can spawn the project's dedicated tests session, and
+ * the sidebar only learns about a session it already knows: `applyStatusPush`
+ * patches a session id present in `item.sessions` and does not insert an unknown
+ * one. Without this refresh the run happens in a session with no row anywhere on
+ * screen, which is worse than blocking the chat — at least a blocked chat is
+ * visible.
+ *
+ * `refresh()` re-applies the developer's own focus afterwards, so surfacing the
+ * tests session never moves the centre pane off the conversation.
+ */
+async function surfaceNewSessions(): Promise<void> {
+  await useProjectsStore().refresh()
+}
 
 // Guards the shared list against a slower response from a project the developer
 // has already switched away from (mirrors evals.load).
@@ -42,6 +58,7 @@ const store = reactive({
     try {
       const { runs } = await invoke('verify.start', { projectId, stackId, suiteIds })
       this.byProject[projectId] = runs
+      await surfaceNewSessions()
       return true
     } catch (error) {
       this.error = errorMessage(error)
@@ -70,6 +87,7 @@ const store = reactive({
     try {
       const { runs } = await invoke('verify.evidence', { projectId, runId })
       this.byProject[projectId] = runs
+      await surfaceNewSessions()
       return true
     } catch (error) {
       this.error = errorMessage(error)

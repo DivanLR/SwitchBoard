@@ -36,6 +36,7 @@ import { foldModelTotals, type EventSink } from './message-mapper'
 import {
   adhdSystemPromptAppend,
   heavySubagentSystemPromptAppend,
+  heavySubagentModelMode,
   modesSystemPromptAppend,
   sandboxSystemPromptAppend,
   terseSystemPromptAppend,
@@ -655,11 +656,20 @@ export class SessionManager {
     const schemaAppend = schemaDoc
       ? `## Database schema (from a previous MCP scan)\n\n${schemaDoc}`
       : null
-    // Advisor/Orchestrator protocol (static text — prompt-cache friendly).
-    const modesAppend = modesSystemPromptAppend(settings.modelMode ?? 'auto')
-    // Fan-out by default when the developer has asked for it (static text, so it
-    // sits in the cached prefix like the other shaping appends).
-    const heavyAppend = heavySubagentSystemPromptAppend(settings.heavySubagents === true)
+    // Divide-and-conquer when the developer has asked for it (static text, so it
+    // sits in the cached prefix like the other shaping appends). Recorded on the
+    // row as well: the header pill is the only way to tell, from a session that is
+    // already running, whether it started under this setting — the toggle applies
+    // at spawn and cannot reach a live session's system prompt.
+    const heavySubagents = settings.heavySubagents === true
+    row.heavySubagents = heavySubagents
+    const heavyAppend = heavySubagentSystemPromptAppend(heavySubagents)
+    // Advisor/Orchestrator protocol (static text — prompt-cache friendly). Pinned
+    // to Orchestrator under heavy subagents, or the two appends contradict:
+    // Advisor's text says to implement scoped work yourself.
+    const modesAppend = modesSystemPromptAppend(
+      heavySubagentModelMode(heavySubagents, settings.modelMode ?? 'auto'),
+    )
     // A carried-over transcript: the digest inline, the full file named. Expired
     // transcripts resolve to null, so a stale carry request is simply ignored
     // rather than starting a session that claims context it does not have.
@@ -925,6 +935,42 @@ export class SessionManager {
    * and cancelling a run that finished on its own in the meantime is a no-op
    * rather than an error — the intent is satisfied either way.
    */
+  /**
+   * The session a verification run should talk to: this project's own verify
+   * session, started if it is not already alive.
+   *
+   * Every dispatch in the Tests section used to resolve its target with
+   * `sessions.activeForProject`, which returns whichever session is open — in
+   * the ordinary case, the one the developer is chatting in. A verification pass
+   * is a long turn: it runs the suites, reads the artefacts and writes a report
+   * line. Queued into the chat session it blocks the conversation for its whole
+   * duration and interleaves build output with the work in hand, which is the
+   * one thing this application exists to stop.
+   *
+   * A project may run as many sessions as it is asked to, so the Tests section
+   * takes its own. Reuse is keyed off the sessionId already persisted on the
+   * newest verify or API run — no new column, no new table, and no second
+   * registry of "which session is the tests one" that could disagree with the
+   * runs themselves. Both kinds are consulted so a verify run and an API set in
+   * the same project share one session rather than spawning two.
+   *
+   * It deliberately never consults `activeForProject`: reusing the chat session
+   * is exactly the behaviour being removed, and a fallback to it would restore
+   * the bug on the first run after a tests session ends.
+   */
+  async testsSessionFor(projectId: string): Promise<Session> {
+    const candidates = [
+      this.repos.verifyRuns.listForProject(projectId)[0]?.sessionId,
+      this.repos.apiRuns.listForProject(projectId)[0]?.sessionId,
+    ]
+    for (const id of candidates) {
+      if (!id) continue
+      const existing = this.repos.sessions.byId(id)
+      if (existing && !existing.endedAt) return existing
+    }
+    return this.startSession(projectId)
+  }
+
   async cancelVerifyRun(runId: string): Promise<void> {
     const run = this.repos.verifyRuns.byId(runId)
     if (!run) throw { code: 'NOT_FOUND', message: 'Run not found' } satisfies IpcError

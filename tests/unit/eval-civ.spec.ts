@@ -224,12 +224,28 @@ describe('what kind of .NET application a project holds', () => {
     expect(label(entries, files)).toBe('.NET API + Blazor')
   })
 
-  it('offers everything when the shape cannot be read, rather than hiding a suite on a guess', () => {
-    // No reader at all (the sandbox image decision), and a reader that cannot open
-    // anything, must both leave the catalog untouched.
+  it('offers everything only when there is no reader at all', () => {
+    // The sandbox-image decision passes no reader, because it only asks whether
+    // .NET is needed. With no evidence gathered, nothing is withheld.
     const all = TEST_STACKS.find((s) => s.id === 'dotnet')?.suites.map((s) => s.id)
     expect(detectStacks(['Api.sln'])[0].suites.map((s) => s.id)).toEqual(all)
-    expect(suiteIds(['Api.sln', 'Program.cs'], {})).toEqual(all)
+  })
+
+  it('withholds the browser suites once a reader has looked and found no screens', () => {
+    // This used to offer the whole catalogue, on the reasoning that hiding a suite
+    // on a guess is worse than offering an extra. It is not a guess. Blazor is read
+    // from file evidence — a .razor component, a wwwroot/index.html, or a Razor
+    // registration — so a tree that was scanned and has none of them has no screens
+    // to drive, and "drive the affected screens in a real browser" was being put in
+    // front of plain Web APIs.
+    const ids = suiteIds(['Api.sln', 'Program.cs'], {})
+    expect(ids).not.toContain('blazor-ui')
+    expect(ids).not.toContain('blazor-interactive')
+    // The API side keeps its suites: the two mistakes are not equal, which is the
+    // same asymmetry the Controllers-folder rule already turns on.
+    expect(ids).toContain('dotnet-unit')
+    expect(ids).toContain('dotnet-http')
+    // Nothing was confirmed, so the label still says only ".NET".
     expect(label(['Api.sln'], {})).toBe('.NET')
   })
 
@@ -251,6 +267,32 @@ describe('what kind of .NET application a project holds', () => {
     const files = { 'Sample.Api.csproj': '<Project Sdk="Microsoft.NET.Sdk.Web"></Project>' }
     expect(label(entries, files)).toBe('.NET API')
     expect(suiteIds(entries, files)).not.toContain('blazor-ui')
+  })
+
+  it('withholds the browser suites from a .NET project with no screens at all', () => {
+    // The case the owner reported: a Web API whose shape reads as NOTHING —
+    // no .razor anywhere, no wwwroot, no Controllers folder, and a Program.cs
+    // deeper than detection reads, so neither signal fires. That used to fall
+    // through to "offer everything", which put "drive the affected screens in a
+    // real browser" in front of a service that has no screens.
+    const entries = ['Service.sln', 'Directory.Build.props', 'src', 'tests']
+    const files = { 'Directory.Build.props': '<Project></Project>' }
+    const ids = suiteIds(entries, files)
+    expect(ids).not.toContain('blazor-ui')
+    expect(ids).not.toContain('blazor-interactive')
+    // The asymmetry the API side already argued for: unconfirmed keeps the API
+    // suites, because offering one costs a skipped suite, while offering a
+    // browser suite costs a run that goes looking for a UI and reports its
+    // absence as a failure of the code.
+    expect(ids).toContain('dotnet-unit')
+    expect(ids).toContain('dotnet-http')
+  })
+
+  it('still offers everything when the tree was never read', () => {
+    // No `read` means no evidence either way, and the sandbox-image decision
+    // depends on that path staying wide: it only asks whether .NET is needed.
+    const ids = detectStacks(['Service.sln']).flatMap((s) => s.suites.map((x) => x.id))
+    expect(ids).toContain('blazor-ui')
   })
 })
 

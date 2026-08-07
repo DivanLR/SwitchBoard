@@ -42,7 +42,7 @@ function textOf(event: SessionEvent): string {
 }
 
 .toggle {
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text-faint);
   cursor: pointer;
   user-select: none;
@@ -64,7 +64,7 @@ function textOf(event: SessionEvent): string {
 
 .line {
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   line-height: 1.7;
   color: var(--text-noise);
   white-space: pre-wrap;
@@ -72,7 +72,7 @@ function textOf(event: SessionEvent): string {
 }
 
 .more {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-ghost);
   margin-top: 4px;
   cursor: pointer;

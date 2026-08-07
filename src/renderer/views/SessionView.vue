@@ -14,8 +14,8 @@ const composerDrafts = new Map<string, string>()
 // (FR-014..019a, R2 resume).
 import { computed, nextTick, onMounted, onUnmounted, onWatcherCleanup, ref, watch } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
-import { agentIdOf } from '@shared/domain'
-import type { SessionEvent } from '@shared/domain'
+import { agentIdOf, DEFAULT_SESSION_MODE, SESSION_MODES } from '@shared/domain'
+import type { SessionEvent, SessionMode } from '@shared/domain'
 import type { CleanupGroup } from '@shared/command-catalog'
 import { activeAgents } from '@shared/agents'
 import { parseInlineQuestion } from '@shared/inline-question'
@@ -25,7 +25,6 @@ import { useProjectsStore } from '@renderer/stores/projects'
 import { useInboxStore } from '@renderer/stores/inbox'
 import { useQueueStore } from '@renderer/stores/queue'
 import { useSettingsStore } from '@renderer/stores/settings'
-import { useTranscriptsStore } from '@renderer/stores/transcripts'
 import { useCommandSuggestions } from '@renderer/composables/useCommandSuggestions'
 import { useProjectRefs } from '@renderer/composables/useProjectRefs'
 import { formatTokens as fmtTok, useSessionUsage } from '@renderer/composables/useSessionUsage'
@@ -43,9 +42,9 @@ import SpecsView from '@renderer/views/SpecsView.vue'
 import CleanupView from '@renderer/views/CleanupView.vue'
 import TestsView from '@renderer/views/TestsView.vue'
 import DiffView from '@renderer/views/DiffView.vue'
+import SessionWaitOverlay from '@renderer/components/SessionWaitOverlay.vue'
 
 const props = defineProps<{ project: ProjectListItem }>()
-const emit = defineEmits<{ (e: 'open-proj-settings'): void }>()
 
 const projects = useProjectsStore()
 const active = useActiveSessionStore()
@@ -95,11 +94,15 @@ const composer = ref('')
 const editTarget = ref<string | null>(null)
 const draftRestored = ref(false)
 const busy = ref(false)
-// Ended-banner restart option: start the next session with all permissions
-// bypassed (--dangerously-skip-permissions), mirroring the New session dialog.
-const bypassRestart = ref(false)
-/** Ended-banner restart option: start the next session read-only, planning first. */
-const planRestart = ref(false)
+// Ended-banner start controls. Two of them, where there used to be two buttons
+// and three switches: WHICH mode the next session runs in, and WHETHER it picks
+// up the last conversation. The three switches could describe states the SDK
+// cannot spawn in (plan and bypass both on meant one silently won), and they
+// only ever offered two of the six modes the SDK actually has.
+const startMode = ref<SessionMode>(DEFAULT_SESSION_MODE)
+const modeOpen = ref(false)
+/** Resume the previous conversation rather than starting an empty one. */
+const resumeSession = ref(false)
 /** Session-start failure (e.g. Docker down for a bypass session), ended banner. */
 const startError = ref<string | null>(null)
 const streamEl = ref<HTMLElement | null>(null)
@@ -200,9 +203,6 @@ function onGlobalKeydown(event: KeyboardEvent): void {
 let unsubscribeCommands: (() => void) | undefined
 onMounted(() => {
   window.addEventListener('keydown', onGlobalKeydown)
-  // Which transcripts are still in temp, so the start panel can offer to carry
-  // the last one. Expired files are swept by the main process on every read.
-  void transcripts.refresh()
   // A session's init message delivers its slash commands / skills after start;
   // pick them up live so a newly-added project's suggestions load without a
   // project switch.
@@ -306,17 +306,11 @@ const composerPlaceholder = computed(() => {
 /** Nothing to send. Both buttons ask the same question, so they ask it once. */
 const composerEmpty = computed(() => composer.value.trim().length === 0)
 
-// The header's usage strip: rate-limit meter, prompt-cache hit rate, per-model
-// totals. All reported figures, never estimates (see the composable).
-const {
-  usagePct,
-  usageColor,
-  usageLimitLabel,
-  cacheHitPct,
-  cacheColor,
-  sessionUsage,
-  currentModelLabel,
-} = useSessionUsage(liveSession)
+// The header's usage strip: prompt-cache hit rate and per-model totals. All
+// reported figures, never estimates (see the composable). The subscription
+// rate-limit meter used to sit here too; the SDK's rate_limit_event never
+// arrives for this account, so it only ever rendered an em dash.
+const { cacheHitPct, cacheColor, sessionUsage, currentModelLabel } = useSessionUsage(liveSession)
 
 /** The full view = exactly what /usage reports, rendered as the ✦ USAGE card. */
 async function openFullUsage(): Promise<void> {
@@ -389,12 +383,14 @@ watch(
     draftRestored.value = false
     mainTab.value = 'session'
     editTarget.value = null
-    // Per-project, both of these: a start failure from the project we left must
-    // not read as this one's, and an armed bypass toggle must never carry over
-    // and silently start the NEXT project's session with permissions skipped.
+    // Per-project, all of these: a start failure from the project we left must
+    // not read as this one's, and a chosen mode must never carry over and
+    // silently start the NEXT project's session with permissions skipped.
     startError.value = null
     busy.value = false
-    bypassRestart.value = false
+    modeOpen.value = false
+    resumeSession.value = false
+    startMode.value = props.project.defaultSessionMode ?? DEFAULT_SESSION_MODE
     // Also per-project: this component instance is reused across projects, so an
     // armed "press Ctrl+C again to stop" left over from the project being left
     // would otherwise sit above the composer of the project being entered, where
@@ -435,21 +431,49 @@ watch(
   },
 )
 
-// The bypass toggle follows whatever session the banner is offering to resume:
-// a bypass session's transcript lives in that project's container volume, so
-// resuming it as a native session would look on the host and find nothing (and
-// the reverse). Declared after the project watcher so it wins on a switch.
+// The picker opens on however the last session began — not on where it ended up.
+// A session toggled out of plan mode mid-flight still STARTED as one, and
+// offering that again is the choice the developer actually made. Declared after
+// the project watcher so it wins on a switch.
 watch(
   () => endedSession.value?.id ?? null,
   (id) => {
     if (!id) return
-    bypassRestart.value = endedSession.value?.bypassPermissions ?? false
-    // How the last one began, not where it ended up: a session that was toggled
-    // out of plan mode mid-flight still started as one, and offering that again
-    // is the choice the developer actually made.
-    planRestart.value = endedSession.value?.planMode ?? false
+    const previous = endedSession.value
+    startMode.value = previous?.bypassPermissions
+      ? 'bypass'
+      : previous?.planMode
+        ? 'plan'
+        : (props.project.defaultSessionMode ?? DEFAULT_SESSION_MODE)
   },
   { immediate: true },
+)
+
+/**
+ * The modes a start may pick right now. Everything, until Resume is on: a bypass
+ * session's transcript lives in that project's container volume rather than in
+ * the host's ~/.claude, so resuming one as a native session looks in the wrong
+ * place and silently finds nothing (and the reverse). Rather than let the
+ * developer choose a pair that cannot work, the impossible half is not offered.
+ */
+const modeChoices = computed(() => {
+  if (!resumeSession.value) return SESSION_MODES
+  const wasBypass = endedSession.value?.bypassPermissions === true
+  return SESSION_MODES.filter((m) => (m.value === 'bypass') === wasBypass)
+})
+
+/** Turning Resume on can rule out the mode already picked; move off it. */
+watch([resumeSession, modeChoices], () => {
+  if (!modeChoices.value.some((m) => m.value === startMode.value)) {
+    startMode.value = modeChoices.value[0]?.value ?? DEFAULT_SESSION_MODE
+  }
+})
+
+const startModeLabel = computed(
+  () => SESSION_MODES.find((m) => m.value === startMode.value)?.label ?? 'Default',
+)
+const startModeDetail = computed(
+  () => SESSION_MODES.find((m) => m.value === startMode.value)?.detail ?? '',
 )
 
 // --- Clean view derivation (FR-015): consecutive same-noiseKind grouping ---
@@ -660,29 +684,7 @@ async function enqueue(): Promise<void> {
   resetSuggestions()
 }
 
-// --- Transcripts ---
-// Every session writes one continuously in the main process, so a crash leaves a
-// file behind; these two are the manual half: save one now, and carry the last
-// one into the next session as context.
-const transcripts = useTranscriptsStore()
-const carryTranscript = ref(false)
-const savingTranscript = ref(false)
-
-/** The newest unexpired transcript for this project, if one is still in temp. */
-const lastTranscript = computed(() => transcripts.latestFor(props.project.id))
-
-async function saveTranscript(): Promise<void> {
-  const id = liveSession.value?.id ?? endedSession.value?.id
-  if (!id) return
-  savingTranscript.value = true
-  try {
-    await transcripts.save(id)
-  } finally {
-    savingTranscript.value = false
-  }
-}
-
-async function start(resume: boolean): Promise<void> {
+async function start(): Promise<void> {
   // This view is reused across projects and a bypass start can take minutes
   // (first-run image build), so the call is pinned to the project it was made
   // for — otherwise its result lands on whichever project is on screen when it
@@ -690,15 +692,15 @@ async function start(resume: boolean): Promise<void> {
   const target = props.project.id
   busy.value = true
   startError.value = null
+  modeOpen.value = false
   try {
     await projects.startSession(
       target,
-      resume,
-      // The restart toggles override the project's mode for this one session.
-      // Neither ticked sends nothing, so the project's own setting applies —
-      // which is why this is undefined rather than a default.
-      bypassRestart.value ? 'bypass' : planRestart.value ? 'plan' : undefined,
-      carryTranscript.value ? (lastTranscript.value?.sessionId ?? undefined) : undefined,
+      // Resume only claims to resume when there is something to resume from.
+      resumeSession.value && canResume.value,
+      // The picker always sends a concrete mode. It opens on the project's own
+      // default, so sending it explicitly changes nothing until it is changed.
+      startMode.value,
     )
   } catch (e) {
     // Docker down / not logged in (bypass sessions run containerised) — show
@@ -842,7 +844,7 @@ const {
       <div class="head-row">
         <span class="h-dot" :style="{ background: headerColor }"></span>
         <span class="h-name mono" data-testid="session-project-name">{{ project.name }}</span>
-        <span class="h-path mono" data-testid="session-project-path">{{ project.path }}</span>
+        <span class="h-path code" data-testid="session-project-path">{{ project.path }}</span>
         <span style="flex: 1"></span>
         <span
           v-if="liveSession?.bypassPermissions"
@@ -882,6 +884,17 @@ const {
         >
           ⚠ No git
         </span>
+        <!-- The setting is read at spawn, so a toggle flipped mid-session changes
+             nothing until the next start. Without this pill that is invisible, and
+             invisible is indistinguishable from broken. -->
+        <span
+          v-if="liveSession?.heavySubagents"
+          class="pill fanout-pill"
+          data-testid="fanout-pill"
+          title="Started with Heavy subagents on: this session is told to split work across as many subagents as it can. Changing the setting applies from the next session."
+        >
+          ⑂ Fan-out
+        </span>
         <span
           v-if="workingAgents.length > 1"
           class="pill agents-pill"
@@ -906,33 +919,11 @@ const {
           {{ pillLabel(liveSession.status) }}
         </span>
         <span v-else-if="endedSession" class="pill ended">Ended</span>
-        <button
-          v-if="liveSession?.status === 'working'"
-          class="stop-btn mono"
-          data-testid="stop-session"
-          title="Interrupt the current turn (Ctrl+C)"
-          @click="interrupt()"
-        >
-          ■
-          <!-- The binding is real (onGlobalKeydown), so the control names it
-               rather than hiding it in a tooltip. -->
-          <kbd class="ctl-key">⌃C</kbd>
-        </button>
-        <!-- The transcript is written continuously anyway; this is for the moment
-             before something risky, when you want the file on disk now. -->
-        <!-- A glyph, not a label: the header row is the tightest strip in the app,
-             and spelling this one out truncated the project name beside it. -->
-        <button
-          v-if="liveSession || endedSession"
-          class="ctl mono ctl-glyph"
-          data-testid="save-transcript"
-          title="Write this session's transcript to a temporary file (expires in 12 hours)"
-          aria-label="Save transcript"
-          :disabled="savingTranscript"
-          @click="saveTranscript()"
-        >
-          ⤓
-        </button>
+        <!-- No interrupt button and no transcript glyph here. Both appeared only
+             mid-turn or mid-session, so the row reflowed under the developer while
+             they were reading it. Ctrl+C still interrupts (onGlobalKeydown, and the
+             status bar names the binding), and the main process writes every
+             session's transcript continuously without being asked. -->
         <button
           v-if="liveSession"
           class="ctl mono"
@@ -943,35 +934,18 @@ const {
         >
           {{ ending ? 'Ending' : 'End' }}
         </button>
-        <!-- The window is blocked for the whole teardown, but lightly: the work
-             stays visible behind a veil and one strip low on the window carries the
-             state, so ending a session never hides where you were. Teleported to the
-             body so no ancestor of this header can clip it. `ending` spans the whole
-             stop: sessions.stop resolves in main only once the SDK has drained and
-             the container is down, and this unmounts with liveSession either way. -->
-        <Teleport to="body">
-          <div
-            v-if="ending"
-            class="end-veil"
-            data-testid="ending-overlay"
-            role="status"
-            aria-live="polite"
-            aria-busy="true"
-          >
-            <div class="end-strip">
-              <span class="end-eyebrow">Ending {{ project.name }}</span>
-              <span class="end-rule" data-testid="ending-bar"></span>
-            </div>
-          </div>
-        </Teleport>
-        <button
-          class="ctl mono"
-          data-testid="open-proj-settings"
-          title="Project settings"
-          @click="emit('open-proj-settings')"
-        >
-          ⚙
-        </button>
+        <!-- Ending blocks the window for the whole teardown, and looks exactly
+             like starting one does: same wait, same screen. `ending` spans the
+             whole stop — sessions.stop resolves in main only once the SDK has
+             drained and the container is down, and this unmounts with
+             liveSession either way. -->
+        <SessionWaitOverlay
+          v-if="ending"
+          testid="ending-overlay"
+          :title="`Ending ${project.name}…`"
+          sub="Draining the session and tearing its container down."
+          ring-testid="ending-bar"
+        />
         <div class="segments mono" data-testid="view-toggle" role="tablist" aria-label="Stream view">
           <button
             type="button"
@@ -1030,15 +1004,6 @@ const {
           session <span style="color: var(--text-meta)">{{ sessionTimer }}</span>
         </span>
         <span
-          v-if="liveSession"
-          data-testid="session-usage"
-          style="color: var(--text-faint); white-space: nowrap"
-        >
-          <span v-if="usagePct != null" :style="{ color: usageColor }">{{ usagePct }}%</span>
-          <span v-else>—</span>
-          {{ usageLimitLabel }}
-        </span>
-        <span
           v-if="cacheHitPct != null"
           data-testid="session-cache"
           style="color: var(--text-faint); white-space: nowrap"
@@ -1071,17 +1036,6 @@ const {
         >
           #{{ sessionStamp.short }}
         </span>
-        <!-- Where a manual save landed. The path is the point: it is what you hand
-             to anything outside this app, so it is shown rather than announced. -->
-        <button
-          v-if="transcripts.lastSavedPath"
-          class="head-stamp saved-path"
-          data-testid="transcript-saved"
-          :title="`${transcripts.lastSavedPath} — click to dismiss`"
-          @click="transcripts.clearLastSaved()"
-        >
-          ⤓ {{ transcripts.lastSavedPath }}
-        </button>
       </div>
     </header>
 
@@ -1194,69 +1148,92 @@ const {
         </div>
 
         <div v-if="endedSession" class="ended" data-testid="ended-banner">
-          <div class="mono" style="font-size: 12px; color: var(--text-mid)">
+          <div class="mono" style="font-size: var(--fs-ui); color: var(--text-mid)">
             Session ended <span class="faint">({{ endedSession.endReason ?? 'unknown' }})</span>
             <span v-if="endedSession.statusDetail" class="faint"> — {{ endedSession.statusDetail }}</span>
           </div>
           <div class="ended-actions">
-            <button class="btn-solid" data-testid="start-session" :disabled="busy" @click="start(false)">
-              Start new session
-            </button>
-            <button
-              v-if="canResume"
-              class="btn-quiet"
-              data-testid="resume-session"
-              :disabled="busy"
-              title="Start a session resuming the previous conversation context"
-              @click="start(true)"
-            >
-              Resume previous conversation
-            </button>
+            <!-- Mode first, then whether to carry the conversation, then Start. It
+                 reads as one sentence: run it LIKE THIS, PICKING UP where we left
+                 off, GO. Every mode the SDK has is here, each carrying its own
+                 description on the row and on hover. -->
+            <div class="mode-pick">
+              <button
+                type="button"
+                class="mode-dd"
+                :class="{ armed: startMode === 'bypass' }"
+                data-testid="start-mode-picker"
+                :aria-expanded="modeOpen"
+                aria-haspopup="listbox"
+                :title="startModeDetail"
+                :disabled="busy"
+                @click="modeOpen = !modeOpen"
+              >
+                <span class="mode-dd-eyebrow">Mode</span>
+                <span class="mode-dd-name mono">{{ startModeLabel }}</span>
+                <span class="mode-dd-arrow mono" aria-hidden="true">{{ modeOpen ? '▲' : '▼' }}</span>
+              </button>
+              <div v-if="modeOpen" class="mode-list" role="listbox" data-testid="start-mode-list">
+                <button
+                  v-for="m in modeChoices"
+                  :key="m.value"
+                  type="button"
+                  class="mode-item"
+                  :class="{ sel: m.value === startMode, armed: m.value === 'bypass' }"
+                  role="option"
+                  :aria-selected="m.value === startMode"
+                  :data-testid="`start-mode-${m.value}`"
+                  :title="m.detail"
+                  @click="((startMode = m.value), (modeOpen = false))"
+                >
+                  <span class="mode-item-name mono">{{ m.label }}</span>
+                  <span class="mode-item-detail">{{ m.detail }}</span>
+                </button>
+                <!-- Said where the choice is made, not discovered after a start
+                     that quietly found no transcript. -->
+                <div v-if="resumeSession" class="mode-note">
+                  Resuming keeps the last session's sandbox: its transcript lives
+                  {{ endedSession.bypassPermissions ? 'inside the container' : 'on this machine' }},
+                  so only matching modes are offered.
+                </div>
+              </div>
+            </div>
+
             <span class="bypass-inline mono">
               <button
                 class="switch"
-                :class="{ on: planRestart }"
-                data-testid="plan-restart-toggle"
+                :class="{ on: resumeSession }"
+                data-testid="resume-session"
                 role="switch"
-                :aria-checked="planRestart"
-                title="Start read-only: research first, then a plan you approve in the inbox"
-                @click="planRestart = !planRestart; if (planRestart) bypassRestart = false"
+                :aria-checked="resumeSession"
+                :disabled="!canResume"
+                :title="
+                  canResume
+                    ? 'Carry on the conversation that just ended: the new session opens with the previous one\'s context, so you can pick up mid-thought instead of re-explaining. Off starts an empty session in the same folder.'
+                    : 'Nothing to resume — this session never reached the point of having a conversation to carry on.'
+                "
+                @click="canResume && (resumeSession = !resumeSession)"
               >
                 <span class="knob"></span>
               </button>
-              <span>Plan first</span>
+              <span :class="{ faint: !canResume }">Resume session</span>
             </span>
-            <span class="bypass-inline mono">
-              <button
-                class="switch danger"
-                :class="{ on: bypassRestart }"
-                data-testid="bypass-restart-toggle"
-                role="switch"
-                :aria-checked="bypassRestart"
-                title="Start with all permissions bypassed (--dangerously-skip-permissions)"
-                @click="bypassRestart = !bypassRestart; if (bypassRestart) planRestart = false"
-              >
-                <span class="knob"></span>
-              </button>
-              <span :class="{ armed: bypassRestart }">Bypass permissions</span>
-            </span>
-            <!-- Only when a transcript is actually still in temp: an offer to carry
-                 context that has expired would be a lie about what the new session
-                 will know. -->
-            <span v-if="lastTranscript" class="bypass-inline mono">
-              <button
-                class="switch"
-                :class="{ on: carryTranscript }"
-                data-testid="carry-transcript-toggle"
-                role="switch"
-                :aria-checked="carryTranscript"
-                :title="`Seed the new session with the previous one's transcript — ${lastTranscript.prompts} prompts, saved ${lastTranscript.savedAt.slice(11, 16)}`"
-                @click="carryTranscript = !carryTranscript"
-              >
-                <span class="knob"></span>
-              </button>
-              <span>Carry last transcript</span>
-            </span>
+
+            <button class="btn-solid" data-testid="start-session" :disabled="busy" @click="start()">
+              {{ resumeSession ? 'Resume' : 'Start session' }}
+            </button>
+          </div>
+          <!-- Bypass used to arm a red switch that sat on this row whether or not
+               the picker was open, so "nothing will ask you" was ambient. A closed
+               dropdown says it once, in small type, and then hides it. Stated in
+               full instead, the same sentence the new-project dialogue uses, so the
+               one mode that skips every approval never depends on a colour. -->
+          <div
+            v-if="startMode === 'bypass'"
+            class="bypass-warn"
+            data-testid="bypass-warning"
+          >
+            ⚠ Nothing will ask for approval — only use this in throwaway or fully trusted folders.
           </div>
           <div v-if="startError" class="mono" style="color: var(--red)" data-testid="start-error">
             ✗ {{ startError }}
@@ -1645,7 +1622,7 @@ const {
    the inbox's pane tabs, the Tests sub-tabs and the Specs part tabs. */
 .mt {
   padding: 9px 13px;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   letter-spacing: var(--track-label);
   text-transform: uppercase;
   color: var(--text-tab);
@@ -1666,7 +1643,7 @@ const {
 }
 
 .mt-badge {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-meta);
   background: color-mix(in srgb, var(--green) 10%, transparent);
   border: 1px solid var(--border-strong);
@@ -1693,7 +1670,7 @@ const {
 }
 
 .h-name {
-  font-size: 15px;
+  font-size: var(--fs-head);
   font-weight: 600;
   color: var(--text-bright);
   white-space: nowrap;
@@ -1712,7 +1689,7 @@ const {
 }
 
 .h-path {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-faint);
   white-space: nowrap;
   overflow: hidden;
@@ -1728,12 +1705,12 @@ const {
   border: 1px solid var(--border-seg);
   border-radius: var(--rp);
   overflow: hidden;
-  font-size: 11px;
+  font-size: var(--fs-meta);
 }
 
 .seg {
   padding: 5px 12px;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   letter-spacing: var(--track-label);
   text-transform: uppercase;
   color: var(--text-tab);
@@ -1752,7 +1729,7 @@ const {
 
 .ctl {
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: var(--fs-ui);
   color: var(--text-tab);
   border: 1px solid var(--border-seg);
   border-radius: var(--rp);
@@ -1766,88 +1743,21 @@ const {
 
 /* A control whose whole label is one glyph: square, so it reads as a key in the
    row rather than as a word that lost its letters. */
-.ctl-glyph {
-  min-width: 24px;
-  padding: 3px 0;
-  text-align: center;
-}
-
 .ctl:disabled {
   opacity: 0.7;
   cursor: default;
 }
 
-/* Drives the ending overlay's rule, below; the End button no longer carries a bar
-   of its own now that the whole window says the session is closing. */
-@keyframes ending-slide {
-  from {
-    background-position: -60% 0;
-  }
-  to {
-    background-position: 160% 0;
-  }
-}
+/* The teardown overlay lives in SessionWaitOverlay now, sharing one screen with
+   the session start. The bespoke veil, strip and sliding rule that used to sit
+   here went with it; ending-bar rides the shared ring. */
 
-/* The whole window while a session tears down. Fixed and teleported to the body,
-   at 60 so it sits over the dialogues at 40 and under the update banner at 100.
-   The veil is the app ground at 82%: enough to say "not now" while leaving the
-   work legible behind it. */
-.end-veil {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-}
-
-.end-veil::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: var(--bg);
-  opacity: 0.82;
-}
-
-.end-strip {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 260px;
-  margin-bottom: 22vh;
-  padding: 12px 16px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-card);
-  box-shadow: var(--shadow-dd);
-}
-
-.end-eyebrow {
-  font-family: var(--mono);
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-meta);
-}
-
-/* The teardown's own indeterminate rule, on the animation the End button used to
-   carry, so this view has one waiting idiom rather than two. It keeps the
-   ending-bar test id: the bar moved off the button, it did not go away. */
-.end-rule {
-  display: block;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, var(--green), transparent) no-repeat;
-  background-size: 45% 100%;
-  animation: ending-slide 1.1s linear infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .end-rule {
-    animation: none;
-    background-size: 100% 100%;
-    opacity: 0.45;
-  }
+/* Same family as the agents pill it sits beside: one says the session is shaped
+   to fan out, the other says it currently is. */
+.pill.fanout-pill {
+  color: var(--purple);
+  border: 1px solid color-mix(in srgb, var(--purple) 30%, transparent);
+  background: color-mix(in srgb, var(--purple) 10%, transparent);
 }
 
 .pill.agents-pill {
@@ -1910,7 +1820,7 @@ const {
 }
 
 .refs-label {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.14em;
   color: var(--text-faint);
 }
@@ -1919,7 +1829,7 @@ const {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-body);
   background: var(--bg-hover);
   border: 1px solid var(--border-card-alt);
@@ -1935,7 +1845,7 @@ const {
 
 .ref-x {
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   padding: 0 1px;
 }
 
@@ -1944,7 +1854,7 @@ const {
 }
 
 .ref-add {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
   border: 1px dashed var(--border-strong);
   border-radius: var(--rc);
@@ -1961,7 +1871,7 @@ const {
 
 .ref-input {
   width: 300px;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   background: var(--bg);
   border: 1px solid var(--green);
   border-radius: var(--rc);
@@ -1973,7 +1883,7 @@ const {
 }
 
 .ref-error {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--red);
   pointer-events: auto;
 }
@@ -1996,12 +1906,12 @@ const {
 }
 
 .drop-title {
-  font-size: 13.5px;
+  font-size: var(--fs-body);
   color: var(--green);
 }
 
 .drop-sub {
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text-meta);
   margin-top: 6px;
 }
@@ -2011,32 +1921,24 @@ const {
   align-items: center;
   gap: 16px;
   margin-top: 7px;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text-meta);
   flex-wrap: wrap;
 }
 
 /* The run's short id: machine truth, so it sits at the ghost tier and never
-   competes with the readings beside it. */
+   competes with the readings beside it. Earned monospace — it is a hash, and a
+   hash is only useful if you can match it character for character. */
 .head-stamp {
-  font-size: 10.5px;
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
   color: var(--text-ghost);
   white-space: nowrap;
 }
 
-/* The saved transcript's path, in the same ghost register. It is a control only
-   so it can be dismissed; it never looks like a button. */
-.saved-path {
-  max-width: 340px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--green2);
-  cursor: pointer;
-}
-
 /* Pairing-mode chip (Advisor/Orchestrator) for the latest work turn. */
 .mode-chip {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--blue);
   border: 1px solid color-mix(in srgb, var(--blue) 35%, transparent);
   border-radius: var(--rp);
@@ -2049,7 +1951,7 @@ const {
   display: inline-flex;
   align-items: center;
   gap: 9px;
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-meta);
   border: 1px solid var(--border-seg);
   border-radius: var(--rp);
@@ -2109,12 +2011,150 @@ const {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  margin-left: auto;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-faint);
 }
 
-.bypass-inline .armed {
+/* Start is the commit; it sits at the far right of the row, after the two
+   choices that shape it. */
+.ended-actions .btn-solid {
+  margin-left: auto;
+}
+
+/* --- Session mode picker (ended banner) --- */
+.mode-pick {
+  position: relative;
+}
+
+.mode-dd {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 5px 9px;
+  background: var(--bg-seg);
+  border: 1px solid var(--border-seg);
+  border-radius: var(--rc);
+  cursor: pointer;
+  color: var(--text-body);
+}
+
+.mode-dd:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+.mode-dd:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* The one mode that approves everything says so on the closed control, not only
+   once the list is open. */
+.mode-dd.armed .mode-dd-name {
+  color: var(--red);
+}
+
+.mode-dd-eyebrow {
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+  letter-spacing: var(--track-label);
+  color: var(--text-ghost);
+}
+
+.mode-dd-name {
+  font-size: var(--fs-meta);
+  color: var(--text-strong);
+}
+
+.mode-dd-arrow {
+  font-size: 8px;
+  color: var(--text-ghost);
+}
+
+/* Opens downward. It was drawn upward first, to keep the stream's first messages
+   clear — but this banner sits directly under a sticky header, so upward put the
+   menu behind it and swallowed the clicks. */
+.mode-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 30;
+  min-width: 340px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-card);
+  border-radius: var(--rc);
+  box-shadow: var(--shadow-menu);
+  overflow: hidden;
+}
+
+.mode-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 11px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-left: 1px solid transparent;
+  cursor: pointer;
+}
+
+.mode-item:hover {
+  background: var(--bg-hover);
+}
+
+/* Selection reads on the wash and on the name's colour. The rule is a hairline
+   because a coloured band down the side of a list row is decoration. */
+.mode-item.sel {
+  background: var(--bg-active);
+  border-left-color: var(--green);
+}
+
+.mode-item-name {
+  font-size: var(--fs-meta);
+  color: var(--text-strong);
+}
+
+.mode-item.sel .mode-item-name {
+  color: var(--green);
+}
+
+.mode-item.armed .mode-item-name {
+  color: var(--red);
+}
+
+/* The description IS the row, not a tooltip you have to discover. The title
+   attribute repeats it for anyone reading by hover. */
+.mode-item-detail {
+  font-size: var(--fs-micro);
+  line-height: 1.45;
+  color: var(--text-faint);
+}
+
+.mode-note {
+  padding: 7px 11px;
+  border-top: 1px solid var(--border-soft);
+  font-size: var(--fs-micro);
+  line-height: 1.45;
+  color: var(--text-ghost);
+}
+
+/* The same warning box ProjectRegistration draws for the same choice. Duplicated
+   rather than shared because it is four properties and two files, and a shared
+   class for it would be the third place to look. */
+.bypass-warn {
+  margin-top: 8px;
+  padding: 8px 10px;
+  font-size: var(--fs-meta);
+  line-height: 1.5;
+  color: var(--red-hover);
+  border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
+  background: color-mix(in srgb, var(--red) 6%, transparent);
+  border-radius: var(--rc);
+}
+
+html.sb-light .bypass-warn {
   color: var(--red);
 }
 
@@ -2124,7 +2164,7 @@ const {
      spanning the stream and its centred label would sit left. */
   display: block;
   width: 100%;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-faint);
   cursor: pointer;
   text-align: center;
@@ -2148,7 +2188,7 @@ const {
 }
 
 .ab-back {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-meta);
   cursor: pointer;
   user-select: none;
@@ -2164,19 +2204,19 @@ const {
 }
 
 .ab-dot {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--blue);
   animation: sbFade 1.6s ease infinite;
 }
 
 .ab-name {
-  font-size: 12px;
+  font-size: var(--fs-ui);
   font-weight: 600;
   color: var(--text-strong);
 }
 
 .ab-chip {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
   border: 1px solid var(--border-seg);
   border-radius: var(--rp);
@@ -2201,19 +2241,19 @@ const {
 }
 
 .agents-label {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.14em;
   color: var(--blue);
 }
 
 .agents-count {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
 }
 
 /* Cap-toggle + "+N more" row for large fan-outs. */
 .agents-toggle {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-tab);
   border: 1px solid var(--border-seg);
   border-radius: var(--rp);
@@ -2228,7 +2268,7 @@ const {
 }
 
 .agents-more {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-faint);
   cursor: pointer;
   padding: 3px 6px;
@@ -2280,19 +2320,19 @@ const {
 }
 
 .agent-chat {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--green);
   white-space: nowrap;
 }
 
 .agent-dot {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--blue);
   animation: sbFade 1.6s ease infinite;
 }
 
 .agent-name {
-  font-size: 12px;
+  font-size: var(--fs-ui);
   font-weight: 600;
   color: var(--text-body);
   white-space: nowrap;
@@ -2300,7 +2340,7 @@ const {
 
 .agent-task {
   flex: 1;
-  font-size: 12px;
+  font-size: var(--fs-ui);
   color: var(--text-meta);
   white-space: nowrap;
   overflow: hidden;
@@ -2320,7 +2360,7 @@ const {
 
 .raw-line {
   font-family: var(--mono);
-  font-size: 11.8px;
+  font-size: var(--fs-meta);
   line-height: 1.75;
   color: var(--text-mid);
   white-space: pre-wrap;
@@ -2358,7 +2398,7 @@ const {
   gap: 10px;
   margin-bottom: 8px;
   padding: 6px 11px;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--amber);
   background: color-mix(in srgb, var(--amber) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
@@ -2371,7 +2411,7 @@ const {
 }
 
 .sc-stop {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   /* Not #fff: white on the light red-pencil correction red measures 2.78:1. --red-ink is the
      token that exists for exactly this, at 6.34:1 — the same fix styles.css
      already applied to .stop-btn:hover. */
@@ -2384,7 +2424,7 @@ const {
 }
 
 .sc-cancel {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-tab);
   border: 1px solid var(--border-strong);
   border-radius: var(--rc);
@@ -2394,7 +2434,7 @@ const {
 }
 
 .draft-note {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--amber);
   margin-bottom: 6px;
 }
@@ -2402,7 +2442,7 @@ const {
 /* The turn finished while the editor was open and the message went as typed.
    Red because the developer's intent was not carried out. */
 .queued-edit-error {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--red);
   margin-bottom: 6px;
 }
@@ -2417,7 +2457,7 @@ const {
 }
 
 .queue-label {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.14em;
   color: var(--text-faint);
 }
@@ -2426,7 +2466,7 @@ const {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-body);
   background: var(--bg-hover);
   box-shadow: var(--elev);
@@ -2459,7 +2499,7 @@ const {
 .queue-edit {
   flex: 1;
   min-width: 120px;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text);
   background: var(--bg-panel);
   border: 1px solid var(--border-strong);
@@ -2470,7 +2510,7 @@ const {
 .queue-x {
   cursor: pointer;
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: var(--fs-meta);
 }
 
 .queue-x:hover {
@@ -2478,7 +2518,7 @@ const {
 }
 
 .queue-note {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-ghost);
 }
 
@@ -2488,7 +2528,7 @@ const {
   border: 1px solid var(--border-strong);
   color: var(--text-mid);
   font-weight: 600;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   padding: 6px 13px;
   border-radius: var(--rc);
 }
@@ -2527,7 +2567,7 @@ const {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--green);
   background: color-mix(in srgb, var(--green) 7%, transparent);
   border: 1px solid color-mix(in srgb, var(--green) 35%, transparent);

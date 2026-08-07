@@ -218,7 +218,7 @@ function chooseStack(id: string): void {
 // The six tiles, and the two rules that decide what each one may claim: an
 // unmeasured figure reads "—" with its reason, and a skipped suite is a warning
 // rather than a pass (see the composable).
-const { gates } = useVerifyGates(latest)
+const { gates, score } = useVerifyGates(latest)
 
 // --- Run ---------------------------------------------------------------------
 
@@ -547,6 +547,35 @@ function statusWord(run: VerifyRun): string {
           </button>
         </div>
         <div v-if="verify.error" class="err" data-testid="tests-error">{{ verify.error }}</div>
+      </div>
+
+      <!-- One headline figure over the six gates, and it is COUNTED: the share
+           of gates this run measured that came back clean. What it left
+           unmeasured is printed beside it rather than folded in, so the figure
+           can never imply coverage the run did not have. -->
+      <div class="score-row">
+        <span class="score-label mono">QUALITY</span>
+        <span
+          class="score-val"
+          :class="score ? (score.pct === 100 ? 'good' : score.pct >= 60 ? 'ok' : 'bad') : 'none'"
+          data-testid="tests-score"
+          :title="
+            score
+              ? `${score.passed} of ${score.measured} measured gates clean. ${score.total - score.measured} gate(s) measured nothing and are excluded.`
+              : 'No gate has measured anything yet.'
+          "
+        >
+          {{ score ? `${score.pct}%` : '—' }}
+        </span>
+        <span class="score-sub" data-testid="tests-score-sub">
+          <template v-if="score">
+            {{ score.passed }}/{{ score.measured }} gates clean<template
+              v-if="score.measured < score.total"
+              >, {{ score.total - score.measured }} unmeasured</template
+            >
+          </template>
+          <template v-else>nothing measured yet</template>
+        </span>
       </div>
 
       <!-- The six gates. -->
@@ -976,6 +1005,50 @@ function statusWord(run: VerifyRun): string {
 </template>
 
 <style scoped>
+/* The run's headline. A rule of its own above the tiles rather than a seventh
+   tile: it is about the six, not one of them. */
+.score-row {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  padding: 0 0 8px;
+}
+
+.score-label {
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+  letter-spacing: var(--track-label);
+  color: var(--text-ghost);
+}
+
+.score-val {
+  font-size: var(--fs-title);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Green only when every measured gate is clean. "Most of them" is not a pass. */
+.score-val.good {
+  color: var(--green);
+}
+
+.score-val.ok {
+  color: var(--amber);
+}
+
+.score-val.bad {
+  color: var(--red);
+}
+
+.score-val.none {
+  color: var(--text-ghost);
+}
+
+.score-sub {
+  font-size: var(--fs-meta);
+  color: var(--text-faint);
+}
+
 .tests {
   flex: 1;
   overflow-y: auto;
@@ -984,7 +1057,7 @@ function statusWord(run: VerifyRun): string {
 
 .intro {
   max-width: 840px;
-  font-size: 12.8px;
+  font-size: var(--fs-ui);
   line-height: 1.6;
   color: var(--text-mid);
   margin-bottom: 14px;
@@ -998,7 +1071,7 @@ function statusWord(run: VerifyRun): string {
 .intro .hint {
   display: block;
   margin-top: 6px;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text-faint);
 }
 
@@ -1025,14 +1098,14 @@ function statusWord(run: VerifyRun): string {
 .stack-name {
   flex-shrink: 0;
   width: 210px;
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
   color: var(--text-bright);
 }
 
 .stack-sub {
   flex: 1;
   min-width: 0;
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1041,7 +1114,7 @@ function statusWord(run: VerifyRun): string {
 
 .det {
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--green);
   border: 1px solid color-mix(in srgb, var(--green) 32%, transparent);
   background: color-mix(in srgb, var(--green) 10%, transparent);
@@ -1061,14 +1134,14 @@ function statusWord(run: VerifyRun): string {
 }
 
 .prof-name {
-  font-size: 13.5px;
+  font-size: var(--fs-body);
   font-weight: 600;
   color: var(--text-bright);
 }
 
 .prof-sub,
 .prof-meta {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
 }
 
@@ -1077,7 +1150,7 @@ function statusWord(run: VerifyRun): string {
 }
 
 .link {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
   text-decoration: underline;
   cursor: pointer;
@@ -1102,7 +1175,7 @@ function statusWord(run: VerifyRun): string {
 }
 
 .lbl {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -1113,7 +1186,7 @@ function statusWord(run: VerifyRun): string {
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-body);
   border: 1px solid var(--border-strong);
   border-radius: var(--rc);
@@ -1135,7 +1208,7 @@ function statusWord(run: VerifyRun): string {
 }
 
 .heavy-tag {
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   color: var(--text-ghost);
 }
 
@@ -1156,7 +1229,7 @@ function statusWord(run: VerifyRun): string {
 
 .cmd-input {
   flex: 1;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   padding: 5px 8px;
   background: var(--bg-code);
   border: 1px solid var(--border-strong);
@@ -1167,7 +1240,7 @@ function statusWord(run: VerifyRun): string {
 .run {
   flex-shrink: 0;
   padding: 6px 14px;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   font-weight: 600;
   color: var(--green-ink);
   background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
@@ -1183,7 +1256,7 @@ function statusWord(run: VerifyRun): string {
 
 .err {
   margin-top: 8px;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--red);
 }
 
@@ -1213,7 +1286,7 @@ function statusWord(run: VerifyRun): string {
 }
 
 .gate-name {
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.05em;
   color: var(--text-faint);
 }
@@ -1222,19 +1295,19 @@ function statusWord(run: VerifyRun): string {
    rather than off the session's summary. Deliberately quiet: it qualifies the
    figure, it is not the figure. */
 .gate-verified {
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.05em;
   color: var(--green);
   opacity: 0.75;
 }
 
 .gate-value {
-  font-size: 14px;
+  font-size: var(--fs-title);
   color: var(--text-bright);
 }
 
 .gate-sub {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-mid);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1243,7 +1316,7 @@ function statusWord(run: VerifyRun): string {
 
 .gate-target {
   margin-top: 3px;
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   color: var(--text-on-wash);
 }
 
@@ -1265,7 +1338,7 @@ function statusWord(run: VerifyRun): string {
 
 /* Labels a suite the current environment cannot run (blockedReason). */
 .dev-tag {
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--amber);
@@ -1284,7 +1357,7 @@ function statusWord(run: VerifyRun): string {
   align-items: center;
   gap: 6px;
   padding: 7px 12px;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   letter-spacing: var(--track-label);
   text-transform: uppercase;
   color: var(--text-tab);
@@ -1306,7 +1379,7 @@ function statusWord(run: VerifyRun): string {
 }
 
 .st-badge {
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   color: var(--green-ink);
   background: var(--green);
   border-radius: var(--rp);
@@ -1314,7 +1387,7 @@ function statusWord(run: VerifyRun): string {
 }
 
 .dev-dot {
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   color: var(--amber);
 }
 
@@ -1330,19 +1403,19 @@ function statusWord(run: VerifyRun): string {
 }
 
 .panel-title {
-  font-size: 13px;
+  font-size: var(--fs-body);
   color: var(--text-bright);
 }
 
 .panel-meta {
   flex: 1;
   min-width: 0;
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
 }
 
 .verdict {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   border-radius: var(--rp);
@@ -1366,13 +1439,13 @@ function statusWord(run: VerifyRun): string {
 }
 
 .note {
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--amber);
   margin-bottom: 10px;
 }
 
 .quiet {
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text-mid);
   margin-bottom: 10px;
 }
@@ -1392,7 +1465,7 @@ function statusWord(run: VerifyRun): string {
 }
 
 .host-lbl {
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-ghost);
@@ -1400,7 +1473,7 @@ function statusWord(run: VerifyRun): string {
 
 .host-in {
   padding: 5px 8px;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-body);
   background: transparent;
   border: 1px solid var(--border-strong);
@@ -1419,7 +1492,7 @@ function statusWord(run: VerifyRun): string {
 
 .host-from {
   margin-top: 5px;
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-ghost);
 }
 
@@ -1437,7 +1510,7 @@ function statusWord(run: VerifyRun): string {
 
 .empty {
   max-width: 620px;
-  font-size: 12px;
+  font-size: var(--fs-ui);
   line-height: 1.6;
   color: var(--text-faint);
   margin-bottom: 10px;
@@ -1462,7 +1535,7 @@ function statusWord(run: VerifyRun): string {
 .row-status {
   flex-shrink: 0;
   width: 78px;
-  font-size: 10px;
+  font-size: var(--fs-micro);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-faint);
@@ -1485,14 +1558,14 @@ function statusWord(run: VerifyRun): string {
 .row-name {
   flex-shrink: 0;
   width: 190px;
-  font-size: 12px;
+  font-size: var(--fs-ui);
   color: var(--text-body);
 }
 
 .row-detail {
   flex: 1;
   min-width: 0;
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1500,7 +1573,7 @@ function statusWord(run: VerifyRun): string {
 }
 
 .sec {
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.05em;
   color: var(--text-ghost);
   margin: 16px 0 8px;
@@ -1523,18 +1596,18 @@ function statusWord(run: VerifyRun): string {
 }
 
 .fig-name {
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.05em;
   color: var(--text-faint);
 }
 
 .fig-value {
-  font-size: 15px;
+  font-size: var(--fs-head);
   color: var(--text-bright);
 }
 
 .fig-src {
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   color: var(--text-on-wash);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1554,7 +1627,7 @@ function statusWord(run: VerifyRun): string {
 .ev-kind {
   flex-shrink: 0;
   width: 74px;
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-faint);
@@ -1566,12 +1639,12 @@ function statusWord(run: VerifyRun): string {
 }
 
 .ev-what {
-  font-size: 12px;
+  font-size: var(--fs-ui);
   color: var(--text-body);
 }
 
 .ev-result {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-mid);
   margin-top: 2px;
   white-space: pre-wrap;
@@ -1579,7 +1652,7 @@ function statusWord(run: VerifyRun): string {
 }
 
 .ev-path {
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   color: var(--text-on-wash);
   margin-top: 3px;
 }
@@ -1602,7 +1675,7 @@ function statusWord(run: VerifyRun): string {
 .ep-verdict {
   flex-shrink: 0;
   width: 52px;
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-faint);
@@ -1618,7 +1691,7 @@ function statusWord(run: VerifyRun): string {
 
 .ep-method {
   flex-shrink: 0;
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.03em;
   color: var(--text-mid);
 }
@@ -1626,7 +1699,7 @@ function statusWord(run: VerifyRun): string {
 .ep-path {
   flex: 1;
   min-width: 0;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-body);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1635,7 +1708,7 @@ function statusWord(run: VerifyRun): string {
 
 .ep-status {
   flex-shrink: 0;
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
 }
 
@@ -1654,13 +1727,13 @@ function statusWord(run: VerifyRun): string {
 .ep-ms {
   flex-shrink: 0;
   width: 56px;
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   text-align: right;
   color: var(--text-on-wash);
 }
 
 .ep-detail {
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text-mid);
   margin-top: 4px;
   /* Same protection as .ep-line and .ev-result: this holds model-written prose
@@ -1672,7 +1745,7 @@ function statusWord(run: VerifyRun): string {
 /* The provenance lines: which server and query produced the identifiers, and
    what the response was checked against. Labelled so neither reads as prose. */
 .ep-line {
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   color: var(--text-on-wash);
   margin-top: 3px;
   word-break: break-word;
@@ -1687,7 +1760,7 @@ function statusWord(run: VerifyRun): string {
 }
 
 .ep-body {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-mid);
   margin-top: 5px;
   padding-top: 5px;
@@ -1713,7 +1786,7 @@ function statusWord(run: VerifyRun): string {
   top: 13px;
   right: 15px;
   font-family: var(--mono);
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--amber);
@@ -1724,7 +1797,7 @@ function statusWord(run: VerifyRun): string {
 }
 
 .dev-title {
-  font-size: 13px;
+  font-size: var(--fs-body);
   color: var(--text-bright);
   margin-bottom: 6px;
 }
@@ -1737,7 +1810,7 @@ function statusWord(run: VerifyRun): string {
 }
 
 .dev-section {
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.05em;
   color: var(--text-ghost);
   border: 1px dashed var(--border-strong);
@@ -1747,7 +1820,7 @@ function statusWord(run: VerifyRun): string {
 
 .dev-body {
   max-width: 620px;
-  font-size: 12px;
+  font-size: var(--fs-ui);
   line-height: 1.6;
   color: var(--text-mid);
   text-wrap: pretty;

@@ -196,7 +196,7 @@ function countLabel(added: number | null, removed: number | null): string {
   align-items: center;
   justify-content: center;
   padding: 40px 22px;
-  font-size: 12px;
+  font-size: var(--fs-ui);
   text-align: center;
 }
 
@@ -264,7 +264,7 @@ function countLabel(added: number | null, removed: number | null): string {
 .dfo-path {
   flex: 1;
   min-width: 0;
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   letter-spacing: var(--track-label);
   color: var(--text-meta);
   overflow: hidden;
@@ -274,13 +274,13 @@ function countLabel(added: number | null, removed: number | null): string {
 
 .dfo-count {
   flex-shrink: 0;
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   color: var(--text-ghost);
 }
 
 .dfo-counts {
   flex-shrink: 0;
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
 }
 
@@ -312,7 +312,7 @@ function countLabel(added: number | null, removed: number | null): string {
   flex-shrink: 0;
   width: 14px;
   text-align: center;
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   font-weight: 600;
   color: var(--text-faint);
 }
@@ -334,7 +334,7 @@ function countLabel(added: number | null, removed: number | null): string {
 .dfr-path {
   flex: 1;
   min-width: 0;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text-body);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -343,7 +343,7 @@ function countLabel(added: number | null, removed: number | null): string {
 
 .dfr-counts {
   flex-shrink: 0;
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
   white-space: nowrap;
 }
@@ -365,7 +365,7 @@ function countLabel(added: number | null, removed: number | null): string {
 .diff-line {
   display: flex;
   padding: 0 14px;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   line-height: 1.55;
   white-space: pre-wrap;
 }

@@ -105,8 +105,11 @@ html.sb-light {
      else. One token because 37 declarations across 13 files used to decide it
      independently. */
   --rp: 0px;
-  /* One tracking value for every spec label, replacing fourteen ad-hoc ones. */
-  --track-label: 0.11em;
+  /* One tracking value for every uppercase label, replacing fourteen ad-hoc ones.
+     0.08em rather than the 0.11em this token was declared at and never applied
+     with: 0.11em is a wordmark's tracking, and at 11px on a label it opens the
+     word until it stops reading as a word. */
+  --track-label: 0.08em;
   --sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
   /* A veil on paper subtracts too. The pale veil this replaces was the same tone
      as the sheet it covered, so a pale dialogue floated on it with nothing
@@ -284,8 +287,41 @@ html.sb-light {
      else. One token because 37 declarations across 13 files used to decide it
      independently. */
   --rp: 0px;
-  /* One tracking value for every spec label, replacing fourteen ad-hoc ones. */
-  --track-label: 0.11em;
+  /* One tracking value for every uppercase label, replacing fourteen ad-hoc ones.
+     0.08em rather than the 0.11em this token was declared at and never applied
+     with: 0.11em is a wordmark's tracking, and at 11px on a label it opens the
+     word until it stops reading as a word. */
+  --track-label: 0.08em;
+
+  /* --- Type scale ---------------------------------------------------------
+     Six steps, whole pixels, each visibly apart from the next. Theme-neutral,
+     so it is declared once here and not again on html.sb-light.
+
+     What it replaces: twelve near-duplicate sizes between 9.5px and 15.5px,
+     hand-set at 377 declarations. Pairs a third of a pixel apart (10 vs 10.5,
+     11.5 vs 11.8, 12.5 vs 12.8) cannot be told apart by eye, so they were never
+     a hierarchy — they were noise that made every surface look slightly wrong
+     beside every other one. Whole pixels also land on the pixel grid, and a
+     face rendered on the grid rather than between it is most of the difference
+     between crisp and soft at these sizes.
+
+     Steps are named for the job, not the size, so a surface picks a role and
+     the ramp decides the number.
+
+     The ramp collapses DOWNWARD wherever it can: 10.5 and 11 both land on 10,
+     11.5 lands on 11, 15.5 lands on 15. Only the 9.5px floor moves up, onto 10,
+     because a floor nobody can read is not a tier. Nothing in the interface got
+     bigger.
+
+     Glyphs are not on this ramp and must not be swept onto it. An icon is sized
+     to its optical weight, which is why .group-caret is 8px, .rd-icon is 17px
+     and .mark .glyph is 13.8px. None of those values appear as a step here. */
+  --fs-micro: 10px;
+  --fs-meta: 11px;
+  --fs-ui: 12px;
+  --fs-body: 13px;
+  --fs-title: 14px;
+  --fs-head: 15px;
   --scrim: rgba(10,11,13, 0.66);
   --shadow-dlg: 0 28px 70px rgba(0,0,0, 0.6), 0 0 0 1px rgba(244,244,242, 0.05) inset;
   --shadow-dd: 0 14px 36px rgba(0,0,0, 0.5);
@@ -303,7 +339,7 @@ html,
   background: var(--bg);
   color: var(--text);
   font-family: var(--sans);
-  font-size: 13px;
+  font-size: var(--fs-body);
   overflow: hidden;
   /* Every figure in the interface is a reading that changes under you: timers,
      costs, token counts, percentages, queue depths. Tabular figures hold their
@@ -321,7 +357,7 @@ body {
   height: 100%;
   color: var(--text);
   font-family: var(--sans);
-  font-size: 13px;
+  font-size: var(--fs-body);
   overflow: hidden;
   --crease: rgba(244, 244, 242, 0.028);
   background:
@@ -357,7 +393,7 @@ html.sb-light body {
  */
 .spec-label {
   font-family: var(--mono);
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   letter-spacing: var(--track-label);
   text-transform: uppercase;
   color: var(--text-on-wash);
@@ -475,8 +511,8 @@ button {
     linear-gradient(135deg, var(--green), var(--green2));
   color: var(--green-ink);
   font-weight: 600;
-  font-size: 11.5px;
-  font-family: var(--mono);
+  font-size: var(--fs-ui);
+  font-family: var(--sans);
   padding: 6px 14px;
   border-radius: var(--rc);
   cursor: pointer;
@@ -492,8 +528,8 @@ button {
   background: var(--gloss), var(--amber);
   color: var(--amber-ink);
   font-weight: 600;
-  font-size: 11.5px;
-  font-family: var(--mono);
+  font-size: var(--fs-ui);
+  font-family: var(--sans);
   padding: 6px 14px;
   border-radius: var(--rc);
   cursor: pointer;
@@ -509,8 +545,8 @@ button {
 .btn-quiet {
   color: var(--text-mid);
   border: 1px solid var(--border-strong);
-  font-size: 11.5px;
-  font-family: var(--mono);
+  font-size: var(--fs-ui);
+  font-family: var(--sans);
   padding: 6px 14px;
   border-radius: var(--rc);
   cursor: pointer;
@@ -545,8 +581,7 @@ button {
 }
 
 .link-green {
-  font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: var(--fs-meta);
   color: var(--green);
   cursor: pointer;
   background: transparent;
@@ -572,24 +607,11 @@ button {
      stays a 26px square wherever it is used without one. */
   gap: 6px;
   padding: 0 6px;
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   color: var(--red);
   border: 1px solid var(--border-strong);
   border-radius: var(--rc);
   cursor: pointer;
-}
-
-/* A control with a keyboard binding says so on its own face, in the mono badge
-   idiom, inheriting the control's colour so it follows every state including
-   hover. Only real bindings get one: advertising a shortcut that does nothing is
-   worse than advertising none. */
-.ctl-key {
-  font-family: var(--mono);
-  font-size: 9.5px;
-  line-height: 1;
-  padding: 2px 3px;
-  border: 1px solid currentColor;
-  opacity: 0.7;
 }
 
 .stop-btn:hover {
@@ -600,13 +622,37 @@ button {
   border-color: var(--red);
 }
 
-/* The class now means what it says. It was declared as var(--sans) while several
-   hundred call sites applied it expecting monospace, which made `.mono` a trap
-   rather than a utility. The remit is the machine-read stratum: labels, counters,
-   timers, ids, paths, branches, statuses, commands, and the button, pill and chip
-   idiom. Sentences do not take it; the exceptions below name the prose that had
-   the class applied by habit. */
+/* MONOSPACE IS EARNED, NOT DEFAULT.
+ *
+ * This class resolved to var(--mono) for one release, on the argument that the
+ * whole "machine-read stratum" — labels, counters, timers, statuses, tab labels,
+ * project names, buttons, pills — should be set in JetBrains Mono. Four hundred
+ * and six call sites carry the class, so that argument set essentially the entire
+ * interface in a code face, and the owner's verdict on the result was that the
+ * text reads bulky, oversized and ugly.
+ *
+ * That verdict is a measurement, not a preference. A monospaced face has to fit a
+ * capital W and a lowercase i into the same advance width, so at an identical
+ * pixel size it runs roughly a tenth wider per character and carries a taller
+ * x-height and heavier stems than a proportional UI face. Nothing here grew a
+ * single px; every label simply got wider and heavier at once.
+ *
+ * So the remit narrows back to what monospace is actually for: text where the
+ * character grid carries meaning — code, commands, filesystem paths, ids and
+ * hashes, diffs, terminal output, and figures that must hold a column while they
+ * tick. That is `.code`, below. Everything else — every label, name, status,
+ * button and tab — is interface chrome, and chrome is set in the UI face.
+ *
+ * Flipping the declaration rather than editing 406 call sites is deliberate: the
+ * class is applied at exactly the places that wanted "not body prose", which is
+ * the same set either way. Only the answer to what that means has changed. */
 .mono {
+  font-family: var(--sans);
+}
+
+/* Text where the character grid is the point. Apply it deliberately; if a
+   surface takes it because it feels technical, it does not take it. */
+.code {
   font-family: var(--mono);
 }
 
@@ -622,8 +668,7 @@ button {
 .pill {
   flex-shrink: 0;
   white-space: nowrap;
-  font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: var(--fs-meta);
   padding: 2px 10px;
   border-radius: var(--rp);
 }
@@ -680,8 +725,7 @@ button {
 
 /* Risk chips (inbox cards) */
 .chip-risk {
-  font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   border-radius: var(--rc);
   padding: 1px 6px;
   white-space: nowrap;
@@ -713,7 +757,7 @@ button {
 .chip-marker {
   border-radius: var(--rc);
   padding: 1px 7px;
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   white-space: nowrap;
 }
 
@@ -743,8 +787,7 @@ button {
 
 /* Amber count badge (sidebar rows, inbox tab) */
 .badge-count {
-  font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: var(--fs-meta);
   color: var(--amber);
   background: color-mix(in srgb, var(--amber) 13%, transparent);
   border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
@@ -771,7 +814,7 @@ button {
 }
 
 .live {
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
   color: var(--text-meta);
   margin-top: 4px;
 }
@@ -805,7 +848,10 @@ button {
   border-radius: 0;
   outline: none;
   color: var(--text);
-  font-size: 13px;
+  /* Earned monospace: what gets typed here is slash commands, @paths and shell
+     lines, where a character grid tells you a hyphen from an underscore. */
+  font-family: var(--mono);
+  font-size: var(--fs-body);
   padding: 0;
   /* A terminal's cursor is a block, in the colour of its prompt. Chromium 139
      and up honour caret-shape; anything older ignores it and keeps the bar,
@@ -823,7 +869,7 @@ button {
 .to {
   flex-shrink: 0;
   white-space: nowrap;
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
   /* Bottom-pinned row: lift the small label to the buttons' text line. */
   padding-bottom: 8px;
@@ -835,7 +881,7 @@ button {
   background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
   color: var(--green-ink);
   font-weight: 600;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   padding: 7px 16px;
   border-radius: var(--rc);
   user-select: none;
@@ -1045,7 +1091,7 @@ button {
   position: absolute;
   inset: 0;
   z-index: 0;
-  font-size: 13px;
+  font-size: var(--fs-body);
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
@@ -1082,7 +1128,7 @@ button {
 }
 
 .suggest-item {
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
   padding: 5px 8px;
   border-radius: var(--rc);
   cursor: pointer;
@@ -1112,7 +1158,7 @@ html.sb-light .suggest-list {
   margin-left: 12px;
   float: right;
   color: var(--text-faint);
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   max-width: 55%;
   white-space: nowrap;
   overflow: hidden;

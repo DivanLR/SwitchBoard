@@ -106,14 +106,14 @@ function cleanLabel(label: string): string {
 }
 
 .q-label {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.13em;
   color: var(--amber);
   margin-bottom: 6px;
 }
 
 .q-text {
-  font-size: 13px;
+  font-size: var(--fs-body);
   line-height: 1.55;
   color: var(--text-body);
   text-wrap: pretty;
@@ -127,7 +127,7 @@ function cleanLabel(label: string): string {
 }
 
 .chip {
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text-body);
   background: color-mix(in srgb, var(--green) 10%, transparent);
   border: 1px solid var(--border-strong);
@@ -165,7 +165,7 @@ function cleanLabel(label: string): string {
 .rec-badge {
   display: inline-block;
   margin-right: 7px;
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.04em;
   color: var(--green);
   text-transform: uppercase;
@@ -177,7 +177,7 @@ function cleanLabel(label: string): string {
 }
 
 .custom-input {
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text-strong);
   background: var(--bg);
   border: 1px solid var(--green);
@@ -188,14 +188,14 @@ function cleanLabel(label: string): string {
 }
 
 .open-hint {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-faint);
   margin-top: 8px;
 }
 
 .answered {
   margin-top: 8px;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--green);
 }
 </style>

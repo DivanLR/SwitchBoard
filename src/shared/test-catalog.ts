@@ -515,13 +515,39 @@ function detectAppShapes(
   return shapes
 }
 
-/** The suites a stack offers a project of these shapes. No shape read means every
- *  suite is offered: hiding one on a guess is worse than offering an extra. */
-function suitesFor(stack: TestStack, shapes: readonly AppShape[]): readonly TestSuite[] {
-  if (shapes.length === 0) return stack.suites
-  return stack.suites.filter(
-    (suite) => !suite.appliesTo || suite.appliesTo.some((shape) => shapes.includes(shape)),
-  )
+/**
+ * The suites a stack offers a project of these shapes.
+ *
+ * `scanned` says whether the tree was actually read. Without a read there is no
+ * evidence either way and every suite is offered, which is what the sandbox-image
+ * decision wants — it only asks whether .NET is needed at all.
+ *
+ * With a read, an EMPTY shape list is not "we do not know". It withholds
+ * screen-driving suites, and the asymmetry is deliberate — the same asymmetry
+ * detectAppShapes already argues for on its API side. Blazor is detected from
+ * file evidence: a `.razor` component, a `wwwroot/index.html`, or a Razor
+ * registration in Program.cs. A .NET project with none of those has no screens,
+ * so "drive the affected screens in a real browser" is an offer to test something
+ * that does not exist, and it was being offered to plain Web APIs.
+ *
+ * The two mistakes are not equal. Offering an API suite to something that turns
+ * out not to be an API costs one skipped suite. Offering a browser suite to a
+ * headless service costs a run that goes looking for a UI, finds none, and
+ * reports that as a failure of the code.
+ */
+function suitesFor(
+  stack: TestStack,
+  shapes: readonly AppShape[],
+  scanned: boolean,
+): readonly TestSuite[] {
+  if (!scanned) return stack.suites
+  return stack.suites.filter((suite) => {
+    if (!suite.appliesTo) return true
+    if (suite.appliesTo.some((shape) => shapes.includes(shape))) return true
+    // Nothing confirmed: keep the API-side suites, withhold the screen-driving
+    // ones. A suite that applies to both is kept by the line above.
+    return shapes.length === 0 && !suite.appliesTo.every((shape) => shape === 'blazor')
+  })
 }
 
 /**
@@ -581,7 +607,7 @@ export function detectStacks(
   return TEST_STACKS.filter((stack) => stack.detect.some(present)).map((stack) => ({
     stackId: stack.id,
     stackLabel: stack.id === 'dotnet' ? dotnetLabel(shapes) : stack.label,
-    suites: suitesFor(stack, shapes).filter(
+    suites: suitesFor(stack, shapes, read !== undefined).filter(
       (suite) => coverage || suite.id !== 'node-coverage',
     ),
   }))

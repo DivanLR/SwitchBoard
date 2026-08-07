@@ -244,19 +244,19 @@ async function startSession(): Promise<void> {
 
 
 .title {
-  font-size: 14px;
+  font-size: var(--fs-title);
   font-weight: 600;
   color: var(--text-bright);
 }
 
 .sub {
-  font-size: 12px;
+  font-size: var(--fs-ui);
   color: var(--text-meta);
   margin: 4px 0 0;
 }
 
 .section-label {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.15em;
   color: var(--text-faint);
   margin: 18px 0 6px;
@@ -268,14 +268,14 @@ async function startSession(): Promise<void> {
 
 .folder-input {
   width: 100%;
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
   padding: 9px 12px;
   background: var(--bg);
   border-radius: var(--rc);
 }
 
 .name-preview {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
   margin-top: 6px;
 }
@@ -293,14 +293,14 @@ async function startSession(): Promise<void> {
 }
 
 .access-label {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.15em;
   color: var(--text-faint);
   margin-bottom: 9px;
 }
 
 .access {
-  font-size: 12px;
+  font-size: var(--fs-ui);
   color: var(--text-body);
   display: flex;
   flex-direction: column;
@@ -315,7 +315,7 @@ async function startSession(): Promise<void> {
 
 .access-row .ok,
 .access-row .ask {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   width: 14px;
   min-width: 14px;
 }
@@ -414,19 +414,19 @@ async function startSession(): Promise<void> {
 
 .mode-note {
   margin: 8px 0 0;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   line-height: 1.5;
   color: var(--text-faint);
 }
 
 .bypass-label {
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 600;
   color: var(--text-title);
 }
 
 .bypass-desc {
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text-tab);
   margin-top: 2px;
   line-height: 1.5;
@@ -435,7 +435,7 @@ async function startSession(): Promise<void> {
 .bypass-warn {
   margin-top: 8px;
   padding: 8px 10px;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   line-height: 1.5;
   color: var(--red-hover);
   border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
@@ -470,13 +470,13 @@ html.sb-light .bypass-warn {
 }
 
 .s-name {
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
   font-weight: 500;
   color: var(--text-name);
 }
 
 .s-path {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
   white-space: nowrap;
   overflow: hidden;
@@ -484,7 +484,7 @@ html.sb-light .bypass-warn {
 }
 
 .s-use {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--green);
 }
 
@@ -499,7 +499,7 @@ html.sb-light .bypass-warn {
 
 .error {
   color: var(--red);
-  font-size: 12px;
+  font-size: var(--fs-ui);
   margin: 8px 0 0;
 }
 </style>

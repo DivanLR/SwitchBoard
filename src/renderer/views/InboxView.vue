@@ -588,7 +588,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
 .tab {
   padding: 11px 12px;
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   letter-spacing: var(--track-label);
   text-transform: uppercase;
   color: var(--text-tab);
@@ -618,7 +618,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
   border-radius: var(--rc);
   color: var(--amber);
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   line-height: 1.5;
 }
 
@@ -627,7 +627,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   margin-top: 5px;
   color: var(--amber);
   font-family: var(--sans);
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   text-decoration: underline;
 }
 
@@ -652,13 +652,13 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
 }
 
 .empty-title {
-  font-size: 13px;
+  font-size: var(--fs-body);
   color: var(--text-mid);
   margin-top: 10px;
 }
 
 .empty-sub {
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text-faint);
   margin-top: 4px;
   line-height: 1.5;
@@ -676,12 +676,12 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
 }
 
 .group-name {
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text-body);
 }
 
 .group-count {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
 }
 
@@ -702,14 +702,14 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
 
 /* "Approve all" high-risk confirm row (mono links, matching .link-green). */
 .approve-all-warn {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--amber);
 }
 
 .link-armed,
 .link-quiet {
   font-family: var(--sans);
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   cursor: pointer;
   background: transparent;
   border: none;
@@ -768,7 +768,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
 }
 
 .item-tool {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--detail);
   border: 1px solid var(--surface-inset-line);
   border-radius: var(--rc);
@@ -777,7 +777,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
 }
 
 .item-title {
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 600;
   color: var(--text-title);
   /* Full ask, wrapped — never truncated or off-screen. */
@@ -786,7 +786,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
 }
 
 .item-explain {
-  font-size: 12.2px;
+  font-size: var(--fs-ui);
   line-height: 1.5;
   color: var(--text-mid);
   margin-top: 8px;
@@ -820,7 +820,7 @@ html.sb-light .detail-box {
 }
 
 .item-detail {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   padding: 6px 9px;
   margin-top: 8px;
   max-height: 160px;
@@ -865,7 +865,7 @@ html.sb-light .detail-box {
 }
 
 .item-ago {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
 }
 
@@ -878,7 +878,7 @@ html.sb-light .detail-box {
 }
 
 .hist-count {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.14em;
   color: var(--text-faint);
 }
@@ -889,7 +889,7 @@ html.sb-light .detail-box {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-body);
   background: var(--gloss), var(--bg-hover);
   box-shadow: var(--elev);
@@ -912,7 +912,7 @@ html.sb-light .detail-box {
 .hist-empty {
   padding: 36px 16px;
   text-align: center;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   line-height: 1.6;
   color: var(--text-faint);
 }
@@ -934,7 +934,7 @@ html.sb-light .detail-box {
 }
 
 .hctx-detail {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.05em;
   color: var(--text-faint);
   padding: 6px 9px;
@@ -950,7 +950,7 @@ html.sb-light .detail-box {
   gap: 7px;
   width: 100%;
   text-align: left;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text-body);
   padding: 7px 9px;
 }
@@ -987,7 +987,7 @@ html.sb-light .detail-box {
 }
 
 .hist-arrow {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-tab);
   width: 14px;
   min-width: 14px;
@@ -1008,7 +1008,7 @@ html.sb-light .detail-box {
 }
 
 .hist-mark {
-  font-size: 12px;
+  font-size: var(--fs-ui);
   width: 14px;
   min-width: 14px;
 }
@@ -1019,7 +1019,7 @@ html.sb-light .detail-box {
 }
 
 .hist-title {
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
   color: var(--text-body);
   white-space: nowrap;
   overflow: hidden;
@@ -1031,7 +1031,7 @@ html.sb-light .detail-box {
 }
 
 .hd-explain {
-  font-size: 12px;
+  font-size: var(--fs-ui);
   line-height: 1.55;
   color: var(--text-mid);
   margin-bottom: 6px;
@@ -1039,7 +1039,7 @@ html.sb-light .detail-box {
 }
 
 .hd-detail {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   padding: 5px 9px;
   margin: 0;
   max-height: 200px;
@@ -1047,7 +1047,7 @@ html.sb-light .detail-box {
 }
 
 .hist-sub {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
   white-space: nowrap;
   overflow: hidden;
@@ -1056,7 +1056,7 @@ html.sb-light .detail-box {
 }
 
 .hist-ago {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
   white-space: nowrap;
 }

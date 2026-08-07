@@ -275,7 +275,7 @@ const toolLabel = computed(() => {
 }
 
 .stamp {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-ghost);
   white-space: nowrap;
 }
@@ -286,7 +286,7 @@ const toolLabel = computed(() => {
   display: flex;
   gap: 9px;
   align-items: flex-start;
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
   margin-top: 6px;
   padding: 8px 11px;
   background: color-mix(in srgb, var(--green) 6%, transparent);
@@ -318,7 +318,7 @@ html.sb-light .prompt {
 }
 
 .pending {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--amber);
   border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
   border-radius: var(--rc);
@@ -342,7 +342,7 @@ html.sb-light .prompt {
   flex: 1;
   min-width: 0;
   resize: vertical;
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
   line-height: 1.5;
   color: var(--text);
   background: var(--bg-panel);
@@ -368,7 +368,7 @@ html.sb-light .prompt {
 }
 
 .withdrawn {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-ghost);
   border: 1px solid var(--border);
   border-radius: var(--rc);
@@ -376,7 +376,7 @@ html.sb-light .prompt {
 }
 
 .assistant {
-  font-size: 13px;
+  font-size: var(--fs-body);
   line-height: 1.55;
   color: var(--text-body);
 }
@@ -391,7 +391,7 @@ html.sb-light .prompt {
 }
 
 .card-label {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.13em;
   /* On .summary-card, which is --bg-hover over the plate: the label tier measures
      3.85:1 there (dark) and 4.13:1 (light). */
@@ -400,14 +400,14 @@ html.sb-light .prompt {
 }
 
 .card-body {
-  font-size: 13px;
+  font-size: var(--fs-body);
   line-height: 1.55;
   color: var(--text-body);
 }
 
 .tool {
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   line-height: 1.7;
   color: var(--text-noise);
   white-space: pre-wrap;
@@ -426,7 +426,7 @@ html.sb-light .prompt {
   display: flex;
   align-items: center;
   gap: 9px;
-  font-size: 12px;
+  font-size: var(--fs-ui);
   flex-wrap: wrap;
 }
 
@@ -436,7 +436,7 @@ html.sb-light .prompt {
 
 .review-link {
   color: var(--green);
-  font-size: 11px;
+  font-size: var(--fs-meta);
 }
 
 .review-link:hover {
@@ -455,7 +455,7 @@ html.sb-light .prompt {
 }
 
 .error-body {
-  font-size: 12px;
+  font-size: var(--fs-ui);
   line-height: 1.6;
   color: var(--text-body);
   white-space: pre-wrap;
@@ -463,13 +463,13 @@ html.sb-light .prompt {
 }
 
 .done {
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
   color: var(--green);
 }
 
 .raw {
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   line-height: 1.7;
   color: var(--text-noise);
   white-space: pre-wrap;

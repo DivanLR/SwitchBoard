@@ -126,6 +126,8 @@ export interface MockDriver {
       mode?: string
       bypassPermissions?: boolean
       planMode?: boolean
+      /** Whether the start asked to resume the previous conversation. */
+      resume?: boolean
       /** The session id whose transcript was carried in as context, if any. */
       carryTranscriptFrom?: string
     }[]
@@ -449,6 +451,8 @@ export function installMockHost(scenario: MockScenario): void {
     mode?: string
     bypassPermissions?: boolean
     planMode?: boolean
+    /** Whether the start asked to resume the previous conversation. */
+    resume?: boolean
     carryTranscriptFrom?: string
   }[] = []
   const planModeChanges: { sessionId: string; enabled: boolean }[] = []
@@ -533,6 +537,29 @@ export function installMockHost(scenario: MockScenario): void {
    * pinning each mock's return shape to InvokeMap[M]['res'] would force every
    * fixture to spell out fields no assertion reads, for no extra safety.
    */
+  /**
+   * The Tests section's own session, mirroring SessionManager.testsSessionFor:
+   * reuse whatever session the newest verify or API run recorded while it is
+   * still alive, otherwise start a NEW one. Deliberately never the chat session
+   * — the whole point of the production change is that a run does not queue
+   * behind the developer's conversation, and a mock that quietly reused it would
+   * leave the e2e suite exercising the behaviour that was removed.
+   *
+   * A plain function rather than an invoke handler: it is not an IPC endpoint,
+   * and invokeHandlers is keyed to InvokeMap so it cannot hold one that is not.
+   */
+  async function testsSession(projectId: string): Promise<MockSession> {
+    const ids = [
+      verifyByProject.get(projectId)?.[0]?.sessionId,
+      apiRunsByProject.get(projectId)?.[0]?.sessionId,
+    ]
+    for (const id of ids) {
+      const existing = id ? sessions.get(String(id)) : undefined
+      if (existing && !existing.endedAt) return existing
+    }
+    return (await invokeHandlers['sessions.start']({ projectId })) as MockSession
+  }
+
   const invokeHandlers: Record<InvokeMethod, (req: AnyRecord) => unknown> = {
     'projects.list': () => ({
       projects: projects
@@ -741,6 +768,9 @@ export function installMockHost(scenario: MockScenario): void {
         mode,
         bypassPermissions: mode === 'bypass',
         planMode,
+        // Recorded so a test can prove Resume actually asked for a resume, rather
+        // than that the switch merely looked on.
+        resume: req.resume === true,
         // Recorded so a test can prove the previous session's transcript was
         // actually asked for, rather than that a toggle merely looked on.
         carryTranscriptFrom: req.carryTranscriptFrom as string | undefined,
@@ -934,7 +964,7 @@ export function installMockHost(scenario: MockScenario): void {
     // The real catalog's answer for this project, carried in as scenario data.
     'evals.suites': () =>
       (scenario.suites ?? []).map((stack) => ({ ...stack, suites: [...stack.suites] })),
-    'evals.dispatch': (req) => {
+    'evals.dispatch': async (req) => {
       const projectId = String(req.projectId)
       const list = evalsByProject.get(projectId) ?? []
       const row = list.find((r) => r.id === req.id)
@@ -951,8 +981,10 @@ export function installMockHost(scenario: MockScenario): void {
             : `Judge the current diff against this acceptance line: "${row.acceptance}"\nEVAL_JUDGE`
       if (req.kind === 'check') row.checkStatus = 'not_run'
       if (req.kind === 'judge') row.judge = null
-      const result = invokeHandlers['specs.runInSession']({ projectId, text }) as { sessionId: string }
-      return { sessionId: result.sessionId, runs: [...list] }
+      const session = await testsSession(projectId)
+      sends.push({ sessionId: session.id, text })
+      appendEvent(session.id, 'prompt', { text, pending: false })
+      return { sessionId: session.id, runs: [...list] }
     },
     'evals.remove': (req) => {
       const projectId = String(req.projectId)
@@ -968,11 +1000,12 @@ export function installMockHost(scenario: MockScenario): void {
       const suiteIds = (req.suiteIds ?? []) as string[]
       if (suiteIds.length === 0) throw { code: 'INVALID_PATH', message: 'Choose at least one suite to run.' }
       const text = `Verify the working tree of this project.\n${suiteIds.join('\n')}\nSWB_VERIFY`
-      // Awaited: runInSession may have to start a session, which is async here
-      // exactly as it is in the real host.
-      const result = (await invokeHandlers['specs.runInSession']({ projectId, text })) as {
-        sessionId: string
-      }
+      // The Tests section's own session, not whichever one is open. Awaited
+      // because starting one is async here exactly as it is in the real host.
+      const session = await testsSession(projectId)
+      const result = { sessionId: session.id }
+      sends.push({ sessionId: session.id, text })
+      appendEvent(session.id, 'prompt', { text, pending: false })
       const list = verifyByProject.get(projectId) ?? []
       list.unshift({
         id: `verify-${list.length + 1}`,
@@ -994,11 +1027,15 @@ export function installMockHost(scenario: MockScenario): void {
       const projectId = String(req.projectId)
       const list = verifyByProject.get(projectId) ?? []
       if (list.length === 0) throw { code: 'NOT_FOUND', message: 'Run a verification pass first — evidence attaches to a run.' }
-      const result = (await invokeHandlers['specs.runInSession']({
-        projectId,
-        text: 'Capture evidence that the change in this working tree actually works.\nSWB_VERIFY',
-      })) as { sessionId: string }
-      return { sessionId: result.sessionId, runs: [...list] }
+      // Back to the session that produced the run while it is alive, like the
+      // real handler; otherwise a fresh tests session.
+      const ran = list[0]?.sessionId ? sessions.get(String(list[0].sessionId)) : undefined
+      const session =
+        ran && !ran.endedAt ? ran : (await testsSession(projectId))
+      const text = 'Capture evidence that the change in this working tree actually works.\nSWB_VERIFY'
+      sends.push({ sessionId: session.id, text })
+      appendEvent(session.id, 'prompt', { text, pending: false })
+      return { sessionId: session.id, runs: [...list] }
     },
     // Cancelling closes the row the way the real host does: inconclusive, with a
     // note saying the developer stopped it. A finished run is left alone.
@@ -1078,18 +1115,20 @@ export function installMockHost(scenario: MockScenario): void {
       }
       return { path: `C:\\mock\\.switchboard\\reports\\api-${run.id}.md` }
     },
-    'api.start': (req) => {
+    'api.start': async (req) => {
       const projectId = String(req.projectId)
       const endpoints = (req.endpoints ?? []) as { method: string; template: string }[]
       if (endpoints.length === 0) {
         throw { code: 'INVALID_PATH', message: 'Choose at least one endpoint to test.' }
       }
-      const result = invokeHandlers['specs.runInSession']({
-        projectId,
-        text: `Produce the request data for an automated API test.\n${endpoints
-          .map((e) => `- ${e.method} ${e.template}`)
-          .join('\n')}\nSWB_APIDATA`,
-      }) as { sessionId: string }
+      // The Tests section's own session, shared with verification runs.
+      const session = await testsSession(projectId)
+      const result = { sessionId: session.id }
+      const text = `Produce the request data for an automated API test.\n${endpoints
+        .map((e) => `- ${e.method} ${e.template}`)
+        .join('\n')}\nSWB_APIDATA`
+      sends.push({ sessionId: session.id, text })
+      appendEvent(session.id, 'prompt', { text, pending: false })
       const list = apiRunsByProject.get(projectId) ?? []
       list.unshift({
         id: `api-${list.length + 1}`,

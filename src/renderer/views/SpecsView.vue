@@ -399,7 +399,7 @@ const partTabs: { id: Part; label: string }[] = [
             <span v-if="running" class="impl-running mono" data-testid="implementing">
               ● Implementing…
             </span>
-            <span v-if="detail.status === 'complete'" class="mono" style="font-size: 11.5px; color: var(--green)">
+            <span v-if="detail.status === 'complete'" class="mono" style="font-size: var(--fs-meta); color: var(--green)">
               ✓ All tasks complete
             </span>
             <span class="sc-progress-label mono">{{ detail.tasksDone }}/{{ detail.tasksTotal }} tasks</span>
@@ -644,13 +644,13 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .ni-title {
-  font-size: 13.5px;
+  font-size: var(--fs-body);
   color: var(--text-mid);
   margin-top: 10px;
 }
 
 .ni-sub {
-  font-size: 12px;
+  font-size: var(--fs-ui);
   color: var(--text-faint);
   margin-top: 5px;
   line-height: 1.6;
@@ -666,7 +666,7 @@ const partTabs: { id: Part; label: string }[] = [
 
 .ni-error {
   margin-top: 12px;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--red);
   white-space: pre-wrap;
   text-align: left;
@@ -688,7 +688,7 @@ const partTabs: { id: Part; label: string }[] = [
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text-meta);
   background: var(--bg-card);
   border: 1px solid var(--surface-line);
@@ -733,13 +733,13 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .sc-title {
-  font-size: 14px;
+  font-size: var(--fs-title);
   font-weight: 700;
   color: var(--text-bright);
 }
 
 .sc-status {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   padding: 2px 9px;
   border: 1px solid var(--border-strong);
   color: var(--text-meta);
@@ -764,13 +764,13 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .sc-path {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
 }
 
 .sc-listen {
   flex-shrink: 0;
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-tab);
   border: 1px solid var(--border-seg);
   border-radius: var(--rp);
@@ -813,13 +813,13 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .ns-title {
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 700;
   color: var(--text-bright);
 }
 
 .ns-sub {
-  font-size: 12px;
+  font-size: var(--fs-ui);
   color: var(--text-faint);
   line-height: 1.55;
   margin-top: 6px;
@@ -836,7 +836,7 @@ const partTabs: { id: Part; label: string }[] = [
   border: 1px solid var(--border-strong);
   border-radius: var(--rc);
   color: var(--text-strong);
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
   line-height: 1.5;
   padding: 8px 10px;
   outline: none;
@@ -855,7 +855,7 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .sc-desc {
-  font-size: 12.8px;
+  font-size: var(--fs-ui);
   line-height: 1.6;
   color: var(--text-mid);
   margin-top: 8px;
@@ -873,7 +873,7 @@ const partTabs: { id: Part; label: string }[] = [
   background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
   color: var(--green-ink);
   font-weight: 600;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   padding: 7px 16px;
   cursor: pointer;
   user-select: none;
@@ -885,13 +885,13 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .impl-running {
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--blue);
   animation: sbFade 2.2s ease infinite;
 }
 
 .sc-progress-label {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-faint);
 }
 
@@ -924,7 +924,7 @@ const partTabs: { id: Part; label: string }[] = [
 
 .pt {
   padding: 8px 13px;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   letter-spacing: var(--track-label);
   text-transform: uppercase;
   color: var(--text-tab);
@@ -945,7 +945,7 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .pt-badge {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--amber);
   background: color-mix(in srgb, var(--amber) 13%, transparent);
   border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
@@ -974,13 +974,13 @@ const partTabs: { id: Part; label: string }[] = [
 
 .sec-title {
   flex: 1;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   font-weight: 600;
   color: var(--text-body);
 }
 
 .sec-refine {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
   cursor: pointer;
   border: 1px solid var(--surface-line);
@@ -995,7 +995,7 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .sec-body {
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
   line-height: 1.6;
   color: var(--text-mid);
   margin-top: 6px;
@@ -1005,7 +1005,7 @@ const partTabs: { id: Part; label: string }[] = [
 
 /* Clarify */
 .q-label {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.15em;
   margin: 0 2px 8px;
 }
@@ -1046,7 +1046,7 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .q-tag {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.1em;
   color: var(--amber);
 }
@@ -1056,12 +1056,12 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .q-id {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
 }
 
 .q-text {
-  font-size: 13px;
+  font-size: var(--fs-body);
   line-height: 1.55;
   color: var(--text-body);
   margin-top: 6px;
@@ -1069,7 +1069,7 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .q-text.dim {
-  font-size: 12.8px;
+  font-size: var(--fs-ui);
   color: var(--text-mid);
 }
 
@@ -1081,7 +1081,7 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .q-answer {
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text-faint);
   border: 1px dashed var(--border-strong);
   padding: 5px 12px;
@@ -1095,14 +1095,14 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .q-answered {
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--green);
   margin-top: 7px;
 }
 
 /* Commands */
 .cmd-label {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.15em;
   margin: 0 2px 8px;
 }
@@ -1127,7 +1127,7 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .sug-cmd {
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 700;
   color: var(--green);
   white-space: nowrap;
@@ -1136,7 +1136,7 @@ const partTabs: { id: Part; label: string }[] = [
 .sug-why {
   flex: 1;
   min-width: 200px;
-  font-size: 12px;
+  font-size: var(--fs-ui);
   line-height: 1.5;
   color: var(--text-mid);
   text-wrap: pretty;
@@ -1147,7 +1147,7 @@ const partTabs: { id: Part; label: string }[] = [
   background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
   color: var(--green-ink);
   font-weight: 600;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   padding: 7px 16px;
   cursor: pointer;
   user-select: none;
@@ -1159,7 +1159,7 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .cmd-hint {
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text-tab);
   margin: 0 2px 10px;
 }
@@ -1190,17 +1190,17 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .cmd-name {
-  font-size: 12px;
+  font-size: var(--fs-ui);
   color: var(--green);
 }
 
 .cmd-run {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
 }
 
 .cmd-desc {
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text-tab);
   margin-top: 4px;
   line-height: 1.5;
@@ -1220,28 +1220,28 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .phase-label {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-meta);
 }
 
 .phase-count {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
 }
 
 .phase-running {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--blue);
   animation: sbFade 1.6s ease infinite;
 }
 
 .phase-done {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--green);
 }
 
 .phase-start {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--green);
   border: 1px solid color-mix(in srgb, var(--green) 35%, transparent);
   padding: 2px 9px;
@@ -1270,7 +1270,7 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .task-check {
-  font-size: 12px;
+  font-size: var(--fs-ui);
   color: var(--green);
   width: 14px;
 }
@@ -1288,13 +1288,13 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .task-id {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
 }
 
 .task-label {
   flex: 1;
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
   color: var(--text-body);
 }
 
@@ -1304,7 +1304,7 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .task-refine {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-ghost);
   cursor: pointer;
   padding: 0 3px;
@@ -1316,7 +1316,7 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .muted {
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
   color: var(--text-faint);
   padding: 4px 2px 14px;
   line-height: 1.6;

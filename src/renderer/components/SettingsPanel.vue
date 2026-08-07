@@ -3,13 +3,11 @@
 // (Models / This project / Terminals / General) with a Plan/Build footer,
 // card + toggle + segmented controls, and a "Changes apply immediately · Done"
 // footer. State and transport live in the settings store.
-import { useTemplateRef, computed, onMounted, onWatcherCleanup, ref, watch } from 'vue'
+import { useTemplateRef, computed, onMounted, ref, watch } from 'vue'
 import { useModal } from '@renderer/composables/useModal'
 import { MATCHER_KIND_LABEL, useAllowedRules } from '@renderer/composables/useAllowedRules'
-import type { ModelChoice, RiskLevel, SessionMode, Settings, TerseLevel } from '@shared/domain'
+import type { ModelChoice, SessionMode, Settings, TerseLevel } from '@shared/domain'
 import { modelLabel, modelPrice, SESSION_MODES } from '@shared/domain'
-import { errorMessage } from '@shared/ipc-types'
-import { useRulesStore } from '@renderer/stores/rules'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { useUpdatesStore } from '@renderer/stores/updates'
@@ -28,66 +26,19 @@ const projects = useProjectsStore()
 const updates = useUpdatesStore()
 const settings = computed(() => store.settings)
 
-type Tab = 'models' | 'proj' | 'mcp' | 'allowed' | 'rules' | 'term' | 'gen'
+// No 'rules' tab. The risk and noise engines still run on every tool call and
+// every streamed event; what is gone is the editor for overriding them, which
+// nobody used and which cost a whole tab in a rail of seven.
+type Tab = 'models' | 'proj' | 'mcp' | 'allowed' | 'term' | 'gen'
 const tab = ref<Tab>(props.initialTab ?? 'models')
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'models', label: 'Models', icon: '✦' },
   { id: 'proj', label: 'This project', icon: '▣' },
   { id: 'mcp', label: 'MCP', icon: '⛁' },
   { id: 'allowed', label: 'Allowed list', icon: '✓' },
-  { id: 'rules', label: 'Rules', icon: '⚖' },
   { id: 'term', label: 'Terminals', icon: '❯' },
   { id: 'gen', label: 'General', icon: '⚙' },
 ]
-
-// --- Rules tab: the risk and noise rules are the developer's, not fixed policy
-// (PRODUCT.md Principle 3). The shipped set is the default, and this edits the
-// difference from it, so switching a rule off here is undoable by definition.
-const rules = useRulesStore()
-const RISK_LEVELS: RiskLevel[] = ['low', 'medium', 'high']
-const newRiskTool = ref('')
-const newRiskPattern = ref('')
-const newRiskLevel = ref<RiskLevel>('medium')
-const newNoiseKindMatcher = ref('raw_output')
-const newNoisePattern = ref('')
-const newNoiseLabel = ref('')
-const ruleError = ref('')
-
-/** Loaded when the tab is first opened rather than with the panel: most sessions
- *  never open it, and the list is only ever read here. */
-watch(
-  tab,
-  (t) => {
-    if (t === 'rules' && !rules.loaded) void run(() => rules.load())
-  },
-  { immediate: true },
-)
-
-/** Every rule mutation reports the same way, so failures surface in one place. */
-async function run(action: () => Promise<void>): Promise<void> {
-  ruleError.value = ''
-  try {
-    await action()
-  } catch (error) {
-    ruleError.value = errorMessage(error, 'That change could not be saved')
-  }
-}
-
-async function addRiskRule(): Promise<void> {
-  await run(async () => {
-    await rules.addRisk(newRiskTool.value, newRiskPattern.value.trim() || null, newRiskLevel.value)
-    newRiskTool.value = ''
-    newRiskPattern.value = ''
-  })
-}
-
-async function addNoiseRule(): Promise<void> {
-  await run(async () => {
-    await rules.addSwallow(newNoiseKindMatcher.value, newNoisePattern.value, newNoiseLabel.value)
-    newNoisePattern.value = ''
-    newNoiseLabel.value = ''
-  })
-}
 
 // "This project": which project the tab configures (defaults to the selected one).
 const projId = ref<string | null>(null)
@@ -95,8 +46,6 @@ const projDd = ref(false)
 const proj = computed(
   () => projects.items.find((p) => p.id === projId.value) ?? projects.items[0] ?? null,
 )
-// Plugins / skills the project's sessions can load (from the session init message).
-const plugins = ref<string[]>([])
 
 /** Applies to the project's NEXT session: the SDK permission mode is fixed at spawn. */
 async function saveSessionMode(mode: SessionMode): Promise<void> {
@@ -104,23 +53,6 @@ async function saveSessionMode(mode: SessionMode): Promise<void> {
   if (!target || target.defaultSessionMode === mode) return
   await projects.setSessionMode(target.id, mode)
 }
-
-watch(
-  () => proj.value?.id,
-  async (id) => {
-    // Guarded because the picker can change faster than a reply arrives: without
-    // this, an earlier project's commands landing second would be listed under
-    // the project now selected. onWatcherCleanup runs when this watcher re-fires
-    // or stops, so it covers unmount as well as the next change.
-    let superseded = false
-    onWatcherCleanup(() => {
-      superseded = true
-    })
-    const names = id ? (await projects.commands(id)).map((c) => c.name) : []
-    if (!superseded) plugins.value = names
-  },
-  { immediate: true },
-)
 
 onMounted(() => {
   void store.load()
@@ -313,19 +245,6 @@ const mcpSelSummary = computed(() => {
   if (n === 1) return '1 server on the MCP view.'
   return `${n} servers on the MCP view — tick a combination there to chat.`
 })
-
-// --- Plugin toggles (design): hide a plugin's commands from suggestions ---
-const disabledPlugins = computed(
-  () => (proj.value && settings.value?.disabledCommands?.[proj.value.id]) || [],
-)
-
-function togglePlugin(name: string): void {
-  if (!proj.value || !settings.value) return
-  const id = proj.value.id
-  const current = settings.value.disabledCommands?.[id] ?? []
-  const next = current.includes(name) ? current.filter((c) => c !== name) : [...current, name]
-  save({ disabledCommands: { ...settings.value.disabledCommands, [id]: next } })
-}
 
 const updateLine = computed(() => {
   const s = updates.status
@@ -557,38 +476,6 @@ const updateLine = computed(() => {
                 </div>
               </div>
 
-              <div class="group">
-                <div class="group-label mono">PLUGINS</div>
-                <div class="group-desc">Tools Claude can load in this project's sessions.</div>
-                <div v-if="plugins.length === 0" class="note">
-                  Nothing reported yet — plugins and skills appear here after the project's first
-                  session starts.
-                </div>
-                <div v-else class="cards" data-testid="proj-plugins">
-                  <div v-for="p in plugins" :key="p" class="card-opt static">
-                    <div class="opt-body">
-                      <div class="opt-name mono">{{ p }}</div>
-                      <div class="opt-sub">
-                        {{
-                          disabledPlugins.includes(p)
-                            ? 'Hidden from composer suggestions'
-                            : 'Suggested in the composer'
-                        }}
-                      </div>
-                    </div>
-                    <button
-                      class="switch"
-                      :class="{ on: !disabledPlugins.includes(p) }"
-                      :data-testid="`plugin-toggle-${p}`"
-                      role="switch"
-                      :aria-checked="!disabledPlugins.includes(p)"
-                      @click="togglePlugin(p)"
-                    >
-                      <span class="knob"></span>
-                    </button>
-                  </div>
-                </div>
-              </div>
             </template>
           </template>
 
@@ -730,165 +617,6 @@ const updateLine = computed(() => {
               />
               <button class="add-cmd-btn mono" data-testid="allowed-add-btn" @click="addAllowedCommand">
                 Allow
-              </button>
-            </div>
-          </template>
-
-          <!-- RULES: risk classification and clean-view noise, both editable -->
-          <template v-else-if="tab === 'rules'">
-            <div v-if="ruleError" class="rule-error mono" data-testid="rules-error">
-              {{ ruleError }}
-            </div>
-
-            <div class="group-label mono">RISK CLASSIFICATION</div>
-            <div class="group-desc">
-              Ordered, first match wins. Anything no rule matches is treated as high risk. Your own
-              rules sit above the shipped ones, so they win. Switching a shipped rule off never
-              deletes it — Reset puts it back. To add one: name a tool, or <span class="mono">*</span>
-              for every tool, and optionally a pattern its input must match.
-            </div>
-            <div class="cards" data-testid="risk-rules">
-              <div v-for="r in rules.risk" :key="r.id" class="card-opt static">
-                <div class="opt-body">
-                  <div class="opt-name mono">{{ r.label || r.toolMatcher }}</div>
-                  <div class="opt-sub">
-                    {{ r.toolMatcher }}<template v-if="r.pattern"> · {{ r.pattern }}</template>
-                    <template v-if="!r.builtin"> · yours</template>
-                    <template v-else-if="r.overridden"> · changed</template>
-                  </div>
-                </div>
-                <div class="seg mono">
-                  <button
-                    v-for="level in RISK_LEVELS"
-                    :key="level"
-                    class="seg-opt"
-                    :class="{ on: r.risk === level }"
-                    :disabled="r.disabled"
-                    :data-testid="`risk-level-${r.id}-${level}`"
-                    @click="run(() => rules.setRisk(r.id, level))"
-                  >
-                    {{ level }}
-                  </button>
-                </div>
-                <button
-                  class="switch"
-                  :class="{ on: !r.disabled }"
-                  :data-testid="`risk-toggle-${r.id}`"
-                  role="switch"
-                  :aria-checked="!r.disabled"
-                  @click="run(() => rules.setDisabled(r.id, 'risk', !r.disabled))"
-                >
-                  <span class="knob"></span>
-                </button>
-                <button
-                  class="btn-quiet rule-reset mono"
-                  :data-testid="`risk-remove-${r.id}`"
-                  @click="run(() => rules.remove(r.id, 'risk'))"
-                >
-                  {{ r.builtin ? 'Reset' : 'Delete' }}
-                </button>
-              </div>
-            </div>
-            <div class="add-cmd">
-              <span class="add-cmd-plus mono">＋</span>
-              <input
-                v-model="newRiskTool"
-                class="add-cmd-input mono"
-                data-testid="risk-add-tool"
-                placeholder="Tool, or *"
-              />
-              <input
-                v-model="newRiskPattern"
-                class="add-cmd-input mono"
-                data-testid="risk-add-pattern"
-                placeholder="Pattern (optional)"
-              />
-              <div class="seg mono">
-                <button
-                  v-for="level in RISK_LEVELS"
-                  :key="level"
-                  class="seg-opt"
-                  :class="{ on: newRiskLevel === level }"
-                  :data-testid="`risk-add-level-${level}`"
-                  @click="newRiskLevel = level"
-                >
-                  {{ level }}
-                </button>
-              </div>
-              <button class="add-cmd-btn mono" data-testid="risk-add-btn" @click="addRiskRule">
-                Add
-              </button>
-            </div>
-
-            <div class="group-label mono" style="margin-top: 8px">CLEAN VIEW — WHAT IS HIDDEN</div>
-            <div class="group-desc">
-              These label low-value output so the clean view can fold it away. Nothing is ever
-              dropped: the raw view stays complete. A change applies to output from now on, not to
-              lines already on screen. To add one: pick output or tool use, give a pattern, and name
-              what it hides.
-            </div>
-            <div class="cards" data-testid="noise-rules">
-              <div v-for="r in rules.swallow" :key="r.id" class="card-opt static">
-                <div class="opt-body">
-                  <div class="opt-name mono">{{ r.noiseKind }}</div>
-                  <div class="opt-sub">
-                    {{ r.eventKindMatcher }} · {{ r.pattern }}
-                    <template v-if="!r.builtin"> · yours</template>
-                  </div>
-                </div>
-                <button
-                  class="switch"
-                  :class="{ on: !r.disabled }"
-                  :data-testid="`noise-toggle-${r.id}`"
-                  role="switch"
-                  :aria-checked="!r.disabled"
-                  @click="run(() => rules.setDisabled(r.id, 'swallow', !r.disabled))"
-                >
-                  <span class="knob"></span>
-                </button>
-                <button
-                  class="btn-quiet rule-reset mono"
-                  :data-testid="`noise-remove-${r.id}`"
-                  @click="run(() => rules.remove(r.id, 'swallow'))"
-                >
-                  {{ r.builtin ? 'Reset' : 'Delete' }}
-                </button>
-              </div>
-            </div>
-            <div class="add-cmd">
-              <span class="add-cmd-plus mono">＋</span>
-              <div class="seg mono">
-                <button
-                  class="seg-opt"
-                  :class="{ on: newNoiseKindMatcher === 'raw_output' }"
-                  data-testid="noise-add-kind-raw"
-                  @click="newNoiseKindMatcher = 'raw_output'"
-                >
-                  output
-                </button>
-                <button
-                  class="seg-opt"
-                  :class="{ on: newNoiseKindMatcher === 'tool_activity' }"
-                  data-testid="noise-add-kind-tool"
-                  @click="newNoiseKindMatcher = 'tool_activity'"
-                >
-                  tool use
-                </button>
-              </div>
-              <input
-                v-model="newNoisePattern"
-                class="add-cmd-input mono"
-                data-testid="noise-add-pattern"
-                placeholder="Pattern"
-              />
-              <input
-                v-model="newNoiseLabel"
-                class="add-cmd-input mono"
-                data-testid="noise-add-label"
-                placeholder="Call it"
-              />
-              <button class="add-cmd-btn mono" data-testid="noise-add-btn" @click="addNoiseRule">
-                Hide
               </button>
             </div>
           </template>
@@ -1042,11 +770,17 @@ const updateLine = computed(() => {
               <div class="sr-text">
                 <div class="sr-label">Heavy subagents</div>
                 <div class="sr-desc">
-                  Instructs every session to break work into independent parts and dispatch them to
-                  as many subagents as the work allows, in one batch, instead of doing it in one
-                  thread. Faster on anything that decomposes, and cheaper when the workers run the
-                  cheap model. It spends more total tokens than a single thread would, and it is the
-                  wrong shape for a one-line fix, so it is off until you ask for it.
+                  Divide and conquer. Every session is told to split work into independent parts
+                  and dispatch them to as many subagents as the work allows, in one batch, rather
+                  than working through a list on one thread. Faster on anything that decomposes,
+                  and cheaper when the workers run the cheap model. It also pins the session to the
+                  Orchestrator protocol, because Advisor's own instruction is to do scoped work
+                  yourself and the two cannot both be in force.
+                  <strong class="sr-warn">
+                    It is read when a session starts, so this applies from the next session, not to
+                    one already running. A session shaped by it carries a ⑂ Fan-out pill in its
+                    header.
+                  </strong>
                 </div>
               </div>
               <button
@@ -1222,18 +956,18 @@ html.sb-light .overlay {
 }
 
 .gear {
-  font-size: 13px;
+  font-size: var(--fs-body);
   color: var(--text-meta);
 }
 
 .s-title {
-  font-size: 13.5px;
+  font-size: var(--fs-body);
   font-weight: 600;
   color: var(--text-bright);
 }
 
 .s-x {
-  font-size: 13px;
+  font-size: var(--fs-body);
   color: var(--text-tab);
   padding: 2px 8px;
   border-radius: var(--rc);
@@ -1285,7 +1019,7 @@ html.sb-light .overlay {
 }
 
 .rt-icon {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-faint);
   width: 13px;
 }
@@ -1295,7 +1029,7 @@ html.sb-light .overlay {
 }
 
 .rt-label {
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text-meta);
 }
 
@@ -1305,7 +1039,7 @@ html.sb-light .overlay {
 
 .rail-foot {
   padding: 9px 11px;
-  font-size: 10px;
+  font-size: var(--fs-micro);
   line-height: 1.7;
   color: var(--text-ghost);
 }
@@ -1325,14 +1059,14 @@ html.sb-light .overlay {
 }
 
 .group-label {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.15em;
   color: var(--text-faint);
   margin-bottom: 4px;
 }
 
 .group-desc {
-  font-size: 12px;
+  font-size: var(--fs-ui);
   color: var(--text-meta);
   margin-bottom: 10px;
   text-wrap: pretty;
@@ -1371,7 +1105,7 @@ html.sb-light .overlay {
 }
 
 .card-opt.static .opt-name {
-  font-size: 13px;
+  font-size: var(--fs-body);
   color: var(--text-title);
 }
 
@@ -1398,7 +1132,7 @@ html.sb-light .overlay {
 }
 
 .opt-name {
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
   font-weight: 600;
   color: var(--text-body);
 }
@@ -1408,13 +1142,13 @@ html.sb-light .overlay {
 }
 
 .opt-sub {
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text-meta);
   margin-top: 2px;
 }
 
 .opt-price {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
   flex-shrink: 0;
 }
@@ -1432,7 +1166,7 @@ html.sb-light .overlay {
   border-radius: var(--rc);
   border: 1.5px solid var(--border-strong);
   color: var(--green-ink);
-  font-size: 11px;
+  font-size: var(--fs-meta);
   line-height: 1;
   display: flex;
   align-items: center;
@@ -1446,7 +1180,7 @@ html.sb-light .overlay {
 
 .mcp-ico {
   flex-shrink: 0;
-  font-size: 15px;
+  font-size: var(--fs-head);
   color: var(--teal);
 }
 
@@ -1455,24 +1189,8 @@ html.sb-light .overlay {
   gap: 12px;
 }
 
-/* Rules tab: the per-row Reset/Delete action, and the one place a failed rule
-   change is reported (an invalid pattern is refused rather than saved dead). */
-.rule-reset {
-  font-size: 10.5px;
-  flex-shrink: 0;
-}
-
-.rule-error {
-  font-size: 11.5px;
-  color: var(--red);
-  border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
-  border-radius: var(--rc);
-  padding: 6px 10px;
-  margin-bottom: 10px;
-}
-
 .lock-chip {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--red);
   border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
   border-radius: var(--rc);
@@ -1499,7 +1217,7 @@ html.sb-light .overlay {
 .add-cmd-input {
   flex: 1;
   min-width: 60px;
-  font-size: 12px;
+  font-size: var(--fs-ui);
   padding: 0;
   background: transparent;
   border: none;
@@ -1522,7 +1240,7 @@ html.sb-light .overlay {
   flex-shrink: 0;
   color: var(--text-mid);
   border: 1px solid var(--border-strong);
-  font-size: 11px;
+  font-size: var(--fs-meta);
   padding: 5px 12px;
   border-radius: var(--rc);
   cursor: pointer;
@@ -1573,13 +1291,13 @@ html.sb-light .overlay {
 
 .dd-name {
   flex: 1;
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
   font-weight: 600;
   color: var(--text-strong);
 }
 
 .dd-arrow {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-tab);
 }
 
@@ -1604,7 +1322,7 @@ html.sb-light .overlay {
   width: 100%;
   padding: 9px 13px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--fs-ui);
   color: var(--text-mid);
   background: transparent;
   text-align: left;
@@ -1622,12 +1340,12 @@ html.sb-light .overlay {
 .dd-check {
   width: 12px;
   min-width: 12px;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--green);
 }
 
 .proj-note {
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text-tab);
   margin-top: 8px;
 }
@@ -1653,17 +1371,27 @@ html.sb-light .overlay {
 }
 
 .sr-label {
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 600;
   color: var(--text-title);
 }
 
 .sr-desc {
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text-tab);
   margin-top: 2px;
   line-height: 1.5;
   text-wrap: pretty;
+}
+
+/* When a setting does not take effect where the developer just flipped it, that
+   sentence is the whole point of the paragraph. Its own line, brighter, not bold
+   prose buried mid-description. */
+.sr-warn {
+  display: block;
+  margin-top: 5px;
+  font-weight: 400;
+  color: var(--text-body);
 }
 
 .seg {
@@ -1676,7 +1404,7 @@ html.sb-light .overlay {
 
 .seg-opt {
   padding: 5px 12px;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-tab);
   cursor: pointer;
   background: transparent;
@@ -1703,13 +1431,13 @@ html.sb-light .overlay {
   background: var(--bg-card);
   border: 1px solid color-mix(in srgb, var(--green) 18%, transparent);
   border-radius: var(--rc);
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   line-height: 1.55;
   color: var(--text-meta);
 }
 
 .update-status {
-  font-size: 12px;
+  font-size: var(--fs-ui);
   color: var(--text-body);
   padding: 10px 13px;
   background: var(--bg-card);
@@ -1729,7 +1457,7 @@ html.sb-light .overlay {
   gap: 10px;
   padding: 12px 18px;
   border-top: 1px solid var(--border);
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
 }
 

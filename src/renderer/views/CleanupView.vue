@@ -99,7 +99,7 @@ function run(command: string): void {
 
 .intro {
   max-width: 840px;
-  font-size: 12.8px;
+  font-size: var(--fs-ui);
   line-height: 1.6;
   color: var(--text-mid);
   margin-bottom: 18px;
@@ -124,18 +124,18 @@ function run(command: string): void {
 }
 
 .group-name {
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
   font-weight: 600;
   color: var(--text-bright);
 }
 
 .group-tag {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
 }
 
 .badge {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   border-radius: var(--rp);
   padding: 1px 9px;
   white-space: nowrap;
@@ -154,7 +154,7 @@ function run(command: string): void {
 }
 
 .group-blurb {
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text-tab);
   line-height: 1.55;
   margin-bottom: 11px;
@@ -187,7 +187,7 @@ function run(command: string): void {
 .cmd-name {
   flex-shrink: 0;
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--green);
   white-space: nowrap;
 }
@@ -195,14 +195,14 @@ function run(command: string): void {
 .cmd-desc {
   flex: 1;
   min-width: 0;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text-mid);
   text-wrap: pretty;
 }
 
 .cmd-run {
   flex-shrink: 0;
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
   white-space: nowrap;
 }
@@ -224,13 +224,13 @@ function run(command: string): void {
 }
 
 .install-title {
-  font-size: 12px;
+  font-size: var(--fs-ui);
   color: var(--text-body);
 }
 
 .install-cmds {
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
   margin-top: 5px;
   white-space: nowrap;
@@ -244,7 +244,7 @@ function run(command: string): void {
   background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
   color: var(--green-ink);
   font-weight: 600;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   padding: 8px 15px;
   border-radius: var(--rc);
   cursor: pointer;

@@ -33,6 +33,26 @@ const meanRating = computed(() =>
     : Math.round((ratings.value.reduce((sum, r) => sum + r, 0) / ratings.value.length) * 10) / 10,
 )
 
+/**
+ * Acceptance pass rate: the share of decided lines that passed.
+ *
+ * This is the honest BDD figure this section can produce. An acceptance line is a
+ * given/when/then written before the work, and a verdict is recorded against it
+ * once, so the fraction that hold is a real measurement rather than a derived one.
+ *
+ * The denominator is DECIDED lines, not all lines, for the same reason meanRating
+ * excludes unrated rows: a line nobody has judged yet is not a failure, and
+ * counting it as one would make the figure fall every time work was added — the
+ * opposite of what it is for. With nothing decided it reads as unmeasured, per
+ * PRODUCT.md principle 2.
+ */
+const decided = computed(() => runs.value.filter((r) => r.verdict !== 'pending'))
+const passRate = computed(() =>
+  decided.value.length === 0
+    ? null
+    : Math.round((decided.value.filter((r) => r.verdict === 'pass').length / decided.value.length) * 100),
+)
+
 const suites = computed(() => evals.suitesFor(props.projectId))
 
 let stopPush: (() => void) | null = null
@@ -154,6 +174,23 @@ const shortDate = (iso: string): string =>
 
     <div class="summary mono">
       <span data-testid="eval-count">{{ runs.length }} line{{ runs.length === 1 ? '' : 's' }}</span>
+      <!-- Measured, never derived: with nothing decided this says so rather than
+           showing a 0% that would read as "everything failed". -->
+      <span
+        v-if="runs.length > 0"
+        class="rate"
+        :class="{ good: passRate === 100, bad: passRate != null && passRate < 100 }"
+        data-testid="eval-pass-rate"
+        :title="
+          passRate == null
+            ? 'No acceptance line has a verdict yet.'
+            : `${decided.length} of ${runs.length} line${runs.length === 1 ? '' : 's'} decided`
+        "
+      >
+        · acceptance
+        <template v-if="passRate != null">{{ passRate }}%</template>
+        <template v-else>—</template>
+      </span>
       <span v-if="meanRating != null" data-testid="eval-mean">· mean rating {{ meanRating }}/5</span>
     </div>
 
@@ -275,6 +312,16 @@ const shortDate = (iso: string): string =>
 </template>
 
 <style scoped>
+/* The pass rate reads as a gate, so it takes the gate colours: green only at
+   100%, because "most of the acceptance lines hold" is not a pass. */
+.rate.good {
+  color: var(--green);
+}
+
+.rate.bad {
+  color: var(--amber);
+}
+
 .evals {
   flex: 1;
   overflow-y: auto;
@@ -283,7 +330,7 @@ const shortDate = (iso: string): string =>
 
 .intro {
   max-width: 840px;
-  font-size: 12.8px;
+  font-size: var(--fs-ui);
   line-height: 1.6;
   color: var(--text-mid);
   margin-bottom: 16px;
@@ -293,7 +340,7 @@ const shortDate = (iso: string): string =>
 .intro .gate {
   display: block;
   margin-top: 6px;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text-faint);
 }
 
@@ -309,7 +356,7 @@ const shortDate = (iso: string): string =>
   flex: 1 1 100%;
   min-width: 0;
   padding: 8px 11px;
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
   color: var(--text-body);
   background: var(--bg-hover);
   border: 1px solid var(--border-card);
@@ -323,13 +370,13 @@ const shortDate = (iso: string): string =>
 
 .in.check {
   flex: 1 1 60%;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
 }
 
 .add-btn {
   flex: 0 0 auto;
   padding: 8px 15px;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   font-weight: 600;
   color: var(--green-ink);
   background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
@@ -347,7 +394,7 @@ const shortDate = (iso: string): string =>
 .err {
   max-width: 840px;
   margin-bottom: 8px;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--red);
 }
 
@@ -356,13 +403,13 @@ const shortDate = (iso: string): string =>
   display: flex;
   gap: 8px;
   margin-bottom: 12px;
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
 }
 
 .empty {
   max-width: 840px;
-  font-size: 12px;
+  font-size: var(--fs-ui);
   color: var(--text-faint);
 }
 
@@ -385,20 +432,20 @@ const shortDate = (iso: string): string =>
 .acc {
   flex: 1;
   min-width: 0;
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
   color: var(--text-bright);
   text-wrap: pretty;
 }
 
 .when {
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
 }
 
 .del {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-faint);
   cursor: pointer;
 }
@@ -416,7 +463,7 @@ const shortDate = (iso: string): string =>
 
 .chip {
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: var(--fs-micro);
   border-radius: var(--rp);
   padding: 1px 9px;
   white-space: nowrap;
@@ -428,7 +475,7 @@ const shortDate = (iso: string): string =>
 .stage {
   flex-shrink: 0;
   font-family: var(--mono);
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   border-radius: var(--rp);
@@ -455,7 +502,7 @@ const shortDate = (iso: string): string =>
 .judge {
   margin-top: 8px;
   padding: 7px 9px;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   line-height: 1.5;
   color: var(--text-mid);
   background: color-mix(in srgb, var(--amber) 7%, transparent);
@@ -468,7 +515,7 @@ const shortDate = (iso: string): string =>
 }
 
 .gated {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
 }
 
@@ -488,7 +535,7 @@ const shortDate = (iso: string): string =>
 }
 
 .stack-head {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -517,7 +564,7 @@ const shortDate = (iso: string): string =>
   flex-shrink: 0;
   width: 62px;
   font-family: var(--mono);
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-faint);
@@ -538,14 +585,14 @@ const shortDate = (iso: string): string =>
 .suite-label {
   flex-shrink: 0;
   width: 190px;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text-body);
 }
 
 .suite-cmd {
   flex: 1;
   min-width: 0;
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -567,7 +614,7 @@ const shortDate = (iso: string): string =>
 .cmd {
   flex: 1;
   min-width: 0;
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-mid);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -588,7 +635,7 @@ const shortDate = (iso: string): string =>
 }
 
 .lbl {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -603,7 +650,7 @@ const shortDate = (iso: string): string =>
 
 .act {
   padding: 4px 10px;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text-body);
   background: transparent;
   border: 1px solid var(--border-strong);
@@ -617,7 +664,7 @@ const shortDate = (iso: string): string =>
 
 .act.sm {
   padding: 2px 9px;
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
 }
 
 .act.on {
@@ -633,7 +680,7 @@ const shortDate = (iso: string): string =>
 }
 
 .star {
-  font-size: 13px;
+  font-size: var(--fs-body);
   line-height: 1;
   color: var(--border-strong);
   cursor: pointer;
@@ -644,7 +691,7 @@ const shortDate = (iso: string): string =>
 }
 
 .reloop {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--amber);
 }
 
@@ -652,6 +699,6 @@ const shortDate = (iso: string): string =>
   flex: 1 1 100%;
   margin-top: 9px;
   padding: 5px 9px;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
 }
 </style>

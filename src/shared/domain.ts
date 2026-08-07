@@ -45,7 +45,7 @@ export type DecisionOutcome = Exclude<PermissionRequestStatus, 'pending'>
  * them onto the SDK's enum; the only one that differs is `bypass`, which the SDK
  * spells `bypassPermissions`.
  */
-export type SessionMode = 'default' | 'auto' | 'acceptEdits' | 'plan' | 'bypass'
+export type SessionMode = 'default' | 'dontAsk' | 'auto' | 'acceptEdits' | 'plan' | 'bypass'
 
 /**
  * The mode a project takes when nothing else says otherwise, and the value the
@@ -56,10 +56,16 @@ export type SessionMode = 'default' | 'auto' | 'acceptEdits' | 'plan' | 'bypass'
 export const DEFAULT_SESSION_MODE: SessionMode = 'auto'
 
 /**
- * The five modes in escalation order, with the copy the pickers render. Shared
- * rather than per-component because two surfaces choose a mode (the new-session
- * dialogue and the per-project setting) and a mode explained two different ways
- * is a mode the developer has to learn twice.
+ * Every mode the SDK can spawn a session in, in escalation order, with the copy
+ * the pickers render. Shared rather than per-component because three surfaces
+ * choose a mode (the new-session dialogue, the per-project setting, and the
+ * start controls on an ended session) and a mode explained three different ways
+ * is a mode the developer has to learn three times.
+ *
+ * This list is exhaustive against the SDK's own `PermissionMode` union, which is
+ * the point: a picker that offers four of six modes is a picker that quietly
+ * decides for you. `dontAsk` is the odd one — it is the only mode that reduces
+ * what can happen rather than widening it.
  */
 export const SESSION_MODES: readonly {
   value: SessionMode
@@ -70,6 +76,12 @@ export const SESSION_MODES: readonly {
     value: 'default',
     label: 'Default',
     detail: 'Every tool call waits for you in the inbox.',
+  },
+  {
+    value: 'dontAsk',
+    label: "Don't ask",
+    detail:
+      'Nothing ever interrupts you. Anything not already approved is refused rather than asked.',
   },
   {
     value: 'auto',
@@ -163,6 +175,14 @@ export interface Session {
    * until it proposes a plan and the developer approves it in the inbox.
    */
   inPlanMode?: boolean
+  /**
+   * Started under the Heavy subagents setting (in-memory only). Not persisted:
+   * it exists so a live session can say which shape it was spawned in, and once
+   * the session has ended that answer stops being actionable. It is read at spawn
+   * like the models are, so toggling the setting never changes a running session
+   * — which is exactly the thing the header pill is there to make visible.
+   */
+  heavySubagents?: boolean
   /** MCP servers reported in the session init message (in-memory only). */
   mcpServers?: McpServer[]
   /** Model the SDK reported for the latest main-loop turn (in-memory only). */

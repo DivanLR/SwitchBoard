@@ -48,7 +48,7 @@ async function copyBlock(event: MouseEvent): Promise<void> {
 
 <style scoped>
 .md {
-  font-size: 13px;
+  font-size: var(--fs-body);
   line-height: 1.55;
   color: var(--text-body);
   text-wrap: pretty;
@@ -69,7 +69,7 @@ async function copyBlock(event: MouseEvent): Promise<void> {
 .md :deep(h4),
 .md :deep(h5),
 .md :deep(h6) {
-  font-size: 13.5px;
+  font-size: var(--fs-body);
   font-weight: 700;
   color: var(--text-title);
   margin: 12px 0 6px;
@@ -103,7 +103,7 @@ async function copyBlock(event: MouseEvent): Promise<void> {
 /* Inline code: subtle chip in the monospace face. */
 .md :deep(code) {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--fs-ui);
   background: var(--bg-chip);
   border: 1px solid var(--border);
   border-radius: var(--rc);
@@ -134,7 +134,7 @@ async function copyBlock(event: MouseEvent): Promise<void> {
   top: 6px;
   right: 8px;
   font-family: var(--mono);
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.06em;
   color: var(--text-ghost);
   background: var(--bg-code);
@@ -157,7 +157,7 @@ async function copyBlock(event: MouseEvent): Promise<void> {
 }
 
 .md :deep(pre.md-pre code) {
-  font-size: 11.8px;
+  font-size: var(--fs-meta);
   line-height: 1.6;
   background: none;
   border: none;
@@ -179,14 +179,14 @@ async function copyBlock(event: MouseEvent): Promise<void> {
 .md :deep(table.md-table) {
   border-collapse: collapse;
   width: 100%;
-  font-size: 12px;
+  font-size: var(--fs-ui);
   line-height: 1.5;
 }
 
 .md :deep(.md-table th) {
   text-align: left;
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-meta);

@@ -2,6 +2,7 @@
 // Advisor/Orchestrator mode protocol.
 import { describe, expect, it } from 'vitest'
 import {
+  heavySubagentModelMode,
   heavySubagentSystemPromptAppend,
   modesSystemPromptAppend,
   terseSystemPromptAppend,
@@ -12,13 +13,40 @@ describe('heavySubagentSystemPromptAppend', () => {
     expect(heavySubagentSystemPromptAppend(false)).toBeNull()
   })
 
-  it('demands one batched dispatch, and names where fanning out is wrong', () => {
+  it('demands one batched dispatch, in the divide-and-conquer terms it was asked for', () => {
     const append = heavySubagentSystemPromptAppend(true)
-    expect(append).toContain('FAN OUT BY DEFAULT')
+    expect(append).toContain('DIVIDE AND CONQUER')
+    expect(append).toContain('as many dynamic subagents')
     // Sequential single dispatches are the failure this instruction exists to stop.
     expect(append).toContain('ONE batch')
-    // Without the counter-case it produces an agent spawned to read one line.
-    expect(append).toContain('Do NOT fan out')
+  })
+
+  it('exempts only single actions, never "it would be quicker to just do it"', () => {
+    // The old text excused any work whose steps "depend on the previous result"
+    // and anything where "dispatching costs more than doing" — two clauses that
+    // fit almost any task, which is most of why the setting read as inert.
+    const append = heavySubagentSystemPromptAppend(true) ?? ''
+    expect(append).toContain('single action')
+    expect(append).toContain('is not an exemption')
+    expect(append).not.toContain('Do NOT fan out for a one-line change')
+  })
+})
+
+describe('heavySubagentModelMode', () => {
+  it('leaves the chosen mode alone when the setting is off', () => {
+    expect(heavySubagentModelMode(false, 'advisor')).toBe('advisor')
+    expect(heavySubagentModelMode(false, 'auto')).toBe('auto')
+  })
+
+  it('pins to orchestrator when on, so the two appends cannot contradict', () => {
+    // Advisor's own protocol says to implement scoped work yourself, which is the
+    // opposite instruction sitting in the same system prompt.
+    for (const chosen of ['auto', 'advisor', 'orchestrator'] as const) {
+      expect(heavySubagentModelMode(true, chosen)).toBe('orchestrator')
+    }
+    expect(modesSystemPromptAppend(heavySubagentModelMode(true, 'advisor'))).not.toContain(
+      'implement directly yourself',
+    )
   })
 })
 

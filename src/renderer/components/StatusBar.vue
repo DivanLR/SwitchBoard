@@ -11,13 +11,9 @@
 // Every figure is reported, never estimated, and the test ids move with the
 // markup: the readings are the same truth, in a better place.
 import { computed } from 'vue'
-import type { Session } from '@shared/domain'
 import { useProjectsStore } from '@renderer/stores/projects'
-import { useSessionUsage } from '@renderer/composables/useSessionUsage'
-import { useNow } from '@renderer/composables/useNow'
 
 const projects = useProjectsStore()
-const now = useNow(1000)
 
 const costLabel = computed(() => `$${projects.counters.costTodayUsd.toFixed(2)}`)
 
@@ -27,36 +23,6 @@ const tokensLabel = computed(() =>
     .format(projects.counters.tokensToday)
     .replace('K', 'k'),
 )
-
-/**
- * Whichever live session has reported a rate-limit window, preferring the
- * selected one. The limit belongs to the subscription rather than to a session,
- * so any session that has reported it is telling the truth about all of them.
- */
-const usageSession = computed<Session | null>(() => {
-  const selected = projects.selected?.session
-  if (selected && !selected.endedAt && selected.usageUtilization != null) return selected
-  const live = projects.items.map((p) => p.session).filter((s) => s && !s.endedAt)
-  return (
-    live.find((s) => s!.usageUtilization != null) ??
-    (selected && !selected.endedAt ? selected : null) ??
-    live[0] ??
-    null
-  )
-})
-
-const { usagePct, usageColor, usageLimitLabel } = useSessionUsage(usageSession)
-
-const usageReset = computed(() => {
-  const at = usageSession.value?.usageResetsAt
-  if (!at) return ''
-  const ms = at * 1000 - now.value
-  if (ms <= 0) return 'now'
-  const mins = Math.floor(ms / 60000)
-  const h = Math.floor(mins / 60)
-  const m = mins % 60
-  return h > 0 ? `${h}h ${m}m` : `${m}m`
-})
 
 /** Ctrl+C only does anything mid-turn, so the hint only claims it mid-turn. */
 const anyWorking = computed(() =>
@@ -93,20 +59,6 @@ const anyWorking = computed(() =>
       <span class="sb-val">{{ tokensLabel }}</span> tok
     </span>
 
-    <span v-if="usageSession" class="sb-stat sb-usage" data-testid="usage-meter">
-      <span class="sb-meter">
-        <span
-          class="sb-fill"
-          :style="{ '--fill': (usagePct ?? 0) / 100, background: usageColor }"
-        ></span>
-      </span>
-      <span v-if="usagePct !== null" :style="{ color: usageColor }">
-        {{ usagePct }}% of {{ usageLimitLabel }}
-      </span>
-      <span v-else>— of {{ usageLimitLabel }}</span>
-      <span v-if="usageReset" class="sb-ghost">Resets in {{ usageReset }}</span>
-    </span>
-
     <span class="sb-gap"></span>
 
     <!-- Only bindings that exist. There is no command palette to advertise. -->
@@ -134,7 +86,7 @@ const anyWorking = computed(() =>
   padding: 0 14px 0 18px;
   border-top: 1px solid var(--border);
   background: var(--bg-sticky);
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
   white-space: nowrap;
 }
@@ -178,32 +130,6 @@ const anyWorking = computed(() =>
   flex: 1;
 }
 
-.sb-ghost {
-  color: var(--text-ghost);
-}
-
-.sb-usage {
-  gap: 8px;
-}
-
-/* A 3px reading, not a demand for attention: the same hairline meter the
-   sidebar footer used, narrowed to fit a single line. */
-.sb-meter {
-  width: 46px;
-  height: 3px;
-  background: var(--bg-seg);
-  overflow: hidden;
-}
-
-.sb-fill {
-  display: block;
-  height: 100%;
-  width: 100%;
-  transform-origin: left;
-  transform: scaleX(var(--fill, 0));
-  transition: transform 0.3s ease;
-}
-
 .sb-hint {
   display: flex;
   align-items: center;
@@ -213,16 +139,10 @@ const anyWorking = computed(() =>
 
 .sb-hint kbd {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   line-height: 1;
   padding: 2px 4px;
   color: var(--text-meta);
   border: 1px solid var(--border-soft);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .sb-fill {
-    transition: none;
-  }
 }
 </style>

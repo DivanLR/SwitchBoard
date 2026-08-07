@@ -9,12 +9,9 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
 })
 
-test('session usage meter shows token spend and increases after a completed turn', async ({
-  page,
-}) => {
-  // The design moved token spend out of the stats card into the session-usage
-  // meter, which shows once a session reports rate-limit utilization.
-  await page.evaluate(() => window.__mock.setUsage('s-alpha', 40, 120, 'five_hour'))
+test('the status bar token count increases after a completed turn', async ({ page }) => {
+  // Token spend is counted from persisted event rows, so it works regardless of
+  // whether the subscription ever reports a rate-limit window.
   const tokens = page.getByTestId('usage-tokens')
   await expect(tokens).toHaveText('0 tok')
   await page.evaluate(() => window.__mock.completeTurn('s-alpha'))
@@ -80,15 +77,12 @@ test('settings has a This project tab with a per-project model override', async 
   await expect(panel.getByTestId('proj-model-claude-haiku-4-5-20251001')).toHaveClass(/sel/)
 })
 
-test('the session usage meter shows for a live session and fills in when usage reports', async ({ page }) => {
-  // A live session exists → the meter shows at once, with a placeholder until
-  // the SDK reports rate-limit utilization.
-  const meter = page.getByTestId('usage-meter')
-  await expect(meter).toBeVisible()
-  await expect(meter).toContainText('— of 5h limit')
+test('no subscription rate-limit meter is rendered, even once usage reports', async ({ page }) => {
+  // It read the SDK's rate_limit_event, which never arrives for this account, so
+  // it only ever showed an em dash. Removed rather than left claiming a reading.
   await page.evaluate(() => window.__mock.setUsage('s-alpha', 72, 95, 'five_hour'))
-  await expect(meter).toContainText('72% of 5h limit')
-  await expect(meter).toContainText('Resets in')
+  await expect(page.getByTestId('statusbar')).not.toContainText('5h limit')
+  await expect(page.getByTestId('session-usage')).toHaveCount(0)
 })
 
 test('typing "/" lists many available skill commands (not just 6)', async ({ page }) => {

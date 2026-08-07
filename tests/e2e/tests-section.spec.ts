@@ -5,6 +5,51 @@
 import { expect, test, type Page } from '@playwright/test'
 import { installMockHost, twoProjectScenario, type MockScenario } from './mock-host'
 
+/**
+ * Click Run and wait until the run row actually exists.
+ *
+ * A run is dispatched into the project's OWN tests session now, so verify.start
+ * has to spawn one before the row is written. Reporting a result in the same tick
+ * as the click used to work only because the dispatch reused a session that was
+ * already open; it now reports into a run that is not there yet. "Running" on the
+ * button is the first thing that can only be true once the row exists.
+ */
+async function startRun(page: import('@playwright/test').Page): Promise<void> {
+  await page.getByTestId('tests-run').click()
+  await expect(page.getByTestId('tests-run')).toContainText('Running')
+}
+
+async function startApiRun(page: import('@playwright/test').Page): Promise<void> {
+  await page.getByTestId('tests-api-run').click()
+  await expect(page.getByTestId('tests-api-run')).toContainText('Running')
+}
+
+
+/**
+ * The last thing dispatched to a session, once it has actually been dispatched.
+ *
+ * Tests-section work now runs in the project's OWN session rather than whichever
+ * session happens to be open, so the first run of a project has to spawn one
+ * before it can send anything. Reading `sends` in the same tick as the click used
+ * to work only because the dispatch reused a session that already existed.
+ */
+async function lastSend(
+  page: import('@playwright/test').Page,
+  /** Wait for a send carrying this, when a previous send would otherwise satisfy
+   *  "something was sent" and the poll would return the wrong one. */
+  contains?: string,
+): Promise<string> {
+  let text = ''
+  const poll = expect.poll(async () => {
+    text = (await page.evaluate(() => window.__mock.state().sends.at(-1)?.text)) ?? ''
+    return text
+  })
+  if (contains) await poll.toContain(contains)
+  else await poll.not.toBe('')
+  return text
+}
+
+
 /** A report shaped like the one the session emits on its marker line. */
 function report(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -59,6 +104,64 @@ async function openTests(page: Page, scenario: MockScenario = twoProjectScenario
   await expect(page.getByTestId('tests-view')).toBeVisible()
 }
 
+test('the headline quality figure counts gates, and says what it left out', async ({ page }) => {
+  await openTests(page)
+  await page.getByTestId('tests-stack-node').click()
+  // Before a run there is nothing to count, and it says so rather than showing 0%.
+  await expect(page.getByTestId('tests-score')).toHaveText('—')
+  await expect(page.getByTestId('tests-score-sub')).toContainText('nothing measured yet')
+
+  await startRun(page)
+  await page.evaluate((r) => window.__mock.reportVerifyResult('p-alpha', 'pass', r), report())
+
+  // Counted, never estimated: whatever the gates say, the figure is their own
+  // arithmetic, and any gate that measured nothing is named rather than folded in.
+  const sub = await page.getByTestId('tests-score-sub').textContent()
+  const clean = /(\d+)\/(\d+) gates clean/.exec(sub ?? '')
+  expect(clean).not.toBeNull()
+  const [, passed, measured] = clean as RegExpExecArray
+  const expected = Math.round((Number(passed) / Number(measured)) * 100)
+  await expect(page.getByTestId('tests-score')).toHaveText(`${expected}%`)
+})
+
+test('a run takes its own session and leaves the conversation where it was', async ({ page }) => {
+  await openTests(page)
+  // One session before the run: the one the developer is chatting in, which is
+  // the only session there is, so no subsession rows are drawn.
+  await expect(page.getByTestId('sidebar-subsessions-alpha')).toHaveCount(0)
+
+  await page.getByTestId('tests-stack-node').click()
+  await startRun(page)
+
+  // Two now, and the run went to the new one. Before this, verification queued
+  // into whichever session was open — in the ordinary case, the conversation —
+  // and blocked it for the whole run.
+  const rows = page.getByTestId('sidebar-subsessions-alpha').getByTestId(/^sidebar-subsession-/)
+  await expect(rows).toHaveCount(2)
+  await expect(page.getByTestId('sidebar-subsession-s-alpha')).toHaveClass(/sel/)
+
+  const sent = await lastSend(page)
+  expect(sent).toContain('node-unit')
+  const target = await page.evaluate(() => window.__mock.state().sends.at(-1)?.sessionId)
+  expect(target).not.toBe('s-alpha')
+})
+
+test('a second run reuses the tests session rather than spawning another', async ({ page }) => {
+  await openTests(page)
+  await page.getByTestId('tests-stack-node').click()
+  await startRun(page)
+  const first = await page.evaluate(() => window.__mock.state().sends.at(-1)?.sessionId)
+
+  await page.evaluate((r) => window.__mock.reportVerifyResult('p-alpha', 'pass', r), report())
+  await expect(page.getByTestId('tests-run')).toContainText('Run verification')
+  await startRun(page)
+
+  const second = await page.evaluate(() => window.__mock.state().sends.at(-1)?.sessionId)
+  expect(second).toBe(first)
+  const rows = page.getByTestId('sidebar-subsessions-alpha').getByTestId(/^sidebar-subsession-/)
+  await expect(rows).toHaveCount(2)
+})
+
 test('the section opens on a stack picker seeded by detection', async ({ page }) => {
   await openTests(page)
   await expect(page.getByTestId('tests-detect-hint')).toContainText('Node / Vue / Electron')
@@ -84,9 +187,9 @@ test('before any run, every gate says nothing measured it', async ({ page }) => 
 test('a run sends the chosen suites to the session, and its report fills the gates', async ({ page }) => {
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
-  await page.getByTestId('tests-run').click()
+  await startRun(page)
 
-  const sent = await page.evaluate(() => window.__mock.state().sends.at(-1)?.text)
+  const sent = await lastSend(page)
   expect(sent).toContain('node-unit')
   // Slow suites stay out of a default run until they are ticked.
   expect(sent).not.toContain('node-mutation')
@@ -109,7 +212,7 @@ test('a run sends the chosen suites to the session, and its report fills the gat
 test('a run in progress can be stopped, and the panel says who stopped it', async ({ page }) => {
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
-  await page.getByTestId('tests-run').click()
+  await startRun(page)
   await expect(page.getByTestId('tests-run')).toContainText('Running')
 
   await page.getByTestId('tests-cancel').click()
@@ -151,7 +254,7 @@ test('a suite command can be corrected, and that is what the run sends', async (
 test('a figure the run did not measure stays a dash and names why', async ({ page }) => {
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
-  await page.getByTestId('tests-run').click()
+  await startRun(page)
   await page.evaluate(
     (r) => window.__mock.reportVerifyResult('p-alpha', 'pass', r),
     report({
@@ -181,7 +284,7 @@ test('a figure the run did not measure stays a dash and names why', async ({ pag
 test('the quality panel shows the service report, the mutants and the rule breaks', async ({ page }) => {
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
-  await page.getByTestId('tests-run').click()
+  await startRun(page)
   await page.evaluate(
     (r) => window.__mock.reportVerifyResult('p-alpha', 'fail', r),
     report({
@@ -211,11 +314,11 @@ test('evidence is captured against the run and shows what actually executed', as
   // Nothing to attach evidence to until a run exists.
   await expect(page.getByTestId('tests-evidence')).toBeDisabled()
 
-  await page.getByTestId('tests-run').click()
+  await startRun(page)
   await page.evaluate((r) => window.__mock.reportVerifyResult('p-alpha', 'pass', r), report())
   await page.getByTestId('tests-evidence').click()
 
-  const sent = await page.evaluate(() => window.__mock.state().sends.at(-1)?.text)
+  const sent = await lastSend(page)
   expect(sent).toContain('Capture evidence')
 
   await page.evaluate(
@@ -241,12 +344,12 @@ test('Run verification survives the clone boundary that used to break it', async
   // which is the exact state that failed. The mock enforces the same clone, so a
   // dispatch landing at all is proof the request crossed the real boundary.
   await expect(page.getByTestId('tests-run')).toContainText('Run verification')
-  await page.getByTestId('tests-run').click()
+  await startRun(page)
 
   await expect(page.getByTestId('tests-run')).toContainText('Running')
   await expect(page.getByTestId('tests-panel-evidence')).not.toContainText('could not be cloned')
 
-  const sent = await page.evaluate(() => window.__mock.state().sends.at(-1)?.text)
+  const sent = await lastSend(page)
   expect(sent).toContain('dotnet-unit')
   expect(sent).toContain('dotnet-http')
 
@@ -267,7 +370,7 @@ test('Run verification survives the clone boundary that used to break it', async
 test('an API run shows each real call, the row behind it, and what the row proved', async ({ page }) => {
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
-  await page.getByTestId('tests-run').click()
+  await startRun(page)
   await page.evaluate(
     (r) => window.__mock.reportVerifyResult('p-alpha', 'pass', r),
     report({
@@ -305,7 +408,7 @@ test('an API run shows each real call, the row behind it, and what the row prove
 test('a failed real call fails the integration gate, even with the suite green', async ({ page }) => {
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
-  await page.getByTestId('tests-run').click()
+  await startRun(page)
   await page.evaluate(
     (r) => window.__mock.reportVerifyResult('p-alpha', 'fail', r),
     report({
@@ -328,7 +431,7 @@ test('a failed real call fails the integration gate, even with the suite green',
 test('a run that reported nothing does not claim the API suite ran', async ({ page }) => {
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
-  await page.getByTestId('tests-run').click()
+  await startRun(page)
   // Inconclusive with no report at all: the session ended its turn without a
   // result line. Saying anything about what the API suite did would be invented.
   await page.evaluate(() => window.__mock.reportVerifyResult('p-alpha', 'inconclusive', null))
@@ -345,7 +448,7 @@ test('with a database server connected and still no calls, it says exactly that'
   scenario.settings = { ...scenario.settings, databaseMcpServers: ['postgres — production'] }
   await openTests(page, scenario)
   await page.getByTestId('tests-stack-node').click()
-  await page.getByTestId('tests-run').click()
+  await startRun(page)
   await page.evaluate((r) => window.__mock.reportVerifyResult('p-alpha', 'pass', r), report())
 
   await page.getByTestId('tests-sub-evidence').click()
@@ -358,7 +461,7 @@ test('with a database server connected and still no calls, it says exactly that'
 test('a call that never completed shows no status at all, and does not read as a pass', async ({ page }) => {
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
-  await page.getByTestId('tests-run').click()
+  await startRun(page)
   await page.evaluate(
     (r) => window.__mock.reportVerifyResult('p-alpha', 'fail', r),
     report({
@@ -378,7 +481,7 @@ test('a call that never completed shows no status at all, and does not read as a
 test('with no endpoint calls, the panel says which of the reasons it was', async ({ page }) => {
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
-  await page.getByTestId('tests-run').click()
+  await startRun(page)
 
   // Mid-run there is no report yet. Reading the report's suites here would say
   // "no API suite in this run" while the API suite was running, so the panel has
@@ -396,7 +499,7 @@ test('with no endpoint calls, the panel says which of the reasons it was', async
   // from what the run was asked to cover, so this unticks the suite rather than
   // editing the report — editing the report would test nothing real.
   await page.getByTestId('tests-suite-node-api').click()
-  await page.getByTestId('tests-run').click()
+  await startRun(page)
   await page.evaluate((r) => window.__mock.reportVerifyResult('p-alpha', 'pass', r), report())
   await expect(page.getByTestId('tests-endpoints-empty')).toContainText('No API suite in this run')
 })
@@ -404,7 +507,7 @@ test('with no endpoint calls, the panel says which of the reasons it was', async
 test('a run that reports nothing is inconclusive, never a pass', async ({ page }) => {
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
-  await page.getByTestId('tests-run').click()
+  await startRun(page)
   await page.evaluate(() => window.__mock.reportVerifyResult('p-alpha', 'inconclusive', null))
 
   await expect(page.getByTestId('tests-panel-evidence')).toContainText('inconclusive')
@@ -462,9 +565,9 @@ test('running the set asks the session for data only, and the app reports the ca
   await openApiPanel(page)
   await expect(page.getByTestId('tests-api-run')).toBeDisabled()
   await page.getByTestId('tests-api-recent-0').click()
-  await page.getByTestId('tests-api-run').click()
+  await startApiRun(page)
 
-  const sent = await page.evaluate(() => window.__mock.state().sends.at(-1)?.text)
+  const sent = await lastSend(page)
   expect(sent).toContain('/api/customers/{id}')
   // The instruction is for data, not for a verdict.
   expect(sent).toContain('request data')
@@ -484,7 +587,7 @@ test('running the set asks the session for data only, and the app reports the ca
 test('a call that never completed shows no status, and the run says why', async ({ page }) => {
   await openApiPanel(page)
   await page.getByTestId('tests-api-recent-0').click()
-  await page.getByTestId('tests-api-run').click()
+  await startApiRun(page)
   await page.evaluate(
     (c) => window.__mock.reportApiResult('p-alpha', 'error', [c], 'Nothing is listening on http://localhost:5057.'),
     apiCall({ status: null, ms: null, body: null, outcome: 'not_run', detail: 'the call did not complete: fetch failed' }),
@@ -520,9 +623,9 @@ test('slow suites are opt-in, and ticking one puts it in the next run', async ({
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
   await page.getByTestId('tests-suite-node-mutation').click()
-  await page.getByTestId('tests-run').click()
+  await startRun(page)
 
-  const sent = await page.evaluate(() => window.__mock.state().sends.at(-1)?.text)
+  const sent = await lastSend(page)
   expect(sent).toContain('node-mutation')
 })
 
@@ -572,7 +675,7 @@ test('the stack choice persists per project and can be changed', async ({ page }
 test('a figure checked against the runner’s own report file is marked as checked', async ({ page }) => {
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
-  await page.getByTestId('tests-run').click()
+  await startRun(page)
   await page.evaluate(
     (r) => window.__mock.reportVerifyResult('p-alpha', 'pass', r),
     report({

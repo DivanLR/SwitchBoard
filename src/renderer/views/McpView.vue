@@ -545,18 +545,18 @@ function answer(eventId: string, choice: string): void {
 }
 
 .db-ico {
-  font-size: 15px;
+  font-size: var(--fs-head);
   color: var(--teal);
 }
 
 .db-name {
-  font-size: 14px;
+  font-size: var(--fs-title);
   font-weight: 700;
   color: var(--text-bright);
 }
 
 .db-sub {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
 }
 
@@ -572,7 +572,7 @@ function answer(eventId: string, choice: string): void {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-tab);
   padding: 3px 11px;
   border: 1px solid var(--border-seg);
@@ -594,7 +594,7 @@ function answer(eventId: string, choice: string): void {
 }
 
 .mcp-tick {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   line-height: 1;
 }
 
@@ -610,7 +610,7 @@ function answer(eventId: string, choice: string): void {
   align-items: center;
   gap: 10px;
   padding-bottom: 10px;
-  font-size: 11px;
+  font-size: var(--fs-meta);
 }
 
 .combo-hint {
@@ -640,7 +640,7 @@ function answer(eventId: string, choice: string): void {
 }
 
 .ch-label {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.14em;
   color: var(--text-faint);
 }
@@ -649,7 +649,7 @@ function answer(eventId: string, choice: string): void {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-tab);
   border: 1px solid var(--border-seg);
   border-radius: var(--rp);
@@ -671,7 +671,7 @@ function answer(eventId: string, choice: string): void {
 
 .ch-ago {
   color: var(--text-faint);
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
 }
 
 .tabs {
@@ -686,7 +686,7 @@ function answer(eventId: string, choice: string): void {
 
 .tab {
   padding: 9px 13px;
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text-tab);
   cursor: pointer;
   background: transparent;
@@ -702,7 +702,7 @@ function answer(eventId: string, choice: string): void {
 }
 
 .rescan {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-mid);
   border: 1px solid var(--border-strong);
   border-radius: var(--rc);
@@ -737,21 +737,21 @@ function answer(eventId: string, choice: string): void {
 }
 
 .empty-title {
-  font-size: 14.5px;
+  font-size: var(--fs-title);
   font-weight: 600;
   color: var(--text-bright);
 }
 
 .empty-sub {
   max-width: 460px;
-  font-size: 12.5px;
+  font-size: var(--fs-ui);
   line-height: 1.6;
   color: var(--text-meta);
   text-wrap: pretty;
 }
 
 .empty-hint {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--amber);
 }
 
@@ -760,7 +760,7 @@ function answer(eventId: string, choice: string): void {
 }
 
 .scan-banner {
-  font-size: 12px;
+  font-size: var(--fs-ui);
   line-height: 1.6;
   color: var(--text-meta);
   border: 1px dashed var(--border-strong);
@@ -780,7 +780,7 @@ function answer(eventId: string, choice: string): void {
   align-items: center;
   gap: 10px;
   margin-bottom: 14px;
-  font-size: 12px;
+  font-size: var(--fs-ui);
 }
 
 .doc-title {
@@ -788,7 +788,7 @@ function answer(eventId: string, choice: string): void {
 }
 
 .doc-head .faint {
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-faint);
 }
 

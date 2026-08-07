@@ -480,6 +480,34 @@ const MIGRATIONS: Migration[] = [
       )
     },
   },
+  {
+    // 'dontAsk' joins the mode list. The pickers were offering four of the SDK's
+    // six permission modes, which is a picker quietly deciding for you; the two
+    // missing ones are now offered, and this is the column that has to accept them.
+    //
+    // 022's CHECK cannot be edited — migrations are append-only, and a developer
+    // who already ran it has that constraint on disk. SQLite has no way to alter a
+    // CHECK in place either, so the column is dropped and re-added with the wider
+    // list, with every project's chosen mode stashed and restored around it. That
+    // is a smaller and more legible operation than rebuilding the whole projects
+    // table, which by now carries columns from six separate migrations and would
+    // have to name every one of them correctly to avoid losing data.
+    name: '023-session-mode-dontask',
+    up: (db) => {
+      db.exec(`
+        CREATE TEMP TABLE mode_carry AS SELECT id, defaultSessionMode FROM projects;
+        ALTER TABLE projects DROP COLUMN defaultSessionMode;
+        ALTER TABLE projects ADD COLUMN defaultSessionMode TEXT NOT NULL DEFAULT 'auto'
+          CHECK (defaultSessionMode IN ('default', 'dontAsk', 'auto', 'acceptEdits', 'plan', 'bypass'));
+        UPDATE projects
+           SET defaultSessionMode = COALESCE(
+             (SELECT defaultSessionMode FROM mode_carry WHERE mode_carry.id = projects.id),
+             'auto'
+           );
+        DROP TABLE mode_carry;
+      `)
+    },
+  },
 ]
 
 /**
