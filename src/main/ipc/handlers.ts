@@ -278,7 +278,9 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'sessions.start': (req) =>
       // No mode default here: undefined has to reach the manager as "unspecified"
       // so it can fall back to the project's own choice.
-      manager.startSession(req.projectId, req.resume ?? false, req.mode, req.carryTranscriptFrom),
+      manager.startSession(req.projectId, req.resume ?? false, req.mode, req.carryTranscriptFrom, {
+        containerised: req.containerised === true,
+      }),
     'transcripts.save': (req) => manager.saveTranscript(req.sessionId),
     'transcripts.list': () => manager.listTranscripts(),
     'sessions.setPlanMode': (req) => {

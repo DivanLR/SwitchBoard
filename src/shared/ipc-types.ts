@@ -252,6 +252,17 @@ export interface InvokeMap {
        */
       mode?: SessionMode
       /**
+       * WHERE this session runs, chosen at start: true for a Docker container,
+       * false for the developer's own machine.
+       *
+       * Separate from `mode`, which decides what the session may DO. Bypass
+       * still forces a container regardless, because on Windows there is no
+       * other isolation boundary; this only adds the container to a mode that
+       * would not otherwise have had one. Omitted means native, the behaviour
+       * before the choice existed.
+       */
+      containerised?: boolean
+      /**
        * Seed the new session with a previous session's transcript: its digest
        * goes into the system prompt and the full file is named there for the
        * model to read on demand. Ignored when that transcript has expired.

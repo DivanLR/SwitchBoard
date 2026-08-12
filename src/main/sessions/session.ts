@@ -639,7 +639,25 @@ export class HostedSession {
    * names, and must not wipe the hints supportedCommands() already gave us. */
   private commandDescriptions = new Map<string, string>()
 
-  private emitCommands(commands: ProjectCommand[]): void {
+  /**
+   * Report the session's commands and skills, merging with what has already been
+   * seen unless the CLI has explicitly replaced the set.
+   *
+   * The merge is the fix for a real bug. Two independent sources report at boot:
+   * the supportedCommands() control request, and the 'init' system message's
+   * slash_commands plus skills. Each used to rebuild the list from its own batch
+   * alone, and every call writes through to a repository that overwrites the
+   * whole row, so whichever resolved LAST silently erased the other. A plugin
+   * whose six skills arrived in one source and one command in the other showed
+   * exactly one of the seven, which read as "the plugin only ships one command"
+   * and sent five Cleanup rows to "Not available" that were installed all along.
+   *
+   * `replace` is true only for a genuine 'commands_changed' frame, whose own
+   * contract is that the client replaces its cached list — otherwise a command a
+   * plugin really did remove could never disappear.
+   */
+  private emitCommands(commands: ProjectCommand[], replace = false): void {
+    if (replace) this.commandDescriptions.clear()
     const byName = new Map<string, ProjectCommand>()
     for (const raw of commands) {
       // Trimmed on the way in. These names come from the CLI's own init message
@@ -654,6 +672,20 @@ export class HostedSession {
         name,
         description: c.description ?? this.commandDescriptions.get(name),
       })
+    }
+    // Everything seen earlier that this batch did not mention. commandDescriptions
+    // already accumulates every name ever reported, so it is the record of what
+    // the other source said and no second structure is needed.
+    if (!replace) {
+      for (const [name, description] of this.commandDescriptions) {
+        if (!byName.has(name)) byName.set(name, { name, description: description || undefined })
+      }
+    }
+    // A name with no description still has to be remembered, or a source that
+    // reports bare names (the init message does) contributes nothing to the
+    // merge above and the erasure comes straight back.
+    for (const name of byName.keys()) {
+      if (!this.commandDescriptions.has(name)) this.commandDescriptions.set(name, '')
     }
     const list = [...byName.values()].sort((a, b) => a.name.localeCompare(b.name))
     if (list.length > 0) this.options.onCommands?.(list)
@@ -684,9 +716,10 @@ export class HostedSession {
       commands?: { name: string; description?: string }[]
     }
     if (msg.type !== 'system') return
-    // Mid-session change (skills discovered while working): REPLACE semantics.
+    // Mid-session change (skills discovered while working): REPLACE semantics,
+    // which is the ONE case that may drop a name the other source reported.
     if (msg.subtype === 'commands_changed' && msg.commands) {
-      this.emitCommands(msg.commands)
+      this.emitCommands(msg.commands, true)
       return
     }
     if (msg.subtype !== 'init') return

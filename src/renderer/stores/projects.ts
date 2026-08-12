@@ -186,6 +186,8 @@ const store = reactive({
     mode?: SessionMode,
     /** A previous session id whose transcript seeds the new session's context. */
     carryTranscriptFrom?: string,
+    /** Run this session in a container rather than on the developer's machine. */
+    containerised?: boolean,
   ): Promise<Session> {
     state.starting = true
     try {
@@ -194,6 +196,7 @@ const store = reactive({
         resume,
         mode,
         carryTranscriptFrom,
+        containerised,
       })
       // Refresh is inside the wait: the session row is what the view renders,
       // so clearing the waiting state before it lands shows an empty stream.

@@ -51,3 +51,50 @@ test('an installed stack-specific plugin still shows its commands', async ({ pag
   await expect(page.getByTestId('cleanup-view')).toContainText('dotnet-claude-kit')
   await expect(page.getByTestId('cleanup-cmd-code-review')).toBeVisible()
 })
+
+// The names a session actually reports are plugin-qualified, and every row in
+// this group is a SKILL rather than a command: dotnet-claude-kit ships no
+// commands/ directory at all. The tests above used bare names, so they would
+// have passed even with the colon handling broken — and the real symptom was
+// one row runnable out of six, with the other five reading "Not available"
+// while the plugin was installed the whole time.
+test('every skill a plugin reports is runnable, however the session qualifies its name', async ({
+  page,
+}) => {
+  await page.evaluate(() =>
+    window.__mock.setCommands('p-alpha', [
+      'dotnet-claude-kit:code-review',
+      'dotnet-claude-kit:de-sloppify',
+      'dotnet-claude-kit:security-scan',
+      'dotnet-claude-kit:verify',
+      'dotnet-claude-kit:health-check',
+      'dotnet-claude-kit:migrate',
+    ]),
+  )
+  await page.getByTestId('tab-cleanup').click()
+
+  for (const name of [
+    'code-review',
+    'de-sloppify',
+    'security-scan',
+    'verify',
+    'health-check',
+    'migrate',
+  ]) {
+    await expect(page.getByTestId(`cleanup-cmd-${name}`)).toBeEnabled()
+  }
+})
+
+test('running a row sends the name the session reported, not the catalogue shorthand', async ({
+  page,
+}) => {
+  await page.evaluate(() =>
+    window.__mock.setCommands('p-alpha', ['dotnet-claude-kit:security-scan']),
+  )
+  await page.getByTestId('tab-cleanup').click()
+  await page.getByTestId('cleanup-cmd-security-scan').click()
+
+  await expect
+    .poll(async () => (await page.evaluate(() => window.__mock.state().sends)).at(-1)?.text)
+    .toBe('/dotnet-claude-kit:security-scan')
+})

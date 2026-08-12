@@ -115,6 +115,18 @@ const startMode = ref<SessionMode>(DEFAULT_SESSION_MODE)
 const modeOpen = ref(false)
 /** Resume the previous conversation rather than starting an empty one. */
 const resumeSession = ref(false)
+
+/**
+ * WHERE the next session runs: a container, or this machine.
+ *
+ * Its own switch because it is its own question. Bypass has always forced a
+ * container (on Windows there is no other isolation boundary) and that stays
+ * true, so the switch reads as on and locked in that mode rather than quietly
+ * disagreeing with what is about to happen.
+ */
+const runInContainer = ref(false)
+const containerForced = computed(() => startMode.value === 'bypass')
+const containerOn = computed(() => containerForced.value || runInContainer.value)
 /** Session-start failure (e.g. Docker down for a bypass session), ended banner. */
 const startError = ref<string | null>(null)
 const streamEl = ref<HTMLElement | null>(null)
@@ -648,6 +660,16 @@ function switchView(view: 'clean' | 'raw'): void {
   scrollToBottom()
 }
 
+// Coming BACK to the conversation lands on its newest line, for the same reason
+// the Clean/Raw toggle does. The stream is a v-else-if, so leaving the tab
+// unmounts it and returning mounts a fresh element scrolled to zero: the top of
+// a long session, which is the least useful place to be put and reads as having
+// lost your place. Always the bottom, not a remembered offset — the whole point
+// of coming back is what arrived while you were away.
+watch(mainTab, (tab) => {
+  if (tab === 'session') scrollToBottom()
+})
+
 watch(
   () => active.events.length,
   () => {
@@ -801,6 +823,8 @@ async function start(): Promise<void> {
       // The picker always sends a concrete mode. It opens on the project's own
       // default, so sending it explicitly changes nothing until it is changed.
       startMode.value,
+      undefined,
+      runInContainer.value,
     )
     // sessions.start resolves once the CLI is spawned, not once it has proven
     // it can run — watch the row it returned for the crash that would otherwise
@@ -1080,11 +1104,16 @@ const {
           v-if="liveSession?.status === 'working'"
           class="stop-btn mono"
           data-testid="stop-session"
+          aria-label="Interrupt the current turn"
           title="Interrupt the current turn (Ctrl+C)"
           @click="interrupt()"
         >
-          ■
-          <kbd class="ctl-key">⌃C</kbd>
+          <!-- A red block and nothing else. The ⌃C key cap beside it spelled out
+               a binding the status bar already names, and put two glyphs in a
+               control whose whole job is to be the one obvious thing to hit when
+               a turn is running away. The binding still works; the tooltip and
+               the status bar still say so. -->
+          <span class="stop-block" aria-hidden="true"></span>
         </button>
         <button
           v-if="liveSession"
@@ -1396,6 +1425,26 @@ const {
                 <span class="knob"></span>
               </button>
               <span :class="{ faint: !canResume }">Resume session</span>
+            </span>
+
+            <span class="bypass-inline mono">
+              <button
+                class="switch"
+                :class="{ on: containerOn }"
+                data-testid="run-in-container"
+                role="switch"
+                :aria-checked="containerOn"
+                :disabled="containerForced"
+                :title="
+                  containerForced
+                    ? 'Bypass always runs in a container: it approves every tool call, so the container is the only thing left standing between it and your files.'
+                    : 'Run this session inside a Linux container instead of on this machine. Your project folder is mounted, nothing else is, and the session cannot reach the rest of your drive. Slower to start, and only two containers may run at once.'
+                "
+                @click="containerForced || (runInContainer = !runInContainer)"
+              >
+                <span class="knob"></span>
+              </button>
+              <span :class="{ faint: containerForced }">Run in container</span>
             </span>
 
             <button class="btn-solid" data-testid="start-session" :disabled="busy" @click="start()">
@@ -1947,14 +1996,12 @@ const {
    interrupts the turn and leaves it open. */
 .stop-btn {
   flex-shrink: 0;
-  min-width: 26px;
+  width: 26px;
   height: 26px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 0 6px;
-  font-size: var(--fs-micro);
+  padding: 0;
   color: var(--red);
   border: 1px solid var(--red);
   border-radius: var(--rp);
@@ -1968,15 +2015,12 @@ const {
   background: var(--red);
 }
 
-/* The binding printed on the control, not hidden in a tooltip. */
-.ctl-key {
-  font-family: var(--mono);
-  font-size: var(--fs-micro);
-  line-height: 1;
-  padding: 2px 3px;
-  border: 1px solid currentColor;
-  border-radius: var(--rp);
-  opacity: 0.7;
+/* The stop mark itself: a square of the control's own colour, so it fills on
+   hover with the button rather than needing a rule of its own. */
+.stop-block {
+  width: 9px;
+  height: 9px;
+  background: currentColor;
 }
 
 /* The teardown overlay lives in SessionWaitOverlay now, sharing one screen with

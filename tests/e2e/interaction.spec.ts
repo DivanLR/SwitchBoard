@@ -130,8 +130,14 @@ test.describe('a draft left by a previous run', () => {
 // the composer had focus, with nothing on screen saying so.
 test('a working session offers a red stop button that interrupts the turn', async ({ page }) => {
   await expect(page.getByTestId('stop-session')).toBeVisible()
-  // It names its own binding rather than hiding it in a tooltip.
-  await expect(page.getByTestId('stop-session')).toContainText('⌃C')
+  // A plain block, not a key cap. The ⌃C legend put a second glyph in a control
+  // whose job is to be the one obvious thing to hit when a turn runs away; the
+  // binding still works and the status bar still names it.
+  await expect(page.getByTestId('stop-session')).not.toContainText('⌃C')
+  await expect(page.getByTestId('stop-session')).toHaveAttribute(
+    'aria-label',
+    'Interrupt the current turn',
+  )
 
   await page.getByTestId('stop-session').click()
   await expect.poll(() => page.evaluate(() => window.__mock.state().interrupts.length)).toBe(1)

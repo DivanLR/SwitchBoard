@@ -143,6 +143,8 @@ export interface MockDriver {
       resume?: boolean
       /** The session id whose transcript was carried in as context, if any. */
       carryTranscriptFrom?: string
+      /** Whether the start asked to run in a container rather than on this machine. */
+      containerised?: boolean
     }[]
     /** Every live plan-mode switch asked for, in order. */
     planModeChanges: { sessionId: string; enabled: boolean }[]
@@ -512,6 +514,7 @@ export function installMockHost(scenario: MockScenario): void {
     /** Whether the start asked to resume the previous conversation. */
     resume?: boolean
     carryTranscriptFrom?: string
+    containerised?: boolean
   }[] = []
   const planModeChanges: { sessionId: string; enabled: boolean }[] = []
   const answers: { eventId: string; choice: string }[] = []
@@ -879,6 +882,9 @@ export function installMockHost(scenario: MockScenario): void {
         // Recorded so a test can prove the previous session's transcript was
         // actually asked for, rather than that a toggle merely looked on.
         carryTranscriptFrom: req.carryTranscriptFrom as string | undefined,
+        // Recorded so a test can prove the container switch reached the host,
+        // rather than that it merely looked on.
+        containerised: req.containerised === true,
       })
       const session: MockSession = {
         id: nextId('sess'),

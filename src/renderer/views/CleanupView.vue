@@ -83,7 +83,13 @@ const groups = computed(() => CLEANUP_GROUPS.filter((g) => !g.stackSpecific || i
  *  toolkit's. Falls back to the catalogue name before the list has loaded. */
 function run(command: string): void {
   const resolved = availableByName.value.get(normalizeForMatch(command)) ?? command
-  emit('run', `/${resolved}`)
+  // The session's own names arrive already slashed (availableCommandNames maps
+  // every one through slashName), while the catalogue's fallback is bare. Adding
+  // one unconditionally sent "//de-sloppify" for every row the session had
+  // actually reported — which is every row in real use, and none of them in the
+  // tests, because those never set a command list and so always took the bare
+  // fallback.
+  emit('run', resolved.startsWith('/') ? resolved : `/${resolved}`)
 }
 </script>
 

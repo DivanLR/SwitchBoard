@@ -13,15 +13,21 @@ const result = computed(() => diff.resultFor(props.projectId))
 const notLive = computed(() => diff.isNotLive(props.projectId))
 const files = computed(() => result.value.files)
 
-/** The folder a run of changed files shares, with its own totals. */
+/** One folder in the tree, with the files directly inside it and its own totals. */
 interface DiffGroup {
   /** Project-relative directory, '' for the project root. */
   dir: string
+  /** The last segment only: the tree's indentation already says where it sits. */
   label: string
+  /** How deep to indent it. 0 for the root and for a top-level folder. */
+  depth: number
   files: DiffFileEntry[]
-  /** Sum of the files whose counts are known; null when none are. */
+  /** Sum over this folder AND everything under it, so a folded parent still
+   *  reports what changed inside. Null when no file below it has known counts. */
   added: number | null
   removed: number | null
+  /** Files in this folder and every folder under it, for the heading's count. */
+  total: number
 }
 
 /**
@@ -38,23 +44,69 @@ const groups = computed<DiffGroup[]>(() => {
     const cut = file.path.lastIndexOf('/')
     return cut === -1 ? '' : file.path.slice(0, cut)
   })
-  return Object.entries(byDir)
-    .sort(([a], [b]) => (a === '' ? -1 : b === '' ? 1 : a.localeCompare(b)))
-    .map(([dir, group]) => {
-      // Object.groupBy types every value as possibly absent, because the key type
-      // is wider than the keys it actually produced. Every key here came from a
-      // file, so no group is ever empty.
-      const entries = group ?? []
-      const known = entries.filter((f) => f.addedLines !== null && f.removedLines !== null)
-      return {
-        dir,
-        label: dir === '' ? '/' : dir,
-        files: entries,
-        added: known.length === 0 ? null : known.reduce((n, f) => n + (f.addedLines ?? 0), 0),
-        removed: known.length === 0 ? null : known.reduce((n, f) => n + (f.removedLines ?? 0), 0),
-      }
-    })
+
+  // Every ancestor, not only the folders that directly hold a changed file. A
+  // repository whose changes are all in src/main/sessions/ has nothing directly
+  // in src/, so grouping by immediate parent alone produced one row labelled
+  // with the whole path and no src/ to fold. The tree is the point: a folder
+  // with one child folder and nothing else still gets a row.
+  const dirs = new Set<string>()
+  for (const dir of Object.keys(byDir)) {
+    dirs.add(dir)
+    const parts = dir === '' ? [] : dir.split('/')
+    for (let i = 1; i < parts.length; i++) dirs.add(parts.slice(0, i).join('/'))
+  }
+
+  // Segment-wise, so a parent always sorts immediately before its own children
+  // and never lands after a sibling that merely shares a prefix ('src-gen'
+  // sorting between 'src' and 'src/main' would break the indentation).
+  const ordered = [...dirs].sort((a, b) => {
+    if (a === '') return -1
+    if (b === '') return 1
+    const x = a.split('/')
+    const y = b.split('/')
+    for (let i = 0; i < Math.min(x.length, y.length); i++) {
+      const cmp = x[i].localeCompare(y[i])
+      if (cmp !== 0) return cmp
+    }
+    return x.length - y.length
+  })
+
+  return ordered.map((dir) => {
+    // Object.groupBy types every value as possibly absent, because the key type
+    // is wider than the keys it actually produced.
+    const own = byDir[dir] ?? []
+    // Totals cover the whole subtree, so folding a parent hides the detail
+    // without hiding how much changed under it.
+    const under = files.value.filter((f) => (dir === '' ? true : f.path.startsWith(`${dir}/`)))
+    const known = under.filter((f) => f.addedLines !== null && f.removedLines !== null)
+    return {
+      dir,
+      label: dir === '' ? '/' : (dir.split('/').at(-1) ?? dir),
+      depth: dir === '' ? 0 : dir.split('/').length - 1,
+      files: own,
+      added: known.length === 0 ? null : known.reduce((n, f) => n + (f.addedLines ?? 0), 0),
+      removed: known.length === 0 ? null : known.reduce((n, f) => n + (f.removedLines ?? 0), 0),
+      total: under.length,
+    }
+  })
 })
+
+/**
+ * The rows actually drawn: a folder disappears when any folder ABOVE it is
+ * folded, which is what makes folding a parent fold its whole subtree rather
+ * than only the files sitting directly in it.
+ */
+const visibleGroups = computed<DiffGroup[]>(() =>
+  groups.value.filter((g) => {
+    if (g.dir === '') return true
+    const parts = g.dir.split('/')
+    for (let i = 1; i < parts.length; i++) {
+      if (folded.value.has(parts.slice(0, i).join('/'))) return false
+    }
+    return true
+  }),
+)
 
 /**
  * Folded folders, by directory. Local and unpersisted on purpose: which folders you
@@ -113,19 +165,20 @@ function countLabel(added: number | null, removed: number | null): string {
              still reports how much changed inside — folding stops you reading it,
              not losing it. Files below show only their own name; the heading
              already said where they are. -->
-        <div v-for="g in groups" :key="g.dir" class="diff-group">
+        <div v-for="g in visibleGroups" :key="g.dir" class="diff-group">
           <button
             type="button"
             class="diff-folder"
+            :style="{ paddingLeft: `${4 + g.depth * 12}px` }"
             :aria-expanded="!folded.has(g.dir)"
-            :aria-label="`${g.label}, ${g.files.length} ${g.files.length === 1 ? 'file' : 'files'}, ${countLabel(g.added, g.removed)}`"
+            :aria-label="`${g.dir || '/'}, ${g.total} ${g.total === 1 ? 'file' : 'files'}, ${countLabel(g.added, g.removed)}`"
             :data-testid="`diff-folder-${g.dir || 'root'}`"
-            :title="g.label"
+            :title="g.dir || '/'"
             @click="toggleFolder(g.dir)"
           >
             <span class="dfo-caret mono" aria-hidden="true">{{ folded.has(g.dir) ? '▶' : '▼' }}</span>
             <span class="dfo-path mono">{{ g.label }}</span>
-            <span class="dfo-count mono" aria-hidden="true">{{ g.files.length }}</span>
+            <span class="dfo-count mono" aria-hidden="true">{{ g.total }}</span>
             <span class="dfo-counts mono" aria-hidden="true">{{ countLabel(g.added, g.removed) }}</span>
           </button>
           <template v-if="!folded.has(g.dir)">
@@ -134,6 +187,7 @@ function countLabel(added: number | null, removed: number | null): string {
               :key="f.path"
               type="button"
               class="diff-file-row"
+              :style="{ paddingLeft: `${10 + (g.depth + 1) * 12}px` }"
               :class="{ sel: diff.selectedPath === f.path }"
               :aria-pressed="diff.selectedPath === f.path"
               :aria-label="`${f.status} ${f.path}, ${countLabel(f.addedLines, f.removedLines)}`"

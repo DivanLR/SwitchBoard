@@ -50,13 +50,16 @@ test('files are grouped under the folder that holds them', async ({ page }) => {
   await expect(headings.nth(3)).toHaveAttribute('data-testid', 'diff-folder-src/renderer')
 })
 
-test("a folder heading totals its own files, so a folded folder still reports", async ({ page }) => {
+test("a folder heading totals everything under it, so a folded folder still reports", async ({ page }) => {
   await openDiff(page)
 
-  // src holds app.ts (+3 −1) and main.ts (+12 −0).
-  await expect(page.getByTestId('diff-folder-src')).toContainText('+15')
-  await expect(page.getByTestId('diff-folder-src')).toContainText('−1')
-  await expect(page.getByTestId('diff-folder-src')).toContainText('2')
+  // src holds app.ts (+3 −1) and main.ts (+12 −0) directly, and renderer/View.vue
+  // (+4 −2) below it. The total covers the SUBTREE, not only the direct children:
+  // folding src hides all three, so a heading that counted two would under-report
+  // exactly when its number is the only thing left on screen.
+  await expect(page.getByTestId('diff-folder-src')).toContainText('+19')
+  await expect(page.getByTestId('diff-folder-src')).toContainText('−3')
+  await expect(page.getByTestId('diff-folder-src')).toContainText('3')
 
   // docs holds one binary file, so there is no count to report rather than a
   // fabricated zero — the same discipline the file rows follow.
@@ -74,19 +77,62 @@ test('a file row shows its own name, since the heading already said where it is'
   await expect(row.locator('.dfr-path')).toHaveAttribute('title', 'src/renderer/View.vue')
 })
 
-test('folding a folder hides its files and keeps its heading', async ({ page }) => {
+test('folding a folder hides everything under it, and keeps its heading', async ({ page }) => {
   await openDiff(page)
   await expect(page.getByTestId('diff-file-src/app.ts')).toBeVisible()
 
   await page.getByTestId('diff-folder-src').click()
   await expect(page.getByTestId('diff-folder-src')).toHaveAttribute('aria-expanded', 'false')
   await expect(page.getByTestId('diff-file-src/app.ts')).toHaveCount(0)
-  // Its neighbours are untouched: folding is per folder, not a global collapse.
-  await expect(page.getByTestId('diff-file-src/renderer/View.vue')).toBeVisible()
+  // The SUBTREE goes with it: src/renderer is inside src, and a fold that left a
+  // child folder on screen under a collapsed parent would not be a tree.
+  await expect(page.getByTestId('diff-folder-src/renderer')).toHaveCount(0)
+  await expect(page.getByTestId('diff-file-src/renderer/View.vue')).toHaveCount(0)
+  // Siblings are untouched: folding is per folder, not a global collapse.
   await expect(page.getByTestId('diff-file-package.json')).toBeVisible()
+  await expect(page.getByTestId('diff-folder-docs')).toBeVisible()
 
   await page.getByTestId('diff-folder-src').click()
   await expect(page.getByTestId('diff-file-src/app.ts')).toBeVisible()
+  await expect(page.getByTestId('diff-folder-src/renderer')).toBeVisible()
+})
+
+// The point of the change: a folder that holds only another folder still gets a
+// row of its own. Grouping by immediate parent alone produced one heading called
+// "src/main/sessions" and no src/ to fold, so a deep tree had no structure at all.
+test('a folder with no files of its own still appears, so the tree has its levels', async ({
+  page,
+}) => {
+  const scenario = twoProjectScenario()
+  scenario.projects[0].diff = {
+    gitNotice: null,
+    files: [
+      {
+        path: 'src/main/sessions/session.ts',
+        status: 'modified',
+        addedLines: 5,
+        removedLines: 2,
+        binary: false,
+      },
+    ],
+  }
+  await page.addInitScript(installMockHost, scenario)
+  await page.goto('/')
+  await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
+  await page.getByTestId('sidebar-project-alpha').click()
+  await page.getByTestId('tab-diff').click()
+
+  // Every level, not just the one holding the file.
+  await expect(page.getByTestId('diff-folder-src')).toBeVisible()
+  await expect(page.getByTestId('diff-folder-src/main')).toBeVisible()
+  await expect(page.getByTestId('diff-folder-src/main/sessions')).toBeVisible()
+  // Each shows only its own segment; the indentation says where it sits.
+  await expect(page.getByTestId('diff-folder-src/main').locator('.dfo-path')).toHaveText('main')
+
+  // Folding the top level collapses the whole chain.
+  await page.getByTestId('diff-folder-src').click()
+  await expect(page.getByTestId('diff-folder-src/main')).toHaveCount(0)
+  await expect(page.getByTestId('diff-file-src/main/sessions/session.ts')).toHaveCount(0)
 })
 
 test('selecting a file still opens its diff, grouped or not', async ({ page }) => {

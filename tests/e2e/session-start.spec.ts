@@ -171,3 +171,47 @@ test('heavy subagent mode is off by default and can be turned on', async ({ page
   await page.getByTestId('settings-tab-term').click()
   await expect(page.getByTestId('setting-heavy-subagents')).toHaveAttribute('aria-checked', 'true')
 })
+
+// WHERE a session runs used to be decided for you: bypass meant a container and
+// everything else meant your own machine, with no way to ask for isolation
+// without also giving away every permission prompt. The switch separates the two
+// questions, and these hold it apart from the mode picker beside it.
+test('a session can be asked to run in a container without choosing bypass', async ({ page }) => {
+  const toggle = page.getByTestId('run-in-container')
+  await expect(toggle).toBeVisible()
+  await expect(toggle).toHaveAttribute('aria-checked', 'false')
+
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-checked', 'true')
+
+  await page.getByTestId('start-session').click()
+  // A start resolves after a simulated spawn delay, so poll rather than read once.
+  await expect
+    .poll(async () => (await page.evaluate(() => window.__mock.state().starts)).at(-1)?.containerised)
+    .toBe(true)
+  // The point of the switch: isolation WITHOUT handing over the permission gate.
+  const last = (await page.evaluate(() => window.__mock.state().starts)).at(-1)
+  expect(last?.bypassPermissions).toBe(false)
+})
+
+test('a native start is what happens when the switch is left alone', async ({ page }) => {
+  await page.getByTestId('start-session').click()
+  await expect
+    .poll(async () => (await page.evaluate(() => window.__mock.state().starts)).at(-1)?.containerised)
+    .toBe(false)
+})
+
+test('bypass shows the switch on and locked, because it has never had a choice', async ({
+  page,
+}) => {
+  await page.getByTestId('start-mode-picker').click()
+  await page.getByTestId('start-mode-bypass').click()
+
+  const toggle = page.getByTestId('run-in-container')
+  await expect(toggle).toHaveAttribute('aria-checked', 'true')
+  await expect(toggle).toBeDisabled()
+  // Clicking a locked switch must not silently turn the container OFF for a mode
+  // that has no other isolation boundary.
+  await toggle.click({ force: true })
+  await expect(toggle).toHaveAttribute('aria-checked', 'true')
+})

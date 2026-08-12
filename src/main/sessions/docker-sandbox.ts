@@ -257,6 +257,14 @@ ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
 ENV DOTNET_NOLOGO=1
 ENV MSBUILDDISABLENODEREUSE=1
 ENV UseSharedCompilation=false
+ENV PATH="/home/node/.dotnet/tools:\${PATH}"
+# The catalogue offers "dotnet stryker" as the mutation suite, so the image it
+# runs in has to have it. Without this the suite reported the developer's code
+# as failing when the truth was that the tool was never installed, which is the
+# exact confusion FR-057 exists to prevent. Installed as the node user so it
+# lands in the HOME above, and pinned to a major version so an image rebuilt
+# months from now does not quietly change what the suite measures.
+RUN dotnet tool install --global dotnet-stryker --version "4.*"
 ${browserEnv(browser)}WORKDIR /workspace
 ENTRYPOINT ["/entrypoint.sh"]
 `
