@@ -220,6 +220,7 @@ export function installMockHost(scenario: MockScenario): void {
   // in flight rather than from disk.
   const diagramRequestedFiles = new Map<string, Set<string>>()
   const diagramOpens: { projectId: string; file: string }[] = []
+  const pluginInstalls: { marketplace: string; pkg: string }[] = []
   /**
    * Inlined from src/shared/diagram.ts (DIAGRAMS_DIR / diagramFileName /
    * diagramPrompt): this host is serialised into the page (addInitScript), so it
@@ -790,6 +791,13 @@ export function installMockHost(scenario: MockScenario): void {
     },
     'diagrams.open': (req) => {
       diagramOpens.push({ projectId: String(req.projectId), file: String(req.file) })
+    },
+    // Host-side plugin install. Records the call rather than pretending to
+    // install anything: what a spec needs to assert is that the button reached
+    // the CLI with the right marketplace and package, which is exactly what the
+    // real handler forwards.
+    'plugins.install': (req) => {
+      pluginInstalls.push({ marketplace: String(req.marketplace), pkg: String(req.pkg) })
     },
     // Enough of a document to prove the frame rendered THIS diagram and not
     // another: the spec asserts on the file name inside the returned HTML.

@@ -698,19 +698,45 @@ function onRanInSection(): void {
   scrollToBottom()
 }
 
-// "Download to project" adds the plugin's marketplace then installs it — two
-// commands in order, in the background session like everything else a section
-// asks for.
-async function installCleanup(group: CleanupGroup): Promise<void> {
-  await specs.runInSession(props.project.id, group.marketplace, true)
-  await specs.runInSession(props.project.id, group.pkg, true)
+/**
+ * "Download to project" installs the plugin on the host, through the CLI's own
+ * subcommands, and waits for the answer.
+ *
+ * This used to send `/plugin marketplace add …` then `/plugin install …` to a
+ * background session as two chat messages. That could not work: `/plugin` is an
+ * interactive CLI command an Agent SDK session answers with "isn't available in
+ * this environment", and the two messages went to two SEPARATE containers on a
+ * project with no prior background work, so the marketplace was registered in
+ * one throwaway home and the install ran in another. Neither failure was
+ * visible, because nothing caught the rejection and nothing showed a result.
+ *
+ * `installing` is the plugin id currently being fetched, so the row that was
+ * clicked is the row that shows it.
+ */
+const installing = ref<string | null>(null)
+const installError = ref<string | null>(null)
+
+async function installPlugin(marketplace: string, pkg: string): Promise<void> {
+  if (installing.value) return
+  installing.value = pkg
+  installError.value = null
+  try {
+    const commands = await projects.installPlugin(props.project.id, marketplace, pkg)
+    // The freshly installed commands, so the install card can retire itself
+    // instead of waiting for a session that may not be running to notice.
+    setSuggestionCommands(commands)
+  } catch (e) {
+    installError.value = errorMessage(e)
+  } finally {
+    installing.value = null
+  }
 }
 
-// Same two-command install as Cleanup's, for the diagram-design plugin.
-async function installDiagramPlugin(): Promise<void> {
-  await specs.runInSession(props.project.id, DIAGRAM_PLUGIN.marketplace, true)
-  await specs.runInSession(props.project.id, DIAGRAM_PLUGIN.pkg, true)
-}
+const installCleanup = (group: CleanupGroup): Promise<void> =>
+  installPlugin(group.marketplace, group.pkg)
+
+const installDiagramPlugin = (): Promise<void> =>
+  installPlugin(DIAGRAM_PLUGIN.marketplace, DIAGRAM_PLUGIN.pkg)
 
 async function send(): Promise<void> {
   const text = composer.value.trim()
@@ -1262,6 +1288,8 @@ const {
       v-else-if="mainTab === 'diagrams'"
       :project-id="project.id"
       :available="availableCommandNames"
+      :installing="installing === DIAGRAM_PLUGIN.pkg"
+      :install-error="installError"
       @install="installDiagramPlugin"
     />
 

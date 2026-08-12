@@ -101,7 +101,29 @@ export interface HostedEntry {
   seq: number
   /** Events that may still be updated in place (partials, tool pairs, markers, questions). */
   live: Map<string, LiveEventEntry>
+  /** Whether this session holds a Docker container, so the admission ceiling in
+   *  startSession can count them without reaching into HostedSession's own state. */
+  containerised: boolean
 }
+
+/**
+ * How many sessions may hold a Docker container at once.
+ *
+ * Two, because every container shares ONE WSL virtual machine of fixed size and
+ * each is capped independently: at the 6g default that is 12 GiB of claim
+ * against a VM that is typically 16 GiB or more, which fits, and a third would
+ * not reliably. The failure this prevents is not a slow machine but a wrong
+ * accusation — the VM's kernel kills whichever container it likes, so the
+ * session that dies is rarely the one that was greedy, and it dies as exit 137
+ * with no stderr, which reads as a crash in the developer's own code.
+ *
+ * ponytail: a constant, not a calculation. The honest version reads the VM's
+ * size (`docker info --format {{.MemTotal}}`) and divides by the configured cap,
+ * so raising Sandbox memory lowers this by itself instead of silently
+ * oversubscribing. Do that when someone actually runs a cap this number cannot
+ * carry; two is safe for every default.
+ */
+const MAX_CONTAINERS = 2
 
 /**
  * How long a verification or API run may go without reporting before the
@@ -550,10 +572,18 @@ export class SessionManager {
    * point rather than the race. Nothing else depended on it — the sessions table
    * has always been keyed by session id, not by project.
    *
-   * Deliberately uncapped. Each session is a CLI child process, and a bypass session
-   * is a Docker container, so a developer who starts twenty will feel it; a ceiling
-   * is a product decision rather than a safety one, and inventing a number here
-   * would be guessing at where it belongs.
+   * Uncapped for a NATIVE session, which is just a CLI child process: a developer
+   * who starts twenty will feel it, and where that becomes too many is a product
+   * decision rather than a safety one.
+   *
+   * Containerised sessions are capped, because there the ceiling IS a safety one.
+   * Every container shares one WSL virtual machine of fixed size, so two at the
+   * default cap can ask for more than the VM has, and the kernel then kills a
+   * container that never exceeded its own limit — reported as exit 137 with no
+   * stderr, on whichever session was unlucky rather than the greedy one. That was
+   * a live crash, not a hypothetical: this comment previously said inventing a
+   * number would be guessing, and the number that got used instead was infinity.
+   * See MAX_CONTAINERS.
    */
   async startSession(
     projectId: string,
@@ -582,6 +612,9 @@ export class SessionManager {
     // row exists, when Docker is down or not logged in. First call builds the
     // image for this project's stack, which can take minutes (tens of them for
     // the .NET one) — the renderer awaits with its busy state.
+    // Before the image, because a queue behind a slow image build is a queue
+    // whose wait nobody can account for.
+    if (containerised) this.refuseWhenContainersFull()
     if (containerised) await ensureSandboxImage(project.path)
     // The app drives the user's own Claude Code CLI and no longer bundles a copy
     // (that binary is ~245 MB). Every Switchboard user has Claude Code, so this
@@ -641,6 +674,7 @@ export class SessionManager {
       projectPath: project.path,
       seq: this.repos.events.maxSeq(row.id),
       live: new Map(),
+      containerised,
       session: null as unknown as HostedSession,
     }
 
@@ -1549,6 +1583,27 @@ export class SessionManager {
 
   private pushStatus(entry: HostedEntry): void {
     this.callbacks.onSessionStatus({ ...entry.row })
+  }
+
+  /**
+   * Refuse a container when the machine already holds its share of them.
+   *
+   * A refusal rather than a queue, deliberately. A queue would hold a background
+   * verify dispatch open for however long the sessions ahead of it run, with
+   * nothing on screen to say why and no point at which the developer could
+   * decide it was not worth waiting for. Naming the limit and the two sessions
+   * already holding it gives them the choice a silent wait takes away.
+   */
+  private refuseWhenContainersFull(): void {
+    const running = [...this.hosted.values()].filter((e) => e.containerised && !e.row.endedAt)
+    if (running.length < MAX_CONTAINERS) return
+    throw {
+      code: 'SANDBOX_FULL',
+      message:
+        `${running.length} sessions already run in a container, which is the limit: they share one ` +
+        'virtual machine, and one more can exhaust it and kill a session that did nothing wrong. ' +
+        'End one of them, then start this again.',
+    } satisfies IpcError
   }
 
   /**

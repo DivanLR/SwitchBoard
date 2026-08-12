@@ -21,6 +21,7 @@ import { INVOKE_CHANNEL, isIpcError, isIpcErrorCode } from '@shared/ipc-types'
 import { rulesView } from '@main/inbox/rule-prefs'
 import type { Repositories } from '@main/store/repositories'
 import type { SessionManager } from '@main/sessions/session-manager'
+import { installPlugin } from '@main/sessions/plugin-install'
 import type { PermissionBroker } from '@main/inbox/permission-broker'
 import {
   addProjectRef,
@@ -880,6 +881,11 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         matcher: { kind: 'command_prefix', value: pattern },
         createdFromRequestId: 'manual',
       })
+    },
+    // Host-side, and deliberately not a session message: see plugin-install.ts.
+    // Awaited to completion so the renderer learns whether it actually worked.
+    'plugins.install': async (req) => {
+      await installPlugin(req.marketplace, req.pkg)
     },
     'settings.get': () => repos.settings.get(),
     'settings.set': (req) => repos.settings.set(req),

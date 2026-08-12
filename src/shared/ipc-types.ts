@@ -87,6 +87,8 @@ export type IpcErrorCode =
   | 'INVALID_PATH'
   | 'DUPLICATE'
   | 'NOT_LIVE'
+  /** Too many sessions already hold a container; they share one virtual machine. */
+  | 'SANDBOX_FULL'
   | 'INTERNAL'
 
 export interface IpcError {
@@ -123,6 +125,7 @@ const IPC_ERROR_CODE_KEYS: Record<IpcErrorCode, true> = {
   INVALID_PATH: true,
   DUPLICATE: true,
   NOT_LIVE: true,
+  SANDBOX_FULL: true,
   INTERNAL: true,
 }
 
@@ -310,6 +313,16 @@ export interface InvokeMap {
     req: { projectId: string; description: string }
     res: { sessionId: string; file: string }
   }
+  /**
+   * Install a Claude Code plugin ON THE HOST, with the CLI's own non-interactive
+   * `plugin marketplace add` and `plugin install` subcommands.
+   *
+   * Not a session message. Plugins used to be "installed" by sending `/plugin …`
+   * to a session, which an Agent SDK session cannot run, and which went to a
+   * throwaway container that no other session shares. Resolves only when the
+   * plugin is genuinely installed, so the caller can report success honestly.
+   */
+  'plugins.install': { req: { marketplace: string; pkg: string }; res: void }
   /** Open one diagram in the developer's default browser. `file` is a bare file
    *  name inside the project's diagrams folder; anything else is refused. */
   'diagrams.open': { req: { projectId: string; file: string }; res: void }

@@ -60,9 +60,15 @@ export interface CleanupGroup {
   /** Short tag line shown after the name. */
   tag: string
   blurb: string
-  /** `/plugin marketplace add …` — adds the plugin's marketplace to the project. */
+  /**
+   * The marketplace source, as `claude plugin marketplace add` takes it: a
+   * GitHub repo, a URL or a path. NOT a slash command. These held
+   * `/plugin marketplace add …` strings that were sent to a session as chat, and
+   * `/plugin` does not exist in an Agent SDK session, so no install ever ran.
+   * See main/sessions/plugin-install.ts.
+   */
   marketplace: string
-  /** `/plugin install …` — installs the plugin. */
+  /** Package id for `claude plugin install`, as `<plugin>@<marketplace>`. */
   pkg: string
   commands: readonly CleanupCommand[]
 }
@@ -73,8 +79,8 @@ export const CLEANUP_GROUPS: readonly CleanupGroup[] = [
     source: 'dotnet-claude-kit',
     tag: 'Roslyn-powered · .NET review & quality',
     blurb: 'Multi-dimensional review, health grading, and systematic cleanup for .NET projects.',
-    marketplace: '/plugin marketplace add codewithmukesh/dotnet-claude-kit',
-    pkg: '/plugin install dotnet-claude-kit',
+    marketplace: 'codewithmukesh/dotnet-claude-kit',
+    pkg: 'dotnet-claude-kit@dotnet-claude-kit',
     commands: [
       { command: 'code-review', label: '/code-review', hint: 'Blast-radius-prioritized code review' },
       { command: 'de-sloppify', label: '/de-sloppify', hint: 'Format, remove dead code, fix analyzers, seal types' },
@@ -93,8 +99,8 @@ export const CLEANUP_GROUPS: readonly CleanupGroup[] = [
     source: 'ponytail',
     tag: 'the laziest senior dev · kill over-engineering',
     blurb: 'Find and delete code that never needed to exist — the best code is the code you never wrote.',
-    marketplace: '/plugin marketplace add DietrichGebert/ponytail',
-    pkg: '/plugin install ponytail@ponytail',
+    marketplace: 'DietrichGebert/ponytail',
+    pkg: 'ponytail@ponytail',
     commands: [
       { command: 'ponytail-review', label: '/ponytail-review', hint: 'Review the current diff for over-engineering' },
       { command: 'ponytail-audit', label: '/ponytail-audit', hint: 'Audit the whole repo, not just the diff' },

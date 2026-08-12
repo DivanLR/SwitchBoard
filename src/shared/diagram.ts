@@ -13,9 +13,15 @@
 export const DIAGRAMS_DIR = 'docs/diagrams'
 
 /** The plugin's own marketplace and package, run as two slash commands in order. */
+// Plain identifiers, as the `claude plugin` subcommands take them. These were
+// `/plugin …` slash commands sent to a session as chat, which an Agent SDK
+// session answers with "/plugin isn't available in this environment", so the
+// install could never run. See main/sessions/plugin-install.ts.
 export const DIAGRAM_PLUGIN = {
-  marketplace: '/plugin marketplace add cathrynlavery/diagram-design',
-  pkg: '/plugin install diagram-design@diagram-design',
+  /** Marketplace source for `claude plugin marketplace add`. */
+  marketplace: 'cathrynlavery/diagram-design',
+  /** Package id for `claude plugin install`. */
+  pkg: 'diagram-design@diagram-design',
   /**
    * A command the plugin ships. Its presence in a session's command list is how
    * the app knows the plugin is installed; the skill itself registers no command,

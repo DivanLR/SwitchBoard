@@ -10,7 +10,7 @@
 // between runs (transcripts, so bypass→bypass resume works).
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { cpus, homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 import type { SpawnOptions as SdkSpawnOptions, SpawnedProcess } from '@anthropic-ai/claude-agent-sdk'
@@ -133,9 +133,16 @@ function safeName(value: string): string {
  * session keep going — the same reasoning as --pids-limit below.
  *
  * 6 GiB because `dotnet restore` + `dotnet test` on a real solution fits
- * comfortably inside it while leaving room in a default 8–16 GiB allowance for
- * a second session; Docker also permits swap up to the same figure again, so a
- * brief spike slows down rather than gets killed.
+ * comfortably inside it while leaving room for a second session.
+ *
+ * `--memory-swap` is pinned to the SAME figure, which is what makes the cap a
+ * cap. Passing `--memory` alone lets Docker allow swap up to the same figure
+ * again, so a "12g" container could reach ~24 GiB — larger than the whole WSL
+ * VM on a 32 GB machine, at which point the VM's own kernel kills whichever
+ * container it likes and the containment promised above never happens. The
+ * cushion that doubling bought was worth less than the containment it cost: a
+ * run that genuinely needs more now stops as itself, which is the entire point
+ * of having a limit.
  *
  * The knob is Settings → Sandbox memory (e.g. "12g", or "0" to remove the
  * cap) — an env var is nowhere a desktop-app user can reach.
@@ -143,7 +150,20 @@ function safeName(value: string): string {
  */
 export function sandboxMemoryArg(setting?: string): string[] {
   const value = process.env.SWITCHBOARD_SANDBOX_MEMORY?.trim() || setting?.trim() || '6g'
-  return value === '0' ? [] : ['--memory', value]
+  return value === '0' ? [] : ['--memory', value, '--memory-swap', value]
+}
+
+/**
+ * How many cores one container may use: half the host's, floored at 2.
+ *
+ * Half rather than all, because MAX_CONTAINERS (session-manager.ts) lets two run
+ * at once and the two numbers have to be derived from the same assumption or
+ * they drift apart, which is exactly how the memory cap came to be sized for a
+ * world with one container in it. Floored at 2 so a small host still runs a
+ * build at all rather than serialising it into a timeout.
+ */
+export function cpuShare(): string {
+  return String(Math.max(2, Math.floor(cpus().length / 2)))
 }
 
 // Built via stdin (`docker build -`): no build context, nothing to package.
@@ -536,6 +556,19 @@ export function sandboxSpawn(config: {
         // process table. Generous enough for a .NET restore plus a test run.
         '--pids-limit',
         '1024',
+        // Half the host's cores, because a container without one sees ALL of
+        // them and every test runner sizes itself from that count. Playwright
+        // and vitest both default their worker count to the reported CPUs, so
+        // two containers each launched twelve workers on a twelve-core host and
+        // twenty-four browsers' worth of memory arrived at once. Sharing the
+        // cores is the honest description of what is actually happening.
+        '--cpus',
+        cpuShare(),
+        // Chromium writes shared memory here, and Docker's 64 MB default is a
+        // well-known cause of renderer crashes under load. Only for a project
+        // that actually drives a browser; it is carved out of the memory cap
+        // above rather than added to it, so it is not free.
+        ...(browser ? ['--shm-size', '512m'] : []),
         // The same argument for memory: one session's appetite must not take the
         // shared virtual machine down with it (see sandboxMemoryArg). '0' removes
         // the cap, which is what a developer setting it to 0 is asking for.

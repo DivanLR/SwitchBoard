@@ -108,6 +108,20 @@ const store = reactive({
     return invoke('projects.commands', { projectId })
   },
 
+  /**
+   * Install a plugin on the host and return its refreshed command list.
+   *
+   * The list is re-read here rather than left to arrive on its own: a plugin's
+   * commands and skills reach a session through the CLI's own `commands_changed`
+   * push, which only fires for a session that is already running and re-reads
+   * its plugins. A project with no live session would otherwise show the install
+   * card for ever, having just installed the plugin successfully.
+   */
+  async installPlugin(projectId: string, marketplace: string, pkg: string): Promise<ProjectCommand[]> {
+    await invoke('plugins.install', { marketplace, pkg })
+    return invoke('projects.commands', { projectId })
+  },
+
   /** Recent composer prompts for a project (command history / up-arrow recall). */
   async promptHistory(projectId: string): Promise<string[]> {
     return invoke('sessions.promptHistory', { projectId })

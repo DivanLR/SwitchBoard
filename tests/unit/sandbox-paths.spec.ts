@@ -6,7 +6,15 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { gitNotice, homeVolumeFor, refMounts, sandboxMemoryArg, toContainerPaths } from '@main/sessions/docker-sandbox'
+import { cpus } from 'node:os'
+import {
+  cpuShare,
+  gitNotice,
+  homeVolumeFor,
+  refMounts,
+  sandboxMemoryArg,
+  toContainerPaths,
+} from '@main/sessions/docker-sandbox'
 import { sandboxSystemPromptAppend } from '@main/sessions/session-shaping'
 import { explainExit } from '@main/sessions/session'
 import {
@@ -187,13 +195,13 @@ describe('sandboxMemoryArg', () => {
 
   it('defaults to 6g with no setting and no env var', () => {
     delete process.env.SWITCHBOARD_SANDBOX_MEMORY
-    expect(sandboxMemoryArg(undefined)).toEqual(['--memory', '6g'])
-    expect(sandboxMemoryArg('   ')).toEqual(['--memory', '6g'])
+    expect(sandboxMemoryArg(undefined)).toEqual(['--memory', '6g', '--memory-swap', '6g'])
+    expect(sandboxMemoryArg('   ')).toEqual(['--memory', '6g', '--memory-swap', '6g'])
   })
 
   it('uses the Settings value', () => {
     delete process.env.SWITCHBOARD_SANDBOX_MEMORY
-    expect(sandboxMemoryArg('12g')).toEqual(['--memory', '12g'])
+    expect(sandboxMemoryArg('12g')).toEqual(['--memory', '12g', '--memory-swap', '12g'])
   })
 
   it("removes the cap entirely for '0'", () => {
@@ -203,7 +211,36 @@ describe('sandboxMemoryArg', () => {
 
   it('lets the env var override the setting', () => {
     process.env.SWITCHBOARD_SANDBOX_MEMORY = '9g'
-    expect(sandboxMemoryArg('12g')).toEqual(['--memory', '9g'])
+    expect(sandboxMemoryArg('12g')).toEqual(['--memory', '9g', '--memory-swap', '9g'])
+  })
+
+  // The cap only caps if swap is pinned to it. With --memory alone, Docker
+  // permits swap up to the same figure again, so a 12g container could reach
+  // ~24 GiB: more than the whole WSL VM on a 32 GB machine, at which point the
+  // VM's kernel kills some container that was within its own limit and the
+  // developer is told their code crashed. Every branch that emits a cap must
+  // emit both halves of it, which is what this asserts rather than the values.
+  it('always pins swap to the same figure, so the cap is a ceiling and not a hint', () => {
+    delete process.env.SWITCHBOARD_SANDBOX_MEMORY
+    for (const setting of [undefined, '4g', '12g', '512m']) {
+      const args = sandboxMemoryArg(setting)
+      const memory = args[args.indexOf('--memory') + 1]
+      expect(args).toContain('--memory-swap')
+      expect(args[args.indexOf('--memory-swap') + 1]).toBe(memory)
+    }
+  })
+})
+
+describe('cpuShare', () => {
+  // Without --cpus a container sees every host core, and both Playwright and
+  // vitest size their worker pools from that count — so two containers on a
+  // twelve-core host each started twelve workers and twenty-four workers' peak
+  // memory arrived at once, inside two caps that each looked reasonable alone.
+  it('gives a container half the host, never fewer than two cores', () => {
+    const share = Number(cpuShare())
+    expect(Number.isInteger(share)).toBe(true)
+    expect(share).toBeGreaterThanOrEqual(2)
+    expect(share).toBeLessThanOrEqual(Math.max(2, cpus().length))
   })
 })
 

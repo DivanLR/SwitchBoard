@@ -10,7 +10,14 @@ import { relativeTime } from '@renderer/relative-time'
 import { normalizeForMatch } from '@renderer/composables/useCommandSuggestions'
 import { useDiagramsStore } from '@renderer/stores/diagrams'
 
-const props = defineProps<{ projectId: string; available: string[] }>()
+const props = defineProps<{
+  projectId: string
+  available: string[]
+  /** True while this plugin's host-side install is running. */
+  installing?: boolean
+  /** Why the install failed, in the CLI's own words. Null when it has not. */
+  installError?: string | null
+}>()
 
 const emit = defineEmits<{ (e: 'install'): void }>()
 
@@ -84,9 +91,19 @@ watch(
           diagram-design is not installed in this project — add it to generate diagrams
         </div>
         <div class="install-cmds mono">{{ DIAGRAM_PLUGIN.marketplace }} · {{ DIAGRAM_PLUGIN.pkg }}</div>
+        <!-- Named, not swallowed: this install used to fail silently, so the one
+             thing it must never do again is look identical to doing nothing. -->
+        <div v-if="installError" class="install-error" data-testid="diagrams-install-error">
+          {{ props.installError }}
+        </div>
       </div>
-      <button class="install-btn" data-testid="diagrams-install" @click="emit('install')">
-        ⤓ Download to project
+      <button
+        class="install-btn"
+        data-testid="diagrams-install"
+        :disabled="props.installing"
+        @click="emit('install')"
+      >
+        {{ props.installing ? 'Installing…' : '⤓ Download to project' }}
       </button>
     </div>
 
@@ -307,6 +324,14 @@ watch(
 .err {
   max-width: 840px;
   margin-bottom: 8px;
+  font-size: var(--fs-meta);
+  color: var(--red);
+}
+
+/* Sits inside the install card rather than beside it: the reason an install
+   failed belongs with the thing that failed, not in the page's error slot. */
+.install-error {
+  margin-top: 6px;
   font-size: var(--fs-meta);
   color: var(--red);
 }
