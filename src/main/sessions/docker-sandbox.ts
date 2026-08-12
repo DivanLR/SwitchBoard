@@ -42,38 +42,104 @@ const NAME_PREFIX = 'swb-'
 // Restore cache, kept out of the container so `dotnet test` does not re-download
 // every package on every session — containers are --rm, the volume is not.
 const NUGET_VOLUME = 'switchboard-nuget'
-// Per PROJECT, not global: the container's cwd is always /workspace, and the CLI
-// derives its per-project storage key from cwd — so with one shared volume every
-// project would collide on the same `projects/-workspace` directory and read each
-// other's transcripts. A volume per project keeps the key unique where it lives,
-// and keeps bypass→bypass resume working for that project.
+/**
+ * The container's own node_modules, shadowing the host's.
+ *
+ * Required, not an optimisation: a Windows-installed tree holds Windows
+ * binaries (e.g. `@rollup/rollup-win32-x64-*`, no Linux build), so `vitest`
+ * inside the container dies on a missing Linux module — confirmed by running
+ * it. `npm install` from inside the container is not the fix either:
+ * /workspace is mounted read-write, so it would overwrite the host's own
+ * node_modules with Linux binaries. Mounting a volume over that one
+ * subdirectory keeps the two separate, the same trick the NuGet and Playwright
+ * caches above already use.
+ *
+ * Per SESSION, for the same reason the home volume above is, and it arrived at
+ * that the hard way: this started per project, so that a tree was not rebuilt
+ * every session start. But `npm ci` deletes node_modules before it reinstalls,
+ * the prompt in session-shaping.ts tells a container it is safe to run one, and
+ * background work (verify, API, diagrams) is containerised for every project
+ * now. Two containers of one project therefore delete and rebuild one directory
+ * underneath each other, and the wreckage persists in the volume for every
+ * later session. Worse than the transcript collision that moved the home
+ * volume: a half-written native binary fails later, somewhere else, as a
+ * missing or invalid module, and the obvious next suspect is the project's own
+ * lockfile — which lives on the real bind mount, and is the developer's file.
+ *
+ * The cost is a cold tree per session, which NPM_CACHE_VOLUME below is there to
+ * blunt.
+ */
+const NODE_MODULES_VOLUME_PREFIX = 'switchboard-node-modules-'
+/**
+ * npm's own download cache, shared across every project and session.
+ *
+ * Only here because node_modules went per session: without it each new session
+ * re-downloads a whole dependency tree over the network rather than relinking a
+ * warm cache. Safe to share where node_modules is not, because this cache is
+ * content-addressed and npm writes into it atomically, whereas node_modules is
+ * a mutable tree two installs race to delete.
+ */
+const NPM_CACHE_VOLUME = 'switchboard-npm-cache'
+// Per SESSION, not per project: the container's cwd is always /workspace, and the
+// CLI derives its storage key from cwd alone — so a volume shared by every
+// concurrent session of one project put them all in the SAME
+// `projects/-workspace` directory, confirmed to let them read (and corrupt) each
+// other's transcripts. Sessions-per-project has no cap and sections also run
+// containerised now, so that collision is reachable, not theoretical. Keying the
+// volume to the session itself means no two running sessions ever open the same
+// one. A resuming session is the one deliberate exception — see homeVolumeFor.
+// ponytail: volumes now accumulate one per session forever (Docker never prunes
+// them on its own). Fine at today's usage; add a sweep keyed off `endedAt` once
+// disk use actually shows it.
 const HOME_VOLUME_PREFIX = 'switchboard-claude-home-'
 
 /**
- * The most memory one bypass container may take, and the reason sessions stopped
- * dying in pairs.
+ * Which Docker volume backs a containerised session's CLI home (~/.claude).
+ *
+ * Defaults to a volume keyed to the session's own id, so it can never collide
+ * with a sibling session's — see HOME_VOLUME_PREFIX for why that matters now.
+ *
+ * A resuming session is the exception: its conversation was written into the
+ * ANCESTOR session's volume (its own volume does not exist yet — this is its
+ * first run), so it has to open that one to find it. `resumeFromSessionId` is
+ * the ancestor's Switchboard session id; the caller already looks up that row
+ * to resolve `resumeSdkSessionId` and can pass its `id` here too.
+ *
+ * Residual gap, not closed here: two DIFFERENT new sessions both resuming the
+ * same already-ended ancestor at the same time would still collide on that
+ * ancestor's volume. Narrower than the bug this fixes (it needs two resumes of
+ * one specific ended session racing each other) and unchanged from today's
+ * behaviour, so left as-is rather than adding machinery for it speculatively.
+ */
+export function homeVolumeFor(sessionId: string, resumeFromSessionId?: string): string {
+  return `${HOME_VOLUME_PREFIX}${safeName(resumeFromSessionId ?? sessionId)}`
+}
+
+/** Docker volume/container names must be [a-zA-Z0-9_.-]. */
+function safeName(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_.-]/g, '')
+}
+
+/**
+ * The most memory one bypass container may take, and the reason sessions
+ * stopped dying in pairs.
  *
  * Docker Desktop runs every container in ONE shared WSL virtual machine with a
- * fixed allowance. Without a limit, a single agent run — a .NET restore, a test
- * pass, a browser — can consume that whole allowance, and the kernel then kills
- * whichever process it likes, which in practice is somebody else's session as
- * often as the greedy one. Exit 137 with nothing in stderr, and the developer
- * looking for a bug in code that was never at fault (see explainExit).
+ * fixed allowance. Without a limit, one greedy run (a .NET restore, a test
+ * pass, a browser) can exhaust it, and the kernel then kills whichever
+ * container it likes — often someone else's session, with exit 137 and no
+ * stderr, read as a code bug that never was (see explainExit). A cap decides
+ * WHO pays when memory runs out: the greedy run stops, the VM and every other
+ * session keep going — the same reasoning as --pids-limit below.
  *
- * A cap does not make the memory go further; it decides WHO pays when it runs
- * out. With one, the run that asked for too much is the one that stops, the
- * virtual machine stays up, and every other session keeps working. Exactly the
- * reasoning already applied to --pids-limit below.
- *
- * 6 GiB because a `dotnet restore` plus `dotnet test` on a real solution sits
+ * 6 GiB because `dotnet restore` + `dotnet test` on a real solution fits
  * comfortably inside it while leaving room in a default 8–16 GiB allowance for
- * a second session. Docker also permits swap up to the same figure again when
- * only --memory is set, so a brief spike slows down instead of being killed.
+ * a second session; Docker also permits swap up to the same figure again, so a
+ * brief spike slows down rather than gets killed.
  *
- * The knob is Settings → Sandbox memory (any Docker size, e.g. "12g", or "0" to
- * remove the cap): an env var "where Switchboard is launched from" is nowhere a
- * desktop-app user can reach. SWITCHBOARD_SANDBOX_MEMORY still wins when set,
- * so pre-Settings setups keep behaving.
+ * The knob is Settings → Sandbox memory (e.g. "12g", or "0" to remove the
+ * cap) — an env var is nowhere a desktop-app user can reach.
+ * SWITCHBOARD_SANDBOX_MEMORY still wins when set, for pre-Settings setups.
  */
 export function sandboxMemoryArg(setting?: string): string[] {
   const value = process.env.SWITCHBOARD_SANDBOX_MEMORY?.trim() || setting?.trim() || '6g'
@@ -85,18 +151,15 @@ export function sandboxMemoryArg(setting?: string): string[] {
 // up a newer CLI, `docker rmi switchboard-sandbox` and the next bypass session
 // rebuilds.
 //
-// Images are picked per project from what the project actually needs: node always,
-// the .NET SDK when stack detection says .NET, and a browser's shared libraries when
-// the project has real browser test infrastructure (needsBrowser() in
-// shared/test-catalog.ts). That gives four possible images and each is built on
-// first use.
+// Images are picked per project from what it actually needs: node always, the
+// .NET SDK when stack detection says .NET, and browser libraries when the
+// project has real browser test infrastructure (needsBrowser() in
+// shared/test-catalog.ts) — four possible images, each built on first use.
 //
-// The browser is deliberately ABSENT for every other project, and that absence is
-// the common case rather than a gap: a project with no Playwright config, no Karma
-// config and no browser dependency gains nothing from several hundred megabytes of
-// Chromium libraries in every session, so it does not get them. The Tests section
-// reads the very same answer through sandboxToolsFor() and says "browser is not in
-// the bypass container" up front, before a run, rather than failing one afterwards.
+// Browser libraries are absent by default (most projects never drive one; see
+// BROWSER_SUFFIX). sandboxToolsFor() reads the same detection, so the Tests
+// section says "browser is not in the bypass container" up front rather than
+// failing a run afterwards.
 //
 // Still no Python: nothing in the catalog needs it inside a container yet.
 // The two answers must change together, here and in shared/test-catalog.ts.
@@ -187,17 +250,19 @@ function imageFor(projectPath: string): {
   image: string
   dotnet: boolean
   browser: boolean
+  /** Has a package.json, so it needs a container-private node_modules. */
+  node: boolean
 } {
   let dotnet = false
   let browser = false
+  const node = existsSync(join(projectPath, 'package.json'))
   try {
     // Root plus one level, the same listing the Tests section detects from, so the
     // image and the suite availability can never disagree about this project.
     const entries = stackEntries(projectPath, (dir) => readdirSync(dir))
     dotnet = sandboxNeedsDotnet(detectStacks(entries))
-    // Evidence-led: a Playwright or Karma config, an Angular workspace, or the
-    // dependency declared in a manifest. Everything else gets no browser, which is
-    // the common case and is stated before a run rather than discovered during one.
+    // Evidence-led: a Playwright or Karma config, an Angular workspace, or a
+    // manifest dependency. Everything else gets no browser (the common case).
     browser = needsBrowser(entries, (entry) => {
       try {
         return readFileSync(join(projectPath, entry), 'utf8')
@@ -210,7 +275,7 @@ function imageFor(projectPath: string): {
     // bypass container" message, never a broken session.
   }
   const base = dotnet ? DOTNET_IMAGE : IMAGE
-  return { image: browser ? base + BROWSER_SUFFIX : base, dotnet, browser }
+  return { image: browser ? base + BROWSER_SUFFIX : base, dotnet, browser, node }
 }
 
 /** What a bypass session for this project can run, from the very same detection
@@ -355,6 +420,13 @@ export interface SandboxPlan {
 }
 
 /** REFS chips mount read-only under /refs/<basename>; duplicates get an index. */
+/** Whether this project's container gets its own node_modules volume, so the
+ *  session can be told (see sandboxSystemPromptAppend). Same detection the mount
+ *  itself uses, so the prompt and the reality cannot disagree. */
+export function hasNodeModulesVolume(projectPath: string): boolean {
+  return imageFor(projectPath).node
+}
+
 export function refMounts(refDirs: readonly string[]): Mount[] {
   const mounts: Mount[] = []
   const seen = new Set<string>()
@@ -395,17 +467,25 @@ export function toContainerPaths(text: string, mounts: readonly Mount[]): string
 
 export function sandboxSpawn(config: {
   sessionId: string
-  projectId: string
   projectPath: string
   refDirs: string[]
   /** Settings → Sandbox memory; the env var still wins (see sandboxMemoryArg). */
   sandboxMemory?: string
+  /** Switchboard id of the ended session this one resumes, when its transcript
+   *  still lives only in THAT session's own home volume (see homeVolumeFor).
+   *  `undefined` for a fresh session.
+   *
+   *  Required rather than optional, and deliberately so: this field was optional
+   *  when it was introduced, the single call site quietly omitted it, and every
+   *  containerised resume silently opened an empty volume while the SDK was told
+   *  to resume a transcript that lived in another one. An optional field cannot
+   *  be forgotten if the compiler will not let it be. */
+  resumeFromSessionId: string | undefined
 }): SandboxPlan {
   const refs = refMounts(config.refDirs)
-  const safe = (value: string): string => value.replace(/[^a-zA-Z0-9_.-]/g, '')
-  const containerName = `${NAME_PREFIX}${safe(config.sessionId)}`
-  const homeVolume = `${HOME_VOLUME_PREFIX}${safe(config.projectId)}`
-  const { image, dotnet, browser } = imageFor(config.projectPath)
+  const containerName = `${NAME_PREFIX}${safeName(config.sessionId)}`
+  const homeVolume = homeVolumeFor(config.sessionId, config.resumeFromSessionId)
+  const { image, dotnet, browser, node } = imageFor(config.projectPath)
   return {
     additionalDirectories: ['/workspace', ...refs.map((r) => r.container)],
     mounts: [{ host: config.projectPath, container: '/workspace' }, ...refs],
@@ -426,6 +506,16 @@ export function sandboxSpawn(config: {
         // Shared across projects on purpose: NuGet packages are immutable per
         // version, so one cache serves every .NET sandbox.
         ...(dotnet ? ['-v', `${NUGET_VOLUME}:/home/node/.nuget/packages`] : []),
+        // Mounted OVER the project's own node_modules (see
+        // NODE_MODULES_VOLUME_PREFIX): the container must never touch the host's.
+        ...(node
+          ? [
+              '-v',
+              `${NODE_MODULES_VOLUME_PREFIX}${safeName(config.sessionId)}:/workspace/node_modules`,
+              '-v',
+              `${NPM_CACHE_VOLUME}:/home/node/.npm`,
+            ]
+          : []),
         // Chromium is immutable per version, so one volume serves every project, the
         // same reasoning as the NuGet cache above. Not mounted at all for a project
         // with no browser tests, which is most of them.

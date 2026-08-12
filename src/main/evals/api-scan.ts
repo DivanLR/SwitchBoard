@@ -161,17 +161,13 @@ export function resolveHeaders(
 }
 
 /**
- * Resolve the base URL to call and the command that starts the API.
- *
- * The project's own launchSettings.json is the authority, because it is what the
- * developer already runs with — the port in it is the port the API listens on.
- * ASPNETCORE_URLS is then forced to that same URL when the run launches the API,
- * so the port is a fact rather than a hope. An explicit setting always wins, and
- * when neither exists the failure is a sentence asking for a base URL, never a
- * guessed port.
- */
-/**
  * Where to call this project's API, and what starts it.
+ *
+ * The project's own launchSettings.json is the authority: the port in it is the
+ * port the API listens on, and ASPNETCORE_URLS is forced to that same URL when
+ * the run launches the API, so the port is a fact rather than a guess. An
+ * explicit setting always wins, and when neither exists the failure asks for a
+ * base URL rather than guessing a port.
  *
  * Asynchronous for the same reason scanProjectEndpoints is: the local branch walks
  * the project tree looking for launchSettings.json, and doing that synchronously

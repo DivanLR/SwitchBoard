@@ -100,10 +100,8 @@ const store = reactive({
     try {
       const { runs } = await invoke('api.start', { projectId, endpoints, target })
       this.runs[projectId] = runs
-      // A Tests-section dispatch can spawn the project's dedicated tests session.
-      // The sidebar only patches a session it already knows, so refresh or the run
-      // happens in a session with no row on screen. refresh() re-applies focus, so
-      // this never moves the centre pane off the conversation.
+      // Refresh so a spawned tests session gets a sidebar row — see verify.ts's
+      // surfaceNewSessions for why.
       await useProjectsStore().refresh()
       return true
     } catch (error) {

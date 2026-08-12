@@ -10,6 +10,7 @@
 // from rows that actually exist. Only the project's database knows which ones do.
 import type { ApiExpect, ApiRequestPlan, ApiTarget } from '@shared/api-endpoints'
 import { firstJsonObject, markerTail, str } from './parse'
+import { HONESTY } from './verify-dispatch'
 
 /** Sentinel the session emits once, on its own line. */
 export const API_DATA_MARKER = 'SWB_APIDATA'
@@ -116,9 +117,9 @@ export function apiDataPrompt(
     'exactly what this catches.\n' +
     '- For a write endpoint, only send a body if the project clearly points at a test ' +
     'database. If in doubt, cover the reads and leave the write out.\n\n' +
-    'Every value must come from something you actually read. If you could not find real data ' +
-    'for an endpoint, leave that endpoint out entirely rather than inventing an id — a missing ' +
-    'request is honest, an invented one produces a green result that means nothing.\n\n' +
+    `${HONESTY} If you could not find real data for an endpoint, leave that endpoint out ` +
+    'entirely rather than inventing an id — a missing request is honest, an invented one ' +
+    'produces a green result that means nothing.\n\n' +
     `Finish your reply with one line, on its own, starting with ${API_DATA_MARKER}: followed by ` +
     `JSON of this shape (one line, no code fence):\n${SCHEMA}`
   )

@@ -3,6 +3,7 @@
 import { reactive } from 'vue'
 import type { SpecDetail, SpecKitState } from '@shared/domain'
 import { invoke } from '@renderer/ipc'
+import { useProjectsStore } from '@renderer/stores/projects'
 
 // Monotonic token guarding the shared, un-keyed detail/selectedSpecId state:
 // switching projects while a load is in flight must not let the older response
@@ -65,9 +66,17 @@ const store = reactive({
     this.detail = detail
   },
 
-  /** Send a spec-kit command / prompt to the project's session. */
-  async runInSession(projectId: string, text: string): Promise<void> {
-    await invoke('specs.runInSession', { projectId, text })
+  /**
+   * Send a spec-kit command or prompt to one of the project's sessions.
+   *
+   * `background` is the section default: the work runs beside the conversation.
+   * The follow-up refresh exists so a spawned session gets a sidebar row — see
+   * verify.ts's surfaceNewSessions for why — and re-applies focus so it doesn't
+   * steal the centre pane.
+   */
+  async runInSession(projectId: string, text: string, background = false): Promise<void> {
+    await invoke('specs.runInSession', { projectId, text, background })
+    if (background) await useProjectsStore().refresh()
   },
 
   /**
@@ -78,7 +87,7 @@ const store = reactive({
     await this.selectSpec(projectId, specId)
     this.runningProjectId = projectId
     try {
-      await this.runInSession(projectId, text)
+      await this.runInSession(projectId, text, true)
     } catch (e) {
       // A failed send must not leave the view stuck in the implementing state.
       this.stopPolling()

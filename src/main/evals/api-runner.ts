@@ -123,19 +123,6 @@ export async function runApiCalls(
 const WRITE_BLOCKED =
   'not sent: a write against a shared QA environment is blocked, so the eval set exercises reads only'
 
-/**
- * A write the run refuses to send against a deployed environment.
- *
- * The prompt asks the session to plan reads only for QA, and that is the right
- * place to ask — but a request is only ever a request. The panel tells the
- * developer that a QA run is "reads only", and a promise about what this app does
- * to someone else's environment has to be kept by the code that opens the socket,
- * not by the model that proposed the plan. One mis-planned DELETE against a shared
- * environment is not a test result, it is an incident, and prose cannot prevent it.
- *
- * Reported as 'not_run' rather than 'fail', because the endpoint was never asked:
- * nothing here says anything about whether that write works.
- */
 /** A call that was never made. Three separate places built this same six-field
  *  literal: the write the QA guard refused, the call whose socket never
  *  completed, and a whole set skipped before it started. They agree by
@@ -145,6 +132,17 @@ function notRunCall(request: ApiRequestPlan, detail: string): ApiCall {
   return { request, status: null, ms: null, body: null, outcome: 'not_run', detail }
 }
 
+/**
+ * A write the run refuses to send against a deployed environment.
+ *
+ * The prompt asks the session to plan reads only for QA, but a promise about what
+ * this app does to someone else's environment has to be kept by the code that
+ * opens the socket, not by the model that proposed the plan — one mis-planned
+ * DELETE against a shared environment is an incident, not a test result.
+ *
+ * Reported as 'not_run' rather than 'fail': the endpoint was never asked, so
+ * nothing here says anything about whether that write works.
+ */
 function blockedWrite(host: ApiHost, request: ApiRequestPlan): ApiCall | null {
   if (host.target !== 'qa' || request.method === 'GET' || request.method === 'HEAD') return null
   return notRunCall(request, WRITE_BLOCKED)

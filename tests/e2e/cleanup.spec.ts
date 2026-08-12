@@ -18,11 +18,17 @@ test('the Cleanup tab lists grouped commands and runs one in the session', async
   await expect(page.getByTestId('cleanup-view')).toContainText('ponytail')
   await expect(page.getByTestId('cleanup-cmd-code-review')).toBeVisible()
 
-  // Running a command jumps to the Session tab and sends the slash command.
+  // Running a command sends it to the project's BACKGROUND session and leaves
+  // the developer where they were. It used to jump to the Session tab, which
+  // now shows the conversation the work is deliberately no longer in.
   await page.getByTestId('cleanup-cmd-de-sloppify').click()
-  await expect(page.getByTestId('tab-session')).toHaveClass(/sel/)
+  await expect(page.getByTestId('tab-cleanup')).toHaveClass(/sel/)
+  await expect
+    .poll(() => page.evaluate(() => window.__mock.state().sends.map((x) => x.text)))
+    .toContain('/de-sloppify')
   const sends = await page.evaluate(() => window.__mock.state().sends)
-  expect(sends.some((s) => s.text === '/de-sloppify')).toBe(true)
+  const run = sends.find((s) => s.text === '/de-sloppify')
+  expect(run?.sessionId).not.toBe('s-alpha')
 })
 
 test('a stack-specific plugin is not advertised to a project that has not installed it', async ({

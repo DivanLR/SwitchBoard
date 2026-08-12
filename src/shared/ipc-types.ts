@@ -5,6 +5,7 @@
 import type {
   AvailableModel,
   DecisionRecord,
+  DiagramEntry,
   DiffListResult,
   Draft,
   EvalCheckStatus,
@@ -295,6 +296,32 @@ export interface InvokeMap {
   /** One file's diff content, fetched only on selection. Null when the file
    *  no longer matches a current changed-file entry. */
   'diff.file': { req: { projectId: string; path: string }; res: FileDiffContent | null }
+  /** Every diagram in the project's docs/diagrams folder, newest first. Reads the
+   *  folder itself, so a file deleted from the repo leaves the list even though
+   *  the app still holds the request that made it. */
+  'diagrams.list': { req: { projectId: string }; res: DiagramEntry[] }
+  /**
+   * Ask the project's session for a diagram, starting a session if none is live.
+   * The app chooses the file name and records the request BEFORE dispatching, so
+   * the finished file can be attributed to the session and the sentence that
+   * asked for it. Returns the name it chose, which nothing else can predict.
+   */
+  'diagrams.generate': {
+    req: { projectId: string; description: string }
+    res: { sessionId: string; file: string }
+  }
+  /** Open one diagram in the developer's default browser. `file` is a bare file
+   *  name inside the project's diagrams folder; anything else is refused. */
+  'diagrams.open': { req: { projectId: string; file: string }; res: void }
+  /**
+   * One diagram's HTML, for rendering inside the app.
+   *
+   * The renderer puts this in a sandboxed iframe's srcdoc, where it cannot run
+   * script: the frame carries no allow-scripts, and the app's own CSP
+   * (`script-src 'self'`) applies to srcdoc content, so two independent layers
+   * refuse it. Same file-name rule as `diagrams.open`.
+   */
+  'diagrams.read': { req: { projectId: string; file: string }; res: { html: string } }
   /** The cached MCP schema map, or null if unscanned. With `servers`, reads the
    *  combination's own scan doc (.switchboard/scans/<combo>.md); without, the
    *  legacy single db-schema.md. */
@@ -305,9 +332,21 @@ export interface InvokeMap {
   'mcp.recordScan': { req: { projectId: string; servers: string[] }; res: McpScan | null }
   /**
    * Run text in the project's session (a spec-kit command or a start-phase
-   * prompt), starting a session first if none is live. Returns its id.
+   * prompt), starting a session first if none is live.
+   *
+   * `background: true` sends the text to the project's BACKGROUND session (the
+   * one the Tests section and diagram generation already share) rather than the
+   * conversation. Every section dispatch sets it: a spec-kit phase, a cleanup
+   * command or a plugin install is long work whose output the developer reads
+   * afterwards, and queued into the chat it blocks whatever they were doing.
+   *
+   * The composer's own spec-edit flow deliberately does NOT set it. A developer
+   * who typed into the chat expects the answer in the chat.
    */
-  'specs.runInSession': { req: { projectId: string; text: string }; res: { sessionId: string } }
+  'specs.runInSession': {
+    req: { projectId: string; text: string; background?: boolean }
+    res: { sessionId: string }
+  }
   /** Eval loop (spec 002 US7): acceptance lines with their verdicts + ratings.
    *  Every mutation answers with the project's full list, newest first, so the
    *  view never has to merge a partial response. The check itself runs through
@@ -484,6 +523,14 @@ export interface InvokeMap {
   // User-authored allowed command (Allowed list tab): a Bash command-prefix rule.
   'rules.standing.add': { req: { projectId: string; pattern: string }; res: PermissionRule }
   /**
+   * Reword a composer message still queued behind the running turn, or withdraw it
+   * by sending empty text — the same convention `queue.edit` uses.
+   *
+   * Fails with NOT_FOUND once the turn has finished and the message has gone,
+   * which is a race the developer cannot see coming.
+   */
+  'sessions.editQueued': { req: { sessionId: string; eventId: string; text: string }; res: void }
+  /**
    * Risk classification and noise rules (PRODUCT.md Principle 3: the developer
    * owns the rules).
    *
@@ -494,14 +541,6 @@ export interface InvokeMap {
    * `remove` therefore means "delete" for a rule they wrote and "back to the
    * shipped default" for one they overrode — the same operation either way.
    */
-  /**
-   * Reword a composer message still queued behind the running turn, or withdraw it
-   * by sending empty text — the same convention `queue.edit` uses.
-   *
-   * Fails with NOT_FOUND once the turn has finished and the message has gone,
-   * which is a race the developer cannot see coming.
-   */
-  'sessions.editQueued': { req: { sessionId: string; eventId: string; text: string }; res: void }
   'rules.list': { req: void; res: RulesView }
   'rules.setDisabled': { req: { id: string; kind: RuleKind; disabled: boolean }; res: RulesView }
   /** null restores the shipped level. */

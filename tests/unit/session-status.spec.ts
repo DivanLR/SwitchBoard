@@ -18,7 +18,6 @@ function makeSession() {
   }
   const session = new HostedSession({
     sessionId: 's1',
-    projectId: 'p1',
     projectPath: '.',
     // Every session spawns in one resolved mode; 'auto' is the app default.
     mode: 'auto',

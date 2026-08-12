@@ -1,13 +1,11 @@
-// T017: mock session host for Playwright. `installMockHost` is injected into
-// the page via addInitScript BEFORE the renderer loads and implements the
-// full `window.switchboard` surface from src/shared/ipc-types.ts, plus a
+// T017: mock session host for Playwright, injected via addInitScript before the
+// renderer loads. Implements the full `window.switchboard` surface plus a
 // `window.__mock` test-driver API for scripting sessions and permissions.
-// The function must stay self-contained: it is serialised into the browser
-// context, so it may not reference imports at runtime. Anything it needs from
-// the real contract therefore arrives as scenario DATA, which is how the
-// settings shape below stays tied to the app's own defaults instead of being a
-// hand-copied duplicate that silently drifts.
-import { DEFAULT_SETTINGS, type Settings } from '../../src/shared/domain'
+// Must stay self-contained: it is serialised into the browser context, so it
+// cannot reference imports at runtime. Anything from the real contract instead
+// arrives as scenario DATA (e.g. settings below), keeping it tied to the app's
+// real defaults instead of a hand-copied duplicate that can drift.
+import { DEFAULT_SETTINGS, type DiagramEntry, type Settings } from '../../src/shared/domain'
 import { detectStacks, type AvailableSuites } from '../../src/shared/test-catalog'
 // Type-only, so nothing is referenced at runtime inside the serialised function.
 // This is what keeps the mock's method table honest: see invokeHandlers below.
@@ -30,6 +28,8 @@ export interface MockSessionSeed {
 }
 
 export interface MockProjectSeed {
+  /** Unsent composer text from a previous run, restored into the composer on open. */
+  drafts?: string[]
   id: string
   name: string
   path: string
@@ -52,26 +52,35 @@ export interface MockScenario {
    *  real defaults; override individual fields for a specific test. */
   settings: Settings
   /**
-   * What `evals.suites` answers. Built from the real catalog by the scenario, for
-   * the same reason `settings` is: the Tests section now takes its suite list from
-   * this answer, so a hand-written subset here silently hides suites the real app
-   * offers, and the tests would be asserting against the mock's imagination.
+   * What `evals.suites` answers, built from the real catalog for the same reason
+   * `settings` is: a hand-written subset here would hide suites the real app
+   * offers, so tests would assert against the mock's imagination.
    *
-   * Omit it only in a scenario that never opens the Tests section: the picker then
-   * has nothing to offer, which is the honest answer for a project with no stack.
+   * Omit only in a scenario that never opens the Tests section.
    */
   suites?: AvailableSuites[]
 }
 
 export interface MockDriver {
+  /** Unsent composer text from a previous run, restored on open. */
+  setDrafts: (projectId: string, texts: string[]) => void
   /** What the next native folder pick answers; null is the cancel case. */
   setNextFolderPick: (path: string | null) => void
   emitEvent: (sessionId: string, kind: string, payload: Record<string, unknown>) => string
+  /** Rewrites an event in place, as a streamed token does to a partial message.
+   *  The real host does this on every delta (UPDATABLE_KINDS), and it is the
+   *  only way to exercise anything that has to survive a mid-stream re-render. */
+  updateEvent: (sessionId: string, eventId: string, payload: Record<string, unknown>) => void
   setCommands: (
     projectId: string,
     commands: (string | { name: string; description?: string })[],
   ) => void
   endSession: (sessionId: string) => void
+  /** Simulates a start whose async run loop throws almost immediately: ends the
+   *  session with endReason 'crashed' and the given detail, exactly as the real
+   *  manager's handleExit / finaliseRow does — but *after* sessions.start already
+   *  resolved. */
+  crashSession: (sessionId: string, detail: string) => void
   setSpecKit: (projectId: string, state: Record<string, unknown>) => void
   /** Diff tab (specs/003-diff-tab): seeds what 'diff.list' answers for a
    *  project — there is no real git repo behind this in-browser mock. */
@@ -105,6 +114,9 @@ export interface MockDriver {
   /** Stand in for the main process reading a verification report off the session:
    *  finishes the running run with that report and pushes it. */
   reportVerifyResult: (projectId: string, status: string, report: unknown) => void
+  /** Stand in for the session finishing a diagram: the file now exists in the
+   *  project's docs/diagrams folder, exactly as if the plugin had written it. */
+  addDiagram: (projectId: string, entry: DiagramEntry) => void
   /** Finish the running API eval set the way the main process does: the app has
    *  made the calls, so the driver supplies the calls and the verdict. */
   reportApiResult: (
@@ -134,6 +146,8 @@ export interface MockDriver {
     }[]
     /** Every live plan-mode switch asked for, in order. */
     planModeChanges: { sessionId: string; enabled: boolean }[]
+    /** Every 'diagrams.open' call, in order, so a spec can assert which file it named. */
+    diagramOpens: { projectId: string; file: string }[]
   }
 }
 
@@ -188,13 +202,61 @@ export function installMockHost(scenario: MockScenario): void {
   let idCounter = 0
   const nextId = (prefix: string): string => `${prefix}-${++idCounter}`
 
-  // Diff tab (specs/003-diff-tab): seeded from the scenario, like mcpServers
-  // above, or set later via __mock.setDiff/setFileDiff — there is no real
-  // git repo behind this in-browser mock.
+  // Diff tab (specs/003-diff-tab) seed data; see setDiff/setFileDiff below for
+  // why there is no real git repo behind this in-browser mock.
   const diffByProject = new Map<string, AnyRecord>()
   const fileDiffByProject = new Map<string, AnyRecord>()
   for (const p of scenario.projects) {
     if (p.diff) diffByProject.set(p.id, p.diff)
+  }
+
+  // Diagrams section: the FILE is the record (src/shared/diagram.ts's own framing),
+  // so unlike every other per-project map above this one is seeded empty and grows
+  // only when a test says a file now exists, via __mock.addDiagram.
+  const diagramsByProject = new Map<string, DiagramEntry[]>()
+  // Names already handed out by 'diagrams.generate' this session, so a second
+  // request for the same subject does not collide with one whose file has not
+  // landed yet — diagramFileName's own taken-names guard, just fed from requests
+  // in flight rather than from disk.
+  const diagramRequestedFiles = new Map<string, Set<string>>()
+  const diagramOpens: { projectId: string; file: string }[] = []
+  /**
+   * Inlined from src/shared/diagram.ts (DIAGRAMS_DIR / diagramFileName /
+   * diagramPrompt): this host is serialised into the page (addInitScript), so it
+   * cannot import the shared module at runtime — the same constraint
+   * inbox.alwaysAllow's dangerous-command regex works around below.
+   */
+  const DIAGRAMS_DIR = 'docs/diagrams'
+  function pickDiagramFileName(description: string, taken: readonly string[]): string {
+    const slug =
+      description
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .split('-')
+        .filter(Boolean)
+        .slice(0, 6)
+        .join('-') || 'diagram'
+    const used = new Set(taken)
+    if (!used.has(`${slug}.html`)) return `${slug}.html`
+    // A second diagram of the same thing is a revision, not an overwrite.
+    for (let n = 2; n < 1000; n++) {
+      const candidate = `${slug}-${n}.html`
+      if (!used.has(candidate)) return candidate
+    }
+    return `${slug}-${Date.now()}.html`
+  }
+  function diagramPromptText(description: string, file: string): string {
+    return [
+      `Create a diagram: ${description}`,
+      '',
+      `Save it to ${DIAGRAMS_DIR}/${file}, creating the folder if it does not exist.`,
+      'Use the default editorial skin. Do not ask about brand colours, fonts or a',
+      'website to sample; generate the diagram now with the neutral defaults.',
+      'Choose the diagram type that fits the request.',
+      '',
+      `When it is written, reply with the one line: wrote ${DIAGRAMS_DIR}/${file}`,
+    ].join('\n')
   }
 
   const sessions = new Map<string, MockSession>()
@@ -296,18 +358,12 @@ export function installMockHost(scenario: MockScenario): void {
     },
   ]
   /**
-   * The rules editor's data.
-   *
-   * A small representative set rather than the app's real shipped defaults, which
-   * is the one place this file cannot follow its own no-hand-copied-data rule: the
-   * defaults and the merge live in src/main, and tsconfig.web.json deliberately
-   * keeps main-process code out of this project.
-   *
-   * The trade is sound because the split is clean. Which rules ship, and how an
-   * override merges over them, is covered against the real code by
-   * tests/unit/rule-prefs.spec.ts and rule-prefs-repo.spec.ts. What the e2e specs
-   * need from here is only that the editor lists rows, toggles them, and adds and
-   * removes a rule — behaviour that does not depend on which rules are real.
+   * The rules editor's data: a small representative set, not the app's real
+   * shipped defaults. This is the one place this file breaks its own
+   * no-hand-copied-data rule, because the real defaults and merge logic live in
+   * src/main (out of reach per tsconfig.web.json) and are covered against the
+   * real code by rule-prefs.spec.ts / rule-prefs-repo.spec.ts. The e2e specs
+   * only need the editor to list, toggle, add and remove rows.
    */
   const rules: { risk: AnyRecord[]; swallow: AnyRecord[] } = {
     risk: [
@@ -539,7 +595,7 @@ export function installMockHost(scenario: MockScenario): void {
    * fixture to spell out fields no assertion reads, for no extra safety.
    */
   /**
-   * The Tests section's own session, mirroring SessionManager.testsSessionFor:
+   * The Tests section's own session, mirroring SessionManager.backgroundSessionFor:
    * reuse whatever session the newest verify or API run recorded while it is
    * still alive, otherwise start a NEW one. Deliberately never the chat session
    * — the whole point of the production change is that a run does not queue
@@ -579,7 +635,7 @@ export function installMockHost(scenario: MockScenario): void {
               session: listed[0] ? { ...listed[0] } : null,
             }
           })(),
-          drafts: [],
+          drafts: (draftsByProject.get(p.id) ?? []).map((text, i) => ({ id: String(i), projectId: p.id, text })),
         })),
       counters: counters(),
     }),
@@ -707,6 +763,39 @@ export function installMockHost(scenario: MockScenario): void {
       }
       return fileDiffByProject.get(`${String(req.projectId)}|${String(req.path)}`) ?? null
     },
+    // Reads the folder back off disk in the real host, so here it reads the
+    // closure map __mock.addDiagram writes to — newest file first, same as a
+    // directory listing sorted by mtime.
+    'diagrams.list': (req) => {
+      const list = diagramsByProject.get(String(req.projectId)) ?? []
+      return [...list].sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt))
+    },
+    // Chooses the name and dispatches the prompt; it does NOT create the file —
+    // in the real app the session's diagram-design plugin writes that, so a test
+    // supplies the finished file itself via __mock.addDiagram.
+    'diagrams.generate': async (req) => {
+      const projectId = String(req.projectId)
+      const description = String(req.description)
+      const requested = diagramRequestedFiles.get(projectId) ?? new Set<string>()
+      const taken = [...(diagramsByProject.get(projectId) ?? []).map((d) => d.file), ...requested]
+      const file = pickDiagramFileName(description, taken)
+      requested.add(file)
+      diagramRequestedFiles.set(projectId, requested)
+      // A BACKGROUND session, never the chat one — see testsSession above.
+      const session = await testsSession(projectId)
+      const text = diagramPromptText(description, file)
+      sends.push({ sessionId: session.id, text })
+      appendEvent(session.id, 'prompt', { text, pending: false })
+      return { sessionId: session.id, file }
+    },
+    'diagrams.open': (req) => {
+      diagramOpens.push({ projectId: String(req.projectId), file: String(req.file) })
+    },
+    // Enough of a document to prove the frame rendered THIS diagram and not
+    // another: the spec asserts on the file name inside the returned HTML.
+    'diagrams.read': (req) => ({
+      html: `<!doctype html><title>${String(req.file)}</title><body><svg role="img" aria-label="${String(req.file)}"><text x="4" y="16">${String(req.file)}</text></svg></body>`,
+    }),
     'specs.install': (req) => {
       const installed = {
         installed: true,
@@ -737,12 +826,17 @@ export function installMockHost(scenario: MockScenario): void {
       return row
     },
     'specs.runInSession': async (req) => {
-      let session = [...sessions.values()].find(
-        (s) => s.projectId === req.projectId && !s.endedAt,
-      )
+      // The `background` split is mirrored, not glossed over (see testsSession
+      // above): a section's work must land in the background session, a composer
+      // message in the conversation — so a test on `sends[].sessionId` can tell
+      // which happened.
+      const projectId = String(req.projectId)
+      let session = req.background
+        ? await testsSession(projectId)
+        : [...sessions.values()].find((s) => s.projectId === projectId && !s.endedAt)
       // sessions.start is async (it simulates spawn latency), so this must await
       // it — the un-awaited Promise used to be cast straight to a session.
-      if (!session) session = (await invokeHandlers['sessions.start']({ projectId: req.projectId })) as MockSession
+      if (!session) session = (await invokeHandlers['sessions.start']({ projectId })) as MockSession
       sends.push({ sessionId: session.id, text: String(req.text) })
       appendEvent(session.id, 'prompt', { text: String(req.text), pending: false })
       return { sessionId: session.id }
@@ -1047,9 +1141,7 @@ export function installMockHost(scenario: MockScenario): void {
       const list = verifyByProject.get(projectId) ?? []
       const at = list.findIndex((r) => r.id === req.runId)
       if (at < 0) throw { code: 'NOT_FOUND', message: 'Run not found' }
-      // Replaced, never mutated in place, for the reason reportVerifyResult below
-      // states: the real host rebuilds the run from its row, and mutating here
-      // hands the renderer an identity it already holds and hides a stale view.
+      // Replaced, never mutated in place — see reportVerifyResult below for why.
       if (list[at].status === 'running') {
         list[at] = {
           ...list[at],
@@ -1210,7 +1302,7 @@ export function installMockHost(scenario: MockScenario): void {
       if (!request) throw { code: 'NOT_FOUND', message: 'Not found' }
       // Mirrors @shared/domain isDangerousCommand — inlined because this host is
       // serialised into the page (addInitScript), so it can't call an import.
-      const dangerous = /\b(rm|rmdir|del|rd|format|mkfs|dd|sudo|doas)\b|Remove-Item|git\s+(push|reset\s+--hard|clean)\b/i
+      const dangerous = /\b(rm|rmdir|del|rd|mkfs|dd|sudo|doas)\b|\bformat\s+[a-z]:|Remove-Item|git\s+(push|reset\s+--hard|clean)\b/i
       if (
         request.type === 'plan_approval' ||
         request.toolName !== 'Bash' ||
@@ -1238,7 +1330,7 @@ export function installMockHost(scenario: MockScenario): void {
       // Pending-based: derive+insert the rule, then approve in one step.
       const request = pending.find((p) => p.id === req.requestId)
       if (!request) throw { code: 'NOT_FOUND', message: 'Not found' }
-      const dangerous = /\b(rm|rmdir|del|rd|format|mkfs|dd|sudo|doas)\b|Remove-Item|git\s+(push|reset\s+--hard|clean)\b/i
+      const dangerous = /\b(rm|rmdir|del|rd|mkfs|dd|sudo|doas)\b|\bformat\s+[a-z]:|Remove-Item|git\s+(push|reset\s+--hard|clean)\b/i
       if (
         request.type !== 'tool_permission' ||
         request.toolName !== 'Bash' ||
@@ -1274,12 +1366,17 @@ export function installMockHost(scenario: MockScenario): void {
       let approved = 0
       let skippedHighRisk = 0
       for (const item of group) {
-        if (item.risk === 'high' && item.type === 'tool_permission') {
+        // `includeHighRisk` was ignored here, so the mock skipped every high-risk
+        // item even after the developer confirmed the sweep — the exact opposite
+        // of FR-011, and the e2e suite was asserting that opposite as correct.
+        // Mirrors permission-broker.approveAllForProject.
+        const isHighRisk = item.risk === 'high' && item.type === 'tool_permission'
+        if (isHighRisk && !req.includeHighRisk) {
           skippedHighRisk += 1
-        } else {
-          decide(item.id, 'approve', false)
-          approved += 1
+          continue
         }
+        decide(item.id, 'approve', isHighRisk)
+        approved += 1
       }
       return { approved, skippedHighRisk }
     },
@@ -1422,12 +1519,21 @@ export function installMockHost(scenario: MockScenario): void {
 
   let floodTimer: number | null = null
   let nextFolderPick: string | null = null
+  // Unsent composer text a previous run left behind, per project. Seeded by a
+  // test; the app restores it into the composer on open.
+  const draftsByProject = new Map<string, string[]>(
+    scenario.projects.filter((p) => p.drafts?.length).map((p) => [p.id, p.drafts as string[]]),
+  )
 
   window.__mock = {
+    setDrafts: (projectId, texts) => {
+      draftsByProject.set(projectId, texts)
+    },
     setNextFolderPick: (path) => {
       nextFolderPick = path
     },
     emitEvent: (sessionId, kind, payload) => String(appendEvent(sessionId, kind, payload).id),
+    updateEvent: (sessionId, eventId, payload) => updateEvent(sessionId, eventId, payload),
     setCommands: (projectId, commands) => {
       // Mirrors the real host: a session's init message stores the commands AND
       // pushes them so a live composer picks them up without a project switch.
@@ -1467,6 +1573,14 @@ export function installMockHost(scenario: MockScenario): void {
         s.endedAt = now()
         s.endReason = 'stopped'
         setStatus(sessionId, 'done')
+      }
+    },
+    crashSession: (sessionId, detail) => {
+      const s = sessions.get(sessionId)
+      if (s) {
+        s.endedAt = now()
+        s.endReason = 'crashed'
+        setStatus(sessionId, 'error', detail)
       }
     },
     emitLines: (sessionId, lines) => {
@@ -1555,6 +1669,11 @@ export function installMockHost(scenario: MockScenario): void {
       verifyByProject.set(projectId, list)
       push('push.verifyChanged', { projectId, runs: [...list] })
     },
+    addDiagram: (projectId, entry) => {
+      const list = diagramsByProject.get(projectId) ?? []
+      list.push({ ...entry })
+      diagramsByProject.set(projectId, list)
+    },
     reportApiResult: (projectId, status, calls, note) => {
       const list = apiRunsByProject.get(projectId) ?? []
       const index = list.findIndex((r) => r.status === 'running')
@@ -1591,6 +1710,7 @@ export function installMockHost(scenario: MockScenario): void {
       decisions: [...decisionLog],
       starts: [...starts],
       planModeChanges: [...planModeChanges],
+      diagramOpens: [...diagramOpens],
     }),
   }
 }

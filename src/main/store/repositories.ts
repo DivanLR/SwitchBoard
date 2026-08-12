@@ -42,8 +42,6 @@ export function nowIso(): string {
   return new Date().toISOString()
 }
 
-// --- Row mapping helpers ---
-
 interface ProjectRow {
   id: string
   name: string
@@ -127,8 +125,6 @@ function toEvent(row: EventRow): SessionEvent {
 function toRequest(row: RequestRow): PermissionRequest {
   return { ...row, deliveryFailed: row.deliveryFailed === 1 }
 }
-
-// --- Repositories ---
 
 export class ProjectsRepo {
   constructor(private db: AppDatabase) {}
@@ -1227,6 +1223,54 @@ function hydrateApiRun(row: ApiRunRow): ApiEvalRun {
   }
 }
 
+/**
+ * What a diagram file cannot say about itself: who asked, and in what words.
+ *
+ * Deliberately not a store of diagrams. The files in docs/diagrams ARE the
+ * diagrams, and they are committed with the code, so a row here is metadata that
+ * may outlive its file (deleted from the repo) or never have one (the session
+ * failed). Both cases are ordinary and neither is cleaned up: the list is built
+ * from the folder, and a row with no file simply never joins.
+ */
+export class DiagramRequestsRepo {
+  constructor(private db: AppDatabase) {}
+
+  /** Recorded BEFORE the session is asked, so a crash mid-generation still
+   *  leaves the reason the file appeared. Re-requesting the same name overwrites,
+   *  because that is a regeneration of the same diagram. */
+  record(projectId: string, file: string, description: string, sessionId: string | null): void {
+    this.db
+      .prepare(
+        `INSERT INTO diagram_requests (projectId, file, sessionId, description, createdAt)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (projectId, file) DO UPDATE SET
+           sessionId = excluded.sessionId,
+           description = excluded.description,
+           createdAt = excluded.createdAt`,
+      )
+      .run(projectId, file, sessionId, description, nowIso())
+  }
+
+  /** The session the newest diagram was asked of, so a second request rejoins it
+   *  rather than starting another. Null when this project has asked for none. */
+  latestSessionFor(projectId: string): string | null {
+    const row = this.db
+      .prepare(
+        'SELECT sessionId FROM diagram_requests WHERE projectId = ? ORDER BY createdAt DESC LIMIT 1',
+      )
+      .get(projectId) as { sessionId: string | null } | undefined
+    return row?.sessionId ?? null
+  }
+
+  /** Keyed by file name, for joining onto whatever the folder actually holds. */
+  forProject(projectId: string): Map<string, { sessionId: string | null; description: string }> {
+    const rows = this.db
+      .prepare('SELECT file, sessionId, description FROM diagram_requests WHERE projectId = ?')
+      .all(projectId) as { file: string; sessionId: string | null; description: string }[]
+    return new Map(rows.map((r) => [r.file, { sessionId: r.sessionId, description: r.description }]))
+  }
+}
+
 export interface Repositories {
   projects: ProjectsRepo
   sessions: SessionsRepo
@@ -1243,6 +1287,7 @@ export interface Repositories {
   evals: EvalsRepo
   verifyRuns: VerifyRunsRepo
   apiRuns: ApiRunsRepo
+  diagramRequests: DiagramRequestsRepo
 }
 
 export function createRepositories(db: AppDatabase): Repositories {
@@ -1262,5 +1307,6 @@ export function createRepositories(db: AppDatabase): Repositories {
     evals: new EvalsRepo(db),
     verifyRuns: new VerifyRunsRepo(db),
     apiRuns: new ApiRunsRepo(db),
+    diagramRequests: new DiagramRequestsRepo(db),
   }
 }

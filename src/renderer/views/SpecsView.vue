@@ -1,9 +1,7 @@
 <script setup lang="ts">
 // Per-project specs view backed by GitHub Spec Kit — 1:1 with the design
-// (Switchboard.dc.html): spec chips, a spec card with status + progress, part
-// tabs (spec.md / plan.md / tasks.md / Clarify / Commands), the Commands tab
-// with SUGGESTED NEXT + ALL COMMANDS, and the SUGGEST AN EDIT bar. When Spec
-// Kit is not installed, an install button scaffolds it per-project.
+// (Switchboard.dc.html). When Spec Kit is not installed, an install button
+// scaffolds it per-project.
 import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
 import type { SpecPhase, SpecStatus } from '@shared/domain'
 import { SPEC_KIT_COMMANDS } from '@shared/command-catalog'
@@ -28,7 +26,7 @@ async function submitNewSpec(): Promise<void> {
   const desc = newSpecDesc.value.trim()
   if (!desc) return // empty Enter is a no-op, matching the disabled Create button
   showNewSpec.value = false
-  await specs.runInSession(props.projectId, `/speckit-specify ${desc}`)
+  await specs.runInSession(props.projectId, `/speckit-specify ${desc}`, true)
   emit('ran') // jump to the Session tab so the run is visible
 }
 
@@ -70,18 +68,18 @@ const speaking = ref(false)
 // turned into sentence breaks; a few common arrows become words.
 function speakable(md: string): string {
   return md
-    .replace(/```[\s\S]*?```/g, '. code block omitted. ') // fenced code
-    .replace(/`([^`]+)`/g, '$1') // inline code
-    .replace(/^\s{0,3}#{1,6}\s+/gm, '') // heading hashes
-    .replace(/\*\*([^*]+)\*\*/g, '$1') // bold
-    .replace(/\*([^*]+)\*/g, '$1') // italic
-    .replace(/^\s*\|.*\|\s*$/gm, '') // table rows
-    .replace(/^\s*[-*]\s+/gm, '') // bullet markers
+    .replace(/```[\s\S]*?```/g, '. code block omitted. ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/^\s*\|.*\|\s*$/gm, '')
+    .replace(/^\s*[-*]\s+/gm, '')
     .replace(/[→⇒]/g, ' to ')
     .replace(/[←⇐]/g, ' from ')
     .replace(/[✦✎⏺⎿■▊●◇✓✗⚖⧉↻▶]/g, ' ') // UI glyphs
     .replace(/[#*_`>|~]/g, ' ') // any stray markdown punctuation
-    .replace(/\s{2,}/g, ' ') // collapse whitespace
+    .replace(/\s{2,}/g, ' ')
     .trim()
 }
 
@@ -126,7 +124,7 @@ const part = ref<Part>('tasks')
 /** Send a stage command scoped to the selected spec (design: cmd + spec id). */
 function runCommand(command: string): void {
   const suffix = detail.value ? ` ${detail.value.id}` : ''
-  void specs.runInSession(props.projectId, `/${command}${suffix}`)
+  void specs.runInSession(props.projectId, `/${command}${suffix}`, true)
   emit('ran') // jump to the Session tab so the run is visible
 }
 

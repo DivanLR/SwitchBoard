@@ -204,8 +204,7 @@ export class MessageMapper {
         const event = this.sink.append('tool_activity', payload)
         if (block.id) {
           this.openToolUses.set(block.id, { eventId: event.id, payload })
-          // Remember agent invocations so a later task_started for the same id
-          // is recognised as a duplicate even after its tool_result closes it.
+          // Dedup guard for a later task_started (see seenAgentToolUses).
           if (block.name === 'Task' || block.name === 'Agent') this.seenAgentToolUses.add(block.id)
         }
       } else if (block.type === 'thinking' && typeof block.thinking === 'string') {

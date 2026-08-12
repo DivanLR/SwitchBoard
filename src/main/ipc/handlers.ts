@@ -2,9 +2,10 @@
 // invoke channel carries every method with a WireResult envelope so stable
 // error codes survive Electron's error serialisation. Push channels batch
 // stream events at >= 30 Hz flushes (SC-007).
-import { dialog, ipcMain, type BrowserWindow } from 'electron'
-import type { Session, SessionEvent } from '@shared/domain'
-import { canPassEval } from '@shared/domain'
+import { dialog, ipcMain, shell, type BrowserWindow } from 'electron'
+import type { DiagramEntry, Session, SessionEvent } from '@shared/domain'
+import { canPassEval, isDangerousCommand } from '@shared/domain'
+import { DIAGRAMS_DIR, diagramFileName, diagramPrompt } from '@shared/diagram'
 import type {
   Counters,
   InvokeMap,
@@ -29,7 +30,7 @@ import {
   suggestProjects,
 } from '@main/projects/discovery'
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import { detectStacks, stackById, stackEntries } from '@shared/test-catalog'
 import { attemptsPrompt, checkPrompt, judgePrompt } from '@main/evals/eval-dispatch'
 import { evidencePrompt, planSuites, verifyPrompt } from '@main/evals/verify-dispatch'
@@ -152,6 +153,29 @@ function toIpcError(error: unknown): IpcError {
   return { code: 'INTERNAL', message }
 }
 
+/**
+ * A diagram's absolute path, or a refusal.
+ *
+ * `file` crosses from the renderer, so it is checked twice: rejected outright if
+ * it carries a separator or a parent segment, then resolved and required to sit
+ * inside the project's own diagrams folder. Shared by open and read so the two
+ * cannot drift apart — a guard that only one caller uses is a guard waiting to
+ * be forgotten by the second.
+ */
+function diagramPath(repos: Repositories, projectId: string, file: string): string {
+  const project = repos.projects.byId(projectId)
+  if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
+  if (file.includes('/') || file.includes('\\') || file.includes('..')) {
+    throw { code: 'INVALID_PATH', message: 'Not a diagram file name' } satisfies IpcError
+  }
+  const dir = resolve(project.path, DIAGRAMS_DIR)
+  const target = resolve(dir, file)
+  if (target !== dir && !target.startsWith(dir + sep)) {
+    throw { code: 'INVALID_PATH', message: 'That file is outside the diagrams folder' } satisfies IpcError
+  }
+  return target
+}
+
 export function registerIpcHandlers(deps: HandlerDeps): void {
   const { repos, manager, broker, dbProjectId } = deps
 
@@ -197,8 +221,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'dialog.pickFolder': async () => {
       const opts = { title: 'Choose a project folder', properties: ['openDirectory' as const] }
       const parent = deps.getWindow()
-      // Parented so the dialogue is modal and cannot be lost behind the window.
-      // The unparented overload is the fallback for the window having gone.
+      // Unparented overload is the fallback if the window is gone.
       const picked = parent
         ? await dialog.showOpenDialog(parent, opts)
         : await dialog.showOpenDialog(opts)
@@ -314,6 +337,67 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       }
       return readFileDiff(project.path, req.path)
     },
+    // The folder IS the list (see DiagramRequestsRepo): a missing docs/diagrams is
+    // a project that has generated nothing, not a failure. Requests join onto
+    // whatever mtime/readdir found, so a hand-dropped or pre-app file still lists,
+    // with nulls for what the app never learned.
+    'diagrams.list': (req) => {
+      const project = repos.projects.byId(req.projectId)
+      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
+      const dir = join(project.path, DIAGRAMS_DIR)
+      if (!existsSync(dir)) return []
+      const requests = repos.diagramRequests.forProject(req.projectId)
+      return readdirSync(dir)
+        .filter((file) => file.toLowerCase().endsWith('.html'))
+        .map((file): DiagramEntry => {
+          const stat = statSync(join(dir, file))
+          const known = requests.get(file)
+          return {
+            file,
+            path: `${DIAGRAMS_DIR}/${file}`,
+            description: known?.description ?? null,
+            sessionId: known?.sessionId ?? null,
+            modifiedAt: stat.mtime.toISOString(),
+            bytes: stat.size,
+          }
+        })
+        .sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt))
+    },
+    'diagrams.generate': async (req) => {
+      const project = repos.projects.byId(req.projectId)
+      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
+      const dir = join(project.path, DIAGRAMS_DIR)
+      const taken = existsSync(dir) ? readdirSync(dir) : []
+      const file = diagramFileName(req.description, taken)
+      // Never the chat session. Drawing a diagram is a long turn whose output the
+      // developer wants to LOOK at, not watch arrive, and queued into the
+      // conversation it would block whatever they were actually doing. Same
+      // reasoning, and the same session, as a verify run.
+      const session = await manager.backgroundSessionFor(req.projectId)
+      // Recorded before the prompt is sent, so a crash mid-generation still leaves
+      // the reason the file appeared (see DiagramRequestsRepo.record).
+      repos.diagramRequests.record(req.projectId, file, req.description, session.id)
+      manager.sendMessage(session.id, diagramPrompt(req.description, file))
+      return { sessionId: session.id, file }
+    },
+    // Trust boundary: `file` arrives from the renderer, so it is proven to sit
+    // directly inside the project's own diagrams folder before anything opens it,
+    // rather than trusted to already be a bare name.
+    'diagrams.open': async (req) => {
+      const openError = await shell.openPath(diagramPath(repos, req.projectId, req.file))
+      if (openError) throw { code: 'INVALID_PATH', message: openError } satisfies IpcError
+    },
+    'diagrams.read': (req) => {
+      const target = diagramPath(repos, req.projectId, req.file)
+      // A diagram is one page of inline SVG. A file this size is not one, and
+      // reading it would push megabytes of string across the bridge to render
+      // something no one asked to see.
+      const MAX_BYTES = 8 * 1024 * 1024
+      if (!existsSync(target) || statSync(target).size > MAX_BYTES) {
+        throw { code: 'NOT_FOUND', message: 'That diagram is missing or too large to show' } satisfies IpcError
+      }
+      return { html: readFileSync(target, 'utf8') }
+    },
     'mcp.readSchema': (req) => {
       const project = repos.projects.byId(req.projectId)
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
@@ -336,8 +420,10 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       return repos.mcpScans.upsert(req.projectId, comboKey(req.servers), req.servers, scannedAt)
     },
     'specs.runInSession': async (req) => {
-      let session = repos.sessions.activeForProject(req.projectId)
-      if (!session) session = await manager.startSession(req.projectId)
+      const session = req.background
+        ? await manager.backgroundSessionFor(req.projectId)
+        : (repos.sessions.activeForProject(req.projectId) ??
+          (await manager.startSession(req.projectId)))
       manager.sendMessage(session.id, req.text)
       return { sessionId: session.id }
     },
@@ -427,7 +513,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       // Same dedicated session the verification runs use: a check or a judge pass
       // is Tests-section work, and Tests-section work does not queue behind the
       // developer's conversation.
-      const session = await manager.testsSessionFor(req.projectId)
+      const session = await manager.backgroundSessionFor(req.projectId)
       // Re-running a check clears the previous outcome, so a stale PASS can never
       // stand in for the run that is only just starting.
       if (req.kind === 'check') repos.evals.update(req.id, { checkStatus: 'not_run' })
@@ -447,7 +533,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       // The project's own verify session, not whichever session happens to be
       // open. A run is a long turn; in the chat session it blocks the
       // conversation for its whole duration. See SessionManager.verifySessionFor.
-      const session = await manager.testsSessionFor(req.projectId)
+      const session = await manager.backgroundSessionFor(req.projectId)
       // A bypass session runs in the sandbox container, which ships node (plus
       // .NET for a .NET project) and nothing else — the rest are named as
       // skipped up front rather than attempted and reported as failures of the
@@ -481,10 +567,6 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         requested: plan.map((p) => p.suite.id),
       })
       manager.watchVerifyReport(session.id, run.id, 'suites')
-      // Database MCP servers the session can actually reach right now: named in
-      // settings AND reporting connected on this session. An API suite uses them
-      // to draw real identifiers, so a name that is configured but not connected
-      // must not be offered — the session would query a server that is not there.
       // Database MCP servers the run can actually reach: named in settings AND
       // reporting connected on this session. A name that is configured but absent
       // must not be offered, or the session queries a server that is not there.
@@ -509,7 +591,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       // in its context. Otherwise it takes a fresh verify session like any run.
       const ran = run.sessionId ? repos.sessions.byId(run.sessionId) : undefined
       const session =
-        ran && !ran.endedAt ? ran : await manager.testsSessionFor(req.projectId)
+        ran && !ran.endedAt ? ran : await manager.backgroundSessionFor(req.projectId)
       // The acceptance lines still waiting on a verdict say what the evidence has
       // to show; without any, the session works from the diff alone.
       const hints = repos.evals
@@ -593,8 +675,8 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       })
       if ('error' in host) throw { code: 'INVALID_PATH', message: host.error } satisfies IpcError
       // The Tests section's own session, shared with verification runs. See
-      // SessionManager.testsSessionFor.
-      const session = await manager.testsSessionFor(req.projectId)
+      // SessionManager.backgroundSessionFor.
+      const session = await manager.backgroundSessionFor(req.projectId)
       const run = repos.apiRuns.start({
         projectId: req.projectId,
         baseUrl: host.baseUrl,
@@ -782,6 +864,16 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'rules.standing.add': (req) => {
       const pattern = req.pattern.trim()
       if (!pattern) throw { code: 'INVALID_PATH', message: 'Enter a command' } satisfies IpcError
+      // The same refusal the broker applies when a rule is created from an
+      // approval. Three places write standing rules and only two enforced this,
+      // so the box in Settings could grant `rm -rf` or `git push --force` a
+      // permanent auto-approval that the inbox itself would never create.
+      if (isDangerousCommand(pattern)) {
+        throw {
+          code: 'INVALID_PATH',
+          message: `"${pattern}" is destructive, so it cannot be always-allowed. Approve it once, each time, from the inbox.`,
+        } satisfies IpcError
+      }
       return repos.standingRules.insert({
         projectId: req.projectId,
         toolName: 'Bash',

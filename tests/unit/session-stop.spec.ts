@@ -20,7 +20,6 @@ function makeSession() {
     sessionId: 's1',
     // Every session spawns in one resolved mode; 'auto' is the app default.
     mode: 'auto',
-    projectId: 'p1',
     projectPath: '.',
     sink,
     gate: (async () => ({ behavior: 'allow', updatedInput: {} })) as never,

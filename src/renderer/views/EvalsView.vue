@@ -34,16 +34,10 @@ const meanRating = computed(() =>
 )
 
 /**
- * Acceptance pass rate: the share of decided lines that passed.
- *
- * This is the honest BDD figure this section can produce. An acceptance line is a
- * given/when/then written before the work, and a verdict is recorded against it
- * once, so the fraction that hold is a real measurement rather than a derived one.
- *
- * The denominator is DECIDED lines, not all lines, for the same reason meanRating
- * excludes unrated rows: a line nobody has judged yet is not a failure, and
- * counting it as one would make the figure fall every time work was added — the
- * opposite of what it is for. With nothing decided it reads as unmeasured, per
+ * Acceptance pass rate: the share of DECIDED lines that passed, not all lines —
+ * for the same reason meanRating excludes unrated rows. A line nobody has judged
+ * yet is not a failure, and counting it as one would make the figure fall every
+ * time work was added. With nothing decided it reads as unmeasured, per
  * PRODUCT.md principle 2.
  */
 const decided = computed(() => runs.value.filter((r) => r.verdict !== 'pending'))
@@ -151,7 +145,6 @@ const shortDate = (iso: string): string =>
     </div>
     <div v-if="evals.error" class="err" data-testid="eval-error">{{ evals.error }}</div>
 
-    <!-- What this project can be tested with, from its own tooling. -->
     <div v-if="showSuites" class="suites" data-testid="eval-suites">
       <div v-if="suites.length === 0" class="empty">
         No known stack detected in this project's root — write the check by hand above.
@@ -524,7 +517,6 @@ const shortDate = (iso: string): string =>
   cursor: not-allowed;
 }
 
-/* Suites the project's own tooling provides (API / unit / UI / coverage). */
 .suites {
   max-width: 840px;
   margin-bottom: 14px;

@@ -77,3 +77,33 @@ test('Ctrl+C only stops when the composer is focused, and confirms first', async
   await expect(page.getByTestId('stop-confirm')).toHaveCount(0)
   expect(await page.evaluate(() => window.__mock.state().interrupts.length)).toBe(1)
 })
+
+// A summary written BEFORE any background work started is not interim noise, and
+// hiding it made a summary the developer had been reading disappear. The watcher
+// re-scanned the whole event list on every tick, so the first background task to
+// start retro-marked every summary already in the session, permanently.
+test('background work hides only the summaries that arrive during it', async ({ page }) => {
+  await page.evaluate(() => {
+    window.__mock.emitEvent('s-alpha', 'summary', { text: 'Earlier summary, before any background work' })
+  })
+  await expect(page.getByTestId('stream')).toContainText('Earlier summary')
+
+  // Background work starts, and posts its own interim summary.
+  await page.evaluate(() => {
+    window.__mock.setBackgroundTasks('s-alpha', [{ taskId: 't1', description: 'deep research' }])
+    window.__mock.emitEvent('s-alpha', 'summary', { text: 'Interim chatter while researching' })
+  })
+  await expect(page.getByTestId('stream')).not.toContainText('Interim chatter')
+
+  // The earlier one is still there. This is the regression: it used to vanish.
+  await expect(page.getByTestId('stream')).toContainText('Earlier summary')
+
+  // And it stays after the work drains, along with the real closing summary.
+  await page.evaluate(() => {
+    window.__mock.setBackgroundTasks('s-alpha', [])
+    window.__mock.emitEvent('s-alpha', 'summary', { text: 'Final consolidated summary' })
+  })
+  await expect(page.getByTestId('stream')).toContainText('Final consolidated summary')
+  await expect(page.getByTestId('stream')).toContainText('Earlier summary')
+  await expect(page.getByTestId('stream')).not.toContainText('Interim chatter')
+})

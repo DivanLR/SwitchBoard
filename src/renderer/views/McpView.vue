@@ -127,13 +127,10 @@ const scanned = computed(() => schemaDoc.value !== null)
 // Main-loop events only — subagent internals stay folded into the parent stream,
 // exactly like the session view.
 /**
- * The DB chat renders the last MAX_RENDER events, not the whole history.
- *
- * SessionView caps its stream for exactly this reason and says so; this view was
- * built from the same store and inherited none of it, so every event the session
- * had ever produced stayed mounted. A schema scan over a large database is one of
- * the longest-running things this app does, and it is precisely the case that
- * accumulates events.
+ * The DB chat renders the last MAX_RENDER events, not the whole history — this
+ * view shares SessionView's store but had none of its capping, so every event a
+ * scan produced stayed mounted, and a schema scan is the longest-running thing
+ * this app does.
  *
  * ponytail: a plain tail slice, no paging control, because unlike the session
  * stream this view has no "show earlier" affordance to hang one on. Add paging
@@ -166,13 +163,12 @@ watch([() => props.project.id, currentKey], () => void loadSchema(), { immediate
 // The combination a running scan was started for (active set may change mid-scan).
 let scanningCombo: string[] = []
 
-// A scan finishes when the session returns to idle — record the combination in
-// the history (main verifies its doc landed) and re-read the doc. recordScan
-// returns null until the doc actually exists, so stay ARMED across an idle blip
-// that is not real completion (e.g. the session pausing on a permission prompt
-// to write the doc, which flips working→false before the file is written).
-// Clearing `scanning` only on a real record avoids the "scanned but shows never
-// scanned" bug where a mid-scan permission pause consumed the flag too early.
+// A scan finishes when the session returns to idle: record the combination
+// (main verifies its doc landed) and re-read it. recordScan returns null until
+// the doc exists, so stay ARMED across an idle blip that isn't real completion
+// (e.g. a permission-prompt pause that flips working→false before the file is
+// written) — clearing `scanning` only on a real record avoids a "scanned but
+// shows never scanned" regression from a mid-scan pause consuming the flag early.
 // ponytail: if the agent never writes the doc at the expected path the spinner
 // stays until the next scan/combo change — acceptable vs. recording a phantom scan.
 watch(working, (now, was) => {
@@ -282,7 +278,6 @@ function answer(eventId: string, choice: string): void {
 
 <template>
   <div class="mcp-view" data-testid="mcp-view">
-    <!-- Header -->
     <header class="head">
       <div class="head-row">
         <span class="db-ico">⛁</span>
@@ -383,7 +378,6 @@ function answer(eventId: string, choice: string): void {
       </button>
     </div>
 
-    <!-- No schema yet: prompt a scan -->
     <div v-if="showEmpty" class="empty" data-testid="mcp-empty">
       <div class="empty-ico">⛁</div>
       <template v-if="!liveSession">
@@ -417,7 +411,6 @@ function answer(eventId: string, choice: string): void {
       <div v-if="sessionError" class="empty-hint mono">{{ sessionError }}</div>
     </div>
 
-    <!-- db-schema.md -->
     <div v-else-if="subtab === 'md'" class="doc" data-testid="mcp-doc">
       <div class="doc-head mono">
         <span class="doc-title mono">db-schema.md</span>
@@ -430,7 +423,6 @@ function answer(eventId: string, choice: string): void {
       <MarkdownText :text="schemaDoc ?? ''" />
     </div>
 
-    <!-- Chat / scan stream -->
     <div v-else ref="streamEl" class="stream" data-testid="mcp-stream">
       <div class="stream-inner">
         <div
@@ -554,7 +546,6 @@ function answer(eventId: string, choice: string): void {
   color: var(--text-faint);
 }
 
-/* Combined MCP servers: a chip per designated server with its live status. */
 .mcp-servers {
   display: flex;
   flex-wrap: wrap;
@@ -598,7 +589,6 @@ function answer(eventId: string, choice: string): void {
   border-radius: var(--rp);
 }
 
-/* Active combination line: combo name + scan freshness + scan button. */
 .combo-row {
   display: flex;
   align-items: center;
@@ -624,7 +614,6 @@ function answer(eventId: string, choice: string): void {
   color: var(--amber);
 }
 
-/* Scanned-combination history: one chip per combination ever scanned. */
 .combo-history {
   display: flex;
   align-items: center;

@@ -31,7 +31,6 @@ function makeSession(mode: ModelMode = 'auto') {
     sessionId: 's1',
     // Every session spawns in one resolved mode; 'auto' is the app default.
     mode: 'auto',
-    projectId: 'p1',
     projectPath: '.',
     mainModel: mainLoopModel(mode, routing),
     strongModel: routing.intelligentModel,

@@ -16,12 +16,10 @@ test('sidebar shows name, branch, status dot and a ticking timer (FR-003/004)', 
   await expect(alpha).toContainText('alpha')
   await expect(page.getByTestId('status-badge-alpha')).toHaveAttribute('data-status', 'working')
 
-  // The branch belongs to the rows that are DOING something, not only to the one
-  // you are looking at. Both of these have a live session, so both stay expanded
-  // and selecting one does not move the branch off the other. The rule this
-  // replaces was selected-only, which collapsed a project working away in the
-  // background the moment you looked at another one — the board's busiest rows
-  // were the least legible. Changed on the owner's direction, 2026-08-05.
+  // The branch belongs to every row with a live session, not just the selected
+  // one — the old selected-only rule collapsed a background project's branch the
+  // moment you looked elsewhere, so the busiest rows were the least legible.
+  // Changed on the owner's direction, 2026-08-05.
   await expect(alpha).toContainText('main')
   await expect(beta).toContainText('feature/x')
   await beta.click()

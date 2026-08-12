@@ -1,17 +1,14 @@
-// The real application: real main process, real CommonJS preload, real
-// contextBridge, real production renderer bundle. No mock host.
+// The real application: real main process, real preload, real contextBridge,
+// real production renderer bundle. No mock host.
 //
-// This exists for one reason. The Tests section's Run verification button failed
-// with "An object could not be cloned", and every other test in this suite runs
-// against a mock `window.switchboard`. A mock can be made to accept a request the
-// real contextBridge rejects, so only the real stack can prove the fix. The two
-// assertions here are deliberately paired: that real Electron genuinely rejects
-// the unguarded shape (so the bug was real and the guard is not superstition),
-// and that the button's own path now crosses the same boundary intact.
+// Exists because Run verification failed with "An object could not be cloned"
+// and every other spec here mocks `window.switchboard`, which can accept what
+// the real contextBridge rejects. The two assertions below are paired: real
+// Electron genuinely rejects the unguarded shape, and the button's own path
+// now crosses the same boundary intact.
 //
-// It runs against out/, so `npm run build` must have happened. Its own config
-// (playwright.real.config.ts) keeps it out of the renderer-only suite, which has
-// a dev-server webServer this test neither needs nor wants.
+// Runs against out/ (`npm run build` first); playwright.real.config.ts keeps
+// it out of the renderer-only suite and its dev-server webServer.
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test'
 import { rmSync } from 'node:fs'
 import { seedRealApp, type SeededApp } from './seed-real-app'
@@ -28,15 +25,12 @@ test.beforeAll(async () => {
       ...process.env,
       NODE_ENV: 'production',
       // Point HOME at the throwaway tree so resolveClaudeExecutable finds no CLI.
-      //
-      // This matters more than it looks. reconcileOnStartup marks every session
-      // row ended before the window paints, so the seeded session is NOT reused:
-      // clicking Run verification would spawn a real Claude Code session, spend
-      // real tokens, and leave it running against a temp directory. With no CLI
-      // resolvable, startSession fails fast with its install message instead —
-      // which is exactly the discriminator this suite needs, since a complaint
-      // about the CLI can only be reached after the request has crossed the
-      // bridge and run through the real handler.
+      // This matters: reconcileOnStartup ends the seeded session before the window
+      // paints, so without this, Run verification would spawn a REAL Claude Code
+      // session and spend real tokens. With no CLI resolvable, startSession fails
+      // fast with its install message instead — exactly the discriminator this
+      // suite needs, since that complaint is only reachable after crossing the
+      // real bridge and handler.
       USERPROFILE: seed.userDataDir,
       HOME: seed.userDataDir,
     },
@@ -196,15 +190,14 @@ test('a second sidebar group can be created, and both persist', async () => {
   expect(names).toEqual(['Work', 'Clients'])
 })
 
-// The two flows behind "I cannot create multiple groups", both reproduced against
-// the real store before they were fixed.
+// The two flows behind "I cannot create multiple groups", both reproduced
+// against the real store before they were fixed.
 //
-// Every group edit is read-modify-write on ONE whole-array setting, and the array
-// the renderer reads only changed once the IPC round trip came back. So a second
-// edit that started while the first was still in flight rebuilt the array from a
-// copy the first edit was missing from, and the last write won. On top of that,
-// every new group was called "New group", so a second one was indistinguishable
-// from the first even when it did persist.
+// Every group edit is read-modify-write on ONE whole-array setting, read only
+// once the IPC round trip returns. A second edit starting while the first was
+// still in flight rebuilt from a copy missing the first edit, so the last write
+// won — compounded by every new group being called "New group", making a second
+// one indistinguishable even when it did persist.
 const groupNames = (): Promise<string[]> =>
   page.evaluate(async () => {
     const settings = await window.switchboard.invoke('settings.get', undefined)

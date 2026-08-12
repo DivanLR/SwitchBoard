@@ -1,6 +1,6 @@
 {
   "name": "terminal-switchboard",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "description": "Switchboard: one desktop window hosting every Claude Code session, with a central permission inbox, clean output views, and per-project context.",
   "private": true,
   "type": "module",
@@ -21,7 +21,8 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:real": "npm run build && playwright test --config playwright.real.config.ts",
-    "prune": "tsx src/main/store/prune-cli.ts"
+    "prune": "tsx src/main/store/prune-cli.ts",
+    "verify-release": "tsx scripts/verify-release.ts"
   },
   "author": "Haefele Software",
   "license": "UNLICENSED",

@@ -119,3 +119,24 @@ test('commands only suggest for a slash token, never for plain prose', async ({ 
   await input.fill('src/main')
   await expect(page.getByTestId('suggest-list')).toHaveCount(0)
 })
+
+// A command that is a literal prefix of its siblings (/ponytail has five) used to
+// re-ghost the instant it was completed, painting a dim grey tail with no further
+// typing. It reads as blank space because .composer-input.is-command makes the
+// real text transparent, leaving the low-contrast mirror as the only thing drawn.
+test('completing a command does not leave a ghost tail behind it', async ({ page }) => {
+  await page.evaluate(() =>
+    window.__mock.setCommands('p-alpha', ['ponytail', 'ponytail-audit', 'ponytail-review']),
+  )
+  const input = page.getByTestId('composer-input')
+  await input.click()
+  await input.fill('/ponyt')
+  // The ghost offers the completion, which is the feature working.
+  await expect(page.getByTestId('ghost-suggestion')).not.toHaveText('')
+
+  // Accept it. Nothing should be suggested afterwards, even though two siblings
+  // still start with exactly this text.
+  await input.press('Tab')
+  await expect(input).toHaveValue('/ponytail')
+  await expect(page.getByTestId('ghost-suggestion')).toHaveText('')
+})

@@ -47,8 +47,8 @@ const LEVEL_INSTRUCTIONS: Record<TerseLevel, string> = {
     HEADER +
     'Level: TERSE (caveman). Compress prose hard. Telegraphic style: drop articles ' +
     '("the", "a", "an"), drop filler and hedging, drop pleasantries, never restate the ' +
-    'question, no preamble, no closing summary unless asked. Use sentence fragments and ' +
-    'bullet points, not full sentences. Conclusion first, then only load-bearing detail. ' +
+    'question, no preamble. Use sentence fragments and bullet points, not full sentences. ' +
+    'Conclusion first, then only load-bearing detail. ' +
     'Aim for well under half the words you would normally use. ' +
     PRESERVE_CLAUSE +
     REINFORCE,
@@ -76,25 +76,28 @@ export function terseSystemPromptAppend(options: {
 // the global always-on plugin: action-first, numbered, no preamble. Gated on the
 // SAME opt-in as that plugin, the flag file `$CLAUDE_CONFIG_DIR/.i-have-adhd-always`
 // (default `~/.claude`), so one switch governs both.
+//
+// Reuses terse's HEADER and PRESERVE_CLAUSE rather than restating either: this can
+// fire alongside terse mode, and two differently-worded "this overrides everything"
+// headers in one system prompt dilute each other rather than reinforcing.
 
 const ADHD_APPEND =
-  '## MANDATORY OUTPUT STYLE — ADHD READER. THIS OVERRIDES DEFAULT VERBOSITY.\n' +
-  'A hard constraint on every response this session, including the first. Shape ' +
-  'each reply so it can be acted on:\n' +
+  HEADER +
+  'Shape each reply so it can be acted on:\n' +
   '1. Lead with the answer or next action: command, path, or snippet first.\n' +
-  '2. Number multi-step work; one bounded action per step.\n' +
+  '2. Number multi-step work; state which step this is (e.g. "step 3 of 5"), one ' +
+  'bounded action per step.\n' +
   '3. End with one next action doable in under two minutes.\n' +
   '4. Finish the current issue before raising a new one.\n' +
-  '5. Restate progress each turn ("step 3 of 5 done").\n' +
-  '6. Give time estimates in concrete units, never "a bit".\n' +
-  '7. After a change, show what now works.\n' +
-  '8. Errors: state location, cause, and fix. No drama.\n' +
-  '9. Cap lists at 5 items; rank rather than pad.\n' +
-  '10. No preamble, no recaps, no closers.\n' +
+  '5. Give time estimates in concrete units, never "a bit".\n' +
+  '6. After a change, show what now works.\n' +
+  '7. Errors: state location, cause, and fix. No drama.\n' +
+  '8. Cap lists at 5 items; rank rather than pad.\n' +
+  '9. No preamble, no recaps, no closers.\n' +
   'Exceptions: explain fully when asked to explain; confirm before destructive ' +
   'actions; after three failed fixes, stop and name the doubtful assumption; if ' +
-  'the request is ambiguous, ask one short question. Never trade a required step, ' +
-  'code, command, path, or error text for brevity — reproduce those exactly.'
+  'the request is ambiguous, ask one short question. ' +
+  PRESERVE_CLAUSE
 
 // --- Heavy subagent mode ---
 // One thread is the wrong shape for work that decomposes: a five-file audit is
@@ -121,22 +124,18 @@ const HEAVY_SUBAGENTS_APPEND =
   '## WORK SHAPE — DIVIDE AND CONQUER. THIS OVERRIDES YOUR DEFAULT TENDENCY TO WORK ALONE.\n' +
   'This session is configured for heavy subagent use, and that is a hard directive for ' +
   'every turn, not a hint. Use as many dynamic subagents as the work allows, split the ' +
-  'work between them, and get it done as fast as parallelism permits. A single thread ' +
-  'grinding through a list is the failure this setting exists to prevent.\n' +
+  'work between them, and get it done as fast as parallelism permits.\n' +
   '1. Before starting any non-trivial work, decompose it and NAME the parts. Anything ' +
   "that does not need another part's result runs NOW, not next.\n" +
   '2. Dispatch every independent part in ONE batch so they run concurrently. Two ' +
   'sequential dispatches of one agent each is the exact failure mode to avoid.\n' +
   '3. Scale the fleet to the work, not to your comfort. A broad audit, a multi-file ' +
   'refactor, a sweep across call sites, or research with several angles each deserve ' +
-  'as many agents as there are independent parts. If you find yourself dispatching ' +
-  'one agent, ask what the other four are.\n' +
+  'as many agents as there are independent parts.\n' +
   '4. Give each agent a bounded task, the context it needs, and the exact shape of ' +
   'the result you want back, so nothing is re-run over a misunderstanding.\n' +
   '5. Verify in parallel too: a finding worth acting on is worth an independent agent ' +
   'trying to refute it.\n' +
-  '6. Keep your own turns for planning, integrating and the genuinely hard part. Do ' +
-  'not read a large file wholesale when an agent can extract the part that matters.\n' +
   'The ONLY work exempt from this is work that is a single action: one edit to one ' +
   'file, one command, one lookup, or a chain where every step literally needs the ' +
   'previous step\'s output. "It would be quicker to just do it" is not an exemption — ' +
@@ -176,6 +175,8 @@ export function heavySubagentModelMode(enabled: boolean, chosen: ModelMode): Mod
 export function sandboxSystemPromptAppend(
   mounts: readonly { container: string }[] = [],
   gitNote: string | null = null,
+  /** True when this project's node_modules is a container-private volume. */
+  nodeModulesVolume = false,
 ): string | null {
   if (mounts.length === 0) return null
   const refs = mounts.filter((m) => m.container !== '/workspace').map((m) => m.container)
@@ -196,6 +197,14 @@ export function sandboxSystemPromptAppend(
       : '- No referenced folders are mounted. REFS chips added after the session started only ' +
         'mount from the next session, so ask for a restart rather than a clone.\n') +
     (gitNote ? `- Git: ${gitNote}\n` : '') +
+    (nodeModulesVolume
+      ? '- `/workspace/node_modules` is a volume of THIS session, not the host\'s folder and not ' +
+        'shared with any other session. The host installed its dependencies on Windows, and ' +
+        'those binaries cannot run here. If a command fails on a missing module, run `npm ci` ' +
+        '(or `npm install`) once; the download cache is shared, so it is faster than it looks. ' +
+        'Doing so is SAFE: it cannot disturb the host checkout, and no other session is ' +
+        'installing into the same folder.\n'
+      : '') +
     'A path in the developer\'s message has already been translated to its container path, so use ' +
     'it as given.'
   )
@@ -288,8 +297,8 @@ export function modesSystemPromptAppend(mode: ModelMode): string {
     '`worker` (cheap model, parallel-safe executor).\n'
   const advisor =
     'SCOPED WORK (single file/feature, mechanical turns): implement directly yourself. ' +
-    'Consult `advisor` at most 3 times per task, only at decision points — the approach before ' +
-    'a non-trivial change, after two failed attempts, or a final review. Follow its guidance.\n'
+    "Consult `advisor` at the decision points its own description names, and follow its " +
+    'guidance.\n'
   const orchestrator =
     'BROAD WORK (multi-step goals, many files, research/audit/migration): act as the ' +
     'orchestrator — plan first, split the goal into chunks with explicit inputs and expected ' +

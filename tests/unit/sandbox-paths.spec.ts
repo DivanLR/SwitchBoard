@@ -6,8 +6,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { gitNotice, refMounts, sandboxMemoryArg, toContainerPaths } from '@main/sessions/docker-sandbox'
+import { gitNotice, homeVolumeFor, refMounts, sandboxMemoryArg, toContainerPaths } from '@main/sessions/docker-sandbox'
 import { sandboxSystemPromptAppend } from '@main/sessions/session-shaping'
+import { explainExit } from '@main/sessions/session'
 import {
   needsBrowser,
   sandboxTools,
@@ -206,6 +207,31 @@ describe('sandboxMemoryArg', () => {
   })
 })
 
+// Two containerised sessions of the SAME project used to share one Docker home
+// volume (keyed by projectId) and collide on the CLI's own storage key, which is
+// derived from cwd alone (always /workspace inside the container) — confirmed to
+// let them read each other's transcripts. Keying the volume to the session itself
+// removes that collision; resume is the one case that must deliberately bridge to
+// an ancestor's volume instead, since that is the only place its transcript exists.
+describe('homeVolumeFor', () => {
+  it('gives two fresh sessions of the same project different home volumes', () => {
+    expect(homeVolumeFor('sess-a')).not.toBe(homeVolumeFor('sess-b'))
+  })
+
+  it('is stable for the same session id', () => {
+    expect(homeVolumeFor('sess-a')).toBe(homeVolumeFor('sess-a'))
+  })
+
+  it('bridges a resuming session to its ANCESTOR volume, not a fresh one of its own', () => {
+    expect(homeVolumeFor('sess-new', 'sess-old')).toBe(homeVolumeFor('sess-old'))
+    expect(homeVolumeFor('sess-new', 'sess-old')).not.toBe(homeVolumeFor('sess-new'))
+  })
+
+  it('sanitises ids the same way container names are sanitised', () => {
+    expect(homeVolumeFor('a/b c')).toBe('switchboard-claude-home-abc')
+  })
+})
+
 // A browser is in the bypass container ONLY where the project actually drives one.
 // For every other project it is deliberately absent, and that absence is the common
 // case: Chromium's shared libraries are several hundred megabytes that a project
@@ -270,5 +296,34 @@ describe('browser in the bypass container, only where earned', () => {
       // Without a browser, both of a Blazor project's UI suites are unavailable.
       expect(unavailableReason(suiteById(id)!, sandboxTools(true, false))).toContain('not in the bypass container')
     }
+  })
+})
+
+// Containerisation and permission-bypass used to be the same boolean, read from
+// `mode === 'bypass'` in two places. The sections need the combination that split
+// could not express: isolated from the developer's checkout, still gated. These
+// pin the two axes apart, because nothing else would notice them re-merging.
+describe('a container is not a permission decision', () => {
+  it('tells a containerised session its node_modules is private, so a failed import is fixable', () => {
+    const append = sandboxSystemPromptAppend([{ container: '/workspace' }], null, true)
+    expect(append).toContain('/workspace/node_modules')
+    // The reason matters as much as the fact: a Windows-installed tree cannot run
+    // here, which is why `npm ci` inside the container is safe rather than reckless.
+    expect(append).toMatch(/npm ci|npm install/)
+    expect(append?.toLowerCase()).toContain('safe')
+  })
+
+  it('says nothing about node_modules for a project that has no package.json', () => {
+    const append = sandboxSystemPromptAppend([{ container: '/workspace' }], null, false)
+    expect(append).not.toContain('node_modules')
+  })
+
+  it('reports the container memory ceiling for any containerised session, not only a bypass one', () => {
+    // exit 137 is the container being SIGKILLed at its --memory cap. That is true
+    // of a section's session too, and explaining it as a bypass problem would send
+    // the developer looking in the wrong place.
+    const detail = explainExit('exited with code 137', true)
+    expect(detail).toContain('Sandbox memory')
+    expect(detail).not.toContain('bypass sandbox')
   })
 })

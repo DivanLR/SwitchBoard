@@ -11,7 +11,9 @@ import { useProjectsStore } from '@renderer/stores/projects'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useInboxStore } from '@renderer/stores/inbox'
 import { useSettingsStore } from '@renderer/stores/settings'
-import { accentFor, GROUP_COLORS, mcpStatusColor } from '@renderer/project-accent'
+// accentFor is gone from this file with the identity bar it coloured; the six-hue
+// rotation still lives on in the group swatches, which read GROUP_COLORS.
+import { GROUP_COLORS, mcpStatusColor } from '@renderer/project-accent'
 import { elapsedClock } from '@renderer/relative-time'
 import { useProjectGroups } from '@renderer/composables/useProjectGroups'
 import { UNGROUPED, useProjectDragDrop } from '@renderer/composables/useProjectDragDrop'
@@ -101,6 +103,17 @@ function timerOf(startedAt: string): string {
  * itself; both before working, which needs nothing from anyone.
  */
 const STATUS_URGENCY = ['error', 'needs_you', 'working', 'done', 'ended', 'none']
+
+/**
+ * The states that mean a session actually exists behind this lane.
+ *
+ * Derived from the urgency list rather than spelled out again: everything above
+ * 'ended' has a live process. 'done' belongs here and is the one worth naming —
+ * the turn finished, the session did not, so the lane is still live and still
+ * yours to type into. Only a session that ended, or a project that never started
+ * one, reads as idle.
+ */
+const LIVE_STATES = new Set(STATUS_URGENCY.slice(0, STATUS_URGENCY.indexOf('ended')))
 
 /**
  * The project row's own mark: the most urgent state across every session it is
@@ -683,7 +696,7 @@ async function confirmRemoveNow(): Promise<void> {
         class="project"
         :class="{
           active: item.id === projects.selectedProjectId,
-          working: statusById[item.id] === 'working',
+          live: LIVE_STATES.has(statusById[item.id] ?? 'none'),
           'drop-before': rowDrop?.id === item.id && rowDrop.zone === 'before',
           'drop-after': rowDrop?.id === item.id && rowDrop.zone === 'after',
           'drop-file': rowDrop?.id === item.id && rowDrop.zone === 'file',
@@ -713,7 +726,6 @@ async function confirmRemoveNow(): Promise<void> {
         <span
           class="brace"
           :data-testid="`project-accent-${item.name}`"
-          :style="{ color: accentFor(item.id) }"
           aria-hidden="true"
         ></span>
         <div class="content">
@@ -1493,25 +1505,12 @@ async function confirmRemoveNow(): Promise<void> {
   text-align: center;
 }
 
-/* A lane is a ROW, not a tile.
-
-   It was a tile for one release: inset 8px from both edges, filled at the card
-   tier, floating on --lane-cast, with a deeper cast again when selected. The
-   owner's verdict is that the list stopped being clean and minimal, and the
-   mechanism is legible in hindsight. A sidebar of eight projects drew eight
-   filled rectangles, eight drop shadows and eight full-brightness colour bars,
-   all at rest, none of them reacting to anything. Every lane was saying the same
-   thing at the same volume, so no lane could raise its voice when it actually had
-   news — which is the entire job of this pane.
-
-   So a lane goes back to being a row in a list. No fill and no cast at rest; the
-   panel shows through. The list separates on rhythm and on its own left edge, and
-   the ink it spends goes to the two rows that earned it: the one under the
-   pointer and the one you are in.
-
-   Full-bleed again, so the row reclaims the 16px the inset was taking and long
-   project names stop being ellipsed. Pitch drops by the 6px the float cost, which
-   is roughly one more project on screen for every six. */
+/* A lane is a ROW, not a tile. It was a tile for one release — inset, filled,
+   floating on a cast shadow — and the owner's verdict was that eight lanes
+   drawing eight rectangles/shadows/colour bars at rest, all at the same volume,
+   meant no lane could raise its voice when it actually had news. Back to a
+   plain row: no fill or cast at rest, full-bleed (reclaims the 16px inset, and
+   ~1 more project per 6 rows), separated by rhythm and its own edge rule. */
 .project {
   position: relative;
   margin: 0 0 1px;
@@ -1545,71 +1544,43 @@ async function confirmRemoveNow(): Promise<void> {
    reduced-motion block could stop every animation without losing information.
    Nothing replaces it; a sheet at rest does not pulse. */
 
-/* Lane identity: one hairline in the project's own colour, top to bottom, on the
-   pane's left edge.
-
-   Two things changed together and they only work together. It is 1px rather than
-   2px, and it is dim on every lane except the one you are in.
-
-   The colour here is IDENTITY, not state — project-accent.ts hashes it out of the
-   same six hues that elsewhere mean working, attention owed and error. Eight lanes
-   drawing eight of those at full strength put eight state-coloured bars on screen
-   that said nothing about state, which is worse than noise: it is noise wearing
-   the vocabulary of the signal. Dimmed, they read as what they are, a way of
-   telling one row from another at a glance, and the one at full strength is the
-   row you are in.
-
-   1px because that is what a rule beside a list item is. At 2px it stops being an
-   edge and becomes a coloured band. */
+/* THE LANE BAR REPORTS STATE (green = live session, orange = none), not
+   identity — reversing the prior per-project accent bar. That bar hashed six
+   hues out of the project id, dimmed to 0.45, precisely because those six also
+   mean working/attention-owed/error elsewhere: eight lanes at full strength was
+   noise wearing the signal's own vocabulary. Two colours, each meaning exactly
+   what they look like, reads at a glance where six accent hues never did. Cost:
+   telling rows apart is now the name's job; accentFor still colours the group
+   swatches. Width settled at 2px on the right (needs less than the busier left
+   edge did), sitting inside the sidebar's own 1px border — both halves of
+   DESIGN.md's original rule for this bar (the width cap, the "never on the
+   row's outer edge" clause) are superseded by this direction. */
 .brace {
   position: absolute;
-  left: 0;
+  right: 0;
   top: 0;
   bottom: 0;
-  width: 1px;
-  background: currentColor;
+  width: 2px;
+  background: var(--idle);
   pointer-events: none;
-  opacity: 0.45;
-  transition: opacity 0.12s ease;
+  transition: background-color 0.12s ease;
 }
 
-.project:hover .brace {
-  opacity: 0.75;
+/* Live means a session exists and has not ended: working, waiting on you, errored
+   or finished-but-open all still have a process behind them. Only an ended
+   session and a project that never started one read as idle. */
+.project.live .brace {
+  background: var(--running);
 }
 
 /* Nothing separates one lane from the next but the 1px of air between them. No
    rules, no edges, no cast: a list of rows in a narrow pane already reads as a
    list, and every mark added to defend that is one more thing on screen.
 
-   Selection is carried by three marks that agree, none of them a shadow, so it
-   still reads for anyone who cannot see one: the --bg-active wash, the identity
-   hairline at full strength, and the brighter name. */
-.project.active .brace,
-.project.active:hover .brace {
-  opacity: 1;
-}
-
-/* A running session says so on its own edge. The status glyph already carried
-   this, but a 14x12 character is a thing you read, and the question here is one
-   you answer by looking: which of these eight lanes is working right now.
-   A bar down the full height of the row answers it at the edge of vision.
-
-   It takes over the lane's own stroke rather than adding a second mark beside
-   it. Identity tells one row from another; state tells you which row wants
-   watching, and on a row that is doing something, state is the more useful of
-   the two. Two bars in a 252px lane would be one bar too many.
-
-   2px is the ceiling DESIGN.md sets for this bar, and this is the case it was
-   raised for: at 1px, against a lane already ruled at both edges, a running
-   session did not read. It stays a mark inside the row, with no background, no
-   gradient and no second colour. --running, not --green, because the action
-   colour is cornflower blue on paper and a working lane is green in both
-   themes. */
-.project.working .brace {
-  width: 2px;
-  background: var(--running);
-  opacity: 1;
-}
+   Selection no longer borrows the bar. The bar answers "is this project
+   running", which is true or false whether or not you are looking at the row, so
+   dimming it on the rows you are not in would hide the very thing it is for.
+   Selection is carried by the --bg-active wash and the brighter name instead. */
 
 .active-bg {
   display: none;
@@ -1907,7 +1878,6 @@ async function confirmRemoveNow(): Promise<void> {
   text-overflow: ellipsis;
 }
 
-/* Agents working in parallel, listed under the row (design). */
 /* Subsession rows. Same nested-child idiom as .agents below — indented under the
    lane's reading edge, one line each, mono — because they are the same kind of thing
    at a different level: what this project is doing right now. A session is a bigger

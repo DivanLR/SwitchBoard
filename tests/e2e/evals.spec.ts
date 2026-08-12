@@ -6,11 +6,8 @@ import { installMockHost, twoProjectScenario } from './mock-host'
 
 /**
  * The last thing dispatched to a session, once it has actually been dispatched.
- *
- * Tests-section work now runs in the project's OWN session rather than whichever
- * session happens to be open, so the first run of a project has to spawn one
- * before it can send anything. Reading `sends` in the same tick as the click used
- * to work only because the dispatch reused a session that already existed.
+ * Waits because dispatch now spawns the project's own tests session first (see
+ * the same helper in tests-section.spec.ts for why a same-tick read no longer works).
  */
 async function lastSend(
   page: import('@playwright/test').Page,
@@ -63,9 +60,12 @@ test('a line is added, verified through the session, judged and rated', async ({
   await expect(page.getByTestId(`eval-verdict-pass-${id}`)).toBeDisabled()
   await expect(page.getByTestId(`eval-gated-${id}`)).toContainText('gated')
 
-  // Run check → dispatched to the session, and the view follows it there.
+  // Run check → dispatched to the project's BACKGROUND session. The view no
+  // longer follows it to the conversation: the check runs beside the chat, so
+  // the developer stays on Tests, which is where the verdict lands anyway.
   await page.getByTestId(`eval-run-check-${id}`).click()
-  await expect(page.getByTestId('stream')).toBeVisible()
+  await expect(page.getByTestId('tab-tests')).toHaveClass(/sel/)
+  await expect.poll(() => lastSend(page)).toContain('npx playwright test')
   const sent = await lastSend(page)
   expect(sent).toContain('npx playwright test tests/e2e/project-actions.spec.ts')
   expect(sent).toContain('Run exactly')

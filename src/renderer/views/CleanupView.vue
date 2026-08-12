@@ -19,13 +19,38 @@ const emit = defineEmits<{
   (e: 'install', group: CleanupGroup): void
 }>()
 
+/**
+ * The session's own command list, keyed by each command's OWN name.
+ *
+ * A plugin's commands arrive namespaced (`dotnet-claude-kit:de-sloppify`,
+ * `ponytail:ponytail-review`); the catalogue names them bare. Matching the whole
+ * string doesn't work — normalizeForMatch strips the colon, so the namespaced
+ * form reduces to one long run that never equals the bare name. That bug had an
+ * installed toolkit reporting five of its seven commands unavailable, and
+ * ponytail as not installed at all; only `code-review` and `verify` matched,
+ * because Claude Code ships built-ins under those bare names too.
+ *
+ * The value is the name AS THE SESSION KNOWS IT, so a row runs the plugin's own
+ * command rather than a same-named built-in.
+ */
+const availableByName = computed(() => {
+  const byName = new Map<string, string>()
+  for (const full of props.available) {
+    const own = full.slice(full.lastIndexOf(':') + 1)
+    const key = normalizeForMatch(own)
+    // A namespaced command wins over a bare one of the same name: the row sits
+    // under a plugin's heading, so the plugin's command is the one it means.
+    if (!byName.has(key) || full.includes(':')) byName.set(key, full)
+  }
+  return byName
+})
+
 // A group counts as installed when any of its commands is available. Before the
 // session's command list has loaded (empty), assume installed so the useful
 // command rows show rather than a flash of download cards.
-const availableKeys = computed(() => new Set(props.available.map(normalizeForMatch)))
 function isInstalled(g: CleanupGroup): boolean {
   if (props.available.length === 0) return true
-  return g.commands.some((c) => availableKeys.value.has(normalizeForMatch(c.command)))
+  return g.commands.some((c) => availableByName.value.has(normalizeForMatch(c.command)))
 }
 
 /**
@@ -41,7 +66,7 @@ function isInstalled(g: CleanupGroup): boolean {
  */
 function isAvailable(c: CleanupCommand): boolean {
   if (props.available.length === 0) return true
-  return availableKeys.value.has(normalizeForMatch(c.command))
+  return availableByName.value.has(normalizeForMatch(c.command))
 }
 
 /**
@@ -53,8 +78,12 @@ function isAvailable(c: CleanupCommand): boolean {
  */
 const groups = computed(() => CLEANUP_GROUPS.filter((g) => !g.stackSpecific || isInstalled(g)))
 
+/** Runs the name the SESSION knows, not the catalogue's short form: a bare
+ *  `/code-review` reaches Claude Code's own built-in, while this row means the
+ *  toolkit's. Falls back to the catalogue name before the list has loaded. */
 function run(command: string): void {
-  emit('run', `/${command}`)
+  const resolved = availableByName.value.get(normalizeForMatch(command)) ?? command
+  emit('run', `/${resolved}`)
 }
 </script>
 

@@ -84,8 +84,11 @@ test('+ New spec opens a description popup that runs /speckit-specify', async ({
   await page.getByTestId('new-spec-input').fill('A per-domain container')
   await page.getByTestId('new-spec-submit').click()
   await expect(page.getByTestId('new-spec-popup')).toHaveCount(0)
-  const sends = await page.evaluate(() => window.__mock.state().sends.map((s) => s.text))
-  expect(sends).toContain('/speckit-specify A per-domain container')
+  // Polled, not sampled: the section dispatches into a background session, and
+  // starting one is not instantaneous.
+  await expect
+    .poll(() => page.evaluate(() => window.__mock.state().sends.map((x) => x.text)))
+    .toContain('/speckit-specify A per-domain container')
 })
 
 async function seedSpec(page: import('@playwright/test').Page): Promise<void> {
@@ -121,8 +124,9 @@ test('the Commands part suggests the next stage and lists all commands', async (
   await expect(page.getByTestId('suggested-next')).toContainText('/speckit.clarify')
   await expect(page.getByTestId('suggested-next')).toContainText('1 open clarification')
   await page.getByTestId('speckit-cmd-speckit-clarify').click()
-  const sends = await page.evaluate(() => window.__mock.state().sends)
-  expect(sends.some((s) => s.text === '/speckit-clarify 001-x')).toBe(true)
+  await expect
+    .poll(() => page.evaluate(() => window.__mock.state().sends.map((x) => x.text)))
+    .toContain('/speckit-clarify 001-x')
 })
 
 test('clarify part shows both open and already-resolved clarifications', async ({ page }) => {
@@ -133,15 +137,17 @@ test('clarify part shows both open and already-resolved clarifications', async (
   await expect(page.getByTestId('resolved-clarification')).toContainText('SQLite.')
 })
 
-test('start phase sends an implement command, jumps to the session, and shows the implementing state', async ({ page }) => {
+test('start phase sends an implement command to the background session and shows the implementing state', async ({ page }) => {
   await seedSpec(page)
   await page.getByTestId('part-tasks').click()
   await page.getByTestId('start-phase-Phase 1: Core').click()
+  await expect
+    .poll(() => page.evaluate(() => window.__mock.state().sends.map((x) => x.text).join(' ')))
+    .toContain('Phase 1: Core')
   const sends = await page.evaluate(() => window.__mock.state().sends)
-  expect(sends.some((s) => s.text.includes('Phase 1: Core'))).toBe(true)
-  // Running a command jumps to the Session tab so the run is visible…
-  await expect(page.getByTestId('stream')).toBeVisible()
-  // …and tabbing back to Specs still shows the implementing state.
-  await page.getByTestId('tab-specs').click()
+  // It runs beside the conversation, not in it: the developer stays on Specs,
+  // which goes on showing the implementing state.
+  expect(sends.find((x) => x.text.includes('Phase 1: Core'))?.sessionId).not.toBe('s-alpha')
+  await expect(page.getByTestId('tab-specs')).toHaveClass(/sel/)
   await expect(page.getByTestId('implementing')).toBeVisible()
 })

@@ -53,9 +53,15 @@ test('requests from two projects land in one inbox, grouped, with risk and expla
   await expect(page.getByTestId('inbox-group-beta')).toBeVisible()
   const alphaItem = page.getByTestId('inbox-group-alpha').getByTestId('inbox-item')
   await expect(alphaItem).toContainText('Run: git status')
-  await expect(alphaItem).toContainText('The session wants to run a shell command.')
   await expect(alphaItem.locator('.chip-risk')).toHaveText('Low')
   await expect(alphaItem).toContainText(/\d+[smh] ago/)
+
+  // The explanation is reference material, not load-bearing, so it sits behind
+  // a closed-by-default disclosure toggle rather than costing every card the
+  // height of a paragraph.
+  await expect(alphaItem).not.toContainText('The session wants to run a shell command.')
+  await alphaItem.getByTestId('item-explain-toggle').click()
+  await expect(alphaItem).toContainText('The session wants to run a shell command.')
 })
 
 test('approve and deny round-trip to the sessions and land in history', async ({ page }) => {
@@ -104,17 +110,32 @@ test('approve-all approves the group but skips high-risk items (FR-011)', async 
     window.__mock.raisePermission({ projectId: 'p-beta', title: 'other group', risk: 'low' })
   })
 
-  // No toast appears while the window is focused, so the group controls are clear.
   // A group containing a high-risk item asks for confirmation before bulk
   // approval sweeps it in, so approve-all is a two-step click.
   await page.getByTestId('inbox-group-alpha').getByTestId('approve-all').click()
   await page.getByTestId('inbox-group-alpha').getByTestId('approve-all-confirm').click()
 
-  // The high-risk item stays, as does the other project's group.
+  // Confirming means confirming: the high-risk item goes with the rest. This
+  // test used to assert it stayed, which was the mock's own bug read back as
+  // truth — the real broker passes includeHighRisk through from that confirm,
+  // and a confirm that changed nothing would make the second click pointless.
   const remaining = page.getByTestId('inbox-item')
-  await expect(remaining).toHaveCount(2)
-  await expect(page.getByTestId('inbox-group-alpha')).toContainText('high one')
+  await expect(remaining).toHaveCount(1)
+  await expect(page.getByTestId('inbox-group-alpha')).toHaveCount(0)
   await expect(page.getByTestId('inbox-group-beta')).toContainText('other group')
+})
+
+test('approve-all needs no confirm when the group holds nothing high-risk (FR-011)', async ({
+  page,
+}) => {
+  await page.evaluate(() => {
+    window.__mock.raisePermission({ projectId: 'p-alpha', title: 'low one', risk: 'low' })
+    window.__mock.raisePermission({ projectId: 'p-alpha', title: 'medium one', risk: 'medium' })
+  })
+
+  // One click, because there is nothing here that a second click would protect.
+  await page.getByTestId('inbox-group-alpha').getByTestId('approve-all').click()
+  await expect(page.getByTestId('inbox-item')).toHaveCount(0)
 })
 
 test('plan approvals carry the plan badge and approve with a single click (FR-007a)', async ({
@@ -132,6 +153,51 @@ test('plan approvals carry the plan badge and approve with a single click (FR-00
   await expect(page.getByTestId('inbox-item').locator('.chip-risk.plan')).toHaveText('Plan')
   await page.getByTestId('approve-btn').click()
   await expect(page.getByTestId('inbox-zero')).toBeVisible()
+})
+
+test('the detail box is dropped only where it repeats the title verbatim (Bash), kept for Write', async ({
+  page,
+}) => {
+  await page.evaluate(() => {
+    window.__mock.raisePermission({
+      projectId: 'p-alpha',
+      toolName: 'Bash',
+      title: 'Run a command: ls -la',
+      detail: 'ls -la',
+      risk: 'low',
+    })
+    window.__mock.raisePermission({
+      projectId: 'p-alpha',
+      toolName: 'Write',
+      title: 'Create or overwrite config.json',
+      detail: 'config.json\n\n{ "flag": true }',
+      risk: 'medium',
+    })
+  })
+
+  const bashItem = page.getByTestId('inbox-item').filter({ hasText: 'Run a command: ls -la' })
+  const writeItem = page.getByTestId('inbox-item').filter({ hasText: 'Create or overwrite config.json' })
+  await expect(bashItem.getByTestId('item-detail')).toHaveCount(0)
+  await expect(writeItem.getByTestId('item-detail')).toContainText('{ "flag": true }')
+})
+
+test('the explanation stays hidden until the "Why" toggle is opened', async ({ page }) => {
+  await page.evaluate(() => {
+    window.__mock.raisePermission({
+      projectId: 'p-alpha',
+      title: 'Run: npm install',
+      explanation: 'Claude wants to install project dependencies.',
+      risk: 'low',
+    })
+  })
+
+  const toggle = page.getByTestId('inbox-item').getByTestId('item-explain-toggle')
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.getByTestId('inbox-item')).not.toContainText('Claude wants to install project dependencies.')
+
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(page.getByTestId('inbox-item')).toContainText('Claude wants to install project dependencies.')
 })
 
 test('history rows expand via an arrow to show the full description', async ({ page }) => {

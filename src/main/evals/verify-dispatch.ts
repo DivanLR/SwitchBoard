@@ -40,52 +40,100 @@ export function planSuites(
     .map((suite) => ({ suite, unavailable: unavailableReason(suite, sandbox) }))
 }
 
-const SCHEMA = `{
-  "suites": [{"id": "<suite id>", "status": "pass|fail|skipped|not_run", "detail": "<one line: counts, or the first failure>"}],
-  "coverage": {
-    "line": {"value": <percent 0-100 or null>, "source": "<the command or report file you read>"},
-    "changed": {"value": <percent of CHANGED lines covered, or null>, "source": "<...>"},
-    "files": [{"path": "<file you touched>", "pct": <percent covered>}]
-  },
-  "quality": {
-    "gate": "pass|fail|not_configured", "gateSource": "<e.g. sonarqube>",
-    "duplication": {"value": <percent duplicated lines or null>, "source": "<...>"},
-    "debt": "<the service's own debt figure, e.g. 2d 4h, or null>",
-    "mutation": {"value": <percent mutants killed or null>, "source": "<...>"},
-    "survivors": ["<surviving mutant, file:line - what it changed>"],
-    "archViolations": {"value": <count or null>, "source": "<...>"},
-    "findings": ["<named rule violation, worst first>"]
-  },
-  "endpoints": [{
-    "method": "GET|POST|PUT|PATCH|DELETE",
-    "path": "<the path you actually called, with REAL values substituted>",
-    "status": <HTTP status you actually received, or null if the call never completed>,
-    "ms": <round-trip milliseconds, or null>,
-    "response": "<the response body, truncated to something readable>",
-    "dataSource": "<the MCP server the real data came from, or null>",
-    "dataQuery": "<the query you ran to get it, verbatim, or null>",
-    "dataAssertion": "<what the data proved, e.g. 'customer 4417 has 3 contracts; response listed 3'>",
-    "outcome": "pass|fail|not_run",
-    "detail": "<why it failed, or what you could not check>"
-  }]
-}`
+/**
+ * What the run actually plans to measure, so the schema (and the guidance below
+ * it) only describes fields that stand a chance of being non-null. A unit run
+ * with no coverage, mutation or API suite chosen was sending a schema for
+ * coverage files, a mutation score and endpoint results it would never have:
+ * most of the JSON, sent every run, describing nothing.
+ *
+ * `quality` is the coarse one, and knowingly so. SuiteKind tags a lint suite
+ * and an architecture suite alike as 'quality', so a lint-only run still gets
+ * the gate/duplication/debt block it cannot fill. Splitting the kind would
+ * reach the catalogue, the gate tiles and the panels; the cost of not splitting
+ * it is one unfillable block, and qualitySection already tells the run to
+ * answer `not_configured` rather than invent a figure. Split it when a suite
+ * needs the distinction for its own sake, not for this.
+ */
+interface SchemaFlags {
+  coverage: boolean
+  quality: boolean
+  mutation: boolean
+  endpoints: boolean
+}
 
-const HONESTY =
+function schemaFlags(runnable: PlannedSuite[], hasEndpoints: boolean): SchemaFlags {
+  return {
+    coverage: runnable.some((p) => p.suite.kind === 'coverage'),
+    quality: runnable.some((p) => p.suite.kind === 'quality'),
+    mutation: runnable.some((p) => p.suite.kind === 'mutation'),
+    endpoints: hasEndpoints,
+  }
+}
+
+function buildSchema(flags: SchemaFlags): string {
+  const blocks = [
+    '"suites": [{"id": "<suite id>", "status": "pass|fail|skipped|not_run", "detail": "<one line: counts, or the first failure>"}]',
+  ]
+  if (flags.coverage) {
+    blocks.push(
+      '"coverage": {\n' +
+        '    "line": {"value": <percent 0-100 or null>, "source": "<the command or report file you read>"},\n' +
+        '    "changed": {"value": <percent of CHANGED lines covered, or null>, "source": "<...>"},\n' +
+        '    "files": [{"path": "<file you touched>", "pct": <percent covered>}]\n' +
+        '  }',
+    )
+  }
+  if (flags.quality || flags.mutation) {
+    const fields: string[] = []
+    if (flags.quality) {
+      fields.push(
+        '"gate": "pass|fail|not_configured", "gateSource": "<e.g. sonarqube>"',
+        '"duplication": {"value": <percent duplicated lines or null>, "source": "<...>"}',
+        '"debt": "<the service\'s own debt figure, e.g. 2d 4h, or null>"',
+        '"archViolations": {"value": <count or null>, "source": "<...>"}',
+        '"findings": ["<named rule violation, worst first>"]',
+      )
+    }
+    if (flags.mutation) {
+      fields.push(
+        '"mutation": {"value": <percent mutants killed or null>, "source": "<...>"}',
+        '"mutationKilled": <count of killed + timeout mutants, or null>',
+        '"mutationSurvived": <count of survived + no-coverage mutants, or null>',
+        '"survivors": ["<surviving mutant that matters, file:line - what it changed, worst first>"]',
+      )
+    }
+    blocks.push(`"quality": {\n    ${fields.join(',\n    ')}\n  }`)
+  }
+  if (flags.endpoints) {
+    blocks.push(
+      '"endpoints": [{\n' +
+        '    "method": "GET|POST|PUT|PATCH|DELETE",\n' +
+        '    "path": "<the path you actually called, with REAL values substituted>",\n' +
+        '    "status": <HTTP status you actually received, or null if the call never completed>,\n' +
+        '    "ms": <round-trip milliseconds, or null>,\n' +
+        '    "response": "<the response body, truncated to something readable>",\n' +
+        '    "dataSource": "<the MCP server the real data came from, or null>",\n' +
+        '    "dataQuery": "<the query you ran to get it, verbatim, or null>",\n' +
+        '    "dataAssertion": "<what the data proved, e.g. \'customer 4417 has 3 contracts; response listed 3\'>",\n' +
+        '    "outcome": "pass|fail|not_run",\n' +
+        '    "detail": "<why it failed, or what you could not check>"\n' +
+        '  }]',
+    )
+  }
+  return `{\n  ${blocks.join(',\n  ')}\n}`
+}
+
+/**
+ * One honesty rule, stated once. Exported so apiDataPrompt uses this exact text
+ * plus its own addendum instead of reinventing the rule — three independent
+ * copies of "don't guess" is how they drift apart.
+ */
+export const HONESTY =
   'Every number must come from output you actually ran or a report file you actually read. ' +
   'If you did not measure something, put null and leave its source null — a guessed, ' +
   'estimated or "typical" figure is far worse than no figure. Never mark a suite pass ' +
-  'because it probably would.\n' +
-  // Said out loud on purpose. The app parses TestResults/*.trx, coverage.cobertura.xml
-  // and StrykerOutput mutation reports itself after the turn, and where a file
-  // disagrees with this line the file is taken and the disagreement is shown. Stating
-  // that removes any advantage in an optimistic summary, and makes the artefact the
-  // thing worth producing.
-  'Note how this is checked: after your turn the application reads the artefacts the ' +
-  'commands left behind — the TRX under TestResults, coverage.cobertura.xml, and ' +
-  "Stryker's mutation report — and where one of those files disagrees with what you " +
-  'reported, the FILE is taken and the disagreement is shown to the developer beside ' +
-  'your line. So do not summarise a file you did not open, and do not tidy a figure. ' +
-  'Leave the artefacts where the commands put them, and report what they say.'
+  'because it probably would.'
 
 /**
  * Tell the session to exercise the API for real, and to get its inputs from the
@@ -146,6 +194,41 @@ function endpointSection(apiSuites: PlannedSuite[], dbServers: readonly string[]
 }
 
 /**
+ * The guidance for gathering whatever quality figures this run actually planned
+ * to produce. Conditioned the same way endpointSection is: a run with no
+ * coverage suite gets no instruction to go read a coverage report, and a run
+ * with no mutation suite is never told to go read Stryker's output.
+ */
+function qualitySection(flags: SchemaFlags): string {
+  const lines: string[] = []
+  if (flags.coverage) {
+    lines.push(
+      '- Coverage: read the coverage report the run produced (cobertura/lcov/json) and give ' +
+        'total line coverage, coverage of the lines this working tree changed (compare against ' +
+        'git diff), and the touched files with the least coverage.',
+    )
+  }
+  if (flags.quality) {
+    lines.push(
+      '- Code quality: if a SonarQube or SonarCloud MCP server is connected for this project, ' +
+        'read its quality gate, duplication, technical debt and issue counts through it and name ' +
+        'it as the source. If no such server is connected, set "gate" to "not_configured" and ' +
+        'leave the figures null — do not substitute a lint count for it. Architecture violations ' +
+        'come only from an architecture suite above that actually produced them.',
+    )
+  }
+  if (flags.mutation) {
+    lines.push(
+      "- Mutation: read the mutation tool's own report (Stryker's mutation-report.json, or the " +
+        "equivalent for this stack) rather than typing a remembered figure. Give the score, how " +
+        'many mutants were killed versus survived, and the surviving mutants worth a look, worst ' +
+        'first.',
+    )
+  }
+  return lines.length === 0 ? '' : `\n\nThen gather the quality figures, without re-running the tests:\n${lines.join('\n')}\n`
+}
+
+/**
  * The default run: execute the chosen suites in order, stop at the first failure
  * (FR-075 — figures gathered through failing tests are not reported, FR-076),
  * and report one line of JSON.
@@ -168,6 +251,7 @@ export function verifyPrompt(
   // Only worth asking for real endpoint exercise when an API-shaped suite is in
   // the run: otherwise the instruction is noise the session has to read past.
   const apiSuites = runnable.filter((p) => p.suite.kind === 'api')
+  const flags = schemaFlags(runnable, apiSuites.length > 0)
   return (
     `Verify the working tree of this ${stackLabel} project. This is a verification pass: ` +
     'run things and report what happened. Do not fix anything and do not edit any file.\n\n' +
@@ -186,18 +270,10 @@ export function verifyPrompt(
         ', and nothing else. Do not install a toolchain to work around that.'
       : '') +
     endpointSection(apiSuites, dbServers) +
-    '\n\nThen gather the quality figures, without re-running the tests:\n' +
-    '- Coverage: read the coverage report the run produced (cobertura/lcov/json) and give ' +
-    'total line coverage, coverage of the lines this working tree changed (compare against ' +
-    'git diff), and the touched files with the least coverage.\n' +
-    '- Code quality: if a SonarQube or SonarCloud MCP server is connected for this project, ' +
-    'read its quality gate, duplication, technical debt and issue counts through it and name ' +
-    'it as the source. If no such server is connected, set "gate" to "not_configured" and ' +
-    'leave the figures null — do not substitute a lint count for it.\n' +
-    '- Architecture and mutation: only from a suite above that actually produced them.\n\n' +
-    `${HONESTY}\n\n` +
+    qualitySection(flags) +
+    `\n${HONESTY}\n\n` +
     `Finish your reply with one line, on its own, starting with ${VERIFY_MARKER}: followed by ` +
-    `JSON of this shape (one line, no code fence):\n${SCHEMA}`
+    `JSON of this shape (one line, no code fence):\n${buildSchema(flags)}`
   )
 }
 
@@ -290,6 +366,9 @@ function normalizeReport(raw: unknown): VerifyReport | null {
   report.quality.duplication = toMeasured(quality.duplication)
   report.quality.debt = str(quality.debt)
   report.quality.mutation = toMeasured(quality.mutation)
+  // Counts, not percentages, so truncate — num() otherwise tolerates a decimal.
+  report.quality.mutationKilled = truncOrNull(num(quality.mutationKilled))
+  report.quality.mutationSurvived = truncOrNull(num(quality.mutationSurvived))
   report.quality.archViolations = toMeasured(quality.archViolations)
   report.quality.survivors = asArray(quality.survivors).map(str).filter(isText)
   report.quality.findings = asArray(quality.findings).map(str).filter(isText)
@@ -383,4 +462,9 @@ function num(value: unknown): number | null {
   if (typeof value !== 'string') return null
   const parsed = Number.parseFloat(value.replace('%', '').trim())
   return Number.isFinite(parsed) ? parsed : null
+}
+
+/** A mutant count, never a fraction — Math.trunc on a null is not an option. */
+function truncOrNull(value: number | null): number | null {
+  return value === null ? null : Math.trunc(value)
 }

@@ -508,6 +508,31 @@ const MIGRATIONS: Migration[] = [
       `)
     },
   },
+  {
+    // Diagram requests. NOT the diagrams themselves: those are files in the
+    // project's own docs/diagrams folder, committed with the code, and the folder
+    // is the list. This table remembers only what a file cannot say about itself —
+    // which session produced it, and the sentence that asked for it.
+    //
+    // Keyed on (projectId, file) rather than an id, because the file name is what
+    // the two sides have in common and a second request for the same name is a
+    // regeneration of that diagram, not a new row.
+    name: '024-diagram-requests',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS diagram_requests (
+          projectId TEXT NOT NULL REFERENCES projects(id),
+          file TEXT NOT NULL,
+          sessionId TEXT,
+          description TEXT NOT NULL,
+          createdAt TEXT NOT NULL,
+          PRIMARY KEY (projectId, file)
+        );
+        CREATE INDEX IF NOT EXISTS idx_diagram_requests_project
+          ON diagram_requests (projectId, createdAt DESC);
+      `)
+    },
+  },
 ]
 
 /**

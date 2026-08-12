@@ -11,12 +11,9 @@ const UNDELIVERABLE_DECISION =
 // Ticket per history load, so an older reply cannot replace a newer one.
 let historyLoad = 0
 
-// State and derivations are declared separately so the derivations can be real
-// `computed()`s. A plain `get` on a reactive object is NOT cached by Vue: it
-// re-runs on every property read, which for `groups` meant rebuilding a Map and
-// re-sorting on every access — including once per render of every template that
-// touches it. Spread back in through `toRefs`, the store's public shape is
-// unchanged (reactive unwraps both refs and computeds on read).
+// State/derivations split the same way as stores/projects.ts (see there for
+// why): `groups` rebuilds a Map and re-sorts, so it needs to be a real
+// `computed()` rather than a plain `get` re-running on every read.
 const state = reactive({
   pending: [] as PermissionRequest[],
   history: [] as DecisionRecord[],

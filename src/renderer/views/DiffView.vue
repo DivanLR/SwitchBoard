@@ -25,15 +25,13 @@ interface DiffGroup {
 }
 
 /**
- * Changed files grouped by the folder holding them, because a flat list stops being
- * readable at about a screenful and a working tree in the middle of a refactor is
- * mostly one folder repeated. The path is already project-relative with forward
- * slashes (DiffFileEntry.path), so this is a renderer-side regroup of what diff.list
- * already returns rather than a second query.
+ * Changed files grouped by folder — a flat list stops being readable at a
+ * screenful, and a refactor's working tree is mostly one folder repeated. A
+ * renderer-side regroup of what diff.list already returns, not a second query.
  *
- * Root-level files lead, then folders alphabetically: the root is where a project's
- * loudest files live (package.json, a config, a lockfile) and burying them under the
- * alphabet would hide exactly the changes worth noticing first.
+ * Root-level files lead, then folders alphabetically: the root holds a
+ * project's loudest files (package.json, a config, a lockfile), and
+ * alphabetical order would bury exactly the changes worth noticing first.
  */
 const groups = computed<DiffGroup[]>(() => {
   const byDir = Object.groupBy(files.value, (file) => {
@@ -111,11 +109,10 @@ function countLabel(added: number | null, removed: number | null): string {
     </div>
     <div v-else class="diff-body">
       <div class="diff-files" aria-label="Changed files" data-testid="diff-file-list">
-        <!-- One block per folder. The heading carries the folder's path and its own
-             totals, so a folded folder still reports how much changed inside it —
-             the point of folding is to stop reading a folder, not to lose it. Files
-             below show only their own name, since the heading already said where
-             they are. -->
+        <!-- One block per folder. The heading carries its own totals, so folding it
+             still reports how much changed inside — folding stops you reading it,
+             not losing it. Files below show only their own name; the heading
+             already said where they are. -->
         <div v-for="g in groups" :key="g.dir" class="diff-group">
           <button
             type="button"

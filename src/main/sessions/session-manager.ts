@@ -57,7 +57,7 @@ import { parseApiRequests } from '@main/evals/api-dispatch'
 import type { ApiRequestPlan } from '@shared/api-endpoints'
 import { mainLoopModel } from './model-routing'
 import { resolveClaudeExecutable } from './claude-executable'
-import { ensureSandboxImage, gitNotice, refMounts, sweepOrphanedContainers } from './docker-sandbox'
+import { ensureSandboxImage, gitNotice, hasNodeModulesVolume, refMounts, sweepOrphanedContainers } from './docker-sandbox'
 
 /** Classifier hook installed by the swallow rule engine (FR-015a); null until then. */
 type NoiseClassifier = (event: SessionEvent) => string | null
@@ -415,9 +415,8 @@ export async function readFileDiff(projectPath: string, path: string): Promise<F
 
 export class SessionManager {
   private hosted = new Map<string, HostedEntry>()
-  /* The `starting` reservation that used to live here is gone with the
-     one-session-per-project limit: it existed only to stop two concurrent starts
-     both passing the "already active" check, and two sessions is now the intent. */
+  /* The starting-reservation guard is gone; a project is no longer capped at
+     one session (see startSession's doc). */
   private classifier: NoiseClassifier | null = null
   /** Pending debounced transcript writes, keyed by session id. */
   private transcriptTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -562,6 +561,9 @@ export class SessionManager {
     /** Omitted means "use the project's own defaultSessionMode", the normal path. */
     requestedMode?: SessionMode,
     carryTranscriptFrom?: string,
+    /** Run in a container while keeping the mode's own permission behaviour. The
+     *  sections ask for this; nothing else does. */
+    opts?: { containerised?: boolean },
   ): Promise<Session> {
     const project = this.repos.projects.byId(projectId)
     if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
@@ -570,14 +572,17 @@ export class SessionManager {
     // value rather than re-deciding.
     const mode = requestedMode ?? project.defaultSessionMode
     const bypassPermissions = mode === 'bypass'
-    // No "already active" refusal: a project runs as many sessions as it is asked to.
-    // resume is the one thing that still reads the project's history, and it still
-    // means "the last session that ended here", not "the only one".
-    // Bypass sessions run containerised (docker-sandbox): fail here, before a
+    // Two axes now, not one. Bypass still implies a container; a section can ask
+    // for a container without asking for bypass, which is the combination the
+    // sections need: isolated from the developer's checkout, still gated.
+    const containerised = opts?.containerised === true || bypassPermissions
+    // No "already active" refusal (see startSession's doc). `resume` still means
+    // "the last session that ended here", not "the only one".
+    // A containerised session needs the image (docker-sandbox): fail here, before a
     // row exists, when Docker is down or not logged in. First call builds the
     // image for this project's stack, which can take minutes (tens of them for
     // the .NET one) — the renderer awaits with its busy state.
-    if (bypassPermissions) await ensureSandboxImage(project.path)
+    if (containerised) await ensureSandboxImage(project.path)
     // The app drives the user's own Claude Code CLI and no longer bundles a copy
     // (that binary is ~245 MB). Every Switchboard user has Claude Code, so this
     // is normally present; if not, fail with a clear message rather than letting
@@ -588,9 +593,16 @@ export class SessionManager {
     }
 
     let resumeSdkSessionId: string | undefined
+    // The ancestor's Switchboard id, not just its SDK id: a containerised resume
+    // has to open the volume that ancestor's ~/.claude was written into, which is
+    // keyed by session id (see homeVolumeFor). Resolving both from the same row is
+    // what keeps the transcript the SDK is told to resume and the home volume it
+    // is resumed in from pointing at two different sessions.
+    let resumeFromSessionId: string | undefined
     if (resume) {
       const previous = this.repos.sessions.latestEndedForProject(projectId)
       resumeSdkSessionId = previous?.sdkSessionId ?? undefined
+      resumeFromSessionId = previous?.id
     }
 
     const row: Session = {
@@ -614,12 +626,11 @@ export class SessionManager {
       // ends it is the only record of whether the transcript went to the host or
       // to this project's container volume — which resume has to match.
       bypassPermissions,
-      // Both are projections of the one resolved mode now, not inputs of their
-      // own, so the pair can no longer describe a session the SDK cannot spawn:
-      // bypass-and-plan-at-once used to be reachable and had to be silently
-      // resolved here. They stay persisted because each answers a question the
-      // mode alone does not — where the transcript lives, and how the session
-      // began — and because the header pill and the restart toggle read them.
+      // Both are projections of the one resolved mode now (see
+      // resolvePermissionMode for why that replaced two separate booleans).
+      // Still persisted because each answers a question the mode alone does
+      // not — where the transcript lives, how the session began — and because
+      // the header pill and the restart toggle read them.
       planMode: mode === 'plan',
       inPlanMode: mode === 'plan',
     }
@@ -673,126 +684,144 @@ export class SessionManager {
     // rather than starting a session that claims context it does not have.
     const carried = carryTranscriptFrom ? transcriptFor(carryTranscriptFrom) : null
     const transcriptAppend = carried ? transcriptContextAppend(carried) : null
-    // A bypass session's CLI runs in a container: tell it the layout, or it hunts
-    // for host paths that cannot exist and calls mounted refs unreachable.
-    const sandboxAppend = bypassPermissions
+    // A containerised CLI has to be told the layout, or it hunts for host paths
+    // that cannot exist inside the container and calls mounted refs unreachable.
+    // Keyed to the container rather than to bypass: a section's session is
+    // containerised without being bypass, and needs this just as much.
+    const sandboxAppend = containerised
       ? sandboxSystemPromptAppend(
           [{ container: '/workspace' }, ...refMounts(project.refs.map((r) => r.path))],
           // Only a .git DIRECTORY at the root survives the mount; anything else
           // reads as "history deleted" unless stated here (see gitNotice).
           gitNotice(project.path),
+          hasNodeModulesVolume(project.path),
         )
       : null
-    entry.session = new HostedSession({
-      sessionId: row.id,
-      projectId,
-      projectPath: project.path,
-      // ponytail: refs added mid-session apply from the next session start.
-      refDirs: project.refs.map((r) => r.path),
-      // Read at session start, like the models: a Settings change applies to
-      // the NEXT bypass session (the container's cap is fixed at docker run).
-      sandboxMemory: settings.sandboxMemory,
-      resumeSdkSessionId,
-      systemPromptAppend:
-        // The carried transcript goes last: it is the only part of this that is
-        // about one specific run, so the static shaping text stays in the cached
-        // prefix ahead of it.
-        [
-          sandboxAppend,
-          adhdAppend,
-          terseAppend,
-          modesAppend,
-          heavyAppend,
-          schemaAppend,
-          transcriptAppend,
-        ]
-          .filter((s): s is string => Boolean(s))
-          .join('\n\n') || undefined,
-      claudeExecutablePath,
-      // The hosted session's plan/work slots both take the intelligent model;
-      // the pairing modes decide when the worker runs the loop instead.
-      // One main-loop model for the session (Advisor runs the cheap one), so no
-      // turn ever switches it and throws away the prompt cache.
-      mainModel: mainLoopModel(settings.modelMode, { intelligentModel, workerModel }),
-      strongModel: intelligentModel,
-      workerModel,
-      autoModelRouting: settings.autoModelRouting,
-      modelMode: settings.modelMode,
-      // Re-read before each turn so a Settings change lands on a RUNNING session
-      // (the note in Settings promises exactly that).
-      resolveModels: () => this.resolveModelRouting(projectId),
-      // Pairing mode per work turn — in-memory only, shown as a header chip.
-      onTurnMode: (mode) => {
-        if (entry.row.currentMode === mode) return
-        entry.row.currentMode = mode
-        this.pushStatus(entry)
-      },
-      mode,
-      // What the CLI itself reports, not what was asked for: a CLI too old to
-      // honour 'plan' would otherwise leave the header claiming a restriction
-      // that is not in force.
-      onPlanModeChange: (inPlanMode) => {
-        if (entry.row.inPlanMode === inPlanMode) return
-        entry.row.inPlanMode = inPlanMode
-        this.pushStatus(entry)
-      },
-      summaries: settings.summaries,
-      sink: this.makeSink(entry),
-      gate: this.callbacks.gate,
-      onStatusChange: (status, detail) => this.handleStatusChange(entry, status, detail),
-      onSdkSessionId: (sdkSessionId) => {
-        entry.row.sdkSessionId = sdkSessionId
-        this.repos.sessions.update(row.id, { sdkSessionId })
-      },
-      onCommands: (commands) => {
-        this.repos.projectCommands.set(projectId, commands)
-        this.callbacks.onProjectCommands(projectId, commands)
-      },
-      onUsage: (usage) => {
-        entry.row.usageUtilization = usage.utilization
-        entry.row.usageResetsAt = usage.resetsAt
-        entry.row.usageLimitType = usage.limitType
-        this.repos.sessions.update(row.id, {
-          usageUtilization: usage.utilization,
-          usageResetsAt: usage.resetsAt,
-          usageLimitType: usage.limitType,
-        })
-        this.pushStatus(entry)
-      },
-      // MCP servers from the init message — in-memory only, pushed to the sidebar.
-      onMcpServers: (servers) => {
-        entry.row.mcpServers = servers
-        this.pushStatus(entry)
-      },
-      // Model reported per main-loop turn — in-memory only, shown in the header.
-      onModel: (model) => {
-        entry.row.currentModel = model
-        this.pushStatus(entry)
-      },
-      // Models this subscription can select — account-global, cached for the
-      // settings model list (which discovers new models from it automatically).
-      onModels: (models) => {
-        this.availableModels = models
-      },
-      // Live background tasks — in-memory only, shown as a card + header pill.
-      onBackgroundTasks: (tasks) => {
-        entry.row.backgroundTasks = tasks
-        this.pushStatus(entry)
-      },
-      // Per-model usage — in-memory only, drives the header's session-total +
-      // top-model chips. The SDK's per-turn modelUsage is session-CUMULATIVE, so
-      // this replaces per model rather than adding (see foldModelTotals).
-      onModelUsage: (modelUsage) => {
-        entry.row.modelTotals = foldModelTotals(entry.row.modelTotals ?? {}, modelUsage)
-        this.pushStatus(entry)
-      },
-      onTurnComplete: () => {
-        this.observeBranch(entry)
-        // A completed turn that left the session idle pulls the next planned task.
-        this.maybeDrainQueue(entry.row.projectId)
-      },
-      onExit: (reason, detail) => this.handleExit(entry, reason, detail),
-    })
+    // Guarded: this constructor runs after the row is already inserted but before
+    // `hosted.set` registers the entry. Left unguarded, a throw here would leave
+    // the row persisted with endedAt null and never registered, so projectList's
+    // fallback would present an orphaned "working" session forever — no ended
+    // banner, so no Start button and no way to retry.
+    try {
+      entry.session = new HostedSession({
+        sessionId: row.id,
+        projectPath: project.path,
+        // ponytail: refs added mid-session apply from the next session start.
+        refDirs: project.refs.map((r) => r.path),
+        // Read at session start, like the models: a Settings change applies to
+        // the NEXT bypass session (the container's cap is fixed at docker run).
+        sandboxMemory: settings.sandboxMemory,
+        resumeSdkSessionId,
+        resumeFromSessionId,
+        systemPromptAppend:
+          // The carried transcript goes last: it is the only part of this that is
+          // about one specific run, so the static shaping text stays in the cached
+          // prefix ahead of it.
+          [
+            sandboxAppend,
+            adhdAppend,
+            terseAppend,
+            modesAppend,
+            heavyAppend,
+            schemaAppend,
+            transcriptAppend,
+          ]
+            .filter((s): s is string => Boolean(s))
+            .join('\n\n') || undefined,
+        claudeExecutablePath,
+        // The hosted session's plan/work slots both take the intelligent model;
+        // the pairing modes decide when the worker runs the loop instead.
+        // One main-loop model for the session (Advisor runs the cheap one), so no
+        // turn ever switches it and throws away the prompt cache.
+        mainModel: mainLoopModel(settings.modelMode, { intelligentModel, workerModel }),
+        strongModel: intelligentModel,
+        workerModel,
+        autoModelRouting: settings.autoModelRouting,
+        modelMode: settings.modelMode,
+        // Re-read before each turn so a Settings change lands on a RUNNING session
+        // (the note in Settings promises exactly that).
+        resolveModels: () => this.resolveModelRouting(projectId),
+        // Pairing mode per work turn — in-memory only, shown as a header chip.
+        onTurnMode: (mode) => {
+          if (entry.row.currentMode === mode) return
+          entry.row.currentMode = mode
+          this.pushStatus(entry)
+        },
+        mode,
+        containerised,
+        // What the CLI itself reports, not what was asked for: a CLI too old to
+        // honour 'plan' would otherwise leave the header claiming a restriction
+        // that is not in force.
+        onPlanModeChange: (inPlanMode) => {
+          if (entry.row.inPlanMode === inPlanMode) return
+          entry.row.inPlanMode = inPlanMode
+          this.pushStatus(entry)
+        },
+        summaries: settings.summaries,
+        sink: this.makeSink(entry),
+        gate: this.callbacks.gate,
+        onStatusChange: (status, detail) => this.handleStatusChange(entry, status, detail),
+        onSdkSessionId: (sdkSessionId) => {
+          entry.row.sdkSessionId = sdkSessionId
+          this.repos.sessions.update(row.id, { sdkSessionId })
+        },
+        onCommands: (commands) => {
+          this.repos.projectCommands.set(projectId, commands)
+          this.callbacks.onProjectCommands(projectId, commands)
+        },
+        onUsage: (usage) => {
+          entry.row.usageUtilization = usage.utilization
+          entry.row.usageResetsAt = usage.resetsAt
+          entry.row.usageLimitType = usage.limitType
+          this.repos.sessions.update(row.id, {
+            usageUtilization: usage.utilization,
+            usageResetsAt: usage.resetsAt,
+            usageLimitType: usage.limitType,
+          })
+          this.pushStatus(entry)
+        },
+        // MCP servers from the init message — in-memory only, pushed to the sidebar.
+        onMcpServers: (servers) => {
+          entry.row.mcpServers = servers
+          this.pushStatus(entry)
+        },
+        // Model reported per main-loop turn — in-memory only, shown in the header.
+        onModel: (model) => {
+          entry.row.currentModel = model
+          this.pushStatus(entry)
+        },
+        // Models this subscription can select — account-global, cached for the
+        // settings model list (which discovers new models from it automatically).
+        onModels: (models) => {
+          this.availableModels = models
+        },
+        // Live background tasks — in-memory only, shown as a card + header pill.
+        onBackgroundTasks: (tasks) => {
+          entry.row.backgroundTasks = tasks
+          this.pushStatus(entry)
+        },
+        // Per-model usage — in-memory only, drives the header's session-total +
+        // top-model chips. The SDK's per-turn modelUsage is session-CUMULATIVE, so
+        // this replaces per model rather than adding (see foldModelTotals).
+        onModelUsage: (modelUsage) => {
+          entry.row.modelTotals = foldModelTotals(entry.row.modelTotals ?? {}, modelUsage)
+          this.pushStatus(entry)
+        },
+        onTurnComplete: () => {
+          this.observeBranch(entry)
+          // A completed turn that left the session idle pulls the next planned task.
+          this.maybeDrainQueue(entry.row.projectId)
+        },
+        onExit: (reason, detail) => this.handleExit(entry, reason, detail),
+      })
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      this.failStart(row, detail)
+      throw {
+        code: 'INTERNAL',
+        message: `Session failed to start: ${detail}`,
+      } satisfies IpcError
+    }
 
     this.hosted.set(row.id, entry)
     entry.session.start()
@@ -923,6 +952,47 @@ export class SessionManager {
   }
 
   /**
+   * The session a verification run should talk to: this project's own verify
+   * session, started if it is not already alive.
+   *
+   * Dispatches used to resolve their target with `sessions.activeForProject` —
+   * whichever session is open, ordinarily the one the developer is chatting in.
+   * A verification pass is a long turn (runs suites, reads artefacts, writes a
+   * report), and queuing it into the chat session blocked the conversation and
+   * interleaved build output with the developer's own work.
+   *
+   * Reuse is keyed off the sessionId already persisted on the newest verify run,
+   * API run, or diagram request — no new table, and no second registry that
+   * could disagree with the work itself — so a verify run, an API set, and a
+   * diagram in the same project share one session.
+   *
+   * Deliberately never falls back to `activeForProject`: that IS the removed
+   * behaviour, and a fallback would restore the bug on the first run after a
+   * tests session ends.
+   */
+  async backgroundSessionFor(projectId: string): Promise<Session> {
+    const candidates = [
+      this.repos.verifyRuns.listForProject(projectId)[0]?.sessionId,
+      this.repos.apiRuns.listForProject(projectId)[0]?.sessionId,
+      // Diagram generation joined this rather than taking a third session of its
+      // own: it is the same kind of work, a long turn whose output the developer
+      // wants to look at afterwards rather than watch arrive.
+      this.repos.diagramRequests.latestSessionFor(projectId),
+    ]
+    for (const id of candidates) {
+      if (!id) continue
+      const existing = this.repos.sessions.byId(id)
+      if (existing && !existing.endedAt) return existing
+    }
+    // Containerised, keeping the project's own permission mode. A section runs
+    // builds, test suites and cleanup passes; those should not be able to touch
+    // the developer's checkout, and they should still ask before doing something
+    // that needs asking. Until now only bypass could give the first, and it gave
+    // the second away to get it.
+    return this.startSession(projectId, false, undefined, undefined, { containerised: true })
+  }
+
+  /**
    * Stop a run the developer no longer wants.
    *
    * Interrupting the session is what actually stops the work; the row is then
@@ -933,42 +1003,6 @@ export class SessionManager {
    * and cancelling a run that finished on its own in the meantime is a no-op
    * rather than an error — the intent is satisfied either way.
    */
-  /**
-   * The session a verification run should talk to: this project's own verify
-   * session, started if it is not already alive.
-   *
-   * Every dispatch in the Tests section used to resolve its target with
-   * `sessions.activeForProject`, which returns whichever session is open — in
-   * the ordinary case, the one the developer is chatting in. A verification pass
-   * is a long turn: it runs the suites, reads the artefacts and writes a report
-   * line. Queued into the chat session it blocks the conversation for its whole
-   * duration and interleaves build output with the work in hand, which is the
-   * one thing this application exists to stop.
-   *
-   * A project may run as many sessions as it is asked to, so the Tests section
-   * takes its own. Reuse is keyed off the sessionId already persisted on the
-   * newest verify or API run — no new column, no new table, and no second
-   * registry of "which session is the tests one" that could disagree with the
-   * runs themselves. Both kinds are consulted so a verify run and an API set in
-   * the same project share one session rather than spawning two.
-   *
-   * It deliberately never consults `activeForProject`: reusing the chat session
-   * is exactly the behaviour being removed, and a fallback to it would restore
-   * the bug on the first run after a tests session ends.
-   */
-  async testsSessionFor(projectId: string): Promise<Session> {
-    const candidates = [
-      this.repos.verifyRuns.listForProject(projectId)[0]?.sessionId,
-      this.repos.apiRuns.listForProject(projectId)[0]?.sessionId,
-    ]
-    for (const id of candidates) {
-      if (!id) continue
-      const existing = this.repos.sessions.byId(id)
-      if (existing && !existing.endedAt) return existing
-    }
-    return this.startSession(projectId)
-  }
-
   async cancelVerifyRun(runId: string): Promise<void> {
     const run = this.repos.verifyRuns.byId(runId)
     if (!run) throw { code: 'NOT_FOUND', message: 'Run not found' } satisfies IpcError
@@ -1374,6 +1408,14 @@ export class SessionManager {
   }
 
   private handleStatusChange(entry: HostedEntry, status: SessionStatus, detail?: string | null): void {
+    // Nothing to say about a session this manager has already let go of. On
+    // app quit, stop() waits EXIT_GRACE_MS and then gives up on a loop that has
+    // not drained — a container that is slow to die will do that — so the loop
+    // can report a status change after the database has been closed underneath
+    // it. Every write below would throw, and worse, onCountersChanged schedules
+    // a bare timer that reads the closed handle with nothing to catch it, which
+    // takes the whole main process down. See the note in HostedSession.stop.
+    if (!this.hosted.has(entry.row.id)) return
     // The turn is over ('needs_you' is a pending permission, not an ending): a
     // verification run that never reported is closed here rather than spinning.
     if (status === 'done' || status === 'error') {
@@ -1413,6 +1455,10 @@ export class SessionManager {
   }
 
   private handleExit(entry: HostedEntry, reason: 'completed' | 'stopped' | 'crashed', detail?: string): void {
+    // Same guard, same reason as handleStatusChange: a loop that outlived the
+    // app-quit grace period must not write to a closed database. Safe on the
+    // normal path because this method is what removes the entry, below.
+    if (!this.hosted.has(entry.row.id)) return
     this.closeUnreportedVerify(entry)
     this.closeUnreportedApi(entry)
     this.closeUnreportedEval(entry)
@@ -1503,6 +1549,27 @@ export class SessionManager {
 
   private pushStatus(entry: HostedEntry): void {
     this.callbacks.onSessionStatus({ ...entry.row })
+  }
+
+  /**
+   * The row was inserted, but the HostedSession that would run it never came to
+   * exist — there is no HostedEntry yet, so finaliseRow (which reads one) does
+   * not apply. Mark it ended the same way a crash would, directly on the row,
+   * so the row this call already persisted never sits with endedAt null and no
+   * registered entry (see startSession's guard around `new HostedSession`).
+   */
+  private failStart(row: Session, detail: string): void {
+    row.status = 'error'
+    row.statusDetail = detail
+    row.endedAt = nowIso()
+    row.endReason = 'crashed'
+    this.repos.sessions.update(row.id, {
+      status: row.status,
+      statusDetail: row.statusDetail,
+      endedAt: row.endedAt,
+      endReason: row.endReason,
+    })
+    this.callbacks.onSessionStatus({ ...row })
   }
 
 }

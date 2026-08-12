@@ -45,16 +45,9 @@ export function classifyRisk(
 
 interface DefaultRuleSeed {
   /**
-   * Stable slug, never a generated id.
-   *
-   * This is what a developer's override is keyed to, so it has to survive a
-   * restart and an app upgrade. The rules themselves stay in code and the database
-   * holds only what was changed about them — the reason the earlier seeded-table
-   * design failed is that a shipped default, once written to a row, could not be
-   * changed again without a bespoke migration per change.
-   *
-   * Renaming a slug therefore orphans that rule's override, which is the same as
-   * the developer never having touched it. Retire a rule rather than rename it.
+   * Stable slug, never a generated id — a developer's override is keyed to it,
+   * so renaming orphans that override. Retire a rule rather than rename it; see
+   * rule-prefs.ts for why the defaults live in code, not a seeded table.
    */
   id: string
   toolMatcher: string
@@ -77,7 +70,6 @@ const DEFAULT_RULE_SEEDS: DefaultRuleSeed[] = [
     },
     risk: 'high',
   },
-  // Read-only inspection commands.
   {
     id: 'bash-readonly',
     label: 'Read-only shell commands',
@@ -101,17 +93,14 @@ const DEFAULT_RULE_SEEDS: DefaultRuleSeed[] = [
     },
     risk: 'medium',
   },
-  // Read-only tools.
   { id: 'tool-read', label: 'Read a file', toolMatcher: 'Read', risk: 'low' },
   { id: 'tool-glob', label: 'Find files by name', toolMatcher: 'Glob', risk: 'low' },
   { id: 'tool-grep', label: 'Search file contents', toolMatcher: 'Grep', risk: 'low' },
   { id: 'tool-notebook-read', label: 'Read a notebook', toolMatcher: 'NotebookRead', risk: 'low' },
   { id: 'tool-todowrite', label: 'Update the task list', toolMatcher: 'TodoWrite', risk: 'low' },
-  // File modification.
   { id: 'tool-edit', label: 'Edit a file', toolMatcher: 'Edit', risk: 'medium' },
   { id: 'tool-write', label: 'Write a file', toolMatcher: 'Write', risk: 'medium' },
   { id: 'tool-notebook-edit', label: 'Edit a notebook', toolMatcher: 'NotebookEdit', risk: 'medium' },
-  // Outward-facing actions are high per the spec assumption.
   { id: 'tool-webfetch', label: 'Fetch a URL', toolMatcher: 'WebFetch', risk: 'high' },
   { id: 'tool-websearch', label: 'Search the web', toolMatcher: 'WebSearch', risk: 'high' },
 ]

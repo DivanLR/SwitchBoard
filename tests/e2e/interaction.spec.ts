@@ -69,3 +69,77 @@ test('an ended session shows the banner and offers a new start (FR-019a)', async
   await expect(page.getByTestId('ended-banner')).toBeVisible()
   await expect(page.getByTestId('start-session')).toBeVisible()
 })
+
+// Scrolled back through a long session, there was no way to return to the newest
+// line but to drag the scrollbar the whole way down.
+test('a scrolled-back stream offers a jump to the newest line', async ({ page }) => {
+  // Nothing to jump to on a short stream: the button must not sit there
+  // permanently on a session with three lines in it.
+  await expect(page.getByTestId('scroll-to-bottom')).toHaveCount(0)
+
+  await page.evaluate(() => {
+    for (let i = 0; i < 60; i++) {
+      window.__mock.emitEvent('s-alpha', 'assistant_text', {
+        text: `line ${i} — long enough to fill the pane and force a scrollback`,
+        partial: false,
+      })
+    }
+  })
+  const stream = page.getByTestId('stream')
+  await expect(page.getByTestId('scroll-to-bottom')).toHaveCount(0) // pinned to the bottom
+
+  await stream.evaluate((el) => {
+    el.scrollTop = 0
+  })
+  await expect(page.getByTestId('scroll-to-bottom')).toBeVisible()
+
+  await page.getByTestId('scroll-to-bottom').click()
+  await expect(page.getByTestId('scroll-to-bottom')).toHaveCount(0)
+  expect(
+    await stream.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight),
+  ).toBeLessThan(24)
+})
+
+// The note claims the composer holds text from a previous run. It used to be a
+// one-way flag cleared only on a project switch, so clearing the box and typing
+// something of your own kept the note up, now describing text the app had never
+// seen.
+test.describe('a draft left by a previous run', () => {
+  test.use({})
+  test('the note describes the restored text, and only that text', async ({ page }) => {
+    const scenario = twoProjectScenario()
+    scenario.projects[0].drafts = ['half-written thought']
+    await page.addInitScript(installMockHost, scenario)
+    await page.goto('/')
+    await page.getByTestId('sidebar-project-alpha').click()
+
+    await expect(page.getByTestId('composer-input')).toHaveValue('half-written thought')
+    await expect(page.getByTestId('draft-note')).toBeVisible()
+
+    // Typing your own text ends the claim.
+    await page.getByTestId('composer-input').fill('something I am writing myself')
+    await expect(page.getByTestId('draft-note')).toHaveCount(0)
+
+    // And an empty box has no restored draft to talk about either.
+    await page.getByTestId('composer-input').fill('')
+    await expect(page.getByTestId('draft-note')).toHaveCount(0)
+  })
+})
+
+// 0.16.0 removed this button. The action survived only as Ctrl+C, and only while
+// the composer had focus, with nothing on screen saying so.
+test('a working session offers a red stop button that interrupts the turn', async ({ page }) => {
+  await expect(page.getByTestId('stop-session')).toBeVisible()
+  // It names its own binding rather than hiding it in a tooltip.
+  await expect(page.getByTestId('stop-session')).toContainText('⌃C')
+
+  await page.getByTestId('stop-session').click()
+  await expect.poll(() => page.evaluate(() => window.__mock.state().interrupts.length)).toBe(1)
+
+  // It interrupts the TURN. The session stays open, which is what End does not do.
+  await expect(page.getByTestId('end-session')).toBeVisible()
+
+  // Nothing to interrupt once the turn is over, so the control goes.
+  await page.evaluate(() => window.__mock.completeTurn('s-alpha'))
+  await expect(page.getByTestId('stop-session')).toHaveCount(0)
+})

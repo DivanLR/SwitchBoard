@@ -574,8 +574,6 @@ export class PermissionBroker {
     this.callbacks.onCountersChanged()
   }
 
-  // --- Questions (FR-020): stream-only, clickable choices ---
-
   private async handleQuestion(context: CanUseToolContext): Promise<PermissionResult> {
     const rawQuestions = Array.isArray(context.input.questions)
       ? (context.input.questions as {

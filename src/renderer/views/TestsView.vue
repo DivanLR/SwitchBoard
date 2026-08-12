@@ -214,13 +214,10 @@ function chooseStack(id: string): void {
   })
 }
 
-// --- Gates -------------------------------------------------------------------
 // The six tiles, and the two rules that decide what each one may claim: an
 // unmeasured figure reads "—" with its reason, and a skipped suite is a warning
 // rather than a pass (see the composable).
 const { gates, score } = useVerifyGates(latest)
-
-// --- Run ---------------------------------------------------------------------
 
 const SUB_TABS: { id: SubTab; label: string; built: boolean }[] = [
   { id: 'api', label: 'API', built: true },
@@ -315,6 +312,16 @@ const qualityDebtSource = computed(() =>
     : 'nothing measured it',
 )
 
+// "X killed / Y survived" beside the survivor list — the split the percentage
+// alone does not say. Either count absent means the run never reported them
+// (an older report, or a stack whose mutation tool the app cannot read), so
+// the line is left off rather than showing a half figure.
+const mutationCounts = computed(() => {
+  const killed = report.value?.quality.mutationKilled
+  const survived = report.value?.quality.mutationSurvived
+  return killed == null || survived == null ? null : `${killed} killed · ${survived} survived`
+})
+
 // Real HTTP calls the run made, with the rows they were drawn from. Only API
 // suites produce these, so an empty list means one of four different things and
 // the message has to say which — otherwise "none" reads as "all passed".
@@ -368,16 +375,12 @@ const runSummary = computed(() => {
   return run.status === 'running' ? `Running since ${when}${where}` : `${when}${where}`
 })
 
-// How long this will take, learned from this project's own past runs. Shown
-// BEFORE the run as well as during it: the useful moment for "this is a four
-// minute job" is while deciding whether to start it, and a developer who knows
-// that goes and does something else instead of watching a spinner.
-//
-// A verification run's length is dominated by which suites are in it — mutation
-// testing is minutes where a unit pass is seconds — so past runs covering the
-// same selection are preferred, and the basis line says which kind it used.
-// The run in progress carries no finishedAt, so estimateRunMs ignores it without
-// this needing to filter it out.
+// How long this will take, learned from this project's own past runs — shown
+// before the run as well as during it, since "this is a four minute job" is
+// most useful while deciding whether to start it. A run's length is dominated
+// by which suites are in it, so past runs covering the same selection are
+// preferred (the basis line says which kind it used); a run still in progress
+// carries no finishedAt, so estimateRunMs ignores it without filtering.
 const verifyEstimate = computed(() => {
   const chosen = [...(selected.value ?? [])].sort().join(',')
   return estimateRunMs(
@@ -407,7 +410,6 @@ function statusWord(run: VerifyRun): string {
 
 <template>
   <div class="tests" data-testid="tests-view">
-    <!-- No stack chosen yet: the picker, seeded by detection. -->
     <template v-if="!stack">
       <div class="intro">
         Pick the verification stack for <span class="proj">{{ projectName }}</span> — it decides which
@@ -459,11 +461,8 @@ function statusWord(run: VerifyRun): string {
           {{ running ? 'Running…' : `Last run ${statusWord(latest)}` }} · {{ runSummary }}
         </div>
 
-        <!-- What this run costs in time, learned from this project's own history.
-             Before the run as much as during it: the moment that matters for "this
-             is a four minute job" is while deciding whether to start it. Nothing is
-             shown until there is a finished run to learn from — the app does not
-             guess a first duration any more than it guesses a coverage figure. -->
+        <!-- What this run costs in time, learned from history — same rationale as
+             verifyEstimate above; shown before the run, not only during it. -->
         <div v-if="verifyEstimateLine" class="prof-meta mono" data-testid="tests-estimate">
           {{ verifyEstimateLine
           }}<span v-if="verifyEstimate && !verifyEstimate.comparable"> — treat it loosely</span>
@@ -486,9 +485,8 @@ function statusWord(run: VerifyRun): string {
               <span v-else-if="s.heavy" class="heavy-tag mono">slow</span>
               <span v-if="commandOverrides[s.id]" class="heavy-tag mono">edited</span>
             </button>
-            <!-- The catalogue's command is a guess about a conventional layout;
-                 this is how a layout it does not fit gets corrected, rather than
-                 by editing this application's source. -->
+            <!-- The catalogue's command is a guess about a conventional layout; this
+                 is how it gets corrected without editing the app's source. -->
             <button
               class="chip cmd-edit mono"
               :data-testid="`tests-suite-edit-${s.id}`"
@@ -578,7 +576,6 @@ function statusWord(run: VerifyRun): string {
         </span>
       </div>
 
-      <!-- The six gates. -->
       <div class="gates">
         <button
           v-for="g in gates"
@@ -603,7 +600,6 @@ function statusWord(run: VerifyRun): string {
         </button>
       </div>
 
-      <!-- Panels. -->
       <div class="sub-tabs mono">
         <button
           v-for="t in subTabs"
@@ -975,7 +971,9 @@ function statusWord(run: VerifyRun): string {
           <span class="row-name">{{ f }}</span>
         </div>
 
-        <div class="sec mono">SURVIVING MUTANTS</div>
+        <div class="sec mono">
+          SURVIVING MUTANTS<template v-if="mutationCounts"> · {{ mutationCounts }}</template>
+        </div>
         <p v-if="!report?.quality.survivors.length" class="empty">
           No surviving mutants reported. Mutation testing is a slow suite — tick it above to include
           it in a run.

@@ -88,7 +88,6 @@ export function scheduleRetention(run: () => void): () => void {
       scheduleNext()
     }, next.getTime() - now.getTime())
   }
-  // First pass is deferred off the startup critical path, then nightly.
   timer = setTimeout(() => {
     run()
     scheduleNext()

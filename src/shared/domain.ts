@@ -390,8 +390,17 @@ export interface PermissionRule {
  * the classifier and land at `high`, but must still be eligible for "always
  * allow". Only the genuinely dangerous set below is ever barred.
  */
+/*
+ * `format` is matched only as a disk format, i.e. followed by a drive letter,
+ * because bare `\bformat\b` also barred `dotnet format` and `npm run format`.
+ * Those are formatters, they are in this app's own suite catalogue, and being
+ * refused an always-allow rule for one is exactly the false refusal the comment
+ * above says this set must not make. Nothing destructive is let through by it:
+ * `format C:` still matches, and wiping a disk without naming one is not a
+ * thing the command does.
+ */
 const DANGEROUS_COMMAND =
-  /\b(rm|rmdir|del|rd|format|mkfs|dd|sudo|doas)\b|Remove-Item|git\s+(push|reset\s+--hard|clean)\b/i
+  /\b(rm|rmdir|del|rd|mkfs|dd|sudo|doas)\b|\bformat\s+[a-z]:|Remove-Item|git\s+(push|reset\s+--hard|clean)\b/i
 
 export function isDangerousCommand(command: string): boolean {
   return DANGEROUS_COMMAND.test(command)
@@ -578,14 +587,11 @@ export interface Settings {
    *  whatever detection found. */
   projectTestStacks: Record<string, string>
   /**
-   * Per-project overrides for a suite's command, keyed by project id and then by
-   * suite id.
+   * Per-project overrides for a suite's command, keyed by project id then suite id.
    *
-   * The catalogue's command is a good guess about a conventional layout, and a
-   * guess is all it can be: a monorepo where `npm test` at the root reaches
-   * nothing, or a solution needing `--project`, had no way to correct it short of
-   * editing this application's own source. An absent entry means the catalogue's
-   * own command, and clearing the field deletes the entry rather than storing an
+   * The catalogue's command is only a guess at a conventional layout (wrong for a
+   * monorepo, or a solution needing `--project`); absent means the catalogue's own
+   * command, and clearing the field deletes the entry rather than storing an
    * empty string.
    */
   projectSuiteCommands: Record<string, Record<string, string>>
@@ -599,11 +605,10 @@ export interface Settings {
    * A deployed environment the same eval set can be run against — the QA URL for
    * an API that already exists somewhere.
    *
-   * Separate from `projectApiBase` rather than replacing it, because the two are
-   * used differently and confusing them is what makes a run dangerous: a local
-   * run may be launched by the app and may write, whereas this one is a shared
-   * environment nobody asked us to restart. Absent means the project has no QA
-   * target and the choice is not offered.
+   * Separate from `projectApiBase` rather than replacing it: a local run may be
+   * launched by the app and may write, whereas this one is a shared environment
+   * nobody asked us to restart, so confusing the two is what makes a run dangerous.
+   * Absent means the project has no QA target and the choice is not offered.
    */
   projectApiQa: Record<string, string>
   /**
@@ -733,7 +738,6 @@ export interface Draft {
   createdAt: string
 }
 
-/** A planned prompt/command queued to auto-run when the session next goes idle (FR-023). */
 // --- Eval loop (spec 002 US7 / FR-086..FR-092) ---
 
 /** Outcome of an acceptance line's check. 'not_run' is never "passing": the app
@@ -836,9 +840,9 @@ export interface SuiteResult {
   verified?: boolean
 }
 
-/** Proof the code was executed — real input and the real result (FR-048). */
 /**
  * One real HTTP call made against a running API, with the real data it used.
+ * Proof the code was executed — real input and the real result (FR-048).
  *
  * This is the difference between "the integration suite passed" and knowing what
  * the API actually answered. An endpoint result is only ever written from a call
@@ -905,6 +909,11 @@ export interface VerifyReport {
     debt: string | null
     /** Percent of mutants killed. */
     mutation: Measured
+    /** Killed + timeout mutants (Stryker's own split), paired with mutationSurvived
+     *  so the report can say "31 killed / 19 survived" beside the percentage. */
+    mutationKilled: number | null
+    /** Survived + no-coverage mutants. */
+    mutationSurvived: number | null
     /** Surviving mutants worth looking at, as the tool described them. */
     survivors: string[]
     archViolations: Measured
@@ -1064,6 +1073,8 @@ export function emptyVerifyReport(): VerifyReport {
       duplication: unmeasured(),
       debt: null,
       mutation: unmeasured(),
+      mutationKilled: null,
+      mutationSurvived: null,
       survivors: [],
       archViolations: unmeasured(),
       findings: [],
@@ -1073,6 +1084,7 @@ export function emptyVerifyReport(): VerifyReport {
   }
 }
 
+/** A planned prompt/command queued to auto-run when the session next goes idle (FR-023). */
 export interface QueuedTask {
   id: string
   projectId: string
@@ -1163,6 +1175,29 @@ export interface DiffListResult {
   /** Non-null means the working tree could not be read; `files` is not meaningful. */
   gitNotice: string | null
   files: DiffFileEntry[]
+}
+
+/**
+ * One diagram file on disk, in the project's own docs/diagrams folder.
+ *
+ * The FILE is the record. The database only remembers who asked for it and in
+ * what words: a diagram deleted from the repo disappears from this list whatever
+ * the database still holds, which is the behaviour a folder committed to git has
+ * to have. So sessionId and description are nullable — a file dropped in by hand,
+ * or generated before this app knew about it, still lists.
+ */
+export interface DiagramEntry {
+  /** File name only, e.g. `auth-flow.html`. Unique within a project. */
+  file: string
+  /** Project-relative, forward slashes, e.g. `docs/diagrams/auth-flow.html`. */
+  path: string
+  /** The sentence that asked for it, when the app was the one that asked. */
+  description: string | null
+  /** The session that produced it, when known. */
+  sessionId: string | null
+  /** File mtime, ISO. The only timestamp that is true of the file itself. */
+  modifiedAt: string
+  bytes: number
 }
 
 export interface DiffLine {

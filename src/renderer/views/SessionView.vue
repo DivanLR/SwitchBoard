@@ -17,6 +17,7 @@ import type { ComputedRef, Ref } from 'vue'
 import { agentIdOf, DEFAULT_SESSION_MODE, SESSION_MODES } from '@shared/domain'
 import type { SessionEvent, SessionMode } from '@shared/domain'
 import type { CleanupGroup } from '@shared/command-catalog'
+import { DIAGRAM_PLUGIN } from '@shared/diagram'
 import { activeAgents } from '@shared/agents'
 import { parseInlineQuestion } from '@shared/inline-question'
 import { errorMessage, isIpcError, type ProjectListItem } from '@shared/ipc-types'
@@ -42,6 +43,7 @@ import SpecsView from '@renderer/views/SpecsView.vue'
 import CleanupView from '@renderer/views/CleanupView.vue'
 import TestsView from '@renderer/views/TestsView.vue'
 import DiffView from '@renderer/views/DiffView.vue'
+import DiagramsView from '@renderer/views/DiagramsView.vue'
 import SessionWaitOverlay from '@renderer/components/SessionWaitOverlay.vue'
 
 const props = defineProps<{ project: ProjectListItem }>()
@@ -84,7 +86,7 @@ function pillLabel(status: string): string {
 // Main-area tab: the live session stream, the project's Spec Kit specs, the
 // verification section, the working-tree diff, or the review/cleanup command
 // launcher.
-const mainTab = ref<'session' | 'specs' | 'tests' | 'diff' | 'cleanup'>('session')
+const mainTab = ref<'session' | 'specs' | 'tests' | 'diff' | 'cleanup' | 'diagrams'>('session')
 const specCount = computed(() => specs.stateFor(props.project.id).specs.length)
 const diffCount = computed(() => diff.resultFor(props.project.id).files.length)
 
@@ -92,7 +94,17 @@ const composer = ref('')
 // Spec-edit target (design ✎ chip): when set, the composer rewrites this spec
 // file/section instead of chatting. Set by SpecsView's Refine actions.
 const editTarget = ref<string | null>(null)
-const draftRestored = ref(false)
+/**
+ * The text restored from a previous run, for as long as the composer still holds
+ * exactly it.
+ *
+ * A boolean could not answer the question the note makes. It said "restored
+ * draft" about whatever happened to be in the composer, so clearing the box and
+ * typing something of your own kept the note up, now describing text the app had
+ * never seen. Holding the restored string means any edit ends the claim, because
+ * the claim is about THAT text and is not true of anything else.
+ */
+const restoredDraft = ref<string | null>(null)
 const busy = ref(false)
 // Ended-banner start controls. Two of them, where there used to be two buttons
 // and three switches: WHICH mode the next session runs in, and WHETHER it picks
@@ -217,6 +229,7 @@ onUnmounted(() => {
   // Opening another view (MCP, no selection) unmounts us without firing the
   // project-switch watcher — save the draft here so it survives the round-trip.
   composerDrafts.set(props.project.id, composer.value)
+  for (const stop of pendingCrashWatches.splice(0)) stop()
 })
 
 const sessionTimer = computed(() =>
@@ -246,14 +259,30 @@ const backgroundTasks = computed(() => liveSession.value?.backgroundTasks ?? [])
 // Summaries produced WHILE background work runs are interim noise — record their
 // ids so they stay hidden even after the tasks drain (only the final,
 // post-settle summary renders). Cleared when the session changes.
+//
+// Only summaries that ARRIVE during background work, which is what the sentence
+// above always claimed and the code did not do. It re-scanned the whole event
+// list on every tick, so the first background task to start retro-marked every
+// summary already in the session — including ones from an hour earlier that had
+// nothing to do with it — and nothing ever un-marked them. The developer saw a
+// summary they had been reading vanish from the clean view and stay gone.
+//
+// `scanned` is the high-water mark of events already considered. Events are
+// append-only and ordered by seq, so everything below it has had its answer.
+let scanned = 0
 const interimSummaries = ref<Set<string>>(new Set())
 watch(
   [() => active.events.length, backgroundTasks],
   () => {
-    if (backgroundTasks.value.length === 0) return
-    for (const event of active.events) {
-      if (event.kind === 'summary') interimSummaries.value.add(event.id)
+    const events = active.events
+    if (backgroundTasks.value.length > 0) {
+      for (let i = scanned; i < events.length; i++) {
+        if (events[i].kind === 'summary') interimSummaries.value.add(events[i].id)
+      }
     }
+    // Advanced even when nothing is running, which is the half that fixes it:
+    // an event seen while the session was quiet can never be marked later.
+    scanned = events.length
   },
 )
 
@@ -334,9 +363,9 @@ watch(
     })
     await active.open(sessionId)
     if (superseded) return
-    if (!draftRestored.value && props.project.drafts.length > 0 && composer.value === '') {
+    if (restoredDraft.value === null && props.project.drafts.length > 0 && composer.value === '') {
       composer.value = props.project.drafts.map((d) => d.text).join('\n')
-      draftRestored.value = true
+      restoredDraft.value = composer.value
     }
     scrollToBottom()
   },
@@ -380,7 +409,7 @@ watch(
     // composer text is preserved across switches instead of being wiped.
     if (prevId) composerDrafts.set(prevId, composer.value)
     composer.value = composerDrafts.get(projectId) ?? ''
-    draftRestored.value = false
+    restoredDraft.value = null
     mainTab.value = 'session'
     editTarget.value = null
     // Per-project, all of these: a start failure from the project we left must
@@ -408,25 +437,19 @@ watch(
   { immediate: true },
 )
 
-// Diff tab refresh: the same turn-complete cadence that already refreshes the
-// header's +adds/−dels counter (session-manager.ts observeBranch) re-derives
-// the per-file list too. A same-project refresh leaves the current selection
-// alone (see stores/diff.ts) so a session that keeps working doesn't yank the
-// developer's open diff out from under them.
+// Diff tab refresh: the same cadence that refreshes the header's +adds/−dels
+// counter (session-manager.ts observeBranch) re-derives the per-file list too.
+// A same-project refresh keeps the current selection (stores/diff.ts).
 //
-// liveSession's id is watched too, and separately from diffAdds/diffDels:
-// starting a session on an already-open project changes neither counter (both
-// stay null until the first turn completes), so without this the tab would
-// sit on its pre-session "not live" read until then. The same id transition
-// covers ending a session, so a stale list doesn't linger once liveSession
-// drops to null.
+// liveSession's id is watched separately from diffAdds/diffDels because both
+// counters stay null until the first turn completes — without it the tab would
+// sit on its pre-session "not live" read, and starting/ending a session
+// wouldn't refresh it.
 //
-// The refresh is skipped while the Diff tab is closed, and taken once when it
-// opens instead. Every one of these costs two git processes against the whole
-// working tree, and a busy session completes a turn every few seconds — all of
-// it spent on a list nobody was looking at, on the Session, Specs, Tests or
-// Cleanup tab, which is where this app is read most of the time. The guard is
-// the one already used on the composer-focus watch above.
+// Skipped while the Diff tab is closed, taken once when it opens instead: each
+// refresh costs two git processes over the whole working tree, and a busy
+// session completes a turn every few seconds — wasted on a list nobody is
+// looking at most of the time.
 watch(
   [
     () => liveSession.value?.diffAdds ?? null,
@@ -439,9 +462,8 @@ watch(
   },
 )
 
-// Opening the tab is what pays for the refreshes the guard above skipped. A
-// same-project refresh keeps the current selection (stores/diff.ts), so this
-// costs the list read and nothing the developer can see moving.
+// Opening the tab pays for the refresh the guard above skipped — costs the
+// list read, nothing visibly changes since selection is kept (see above).
 watch(mainTab, (tab) => {
   if (tab === 'diff') void diff.loadList(props.project.id)
 })
@@ -595,6 +617,30 @@ function scrollToBottom(): void {
   })
 }
 
+/**
+ * Whether the stream is parked at its newest line.
+ *
+ * Drives the jump-to-latest button, and only that: autoscroll keeps its own
+ * threshold below, because the two questions are different. Autoscroll asks "may
+ * I move the view under you", and answers generously at 160px so a line arriving
+ * mid-read does not yank the page. This asks "are you already at the bottom",
+ * where anything but a few pixels of slack would leave the button showing when
+ * there is nowhere to go.
+ */
+const atBottom = ref(true)
+
+function onStreamScroll(): void {
+  const el = streamEl.value
+  atBottom.value = !el || el.scrollHeight - el.scrollTop - el.clientHeight < 24
+}
+
+// A short stream has no scrollback, so the button must not appear on a session
+// with three lines in it. Re-checked when the content changes, not only on
+// scroll, because content arriving is what turns a short stream into a long one.
+watch([() => active.events.length, () => active.view, () => liveSession.value?.id, mainTab], () =>
+  void nextTick(onStreamScroll),
+)
+
 // Clean/Raw toggle re-pins to the newest line — the two views have separate
 // scroll containers, so switching would otherwise land wherever the other was.
 function switchView(view: 'clean' | 'raw'): void {
@@ -632,26 +678,38 @@ function onSetTarget(label: string): void {
   void nextTick(() => composerEl.value?.focus())
 }
 
-// A Cleanup card's slash command, or an eval line's check / manual-pass prompt,
-// goes straight to the session; output lands in the Session tab, so switch there
-// to watch it run.
-function runInSession(text: string): void {
-  mainTab.value = 'session'
-  void specs.runInSession(props.project.id, text)
+/**
+ * A section asked for work: it goes to the background session, not the chat.
+ *
+ * This is what Cleanup's rows and the Tests section's manual pass emit into. The
+ * tab no longer switches, because the Session tab shows the conversation and the
+ * work is no longer in it; the store's refresh surfaces the background session
+ * as its own sidebar row, which is where the output is read.
+ */
+function runInSection(text: string): void {
+  void specs.runInSession(props.project.id, text, true)
 }
 
-/** A child tab reports it dispatched something: show the stream and follow it. */
-function onRanInSession(): void {
-  mainTab.value = 'session'
+/**
+ * A child tab reports it dispatched something. Same reasoning as runInSection
+ * above — no tab switch; the dispatch surfaces as its own sidebar row.
+ */
+function onRanInSection(): void {
   scrollToBottom()
 }
 
 // "Download to project" adds the plugin's marketplace then installs it — two
-// slash commands run in order in the session.
+// commands in order, in the background session like everything else a section
+// asks for.
 async function installCleanup(group: CleanupGroup): Promise<void> {
-  mainTab.value = 'session'
-  await specs.runInSession(props.project.id, group.marketplace)
-  await specs.runInSession(props.project.id, group.pkg)
+  await specs.runInSession(props.project.id, group.marketplace, true)
+  await specs.runInSession(props.project.id, group.pkg, true)
+}
+
+// Same two-command install as Cleanup's, for the diagram-design plugin.
+async function installDiagramPlugin(): Promise<void> {
+  await specs.runInSession(props.project.id, DIAGRAM_PLUGIN.marketplace, true)
+  await specs.runInSession(props.project.id, DIAGRAM_PLUGIN.pkg, true)
 }
 
 async function send(): Promise<void> {
@@ -705,26 +763,74 @@ async function start(): Promise<void> {
   // for — otherwise its result lands on whichever project is on screen when it
   // finally settles.
   const target = props.project.id
+  const wasResuming = resumeSession.value && canResume.value
   busy.value = true
   startError.value = null
   modeOpen.value = false
   try {
-    await projects.startSession(
+    const session = await projects.startSession(
       target,
       // Resume only claims to resume when there is something to resume from.
-      resumeSession.value && canResume.value,
+      wasResuming,
       // The picker always sends a concrete mode. It opens on the project's own
       // default, so sending it explicitly changes nothing until it is changed.
       startMode.value,
     )
+    // sessions.start resolves once the CLI is spawned, not once it has proven
+    // it can run — watch the row it returned for the crash that would otherwise
+    // surface only as a beat-later ended banner, easy to miss.
+    watchForImmediateCrash(target, session.id, wasResuming)
   } catch (e) {
     // Docker down / not logged in (bypass sessions run containerised) — show
     // it in the ended banner instead of dying as an unhandled rejection.
-    if (props.project.id === target) startError.value = isIpcError(e) ? e.message : String(e)
+    if (props.project.id === target) {
+      const message = isIpcError(e) ? e.message : String(e)
+      // A resume attempt that failed must not stay armed for the next click —
+      // retrying it unchanged would only fail the same way again.
+      startError.value = wasResuming ? `Resume failed, starting fresh — ${message}` : message
+      if (wasResuming) resumeSession.value = false
+    }
   } finally {
     if (props.project.id === target) busy.value = false
   }
 }
+
+/**
+ * `sessions.start` resolves as soon as the CLI process is spawned; the run
+ * loop that actually proves it can run is async and un-awaited, so a start
+ * that dies immediately (most often an invalid resume — a bypass session's
+ * transcript lives in that project's container volume, so rebuilding the
+ * sandbox image orphans it) reports success here and only shows up later as
+ * an ended row, with the reason sitting in the banner's small detail line.
+ *
+ * Watches that one row (looked up through the store, not `props.project` —
+ * the developer may have switched away from `projectId` while it was still
+ * spawning) and promotes a crash to the same start error a synchronous
+ * failure gets, and turns Resume back off so a failed resume cannot silently
+ * re-arm the next click.
+ */
+function watchForImmediateCrash(projectId: string, sessionId: string, wasResuming: boolean): void {
+  const found = computed(
+    () => projects.items.find((p) => p.id === projectId)?.sessions.find((s) => s.id === sessionId) ?? null,
+  )
+  const stop = watch(
+    found,
+    (session) => {
+      if (!session?.endedAt) return
+      stop() // this row is settled either way — nothing more to watch for
+      if (session.endReason !== 'crashed' || props.project.id !== projectId) return
+      const reason = session.statusDetail ?? 'The session ended immediately after starting.'
+      startError.value = wasResuming ? `Resume failed, starting fresh — ${reason}` : reason
+      if (wasResuming) resumeSession.value = false
+    },
+    { immediate: true },
+  )
+  pendingCrashWatches.push(stop)
+}
+
+/** Crash watches still waiting on a row when this view unmounts. Each stops
+ *  itself once its row settles; this only covers the ones that never did. */
+const pendingCrashWatches: (() => void)[] = []
 
 // Ctrl+C, like a terminal (the design has no interrupt button).
 async function interrupt(): Promise<void> {
@@ -854,7 +960,6 @@ const {
     @dragleave="onPaneDragLeave"
     @drop="onPaneDrop"
   >
-    <!-- Header -->
     <header class="head">
       <div class="head-row">
         <span class="h-dot" :style="{ background: headerColor }"></span>
@@ -939,6 +1044,22 @@ const {
              they were reading it. Ctrl+C still interrupts (onGlobalKeydown, and the
              status bar names the binding), and the main process writes every
              session's transcript continuously without being asked. -->
+        <!-- Stop the turn in flight. Restored after 0.16.0 removed it: the action
+             still existed, but only as Ctrl+C, and only while the composer had
+             focus, with nothing on screen saying so. It interrupts the TURN and
+             leaves the session open, which is what End beside it does not do.
+             The binding is real, so the control names it rather than hiding it
+             in a tooltip. -->
+        <button
+          v-if="liveSession?.status === 'working'"
+          class="stop-btn mono"
+          data-testid="stop-session"
+          title="Interrupt the current turn (Ctrl+C)"
+          @click="interrupt()"
+        >
+          ■
+          <kbd class="ctl-key">⌃C</kbd>
+        </button>
         <button
           v-if="liveSession"
           class="ctl mono"
@@ -1040,9 +1161,8 @@ const {
             {{ m.label }} <span class="uw-model-tok">{{ fmtTok(m.tokens) }}</span>
           </span>
         </button>
-        <!-- The run's own id, quoted short the way a commit is. It is what you
-             need when you are naming one specific run, or matching this pane
-             against a log; the full id sits on the title. -->
+        <!-- The run's short id — see sessionStamp above for why; the full id sits
+             on the title. -->
         <span
           v-if="sessionStamp"
           class="head-stamp"
@@ -1070,7 +1190,6 @@ const {
       </div>
     </div>
 
-    <!-- Session / Specs / Tests / Cleanup tabs -->
     <div class="main-tabs mono">
       <button
         class="mt"
@@ -1104,29 +1223,46 @@ const {
       >
         Cleanup
       </button>
+      <button
+        class="mt"
+        :class="{ sel: mainTab === 'diagrams' }"
+        data-testid="tab-diagrams"
+        @click="mainTab = 'diagrams'"
+      >
+        Diagrams
+      </button>
     </div>
 
     <SpecsView
       v-if="mainTab === 'specs'"
       :project-id="project.id"
       @set-target="onSetTarget"
-      @ran="onRanInSession"
+      @ran="onRanInSection"
     />
     <TestsView
       v-else-if="mainTab === 'tests'"
       :project-id="project.id"
       :project-name="project.name"
       :branch="liveSession?.branch ?? endedSession?.branch ?? null"
-      @run="runInSession"
-      @ran="onRanInSession"
+      @run="runInSection"
+      @ran="onRanInSection"
     />
     <DiffView v-else-if="mainTab === 'diff'" :project-id="project.id" />
     <CleanupView
       v-else-if="mainTab === 'cleanup'"
       :project-name="project.name"
       :available="availableCommandNames"
-      @run="runInSession"
+      @run="runInSection"
       @install="installCleanup"
+    />
+    <!-- No @ran: a diagram is drawn in a background session, so asking for one
+         does not take you to the conversation. The tab you are on is where the
+         answer arrives. -->
+    <DiagramsView
+      v-else-if="mainTab === 'diagrams'"
+      :project-id="project.id"
+      :available="availableCommandNames"
+      @install="installDiagramPlugin"
     />
 
     <!-- Clean stream (an open agent chat always renders clean) -->
@@ -1136,9 +1272,9 @@ const {
       class="stream"
       data-testid="stream"
       :style="{ zoom: streamZoom }"
+      @scroll.passive="onStreamScroll"
     >
       <div class="stream-inner">
-        <!-- Agent chat banner: ← back │ ● name · subagent -->
         <div v-if="selectedAgent" class="agent-banner mono" data-testid="agent-banner">
           <button
             type="button"
@@ -1298,7 +1434,6 @@ const {
           @answer="onInlineAnswer"
         />
 
-        <!-- Agent chat: the live line is the agent's task -->
         <div v-if="selectedAgent" class="live mono" data-testid="live-line">
           <span class="blink" style="color: var(--green)">▊</span>
           {{ selectedAgent.task || selectedAgent.label }}
@@ -1414,8 +1549,7 @@ const {
       </div>
     </div>
 
-    <!-- Raw view -->
-    <div v-else ref="streamEl" class="raw-view" data-testid="stream" :style="{ zoom: streamZoom }">
+    <div v-else ref="streamEl" class="raw-view" data-testid="stream" :style="{ zoom: streamZoom }" @scroll.passive="onStreamScroll">
       <div
         v-for="line in rawLines"
         :key="line.key"
@@ -1428,8 +1562,24 @@ const {
       </div>
     </div>
 
-    <!-- Composer -->
     <footer class="composer">
+      <!-- Jump to the newest line. Anchored to the composer rather than to the
+           stream, because the stream is the scrolling box: anything absolute
+           inside it scrolls away with the content. The composer is the fixed
+           thing directly under it, so hanging the button off its top edge keeps
+           it in the stream's bottom-right corner however tall the composer
+           grows. Shown only when there is somewhere to go. -->
+      <button
+        v-if="!atBottom"
+        type="button"
+        class="to-bottom"
+        data-testid="scroll-to-bottom"
+        title="Jump to the newest line"
+        aria-label="Jump to the newest line"
+        @click="scrollToBottom()"
+      >
+        ↓
+      </button>
       <!-- REFS (design): folders this session may read — floats just above the
            composer, overlapping the bottom of the stream. -->
       <div class="refs-row mono" data-testid="refs-row">
@@ -1469,7 +1619,6 @@ const {
         </button>
         <span v-if="refError" class="ref-error" data-testid="ref-error">{{ refError }}</span>
       </div>
-      <!-- Planned task queue ("UP NEXT"): runs each item in order as the session goes idle -->
       <div v-if="queuedTasks.length > 0" class="queue" data-testid="task-queue">
         <span class="queue-label mono">UP NEXT</span>
         <span
@@ -1516,11 +1665,10 @@ const {
       <div v-if="queuedEditError" class="queued-edit-error mono" data-testid="queued-edit-error">
         {{ queuedEditError }}
       </div>
-      <div v-if="draftRestored && composer" class="draft-note" data-testid="draft-note">
+      <div v-if="restoredDraft !== null && composer === restoredDraft" class="draft-note" data-testid="draft-note">
         Restored draft from the previous run — send to deliver it.
       </div>
 
-      <!-- Ctrl+C stop confirmation, floating just above the input. -->
       <div v-if="stopConfirm" class="stop-confirm mono" data-testid="stop-confirm">
         <span class="sc-text">⏹ Ctrl+C again to stop the chat — are you sure?</span>
         <button class="sc-stop" data-testid="stop-confirm-yes" @click="confirmStop()">Stop</button>
@@ -1542,7 +1690,6 @@ const {
           </button>
         </span>
         <div class="input-wrap">
-          <!-- Suggestion dropdown (terminal-style), above the input -->
           <div v-if="suggestions.length > 0" class="suggest-list mono" data-testid="suggest-list">
             <div
               v-for="(cmd, index) in suggestions"
@@ -1762,11 +1909,46 @@ const {
   border-color: var(--border-strong);
 }
 
-/* A control whose whole label is one glyph: square, so it reads as a key in the
-   row rather than as a word that lost its letters. */
 .ctl:disabled {
   opacity: 0.7;
   cursor: default;
+}
+
+/* Red, because it is the one control here that stops work already running. It
+   sits beside End and means something different: End closes the session, this
+   interrupts the turn and leaves it open. */
+.stop-btn {
+  flex-shrink: 0;
+  min-width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 6px;
+  font-size: var(--fs-micro);
+  color: var(--red);
+  border: 1px solid var(--red);
+  border-radius: var(--rp);
+  cursor: pointer;
+}
+
+.stop-btn:hover {
+  /* --red-ink is the token that exists for exactly this: white on the fill
+     measured too low once --red became a lighter red-pencil red. */
+  color: var(--red-ink);
+  background: var(--red);
+}
+
+/* The binding printed on the control, not hidden in a tooltip. */
+.ctl-key {
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  line-height: 1;
+  padding: 2px 3px;
+  border: 1px solid currentColor;
+  border-radius: var(--rp);
+  opacity: 0.7;
 }
 
 /* The teardown overlay lives in SessionWaitOverlay now, sharing one screen with
@@ -1798,7 +1980,7 @@ const {
 }
 
 /* Off, it is an offer, so it stays in neutral ink like any quiet control. On, it
-   takes valley blue — the attention-owed hue — because a planning session is
+   takes amber — the attention-owed hue — because a planning session is
    holding, waiting on the developer to approve what it proposes. */
 .pill.plan-pill {
   cursor: pointer;
@@ -1823,7 +2005,6 @@ const {
   border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
 }
 
-/* REFS row (design): chips + dashed add pill under the meta line. */
 /* REFS row (design): floats just above the composer, overlapping the bottom of
    the stream. The container ignores pointer events so the stream stays usable;
    the chips/buttons re-enable them. */
@@ -2196,7 +2377,6 @@ html.sb-light .bypass-warn {
   color: var(--text-mid);
 }
 
-/* Agent chat banner (design: ← project │ ● name · subagent). */
 .agent-banner {
   display: flex;
   align-items: center;
@@ -2405,6 +2585,34 @@ html.sb-light .bypass-warn {
 .composer {
   position: relative;
   box-shadow: var(--hairline-shine);
+}
+
+/* The one round thing in a world of cut corners, and deliberately so: it is a
+   floating control over the text rather than a part of the sheet, and the three
+   existing exemptions are round for the same reason — a mark that is not a
+   surface. It sits clear of the composer's own right-hand controls. */
+.to-bottom {
+  position: absolute;
+  top: -44px;
+  right: 22px;
+  z-index: 5;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-body);
+  color: var(--text-body);
+  background: var(--bg-card);
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  box-shadow: var(--shadow-dd);
+  cursor: pointer;
+}
+
+.to-bottom:hover {
+  color: var(--green);
+  border-color: var(--green);
 }
 
 .composer-row {

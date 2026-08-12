@@ -191,7 +191,15 @@ it is also where the SHA-512 it verifies the download against lives.
    ```
 
    This produces `release/Switchboard-Setup-<version>.exe` and `release/latest.yml`.
-3. Publish a GitHub release, attaching both:
+3. Run `npm run verify-release`. This exists because a release missing
+   `latest.yml`, or one whose recorded version or SHA-512 no longer matches the
+   installer on disk, is silently un-updatable rather than visibly broken — the
+   gate catches that before it reaches users. It checks that `latest.yml`
+   exists and parses, that its version matches `package.json`, that the
+   installer it names exists, and that a freshly computed SHA-512 of that
+   installer matches the one recorded. It exits non-zero with a specific
+   message on any failure.
+4. Publish a GitHub release, attaching both:
 
    ```powershell
    gh release create v<version> `

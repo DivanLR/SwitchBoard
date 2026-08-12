@@ -4,11 +4,9 @@ import { computed, reactive, toRefs } from 'vue'
 import type { UpdateStatus } from '@shared/ipc-types'
 import { invoke } from '@renderer/ipc'
 
-// State and derivations are declared separately so the derivations can be real
-// `computed()`s (the same split as stores/projects.ts). A plain `get` on a
-// reactive object is NOT cached by Vue — it re-runs on every read, and the
-// update banner reads five of these on every render while a download ticks.
-// Spread back in through `toRefs`, the public shape of the store is unchanged.
+// State/derivations split the same way as stores/projects.ts (see there for
+// why): the update banner reads five of these every render while a download
+// ticks, and a plain `get` isn't cached by Vue.
 const state = reactive({
   status: { state: 'idle' } as UpdateStatus,
 })
@@ -16,10 +14,15 @@ const state = reactive({
 /** A newer release exists (download not yet started). */
 const available = computed((): boolean => state.status.state === 'available')
 
-/** The banner stays up through the whole download/install flow. */
+/** The banner stays up through the whole download/install flow, and through a
+ *  failure. An update that starts downloading and then fails used to leave the
+ *  banner state and vanish, so the app simply stayed on the old version with
+ *  nothing said — the one outcome a developer needs told about. */
 const active = computed((): boolean =>
-  ['available', 'downloading', 'ready'].includes(state.status.state),
+  ['available', 'downloading', 'ready', 'error'].includes(state.status.state),
 )
+
+const failed = computed((): boolean => state.status.state === 'error')
 
 const downloading = computed((): boolean => state.status.state === 'downloading')
 const ready = computed((): boolean => state.status.state === 'ready')
@@ -31,6 +34,7 @@ const store = reactive({
   available,
   active,
   downloading,
+  failed,
   ready,
   percent,
   busy,

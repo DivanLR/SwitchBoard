@@ -1,8 +1,6 @@
 <script setup lang="ts">
-// Central inbox panel — 1:1 with the design reference: inbox/history tabs with
-// amber count badge, per-project groups (status dot, name, "N pending",
-// "approve all"), item cards with risk chip / explanation / detail box /
-// approve+deny, and the history list of ✓/✗ rows (FR-007..013, SC-004).
+// Central inbox panel — 1:1 with the design reference (inbox/history tabs,
+// per-project groups, item cards, history rows). FR-007..013, SC-004.
 import { nextTick, onMounted, onWatcherCleanup, ref, watch } from 'vue'
 import { isDangerousCommand, type DecisionRecord, type PermissionRequest } from '@shared/domain'
 import { useInboxStore } from '@renderer/stores/inbox'
@@ -22,10 +20,20 @@ const confirmingId = ref<string | null>(null)
 // gets conflated with the one-time high-risk Approve confirm.
 const alwaysConfirmId = ref<string | null>(null)
 const expandedHistory = ref(new Set<string>())
+// Per-card "why" disclosure on pending items — closed by default so the common
+// case (title + risk + command) is all a card costs; same Set-toggle idiom as
+// expandedHistory above.
+const expandedExplain = ref(new Set<string>())
 
 function toggleHistory(id: string): void {
   // Vue 3 tracks mutations on a reactive Set, so toggle in place — no clone.
   const set = expandedHistory.value
+  if (set.has(id)) set.delete(id)
+  else set.add(id)
+}
+
+function toggleExplain(id: string): void {
+  const set = expandedExplain.value
   if (set.has(id)) set.delete(id)
   else set.add(id)
 }
@@ -95,6 +103,24 @@ async function deny(item: PermissionRequest): Promise<void> {
 /** An MCP server tool, e.g. `mcp__oracle-sqlcl__sql_run`. */
 function isMcpItem(item: PermissionRequest): boolean {
   return item.toolName?.startsWith('mcp__') ?? false
+}
+
+/** Tools whose title verb already names the action (describeTool in
+ *  permission-broker.ts), so the mono tool-name chip beside it would repeat
+ *  what the title already said. */
+const SELF_NAMING_TOOLS = new Set(['Bash', 'Write', 'Edit', 'NotebookEdit', 'Read', 'WebFetch', 'WebSearch'])
+
+/** Whether the tool-name chip earns its place: MCP tools and the generic
+ *  "Use the {toolName} tool" fallback have no other name for the tool in view. */
+function showToolChip(item: PermissionRequest): boolean {
+  return isMcpItem(item) || !SELF_NAMING_TOOLS.has(item.toolName ?? '')
+}
+
+/** Bash's detail box just repeats the title verbatim ("Run a command: " + the
+ *  command); Write/Edit/Read/MCP details carry a diff, path or JSON the title
+ *  never states, so only Bash's box is a pure duplicate. */
+function isDuplicateDetail(item: Pick<PermissionRequest, 'toolName' | 'title' | 'detail'>): boolean {
+  return item.toolName === 'Bash' && item.title.endsWith(item.detail)
 }
 
 /** `mcp__oracle-sqlcl__sql_run` → `sql_run` for a compact button label. */
@@ -368,7 +394,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
             <div class="item-main">
               <div class="item-title" data-testid="item-title">{{ item.title }}</div>
               <div class="item-sub">
-                <span v-if="item.toolName" class="item-tool mono">{{ item.toolName }}</span>
+                <span v-if="item.toolName && showToolChip(item)" class="item-tool mono">{{ item.toolName }}</span>
                 <span class="item-ago mono">{{ age(item.createdAt) }}</span>
               </div>
             </div>
@@ -382,8 +408,22 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
               {{ RISK_LABEL[item.risk] }}
             </span>
           </div>
-          <div class="item-explain">{{ item.explanation }}</div>
-          <div class="item-detail detail-box mono" data-testid="item-detail">{{ item.detail }}</div>
+          <button
+            type="button"
+            class="item-explain-toggle"
+            data-testid="item-explain-toggle"
+            :aria-expanded="expandedExplain.has(item.id)"
+            @click="toggleExplain(item.id)"
+          >
+            <span class="hist-arrow mono" :class="{ open: expandedExplain.has(item.id) }">▸</span>
+            Why
+          </button>
+          <div v-if="expandedExplain.has(item.id)" class="item-explain">{{ item.explanation }}</div>
+          <div
+            v-if="!isDuplicateDetail(item)"
+            class="item-detail detail-box mono"
+            data-testid="item-detail"
+          >{{ item.detail }}</div>
 
           <div class="item-actions">
             <template v-if="confirmingId === item.id">
@@ -490,7 +530,9 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
         </div>
         <div v-if="expandedHistory.has(h.id)" class="hist-detail" data-testid="history-detail" @click.stop>
           <div v-if="h.explanation" class="hd-explain">{{ h.explanation }}</div>
-          <pre class="hd-detail detail-box mono">{{ h.detail }}</pre>
+          <!-- Same duplicate-box judgement as the pending card: for Bash, the
+               title already IS the command, so a second copy below adds nothing. -->
+          <pre v-if="!isDuplicateDetail(h)" class="hd-detail detail-box mono">{{ h.detail }}</pre>
         </div>
       </div>
     </div>
@@ -554,7 +596,6 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   padding: 0 8px;
 }
 
-/* Collapse chevron on the tab row's right edge. */
 /* The chevron is drawn, so there is no font-size or line-height here any more:
    both existed to position a text glyph that no longer exists. Density was
    tunable while choosing the variant and settled at 1, so 22px is the literal. */
@@ -785,11 +826,33 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   line-height: 1.4;
 }
 
+/* Disclosure for .item-explain — closed by default, reusing .hist-arrow's
+   glyph and rotate-on-open rather than a second visual language for the
+   same gesture. */
+.item-explain-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-family: var(--sans);
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.item-explain-toggle:hover,
+.item-explain-toggle:hover .hist-arrow {
+  color: var(--text-mid);
+}
+
 .item-explain {
   font-size: var(--fs-ui);
   line-height: 1.5;
   color: var(--text-mid);
-  margin-top: 8px;
+  margin-top: 6px;
   text-wrap: pretty;
   overflow-wrap: anywhere;
 }

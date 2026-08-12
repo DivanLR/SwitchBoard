@@ -1,10 +1,16 @@
 // What the app injects into every session: output-style appends and the
 // Advisor/Orchestrator mode protocol.
-import { describe, expect, it } from 'vitest'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
+  adhdSystemPromptAppend,
   heavySubagentModelMode,
   heavySubagentSystemPromptAppend,
+  modeAgents,
   modesSystemPromptAppend,
+  sandboxSystemPromptAppend,
   terseSystemPromptAppend,
 } from '@main/sessions/session-shaping'
 
@@ -94,5 +100,94 @@ describe('modesSystemPromptAppend', () => {
       expect(text).toContain('`advisor`')
       expect(text).toContain('`worker`')
     }
+  })
+
+  it('never both forbids and mandates a closing summary on a default session', () => {
+    // Default settings: terseMode true, terseLevel 'full', modelMode 'auto' — all three
+    // fire together, so this is the combination an audit actually saw.
+    const terse = terseSystemPromptAppend({ terseMode: true, terseLevel: 'full' }) ?? ''
+    const modes = modesSystemPromptAppend('auto')
+    expect(terse).not.toMatch(/no closing summary/i)
+    expect(modes).toContain('ONE SUMMARY')
+  })
+
+  it('states the advisor cap once, in the agent description, not again in the protocol text', () => {
+    const description = modeAgents({}).advisor?.description ?? ''
+    expect(description).toContain('at most 3 consults')
+    for (const mode of ['advisor', 'orchestrator', 'auto'] as const) {
+      expect(modesSystemPromptAppend(mode)).not.toContain('at most 3')
+    }
+  })
+
+  it('keeps the orchestrator "own turns" clause out of the heavy-subagent append', () => {
+    // Heavy mode forces orchestrator (heavySubagentModelMode), so the two appends
+    // are never apart; the instruction should live in exactly one of them.
+    const heavy = heavySubagentSystemPromptAppend(true) ?? ''
+    const orchestrator = modesSystemPromptAppend('orchestrator')
+    expect(orchestrator).toContain('Keep your own turns')
+    expect(heavy).not.toContain('Keep your own turns')
+  })
+})
+
+describe('heavySubagentSystemPromptAppend prose', () => {
+  it('drops justification prose while keeping the token-cost closer', () => {
+    const append = heavySubagentSystemPromptAppend(true) ?? ''
+    expect(append).not.toContain('grinding through a list')
+    expect(append).not.toContain('ask what the other four are')
+    expect(append).toContain('fan-out spends more tokens')
+  })
+})
+
+describe('sandboxSystemPromptAppend prose', () => {
+  it('drops the build-per-platform mechanism aside, keeps the actionable instruction', () => {
+    const append = sandboxSystemPromptAppend([{ container: '/workspace' }], null, true) ?? ''
+    expect(append).not.toContain('ship a build per platform')
+    expect(append).toContain('npm ci')
+  })
+})
+
+describe('adhdSystemPromptAppend', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'switchboard-adhd-'))
+  const originalConfigDir = process.env.CLAUDE_CONFIG_DIR
+
+  beforeEach(() => {
+    process.env.CLAUDE_CONFIG_DIR = dir
+  })
+
+  afterEach(() => {
+    if (originalConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
+    else process.env.CLAUDE_CONFIG_DIR = originalConfigDir
+    rmSync(join(dir, '.i-have-adhd-always'), { force: true })
+  })
+
+  it('returns null when the flag file is absent', () => {
+    expect(adhdSystemPromptAppend()).toBeNull()
+  })
+
+  it('shares one output-style header with terse mode, not a competing one', () => {
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, '.i-have-adhd-always'), '')
+    const adhd = adhdSystemPromptAppend() ?? ''
+    const terse = terseSystemPromptAppend({ terseMode: true, terseLevel: 'lite' }) ?? ''
+    // Same header text, not a second "THIS OVERRIDES" claim competing with it.
+    const sharedHeader = 'MANDATORY OUTPUT STYLE — THIS OVERRIDES DEFAULT VERBOSITY AND FORMATTING.'
+    expect(adhd).toContain(sharedHeader)
+    expect(terse).toContain(sharedHeader)
+    expect(adhd).not.toContain('ADHD READER')
+  })
+
+  it('routes the preserve rule through the shared constant instead of restating it', () => {
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, '.i-have-adhd-always'), '')
+    const adhd = adhdSystemPromptAppend() ?? ''
+    expect(adhd).toContain('Never abbreviate, reword, or omit code')
+  })
+
+  it('does not both mandate restating progress and forbid recaps', () => {
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, '.i-have-adhd-always'), '')
+    const adhd = adhdSystemPromptAppend() ?? ''
+    expect(adhd).not.toMatch(/restate progress/i)
+    expect(adhd).toContain('No preamble, no recaps, no closers')
   })
 })

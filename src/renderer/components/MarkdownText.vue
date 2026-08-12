@@ -3,11 +3,46 @@
 // fenced code blocks, headings, lists). The HTML comes from renderMarkdown,
 // which HTML-escapes first and emits only a fixed, attribute-free tag set, so
 // v-html is safe here (no injection surface).
-import { computed } from 'vue'
+import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import { renderMarkdown } from '@shared/markdown'
 
 const props = defineProps<{ text: string }>()
 const html = computed(() => renderMarkdown(props.text))
+
+const mdEl = useTemplateRef<HTMLElement>('md')
+
+/**
+ * Which block was copied, by position, and NOT by a class on the block itself.
+ *
+ * The class alone could not survive: `v-html` is not diffed, so every streamed
+ * token replaces this container's entire contents, taking the just-clicked
+ * `<pre>` with it. Copying a block out of a message that was still arriving
+ * therefore looked like it had done nothing — the clipboard write succeeded
+ * every time, and the "copied" label was destroyed by the next token, usually
+ * inside the 1200ms it was meant to be visible.
+ *
+ * The index lives out here in component state, where a re-render cannot reach
+ * it, and is re-applied to the new DOM after each one.
+ */
+const copiedIndex = ref<number | null>(null)
+let clearTimer: ReturnType<typeof setTimeout> | null = null
+
+function markCopied(): void {
+  const blocks = mdEl.value?.querySelectorAll('pre.md-pre')
+  if (!blocks) return
+  blocks.forEach((block, index) => {
+    block.classList.toggle('copied', index === copiedIndex.value)
+  })
+}
+
+// After the re-render that just wiped it, put the mark back — but only when
+// there is a mark to restore. Watching both together ran a querySelectorAll over
+// every block on every streamed token of every message, for the whole session,
+// to re-apply nothing.
+watch(html, () => {
+  if (copiedIndex.value !== null) void nextTick(markCopied)
+})
+watch(copiedIndex, () => void nextTick(markCopied))
 
 /**
  * Click a code block to copy it.
@@ -36,14 +71,23 @@ async function copyBlock(event: MouseEvent): Promise<void> {
     // copy that did not happen.
     return
   }
-  pre.classList.add('copied')
-  setTimeout(() => pre.classList.remove('copied'), 1200)
+  const blocks = [...(mdEl.value?.querySelectorAll('pre.md-pre') ?? [])]
+  copiedIndex.value = blocks.indexOf(pre)
+  markCopied()
+  // Restarted, not stacked: copying a second block while the first is still
+  // marked must move the mark, not have the first block's timer clear it early.
+  if (clearTimer) clearTimeout(clearTimer)
+  clearTimer = setTimeout(() => {
+    clearTimer = null
+    copiedIndex.value = null
+    markCopied()
+  }, 1200)
 }
 </script>
 
 <template>
   <!-- eslint-disable-next-line vue/no-v-html -- content is escaped + tag-whitelisted by renderMarkdown -->
-  <div class="md" data-testid="markdown-text" @click="copyBlock" v-html="html"></div>
+  <div ref="md" class="md" data-testid="markdown-text" @click="copyBlock" v-html="html"></div>
 </template>
 
 <style scoped>

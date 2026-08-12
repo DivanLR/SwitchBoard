@@ -16,6 +16,11 @@ const store = reactive({
   suitesByProject: {} as Record<string, AvailableSuites[]>,
   loading: false,
   error: null as string | null,
+  /** An add in flight, so the button cannot post the same line twice. */
+  adding: false,
+  /** Eval ids with a dispatch in flight. A list rather than one flag because two
+   *  different lines may legitimately run at once; the same line twice may not. */
+  dispatching: [] as string[],
 
   listFor(projectId: string): EvalRun[] {
     return this.byProject[projectId] ?? []
@@ -48,21 +53,28 @@ const store = reactive({
 
   /** Send this line's work to the session: check, attempts, or judge. */
   async dispatch(projectId: string, id: string, kind: 'check' | 'attempts' | 'judge'): Promise<void> {
+    // Per line, not per store: two different acceptance lines may legitimately be
+    // dispatched at once, but clicking Check twice on ONE line sent the same work
+    // to the session twice, and the button gave no sign the first click landed.
+    if (this.dispatching.includes(id)) return
+    this.dispatching = [...this.dispatching, id]
     this.error = null
     try {
       const { runs } = await invoke('evals.dispatch', { projectId, id, kind })
       this.byProject[projectId] = runs
-      // A Tests-section dispatch can spawn the project's dedicated tests session.
-      // The sidebar only patches a session it already knows, so refresh or the run
-      // happens in a session with no row on screen. refresh() re-applies focus, so
-      // this never moves the centre pane off the conversation.
+      // Refresh so a spawned tests session gets a sidebar row — see verify.ts's
+      // surfaceNewSessions for why.
       await useProjectsStore().refresh()
     } catch (error) {
       this.error = errorMessage(error)
+    } finally {
+      this.dispatching = this.dispatching.filter((x) => x !== id)
     }
   },
 
   async add(projectId: string, acceptance: string, checkCmd?: string): Promise<void> {
+    if (this.adding) return
+    this.adding = true
     this.error = null
     try {
       this.byProject[projectId] = await invoke('evals.add', {
@@ -72,6 +84,8 @@ const store = reactive({
       })
     } catch (error) {
       this.error = errorMessage(error)
+    } finally {
+      this.adding = false
     }
   },
 

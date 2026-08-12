@@ -148,6 +148,14 @@ const dbProject = computed(() => projects.dbProject)
         <template v-else-if="updates.ready">
           Update downloaded — the installer is opening. The app will close.
         </template>
+        <!-- A failed update said nothing at all before this: the banner simply
+             disappeared and the app stayed on the old version. -->
+        <template v-else-if="updates.failed">
+          The update could not be installed{{
+            updates.status.message ? ` — ${updates.status.message}` : ''
+          }}. You are still on the current version; try again later or download it
+          from the releases page.
+        </template>
         <template v-else>
           A new version{{ updates.status.version ? ` (${updates.status.version})` : '' }} is available.
         </template>

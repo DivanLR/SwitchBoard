@@ -64,12 +64,10 @@ class AsyncPushQueue<T> implements AsyncIterable<T> {
 type CanUseToolOptions = Parameters<CanUseTool>[2]
 
 /**
- * Re-exported so the rest of the main process never imports the SDK itself.
- *
+ * Re-exported so the rest of the main process never imports the SDK directly.
  * `src/main/sessions/` is the SDK's only home (CLAUDE.md), and the permission
- * broker needs this one type because it IS what a gate resolves to. Surfacing it
- * here keeps the boundary real: an SDK upgrade that renames or reshapes this type
- * lands in this directory, not scattered across the inbox.
+ * broker needs this type because it IS what a gate resolves to — an SDK upgrade
+ * that reshapes it then lands here, not scattered across the inbox.
  */
 export type { PermissionResult }
 
@@ -84,8 +82,6 @@ export type PermissionGate = (context: {
 interface HostedSessionOptions {
   /** Switchboard session id (not the SDK session id). */
   sessionId: string
-  /** Owning project; scopes the sandbox's persisted container home per project. */
-  projectId: string
   projectPath: string
   /** Referenced folders (REFS chips) granted as additional directories. */
   refDirs?: string[]
@@ -93,6 +89,10 @@ interface HostedSessionOptions {
   sandboxMemory?: string
   /** SDK session id of a prior conversation to resume (R2). */
   resumeSdkSessionId?: string
+  /** Switchboard id of the session that conversation belongs to. A containerised
+   *  resume needs it to open the ancestor's home volume, where the transcript the
+   *  SDK is being asked to resume actually lives (see homeVolumeFor). */
+  resumeFromSessionId?: string
   /** Terse-mode instruction appended to the Claude Code system prompt, if enabled. */
   systemPromptAppend?: string
   /** Path to the bundled standalone Claude executable (avoids the Electron spawn crash). */
@@ -124,11 +124,23 @@ interface HostedSessionOptions {
   onTurnMode?: (mode: 'advisor' | 'orchestrator' | null) => void
   /**
    * The mode this session spawns in, already resolved by the manager from the
-   * request and the project's own default. One value: `bypass` and `plan` used to
-   * be separate booleans and the pair could ask for a state the SDK has no way to
-   * start in.
+   * request and the project's own default. One value, not two separate booleans
+   * (see resolvePermissionMode for why).
    */
   mode: SessionMode
+  /**
+   * Run the CLI in a disposable container, WITHOUT touching what it may do.
+   *
+   * These were one value until now: `bypass` meant both "runs in a container"
+   * and "approves everything", read from the same predicate in two places, so a
+   * containerised session could not keep normal permission gating. The sections
+   * need exactly that combination — their work should not be able to disturb the
+   * developer's own checkout, and it should still ask before it does something
+   * that would need asking.
+   *
+   * Bypass still implies this, so nothing about a bypass session changes.
+   */
+  containerised?: boolean
   /** The live plan-mode state, whenever the CLI reports it or a toggle changes it. */
   onPlanModeChange?: (inPlanMode: boolean) => void
   /** Relabel a turn's closing message as ✦ SUMMARY (off = raw response). */
@@ -176,11 +188,11 @@ interface QueuedSend {
  * Named rather than relayed, because reporting an environment limit as the
  * developer's code crashing is the one thing this product forbids itself.
  */
-export function explainExit(raw: string, bypass: boolean): string {
+export function explainExit(raw: string, containerised: boolean): string {
   const code = /exited with code (\d+)/.exec(raw)?.[1]
   if (code === '137') {
-    return bypass
-      ? 'The bypass sandbox container was killed from outside the process: exit 137 is ' +
+    return containerised
+      ? 'The sandbox container was killed from outside the process: exit 137 is ' +
           'SIGKILL, so nothing inside it got to report why. It ran out of memory, and there ' +
           'are two ceilings it could have hit. The container runs with a limit of its own ' +
           '(6 GiB by default), so a build that genuinely needs more stops here rather than ' +
@@ -246,11 +258,21 @@ export class HostedSession {
   /** Set for a bypass session: its host→container mounts (see deliverNow). */
   private sandbox: SandboxPlan | null = null
 
-  /** Bypass is the one mode that changes where the session RUNS, not just what it
-   *  may do: no OS sandbox exists on native Windows, so it runs containerised and
-   *  its transcript lives in a container volume. Three call sites ask. */
+  /** What this session may DO: bypass approves every tool call. */
   private get bypassing(): boolean {
     return this.options.mode === 'bypass'
+  }
+
+  /**
+   * WHERE this session runs. No OS sandbox exists on native Windows, so a
+   * container is the isolation boundary and its transcript lives in a container
+   * volume.
+   *
+   * Separate from `bypassing` since 2026-08-12 (see the `containerised` option
+   * above for why): bypass still implies this, but the reverse no longer holds.
+   */
+  private get containerised(): boolean {
+    return this.options.containerised === true || this.bypassing
   }
 
   constructor(options: HostedSessionOptions) {
@@ -265,17 +287,17 @@ export class HostedSession {
   }
 
   start(): void {
-    // Bypass sessions run the CLI in a disposable Linux container: no OS
-    // sandbox exists on native Windows, so the container is the isolation
+    // A containerised session runs the CLI in a disposable Linux container: no
+    // OS sandbox exists on native Windows, so the container is the isolation
     // boundary (docker-sandbox.ts). Paths handed to the CLI must then be
     // container-side (/workspace, /refs/*), not host paths.
-    const sandbox = this.bypassing
+    const sandbox = this.containerised
       ? sandboxSpawn({
           sessionId: this.sessionId,
-          projectId: this.options.projectId,
           projectPath: this.options.projectPath,
           refDirs: this.options.refDirs ?? [],
           sandboxMemory: this.options.sandboxMemory,
+          resumeFromSessionId: this.options.resumeFromSessionId,
         })
       : null
     this.sandbox = sandbox
@@ -373,7 +395,7 @@ export class HostedSession {
         return
       }
       const raw = error instanceof Error ? error.message : String(error)
-      const detail = explainExit(raw, this.bypassing)
+      const detail = explainExit(raw, this.containerised)
       this.fatal = true
       this.mapper.fatalError(detail)
       this.setStatus('error', detail)
@@ -424,16 +446,13 @@ export class HostedSession {
   }
 
   /**
-   * Apply the session's main-loop model before a turn is delivered, and report
-   * which pairing pattern this message falls into.
+   * Apply the session's main-loop model before a turn, and report which pairing
+   * pattern this message falls into.
    *
-   * The model comes from the MODE, not the message, and therefore does not
-   * change from turn to turn: switching the main-loop model mid-session
-   * invalidates the tools, system, AND message prompt-cache tiers, so the whole
-   * conversation prefix is re-written at the cache-write rate on the next turn.
-   * The cheap tier is reached through the `worker` subagent, which keeps its own
-   * context. The pairing pattern still varies per message — that only changes
-   * which protocol the loop follows and which subagent it reaches for.
+   * The model comes from the MODE, not the message, so it never changes turn to
+   * turn (see mainLoopModel: switching it mid-session invalidates every
+   * prompt-cache tier). The pairing pattern still varies per message — that only
+   * changes which protocol the loop follows and which subagent it reaches for.
    *
    * Fire-and-forget (best-effort) so the send path stays synchronous — no await
    * window for a stop/interrupt to race.
@@ -622,12 +641,18 @@ export class HostedSession {
 
   private emitCommands(commands: ProjectCommand[]): void {
     const byName = new Map<string, ProjectCommand>()
-    for (const c of commands) {
-      if (!c.name || byName.has(c.name)) continue
-      if (c.description) this.commandDescriptions.set(c.name, c.description)
-      byName.set(c.name, {
-        name: c.name,
-        description: c.description ?? this.commandDescriptions.get(c.name),
+    for (const raw of commands) {
+      // Trimmed on the way in. These names come from the CLI's own init message
+      // and are inserted verbatim into the composer when one is chosen, so any
+      // padding it reports for its own column layout would arrive as trailing
+      // whitespace in a message about to be sent.
+      const name = raw.name?.trim()
+      const c = { ...raw, name }
+      if (!name || byName.has(name)) continue
+      if (c.description) this.commandDescriptions.set(name, c.description)
+      byName.set(name, {
+        name,
+        description: c.description ?? this.commandDescriptions.get(name),
       })
     }
     const list = [...byName.values()].sort((a, b) => a.name.localeCompare(b.name))

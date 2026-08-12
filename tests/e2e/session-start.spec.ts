@@ -108,6 +108,53 @@ test('resuming a native session never offers bypass, because its transcript is o
   await expect(list).toContainText('on this machine')
 })
 
+test('a start that crashes immediately surfaces its reason as the start error', async ({ page }) => {
+  await page.getByTestId('start-session').click()
+  await expect(page.getByTestId('ended-banner')).toHaveCount(0)
+
+  // sessions.start already resolved "success" here — the run loop dies a beat
+  // later, exactly the race this fix closes. Read the live session id back off
+  // the project list rather than the mock's own counter, so the test does not
+  // depend on how ids happen to be minted.
+  const sessionId = await page.evaluate(async () => {
+    const { projects } = await window.switchboard.invoke('projects.list', undefined)
+    return projects.find((p) => p.id === 'p-alpha')?.session?.id
+  })
+  expect(sessionId).toBeTruthy()
+
+  await page.evaluate(
+    (id) => window.__mock.crashSession(id as string, 'The Claude Code process exited with code 13.'),
+    sessionId,
+  )
+
+  await expect(page.getByTestId('start-error')).toContainText('code 13')
+  // Ended, not still "working" behind a stale pill.
+  await expect(page.getByTestId('ended-banner')).toBeVisible()
+})
+
+test('a failed resume turns Resume back off, and says why in the message', async ({ page }) => {
+  // The seeded ended session already has an sdkSessionId (see beforeEach), so
+  // Resume is available without another round-trip through start/end.
+  await page.getByTestId('resume-session').click()
+  await expect(page.getByTestId('resume-session')).toHaveAttribute('aria-checked', 'true')
+  await page.getByTestId('start-session').click()
+  await expect(page.getByTestId('ended-banner')).toHaveCount(0)
+
+  const sessionId = await page.evaluate(async () => {
+    const { projects } = await window.switchboard.invoke('projects.list', undefined)
+    return projects.find((p) => p.id === 'p-alpha')?.session?.id
+  })
+  await page.evaluate(
+    (id) => window.__mock.crashSession(id as string, 'The last conversation could not be resumed.'),
+    sessionId,
+  )
+
+  await expect(page.getByTestId('start-error')).toContainText('Resume failed, starting fresh')
+  await expect(page.getByTestId('start-error')).toContainText('could not be resumed')
+  // Off for the next click — a retry must not silently repeat the same resume.
+  await expect(page.getByTestId('resume-session')).toHaveAttribute('aria-checked', 'false')
+})
+
 test('heavy subagent mode is off by default and can be turned on', async ({ page }) => {
   await page.getByTestId('open-settings').click()
   await page.getByTestId('settings-tab-term').click()

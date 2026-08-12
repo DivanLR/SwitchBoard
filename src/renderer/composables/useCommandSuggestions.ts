@@ -110,6 +110,13 @@ export function useCommandSuggestions(opts: {
     if (!ghostMatch.value) return false
     composer.value = ghostMatch.value
     suggestIndex.value = -1
+    // Accepting settles the choice, exactly as picking from the dropdown does.
+    // Without this, a command that is a literal prefix of its siblings re-ghosted
+    // the moment it was completed — /ponytail has five — so a dim grey tail
+    // appeared with no further typing. It reads as blank space rather than text
+    // because .composer-input.is-command makes the real text transparent, leaving
+    // the low-contrast mirror as the only thing drawn there.
+    suggestDismissed.value = true
     return true
   }
 

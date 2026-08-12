@@ -54,6 +54,39 @@ test('a code block is copied by clicking it, and says so', async ({ page, contex
   expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('npm run check')
 })
 
+// The bug this guards: v-html is not diffed, so every streamed token replaces
+// this message's whole subtree, taking the just-clicked block with it. Copying
+// out of a message that was still arriving looked like it had done nothing —
+// the clipboard write always succeeded, the "copied" mark was destroyed by the
+// next token. The old test above only ever emitted a finished message, so the
+// suite passed while the bug was live.
+test('the copied mark survives the next streamed token', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const eventId = await page.evaluate(() =>
+    window.__mock.emitEvent('s-alpha', 'assistant_text', {
+      text: ['Run this:', '', '```', 'npm run check', '```'].join('\n'),
+      partial: true,
+    }),
+  )
+
+  const block = page.getByTestId('stream-event-assistant_text').locator('pre.md-pre')
+  await block.click()
+  await expect(block).toHaveClass(/copied/)
+
+  // The message keeps arriving, which rebuilds the block the mark was sitting on.
+  await page.evaluate((id) => {
+    window.__mock.updateEvent('s-alpha', id, {
+      text: ['Run this:', '', '```', 'npm run check', '```', '', 'Then read the output.'].join('\n'),
+      partial: true,
+    })
+  }, eventId)
+
+  await expect(page.getByTestId('stream-event-assistant_text')).toContainText('Then read the output')
+  await expect(
+    page.getByTestId('stream-event-assistant_text').locator('pre.md-pre'),
+  ).toHaveClass(/copied/)
+})
+
 test('selecting inside a code block is not overwritten by the copy', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   await page.evaluate(async () => {

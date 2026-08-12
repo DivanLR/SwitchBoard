@@ -83,11 +83,16 @@ const store = reactive({
 
   async loadEarlier(): Promise<void> {
     if (!this.sessionId || this.oldestSeq === null) return
+    // The same guard open() carries, for the same reason: scrolling back and
+    // then switching session must not splice one session's history onto
+    // another's stream. Captured before the await, checked after it.
+    const sessionId = this.sessionId
     const older = await invoke('sessions.events', {
-      sessionId: this.sessionId,
+      sessionId,
       beforeSeq: this.oldestSeq,
       limit: PAGE_SIZE,
     })
+    if (this.sessionId !== sessionId) return
     this.events = [...older, ...this.events]
     this.oldestSeq = this.events.length > 0 ? this.events[0].seq : null
     this.hasMoreHistory = older.length >= PAGE_SIZE

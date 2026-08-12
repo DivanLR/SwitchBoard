@@ -140,7 +140,6 @@ html.sb-light .uc-bar {
   color: var(--text-meta);
 }
 
-/* The dotted list. */
 .uc-list {
   margin: 0;
   padding-left: 18px;

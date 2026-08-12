@@ -20,14 +20,14 @@
      sheet's rule and deliberate: the warm-on-cool opposition is what made the
      old light theme read as a printed material, and a material is what was
      asked to go.
-   - The action colour is CORNFLOWER BLUE here and foil green on carbon. The two
-     themes no longer share an accent. This was chosen with the trade named: the
-     product reads as one identity across modes only in its structure, type and
-     geometry now, not in its hue.
-   - Attention owed moves off blue onto a dark amber, because the action colour
-     took blue. It cannot be a bright gold: no saturated warm hue clears 4.5:1
-     on a near-white ground in sRGB, so "amber" here means the darkest legible
-     amber, which is the same wall GitHub's own light warning text sits against.
+   - The action colour was CORNFLOWER BLUE for one release and is GREEN again,
+     on the owner's direction. What survives from the reference is its neutrals:
+     the cool canvas, the white cards, the soft hairlines and the 6px corners.
+     Only the accent came back. The two themes agree on hue once more.
+   - Attention owed stays a dark amber, where it landed when the action colour
+     briefly took blue. It cannot be a bright gold: no saturated warm hue clears
+     4.5:1 on a near-white ground in sRGB, so "amber" here means the darkest
+     legible amber, the same wall GitHub's own light warning text sits against.
    - Corners are 6px HERE ONLY. On carbon a fold is still a cut. See --rc.
 
    Every value below was measured, not chosen by eye. The floors are 4.5:1 for
@@ -93,13 +93,16 @@ html.sb-light {
      sits on rather than the flat ground: 6.02:1 on a hover wash, 5.48:1 on a
      selected row. The ramp tier nearest it fails both. */
   --text-on-wash: #4E535B;
-  /* THE ACTION COLOUR: cornflower blue, darkened from the reference's own fill
-     value because this token is also set as bare text in twenty files, so it
-     has to pass as text and not only as white-on-fill. 5.75:1 as text, 6.23:1
-     carrying white. Hover deepens: on a bright ground a press adds ink. */
-  --green: #2B58CC;
-  --green-hover: #1E43A8;
-  --green2: #2650BE;
+  /* THE ACTION COLOUR IS GREEN AGAIN. It was cornflower blue for one release,
+     taken from the reference wholesale; the owner asked for green back, so the
+     Cornflower NEUTRALS stay (cool canvas, white cards, soft hairlines, 6px
+     corners) and the accent returns to the foil green the dark sheet uses. The
+     two themes agree on hue once more, and this green is measured on the new
+     cooler grounds rather than inherited from the old paper ones: 5.73:1 as
+     text on the canvas, 5.28:1 on a panel, and 6.20:1 carrying white. */
+  --green: #136F45;
+  --green-hover: #0F5A38;
+  --green2: #115F3C;
   --green-ink: #FFFFFF;
   /* The reference tints its primary shadow with the primary itself, and that is
      the one place it lets a shadow carry hue. Kept, derived from the token so
@@ -107,11 +110,22 @@ html.sb-light {
   --green-glow:
     0 1px 2px color-mix(in srgb, var(--green) 26%, transparent),
     0 4px 10px color-mix(in srgb, var(--green) 16%, transparent);
-  /* A RUNNING SESSION IS STILL GREEN. It has to be: the action colour is blue
-     here, and a lane reporting "working" in the action colour reports it in
-     blue. Derived from the reference's own success hue, darkened to carry text
-     at 5.73:1. */
+  /* A LIVE SESSION. Kept as its own token even now that it equals --green
+     again: --green is what an ACTION is drawn in, this is what a STATE is drawn
+     in, and the lane bar reads this one. They agreed in dark all along, and
+     disagreed in light for exactly one release, which is the whole argument for
+     the pair existing. 5.73:1 as text. */
   --running: #136F45;
+  /* NO LIVE SESSION. The other half of the lane bar: orange where --running is
+     green. 4.02:1 at worst against a panel, comfortably past the 3:1 a non-text
+     mark needs, and a warmer, lighter orange than --amber so a lane bar is not
+     mistaken for the attention-owed glyph beside it. */
+  --idle: #A6640B;
+  /* An OFF switch track. It used to read --border-strong, which is a control's
+     boundary weight: 60% ink on a white card drew a near-black pill that looked
+     switched ON. A track is a surface, not an edge, so it gets its own token at
+     a surface's weight. */
+  --switch-off: rgba(15, 19, 26, 0.28);
   /* Attention owed. See the note at the top on why this is not a bright gold.
      5.54:1 as text, 6:1 carrying white. --blue holds the same value, as it
      always has here. */
@@ -198,6 +212,13 @@ html.sb-light {
   --bg-card-alt: #1B1D21;
   /* Code surface: where terminal output and code are printed. */
   --bg-code: #141518;
+  /* The one deliberately theme-INVARIANT surface, declared here and never
+     overridden in html.sb-light: a rendered diagram is a document with its own
+     page colour, so its ground is white on carbon as well as on the light
+     sheet. Letting the sheet show through a diagram's margins would read as
+     part of the drawing. Every other surface token is themed; this one is a
+     page, not a surface. */
+  --diagram-page: #FFFFFF;
   --bg-hover: rgba(244,244,242, 0.06);
   /* The selected part is washed in mountain gray, the structural neutral. */
   --bg-active: color-mix(in srgb, #B9B6AE 12%, transparent);
@@ -285,6 +306,15 @@ html.sb-light {
      running session is green in both themes, so the state keeps its own token and
      the action keeps --green. */
   --running: #4DC97E;
+  /* NO LIVE SESSION, the other half of the lane bar. Carbon has no orange at
+     all: --amber here is a pale BLUE, because a warm ochre sat 27 degrees from
+     the error red and the two signals that matter most stopped being tellable
+     apart. So this is a NEW token rather than a reuse of that one, and it is a
+     BAR colour only, never a glyph, so it is never asked to be told from the red
+     mark in the same shape at the same size. 7.6:1 against a sidebar panel. */
+  --idle: #E09B42;
+  /* An OFF switch track. See the light value for why this is not --border-strong. */
+  --switch-off: rgba(244, 244, 242, 0.22);
   --blue: #8CB8E4;
   /* Attention owed. CONTRACT AMENDMENT: the original direction named a warm
      ochre mark here, and on a dark sheet that could not work. Lightened enough
@@ -899,7 +929,10 @@ html.sb-light .btn-solid {
      lines, where a character grid tells you a hyphen from an underscore. */
   font-family: var(--mono);
   font-size: var(--fs-body);
-  padding: 0;
+  /* Left padding so the block caret does not sit against the border on an empty
+     composer. The ghost mirror carries the identical figure; a mirror padded
+     differently from the field puts its ghost text off the real caret. */
+  padding: 0 0 0 3px;
   /* A terminal's cursor is a block, in the colour of its prompt. Chromium 139
      and up honour caret-shape; anything older ignores it and keeps the bar,
      which is a perfectly good fallback rather than a broken state. */
@@ -952,7 +985,7 @@ html.sb-light .btn-solid {
   min-width: 38px;
   height: 21px;
   border-radius: var(--rp);
-  background: var(--border-strong);
+  background: var(--switch-off);
   position: relative;
   cursor: pointer;
   border: none;
@@ -1147,6 +1180,7 @@ html.sb-light .btn-solid {
   /* Mirrors .composer-input exactly — keep the paddings in lockstep. */
   padding-top: 3px;
   padding-bottom: 3px;
+  padding-left: 3px;
 }
 
 .ghost-typed {

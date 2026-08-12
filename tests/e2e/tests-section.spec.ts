@@ -27,11 +27,8 @@ async function startApiRun(page: import('@playwright/test').Page): Promise<void>
 
 /**
  * The last thing dispatched to a session, once it has actually been dispatched.
- *
- * Tests-section work now runs in the project's OWN session rather than whichever
- * session happens to be open, so the first run of a project has to spawn one
- * before it can send anything. Reading `sends` in the same tick as the click used
- * to work only because the dispatch reused a session that already existed.
+ * Waits because dispatch now spawns the project's own tests session first — see
+ * startRun above for why a same-tick read used to work and no longer does.
  */
 async function lastSend(
   page: import('@playwright/test').Page,
@@ -68,6 +65,8 @@ function report(over: Record<string, unknown> = {}): Record<string, unknown> {
       duplication: { value: 1.2, source: 'sonarqube' },
       debt: '2d 4h',
       mutation: { value: 74, source: 'stryker' },
+      mutationKilled: 31,
+      mutationSurvived: 11,
       survivors: ['db.ts:88 — removed the WAL pragma'],
       archViolations: { value: 0, source: 'architecture suite' },
       findings: [],
@@ -294,6 +293,8 @@ test('the quality panel shows the service report, the mutants and the rule break
         duplication: { value: 4.8, source: 'sonarqube' },
         debt: '2d 4h',
         mutation: { value: 61, source: 'stryker' },
+        mutationKilled: 39,
+        mutationSurvived: 25,
         survivors: ['db.ts:88 — removed the WAL pragma'],
         archViolations: { value: 2, source: 'architecture suite' },
         findings: ['Application depends on Infrastructure (OrdersHandler.cs:14)'],
@@ -306,6 +307,9 @@ test('the quality panel shows the service report, the mutants and the rule break
   await expect(page.getByTestId('tests-panel-quality')).toContainText('sonarqube')
   await expect(page.getByTestId('tests-quality-debt')).toContainText('2d 4h')
   await expect(page.getByTestId('tests-panel-quality')).toContainText('removed the WAL pragma')
+  // The score alone does not say how many mutants survived — the count beside
+  // the survivor list is what makes "61%" actionable.
+  await expect(page.getByTestId('tests-panel-quality')).toContainText('39 killed · 25 survived')
 })
 
 test('evidence is captured against the run and shows what actually executed', async ({ page }) => {
@@ -514,10 +518,10 @@ test('a run that reports nothing is inconclusive, never a pass', async ({ page }
   await expect(page.getByTestId('tests-gate-unit')).not.toContainText('passed')
 })
 
-// --- The API eval set: the deterministic path -------------------------------
-// What separates these from the tests above: no report line decides anything.
-// The app sends the requests and computes the verdict, so the session's only
-// contribution is data, and the panel shows the calls the app actually made.
+// The API eval set: the deterministic path. No report line decides anything
+// here — the app sends the requests and computes the verdict, so the
+// session's only contribution is data, and the panel shows the calls the app
+// actually made.
 
 /** One call as the app records it: the request it sent, and what came back. */
 function apiCall(over: Record<string, unknown> = {}): Record<string, unknown> {
