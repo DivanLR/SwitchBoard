@@ -5,20 +5,11 @@
   // (so it needs DOM and the window.switchboard augmentation). Neither the node
   // nor the web project can own it without gaining types it must not have, so it
   // gets its own project rather than widening theirs.
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "composite": true,
     "target": "ES2023",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true,
-    "skipLibCheck": true,
     "resolveJsonModule": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
     "types": ["node"],
     "paths": {
       "@shared/*": ["./src/shared/*"],

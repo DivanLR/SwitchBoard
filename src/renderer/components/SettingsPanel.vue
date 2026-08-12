@@ -281,7 +281,7 @@ const updateLine = computed(() => {
       <div class="s-head">
         <span class="gear mono">⚙</span>
         <span class="s-title mono">Settings</span>
-        <span style="flex: 1"></span>
+        <span class="spacer"></span>
         <button class="s-x mono" data-testid="settings-close" @click="emit('close')">✕</button>
       </div>
 
@@ -299,7 +299,7 @@ const updateLine = computed(() => {
             <span class="rt-icon mono">{{ t.icon }}</span>
             <span class="rt-label mono">{{ t.label }}</span>
           </button>
-          <span style="flex: 1"></span>
+          <span class="spacer"></span>
           <div v-if="settings" class="rail-foot mono">
             Smart {{ modelLabel(settings.intelligentModel) }}<br />Worker {{ modelLabel(settings.workerModel) }}
           </div>
@@ -901,7 +901,7 @@ const updateLine = computed(() => {
       <!-- Footer -->
       <div class="s-foot mono">
         <span>Changes apply immediately</span>
-        <span style="flex: 1"></span>
+        <span class="spacer"></span>
         <button class="btn-solid" data-testid="settings-done" @click="emit('close')">Done</button>
       </div>
     </div>

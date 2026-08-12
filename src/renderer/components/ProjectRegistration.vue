@@ -1,9 +1,14 @@
 <script setup lang="ts">
 // "New session" dialog (design reference): folder input with a live session
 // name, the default folder-access summary, a bypass-permissions toggle with
-// warning, and Start/Cancel. Claude Code suggestions (FR-001a) fill the
-// folder input on click.
-import { useTemplateRef, computed, onMounted, ref } from 'vue'
+// warning, and Start/Cancel. The folder is typed or chosen with the native
+// picker.
+//
+// The list of folders Claude Code had been used in was removed on request. It
+// answered "where have you worked before", which is a question the sidebar
+// already answers for every project that matters, and it pushed the folder
+// field and Start apart by however many rows it happened to find.
+import { useTemplateRef, computed, ref } from 'vue'
 import { useModal } from '@renderer/composables/useModal'
 import { isIpcError } from '@shared/ipc-types'
 import { DEFAULT_SESSION_MODE, SESSION_MODES, type SessionMode } from '@shared/domain'
@@ -28,9 +33,14 @@ const mode = ref<SessionMode>(DEFAULT_SESSION_MODE)
 const error = ref<string | null>(null)
 const busy = ref(false)
 
-onMounted(() => {
-  void projects.loadSuggestions()
-})
+// The picked path goes into the same field a typed path goes into, so it takes
+// the same validation on Start rather than a second, quieter branch of its own.
+// The OS guarantees the folder exists; it guarantees nothing about whether this
+// project is already registered.
+async function browseFolder(): Promise<void> {
+  const picked = await projects.pickFolder()
+  if (picked) folder.value = picked
+}
 
 const stripSlash = (p: string): string => p.replace(/[\\/]+$/, '')
 
@@ -110,14 +120,25 @@ async function startSession(): Promise<void> {
       <p v-if="error" class="error mono" data-testid="registration-error">{{ error }}</p>
 
       <div class="section-label mono">FOLDER</div>
-      <input
-        v-model="folder"
-        class="mono folder-input"
-        data-testid="folder-input"
-        placeholder="~/dev/my-project"
-        spellcheck="false"
-        @keydown.enter="startSession"
-      />
+      <div class="folder-row">
+        <input
+          v-model="folder"
+          class="mono folder-input"
+          data-testid="folder-input"
+          placeholder="~/dev/my-project"
+          spellcheck="false"
+          @keydown.enter="startSession"
+        />
+        <button
+          type="button"
+          class="btn-outline mono"
+          data-testid="browse-folder"
+          :disabled="busy"
+          @click="browseFolder"
+        >
+          Browse…
+        </button>
+      </div>
       <div class="name-preview mono" data-testid="session-name-preview">
         Session name: <span class="name-val">{{ sessionName }}</span>
       </div>
@@ -172,29 +193,10 @@ async function startSession(): Promise<void> {
         Saved on the project: every session it starts uses this, and you can change it in Settings.
       </p>
 
-      <template v-if="projects.suggestions.length > 0">
-        <div class="section-label mono">SUGGESTED · Claude Code has been used here</div>
-        <button
-          v-for="s in projects.suggestions"
-          :key="s.path"
-          type="button"
-          class="suggestion"
-          :data-testid="`suggestion-${s.name}`"
-          :aria-label="`Use ${s.path}`"
-          @click="folder = s.path"
-        >
-          <div class="s-meta">
-            <div class="s-name mono">{{ s.name }}</div>
-            <div class="s-path mono">{{ s.path }}</div>
-          </div>
-          <span class="s-use mono">Use</span>
-        </button>
-      </template>
-
       </div>
 
-      <!-- Pinned footer: Start session stays visible no matter how long the
-           suggestions list grows. -->
+      <!-- Pinned footer: Start session stays visible however long the body
+           grows. -->
       <div class="actions">
         <button
           class="btn-solid"
@@ -266,12 +268,26 @@ async function startSession(): Promise<void> {
    the two switches it reshaped: this dialogue renders no switch now, and the shared
    ones in styles.css already take var(--rp). */
 
+/* The field takes the room; Browse takes what it needs. Typing a path stays the
+   primary way in, so the picker sits beside the field rather than above it. */
+.folder-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
 .folder-input {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   font-size: var(--fs-ui);
   padding: 9px 12px;
   background: var(--bg);
   border-radius: var(--rc);
+}
+
+.folder-row .btn-outline {
+  flex-shrink: 0;
+  padding: 9px 14px;
 }
 
 .name-preview {
@@ -445,47 +461,6 @@ async function startSession(): Promise<void> {
 
 html.sb-light .bypass-warn {
   color: var(--red);
-}
-
-.suggestion {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  /* width + text-align: this is a <button> now, so it must be told to fill the
-     row the div filled for free. */
-  width: 100%;
-  text-align: left;
-  padding: 8px 4px;
-  border-bottom: 1px solid var(--border-hist);
-  cursor: pointer;
-}
-
-.suggestion:hover {
-  background: var(--bg-card);
-}
-
-.s-meta {
-  min-width: 0;
-}
-
-.s-name {
-  font-size: var(--fs-ui);
-  font-weight: 500;
-  color: var(--text-name);
-}
-
-.s-path {
-  font-size: var(--fs-micro);
-  color: var(--text-faint);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.s-use {
-  font-size: var(--fs-micro);
-  color: var(--green);
 }
 
 /* Pinned footer: stays visible below the scrollable body. */

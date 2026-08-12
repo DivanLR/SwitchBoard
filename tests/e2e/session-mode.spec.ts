@@ -23,7 +23,7 @@ test('a new project defaults to Auto, which is what every project ran as before'
 
 test('the mode chosen when adding a project is what its session starts in', async ({ page }) => {
   await page.getByTestId('add-project').click()
-  await page.getByTestId('suggestion-gamma').click()
+  await page.getByTestId('folder-input').fill('C:\\work\\gamma')
   await page.getByTestId('session-mode-acceptEdits').check()
   await page.getByTestId('start-session').click()
 
@@ -38,7 +38,7 @@ test('the mode chosen when adding a project is what its session starts in', asyn
 
 test('choosing Bypass sends bypass, and the session records it', async ({ page }) => {
   await page.getByTestId('add-project').click()
-  await page.getByTestId('suggestion-gamma').click()
+  await page.getByTestId('folder-input').fill('C:\\work\\gamma')
   await page.getByTestId('session-mode-bypass').check()
   await page.getByTestId('start-session').click()
 

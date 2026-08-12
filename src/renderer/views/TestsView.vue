@@ -435,7 +435,7 @@ function statusWord(run: VerifyRun): string {
           <span class="prof-sub mono" data-testid="tests-suite-count">
             {{ (selected ?? []).length }} of {{ suites.length }} suites
           </span>
-          <span style="flex: 1"></span>
+          <span class="spacer"></span>
           <button class="link" data-testid="tests-change-stack" @click="chooseStack('')">change stack</button>
         </div>
         <div class="prof-meta mono">
@@ -515,7 +515,7 @@ function statusWord(run: VerifyRun): string {
         <div class="targets">
           <span class="lbl">verify</span>
           <button class="chip on" data-testid="tests-target-tree">Working tree</button>
-          <span style="flex: 1"></span>
+          <span class="spacer"></span>
           <button
             class="chip"
             :disabled="!latest || running"
@@ -763,7 +763,7 @@ function statusWord(run: VerifyRun): string {
           <span v-if="apiEstimateLine" class="lbl mono" data-testid="tests-api-estimate">
             {{ apiEstimateLine }}
           </span>
-          <span style="flex: 1"></span>
+          <span class="spacer"></span>
           <button
             v-if="apiRunning && apiRun"
             class="chip"
@@ -786,7 +786,7 @@ function statusWord(run: VerifyRun): string {
 
         <div class="targets">
           <span class="sec mono">EVAL SET</span>
-          <span style="flex: 1"></span>
+          <span class="spacer"></span>
           <!-- The report is written from the recorded calls, so it is offered for
                any finished run rather than only the one just made. -->
           <button

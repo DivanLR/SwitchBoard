@@ -6,6 +6,7 @@
 // tools — so every answer is a real query, not a mock.
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { relativeTime } from '@renderer/relative-time'
+import { mcpStatusColor } from '@renderer/project-accent'
 import { isIpcError, type ProjectListItem } from '@shared/ipc-types'
 import { agentIdOf } from '@shared/domain'
 import type { McpScan, QuestionPayload, SessionEvent } from '@shared/domain'
@@ -66,13 +67,6 @@ function activateCombo(scan: McpScan): void {
 
 /** Shared with InboxView. Static: an MCP scan's age does not need a live tick. */
 const ago = (iso: string): string => relativeTime(iso, Date.now())
-
-function dotColor(status: string): string {
-  const st = status.toLowerCase()
-  if (st === 'connected') return 'var(--green)'
-  if (st === 'failed' || st === 'error') return 'var(--red)'
-  return 'var(--amber)'
-}
 
 const liveSession = computed(() =>
   props.project.session && !props.project.session.endedAt ? props.project.session : null,
@@ -294,7 +288,7 @@ function answer(eventId: string, choice: string): void {
         <span class="db-ico">⛁</span>
         <span class="db-name mono">MCP chat</span>
         <span class="db-sub mono">{{ project.name }}</span>
-        <span style="flex: 1"></span>
+        <span class="spacer"></span>
         <button
           v-if="working"
           class="stop-btn mono"
@@ -318,7 +312,7 @@ function answer(eventId: string, choice: string): void {
           @click="toggleServer(s.name)"
         >
           <span class="mcp-tick">{{ s.on ? '☑' : '☐' }}</span>
-          <span class="mcp-chip-dot" :style="{ background: dotColor(s.status) }"></span>{{ s.name }}
+          <span class="mcp-chip-dot" :style="{ background: mcpStatusColor(s.status) }"></span>{{ s.name }}
         </button>
       </div>
       <div v-else class="mcp-servers mono">
@@ -377,7 +371,7 @@ function answer(eventId: string, choice: string): void {
       >
         db-schema.md
       </button>
-      <span style="flex: 1"></span>
+      <span class="spacer"></span>
       <button
         v-if="scanned && subtab === 'chat'"
         class="rescan mono"
@@ -428,7 +422,7 @@ function answer(eventId: string, choice: string): void {
       <div class="doc-head mono">
         <span class="doc-title mono">db-schema.md</span>
         <span class="faint">from the MCP scan</span>
-        <span style="flex: 1"></span>
+        <span class="spacer"></span>
         <button class="rescan mono" data-testid="mcp-doc-rescan" :disabled="!liveSession || working || activeServers.length === 0" @click="scan()">
           ↻ Re-scan
         </button>

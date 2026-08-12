@@ -212,7 +212,9 @@ export interface ProjectsSnapshot {
 
 export interface InvokeMap {
   'projects.list': { req: void; res: ProjectsSnapshot }
-  'projects.suggestions': { req: void; res: ProjectSuggestion[] }
+  /** Native folder picker. `path` is null when the dialogue was cancelled, which
+   *  is an ordinary outcome and not an error, so it carries no IpcErrorCode. */
+  'dialog.pickFolder': { req: void; res: { path: string | null } }
   'projects.register': {
     req: { path: string; name?: string; defaultSessionMode?: SessionMode }
     res: Project

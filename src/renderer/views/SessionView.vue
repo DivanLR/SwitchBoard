@@ -420,6 +420,13 @@ watch(
 // sit on its pre-session "not live" read until then. The same id transition
 // covers ending a session, so a stale list doesn't linger once liveSession
 // drops to null.
+//
+// The refresh is skipped while the Diff tab is closed, and taken once when it
+// opens instead. Every one of these costs two git processes against the whole
+// working tree, and a busy session completes a turn every few seconds — all of
+// it spent on a list nobody was looking at, on the Session, Specs, Tests or
+// Cleanup tab, which is where this app is read most of the time. The guard is
+// the one already used on the composer-focus watch above.
 watch(
   [
     () => liveSession.value?.diffAdds ?? null,
@@ -427,9 +434,17 @@ watch(
     () => liveSession.value?.id ?? null,
   ],
   () => {
+    if (mainTab.value !== 'diff') return
     void diff.loadList(props.project.id)
   },
 )
+
+// Opening the tab is what pays for the refreshes the guard above skipped. A
+// same-project refresh keeps the current selection (stores/diff.ts), so this
+// costs the list read and nothing the developer can see moving.
+watch(mainTab, (tab) => {
+  if (tab === 'diff') void diff.loadList(props.project.id)
+})
 
 // The picker opens on however the last session began — not on where it ended up.
 // A session toggled out of plan mode mid-flight still STARTED as one, and
@@ -845,7 +860,7 @@ const {
         <span class="h-dot" :style="{ background: headerColor }"></span>
         <span class="h-name mono" data-testid="session-project-name">{{ project.name }}</span>
         <span class="h-path code" data-testid="session-project-path">{{ project.path }}</span>
-        <span style="flex: 1"></span>
+        <span class="spacer"></span>
         <span
           v-if="liveSession?.bypassPermissions"
           class="pill bypass-pill"
@@ -1138,7 +1153,7 @@ const {
           <span class="ab-dot">●</span>
           <span class="ab-name">{{ selectedAgent.task || selectedAgent.name }}</span>
           <span class="ab-chip">subagent</span>
-          <span style="flex: 1"></span>
+          <span class="spacer"></span>
         </div>
 
         <div v-if="!liveSession && !endedSession" class="stream-empty">
@@ -1294,7 +1309,7 @@ const {
           <div class="agents-head">
             <span class="agents-label">⑂ AGENTS</span>
             <span class="agents-count">{{ workingAgents.length }} working in parallel</span>
-            <span style="flex: 1"></span>
+            <span class="spacer"></span>
             <button
               v-if="workingAgents.length > SHOW_LIMIT"
               class="agents-toggle"
@@ -1366,7 +1381,7 @@ const {
           <div class="agents-head">
             <span class="agents-label bg">⧗ BACKGROUND</span>
             <span class="agents-count">{{ backgroundTasks.length }} running</span>
-            <span style="flex: 1"></span>
+            <span class="spacer"></span>
             <button
               v-if="backgroundTasks.length > SHOW_LIMIT"
               class="agents-toggle"
@@ -1705,14 +1720,17 @@ const {
   border: 1px solid var(--border-seg);
   border-radius: var(--rp);
   overflow: hidden;
-  font-size: var(--fs-meta);
+  font-size: var(--fs-ui);
 }
 
+/* Sentence case, not the spec-label uppercase the rest of the chrome uses: a
+   view toggle is read, not scanned as an identifier, and 11px uppercase at
+   0.08em tracking was the one treatment here that read as dated. Strip height
+   is unchanged — 4px padding on a 15px line matches the old 5px on 13. */
 .seg {
-  padding: 5px 12px;
-  font-size: var(--fs-meta);
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
+  padding: 4px 12px;
+  line-height: 15px;
+  font-weight: 500;
   color: var(--text-tab);
   cursor: pointer;
 }
@@ -1721,9 +1739,12 @@ const {
   color: var(--text-body);
 }
 
+/* Weight carries the selected tab; tracking no longer can, now that the label
+   is sentence case. */
 .seg.on {
   background: color-mix(in srgb, var(--green) 24%, transparent);
   color: var(--text-strong);
+  font-weight: 600;
   cursor: default;
 }
 

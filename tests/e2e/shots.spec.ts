@@ -59,7 +59,6 @@ function boardScenario(): MockScenario {
       },
       { id: 'p-docs', name: 'docs-site', path: 'C:\\work\\docs-site' },
     ],
-    suggestions: [{ path: 'C:\\work\\gamma', name: 'gamma' }],
   }
 }
 

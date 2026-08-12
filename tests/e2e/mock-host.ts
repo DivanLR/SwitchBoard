@@ -48,7 +48,6 @@ export interface MockProjectSeed {
 
 export interface MockScenario {
   projects: MockProjectSeed[]
-  suggestions?: { path: string; name: string }[]
   /** Starting settings. Pass DEFAULT_SETTINGS so the mock cannot drift from the
    *  real defaults; override individual fields for a specific test. */
   settings: Settings
@@ -65,6 +64,8 @@ export interface MockScenario {
 }
 
 export interface MockDriver {
+  /** What the next native folder pick answers; null is the cancel case. */
+  setNextFolderPick: (path: string | null) => void
   emitEvent: (sessionId: string, kind: string, payload: Record<string, unknown>) => string
   setCommands: (
     projectId: string,
@@ -582,7 +583,9 @@ export function installMockHost(scenario: MockScenario): void {
         })),
       counters: counters(),
     }),
-    'projects.suggestions': () => scenario.suggestions ?? [],
+    // The real picker is an OS dialogue Playwright cannot drive, so the test
+    // says in advance what it returns. null is the cancel case.
+    'dialog.pickFolder': () => ({ path: nextFolderPick }),
     'projects.register': (req) => {
       const path = String(req.path)
       if (path.includes('missing')) throw { code: 'INVALID_PATH', message: 'The folder does not exist' }
@@ -1418,8 +1421,12 @@ export function installMockHost(scenario: MockScenario): void {
   } as unknown as typeof window.switchboard
 
   let floodTimer: number | null = null
+  let nextFolderPick: string | null = null
 
   window.__mock = {
+    setNextFolderPick: (path) => {
+      nextFolderPick = path
+    },
     emitEvent: (sessionId, kind, payload) => String(appendEvent(sessionId, kind, payload).id),
     setCommands: (projectId, commands) => {
       // Mirrors the real host: a session's init message stores the commands AND
@@ -1620,6 +1627,5 @@ export function twoProjectScenario(): MockScenario {
         session: { id: 's-beta', status: 'working', branch: 'feature/x' },
       },
     ],
-    suggestions: [{ path: 'C:\\work\\gamma', name: 'gamma' }],
   }
 }

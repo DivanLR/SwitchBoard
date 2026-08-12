@@ -1,6 +1,7 @@
 // Wrapper around one Agent SDK `query()` run: streaming input, composer
 // queueing (FR-019), interrupt/stop (FR-019a), status derivation
 // (contracts/session-events.md) and process-death detection (FR-004, FR-006).
+import { setTimeout as delay } from 'node:timers/promises'
 import {
   query,
   type CanUseTool,
@@ -773,10 +774,7 @@ export class HostedSession {
     // Bounded, because a hung CLI must not hold the app open: past the grace
     // period we stop waiting and quit anyway. A late onExit after that is
     // harmless, since finaliseRow ignores an already-finalised row.
-    await Promise.race([
-      this.runLoop,
-      new Promise<void>((resolve) => setTimeout(resolve, EXIT_GRACE_MS)),
-    ])
+    await Promise.race([this.runLoop, delay(EXIT_GRACE_MS)])
   }
 
   /** Composer messages never delivered; preserved as drafts on app exit. */

@@ -2,7 +2,7 @@
 // invoke channel carries every method with a WireResult envelope so stable
 // error codes survive Electron's error serialisation. Push channels batch
 // stream events at >= 30 Hz flushes (SC-007).
-import { ipcMain, type BrowserWindow } from 'electron'
+import { dialog, ipcMain, type BrowserWindow } from 'electron'
 import type { Session, SessionEvent } from '@shared/domain'
 import { canPassEval } from '@shared/domain'
 import type {
@@ -191,7 +191,20 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
 
   const handlers: Handlers = {
     'projects.list': () => ({ projects: projectList(), counters: computeCounters(repos) }),
-    'projects.suggestions': () => suggestProjects(repos),
+    // Modal on the main window, so it cannot be lost behind it. Cancelling
+    // returns null rather than throwing: the developer changed their mind, which
+    // the caller handles by leaving the folder field alone.
+    'dialog.pickFolder': async () => {
+      const opts = { title: 'Choose a project folder', properties: ['openDirectory' as const] }
+      const parent = deps.getWindow()
+      // Parented so the dialogue is modal and cannot be lost behind the window.
+      // The unparented overload is the fallback for the window having gone.
+      const picked = parent
+        ? await dialog.showOpenDialog(parent, opts)
+        : await dialog.showOpenDialog(opts)
+      const path = picked.canceled ? undefined : picked.filePaths[0]
+      return { path: path ?? null }
+    },
     'projects.register': async (req) => {
       const suggested = (await suggestProjects(repos)).some(
         (s) => s.path.toLowerCase() === req.path.toLowerCase(),

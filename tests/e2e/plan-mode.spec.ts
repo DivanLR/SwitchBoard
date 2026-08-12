@@ -38,7 +38,7 @@ test('the session type is one choice, so plan and bypass cannot both be asked fo
 
 test('a session started with Plan on says it is planning, and asks for it', async ({ page }) => {
   await page.getByTestId('add-project').click()
-  await page.getByTestId('suggestion-gamma').click()
+  await page.getByTestId('folder-input').fill('C:\\work\\gamma')
   await page.getByTestId('session-mode-plan').check()
   await page.getByTestId('start-session').click()
 

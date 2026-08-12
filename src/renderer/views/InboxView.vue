@@ -276,7 +276,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
       >
         History
       </button>
-      <span style="flex: 1"></span>
+      <span class="spacer"></span>
       <button
         class="inbox-collapse"
         data-testid="inbox-collapse"
@@ -330,7 +330,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
           <span class="group-dot"></span>
           <span class="group-name mono">{{ projectName(group.projectId) }}</span>
           <span class="group-count mono">· {{ group.items.length }} pending</span>
-          <span style="flex: 1"></span>
+          <span class="spacer"></span>
           <template v-if="approveAllConfirmId === group.projectId">
             <span class="approve-all-warn" data-testid="approve-all-warn">
               Includes {{ groupHighRiskCount(group.items) }} high-risk. Sure?
@@ -431,7 +431,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
         <span class="hist-count mono" data-testid="history-count">
           DECISIONS · {{ inbox.history.length }}
         </span>
-        <span style="flex: 1"></span>
+        <span class="spacer"></span>
         <button
           v-if="inbox.history.length > 0"
           class="hist-clear mono"
@@ -505,7 +505,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
     <Teleport to="body">
       <div
         v-if="histCtx"
-        class="hctx-overlay"
+        class="ctx-catcher"
         @click="histCtx = null"
         @contextmenu.prevent="histCtx = null"
       >
@@ -915,12 +915,6 @@ html.sb-light .detail-box {
   font-size: var(--fs-meta);
   line-height: 1.6;
   color: var(--text-faint);
-}
-
-.hctx-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 70;
 }
 
 .hctx-menu {

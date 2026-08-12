@@ -374,7 +374,7 @@ const partTabs: { id: Part; label: string }[] = [
             <span class="sc-status mono" :class="detail.status">{{
               statusLabel[detail.status]
             }}</span>
-            <span style="flex: 1"></span>
+            <span class="spacer"></span>
             <button
               class="sc-listen mono"
               :class="{ on: speaking }"
@@ -403,7 +403,7 @@ const partTabs: { id: Part; label: string }[] = [
               ✓ All tasks complete
             </span>
             <span class="sc-progress-label mono">{{ detail.tasksDone }}/{{ detail.tasksTotal }} tasks</span>
-            <span style="flex: 1"></span>
+            <span class="spacer"></span>
           </div>
           <div class="sc-bar"><div class="sc-fill" :style="{ '--fill': progressPct / 100 }"></div></div>
         </div>
@@ -521,7 +521,7 @@ const partTabs: { id: Part; label: string }[] = [
             >
               <div class="cmd-row">
                 <span class="cmd-name mono">{{ c.label }}</span>
-                <span style="flex: 1"></span>
+                <span class="spacer"></span>
                 <span class="cmd-run mono">▶ Run</span>
               </div>
               <div class="cmd-desc">{{ c.hint }}</div>
@@ -539,7 +539,7 @@ const partTabs: { id: Part; label: string }[] = [
             <div class="phase-header">
               <span class="phase-label mono">{{ phase.label }}</span>
               <span class="phase-count mono">{{ phaseCount(phase) }}</span>
-              <span style="flex: 1"></span>
+              <span class="spacer"></span>
               <span v-if="phaseRunning(phase)" class="phase-running mono">● Running…</span>
               <span v-else-if="phaseDone(phase)" class="phase-done mono">✓ Done</span>
               <button

@@ -7,7 +7,6 @@ export default defineConfig({
   // It has its own config (playwright.real.config.ts) and `npm run test:real`;
   // running it here would start it without a build and with the wrong worker model.
   testIgnore: 'real-app.spec.ts',
-  timeout: 30_000,
   fullyParallel: true,
   reporter: [['list']],
   use: {

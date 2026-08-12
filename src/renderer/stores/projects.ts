@@ -1,8 +1,8 @@
-// Sidebar state (FR-003/004/005): projects with live sessions, selection,
-// suggestions, and aggregate counters.
+// Sidebar state (FR-003/004/005): projects with live sessions, selection, and
+// aggregate counters.
 import { computed, reactive, toRefs } from 'vue'
 import type { McpScan, Project, ProjectCommand, Session, SessionMode } from '@shared/domain'
-import type { Counters, ProjectListItem, ProjectSuggestion, SessionStatusPush } from '@shared/ipc-types'
+import type { Counters, ProjectListItem, SessionStatusPush } from '@shared/ipc-types'
 import { useActiveSessionStore } from './activeSession'
 import { invoke } from '@renderer/ipc'
 
@@ -14,7 +14,6 @@ import { invoke } from '@renderer/ipc'
 // store is unchanged (reactive unwraps refs and computeds on read).
 const state = reactive({
   items: [] as ProjectListItem[],
-  suggestions: [] as ProjectSuggestion[],
   selectedProjectId: null as string | null,
   counters: { running: 0, needsYou: 0, costTodayUsd: 0, tokensToday: 0 } as Counters,
   loaded: false,
@@ -86,14 +85,14 @@ const store = reactive({
     }
   },
 
-  async loadSuggestions(): Promise<void> {
-    state.suggestions = await invoke('projects.suggestions', undefined)
+  /** Native folder picker; null when the developer cancelled it. */
+  async pickFolder(): Promise<string | null> {
+    return (await invoke('dialog.pickFolder', undefined)).path
   },
 
   async register(path: string, name?: string, defaultSessionMode?: SessionMode): Promise<Project> {
     const project = await invoke('projects.register', { path, name, defaultSessionMode })
     await this.refresh()
-    await this.loadSuggestions()
     return project
   },
 

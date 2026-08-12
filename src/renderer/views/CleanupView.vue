@@ -5,7 +5,7 @@
 // rows; otherwise it shows a "download to project" card that installs it. A
 // command row sends its slash command to the session (output streams there).
 import { computed } from 'vue'
-import { CLEANUP_GROUPS, type CleanupGroup } from '@shared/command-catalog'
+import { CLEANUP_GROUPS, type CleanupCommand, type CleanupGroup } from '@shared/command-catalog'
 import { normalizeForMatch } from '@renderer/composables/useCommandSuggestions'
 
 const props = defineProps<{
@@ -26,6 +26,22 @@ const availableKeys = computed(() => new Set(props.available.map(normalizeForMat
 function isInstalled(g: CleanupGroup): boolean {
   if (props.available.length === 0) return true
   return g.commands.some((c) => availableKeys.value.has(normalizeForMatch(c.command)))
+}
+
+/**
+ * A single row is runnable only when the session offers that exact command.
+ *
+ * A group counts as installed on ANY match, which is right — a plugin need not
+ * ship every command the catalogue lists. But that also meant one real command
+ * in a group made every row in it clickable, including rows naming a command the
+ * plugin does not have. Those sent a slash command that could only answer
+ * "Unknown command". The catalogue is hand-maintained, so it will drift again
+ * whenever a plugin renames or withdraws a command; checking each row against
+ * the session's own list is what stops that drift reaching a button.
+ */
+function isAvailable(c: CleanupCommand): boolean {
+  if (props.available.length === 0) return true
+  return availableKeys.value.has(normalizeForMatch(c.command))
 }
 
 /**
@@ -53,7 +69,7 @@ function run(command: string): void {
       <div class="group-head">
         <span class="group-name mono">{{ g.source }}</span>
         <span class="group-tag">{{ g.tag }}</span>
-        <span style="flex: 1"></span>
+        <span class="spacer"></span>
         <span v-if="isInstalled(g)" class="badge installed">✓ Installed</span>
         <span v-else class="badge missing">○ Not installed</span>
       </div>
@@ -65,11 +81,17 @@ function run(command: string): void {
           :key="c.command"
           class="cmd-row"
           :data-testid="`cleanup-cmd-${c.command}`"
+          :disabled="!isAvailable(c)"
+          :title="
+            isAvailable(c)
+              ? undefined
+              : `${c.label} is not in this session's command list. The plugin may not ship it, or it may have been renamed.`
+          "
           @click="run(c.command)"
         >
           <span class="cmd-name mono">{{ c.label }}</span>
           <span class="cmd-desc">{{ c.hint }}</span>
-          <span class="cmd-run">Run →</span>
+          <span class="cmd-run">{{ isAvailable(c) ? 'Run →' : 'Not available' }}</span>
         </button>
       </div>
 
@@ -180,8 +202,16 @@ function run(command: string): void {
   text-align: left;
 }
 
-.cmd-row:hover {
+.cmd-row:hover:not(:disabled) {
   border-color: var(--green);
+}
+
+/* A row the session cannot run stays readable rather than hidden: the command is
+   still worth knowing about, and hiding it would leave the group looking short
+   with no reason given. The title attribute carries the reason. */
+.cmd-row:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 
 .cmd-name {

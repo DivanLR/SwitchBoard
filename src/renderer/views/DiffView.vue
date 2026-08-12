@@ -36,17 +36,17 @@ interface DiffGroup {
  * alphabet would hide exactly the changes worth noticing first.
  */
 const groups = computed<DiffGroup[]>(() => {
-  const byDir = new Map<string, DiffFileEntry[]>()
-  for (const file of files.value) {
+  const byDir = Object.groupBy(files.value, (file) => {
     const cut = file.path.lastIndexOf('/')
-    const dir = cut === -1 ? '' : file.path.slice(0, cut)
-    const existing = byDir.get(dir)
-    if (existing) existing.push(file)
-    else byDir.set(dir, [file])
-  }
-  return [...byDir.entries()]
+    return cut === -1 ? '' : file.path.slice(0, cut)
+  })
+  return Object.entries(byDir)
     .sort(([a], [b]) => (a === '' ? -1 : b === '' ? 1 : a.localeCompare(b)))
-    .map(([dir, entries]) => {
+    .map(([dir, group]) => {
+      // Object.groupBy types every value as possibly absent, because the key type
+      // is wider than the keys it actually produced. Every key here came from a
+      // file, so no group is ever empty.
+      const entries = group ?? []
       const known = entries.filter((f) => f.addedLines !== null && f.removedLines !== null)
       return {
         dir,

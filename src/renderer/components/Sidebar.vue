@@ -11,7 +11,7 @@ import { useProjectsStore } from '@renderer/stores/projects'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useInboxStore } from '@renderer/stores/inbox'
 import { useSettingsStore } from '@renderer/stores/settings'
-import { accentFor, GROUP_COLORS } from '@renderer/project-accent'
+import { accentFor, GROUP_COLORS, mcpStatusColor } from '@renderer/project-accent'
 import { elapsedClock } from '@renderer/relative-time'
 import { useProjectGroups } from '@renderer/composables/useProjectGroups'
 import { UNGROUPED, useProjectDragDrop } from '@renderer/composables/useProjectDragDrop'
@@ -194,13 +194,6 @@ function mcpStatusOf(name: string): string {
   if (!session || session.endedAt) return 'not started'
   return session.mcpServers?.find((m) => m.name === name)?.status ?? 'connecting'
 }
-function mcpDot(status: string): string {
-  const st = status.toLowerCase()
-  if (st === 'connected') return 'var(--green)'
-  if (st === 'failed' || st === 'error') return 'var(--red)'
-  return 'var(--amber)'
-}
-
 // Collapsible project groups (sidebar-only organisation, kept in Settings
 // beside the other per-project maps, so it persists with no schema change).
 // The inline-rename refs are declared here because the same pair also renames
@@ -530,7 +523,7 @@ async function confirmRemoveNow(): Promise<void> {
         <div class="logo mono">
           <span style="color: var(--green)">▣</span><span v-if="!collapsed"> switchboard</span>
         </div>
-        <span style="flex: 1"></span>
+        <span class="spacer"></span>
         <button
           v-if="!collapsed"
           class="icon-btn mono"
@@ -587,7 +580,7 @@ async function confirmRemoveNow(): Promise<void> {
           <span class="section-label mono">PROJECTS</span>
           <span class="section-count mono" data-testid="project-count">{{ filtered.length }}</span>
         </template>
-        <span style="flex: 1"></span>
+        <span class="spacer"></span>
         <!-- The plus leads and the stack sits under it, so the mark reads add
              first. The words belong to the row rather than to the button: they
              borrow the heading's own label voice and sit out in the margin, where
@@ -690,6 +683,7 @@ async function confirmRemoveNow(): Promise<void> {
         class="project"
         :class="{
           active: item.id === projects.selectedProjectId,
+          working: statusById[item.id] === 'working',
           'drop-before': rowDrop?.id === item.id && rowDrop.zone === 'before',
           'drop-after': rowDrop?.id === item.id && rowDrop.zone === 'after',
           'drop-file': rowDrop?.id === item.id && rowDrop.zone === 'file',
@@ -891,7 +885,7 @@ async function confirmRemoveNow(): Promise<void> {
           <!-- The dot IS the status; spelling it out under the name doubled the
                row's height to repeat what the colour already says. -->
           <div class="mcp-name mono">{{ s }}</div>
-          <span class="mcp-dot" :style="{ background: mcpDot(mcpStatusOf(s)) }"></span>
+          <span class="mcp-dot" :style="{ background: mcpStatusColor(mcpStatusOf(s)) }"></span>
         </template>
         <span class="mcp-accent"></span>
       </div>
@@ -945,7 +939,7 @@ async function confirmRemoveNow(): Promise<void> {
   </aside>
 
   <!-- Right-click context menu -->
-  <div v-if="ctx" class="ctx-overlay" @click="closeCtx" @contextmenu.prevent="closeCtx">
+  <div v-if="ctx" class="ctx-catcher" @click="closeCtx" @contextmenu.prevent="closeCtx">
     <div
       class="ctx-menu"
       data-testid="project-ctx-menu"
@@ -1595,6 +1589,28 @@ async function confirmRemoveNow(): Promise<void> {
   opacity: 1;
 }
 
+/* A running session says so on its own edge. The status glyph already carried
+   this, but a 14x12 character is a thing you read, and the question here is one
+   you answer by looking: which of these eight lanes is working right now.
+   A bar down the full height of the row answers it at the edge of vision.
+
+   It takes over the lane's own stroke rather than adding a second mark beside
+   it. Identity tells one row from another; state tells you which row wants
+   watching, and on a row that is doing something, state is the more useful of
+   the two. Two bars in a 252px lane would be one bar too many.
+
+   2px is the ceiling DESIGN.md sets for this bar, and this is the case it was
+   raised for: at 1px, against a lane already ruled at both edges, a running
+   session did not read. It stays a mark inside the row, with no background, no
+   gradient and no second colour. --running, not --green, because the action
+   colour is cornflower blue on paper and a working lane is green in both
+   themes. */
+.project.working .brace {
+  width: 2px;
+  background: var(--running);
+  opacity: 1;
+}
+
 .active-bg {
   display: none;
 }
@@ -1656,8 +1672,10 @@ async function confirmRemoveNow(): Promise<void> {
   color: var(--amber);
 }
 
+/* The glyph and the lane bar report the same state, so they read the same
+   token. Split them and paper would show a blue chevron beside a green bar. */
 .mark.working {
-  color: var(--green);
+  color: var(--running);
 }
 
 .mark.error {
@@ -2081,12 +2099,6 @@ async function confirmRemoveNow(): Promise<void> {
   background: var(--teal);
 }
 
-.ctx-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 70;
-}
-
 .ctx-menu {
   position: fixed;
   min-width: 180px;
@@ -2141,6 +2153,12 @@ async function confirmRemoveNow(): Promise<void> {
    work model only; every reading moved to the status bar. */
 .foot {
   flex-shrink: 0;
+  /* The room sits ABOVE the rule, not below it. A margin, not padding: the gap
+     belongs between the lane list and the seam, so the rule reads as this
+     footer's own top edge rather than as a line with a space under it. Padding
+     is back to its original 6px, so the gear keeps the spacing it always had
+     from the rule. */
+  margin-top: 12px;
   border-top: 1px solid var(--border);
   padding: 6px 14px 7px 18px;
 }

@@ -49,9 +49,7 @@ test('status pushes update the dot without user action (FR-004)', async ({ page 
   await expect(page.getByTestId('status-badge-beta')).toHaveAttribute('data-status', 'done')
 })
 
-test('the New session dialog fills from suggestions, validates paths, and starts', async ({
-  page,
-}) => {
+test('the New session dialog validates paths and starts', async ({ page }) => {
   await page.getByTestId('add-project').click()
 
   // Live session-name preview follows the folder input.
@@ -69,10 +67,30 @@ test('the New session dialog fills from suggestions, validates paths, and starts
   await expect(page.getByTestId('registration-dialog')).toHaveCount(0)
   await expect(page.getByTestId('session-project-name')).toHaveText('alpha')
 
-  // A suggestion click fills the folder; Start registers and opens the session.
+  // A typed folder registers and opens the session.
   await page.getByTestId('add-project').click()
-  await expect(page.getByTestId('suggestion-gamma')).toContainText('C:\\work\\gamma')
-  await page.getByTestId('suggestion-gamma').click()
+  await page.getByTestId('folder-input').fill('C:\\work\\gamma')
+  await page.getByTestId('start-session').click()
+  await expect(page.getByTestId('sidebar-project-gamma')).toBeVisible()
+})
+
+// Browse fills the same field a typed path goes into, so the picked folder
+// takes the same validation on Start rather than a quieter path of its own.
+test('the folder picker fills the folder field, and cancelling leaves it alone', async ({
+  page,
+}) => {
+  await page.getByTestId('add-project').click()
+
+  await page.evaluate(() => window.__mock.setNextFolderPick('C:\\work\\gamma'))
+  await page.getByTestId('browse-folder').click()
+  await expect(page.getByTestId('folder-input')).toHaveValue('C:\\work\\gamma')
+  await expect(page.getByTestId('session-name-preview')).toContainText('Session name: gamma')
+
+  // Cancelling answers null, which must not blank a field already filled.
+  await page.evaluate(() => window.__mock.setNextFolderPick(null))
+  await page.getByTestId('browse-folder').click()
+  await expect(page.getByTestId('folder-input')).toHaveValue('C:\\work\\gamma')
+
   await page.getByTestId('start-session').click()
   await expect(page.getByTestId('sidebar-project-gamma')).toBeVisible()
 })
@@ -82,7 +100,7 @@ test('the New session dialog fills from suggestions, validates paths, and starts
 // looking idle, so the whole window says what it is waiting for.
 test('starting a session takes the whole window until the session is up', async ({ page }) => {
   await page.getByTestId('add-project').click()
-  await page.getByTestId('suggestion-gamma').click()
+  await page.getByTestId('folder-input').fill('C:\\work\\gamma')
   await page.getByTestId('start-session').click()
 
   const overlay = page.getByTestId('session-start-overlay')

@@ -81,8 +81,12 @@ export const CLEANUP_GROUPS: readonly CleanupGroup[] = [
       { command: 'security-scan', label: '/security-scan', hint: 'OWASP, secrets, and CVE auditing' },
       { command: 'verify', label: '/verify', hint: 'Build, analyzers, tests, and security in one pass' },
       { command: 'health-check', label: '/health-check', hint: 'Letter-grade project assessment (A–F)' },
-      { command: 'outdated', label: '/outdated', hint: 'Dependency health: CVEs and licensing traps' },
-      { command: 'arch-check', label: '/arch-check', hint: 'Architecture conformance validation' },
+      // Every entry must name a command the plugin actually ships. /outdated and
+      // /arch-check sat here through several releases and never existed in any
+      // version of the toolkit, so both rows sent a command that could only ever
+      // answer "Unknown command". /migrate is the real dependency and upgrade
+      // workflow; architecture conformance has no one-shot command to point at.
+      { command: 'migrate', label: '/migrate', hint: 'EF Core migrations, .NET upgrades, NuGet updates' },
     ],
   },
   {

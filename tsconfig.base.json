@@ -1,0 +1,21 @@
+{
+  // What all three projects agree on. They are separate projects because each
+  // needs a different `lib` and `types` set, not because they disagree about how
+  // TypeScript should behave, and repeating that agreement three times is how the
+  // three quietly drift apart.
+  //
+  // Options TypeScript 6 already defaults to true are NOT listed here: `strict`,
+  // `esModuleInterop` and `forceConsistentCasingInFileNames` were declared in all
+  // three files and each one only restated the compiler's own default. `module`
+  // and `moduleResolution` stay explicit and adjacent, because the second is
+  // derived from the first and separating them is how that pair drifts.
+  "compilerOptions": {
+    "composite": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true
+  }
+}

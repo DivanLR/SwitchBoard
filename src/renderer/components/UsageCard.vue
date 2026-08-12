@@ -91,6 +91,14 @@ function barColor(pct: number): string {
   overflow: hidden;
 }
 
+/* The track is a 7%-white wash, which is a lift on carbon and nothing at all on
+   a near-white card: the meter read as a coloured bar floating with no track to
+   measure it against, so the empty part of the meter carried no information.
+   Ink here, subtractive, like every other light-theme wash. */
+html.sb-light .uc-bar {
+  background: rgba(15, 19, 26, 0.09);
+}
+
 .uc-fill {
   height: 100%;
   border-radius: var(--rp);

@@ -7,8 +7,9 @@ export default defineConfig({
   testDir: 'tests/e2e',
   testMatch: 'real-app.spec.ts',
   // One Electron instance, shared and stateful: the tests build on each other.
+  // `workers: 1` is what enforces that; `fullyParallel: false` was also set and is
+  // Playwright's own default, so it stated nothing.
   workers: 1,
-  fullyParallel: false,
   timeout: 60_000,
   reporter: [['list']],
   use: { trace: 'retain-on-failure' },

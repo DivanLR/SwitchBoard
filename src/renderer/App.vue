@@ -389,12 +389,14 @@ const dbProject = computed(() => projects.dbProject)
     var(--bg);
 }
 
-/* Same crease, matched by eye rather than by alpha: a dark hairline on paper
-   carries about twice the step a pale one carries on carbon, so 0.05 turned the
-   world's ground into its foreground on the one pane with the most empty sheet.
+/* No crease in light mode. The lattice is the scored-sheet world's signature and
+   light mode no longer belongs to it: the Cornflower direction asks for a flat,
+   calm canvas, and this is the pane with the most empty ground to be calm on.
+   Setting --crease transparent leaves the gradients in place but paints nothing,
+   so the shorthand above stays the single declaration of this pane's background.
    See the matching note on html.sb-light body in styles.css. */
 html.sb-light .main {
-  --crease: rgba(10, 10, 10, 0.028);
+  --crease: transparent;
 }
 
 /* Drag handle on the inbox's left edge (design seam sits on the inbox border). */

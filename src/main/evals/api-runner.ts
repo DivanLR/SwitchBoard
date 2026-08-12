@@ -136,16 +136,18 @@ const WRITE_BLOCKED =
  * Reported as 'not_run' rather than 'fail', because the endpoint was never asked:
  * nothing here says anything about whether that write works.
  */
+/** A call that was never made. Three separate places built this same six-field
+ *  literal: the write the QA guard refused, the call whose socket never
+ *  completed, and a whole set skipped before it started. They agree by
+ *  construction now, which matters because 'not_run' is what keeps an unasked
+ *  endpoint from being reported as a failure. */
+function notRunCall(request: ApiRequestPlan, detail: string): ApiCall {
+  return { request, status: null, ms: null, body: null, outcome: 'not_run', detail }
+}
+
 function blockedWrite(host: ApiHost, request: ApiRequestPlan): ApiCall | null {
   if (host.target !== 'qa' || request.method === 'GET' || request.method === 'HEAD') return null
-  return {
-    request,
-    status: null,
-    ms: null,
-    body: null,
-    outcome: 'not_run',
-    detail: WRITE_BLOCKED,
-  }
+  return notRunCall(request, WRITE_BLOCKED)
 }
 
 /** One request: sent, timed, and judged. */
@@ -186,26 +188,12 @@ async function sendOne(host: ApiHost, request: ApiRequestPlan): Promise<ApiCall>
   } catch (error) {
     // A call that never completed is 'not_run', never 'fail': a socket that
     // refused or timed out says nothing about whether the endpoint is correct.
-    return {
-      request,
-      status: null,
-      ms: null,
-      body: null,
-      outcome: 'not_run',
-      detail: `the call did not complete: ${message(error)}`,
-    }
+    return notRunCall(request, `the call did not complete: ${message(error)}`)
   }
 }
 
 function notRun(requests: readonly ApiRequestPlan[], reason: string): ApiCall[] {
-  return requests.map((request) => ({
-    request,
-    status: null,
-    ms: null,
-    body: null,
-    outcome: 'not_run' as const,
-    detail: reason,
-  }))
+  return requests.map((request) => notRunCall(request, reason))
 }
 
 /** Any HTTP answer at all proves a server is listening — a 404 counts. */

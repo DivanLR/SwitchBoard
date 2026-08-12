@@ -20,6 +20,16 @@ export function accentFor(id: string): string {
   return PROJECT_ACCENTS[hash % PROJECT_ACCENTS.length]
 }
 
+/** An MCP server's connection state as a colour token. Lives here, beside the
+ *  other renderer-side colour lookups, because the sidebar and the MCP view had
+ *  each written this same three-branch function out in full. */
+export function mcpStatusColor(status: string): string {
+  const st = status.toLowerCase()
+  if (st === 'connected') return 'var(--green)'
+  if (st === 'failed' || st === 'error') return 'var(--red)'
+  return 'var(--amber)'
+}
+
 /** Group swatch colours, in the design's own order, handed out round-robin as
  *  groups are created. Same six accents as the project stripes. */
 export const GROUP_COLORS = [

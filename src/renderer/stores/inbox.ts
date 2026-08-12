@@ -27,15 +27,13 @@ const state = reactive({
 
 /** Grouped by project, oldest first within each group (clarified FIFO). */
 const groups = computed((): { projectId: string; items: PermissionRequest[] }[] => {
-  const byProject = new Map<string, PermissionRequest[]>()
-  for (const item of state.pending) {
-    const list = byProject.get(item.projectId) ?? []
-    list.push(item)
-    byProject.set(item.projectId, list)
-  }
-  return [...byProject.entries()].map(([projectId, items]) => ({
+  const byProject = Object.groupBy(state.pending, (item) => item.projectId)
+  return Object.entries(byProject).map(([projectId, items]) => ({
     projectId,
-    items: [...items].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+    // Object.groupBy types every value as possibly absent, because the key type is
+    // wider than the keys it actually produced. A key only exists here because an
+    // item produced it, so no group is ever empty.
+    items: [...(items ?? [])].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
   }))
 })
 

@@ -7,118 +7,170 @@
    authored per token, not boosted afterwards. Removing it also stops the filter
    creating a containing block that broke fixed-position overlays. */
 
-/* Light theme: the same sheet, deployed on paper instead of carbon fibre. The
-   ground is warm paper and the ink is cool graphite, the exact inversion of the
-   dark sheet's warm ink on cool carbon: on both, the mark and the material are
-   never the same temperature. The neutral #F7F7F7 ground this replaces sat
-   between warm panels and warm ink, and that agreement is what made paper read
-   as dirty rather than as paper. The three accents darken so they hold contrast;
-   nothing else changes. */
+/* LIGHT THEME — CORNFLOWER. The dark sheet is unchanged and remains this
+   world's home ground; light mode is no longer the same sheet on paper.
+   Replaced on the owner's direction against a named reference (the Cornflower
+   design system: "white cards floating on a cool light-gray canvas, a single
+   restrained cornflower-blue accent, soft low-alpha shadows, nothing shouts").
+
+   What that changes, and what it costs:
+
+   - The ground is cool grey-blue, not warm paper. Ink and ground now agree in
+     temperature instead of opposing it, which is the opposite of the dark
+     sheet's rule and deliberate: the warm-on-cool opposition is what made the
+     old light theme read as a printed material, and a material is what was
+     asked to go.
+   - The action colour is CORNFLOWER BLUE here and foil green on carbon. The two
+     themes no longer share an accent. This was chosen with the trade named: the
+     product reads as one identity across modes only in its structure, type and
+     geometry now, not in its hue.
+   - Attention owed moves off blue onto a dark amber, because the action colour
+     took blue. It cannot be a bright gold: no saturated warm hue clears 4.5:1
+     on a near-white ground in sRGB, so "amber" here means the darkest legible
+     amber, which is the same wall GitHub's own light warning text sits against.
+   - Corners are 6px HERE ONLY. On carbon a fold is still a cut. See --rc.
+
+   Every value below was measured, not chosen by eye. The floors are 4.5:1 for
+   anything carrying text, and 3:1 for a border that IS a control's boundary.
+   A border that only separates two surfaces which already differ in tone is
+   held to no floor: WCAG 1.4.11 does not reach a divider that is not the sole
+   means of identifying a component, and forcing 3:1 onto every hairline is what
+   turns a calm light interface into a wireframe. That distinction is the one
+   real disagreement between the three palettes this was synthesised from, and
+   it is settled here on the letter of the rule rather than on taste. */
 html.sb-light {
-  --bg: #F6F4EF;
-  /* Paper is opaque. The margin is a sheet laid on the sheet, not glass. */
-  --bg-panel: #EFEDE6;
-  --bg-sticky: #EAE7DF;
-  --bg-card: #FCFBF7;
-  --bg-card-alt: #F9F7F2;
-  --bg-code: #F1EFE8;
-  --bg-hover: rgba(10,10,10, 0.05);
-  /* --bg-active DOES need overriding on paper, and the note that said otherwise
-     had the wrong reason: it mixes mountain gray, not --green. Over a paper
-     panel that landed at 234 while --bg-hover lands at 229, so the selected lane
-     read as the weaker of the two washes. A mark on paper subtracts, so the
-     selected wash is graphite and sits below hover where it belongs. */
-  --bg-active: color-mix(in srgb, #1A1C20 9%, transparent);
-  --bg-seg: rgba(10,10,10, 0.09);
-  --bg-chip: rgba(10,10,10, 0.05);
-  --border: rgba(10,10,10, 0.13);
-  --border-card: rgba(10,10,10, 0.15);
-  --border-card-alt: rgba(10,10,10, 0.14);
-  --border-soft: rgba(10,10,10, 0.1);
-  --border-code: rgba(10,10,10, 0.12);
-  --border-strong: rgba(10,10,10, 0.26);
-  --border-seg: rgba(10,10,10, 0.15);
-  --border-hist: rgba(10,10,10, 0.09);
-  /* Cool graphite on warm paper. The previous ramp was warm on both sides, so
-     ink and sheet read as one beige material; pencil on paper is the cooler of
-     the two. Same measurement discipline as the dark ramp: every tier below
-     carries real content, so every tier clears 4.5:1. */
-  --text-bright: #0B0C0E;
-  --text-strong: #1A1C20;
-  --text-title: #262A2F;
-  --text: #1A1C20;
-  --text-body: #34383E;
-  --text-name: #22262B;
-  --text-prompt: #2E3238;
-  /* 5.6:1 at the palest tier on the ground, 6.4:1 on a card. */
-  --text-mid: #4F545B;
-  --text-meta: #565B62;
-  --text-tab: #585D64;
-  --text-noise: #5D6269;
-  --text-label: #5D6269;
-  --text-faint: #585D64;
-  --text-ghost: #585D64;
-  /* 6.4:1 on a --bg-hover card, 6.0:1 on a --bg-active row. See :root. */
-  --text-on-wash: #494E55;
-  /* Foil green on paper, measured on the sheet rather than derived from the dark
-     value. 5.81:1, hue 148 — a shade clear of the 5.64:1 the gold held here. */
-  --green: #1F6E44;
-  --green-hover: #175A37;
-  --green2: #1A6039;
-  /* Paper does not glow. A green halo under a green button reads as a smudge on
-     a pale ground, so the action button is lifted by ink: offset and blur, the
-     same subtractive rule the crease follows. */
-  --green-glow: 0 6px 16px -8px rgba(26,28,32, 0.26), 0 1px 2px rgba(26,28,32, 0.13);
-  --blue: #2C5F94;
-  --amber: #2C5F94;
-  --amber-hover: #234C77;
-  --red: #A02A1B;
-  --red-hover: #822116;
-  /* One paper white on every filled control, not three. The warm, the cool and
-     the pink-tinted whites these replace disagreed on a surface whose whole job
-     is to be one sheet. 6.0:1 on foil green, 6.3:1 on valley blue, 7.1:1 on
-     red-pencil. */
-  --green-ink: #FCFBF7;
-  --amber-ink: #FCFBF7;
-  --red-ink: #FCFBF7;
-  --detail: #4F545B;
-  /* Graphite steel, darkened for paper. */
-  --teal: #3F5A6B;
-  --purple: #5B4E77;
-  /* These mirror the grounds above tier for tier, so they move with them. */
-  --surface-inset: #FCFBF7;
-  --surface-inset-line: #DCD8CD;
-  --surface-line: #DCD8CD;
-  --surface-raised: #EFEDE6;
-  --surface-hover: #E8E5DC;
-  --surface-hover-line: #DCD8CD;
-  --surface-sunken: #F1EFE8;
-  --bg-panel-2: #EDEAE3;
-  /* On paper the lip of light inverts: the sheet catches light on its top edge. */
-  --elev: inset 0 1px 0 rgba(255,255,255,.7),0 1px 2px rgba(10,10,10,.09);
-  /* A whisper, not a sheen. At .5 this read as a glossy 2000s gradient button,
-     which is the opposite of a sheet folded flat. */
-  --gloss: linear-gradient(rgba(255,255,255,.1),rgba(255,255,255,0));
-  --rc: 0px;
-  /* The value-reporting idiom. The outgoing world bowed these to 99px; a fold
-     is a cut, so a tag that reports a figure is scored square like everything
-     else. One token because 37 declarations across 13 files used to decide it
-     independently. */
-  --rp: 0px;
-  /* One tracking value for every uppercase label, replacing fourteen ad-hoc ones.
-     0.08em rather than the 0.11em this token was declared at and never applied
-     with: 0.11em is a wordmark's tracking, and at 11px on a label it opens the
-     word until it stops reading as a word. */
+  --bg: #F4F6F9;
+  --bg-panel: #EAEDF2;
+  --bg-sticky: #E2E6EC;
+  /* Pure white, per the reference: the card is the one surface that floats. */
+  --bg-card: #FFFFFF;
+  --bg-card-alt: #F9FBFD;
+  --bg-code: #EEF1F5;
+  /* Washes subtract light, as they did on paper: a mark on a bright ground is
+     ink, never a lightening. The ink is --text-bright, not black, so every
+     wash stays inside the one hue family. */
+  --bg-hover: rgba(15, 19, 26, 0.045);
+  --bg-active: color-mix(in srgb, #0F131A 9%, transparent);
+  --bg-seg: rgba(15, 19, 26, 0.08);
+  --bg-chip: rgba(15, 19, 26, 0.05);
+  /* THE BOUNDARY TIERS. These three are a control's own edge — inputs, the
+     outline and quiet buttons, chips, segmented controls, dropdowns, context
+     menus, and the clickable rows in the Cleanup list — so each clears 3:1
+     against the surface behind it. Measured: 4.73, 3.08, 3.11. */
+  --border-strong: rgba(15, 19, 26, 0.6);
+  --border-seg: rgba(15, 19, 26, 0.47);
+  --border-card: rgba(15, 19, 26, 0.46);
+  /* THE SEPARATION TIERS. These rule one surface off another, and the two
+     surfaces already differ in tone, so the hairline is a second cue rather
+     than the only one. Held at the reference's own weight (1.2 to 1.4:1)
+     because that softness IS the modern read being asked for. Raising them to
+     3:1 was tried in one of the three source palettes and draws every card
+     edge as a mid-grey line. */
+  --border: rgba(15, 19, 26, 0.16);
+  --border-code: rgba(15, 19, 26, 0.14);
+  --border-card-alt: rgba(15, 19, 26, 0.13);
+  --border-soft: rgba(15, 19, 26, 0.11);
+  --border-hist: rgba(15, 19, 26, 0.1);
+  /* Cool blue-grey ink at the reference's own hue, so ink and ground are one
+     material lit two ways. Every tier carries real content, so every tier is
+     measured against the DARKEST of the three grounds it can land on
+     (--bg-panel), not the most flattering. Worst tier: 4.64:1. */
+  --text-bright: #0F131A;
+  --text-strong: #1B2027;
+  --text: #1B2027;
+  --text-title: #262B33;
+  --text-name: #22272E;
+  --text-prompt: #2D323A;
+  --text-body: #3A3F47;
+  --text-mid: #545961;
+  --text-meta: #5C6169;
+  --text-tab: #61666E;
+  --text-faint: #61666E;
+  --text-ghost: #61666E;
+  --text-noise: #656A72;
+  --text-label: #656A72;
+  /* Its own role, not a ramp step. Measured against the composites it actually
+     sits on rather than the flat ground: 6.02:1 on a hover wash, 5.48:1 on a
+     selected row. The ramp tier nearest it fails both. */
+  --text-on-wash: #4E535B;
+  /* THE ACTION COLOUR: cornflower blue, darkened from the reference's own fill
+     value because this token is also set as bare text in twenty files, so it
+     has to pass as text and not only as white-on-fill. 5.75:1 as text, 6.23:1
+     carrying white. Hover deepens: on a bright ground a press adds ink. */
+  --green: #2B58CC;
+  --green-hover: #1E43A8;
+  --green2: #2650BE;
+  --green-ink: #FFFFFF;
+  /* The reference tints its primary shadow with the primary itself, and that is
+     the one place it lets a shadow carry hue. Kept, derived from the token so
+     it cannot drift from the fill. */
+  --green-glow:
+    0 1px 2px color-mix(in srgb, var(--green) 26%, transparent),
+    0 4px 10px color-mix(in srgb, var(--green) 16%, transparent);
+  /* A RUNNING SESSION IS STILL GREEN. It has to be: the action colour is blue
+     here, and a lane reporting "working" in the action colour reports it in
+     blue. Derived from the reference's own success hue, darkened to carry text
+     at 5.73:1. */
+  --running: #136F45;
+  /* Attention owed. See the note at the top on why this is not a bright gold.
+     5.54:1 as text, 6:1 carrying white. --blue holds the same value, as it
+     always has here. */
+  --blue: #8F5600;
+  --amber: #8F5600;
+  --amber-hover: #7A4700;
+  --amber-ink: #FFFFFF;
+  /* Error, pushed darker than the reference's own destructive so it separates
+     from amber by LUMINANCE as well as hue: 1.34:1 between the two, where a
+     straight transposition of both left them within 1.15:1 of each other and
+     told apart by hue alone. The glyph and its plain-language title still do
+     the work colour cannot for anyone who cannot see the difference. */
+  --red: #A0141B;
+  --red-hover: #860F16;
+  --red-ink: #FFFFFF;
+  --detail: #545961;
+  /* Project identity, not state. Held to the same 4.5:1 floor because a lane
+     name is set in them. */
+  --teal: #1D6E80;
+  --purple: #6B4E9B;
+  --surface-inset: #FFFFFF;
+  --surface-inset-line: #D5DAE2;
+  --surface-line: #C9CFD8;
+  --surface-raised: #EAEDF2;
+  --surface-hover: #DDE1E8;
+  --surface-hover-line: #C2C8D2;
+  --surface-sunken: #EEF1F5;
+  --bg-panel-2: #E6E9EF;
+  /* Seven opaque tiers, each one step of 1.03 to 1.05:1 from its neighbour, in
+     an even flight rather than a stripe: no two steps are identical and every
+     seam also carries its own hairline. The old paper theme separated its tiers
+     by less than half this and left the hairlines too faint to register, which
+     is how a scrolled sidebar read as one plate. */
+  --elev: inset 0 1px 0 rgba(255, 255, 255, 0.65), 0 1px 2px rgba(15, 19, 26, 0.07);
+  /* A whisper. The reference caps its own elevation at 0.12 alpha and says
+     nothing shouts; a light card does not glaze itself. */
+  --gloss: linear-gradient(rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0));
+  /* The white lip along a pane's top edge. Theme-neutral until now, which meant
+     a 6%-white inset was inherited onto a near-white surface and vanished at
+     all eight of its call sites. On this ground the lip is the strongest cue
+     that a surface is raised, so it is opaque enough to actually read. */
+  --hairline-shine: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  /* 6px HERE ONLY, on the owner's direction. The dark sheet keeps 0: a fold is
+     a cut, and that rule still governs carbon. This is the one place the two
+     themes differ in geometry rather than in colour, and it is what carries
+     most of the "modern" the reference is being asked for. */
+  --rc: 6px;
+  /* Tighter than --rc, deliberately. --rp is the idiom for a tag that REPORTS A
+     FIGURE — a count, a timer, a risk. At 6px on an 18px chip the curve eats
+     the digits and the idiom stops being distinguishable from a button. */
+  --rp: 4px;
   --track-label: 0.08em;
   --sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
-  /* A veil on paper subtracts too. The pale veil this replaces was the same tone
-     as the sheet it covered, so a pale dialogue floated on it with nothing
-     between them; 30% graphite seats the dialogue without borrowing dark mode's
-     blackout. */
-  --scrim: rgba(26,28,32, 0.30);
-  --shadow-dlg: 0 28px 70px rgba(10,10,10, 0.2), 0 0 0 1px rgba(10,10,10, 0.06) inset;
-  --shadow-dd: 0 14px 36px rgba(10,10,10, 0.17);
-  --shadow-menu: 0 14px 36px rgba(10,10,10, 0.19);
+  --scrim: rgba(15, 19, 26, 0.32);
+  /* Blue-tinted ink, capped at the reference's 0.12 ceiling. A dialogue is
+     seated by its own hairline plus a soft cast, not by a black drop. */
+  --shadow-dlg: 0 24px 60px rgba(15, 19, 26, 0.12), 0 0 0 1px rgba(15, 19, 26, 0.05) inset;
+  --shadow-dd: 0 12px 32px rgba(15, 19, 26, 0.1);
+  --shadow-menu: 0 12px 32px rgba(15, 19, 26, 0.11);
 }
 
 
@@ -224,7 +276,15 @@ html.sb-light {
   --green-ink: #17181B;
   --green-glow: 0 6px 18px -6px color-mix(in srgb, var(--green) 45%, transparent);
   /* Working IS the action state, so it borrows the action colour's own hue rather
-     than a fourth colour. Action and state differ here in form, never in hue. */
+     than a fourth colour. Action and state differ here in form, never in hue.
+
+     THE STATE'S OWN TOKEN. On carbon this is the action green exactly, so naming
+     it separately changes nothing here. It exists because the two roles stop
+     agreeing on paper: light mode's action colour is cornflower blue, and a lane
+     that reports "working" in the action colour would report it in blue. A
+     running session is green in both themes, so the state keeps its own token and
+     the action keeps --green. */
+  --running: #4DC97E;
   --blue: #8CB8E4;
   /* Attention owed. CONTRACT AMENDMENT: the original direction named a warm
      ochre mark here, and on a dark sheet that could not work. Lightened enough
@@ -366,63 +426,41 @@ body {
     #17181b;
 }
 
-/* The light theme's version of the same sheet. The crease is scored, not
-   printed: a dark hairline on a bright field carries roughly twice the step a
-   pale one carries on carbon, so at the old 0.045 the lattice stopped being the
-   ground and became the pattern. The alpha comes down until the whisper matches
-   the dark sheet's — same signature, same loudness, honest arithmetic. */
+/* The crease lattice does not survive the move to Cornflower, and it should not:
+   it is the scored-sheet world's signature, and a scored sheet is what light
+   mode stopped being. The reference calls for a flat, calm canvas, and a 60
+   degree lattice under dense output is the opposite of calm.
+   The dark sheet keeps its lattice, declared on `body` above.
+
+   The ground is repeated here as a literal rather than var(--bg) because this
+   rule overrides a `background` SHORTHAND, and a shorthand cannot be half
+   declared: naming only the colour would drop the two gradient layers the dark
+   rule sets, which is precisely what has to happen. Keep it in step with --bg. */
 html.sb-light body {
-  --crease: rgba(10, 10, 10, 0.026);
-  background:
-    repeating-linear-gradient(60deg, var(--crease) 0 1px, transparent 1px 84px),
-    repeating-linear-gradient(-60deg, var(--crease) 0 1px, transparent 1px 84px),
-    #f6f4ef;
+  background: #F4F6F9;
 }
 
-/* A fold is a cut, so a sheet's corner is chamfered rather than rounded. Applied
-   to surfaces only, never to a focusable control: clip-path would clip the focus
-   outline with it, and the keyboard work this app just did outranks the corner. */
-/*
- * The spec-label: how this world annotates structure. A crease on the source sheet
- * carries M-128; a section here carries PROJECTS or REFS in the same register.
- *
- * It exists as one utility because the tracking had drifted to fourteen different
- * values between 0.04em and 0.15em across eight files, each view having decided it
- * alone. DESIGN.md recorded that drift as observed rather than prescribed; this is
- * the prescription, and --track-label is the single value.
- */
-.spec-label {
-  font-family: var(--mono);
-  font-size: var(--fs-micro);
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
-  color: var(--text-on-wash);
+/* .spec-label, .scored-rule and .chamfer were declared here and applied by nothing:
+   DESIGN.md recorded all three as available-but-unadopted through several releases,
+   and a repository-wide search found no template, no :class binding and no built
+   output using any of them. Deleted 2026-08-12 rather than carried further. The
+   ideas are in DESIGN.md if a surface ever wants them; a stylesheet is not the
+   place to keep a proposal. */
+
+/* Full-viewport click-away catcher behind a context menu. One rule, because the
+   sidebar's menu and the inbox's history menu had declared it separately and
+   identically. */
+.ctx-catcher {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
 }
 
-/*
- * A scored hairline: a rule whose end is cut at the crease angle rather than
- * stopping square. The world's own drawings terminate their leader lines this way,
- * and on a surface that is mostly text it is the cheapest place the geometry shows.
- */
-.scored-rule {
-  position: relative;
-  border-bottom: 1px solid var(--border);
-}
-
-.scored-rule::after {
-  content: '';
-  position: absolute;
-  right: 0;
-  bottom: -1px;
-  width: 14px;
-  height: 1px;
-  background: var(--border);
-  transform: skewX(-30deg);
-  transform-origin: right bottom;
-}
-
-.chamfer {
-  clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 7px 100%, 0 calc(100% - 7px));
+/* The flexible gap between a row's left group and its right group. Every use was
+   an inline style="flex: 1" span, twenty-four of them across eight files, which is
+   a shared class written out by hand twenty-four times. */
+.spacer {
+  flex: 1;
 }
 
 /* The app shell is transparent so the body's crease lattice shows through. */
@@ -460,7 +498,7 @@ a:hover {
    had no visible thumb on the light sheet at all. Ink, subtractive, like every other
    light-theme wash in this file. */
 html.sb-light ::-webkit-scrollbar-thumb {
-  background: rgba(10, 10, 10, 0.15);
+  background: rgba(15, 19, 26, 0.22);
 }
 
 ::-webkit-scrollbar-track {
@@ -518,6 +556,15 @@ button {
   cursor: pointer;
   user-select: none;
   box-shadow: var(--green-glow);
+}
+
+/* The raking highlight belongs to foil pressed into a sheet. On the Cornflower
+   ground the same 18% white sheen across a flat blue fill reads as a glossy
+   gradient button, which the reference rules out in as many words: nothing
+   shouts. The fill is left flat here and the gloss layer alone carries the top
+   light. */
+html.sb-light .btn-solid {
+  background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
 }
 
 .btn-solid:hover:not(:disabled) {

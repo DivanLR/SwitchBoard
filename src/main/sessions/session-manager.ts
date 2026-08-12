@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 
 const execFileAsync = promisify(execFile)
 const GIT_EXEC_OPTS = { timeout: 8000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 } as const
@@ -194,45 +195,36 @@ async function readGitBranch(projectPath: string): Promise<string | null> {
   }
 }
 
-/** Working-tree line changes (git diff --shortstat), shown in the header (design reference). */
-async function readGitDiffStat(
-  projectPath: string,
-): Promise<{ adds: number; dels: number } | null> {
-  let stdout: string
-  try {
-    ;({ stdout } = await execFileAsync('git', ['-C', projectPath, 'diff', '--numstat'], {
-      timeout: 4000,
-      windowsHide: true,
-    }))
-  } catch {
-    return null
-  }
-  let adds = 0
-  let dels = 0
-  for (const line of stdout.split('\n')) {
-    const [a, d] = line.split('\t')
-    if (a === undefined || d === undefined) continue
-    // Binary files report "-" for both counts.
-    adds += Number.parseInt(a, 10) || 0
-    dels += Number.parseInt(d, 10) || 0
-  }
-  return { adds, dels }
-}
-
 /** First 8000 bytes containing a NUL byte — the same heuristic git itself
  *  uses to decide whether to print "Binary files ... differ". */
 function isBinaryContent(buf: Buffer): boolean {
   return buf.subarray(0, 8000).includes(0)
 }
 
-/** Per-file line counts from `git diff --numstat`, keyed by path. Binary
- *  files report "-" for both counts (git's own convention) and are mapped to
- *  null/null here rather than 0/0, so they read as "unavailable" and not as
- *  "no change". Tracked changes only — untracked files never appear here. */
-async function readNumstatByPath(
-  projectPath: string,
-): Promise<Map<string, { adds: number | null; dels: number | null; binary: boolean }>> {
-  const result = new Map<string, { adds: number | null; dels: number | null; binary: boolean }>()
+type NumstatEntry = { adds: number | null; dels: number | null; binary: boolean }
+
+/**
+ * `git diff --numstat`, read ONCE and answering both questions it can answer:
+ * the working tree's total line churn for the header counters, and the per-file
+ * counts the Diff tab lists.
+ *
+ * These were two functions running the same command against the same working
+ * tree moments apart on every completed turn, because one wanted the sum and
+ * the other wanted the rows. Neither cached, so a refresh paid for four git
+ * spawns where three do — and on Windows the spawn is the expensive part, not
+ * the diff.
+ *
+ * `totals` is null when git itself failed, which is not the same as a clean
+ * tree: the header then shows no counters rather than a fabricated zero. Binary
+ * files report "-" for both counts (git's own convention) and map to null
+ * rather than 0, so they read as "unavailable" and not as "no change"; they add
+ * nothing to the totals. Tracked changes only — untracked files never appear.
+ */
+async function readNumstat(projectPath: string): Promise<{
+  totals: { adds: number; dels: number } | null
+  byPath: Map<string, NumstatEntry>
+}> {
+  const byPath = new Map<string, NumstatEntry>()
   let stdout: string
   try {
     ;({ stdout } = await execFileAsync(
@@ -241,19 +233,21 @@ async function readNumstatByPath(
       GIT_EXEC_OPTS,
     ))
   } catch {
-    return result
+    return { totals: null, byPath }
   }
+  let adds = 0
+  let dels = 0
   for (const line of stdout.split('\n')) {
     const [a, d, path] = line.split('\t')
     if (path === undefined) continue
     const binary = a === '-' && d === '-'
-    result.set(path, {
-      adds: binary ? null : Number.parseInt(a, 10) || 0,
-      dels: binary ? null : Number.parseInt(d, 10) || 0,
-      binary,
-    })
+    const fileAdds = binary ? null : Number.parseInt(a, 10) || 0
+    const fileDels = binary ? null : Number.parseInt(d, 10) || 0
+    byPath.set(path, { adds: fileAdds, dels: fileDels, binary })
+    adds += fileAdds ?? 0
+    dels += fileDels ?? 0
   }
-  return result
+  return { totals: { adds, dels }, byPath }
 }
 
 /** A new, untracked file has no git-tracked baseline: its whole readable
@@ -296,9 +290,10 @@ export async function readDiffList(projectPath: string): Promise<DiffListResult>
     return { gitNotice: 'Unable to read this project’s working tree.', files: [] }
   }
 
-  const numstat = await readNumstatByPath(projectPath)
+  const { byPath: numstat } = await readNumstat(projectPath)
   const tokens = statusOut.split('\0').filter((t) => t.length > 0)
   const files: DiffFileEntry[] = []
+  const untrackedPaths: string[] = []
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i]
     const code = token.slice(0, 2)
@@ -319,7 +314,7 @@ export async function readDiffList(projectPath: string): Promise<DiffListResult>
               : 'modified'
 
     if (status === 'untracked') {
-      files.push(await readUntrackedEntry(projectPath, path))
+      untrackedPaths.push(path)
       continue
     }
     const counts = numstat.get(path)
@@ -330,6 +325,18 @@ export async function readDiffList(projectPath: string): Promise<DiffListResult>
       removedLines: counts?.dels ?? null,
       binary: counts?.binary ?? false,
     })
+  }
+  // Untracked files are read after the status walk, a bounded batch at a time,
+  // rather than one at a time inside it. Each read opens and counts a whole
+  // file, so serially this cost the sum of every read; in batches it costs the
+  // slowest read in each batch. The cap is deliberate: readFile against ten
+  // thousand paths at once exhausts the process's file handles, and
+  // readUntrackedEntry answers that with "counts unavailable", so the failure
+  // would be silent wrong numbers rather than an error anyone sees.
+  const BATCH = 32
+  for (let i = 0; i < untrackedPaths.length; i += BATCH) {
+    const batch = untrackedPaths.slice(i, i + BATCH)
+    files.push(...(await Promise.all(batch.map((p) => readUntrackedEntry(projectPath, p)))))
   }
   files.sort((a, b) => a.path.localeCompare(b.path))
   return { gitNotice: null, files }
@@ -553,16 +560,7 @@ export class SessionManager {
     projectId: string,
     resume = false,
     /** Omitted means "use the project's own defaultSessionMode", the normal path. */
-    mode?: SessionMode,
-    carryTranscriptFrom?: string,
-  ): Promise<Session> {
-    return this.launchSession(projectId, resume, mode, carryTranscriptFrom)
-  }
-
-  private async launchSession(
-    projectId: string,
-    resume: boolean,
-    requestedMode: SessionMode | undefined,
+    requestedMode?: SessionMode,
     carryTranscriptFrom?: string,
   ): Promise<Session> {
     const project = this.repos.projects.byId(projectId)
@@ -1055,7 +1053,7 @@ export class SessionManager {
     const deadline = Date.now() + timeoutMs
     let live = connected()
     while (Date.now() < deadline && !wanted.every((name) => live.includes(name))) {
-      await new Promise((resolve) => setTimeout(resolve, 150))
+      await delay(150)
       // A session that exited while we waited is never going to report.
       if (!this.hosted.has(sessionId)) break
       live = connected()
@@ -1402,9 +1400,9 @@ export class SessionManager {
   private observeBranch(entry: HostedEntry): void {
     // Both git reads are async so a completed turn never blocks the main loop.
     void this.refreshBranch(entry)
-    void readGitDiffStat(entry.projectPath).then((diff) => {
-      const adds = diff?.adds ?? null
-      const dels = diff?.dels ?? null
+    void readNumstat(entry.projectPath).then(({ totals }) => {
+      const adds = totals?.adds ?? null
+      const dels = totals?.dels ?? null
       if (adds === entry.row.diffAdds && dels === entry.row.diffDels) return
       entry.row.diffAdds = adds
       entry.row.diffDels = dels
