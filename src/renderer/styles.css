@@ -179,7 +179,13 @@ html.sb-light {
   --rp: 4px;
   --track-label: 0.08em;
   --sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --scrim: rgba(15, 19, 26, 0.32);
+  /* Raised from 0.32. A dialogue on the light sheet sits over a board that is
+     itself near-white and densely packed, so at 0.32 the page behind it stayed
+     legible and competed with the thing asking for an answer. Changed HERE
+     rather than in the Settings dialog that prompted it: all three dialogues
+     read this one token, and giving one its own override is exactly the drift
+     that had to be undone once already. */
+  --scrim: rgba(15, 19, 26, 0.44);
   /* Blue-tinted ink, capped at the reference's 0.12 ceiling. A dialogue is
      seated by its own hairline plus a soft cast, not by a black drop. */
   --shadow-dlg: 0 24px 60px rgba(15, 19, 26, 0.12), 0 0 0 1px rgba(15, 19, 26, 0.05) inset;

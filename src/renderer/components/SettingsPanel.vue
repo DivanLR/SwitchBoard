@@ -31,13 +31,18 @@ const settings = computed(() => store.settings)
 // nobody used and which cost a whole tab in a rail of seven.
 type Tab = 'models' | 'proj' | 'mcp' | 'allowed' | 'term' | 'gen'
 const tab = ref<Tab>(props.initialTab ?? 'models')
+// One family, one weight. These were drawn from four unrelated Unicode blocks —
+// a four-pointed star, a filled square, a database cylinder, a tick, a chevron
+// and a gear — so the rail read as six marks that happened to be stacked rather
+// than one set. Geometric outline shapes from a single block hold the same
+// stroke at this size and let the LABEL do the naming, which it already does.
 const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: 'models', label: 'Models', icon: '✦' },
-  { id: 'proj', label: 'This project', icon: '▣' },
-  { id: 'mcp', label: 'MCP', icon: '⛁' },
-  { id: 'allowed', label: 'Allowed list', icon: '✓' },
-  { id: 'term', label: 'Terminals', icon: '❯' },
-  { id: 'gen', label: 'General', icon: '⚙' },
+  { id: 'models', label: 'Models', icon: '◇' },
+  { id: 'proj', label: 'This project', icon: '□' },
+  { id: 'mcp', label: 'MCP', icon: '◎' },
+  { id: 'allowed', label: 'Allowed list', icon: '△' },
+  { id: 'term', label: 'Terminals', icon: '▷' },
+  { id: 'gen', label: 'General', icon: '○' },
 ]
 
 // "This project": which project the tab configures (defaults to the selected one).
@@ -910,11 +915,13 @@ const updateLine = computed(() => {
 
 <style scoped>
 .settings {
-  /* Local aliases for design rgba steps with no shared app token (rule 5) —
-     themed for light via the html.sb-light override below. Dialog/dropdown
-     shadows come from the shared --shadow-dlg/--shadow-dd tokens. */
-  --hi09: rgba(255, 255, 255, 0.09);
-  --hi22: rgba(255, 255, 255, 0.22);
+  /* This dialog used to alias the generic ink token at 9 and 22 per cent to
+     draw the edge of a clickable card. Against the light surface that computed
+     to roughly 1.0-1.4:1, under the 3:1 floor styles.css itself documents for a
+     control's own boundary, and it is why the option list read as one flat
+     field rather than a set of choices. The app already has boundary tokens for
+     that role and the rest of it uses them; this was the one place reinventing
+     them. Dialog and dropdown shadows come from --shadow-dlg / --shadow-dd. */
   width: 730px;
   max-width: 94vw;
   height: 580px;
@@ -924,11 +931,6 @@ const updateLine = computed(() => {
   flex-direction: column;
   overflow: hidden;
   box-shadow: var(--shadow-dlg);
-}
-
-html.sb-light .settings {
-  --hi09: color-mix(in srgb, var(--detail) 9%, transparent);
-  --hi22: color-mix(in srgb, var(--detail) 22%, transparent);
 }
 
 /* This dialog's own overlay tint/blur (design: separate from other dialogs') —
@@ -1013,6 +1015,12 @@ html.sb-light .overlay {
   box-shadow: var(--elev);
 }
 
+/* Neutral, and deliberately NOT the green wash the option cards use. The rail
+   says WHERE YOU ARE; a card says WHAT YOU CHOSE. Those are different questions
+   and a reader answers them at different moments, so giving both the same
+   accent would put two green washes on screen at once, each meaning something
+   the other does not. The green stays on the rail's icon alone, which marks the
+   position without competing with the choice the panel is actually asking for. */
 .rail-tab.sel {
   background: var(--bg-active);
   border-color: var(--border-strong);
@@ -1052,6 +1060,18 @@ html.sb-light .overlay {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  /* Says there is more below. The panel scrolls against a fixed footer whose
+     divider is held to no contrast floor, so a row clipped mid-height looked
+     like the end of the list rather than the middle of it. The mask fades the
+     last few pixels only while there is something to scroll to: scroll to the
+     bottom and it resolves to a hard edge again. */
+  /* #000 here is a STENCIL, not a colour: a mask reads the alpha channel only,
+     so the hue never reaches the screen and a palette token would be both
+     meaningless and misleading in its place. Opaque means "keep", transparent
+     means "fade". */
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 18px), transparent 100%);
+  mask-size: 100% calc(100% + 18px);
+  mask-repeat: no-repeat;
 }
 
 .group {
@@ -1085,14 +1105,14 @@ html.sb-light .overlay {
   padding: 10px 13px;
   background: var(--bg-hover);
   box-shadow: var(--elev);
-  border: 1px solid var(--hi09);
+  border: 1px solid var(--border-card);
   border-radius: var(--rc);
   cursor: pointer;
   text-align: left;
 }
 
 .card-opt:hover:not(.static) {
-  border-color: var(--hi22);
+  border-color: var(--green);
 }
 
 .card-opt.sel {
@@ -1118,7 +1138,7 @@ html.sb-light .overlay {
   min-width: 8px;
   height: 8px;
   border-radius: var(--rp);
-  border: 1.5px solid var(--hi22);
+  border: 1.5px solid var(--border-strong);
 }
 
 .opt-dot.on {
@@ -1278,7 +1298,7 @@ html.sb-light .overlay {
 }
 
 .dd:hover {
-  border-color: var(--hi22);
+  border-color: var(--green);
 }
 
 .dd-dot {
@@ -1361,7 +1381,7 @@ html.sb-light .overlay {
   padding: 10px 13px;
   background: var(--bg-hover);
   box-shadow: var(--elev);
-  border: 1px solid var(--hi09);
+  border: 1px solid var(--border-card);
   border-radius: var(--rc);
 }
 

@@ -161,6 +161,16 @@ export const TEST_STACKS: readonly TestStack[] = [
         kind: 'mutation',
         label: 'Mutation testing (Stryker)',
         acceptance: 'the tests fail when the code is broken on purpose',
+        // Stryker is a dotnet TOOL, not part of the SDK, so `needs: 'dotnet'` is
+        // only true because docker-sandbox.ts's .NET image installs it. It did
+        // not, once, and the suite then reported the developer's code as failing
+        // when nothing had ever been installed — the exact confusion FR-057
+        // exists to prevent. If that RUN line ever leaves the image, this entry
+        // has to go with it or gain a way to say "the tool is missing".
+        //
+        // No host-side probe: every verification run is containerised
+        // (backgroundSessionFor), so the image IS the environment this runs in.
+        // Add one if a native run ever becomes possible again.
         command: 'dotnet stryker',
         needs: 'dotnet',
         heavy: true,

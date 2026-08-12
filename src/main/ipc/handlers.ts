@@ -4,7 +4,7 @@
 // stream events at >= 30 Hz flushes (SC-007).
 import { dialog, ipcMain, shell, type BrowserWindow } from 'electron'
 import type { DiagramEntry, Session, SessionEvent } from '@shared/domain'
-import { canPassEval, isDangerousCommand } from '@shared/domain'
+import { canPassEval, isDangerousCommand, sessionName } from '@shared/domain'
 import { DIAGRAMS_DIR, diagramFileName, diagramPrompt } from '@shared/diagram'
 import type {
   Counters,
@@ -192,7 +192,22 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         .map((id) => manager.liveSessionRow(id))
         .filter((s): s is Session => !!s && s.projectId === project.id)
       const latest = live.length === 0 ? repos.sessions.latestForProject(project.id) : undefined
-      const sessions = live.length > 0 ? live : latest ? [latest] : []
+      const rows = live.length > 0 ? live : latest ? [latest] : []
+      // Named from the work each was started for, so a project running three
+      // sessions does not show the same branch three times with nothing to tell
+      // them apart. Read once per project rather than per session.
+      const work = {
+        verifyRunSessionIds: repos.verifyRuns
+          .listForProject(project.id)
+          .map((r) => r.sessionId)
+          .filter((id): id is string => !!id),
+        apiRunSessionIds: repos.apiRuns
+          .listForProject(project.id)
+          .map((r) => r.sessionId)
+          .filter((id): id is string => !!id),
+        diagrams: [...repos.diagramRequests.forProject(project.id).values()],
+      }
+      const sessions = rows.map((s) => ({ ...s, name: sessionName(s.id, work) }))
       return {
         ...project,
         session: sessions[0] ?? null,

@@ -63,3 +63,32 @@ test('a second session in one project leaves the other project alone', async ({ 
   await expect(page.getByTestId('sidebar-subsessions-beta')).toHaveCount(0)
   await expect(page.getByTestId('sidebar-project-beta')).toBeVisible()
 })
+
+// A project accumulates sessions, since a section starts its own, and ending
+// them was one at a time. Tedious at two and genuinely annoying at four, which
+// is a count this app reaches on its own without being asked.
+test('every session in a project can be ended at once, and the list comes back down', async ({
+  page,
+}) => {
+  await startSecond(page)
+  await expect(page.getByTestId('sidebar-subsessions-alpha').getByRole('button')).toHaveCount(2)
+
+  await page.getByTestId('sidebar-project-alpha').click({ button: 'right' })
+  const endAll = page.getByTestId('ctx-end-all')
+  await expect(endAll).toBeVisible()
+  await expect(endAll).toContainText('2')
+  await endAll.click()
+
+  // Both end, not just the focused one — and the list collapses back to a lane
+  // with nothing running under it, which is the other half of the ask.
+  await expect(page.getByTestId('sidebar-subsessions-alpha')).toHaveCount(0)
+  await expect(page.getByTestId('ended-banner')).toBeVisible()
+})
+
+// One session is the lane itself, so there is no "all" to end and the item would
+// be a second name for the End button already on screen.
+test('the end-all item stays hidden while a project runs a single session', async ({ page }) => {
+  await page.getByTestId('sidebar-project-alpha').click({ button: 'right' })
+  await expect(page.getByTestId('project-ctx-menu')).toBeVisible()
+  await expect(page.getByTestId('ctx-end-all')).toHaveCount(0)
+})

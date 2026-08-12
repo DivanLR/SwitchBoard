@@ -154,6 +154,13 @@ export interface Session {
   endedAt: string | null
   endReason: SessionEndReason | null
   /**
+   * What this session is about, in a few words. DERIVED and never stored: the
+   * main process fills it when it builds the project list (see sessionName), and
+   * a row read straight from the database has it absent. Null for a plain
+   * conversation, which has no such fact to state.
+   */
+  name?: string | null
+  /**
    * Started with --dangerously-skip-permissions (header "⚠ Bypass" pill), which
    * also means the session ran inside the Docker sandbox. Persisted, because a
    * bypass session's transcript lives in a container volume rather than the
@@ -1186,6 +1193,35 @@ export interface DiffListResult {
  * to have. So sessionId and description are nullable — a file dropped in by hand,
  * or generated before this app knew about it, still lists.
  */
+/**
+ * What a session is ABOUT, in a few words, for a list that otherwise shows the
+ * same branch name on every row of a project.
+ *
+ * Derived rather than stored, which is why it takes the work rows instead of
+ * reading a column: a name written at session start would be blank for every
+ * session that already exists, and would need a migration to hold a fact the app
+ * can already work out. A section's session is named after the work it was
+ * started for; a conversation has no such fact and keeps its branch.
+ */
+export function sessionName(
+  sessionId: string,
+  work: {
+    verifyRunSessionIds?: readonly string[]
+    apiRunSessionIds?: readonly string[]
+    /** Diagram file name by the session that drew it. */
+    diagrams?: readonly { sessionId: string | null; description: string }[]
+  },
+): string | null {
+  const diagram = work.diagrams?.find((d) => d.sessionId === sessionId)
+  if (diagram) {
+    const words = diagram.description.trim().split(/\s+/).slice(0, 6).join(' ')
+    return words ? `Diagram: ${words}` : 'Diagram'
+  }
+  if (work.verifyRunSessionIds?.includes(sessionId)) return 'Verification run'
+  if (work.apiRunSessionIds?.includes(sessionId)) return 'API run'
+  return null
+}
+
 export interface DiagramEntry {
   /** File name only, e.g. `auth-flow.html`. Unique within a project. */
   file: string

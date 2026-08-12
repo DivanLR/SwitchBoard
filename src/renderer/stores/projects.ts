@@ -85,6 +85,21 @@ const store = reactive({
     }
   },
 
+  /**
+   * End several sessions at once.
+   *
+   * Concurrently, and tolerating a failure of any one: a session that ended
+   * between the menu opening and the click is exactly the case this exists for,
+   * and it must not stop the others from ending. One refresh at the end rather
+   * than one per session, so the sidebar redraws once instead of N times.
+   */
+  async endSessions(sessionIds: readonly string[]): Promise<void> {
+    await Promise.allSettled(
+      sessionIds.map((sessionId) => invoke('sessions.stop', { sessionId })),
+    )
+    await this.refresh()
+  },
+
   /** Native folder picker; null when the developer cancelled it. */
   async pickFolder(): Promise<string | null> {
     return (await invoke('dialog.pickFolder', undefined)).path

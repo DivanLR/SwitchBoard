@@ -383,6 +383,27 @@ async function ctxNewSession(): Promise<void> {
   await startAnotherSession(projectId)
 }
 
+/** The live sessions of the right-clicked project, for the end-all item. */
+const ctxLiveSessions = computed<string[]>(() => {
+  if (ctx.value?.kind !== 'project') return []
+  const project = projects.items.find((p) => p.id === ctx.value?.id)
+  return (project?.sessions ?? []).filter((s) => !s.endedAt).map((s) => s.id)
+})
+
+/**
+ * End every session this project is running.
+ *
+ * Ending them one at a time was the only way, which is tedious at two and
+ * genuinely annoying at four — and a project accumulates them, since a section
+ * starts its own. Ended sessions drop out of the list on the refresh that
+ * follows, so this is also how the row count comes back down.
+ */
+async function ctxEndAll(): Promise<void> {
+  const ids = ctxLiveSessions.value
+  ctx.value = null
+  if (ids.length > 0) await projects.endSessions(ids)
+}
+
 function ctxRemoveGroup(): void {
   if (!ctx.value || ctx.value.kind !== 'group') return
   removeGroup(ctx.value.id)
@@ -831,7 +852,7 @@ async function confirmRemoveNow(): Promise<void> {
               class="sub-line"
               :class="{ sel: item.session?.id === s.id }"
               :data-testid="`sidebar-subsession-${s.id}`"
-              :title="`${markTitle(sessionStatus(s))} — ${s.branch ?? 'no branch'} · session ${s.id}`"
+              :title="`${markTitle(sessionStatus(s))} — ${s.name ?? s.branch ?? 'no branch'} · session ${s.id}`"
               @click.stop="focusSub(item.id, s.id)"
             >
               <span class="mark sub-mark" :class="sessionStatus(s)">
@@ -842,7 +863,11 @@ async function confirmRemoveNow(): Promise<void> {
                    rows read as one repeated row without a number in front. The array
                    is start-ordered, so the number is stable for a session's life. -->
               <span class="sub-ord mono">{{ i + 1 }}</span>
-              <span class="sub-name code">{{ s.branch ?? s.id.slice(0, 8) }}</span>
+              <!-- What it is about, when the app knows: every session of a
+                   project runs against the same checkout, so the branch is
+                   identical on all of them and the rows read as one repeated
+                   row. A section's session knows what it was started for. -->
+              <span class="sub-name code">{{ s.name ?? s.branch ?? s.id.slice(0, 8) }}</span>
               <span v-if="!s.endedAt" class="timer mono">{{ timerOf(s.startedAt) }}</span>
             </button>
           </div>
@@ -974,6 +999,16 @@ async function confirmRemoveNow(): Promise<void> {
              project DO something rather than describe it. -->
         <button class="ctx-item mono" data-testid="ctx-new-session" @click="ctxNewSession">
           <span style="color: var(--green)">＋</span>New session here
+        </button>
+        <!-- The way back down. A project accumulates sessions — a section starts
+             its own — and ending them one at a time is tedious at two. -->
+        <button
+          v-if="ctxLiveSessions.length > 1"
+          class="ctx-item mono"
+          data-testid="ctx-end-all"
+          @click="ctxEndAll"
+        >
+          <span style="color: var(--red)">■</span>End all {{ ctxLiveSessions.length }} sessions
         </button>
         <div class="ctx-sep"></div>
         <button class="ctx-item mono" data-testid="ctx-repoint" @click="startRepoint">

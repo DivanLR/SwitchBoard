@@ -104,6 +104,9 @@ export interface HostedEntry {
   /** Whether this session holds a Docker container, so the admission ceiling in
    *  startSession can count them without reaching into HostedSession's own state. */
   containerised: boolean
+  /** Started by a section rather than by the developer, so nobody is sitting in
+   *  it and it can close itself when its work is done (see endIfIdleBackground). */
+  background: boolean
 }
 
 /**
@@ -592,8 +595,9 @@ export class SessionManager {
     requestedMode?: SessionMode,
     carryTranscriptFrom?: string,
     /** Run in a container while keeping the mode's own permission behaviour. The
-     *  sections ask for this; nothing else does. */
-    opts?: { containerised?: boolean },
+     *  sections ask for this; nothing else does. `background` marks a session
+     *  started FOR a section rather than by the developer. */
+    opts?: { containerised?: boolean; background?: boolean },
   ): Promise<Session> {
     const project = this.repos.projects.byId(projectId)
     if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
@@ -675,6 +679,7 @@ export class SessionManager {
       seq: this.repos.events.maxSeq(row.id),
       live: new Map(),
       containerised,
+      background: opts?.background === true,
       session: null as unknown as HostedSession,
     }
 
@@ -1023,7 +1028,10 @@ export class SessionManager {
     // the developer's checkout, and they should still ask before doing something
     // that needs asking. Until now only bypass could give the first, and it gave
     // the second away to get it.
-    return this.startSession(projectId, false, undefined, undefined, { containerised: true })
+    return this.startSession(projectId, false, undefined, undefined, {
+      containerised: true,
+      background: true,
+    })
   }
 
   /**
@@ -1462,6 +1470,38 @@ export class SessionManager {
     this.repos.sessions.update(entry.row.id, { status, statusDetail: detail ?? null })
     this.pushStatus(entry)
     this.callbacks.onCountersChanged()
+    // After the watches above have settled, so "nothing outstanding" is true
+    // rather than merely not yet written down.
+    if (status === 'done') void this.endIfIdleBackground(entry)
+  }
+
+  /**
+   * End a section's session once its work is finished.
+   *
+   * A background session is nobody's conversation: it is started FOR a verify
+   * pass, an API run or a diagram, and the developer never opens it. It used to
+   * stay alive for the rest of the day, which mattered more than tidiness once
+   * every one of them took a container — two is the whole allowance
+   * (MAX_CONTAINERS), so a project that ran one verify pass in the morning held
+   * half the machine's capacity until the app closed, and the session that then
+   * failed to start was some other project's.
+   *
+   * Only on 'done'. An errored session is left alone deliberately: its output is
+   * the evidence for what went wrong, and closing it the instant it fails is how
+   * a developer loses the thing they were about to look at.
+   *
+   * A watch still held means a run is mid-flight, and a queued task means work
+   * is waiting, so neither is idle.
+   */
+  private async endIfIdleBackground(entry: HostedEntry): Promise<void> {
+    if (!entry.background) return
+    const id = entry.row.id
+    if (this.verifyWatch.has(id) || this.apiWatch.has(id) || this.evalWatch.has(id)) return
+    if (this.repos.taskQueue.listForProject(entry.row.projectId).length > 0) return
+    // Re-checked after the await inside stopSession's own path: a section can
+    // dispatch again between the turn ending and this running.
+    if (!this.hosted.has(id)) return
+    await this.stopSession(id)
   }
 
   /** Read the git branch asynchronously; push only when it actually changed. */
