@@ -2069,15 +2069,27 @@ async function confirmRemoveNow(): Promise<void> {
   background: var(--teal);
 }
 
+/* An OPAQUE surface, like every other floating menu here (.suggest-list in
+   styles.css, .hctx-menu in InboxView). This used --bg-hover, which is a 6%
+   wash meant for tinting a row that already has a background under it: over the
+   project list the board showed straight through the menu and its own text, and
+   in light mode there was almost nothing left to read. A menu floats above the
+   page rather than sitting on it, so it brings its own ground. */
 .ctx-menu {
   position: fixed;
   min-width: 180px;
-  background: var(--bg-hover);
+  background: var(--bg-panel-2);
   border: 1px solid var(--border-strong);
   border-radius: var(--rc);
   overflow: hidden;
   box-shadow: var(--shadow-menu);
   animation: sbIn 0.12s ease;
+}
+
+/* White, as the light sheet's floating surfaces are: the panel tone that reads
+   as raised on carbon reads as sunken against a near-white page. */
+html.sb-light .ctx-menu {
+  background: var(--bg-card);
 }
 
 .ctx-name {

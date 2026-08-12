@@ -25,6 +25,7 @@ import { useEvalsStore } from '@renderer/stores/evals'
 import { useVerifyStore } from '@renderer/stores/verify'
 import { useApiStore } from '@renderer/stores/api'
 import { useProjectsStore } from '@renderer/stores/projects'
+import MiniTerminal from '@renderer/components/MiniTerminal.vue'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { useApiEvalSet } from '@renderer/composables/useApiEvalSet'
 import { pct, round, sourceOf, unmeasured, useVerifyGates } from '@renderer/composables/useVerifyGates'
@@ -461,6 +462,11 @@ function statusWord(run: VerifyRun): string {
           {{ running ? 'Running…' : `Last run ${statusWord(latest)}` }} · {{ runSummary }}
         </div>
 
+        <!-- "Running…" for several minutes says nothing about whether anything is
+             actually happening. The run's own session output does, and it was
+             already streaming to the renderer the whole time. -->
+        <MiniTerminal v-if="running && latest?.sessionId" :session-id="latest.sessionId" label="verifying" />
+
         <!-- What this run costs in time, learned from history — same rationale as
              verifyEstimate above; shown before the run, not only during it. -->
         <div v-if="verifyEstimateLine" class="prof-meta mono" data-testid="tests-estimate">
@@ -634,6 +640,14 @@ function statusWord(run: VerifyRun): string {
           The app sends these requests itself and decides pass or fail from the status and body that
           came back. The session is asked for one thing: identifiers that really exist.
         </p>
+
+        <!-- The session's part of an API run is fetching real identifiers, which
+             is the slow half and the half that silently fails. -->
+        <MiniTerminal
+          v-if="apiRunning && apiRun?.sessionId"
+          :session-id="apiRun.sessionId"
+          label="gathering data"
+        />
 
         <div class="host">
           <label class="host-field">

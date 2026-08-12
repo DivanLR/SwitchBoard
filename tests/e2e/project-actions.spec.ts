@@ -184,3 +184,23 @@ test('End ends the session (distinct from Ctrl+C interrupt)', async ({ page }) =
   // The live-only controls are gone once the session has ended.
   await expect(page.getByTestId('end-session')).toHaveCount(0)
 })
+
+// The menu floats over the project list, so it has to bring its own ground. It
+// used --bg-hover, a 6% wash meant for tinting a row that already has a
+// background under it, and the board showed straight through the menu and its
+// own text. Asserted as "opaque", not as a colour, so a palette change does not
+// break it but a transparent surface does.
+test('the project menu has an opaque surface, not a wash you can read the board through', async ({
+  page,
+}) => {
+  await page.getByTestId('sidebar-project-alpha').click({ button: 'right' })
+  const menu = page.getByTestId('project-ctx-menu')
+  await expect(menu).toBeVisible()
+
+  const alpha = await menu.evaluate((el) => {
+    // rgb() has three components and is opaque; only a fourth is the alpha.
+    const parts = getComputedStyle(el).backgroundColor.match(/[\d.]+/g) ?? []
+    return parts.length < 4 ? 1 : Number(parts[3])
+  })
+  expect(alpha).toBe(1)
+})

@@ -9,6 +9,7 @@ import { DIAGRAM_PLUGIN, DIAGRAMS_DIR } from '@shared/diagram'
 import { relativeTime } from '@renderer/relative-time'
 import { normalizeForMatch } from '@renderer/composables/useCommandSuggestions'
 import { useDiagramsStore } from '@renderer/stores/diagrams'
+import MiniTerminal from '@renderer/components/MiniTerminal.vue'
 
 const props = defineProps<{
   projectId: string
@@ -144,6 +145,9 @@ watch(
       <div class="row-meta">
         <span class="chip mono">running in the background</span>
       </div>
+      <!-- The session drawing it is one the developer never opens, so without
+           this the wait is a minute of a static word. -->
+      <MiniTerminal :session-id="pending.sessionId" label="drawing" />
     </div>
 
     <div v-if="list.length === 0 && !pending" class="empty" data-testid="diagrams-empty">

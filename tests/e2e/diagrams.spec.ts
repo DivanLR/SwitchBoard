@@ -192,3 +192,35 @@ test('the install card shows only while the plugin is absent from the session co
   )
   await expect(page.getByTestId('diagrams-install')).toHaveCount(0)
 })
+
+// A diagram is drawn in a session the developer never opens, so the wait used to
+// be a static word for however long it took, with no way to tell work from a
+// hang. The events were already streaming to the renderer; nothing rendered
+// them. This asserts LIVE output, not the presence of a label — a hard-coded
+// "drawing…" would satisfy a weaker test and prove nothing.
+test('the pending row shows the drawing session output as it arrives', async ({ page }) => {
+  await page.getByTestId('tab-diagrams').click()
+  await page.getByTestId('diagram-input').fill('Auth flow for login')
+  await page.getByTestId('diagram-generate').click()
+  await expect(page.getByTestId('diagram-pending')).toBeVisible()
+
+  const term = page.getByTestId('mini-terminal')
+  await expect(term).toBeVisible()
+
+  // The session the request actually went to, not a guess.
+  const sessionId = await page.evaluate(() => window.__mock.state().sends.at(-1)?.sessionId ?? '')
+  expect(sessionId).not.toBe('')
+
+  await page.evaluate(
+    (id) => window.__mock.emitEvent(id, 'assistant_text', { text: 'writing docs/diagrams' }),
+    sessionId,
+  )
+  await expect(term).toContainText('writing docs/diagrams')
+
+  // And it keeps up, rather than showing only whatever happened to be first.
+  await page.evaluate(
+    (id) => window.__mock.emitEvent(id, 'assistant_text', { text: 'rendering the SVG' }),
+    sessionId,
+  )
+  await expect(term).toContainText('rendering the SVG')
+})

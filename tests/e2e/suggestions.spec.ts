@@ -140,3 +140,28 @@ test('completing a command does not leave a ghost tail behind it', async ({ page
   await expect(input).toHaveValue('/ponytail')
   await expect(page.getByTestId('ghost-suggestion')).toHaveText('')
 })
+
+// Tab in a composer means "finish what I am typing". Its NATIVE action is to
+// move focus to the next control, so a Tab with nothing to complete used to
+// take the developer out of the field mid-thought with no visible cause — the
+// preventDefault only ran on the branches that actually accepted something.
+test('Tab with nothing to complete leaves the composer alone and keeps focus', async ({ page }) => {
+  const input = page.getByTestId('composer-input')
+  await input.click()
+  await input.fill('just some prose, no command here')
+  await page.keyboard.press('Tab')
+
+  await expect(input).toHaveValue('just some prose, no command here')
+  await expect(input).toBeFocused()
+})
+
+// Shift+Tab is the way back out. Trapping it would strand keyboard focus in a
+// text box with no way to reach the controls above it.
+test('Shift+Tab still moves focus out, so the composer is not a keyboard trap', async ({ page }) => {
+  const input = page.getByTestId('composer-input')
+  await input.click()
+  await input.fill('prose')
+  await page.keyboard.press('Shift+Tab')
+
+  await expect(input).not.toBeFocused()
+})

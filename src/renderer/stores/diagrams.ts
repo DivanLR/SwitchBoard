@@ -17,8 +17,12 @@ const store = reactive({
   byProject: {} as Record<string, DiagramEntry[]>,
   loading: false,
   generating: false,
-  /** The diagram asked for and not yet on disk, shown as a row on its way. */
-  pending: null as { projectId: string; file: string; description: string } | null,
+  /** The diagram asked for and not yet on disk, shown as a row on its way. The
+   *  session is carried so the row can show that session's output while it
+   *  draws, rather than a static "drawing…" for a minute. */
+  pending: null as
+    | { projectId: string; file: string; description: string; sessionId: string }
+    | null,
   /** The diagram open in the preview pane. */
   selected: null as { projectId: string; file: string } | null,
   /** Read HTML, by file name. See select() for why it is kept rather than swapped. */
@@ -63,8 +67,8 @@ const store = reactive({
     this.generating = true
     this.error = null
     try {
-      const { file } = await invoke('diagrams.generate', { projectId, description })
-      this.pending = { projectId, file, description }
+      const { file, sessionId } = await invoke('diagrams.generate', { projectId, description })
+      this.pending = { projectId, file, description, sessionId }
       void this.awaitFile(projectId, file)
       return true
     } catch (e) {

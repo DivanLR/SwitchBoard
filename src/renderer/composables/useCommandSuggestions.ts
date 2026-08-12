@@ -190,11 +190,19 @@ export function useCommandSuggestions(opts: {
     const list = suggestions.value
     switch (event.key) {
       case 'Tab':
+        // Shift+Tab is left alone deliberately: it is the way BACK out of the
+        // composer, and trapping it would strand keyboard focus in a text box
+        // with no way to reach the controls above it.
+        if (event.shiftKey) return
+        // Prevented for every plain Tab, not only the ones that complete
+        // something. Tab's native action here is to move focus out of the
+        // composer, so a Tab with nothing to accept silently took the developer
+        // out of the field they were typing in, mid-thought and with no visible
+        // cause. In a composer, Tab means "finish what I am typing".
+        event.preventDefault()
         if (ghostRest.value) {
-          event.preventDefault()
           acceptGhost()
         } else if (suggestIndex.value >= 0 && list[suggestIndex.value]) {
-          event.preventDefault()
           acceptSuggestion(list[suggestIndex.value])
         }
         return

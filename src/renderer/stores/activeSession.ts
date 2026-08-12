@@ -32,9 +32,25 @@ const PAGE_SIZE = 300
  */
 const MAX_LIVE_EVENTS = 3000
 
+/**
+ * How many lines a mini terminal keeps.
+ *
+ * Small on purpose: a tail exists to show that something is happening and what
+ * it is doing right now, not to be read back through. Anything worth studying
+ * is in the session itself, whole and paged.
+ */
+const MAX_TAIL_EVENTS = 150
+
 const store = reactive({
   sessionId: null as string | null,
   events: [] as SessionEvent[],
+  /**
+   * Recent events per WATCHED session id, for the mini terminals a section shows
+   * while its background session works. Separate from `events`, which stays the
+   * open conversation and only that: a section's work runs in a session the
+   * developer is not looking at, so the two must not be the same array.
+   */
+  tails: {} as Record<string, SessionEvent[]>,
   viewBySession: {} as Record<string, 'clean' | 'raw'>,
   defaultView: 'clean' as 'clean' | 'raw',
   /** Oldest loaded seq, for paging back through history. */
@@ -100,6 +116,12 @@ const store = reactive({
 
   /** push.event: replace by id (in-place updates) or insert in seq order. */
   applyEventPush(event: SessionEvent): void {
+    // Tails first, and before the early return: a background session's events
+    // already arrive here at the same cadence as the open conversation's, they
+    // were simply dropped on the floor because they belonged to a session
+    // nobody was looking at. A section that dispatched work had nothing to show
+    // for minutes as a result. See watchTail.
+    this.appendTail(event)
     if (event.sessionId !== this.sessionId) return
     // Backwards, not forwards. Ids are unique so the result is identical, but the
     // events that get replaced in place are partials and tool pairs still being
@@ -118,6 +140,45 @@ const store = reactive({
       this.events.splice(at === -1 ? this.events.length : at, 0, event)
     }
     this.trimHead()
+  },
+
+  /**
+   * Start showing a session's output without opening it.
+   *
+   * Seeded from the database so a tail that starts mid-run is not blank until
+   * the next event happens to arrive. A background session read off an older run
+   * row may be gone entirely, which is not an error worth surfacing: the tail
+   * simply has nothing to show.
+   */
+  async watchTail(sessionId: string): Promise<void> {
+    if (!this.tails[sessionId]) this.tails[sessionId] = []
+    try {
+      const events = await invoke('sessions.events', { sessionId, limit: MAX_TAIL_EVENTS })
+      // Only if nothing has arrived meanwhile: a live push that landed during
+      // the await is newer than this page and must not be overwritten by it.
+      if ((this.tails[sessionId]?.length ?? 0) === 0) this.tails[sessionId] = events
+    } catch {
+      // Gone, or never existed. An empty tail is the honest answer.
+    }
+  },
+
+  /** Stop keeping a session's tail, and free it. */
+  unwatchTail(sessionId: string): void {
+    delete this.tails[sessionId]
+  },
+
+  /** Append to any watched tail this event belongs to. A no-op otherwise, which
+   *  is most events: only a section actively showing a terminal watches one. */
+  appendTail(event: SessionEvent): void {
+    const tail = this.tails[event.sessionId]
+    if (!tail) return
+    const index = tail.findLastIndex((e) => e.id === event.id)
+    if (index !== -1) {
+      tail[index] = event
+      return
+    }
+    tail.push(event)
+    if (tail.length > MAX_TAIL_EVENTS) tail.splice(0, tail.length - MAX_TAIL_EVENTS)
   },
 
   /**

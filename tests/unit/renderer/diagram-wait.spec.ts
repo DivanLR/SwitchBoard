@@ -37,7 +37,7 @@ function waiting(file: string): ReturnType<typeof useDiagramsStore> {
   const store = useDiagramsStore()
   store.byProject = {}
   store.error = null
-  store.pending = { projectId: 'p1', file, description: 'Auth flow' }
+  store.pending = { projectId: 'p1', file, description: 'Auth flow', sessionId: 's1' }
   return store
 }
 
@@ -79,7 +79,7 @@ describe('diagrams store: waiting for the file to land', () => {
     const store = waiting('auth-flow.html')
 
     const wait = store.awaitFile('p1', 'auth-flow.html')
-    store.pending = { projectId: 'p1', file: 'billing.html', description: 'Billing' }
+    store.pending = { projectId: 'p1', file: 'billing.html', description: 'Billing', sessionId: 's1' }
     await vi.advanceTimersByTimeAsync(2500)
     await wait
 
