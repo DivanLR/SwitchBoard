@@ -224,3 +224,24 @@ test('the pending row shows the drawing session output as it arrives', async ({ 
   )
   await expect(term).toContainText('rendering the SVG')
 })
+
+// A plugin is installed on the HOST, by the CLI, in a process no session knows
+// about — so nothing told the sessions, and the card that had just installed the
+// plugin carried on offering to install it. The only way out was starting a new
+// session, which is not an obvious thing to think of when a button looks like it
+// did nothing. The real handler now asks every live session to reload its
+// plugins, and this asserts the consequence a developer actually sees.
+test('installing the plugin retires the install card', async ({ page }) => {
+  await page.evaluate(() => window.__mock.setCommands('p-alpha', ['some-other-command']))
+  await page.getByTestId('tab-diagrams').click()
+
+  const card = page.getByTestId('diagrams-install')
+  await expect(card).toBeVisible()
+  await card.click()
+
+  // Gone, without a restart and without a project switch.
+  await expect(page.getByTestId('diagrams-install')).toHaveCount(0)
+  // And it reached the CLI with the right package, not just hid the card.
+  const installs = await page.evaluate(() => window.__mock.state().pluginInstalls)
+  expect(installs.at(-1)?.pkg).toBe(DIAGRAM_PLUGIN.pkg)
+})

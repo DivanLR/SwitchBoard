@@ -903,6 +903,10 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     // Awaited to completion so the renderer learns whether it actually worked.
     'plugins.install': async (req) => {
       await installPlugin(req.marketplace, req.pkg)
+      // The install happened on the host, outside every session, so nothing else
+      // would ever tell them. Without this the card that just installed a plugin
+      // carries on offering to install it until a new session starts.
+      await manager.reloadPlugins()
     },
     'settings.get': () => repos.settings.get(),
     'settings.set': (req) => repos.settings.set(req),

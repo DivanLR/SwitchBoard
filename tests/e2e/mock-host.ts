@@ -150,6 +150,8 @@ export interface MockDriver {
     planModeChanges: { sessionId: string; enabled: boolean }[]
     /** Every 'diagrams.open' call, in order, so a spec can assert which file it named. */
     diagramOpens: { projectId: string; file: string }[]
+    /** Every host-side plugin install asked for, in order. */
+    pluginInstalls: { marketplace: string; pkg: string }[]
   }
 }
 
@@ -800,7 +802,38 @@ export function installMockHost(scenario: MockScenario): void {
     // the CLI with the right marketplace and package, which is exactly what the
     // real handler forwards.
     'plugins.install': (req) => {
-      pluginInstalls.push({ marketplace: String(req.marketplace), pkg: String(req.pkg) })
+      const pkg = String(req.pkg)
+      pluginInstalls.push({ marketplace: String(req.marketplace), pkg })
+      // Mirrors what the real handler does after a host install: it asks every
+      // live session to reload its plugins, and the refreshed command list is
+      // what makes the install card retire itself. Without this the mock would
+      // let a broken app pass — the card only ever disappears because the
+      // commands arrived, never because a button was clicked.
+      const shipped: Record<string, string[]> = {
+        'diagram-design@diagram-design': ['export-diagram'],
+        'dotnet-claude-kit@dotnet-claude-kit': [
+          'dotnet-claude-kit:code-review',
+          'dotnet-claude-kit:de-sloppify',
+          'dotnet-claude-kit:security-scan',
+          'dotnet-claude-kit:verify',
+          'dotnet-claude-kit:health-check',
+          'dotnet-claude-kit:migrate',
+        ],
+        'ponytail@ponytail': [
+          'ponytail:ponytail-review',
+          'ponytail:ponytail-audit',
+          'ponytail:ponytail-debt',
+        ],
+      }
+      const added = shipped[pkg] ?? []
+      if (added.length === 0) return
+      // User scope, so every project gains them, exactly as reloadPlugins does.
+      for (const project of projects) {
+        const existing = (projectCommands.get(project.id) ?? []).map((c) => c.name)
+        const shaped = [...new Set([...existing, ...added])].map((name) => ({ name }))
+        projectCommands.set(project.id, shaped)
+        push('push.projectCommands', { projectId: project.id, commands: shaped })
+      }
     },
     // Enough of a document to prove the frame rendered THIS diagram and not
     // another: the spec asserts on the file name inside the returned HTML.
@@ -1725,6 +1758,7 @@ export function installMockHost(scenario: MockScenario): void {
       starts: [...starts],
       planModeChanges: [...planModeChanges],
       diagramOpens: [...diagramOpens],
+      pluginInstalls: [...pluginInstalls],
     }),
   }
 }

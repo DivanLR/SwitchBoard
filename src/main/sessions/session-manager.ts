@@ -1130,6 +1130,21 @@ export class SessionManager {
   }
 
   /**
+   * Tell every live session to re-read its plugins, after one was installed.
+   *
+   * Every session, not just the project's: a plugin is installed at user scope
+   * on the host, so it becomes available to all of them at once, and a developer
+   * who installs from one project should not find the other projects still
+   * offering to install it.
+   *
+   * Settles rather than races: one session that cannot answer must not stop the
+   * rest from refreshing.
+   */
+  async reloadPlugins(): Promise<void> {
+    await Promise.allSettled([...this.hosted.values()].map((entry) => entry.session.reloadPlugins()))
+  }
+
+  /**
    * The session's connected MCP servers, waiting briefly for them to arrive.
    *
    * `startSession` resolves as soon as the process is spawned; the server list

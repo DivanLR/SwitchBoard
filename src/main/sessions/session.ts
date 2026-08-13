@@ -506,6 +506,35 @@ export class HostedSession {
    * the app claims — which is why the reported mode, not the requested one, is
    * what the header reads.
    */
+  /**
+   * Re-read plugins from disk and report the commands that came back.
+   *
+   * A plugin is installed on the HOST, by the CLI, in a process that has nothing
+   * to do with any running session (see plugin-install.ts). Nothing told the
+   * sessions, and a session's command list is the only thing the app has: so a
+   * successful install left every "Download to project" card exactly where it
+   * was, still offering to install the plugin that had just been installed. The
+   * only way out was starting a new session, which is not an obvious thing to
+   * think of when a button appears to have done nothing.
+   *
+   * Failure is not reported: an older CLI without the control request leaves the
+   * list as it was, which is where it would have been anyway.
+   */
+  async reloadPlugins(): Promise<void> {
+    try {
+      const result = await this.q?.reloadPlugins()
+      if (!result) return
+      this.emitCommands(
+        result.commands.map((c) => ({
+          name: c.name,
+          description: (c as { description?: string }).description || undefined,
+        })),
+      )
+    } catch {
+      // Older CLI, or a session already shutting down.
+    }
+  }
+
   setPlanMode(enabled: boolean): void {
     // Leaving plan mode returns to the mode this session was started in, so a
     // visit to planning cannot silently change what the rest of the session may
