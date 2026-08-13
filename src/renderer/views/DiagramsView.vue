@@ -27,24 +27,6 @@ const diagrams = useDiagramsStore()
 onMounted(() => void diagrams.load(props.projectId))
 watch(() => props.projectId, (id) => void diagrams.load(id))
 
-// Installed when the plugin's probe command shows up in the session's own
-// command list. Before that list has loaded (empty), assume installed rather
-// than flashing a download card that a moment later turns out to be wrong —
-// the same rule CleanupView applies per group.
-const installed = computed(() => {
-  if (props.available.length === 0) return true
-  const key = normalizeForMatch(DIAGRAM_PLUGIN.probeCommand)
-  // Match the command's OWN name, after the plugin namespace. A session reports
-  // this skill as "diagram-design:export-diagram", and normalizeForMatch strips
-  // the colon rather than the namespace, so the whole string reduces to
-  // "diagramdesignexportdiagram" and never equalled the probe's
-  // "exportdiagram". The card therefore claimed the plugin was missing on every
-  // project that had it installed, and clicking Download re-installed something
-  // already present, which changed nothing and looked broken.
-  // CleanupView already does exactly this; the two now agree.
-  return props.available.some((c) => normalizeForMatch(c.slice(c.lastIndexOf(':') + 1)) === key)
-})
-
 const description = ref('')
 
 async function generate(): Promise<void> {
@@ -64,6 +46,35 @@ const pending = computed(() =>
 const list = computed(() =>
   [...diagrams.forProject(props.projectId)].sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt)),
 )
+
+// Whether to keep quiet about installing anything.
+//
+// EVIDENCE FIRST. A project with diagrams in its folder, or one on its way,
+// plainly can draw them, whatever a command list says — and the drawing runs in
+// a container whose ~/.claude is its own and holds no plugins, so the probe is
+// answering for an environment that is not the one doing the work. Offering to
+// install underneath a list of finished diagrams reads as the app not knowing
+// what it is showing.
+//
+// The probe still decides the empty case, and only once the folder has been
+// read: before that the answer is not "missing", it is "not known yet", and a
+// download card that appears for one frame and then leaves is worse than one
+// that arrives a moment late.
+const installed = computed(() => {
+  if (diagrams.byProject[props.projectId] === undefined) return true
+  if (list.value.length > 0 || pending.value) return true
+  if (props.available.length === 0) return true
+  const key = normalizeForMatch(DIAGRAM_PLUGIN.probeCommand)
+  // Match the command's OWN name, after the plugin namespace. A session reports
+  // this skill as "diagram-design:export-diagram", and normalizeForMatch strips
+  // the colon rather than the namespace, so the whole string reduces to
+  // "diagramdesignexportdiagram" and never equalled the probe's
+  // "exportdiagram". The card therefore claimed the plugin was missing on every
+  // project that had it installed, and clicking Download re-installed something
+  // already present, which changed nothing and looked broken.
+  // CleanupView already does exactly this; the two now agree.
+  return props.available.some((c) => normalizeForMatch(c.slice(c.lastIndexOf(':') + 1)) === key)
+})
 
 const ago = (iso: string): string => relativeTime(iso, Date.now())
 

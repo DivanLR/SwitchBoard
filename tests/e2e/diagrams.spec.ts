@@ -244,6 +244,32 @@ test('the pending row shows the drawing session output as it arrives', async ({ 
   await expect(term).toContainText('rendering the SVG')
 })
 
+// The probe answers for the wrong environment. Diagrams are drawn in a container
+// whose ~/.claude is its own and holds no plugins, so a session's command list
+// can say "missing" for a project that has been drawing them all along — and the
+// card then sat above a list of finished diagrams offering to install what had
+// evidently just worked.
+test('a project with diagrams is never offered the download', async ({ page }) => {
+  await page.evaluate(() => window.__mock.setCommands('p-alpha', ['some-other-command']))
+  await expect(page.getByTestId('diagrams-install')).toBeVisible()
+
+  await page.evaluate(() => {
+    window.__mock.addDiagram('p-alpha', {
+      file: 'auth-flow.html',
+      path: `${'docs/diagrams'}/auth-flow.html`,
+      description: 'Auth flow for login',
+      sessionId: 's-alpha',
+      modifiedAt: new Date().toISOString(),
+      bytes: 4096,
+    })
+  })
+  await page.getByTestId('tab-session').click()
+  await page.getByTestId('tab-diagrams').click()
+
+  await expect(page.getByTestId('diagram-list')).toBeVisible()
+  await expect(page.getByTestId('diagrams-install')).toHaveCount(0)
+})
+
 // A plugin is installed on the HOST, by the CLI, in a process no session knows
 // about — so nothing told the sessions, and the card that had just installed the
 // plugin carried on offering to install it. The only way out was starting a new
