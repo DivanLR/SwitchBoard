@@ -88,7 +88,7 @@ const store = reactive({
    * file may still arrive, and the next ordinary load will show it.
    */
   async awaitFile(projectId: string, file: string): Promise<void> {
-    const deadline = Date.now() + 5 * 60_000
+    const deadline = Date.now() + 20 * 60_000
     while (Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 2500))
       // The developer switched project, or asked for something else: this poll
@@ -108,7 +108,7 @@ const store = reactive({
     // reads as the app having lost the request rather than having stopped
     // waiting for it. The file may still land; the next load will show it.
     if (this.pending?.file === file) {
-      this.error = `${file} has not appeared after five minutes. The background session may still be drawing it, or it may have failed — open that session to see, or ask again.`
+      this.error = `${file} has not appeared after twenty minutes. The background session may still be drawing it, or it may have failed — open that session to see, or ask again.`
       this.pending = null
     }
   },

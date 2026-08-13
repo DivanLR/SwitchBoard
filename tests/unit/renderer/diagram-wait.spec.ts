@@ -68,10 +68,10 @@ describe('diagrams store: waiting for the file to land', () => {
     const store = waiting('auth-flow.html')
 
     const wait = store.awaitFile('p1', 'auth-flow.html')
-    await vi.advanceTimersByTimeAsync(5 * 60_000 + 2500)
+    await vi.advanceTimersByTimeAsync(20 * 60_000 + 2500)
     await wait
 
-    expect(store.error).toMatch(/has not appeared after five minutes/)
+    expect(store.error).toMatch(/has not appeared after twenty minutes/)
     expect(store.pending).toBeNull()
   })
 
