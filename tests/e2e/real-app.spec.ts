@@ -152,16 +152,23 @@ test('Run verification crosses the real boundary without the clone error', async
 
   await page.getByTestId('tests-run').click()
 
-  // What comes back must be the handler's own complaint about the missing CLI.
-  // That is positive proof of the whole path: the request was serialised by real
-  // structuredClone, crossed the real contextBridge, was validated against the
-  // stack and the suite plan, and reached the session lookup — none of which is
-  // reachable if the clone fails, because the clone happens first.
+  // What comes back must be the handler's own complaint about a real missing
+  // prerequisite. That is positive proof of the whole path: the request was
+  // serialised by real structuredClone, crossed the real contextBridge, was
+  // validated against the stack and the suite plan, and reached the session
+  // lookup — none of which is reachable if the clone fails, because the clone
+  // happens first.
   const banner = page.getByTestId('tests-error')
   await expect(banner).toBeVisible()
   const message = (await banner.textContent()) ?? ''
   expect(message).not.toMatch(/could not be cloned/i)
-  expect(message).toMatch(/Claude Code was not found/i)
+  // WHICH prerequisite is missing is not the point, and it moved once already:
+  // a verification run is containerised now (backgroundSessionFor), so the
+  // sandbox readiness check runs BEFORE the CLI lookup and reports whichever of
+  // Docker, the login or the executable it finds missing first. Pinning the
+  // message to one of those made this test an assertion about the order of two
+  // preflight checks rather than about the boundary it is named for.
+  expect(message).toMatch(/Claude Code was not found|login not found|Docker Desktop is not running/i)
 })
 
 // Last in the file on purpose: creating groups changes the sidebar's shape, and
