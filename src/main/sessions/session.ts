@@ -379,7 +379,15 @@ export class HostedSession {
           // Older CLI without supportedModels — the manager keeps what it had.
         })
     }
-    this.setStatus('done')
+    // recompute, NOT a flat 'done'. start() is not awaited (see
+    // SessionManager.startSession), and a section dispatches to the session it
+    // just asked for within milliseconds — while this is still waiting on a
+    // container to boot. Declaring 'done' here overwrote the 'working' that send
+    // had already set, and for a BACKGROUND session that status is a kill
+    // signal: endIfIdleBackground stopped it about six seconds in, before the
+    // first token, and every diagram, verify and API run dispatched that way
+    // died silently with nothing in it but the prompt.
+    this.recomputeStatus()
   }
 
   private async run(): Promise<void> {
