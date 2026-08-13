@@ -1283,7 +1283,7 @@ async function confirmRemoveNow(): Promise<void> {
 
 .logo {
   font-size: var(--fs-body);
-  font-weight: 500;
+  font-weight: var(--w-em);
   color: var(--text-bright);
   letter-spacing: 0.02em;
 }
@@ -1677,7 +1677,7 @@ async function confirmRemoveNow(): Promise<void> {
   height: 12px;
   font-family: var(--mono);
   font-size: 13.8px;
-  font-weight: 500;
+  font-weight: var(--w-em);
   line-height: 12px;
   text-align: center;
 }
@@ -1711,7 +1711,7 @@ async function confirmRemoveNow(): Promise<void> {
   flex: 1;
   min-width: 0;
   font-size: var(--fs-ui);
-  font-weight: 500;
+  font-weight: var(--w-em);
   color: var(--text-name);
   white-space: nowrap;
   overflow: hidden;
@@ -1807,7 +1807,7 @@ async function confirmRemoveNow(): Promise<void> {
 
 .rd-title {
   font-size: var(--fs-head);
-  font-weight: 500;
+  font-weight: var(--w-em);
   color: var(--text-bright);
   margin-top: 14px;
 }

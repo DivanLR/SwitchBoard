@@ -136,6 +136,99 @@ test('Generate sends the prompt to a background session and stays on the tab', a
   expect(sends.some((s) => s.text.includes('Auth flow for login'))).toBe(true)
 })
 
+// The wait is for ONE file. When it lands, that is the thing to be looking at —
+// the pending row said so for however many minutes it took. It used to land in
+// the list and leave the pane on whatever was selected before it, or on nothing
+// at all, which reads as the diagram having failed.
+test('the diagram you asked for is the one showing when it arrives', async ({ page }) => {
+  await page.evaluate(() => {
+    window.__mock.addDiagram('p-alpha', {
+      file: 'older.html',
+      path: 'docs/diagrams/older.html',
+      description: 'An earlier diagram',
+      sessionId: 's-alpha',
+      modifiedAt: new Date(Date.now() - 60_000).toISOString(),
+      bytes: 2048,
+    })
+  })
+  await page.getByTestId('tab-session').click()
+  await page.getByTestId('tab-diagrams').click()
+  await expect(page.getByTestId('diagram-frame')).toHaveAttribute('srcdoc', /older\.html/)
+
+  await page.getByTestId('diagram-input').fill('Auth flow for login')
+  await page.getByTestId('diagram-generate').click()
+  await expect(page.getByTestId('diagram-pending')).toBeVisible()
+
+  const file = await page.evaluate(
+    () => window.__mock.state().sends.at(-1)?.text.match(/docs\/diagrams\/([\w.-]+\.html)/)?.[1],
+  )
+  expect(file).toBeTruthy()
+
+  await page.evaluate((f) => {
+    window.__mock.addDiagram('p-alpha', {
+      file: f!,
+      path: `docs/diagrams/${f}`,
+      description: 'Auth flow for login',
+      sessionId: 's-alpha',
+      modifiedAt: new Date().toISOString(),
+      bytes: 8192,
+    })
+  }, file)
+
+  await expect(page.getByTestId('diagram-pending')).toHaveCount(0)
+  await expect(page.getByTestId('diagram-frame')).toHaveAttribute(
+    'srcdoc',
+    new RegExp(file!.replace(/[.]/g, '[.]')),
+  )
+})
+
+// Drawing is an ordinary request, not a command — but the plugin ships three
+// real commands, and reaching them meant knowing they existed and typing one
+// into the conversation.
+test('the section offers the plugin commands, and runs one on the diagram in the pane', async ({
+  page,
+}) => {
+  await page.evaluate(
+    (probe) => window.__mock.setCommands('p-alpha', [`diagram-design:${probe}`]),
+    DIAGRAM_PLUGIN.probeCommand,
+  )
+  await page.evaluate(() => {
+    window.__mock.addDiagram('p-alpha', {
+      file: 'auth-flow.html',
+      path: 'docs/diagrams/auth-flow.html',
+      description: 'Auth flow',
+      sessionId: 's-alpha',
+      modifiedAt: '2026-08-10T00:00:00.000Z',
+      bytes: 4200,
+    })
+  })
+  await page.getByTestId('tab-session').click()
+  await page.getByTestId('tab-diagrams').click()
+
+  await expect(page.getByTestId('diagram-command-menu')).toHaveCount(0)
+  await page.getByTestId('diagram-commands').click()
+
+  const menu = page.getByTestId('diagram-command-menu')
+  await expect(menu).toBeVisible()
+  // Every command the plugin ships, described in the plugin's own words.
+  await expect(menu.getByTestId(/^diagram-command-/)).toHaveCount(3)
+  await expect(page.getByTestId('diagram-command-export-diagram')).toContainText('.svg')
+  // Reported by the session, so it is offered; the other two are not, and say so.
+  await expect(page.getByTestId('diagram-command-export-diagram')).toBeEnabled()
+  await expect(page.getByTestId('diagram-command-import-mermaid')).toBeDisabled()
+  await expect(page.getByTestId('diagram-command-import-mermaid')).toContainText(
+    'not in this project',
+  )
+
+  await page.getByTestId('diagram-command-export-diagram').click()
+  await expect(menu).toHaveCount(0)
+
+  // Dispatched with the diagram on screen as its argument — no path typed.
+  await expect
+    .poll(async () => (await page.evaluate(() => window.__mock.state().sends)).at(-1)?.text)
+    .toBe(`/${DIAGRAM_PLUGIN.namespace}:export-diagram ${DIAGRAMS_DIR}/auth-flow.html`)
+})
+
 test('Generate does nothing on an empty or whitespace-only description', async ({ page }) => {
   const before = await page.evaluate(() => window.__mock.state().sends.length)
 

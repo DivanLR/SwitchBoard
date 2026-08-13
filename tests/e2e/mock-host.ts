@@ -260,6 +260,13 @@ export function installMockHost(scenario: MockScenario): void {
       'website to sample; generate the diagram now with the neutral defaults.',
       'Choose the diagram type that fits the request.',
       '',
+      'A DIAGRAM, not a document. The page is a short title, the drawing, and a',
+      'legend. Every label belongs inside the drawing. Do not add an introductory',
+      'paragraph above it, and do not add prose sections, resource tables, numbered',
+      'walkthroughs or a reading order below it. One caption line under the drawing',
+      'is the whole of the prose budget; if something needs explaining, label it in',
+      'the picture instead.',
+      '',
       `When it is written, reply with the one line: wrote ${DIAGRAMS_DIR}/${file}`,
     ].join('\n')
   }

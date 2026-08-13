@@ -1035,7 +1035,7 @@ function statusWord(run: VerifyRun): string {
 
 .score-val {
   font-size: var(--fs-title);
-  font-weight: 500;
+  font-weight: var(--w-em);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1151,7 +1151,7 @@ function statusWord(run: VerifyRun): string {
 
 .prof-name {
   font-size: var(--fs-body);
-  font-weight: 500;
+  font-weight: var(--w-em);
   color: var(--text-bright);
 }
 
@@ -1257,7 +1257,7 @@ function statusWord(run: VerifyRun): string {
   flex-shrink: 0;
   padding: 6px 14px;
   font-size: var(--fs-meta);
-  font-weight: 500;
+  font-weight: var(--w-em);
   color: var(--green-ink);
   background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
   border-radius: var(--rc);

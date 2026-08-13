@@ -732,7 +732,7 @@ const partTabs: { id: Part; label: string }[] = [
 
 .sc-title {
   font-size: var(--fs-title);
-  font-weight: 500;
+  font-weight: var(--w-em);
   color: var(--text-bright);
 }
 
@@ -812,7 +812,7 @@ const partTabs: { id: Part; label: string }[] = [
 
 .ns-title {
   font-size: var(--fs-body);
-  font-weight: 500;
+  font-weight: var(--w-em);
   color: var(--text-bright);
 }
 
@@ -870,7 +870,7 @@ const partTabs: { id: Part; label: string }[] = [
 .impl-btn {
   background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
   color: var(--green-ink);
-  font-weight: 500;
+  font-weight: var(--w-em);
   font-size: var(--fs-meta);
   padding: 7px 16px;
   cursor: pointer;
@@ -972,7 +972,7 @@ const partTabs: { id: Part; label: string }[] = [
 .sec-title {
   flex: 1;
   font-size: var(--fs-meta);
-  font-weight: 500;
+  font-weight: var(--w-em);
   color: var(--text-body);
 }
 
@@ -1125,7 +1125,7 @@ const partTabs: { id: Part; label: string }[] = [
 
 .sug-cmd {
   font-size: var(--fs-body);
-  font-weight: 500;
+  font-weight: var(--w-em);
   color: var(--green);
   white-space: nowrap;
 }
@@ -1143,7 +1143,7 @@ const partTabs: { id: Part; label: string }[] = [
   flex-shrink: 0;
   background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
   color: var(--green-ink);
-  font-weight: 500;
+  font-weight: var(--w-em);
   font-size: var(--fs-meta);
   padding: 7px 16px;
   cursor: pointer;

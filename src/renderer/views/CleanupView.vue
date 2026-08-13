@@ -198,7 +198,7 @@ function run(command: string): void {
 
 .group-name {
   font-size: var(--fs-ui);
-  font-weight: 500;
+  font-weight: var(--w-em);
   color: var(--text-bright);
 }
 
@@ -330,7 +330,7 @@ function run(command: string): void {
   white-space: nowrap;
   background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
   color: var(--green-ink);
-  font-weight: 500;
+  font-weight: var(--w-em);
   font-size: var(--fs-meta);
   padding: 8px 15px;
   border-radius: var(--rc);

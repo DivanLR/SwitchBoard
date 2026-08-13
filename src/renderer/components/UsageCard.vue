@@ -80,7 +80,7 @@ function barColor(pct: number): string {
 
 .uc-meter-pct {
   font-size: var(--fs-meta);
-  font-weight: 500;
+  font-weight: var(--w-em);
   text-align: right;
 }
 

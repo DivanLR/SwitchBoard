@@ -101,6 +101,11 @@ const store = reactive({
         // say. Breaking without clearing it fell into the timeout branch below
         // and reported a five-minute failure the moment the diagram succeeded.
         this.pending = null
+        // And SHOW it. The wait was for this one file, for however many minutes
+        // it took; arriving into the list while the pane keeps showing whatever
+        // was selected before — or nothing at all, on a project whose first
+        // diagram this is — reads as the drawing having failed.
+        await this.select(projectId, file)
         return
       }
     }

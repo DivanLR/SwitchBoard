@@ -1,11 +1,11 @@
 <script setup lang="ts">
 // Diagrams section: type what you want, the project's session hands it to the
 // diagram-design plugin, and the plugin writes a standalone HTML file into the
-// project's own docs/diagrams. This view only asks and lists — the plugin has
-// no slash command, so unlike Cleanup there is nothing here to "run" once it
-// is installed, only the one generate box and the folder's contents.
+// project's own docs/diagrams. Drawing one has no slash command — the skill
+// activates on an ordinary request — but the plugin does ship commands for
+// exporting and importing, and those are offered in the Commands menu.
 import { computed, onMounted, ref, watch } from 'vue'
-import { DIAGRAM_PLUGIN, DIAGRAMS_DIR } from '@shared/diagram'
+import { DIAGRAM_COMMANDS, DIAGRAM_PLUGIN, DIAGRAMS_DIR } from '@shared/diagram'
 import { relativeTime } from '@renderer/relative-time'
 import { normalizeForMatch } from '@renderer/composables/useCommandSuggestions'
 import { useDiagramsStore } from '@renderer/stores/diagrams'
@@ -14,13 +14,15 @@ import MiniTerminal from '@renderer/components/MiniTerminal.vue'
 const props = defineProps<{
   projectId: string
   available: string[]
+  /** The section's own background session, so a dispatched command is watchable. */
+  sessionId?: string | null
   /** True while this plugin's host-side install is running. */
   installing?: boolean
   /** Why the install failed, in the CLI's own words. Null when it has not. */
   installError?: string | null
 }>()
 
-const emit = defineEmits<{ (e: 'install'): void }>()
+const emit = defineEmits<{ (e: 'install'): void; (e: 'run', command: string): void }>()
 
 const diagrams = useDiagramsStore()
 
@@ -85,6 +87,47 @@ const selected = computed(() =>
 const selectedHtml = computed(() => (selected.value ? diagrams.html[selected.value] : undefined))
 const selectedEntry = computed(() => list.value.find((d) => d.file === selected.value) ?? null)
 
+// THE COMMANDS MENU.
+//
+// Drawing a diagram is not a command — the skill activates on an ordinary
+// request, which is why this section is a text box and not a list of buttons.
+// The plugin does ship three commands, though, and until now the only way to
+// reach them was to know they existed and type one into the conversation.
+//
+// Availability is reported per command rather than assumed from the plugin
+// being installed, on the same rule the rest of the view follows: an empty
+// command list means "not known yet", not "missing".
+const menuOpen = ref(false)
+
+const commands = computed(() =>
+  DIAGRAM_COMMANDS.map((c) => ({
+    ...c,
+    available:
+      props.available.length === 0 ||
+      props.available.some(
+        (name) => normalizeForMatch(name.slice(name.lastIndexOf(':') + 1)) === normalizeForMatch(c.command),
+      ),
+  })),
+)
+
+/**
+ * Dispatches a command with the argument this section already knows.
+ *
+ * Every one of these takes a file. For the export that file is the diagram in
+ * the pane, so it runs on what is on screen without anyone typing a path; for
+ * the two importers the source is a file this app has never heard of, so
+ * whatever is in the box is passed through and an empty box leaves the session
+ * to ask — which is visible now, in the terminal below.
+ */
+function runCommand(entry: (typeof commands.value)[number]): void {
+  menuOpen.value = false
+  const typed = description.value.trim()
+  const argument = typed || (entry.takesDiagram && selected.value ? `${DIAGRAMS_DIR}/${selected.value}` : '')
+  emit('run', `/${DIAGRAM_PLUGIN.namespace}:${entry.command}${argument ? ` ${argument}` : ''}`)
+  description.value = ''
+}
+
+
 // Opening the tab on a project that already has diagrams shows one rather than an
 // empty pane. The newest is the one most likely to be the reason you came here.
 watch(
@@ -144,8 +187,44 @@ watch(
       >
         {{ diagrams.generating ? 'Asking…' : '✎ Generate' }}
       </button>
+
+      <!-- What else this plugin can do. Drawing is the box to the left; these
+           are its other three commands, which were previously reachable only by
+           knowing they existed and typing one into the conversation. -->
+      <div class="cmds">
+        <button
+          class="cmd-btn"
+          data-testid="diagram-commands"
+          :aria-expanded="menuOpen"
+          @click="menuOpen = !menuOpen"
+        >
+          Commands <span aria-hidden="true">▾</span>
+        </button>
+        <div v-if="menuOpen" class="cmd-menu" data-testid="diagram-command-menu">
+          <button
+            v-for="c in commands"
+            :key="c.command"
+            class="cmd-item"
+            :data-testid="`diagram-command-${c.command}`"
+            :disabled="!c.available"
+            @click="runCommand(c)"
+          >
+            <span class="cmd-name mono">/{{ c.command }}</span>
+            <span class="cmd-desc">{{ c.description }}</span>
+            <span class="cmd-args mono">{{ c.argumentHint }}</span>
+            <span v-if="!c.available" class="cmd-missing">not in this project</span>
+          </button>
+        </div>
+      </div>
     </div>
+    <!-- Click anywhere else to dismiss, without a document listener: the menu is
+         the only thing that opens one, and it closes itself when it acts. -->
+    <div v-if="menuOpen" class="cmd-scrim" @click="menuOpen = false"></div>
     <div v-if="diagrams.error" class="err" data-testid="diagram-error">{{ diagrams.error }}</div>
+
+    <!-- A command runs in the section's own background session, which nobody
+         opens, so its output belongs here. -->
+    <MiniTerminal v-if="props.sessionId && !pending" :session-id="props.sessionId" label="running" />
 
     <!-- The row for a diagram that has been asked for and is not on disk yet. It
          names the file the app already chose, so the wait has something to point
@@ -285,7 +364,7 @@ watch(
   white-space: nowrap;
   background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
   color: var(--green-ink);
-  font-weight: 500;
+  font-weight: var(--w-em);
   font-size: var(--fs-meta);
   padding: 8px 15px;
   border-radius: var(--rc);
@@ -328,7 +407,7 @@ watch(
   flex-shrink: 0;
   padding: 8px 15px;
   font-size: var(--fs-meta);
-  font-weight: 500;
+  font-weight: var(--w-em);
   color: var(--green-ink);
   background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
   border-radius: var(--rc);
@@ -340,6 +419,89 @@ watch(
   opacity: 0.5;
   cursor: default;
   box-shadow: none;
+}
+
+.cmds {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.cmd-btn {
+  padding: 8px 13px;
+  font-size: var(--fs-meta);
+  color: var(--text-body);
+  background: var(--bg-hover);
+  border: 1px solid var(--border-card);
+  border-radius: var(--rc);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.cmd-btn:hover {
+  border-color: var(--border-strong);
+}
+
+/* Brings its own ground, like every other menu in the app (.ctx-menu): it
+   floats over the list rather than sitting in it. */
+.cmd-menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  right: 0;
+  z-index: 30;
+  min-width: 360px;
+  padding: 4px;
+  background: var(--bg-panel-2);
+  border: 1px solid var(--border-card);
+  border-radius: var(--rc);
+  box-shadow: var(--elev);
+}
+
+.cmd-item {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 7px 9px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: var(--rc);
+  cursor: pointer;
+}
+
+.cmd-item:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.cmd-item:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.cmd-name {
+  font-size: var(--fs-ui);
+  color: var(--text-body);
+}
+
+.cmd-desc {
+  font-size: var(--fs-meta);
+  color: var(--text-mid);
+  text-wrap: pretty;
+}
+
+.cmd-args {
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+}
+
+.cmd-missing {
+  font-size: var(--fs-micro);
+  color: var(--amber);
+}
+
+.cmd-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
 }
 
 .err {

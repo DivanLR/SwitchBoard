@@ -306,7 +306,7 @@ html.sb-light .prompt {
 
 .caret {
   color: var(--green);
-  font-weight: 500;
+  font-weight: var(--w-em);
   line-height: 1.5;
 }
 

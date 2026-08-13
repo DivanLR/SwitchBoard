@@ -370,7 +370,7 @@ const shortDate = (iso: string): string =>
   flex: 0 0 auto;
   padding: 8px 15px;
   font-size: var(--fs-meta);
-  font-weight: 500;
+  font-weight: var(--w-em);
   color: var(--green-ink);
   background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
   border-radius: var(--rc);

@@ -28,7 +28,41 @@ export const DIAGRAM_PLUGIN = {
    * so there is nothing else to detect it by.
    */
   probeCommand: 'export-diagram',
+  /** How this plugin's commands are namespaced in a session's command list. */
+  namespace: 'diagram-design',
 } as const
+
+/**
+ * The commands the plugin ships, for the section's Commands menu.
+ *
+ * Descriptions and argument hints are the plugin's OWN, read from its command
+ * files rather than written here, so the menu says what the command does
+ * instead of what this app guesses it does.
+ *
+ * Every one of them takes a file. `takesDiagram` marks the ones whose file is a
+ * diagram this section already knows about — those can run on the one in the
+ * pane without the developer typing a path.
+ */
+export const DIAGRAM_COMMANDS = [
+  {
+    command: 'export-diagram',
+    description: 'Export a diagram HTML file to .svg and .png next to the source',
+    argumentHint: '<html-file> [--svg-only|--png-only] [--scale=N]',
+    takesDiagram: true,
+  },
+  {
+    command: 'import-mermaid',
+    description: 'Redraw Mermaid as an editorial diagram at a chosen format, size and detail level',
+    argumentHint: '<mermaid-file> [--format=…] [--detail=…] [--audience=…]',
+    takesDiagram: false,
+  },
+  {
+    command: 'import-drawio',
+    description: 'Redraw a draw.io file as an editorial diagram at a chosen format, size and detail level',
+    argumentHint: '<drawio-file> [--format=…] [--detail=…] [--audience=…]',
+    takesDiagram: false,
+  },
+] as const
 
 /**
  * A filename the app chooses, rather than one the model invents.
@@ -61,12 +95,18 @@ export function diagramFileName(description: string, taken: readonly string[] = 
 /**
  * What the session is actually asked.
  *
- * Three things it must say, each for a reason:
+ * Four things it must say, each for a reason:
  * - The exact output path, because the skill's own default is the workspace root
  *   and the destination is the whole point of the feature.
  * - To use the default skin, because the skill has a first-run gate that asks the
  *   user to supply a website to take brand colours from. Left alone it would stop
  *   and ask, and a section whose one button hangs on a question is broken.
+ * - That the deliverable is a DIAGRAM. Left to itself the model writes an
+ *   editorial document around the drawing: a lede paragraph, a stat strip, then
+ *   the picture, then numbered walkthroughs, resource tables and a reading
+ *   order. It answers the question, at the length of a report, and the drawing
+ *   ends up as one illustration inside an essay nobody asked for. A legend and
+ *   one caption line are the whole of the prose budget.
  * - To answer with the path, so the reply names what it produced rather than
  *   leaving the developer to guess which of several files is new.
  */
@@ -78,6 +118,13 @@ export function diagramPrompt(description: string, file: string): string {
     'Use the default editorial skin. Do not ask about brand colours, fonts or a',
     'website to sample; generate the diagram now with the neutral defaults.',
     'Choose the diagram type that fits the request.',
+    '',
+    'A DIAGRAM, not a document. The page is a short title, the drawing, and a',
+    'legend. Every label belongs inside the drawing. Do not add an introductory',
+    'paragraph above it, and do not add prose sections, resource tables, numbered',
+    'walkthroughs or a reading order below it. One caption line under the drawing',
+    'is the whole of the prose budget; if something needs explaining, label it in',
+    'the picture instead.',
     '',
     `When it is written, reply with the one line: wrote ${DIAGRAMS_DIR}/${file}`,
   ].join('\n')

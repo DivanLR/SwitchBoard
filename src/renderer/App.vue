@@ -121,7 +121,7 @@ const dbProject = computed(() => projects.dbProject)
 
 <template>
   <div v-if="bridgeMissing" class="bridge-missing">
-    <div class="mono" style="font-size: var(--fs-head); font-weight: 600">
+    <div class="mono" style="font-size: var(--fs-head); font-weight: var(--w-em)">
       <span style="color: var(--green)">▣</span> switchboard
     </div>
     <p class="dim">
@@ -286,7 +286,7 @@ const dbProject = computed(() => projects.dbProject)
 .ub-install {
   background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
   color: var(--green-ink);
-  font-weight: 600;
+  font-weight: var(--w-em);
   font-size: var(--fs-meta);
   font-family: var(--sans);
   padding: 4px 12px;
@@ -356,7 +356,7 @@ const dbProject = computed(() => projects.dbProject)
   color: var(--amber-ink);
   background: var(--gloss), var(--amber);
   border-color: var(--amber);
-  font-weight: 700;
+  font-weight: var(--w-em);
   animation: inboxPeekGlow 1.8s ease-in-out infinite;
 }
 

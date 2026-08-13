@@ -1329,9 +1329,11 @@ const {
       v-else-if="mainTab === 'diagrams'"
       :project-id="project.id"
       :available="availableCommandNames"
+      :session-id="sectionSessionId"
       :installing="installing === DIAGRAM_PLUGIN.pkg"
       :install-error="installError"
       @install="installDiagramPlugin"
+      @run="runInSection"
     />
 
     <!-- Clean stream (an open agent chat always renders clean) -->
@@ -1922,7 +1924,7 @@ const {
 
 .h-name {
   font-size: var(--fs-head);
-  font-weight: 500;
+  font-weight: var(--w-em);
   color: var(--text-bright);
   white-space: nowrap;
   /* The same treatment .h-path already has, right beside it. Without min-width: 0
@@ -1966,7 +1968,7 @@ const {
 .seg {
   padding: 4px 12px;
   line-height: 15px;
-  font-weight: 500;
+  font-weight: var(--w-em);
   color: var(--text-tab);
   cursor: pointer;
 }
@@ -1984,7 +1986,7 @@ const {
 .seg.on {
   background: var(--bg-active);
   color: var(--text-strong);
-  font-weight: 500;
+  font-weight: var(--w-em);
   cursor: default;
 }
 
@@ -2258,7 +2260,7 @@ const {
 
 .uw-total {
   color: var(--text-body);
-  font-weight: 500;
+  font-weight: var(--w-em);
 }
 
 .uw-cost {
@@ -2500,7 +2502,7 @@ html.sb-light .bypass-warn {
 
 .ab-name {
   font-size: var(--fs-ui);
-  font-weight: 500;
+  font-weight: var(--w-em);
   color: var(--text-strong);
 }
 
@@ -2622,7 +2624,7 @@ html.sb-light .bypass-warn {
 
 .agent-name {
   font-size: var(--fs-ui);
-  font-weight: 500;
+  font-weight: var(--w-em);
   color: var(--text-body);
   white-space: nowrap;
 }
@@ -2844,7 +2846,7 @@ html.sb-light .bypass-warn {
   white-space: nowrap;
   border: 1px solid var(--border-strong);
   color: var(--text-mid);
-  font-weight: 500;
+  font-weight: var(--w-em);
   font-size: var(--fs-meta);
   padding: 6px 13px;
   border-radius: var(--rc);
@@ -2863,7 +2865,7 @@ html.sb-light .bypass-warn {
 .caret {
   flex-shrink: 0;
   color: var(--green);
-  font-weight: 500;
+  font-weight: var(--w-em);
   /* Matches the field's own 3px, so the sigil stays level with the typed line
      now that the line is centred rather than dropped to the row's foot. */
   padding-bottom: 3px;

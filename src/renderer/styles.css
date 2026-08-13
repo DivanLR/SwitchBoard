@@ -154,6 +154,13 @@ html.sb-light {
   --surface-hover-line: #C2C8D2;
   --surface-sunken: #EEF1F5;
   --bg-panel-2: #E6E9EF;
+  /* LIGHTER HERE. Dark ink on a bright ground gains weight optically — the same
+     glyph that needs 500 to hold up in light-on-dark reads as bold in
+     dark-on-light, and this interface is monospace throughout, where a heavy
+     stroke closes the counters and costs the face its character. 400 is the
+     face's own regular; the emphasis in light mode is carried by the ink tier
+     and the surface a thing sits on, which is what the reference does. */
+  --w-em: 400;
   /* Seven opaque tiers, each one step of 1.03 to 1.05:1 from its neighbour, in
      an even flight rather than a stripe: no two steps are identical and every
      seam also carries its own hairline. The old paper theme separated its tiers
@@ -448,6 +455,12 @@ html.sb-light {
   --fs-body: 12.5px;
   --fs-title: 14px;
   --fs-head: 14px;
+  /* THE ONE EMPHASIS WEIGHT. JetBrains Mono here is a variable face (wght
+     400–800), so this is a real interpolated weight rather than a synthetic
+     one, and a theme can hold a different value without changing anything else.
+     Dark keeps 500: light glyphs on a dark ground lose weight optically, and
+     that is the amount they lose. Light lowers it — see html.sb-light. */
+  --w-em: 500;
   --scrim: rgba(10,11,13, 0.66);
   --shadow-dlg: 0 28px 70px rgba(0,0,0, 0.6), 0 0 0 1px rgba(244,244,242, 0.05) inset;
   --shadow-dd: 0 14px 36px rgba(0,0,0, 0.5);
@@ -622,7 +635,7 @@ button {
     var(--gloss),
     linear-gradient(135deg, var(--green), var(--green2));
   color: var(--green-ink);
-  font-weight: 500;
+  font-weight: var(--w-em);
   font-size: var(--fs-ui);
   font-family: var(--sans);
   padding: 6px 14px;
@@ -647,7 +660,7 @@ html.sb-light .btn-solid {
 .btn-armed {
   background: var(--gloss), var(--amber);
   color: var(--amber-ink);
-  font-weight: 500;
+  font-weight: var(--w-em);
   font-size: var(--fs-ui);
   font-family: var(--sans);
   padding: 6px 14px;
@@ -1026,7 +1039,7 @@ html.sb-light .btn-solid {
   white-space: nowrap;
   background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
   color: var(--green-ink);
-  font-weight: 500;
+  font-weight: var(--w-em);
   font-size: var(--fs-meta);
   padding: 7px 16px;
   border-radius: var(--rc);
@@ -1305,7 +1318,7 @@ html.sb-light .suggest-list {
 
 .suggest-typed {
   color: var(--text);
-  font-weight: 500;
+  font-weight: var(--w-em);
 }
 
 /* Small what-it-does explanation next to a suggested /command. */
