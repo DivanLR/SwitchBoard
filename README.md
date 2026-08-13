@@ -101,9 +101,41 @@ The app keeps itself current via auto-update from GitHub releases.
 - [`eslint`](https://eslint.org/) ([`typescript-eslint`](https://typescript-eslint.io/), [`eslint-plugin-vue`](https://eslint.vuejs.org/), [`eslint-config-prettier`](https://github.com/prettier/eslint-config-prettier)) + [`prettier`](https://prettier.io/) — linting and formatting
 - [`tsx`](https://github.com/privatenumber/tsx) — runs the TypeScript retention CLI
 
-### Built with an ADHD-friendly workflow
+### The agent toolchain
 
-Development runs on Claude Code with [`i-have-adhd`](https://github.com/ayghri/i-have-adhd) as the backbone — action-first, numbered, no-preamble output — kept always-on so every session (global and inside Switchboard) is shaped the same way. It pairs with [`ponytail`](https://github.com/DietrichGebert/ponytail) for lazy/minimal code and [`github/spec-kit`](https://github.com/github/spec-kit) for specs. Switchboard applies the same output style to the sessions it hosts.
+Switchboard is built with Claude Code, and the same plugins and skills are installed at
+**user scope** so every project — and every session Switchboard itself hosts — is shaped the
+same way. Two of them shape the output style: `i-have-adhd` for action-first, numbered,
+no-preamble answers, and `ponytail` for lazy, minimal code. Switchboard passes that style
+through to the sessions it runs.
+
+**Plugins** (`claude plugin marketplace add <repo>` then `claude plugin install <pkg> --scope user`)
+
+| Plugin | Source | What it is for |
+| --- | --- | --- |
+| `i-have-adhd` | [ayghri/i-have-adhd](https://github.com/ayghri/i-have-adhd) | Output style: action first, numbered, no preamble |
+| `ponytail` | [DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail) | Lazy senior developer — YAGNI, deletion over addition |
+| `mattpocock-skills` | [mattpocock/skills](https://github.com/mattpocock/skills) | 34 engineering skills, including `grill-me` and `handoff` |
+| `dotnet-claude-kit` | [codewithmukesh/dotnet-claude-kit](https://github.com/codewithmukesh/dotnet-claude-kit) | .NET architecture, scaffolding and the Roslyn navigator MCP |
+| `ui-ux-pro-max` | [nextlevelbuilder/ui-ux-pro-max-skill](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill) | Design, design-system and UI-styling skills |
+| `diagram-design` | [cathrynlavery/diagram-design](https://github.com/cathrynlavery/diagram-design) | Draws the editorial HTML diagrams the Diagrams tab lists |
+| `wt-agent-hooks` | local directory | Terminal integration hooks |
+
+**Skills used most often, by plugin**
+
+- `mattpocock-skills` — `grill-me` and `grilling` (a relentless interview that sharpens a plan
+  before any code is written), `handoff` (compacts a conversation into a document a fresh
+  agent can pick up), plus `tdd`, `code-review`, `diagnosing-bugs`, `domain-modeling`,
+  `to-spec`, `to-tickets` and `research`.
+- `ui-ux-pro-max` — `design`, `design-system`, `ui-styling`.
+- `dotnet-claude-kit` — `scaffold`, and the `code-reviewer`, `ef-core-specialist`,
+  `security-auditor` and `test-engineer` subagents.
+- `diagram-design` — `export-diagram`, `import-mermaid`, `import-drawio`, all three offered
+  from the Diagrams tab's Commands menu.
+
+**Standalone skills** in `~/.claude/skills/`, available to every project without a plugin:
+[`github/spec-kit`](https://github.com/github/spec-kit) (`speckit`, `speckit-implement-scaffold`)
+for specs, and a set of repo-specific Clean Architecture and PL/SQL skills.
 
 ## Getting started
 
