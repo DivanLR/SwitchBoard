@@ -833,6 +833,11 @@ export class SessionManager {
           this.repos.sessions.update(row.id, { sdkSessionId })
         },
         onCommands: (commands) => {
+          // A container has its OWN empty ~/.claude, so it reports a list with
+          // none of the developer's plugins in it. Letting that list win erased
+          // the real one: installing diagram-design put the card away, and the
+          // first diagram — drawn in a container — brought it straight back.
+          if (containerised) return
           this.repos.projectCommands.set(projectId, commands)
           this.callbacks.onProjectCommands(projectId, commands)
         },
