@@ -885,7 +885,7 @@ const partTabs: { id: Part; label: string }[] = [
 .impl-running {
   font-size: var(--fs-meta);
   color: var(--blue);
-  animation: sbFade 2.2s ease infinite;
+  animation: sbFade 2.2s var(--ease) infinite;
 }
 
 .sc-progress-label {
@@ -909,7 +909,7 @@ const partTabs: { id: Part; label: string }[] = [
   background: var(--green);
   transform-origin: left;
   transform: scaleX(var(--fill, 0));
-  transition: transform 0.3s ease;
+  transition: transform 0.3s var(--ease);
 }
 
 /* Part tabs */
@@ -1230,7 +1230,7 @@ const partTabs: { id: Part; label: string }[] = [
 .phase-running {
   font-size: var(--fs-micro);
   color: var(--blue);
-  animation: sbFade 1.6s ease infinite;
+  animation: sbFade 1.6s var(--ease) infinite;
 }
 
 .phase-done {

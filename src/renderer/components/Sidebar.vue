@@ -1296,7 +1296,7 @@ async function confirmRemoveNow(): Promise<void> {
      8px is the interactive-row corner. Every other input in the app uses --rc. */
   border-radius: var(--rc);
   transition:
-    border-color 0.14s ease,
+    border-color 0.14s var(--ease),
     box-shadow 0.14s ease;
 }
 
@@ -1416,7 +1416,7 @@ async function confirmRemoveNow(): Promise<void> {
   text-transform: uppercase;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 110ms ease;
+  transition: opacity 110ms var(--ease);
 }
 
 .add-caption:hover .caption,
@@ -1552,7 +1552,7 @@ async function confirmRemoveNow(): Promise<void> {
   padding: 6px 13px;
   background: transparent;
   cursor: pointer;
-  transition: background 0.12s ease;
+  transition: background 0.12s var(--ease);
 }
 
 /* Hover is the FIRST fill a lane ever gets now, so it does the work the card tier
@@ -1598,7 +1598,7 @@ async function confirmRemoveNow(): Promise<void> {
   width: 2px;
   background: var(--idle);
   pointer-events: none;
-  transition: background-color 0.12s ease;
+  transition: background-color 0.12s var(--ease);
 }
 
 /* Live means a session exists and has not ended: working, waiting on you, errored
@@ -1782,7 +1782,7 @@ async function confirmRemoveNow(): Promise<void> {
   border-radius: var(--rc);
   padding: 24px;
   box-shadow: var(--shadow-dlg);
-  animation: sbIn 0.18s ease;
+  animation: sbIn 0.18s var(--ease);
 }
 
 .rd-icon {
@@ -2013,7 +2013,7 @@ async function confirmRemoveNow(): Promise<void> {
   min-width: 5px;
   height: 5px;
   background: var(--blue);
-  animation: sbFade 1.8s ease infinite;
+  animation: sbFade 1.8s var(--ease) infinite;
 }
 
 .agent-name {
@@ -2118,7 +2118,7 @@ async function confirmRemoveNow(): Promise<void> {
   border-radius: var(--rc);
   overflow: hidden;
   box-shadow: var(--shadow-menu);
-  animation: sbIn 0.12s ease;
+  animation: sbIn 0.12s var(--ease);
 }
 
 /* White, as the light sheet's floating surfaces are: the panel tone that reads

@@ -225,6 +225,19 @@ html.sb-light {
      part of the drawing. Every other surface token is themed; this one is a
      page, not a surface. */
   --diagram-page: #FFFFFF;
+  /* ONE motion curve, theme-independent because motion has no palette.
+     Everything moved on the browser's `ease` before this, which is symmetric:
+     it accelerates and decelerates equally, so a panel arrives at the same rate
+     it left, and nothing in the physical world does that. This curve leaves
+     quickly and settles slowly, which is what mass looks like. The value is not
+     invented: it is the one already used by the inbox row transform, promoted
+     from a single call site to the token everything shares, so the interface
+     stops having three different motion characters depending on which component
+     you touched.
+     Durations stay where they are. A product UI acknowledges an action; it does
+     not perform for you, and the reduced-motion block below still cuts all of
+     it to 0.01ms. */
+  --ease: var(--ease);
   --bg-hover: rgba(244,244,242, 0.06);
   /* The selected part is washed in mountain gray, the structural neutral. */
   --bg-active: color-mix(in srgb, #B9B6AE 12%, transparent);
@@ -626,7 +639,7 @@ html.sb-light .btn-solid {
   border-radius: var(--rc);
   cursor: pointer;
   user-select: none;
-  animation: sbIn 0.2s ease;
+  animation: sbIn 0.2s var(--ease);
 }
 
 .btn-armed:hover:not(:disabled) {
@@ -1033,7 +1046,7 @@ html.sb-light .btn-solid {
   height: 17px;
   border-radius: var(--rp);
   background: var(--text-faint);
-  transition: all 0.15s ease;
+  transition: all 0.15s var(--ease);
 }
 
 .switch.on .knob {

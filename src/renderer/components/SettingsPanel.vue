@@ -1332,7 +1332,7 @@ html.sb-light .overlay {
   overflow: hidden;
   z-index: 10;
   box-shadow: var(--shadow-dd);
-  animation: sbIn 0.15s ease;
+  animation: sbIn 0.15s var(--ease);
 }
 
 .dd-item {

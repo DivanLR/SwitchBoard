@@ -737,7 +737,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   height: 7px;
   border-radius: var(--rp);
   background: var(--amber);
-  animation: sbPulse 1.8s ease infinite;
+  animation: sbPulse 1.8s var(--ease) infinite;
   flex-shrink: 0;
 }
 
@@ -785,7 +785,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   border-radius: var(--rc);
   padding: 11px 12px;
   margin-bottom: 8px;
-  animation: sbIn 0.25s ease;
+  animation: sbIn 0.25s var(--ease);
   box-shadow: var(--elev);
 }
 
@@ -912,7 +912,7 @@ html.sb-light .detail-box {
 .item-actions .btn-armed,
 .item-actions .btn-outline {
   font-family: var(--sans);
-  transition: transform 0.13s cubic-bezier(0.2, 0.7, 0.3, 1);
+  transition: transform 0.13s var(--ease);
 }
 
 .item-actions .btn-solid:hover,
@@ -1053,7 +1053,7 @@ html.sb-light .detail-box {
   text-align: center;
   border: 1px solid var(--border-card);
   border-radius: var(--rp);
-  transition: transform 0.12s ease;
+  transition: transform 0.12s var(--ease);
 }
 
 .hist-arrow.open {

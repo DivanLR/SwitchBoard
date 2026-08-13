@@ -91,7 +91,7 @@ onUnmounted(() => {
 
 .spin-fade-enter-active,
 .spin-fade-leave-active {
-  transition: opacity 0.15s ease;
+  transition: opacity 0.15s var(--ease);
 }
 
 .spin-fade-enter-from,

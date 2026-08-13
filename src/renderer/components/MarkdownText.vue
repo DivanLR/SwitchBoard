@@ -185,7 +185,7 @@ async function copyBlock(event: MouseEvent): Promise<void> {
   padding: 1px 5px;
   border: 1px solid var(--border-soft);
   opacity: 0;
-  transition: opacity 0.12s ease;
+  transition: opacity 0.12s var(--ease);
   pointer-events: none;
 }
 

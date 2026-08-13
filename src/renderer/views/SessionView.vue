@@ -2491,7 +2491,7 @@ html.sb-light .bypass-warn {
 .ab-dot {
   font-size: var(--fs-meta);
   color: var(--blue);
-  animation: sbFade 1.6s ease infinite;
+  animation: sbFade 1.6s var(--ease) infinite;
 }
 
 .ab-name {
@@ -2574,7 +2574,7 @@ html.sb-light .bypass-warn {
 
 .agent-dot.bg {
   color: var(--amber);
-  animation: sbFade 1.6s ease infinite;
+  animation: sbFade 1.6s var(--ease) infinite;
 }
 
 .bg-row {
@@ -2613,7 +2613,7 @@ html.sb-light .bypass-warn {
 .agent-dot {
   font-size: var(--fs-meta);
   color: var(--blue);
-  animation: sbFade 1.6s ease infinite;
+  animation: sbFade 1.6s var(--ease) infinite;
 }
 
 .agent-name {
@@ -2716,7 +2716,7 @@ html.sb-light .bypass-warn {
   background: color-mix(in srgb, var(--amber) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
   border-radius: var(--rc);
-  animation: sbIn 0.15s ease;
+  animation: sbIn 0.15s var(--ease);
 }
 
 .sc-text {
