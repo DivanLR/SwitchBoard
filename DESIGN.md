@@ -29,46 +29,40 @@ colors:
   identity-violet: "#A99BD0"
   mountain-gray: "#B9B6AE"
 typography:
-  headline:
+  # One ramp, six steps, lifted 2026-08-13. Counting real usage found the old
+  # ramp inverted: 287 of 407 uses sat on the two smallest tiers, and those two
+  # were 1px apart, which at that size is a difference a reader cannot see. The
+  # floor moved off 10px for the same reason the 9.5px floor was retired before
+  # it: a tier nobody can read is not a tier. Density drops a little on purpose.
+  # These values are the ones in styles.css. The block that used to sit here
+  # listed 15.5 / 13.5 / 13 / 12.5 / 12 / 11 / 10.5 / 10 / 9.5, none of which
+  # the code had shipped for some time.
+  head:
     fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif"
-    fontSize: "15.5px"
+    fontSize: "17px"
     fontWeight: 600
     lineHeight: 1.3
   title:
     fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif"
-    fontSize: "13.5px"
+    fontSize: "15.5px"
     fontWeight: 700
     letterSpacing: "0.02em"
   body:
     fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif"
-    fontSize: "13px"
-    fontWeight: 400
-    lineHeight: 1.6
-  bodyCompact:
-    fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif"
-    fontSize: "12.5px"
+    fontSize: "14px"
     fontWeight: 400
     lineHeight: 1.6
   ui:
     fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif"
-    fontSize: "12px"
+    fontSize: "13px"
     fontWeight: 400
-  label:
-    fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif"
-    fontSize: "11px"
-    fontWeight: 400
-    letterSpacing: "0.08em"
   meta:
     fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif"
-    fontSize: "10.5px"
-    fontWeight: 400
-  caption:
-    fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif"
-    fontSize: "10px"
+    fontSize: "12px"
     fontWeight: 400
   micro:
     fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif"
-    fontSize: "9.5px"
+    fontSize: "11px"
     fontWeight: 400
   mono:
     fontFamily: "'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace"

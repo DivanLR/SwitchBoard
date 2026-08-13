@@ -412,12 +412,21 @@ html.sb-light {
      Glyphs are not on this ramp and must not be swept onto it. An icon is sized
      to its optical weight, which is why .group-caret is 8px, .rd-icon is 17px
      and .mark .glyph is 13.8px. None of those values appear as a step here. */
-  --fs-micro: 10px;
-  --fs-meta: 11px;
-  --fs-ui: 12px;
-  --fs-body: 13px;
-  --fs-title: 14px;
-  --fs-head: 15px;
+  /* The ramp lifted by one step, 2026-08-13. Counting real usage found it
+     inverted: 287 of 407 uses sat on the two smallest tiers (158 at 10px, 129
+     at 11px) while the largest was used six times. So seven tenths of the
+     interface was reading at 10 to 11px, and the two tiers carrying most of the
+     hierarchy were 1px apart, which at that size is a difference a reader
+     cannot see. A tier nobody can distinguish is not a tier, the same reasoning
+     that moved the old 9.5px floor onto 10.
+     Everything gets one step larger and the gaps widen with it. Density drops a
+     little, deliberately: this is a desktop app read for hours, not a chart. */
+  --fs-micro: 11px;
+  --fs-meta: 12px;
+  --fs-ui: 13px;
+  --fs-body: 14px;
+  --fs-title: 15.5px;
+  --fs-head: 17px;
   --scrim: rgba(10,11,13, 0.66);
   --shadow-dlg: 0 28px 70px rgba(0,0,0, 0.6), 0 0 0 1px rgba(244,244,242, 0.05) inset;
   --shadow-dd: 0 14px 36px rgba(0,0,0, 0.5);
@@ -888,12 +897,23 @@ html.sb-light .btn-solid {
   flex: 1;
   overflow-y: auto;
   padding: 18px 22px;
+  /* A column, so the inner block can be pushed to the bottom. See below. */
+  display: flex;
+  flex-direction: column;
 }
 
 .stream-inner {
   /* Full-width session area: fill the pane rather than capping at 840px, which
      left a wide right-hand gap on large/fullscreen windows. */
   max-width: none;
+  /* Bottom-anchored, like every terminal and every chat. A short session used to
+     sit at the top of a tall pane with the composer pinned far below it, so more
+     than half the centre pane was empty and the eye had to travel the whole
+     height from the last line to the box where the reply is typed.
+     `margin-top: auto` rather than `justify-content: flex-end` on the parent:
+     the two look identical while the content is short, but flex-end clips the
+     TOP of content taller than the box and puts it out of scroll reach. */
+  margin-top: auto;
 }
 
 .live {
