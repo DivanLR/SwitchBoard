@@ -1977,8 +1977,12 @@ const {
 
 /* Weight carries the selected tab; tracking no longer can, now that the label
    is sentence case. */
+/* The selected option is drawn in the SELECTION wash, not the action colour.
+   Which view you are reading is not a thing you are being asked to do, and
+   filling it with green made a view preference the loudest control in the
+   header — louder than End, louder than the pending count. */
 .seg.on {
-  background: color-mix(in srgb, var(--green) 24%, transparent);
+  background: var(--bg-active);
   color: var(--text-strong);
   font-weight: 500;
   cursor: default;

@@ -374,7 +374,6 @@ const shortDate = (iso: string): string =>
   color: var(--green-ink);
   background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
   border-radius: var(--rc);
-  box-shadow: var(--green-glow);
   cursor: pointer;
 }
 

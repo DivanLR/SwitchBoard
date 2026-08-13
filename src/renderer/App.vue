@@ -292,7 +292,6 @@ const dbProject = computed(() => projects.dbProject)
   padding: 4px 12px;
   border-radius: var(--rc);
   cursor: pointer;
-  box-shadow: var(--green-glow);
 }
 
 .ub-dismiss {

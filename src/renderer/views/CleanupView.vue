@@ -336,7 +336,6 @@ function run(command: string): void {
   border-radius: var(--rc);
   cursor: pointer;
   user-select: none;
-  box-shadow: var(--green-glow);
 }
 
 .install-btn:hover {

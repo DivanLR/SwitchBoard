@@ -604,8 +604,14 @@ button {
 }
 
 /* Shared button idioms from the reference. The primary fill is the design's
-   135deg green gradient under a top gloss (transparent in dark), with a green
-   glow; hover flips to the flat brighter green. */
+   135deg green gradient under a top gloss (transparent in dark); hover flips to
+   the flat brighter green.
+
+   NO GLOW. A coloured shadow is elevation, and elevation says "this is the one
+   thing to do here" — so it belongs to the composer's Send and nothing else. It
+   used to sit under every solid button, which put three glowing Approves in one
+   inbox rail and a fourth under every section's Generate. --green-glow is still
+   the token for it; only its reach changed. */
 /* Foil catches light along the fold it is pressed over, so the one action colour
    carries a raking highlight of its own on top of the shared --gloss. Shallow on
    purpose: any stronger and it reads as a glossy 2000s button, which is the opposite
@@ -623,7 +629,6 @@ button {
   border-radius: var(--rc);
   cursor: pointer;
   user-select: none;
-  box-shadow: var(--green-glow);
 }
 
 /* The raking highlight belongs to foil pressed into a sheet. On the Cornflower

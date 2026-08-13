@@ -1089,7 +1089,9 @@ function statusWord(run: VerifyRun): string {
 
 .stack-row {
   display: flex;
-  align-items: center;
+  /* Top, not centre: the offerings wrap to a second line now, and centring
+     would float the stack's name against the middle of that block. */
+  align-items: flex-start;
   gap: 12px;
   width: 100%;
   max-width: 840px;
@@ -1114,14 +1116,16 @@ function statusWord(run: VerifyRun): string {
   color: var(--text-bright);
 }
 
+/* Wraps. This is the list of what picking a stack actually gets you, and every
+   one of the four was clipped mid-word against a pane that was two-thirds
+   empty — an ellipsis where the answer to the question on screen should be. */
 .stack-sub {
   flex: 1;
   min-width: 0;
   font-size: var(--fs-micro);
   color: var(--text-faint);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.55;
+  text-wrap: pretty;
 }
 
 .det {
@@ -1257,7 +1261,6 @@ function statusWord(run: VerifyRun): string {
   color: var(--green-ink);
   background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
   border-radius: var(--rc);
-  box-shadow: var(--green-glow);
   cursor: pointer;
 }
 

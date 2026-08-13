@@ -875,7 +875,6 @@ const partTabs: { id: Part; label: string }[] = [
   padding: 7px 16px;
   cursor: pointer;
   user-select: none;
-  box-shadow: var(--green-glow);
 }
 
 .impl-btn:hover {
@@ -1149,7 +1148,6 @@ const partTabs: { id: Part; label: string }[] = [
   padding: 7px 16px;
   cursor: pointer;
   user-select: none;
-  box-shadow: var(--green-glow);
 }
 
 .sug-run:hover {

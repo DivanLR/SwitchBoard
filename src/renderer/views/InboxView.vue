@@ -445,22 +445,28 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
             </template>
             <template v-else>
               <button class="btn-solid" data-testid="approve-btn" @click="approve(item)">Approve</button>
-              <button
-                v-if="canAlwaysAllow(item)"
-                class="btn-outline"
-                data-testid="always-allow-btn"
-                :title="
-                  isMcpItem(item)
-                    ? `Auto-approve every ${item.toolName} call in this project from now on`
-                    : 'Creates a standing rule for this command and approves it now'
-                "
-                @click="alwaysAllowSimilar(item)"
-              >
-                {{ isMcpItem(item) ? `Always allow ${toolShortName(item)}` : 'Always allow similar' }}
-              </button>
               <button class="btn-outline" data-testid="deny-btn" @click="deny(item)">Deny</button>
             </template>
           </div>
+
+          <!-- Not a third decision. Approve and Deny answer the question; a
+               standing rule answers every question like it, which is a different
+               size of choice and was reading as a peer wide enough to push Deny
+               onto a line of its own. -->
+          <button
+            v-if="canAlwaysAllow(item) && confirmingId !== item.id && alwaysConfirmId !== item.id"
+            class="item-standing"
+            data-testid="always-allow-btn"
+            :title="
+              isMcpItem(item)
+                ? `Auto-approve every ${item.toolName} call in this project from now on`
+                : 'Creates a standing rule for this command and approves it now'
+            "
+            @click="alwaysAllowSimilar(item)"
+          >
+            {{ isMcpItem(item) ? `Always allow ${toolShortName(item)}` : 'Always allow similar' }}
+            <span aria-hidden="true">→</span>
+          </button>
         </div>
       </div>
     </div>
@@ -896,6 +902,26 @@ html.sb-light .detail-box {
   gap: 8px;
   margin-top: 10px;
   flex-wrap: wrap;
+}
+
+/* Quiet by design: a standing rule is offered, not urged. */
+.item-standing {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  font-family: var(--sans);
+  font-size: var(--fs-meta);
+  color: var(--text-mid);
+  cursor: pointer;
+  text-align: left;
+}
+
+.item-standing:hover {
+  color: var(--green);
 }
 
 /* Risk chips are a shared class (styles.css) whose radius/padding are still
