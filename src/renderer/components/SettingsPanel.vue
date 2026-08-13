@@ -11,6 +11,7 @@ import { modelLabel, modelPrice, SESSION_MODES } from '@shared/domain'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { useUpdatesStore } from '@renderer/stores/updates'
+import Icon from '@renderer/components/Icon.vue'
 
 // The prop deliberately omits 'mcp' even though the Tab union below includes it:
 // the MCP tab is reachable by clicking, but no caller opens the panel straight
@@ -34,15 +35,15 @@ const tab = ref<Tab>(props.initialTab ?? 'models')
 // One family, one weight. These were drawn from four unrelated Unicode blocks —
 // a four-pointed star, a filled square, a database cylinder, a tick, a chevron
 // and a gear — so the rail read as six marks that happened to be stacked rather
-// than one set. Geometric outline shapes from a single block hold the same
-// stroke at this size and let the LABEL do the naming, which it already does.
+// than one set. Now icons from the one drawn set (Icon.vue), each named for
+// what the tab does rather than for a shape.
 const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: 'models', label: 'Models', icon: '◇' },
-  { id: 'proj', label: 'This project', icon: '□' },
-  { id: 'mcp', label: 'MCP', icon: '◎' },
-  { id: 'allowed', label: 'Allowed list', icon: '△' },
-  { id: 'term', label: 'Terminals', icon: '▷' },
-  { id: 'gen', label: 'General', icon: '○' },
+  { id: 'models', label: 'Models', icon: 'spark' },
+  { id: 'proj', label: 'This project', icon: 'folder' },
+  { id: 'mcp', label: 'MCP', icon: 'database' },
+  { id: 'allowed', label: 'Allowed list', icon: 'square-check' },
+  { id: 'term', label: 'Terminals', icon: 'terminal' },
+  { id: 'gen', label: 'General', icon: 'settings' },
 ]
 
 // "This project": which project the tab configures (defaults to the selected one).
@@ -284,10 +285,17 @@ const updateLine = computed(() => {
       tabindex="-1" data-testid="settings-panel">
       <!-- Header -->
       <div class="s-head">
-        <span class="gear mono">⚙</span>
+        <Icon name="settings" class="gear" />
         <span class="s-title mono">Settings</span>
         <span class="spacer"></span>
-        <button class="s-x mono" data-testid="settings-close" @click="emit('close')">✕</button>
+        <button
+          class="s-x mono"
+          data-testid="settings-close"
+          aria-label="Close settings"
+          @click="emit('close')"
+        >
+          <Icon name="close" />
+        </button>
       </div>
 
       <div class="s-main">
@@ -301,7 +309,7 @@ const updateLine = computed(() => {
             :data-testid="`settings-tab-${t.id}`"
             @click="tab = t.id"
           >
-            <span class="rt-icon mono">{{ t.icon }}</span>
+            <Icon :name="t.icon" class="rt-icon" />
             <span class="rt-label mono">{{ t.label }}</span>
           </button>
           <span class="spacer"></span>
@@ -397,7 +405,7 @@ const updateLine = computed(() => {
                   <button class="dd" data-testid="proj-settings-picker" @click="projDd = !projDd">
                     <span class="dd-dot"></span>
                     <span class="dd-name mono">{{ proj.name }}</span>
-                    <span class="dd-arrow mono">{{ projDd ? '▲' : '▼' }}</span>
+                    <Icon :name="projDd ? 'chevron-up' : 'chevron-down'" class="dd-arrow" :size="11" />
                   </button>
                   <div v-if="projDd" class="dd-list">
                     <button
@@ -408,7 +416,9 @@ const updateLine = computed(() => {
                       :data-testid="`proj-settings-option-${p.id}`"
                       @click="((projId = p.id), (projDd = false))"
                     >
-                      <span class="dd-check mono">{{ p.id === proj.id ? '✓' : '' }}</span>
+                      <span class="dd-check">
+                        <Icon v-if="p.id === proj.id" name="check" :size="11" />
+                      </span>
                       <span class="mono">{{ p.name }}</span>
                     </button>
                   </div>
@@ -441,7 +451,10 @@ const updateLine = computed(() => {
                       <div class="opt-name mono">{{ m.label }}</div>
                       <div class="opt-sub">{{ m.detail }}</div>
                     </div>
-                    <span class="opt-price mono">{{ m.value === 'bypass' ? '⚠' : '—' }}</span>
+                    <span class="opt-price mono">
+                      <Icon v-if="m.value === 'bypass'" name="warning" :size="12" />
+                      <template v-else>—</template>
+                    </span>
                   </button>
                 </div>
               </div>
@@ -501,8 +514,10 @@ const updateLine = computed(() => {
                 :data-testid="`db-mcp-${name}`"
                 @click="toggleDatabaseMcp(name)"
               >
-                <span class="mcp-check" :class="{ on: isDbMcp(name) }">{{ isDbMcp(name) ? '✓' : '' }}</span>
-                <span class="mcp-ico">⛁</span>
+                <span class="mcp-check" :class="{ on: isDbMcp(name) }">
+                  <Icon v-if="isDbMcp(name)" name="check" :size="12" />
+                </span>
+                <Icon name="database" class="mcp-ico" :size="18" />
                 <div class="opt-body">
                   <div class="opt-name mono">{{ name }}</div>
                   <div class="opt-sub">
@@ -516,7 +531,7 @@ const updateLine = computed(() => {
               from. You can also type the exact server name below.
             </div>
             <div class="add-cmd">
-              <span class="add-cmd-plus mono">＋</span>
+              <Icon name="plus" class="add-cmd-plus" />
               <input
                 v-model="dbMcpInput"
                 class="add-cmd-input mono"
@@ -612,7 +627,7 @@ const updateLine = computed(() => {
               </div>
             </div>
             <div class="add-cmd">
-              <span class="add-cmd-plus mono">＋</span>
+              <Icon name="plus" class="add-cmd-plus" />
               <input
                 v-model="newCmd"
                 class="add-cmd-input mono"
@@ -733,9 +748,9 @@ const updateLine = computed(() => {
               <div class="sr-text">
                 <div class="sr-label">Turn summaries</div>
                 <div class="sr-desc">
-                  Style each turn's closing message as a ✦ SUMMARY. Off shows it as the raw response —
-                  e.g. the full <span class="mono">/usage</span> report instead of a summary. Display
-                  only; no extra model call.
+                  Style each turn's closing message as a <Icon name="spark" :size="11" /> SUMMARY. Off
+                  shows it as the raw response — e.g. the full <span class="mono">/usage</span> report
+                  instead of a summary. Display only; no extra model call.
                 </div>
               </div>
               <button
@@ -783,8 +798,8 @@ const updateLine = computed(() => {
                   yourself and the two cannot both be in force.
                   <strong class="sr-warn">
                     It is read when a session starts, so this applies from the next session, not to
-                    one already running. A session shaped by it carries a ⑂ Fan-out pill in its
-                    header.
+                    one already running. A session shaped by it carries a
+                    <Icon name="fork" :size="11" /> Fan-out pill in its header.
                   </strong>
                 </div>
               </div>
@@ -958,7 +973,6 @@ html.sb-light .overlay {
 }
 
 .gear {
-  font-size: var(--fs-body);
   color: var(--text-meta);
 }
 
@@ -969,7 +983,6 @@ html.sb-light .overlay {
 }
 
 .s-x {
-  font-size: var(--fs-body);
   color: var(--text-tab);
   padding: 2px 8px;
   border-radius: var(--rc);
@@ -995,7 +1008,7 @@ html.sb-light .overlay {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  background: var(--bg-code);
+  background: var(--bg-panel-2);
 }
 
 .rail-tab {
@@ -1027,9 +1040,7 @@ html.sb-light .overlay {
 }
 
 .rt-icon {
-  font-size: var(--fs-meta);
   color: var(--text-faint);
-  width: 13px;
 }
 
 .rail-tab.sel .rt-icon {
@@ -1080,7 +1091,7 @@ html.sb-light .overlay {
 
 .group-label {
   font-size: var(--fs-micro);
-  letter-spacing: 0.15em;
+  letter-spacing: var(--track-label);
   color: var(--text-faint);
   margin-bottom: 4px;
 }
@@ -1102,7 +1113,7 @@ html.sb-light .overlay {
   display: flex;
   align-items: center;
   gap: 11px;
-  padding: 10px 13px;
+  padding: var(--pad-card);
   background: var(--bg-hover);
   box-shadow: var(--elev);
   border: 1px solid var(--border-card);
@@ -1186,8 +1197,6 @@ html.sb-light .overlay {
   border-radius: var(--rc);
   border: 1.5px solid var(--border-strong);
   color: var(--green-ink);
-  font-size: var(--fs-meta);
-  line-height: 1;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1200,7 +1209,6 @@ html.sb-light .overlay {
 
 .mcp-ico {
   flex-shrink: 0;
-  font-size: var(--fs-head);
   color: var(--teal);
 }
 
@@ -1317,7 +1325,6 @@ html.sb-light .overlay {
 }
 
 .dd-arrow {
-  font-size: var(--fs-micro);
   color: var(--text-tab);
 }
 
@@ -1358,9 +1365,9 @@ html.sb-light .overlay {
 }
 
 .dd-check {
+  display: inline-flex;
   width: 12px;
   min-width: 12px;
-  font-size: var(--fs-meta);
   color: var(--green);
 }
 
@@ -1378,7 +1385,7 @@ html.sb-light .overlay {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 13px;
+  padding: var(--pad-card);
   background: var(--bg-hover);
   box-shadow: var(--elev);
   border: 1px solid var(--border-card);

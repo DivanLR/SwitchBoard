@@ -30,6 +30,7 @@ import { useSettingsStore } from '@renderer/stores/settings'
 import { useApiEvalSet } from '@renderer/composables/useApiEvalSet'
 import { pct, round, sourceOf, unmeasured, useVerifyGates } from '@renderer/composables/useVerifyGates'
 import EvalsView from '@renderer/views/EvalsView.vue'
+import Icon from '@renderer/components/Icon.vue'
 
 const props = defineProps<{ projectId: string; projectName: string; branch?: string | null }>()
 
@@ -499,7 +500,7 @@ function statusWord(run: VerifyRun): string {
               :title="`Edit the command for ${s.label}`"
               @click="editCommand(s)"
             >
-              ✎
+              <Icon name="pencil" :size="12" />
             </button>
           </template>
         </div>
@@ -547,7 +548,8 @@ function statusWord(run: VerifyRun): string {
             data-testid="tests-run"
             @click="runVerify()"
           >
-            {{ running ? '● Running…' : '▷ Run verification' }}
+            <template v-if="running"><Icon name="dot" :size="8" /> Running…</template>
+            <template v-else><Icon name="play" :size="12" /> Run verification</template>
           </button>
         </div>
         <div v-if="verify.error" class="err" data-testid="tests-error">{{ verify.error }}</div>
@@ -617,7 +619,7 @@ function statusWord(run: VerifyRun): string {
         >
           {{ t.label }}
           <span v-if="t.badge > 0" class="st-badge">{{ t.badge }}</span>
-          <span v-if="!t.built" class="dev-dot" title="In development">◌</span>
+          <span v-if="!t.built" class="dev-dot" title="In development"><Icon name="circle" :size="11" /></span>
         </button>
       </div>
 
@@ -738,7 +740,7 @@ function statusWord(run: VerifyRun): string {
           @click="togglePick(e)"
         >
           <span class="row-status mono" :class="isPicked(e) ? 'pass' : ''">
-            {{ isPicked(e) ? '✓' : '+' }}
+            <Icon :name="isPicked(e) ? 'check' : 'plus'" :size="12" />
           </span>
           <span class="ep-method mono">{{ e.method }}</span>
           <span class="row-name mono">{{ e.template }}</span>
@@ -789,7 +791,10 @@ function statusWord(run: VerifyRun): string {
             data-testid="tests-api-run"
             @click="runApi()"
           >
-            {{ apiRunning ? '● Running…' : `▷ Run against ${apiTarget === 'qa' ? 'QA' : 'local'}` }}
+            <template v-if="apiRunning"><Icon name="dot" :size="8" /> Running…</template>
+            <template v-else
+              ><Icon name="play" :size="12" /> Run against {{ apiTarget === 'qa' ? 'QA' : 'local' }}</template
+            >
           </button>
         </div>
         <div v-if="api.error" class="err" data-testid="tests-api-error">{{ api.error }}</div>
@@ -1318,6 +1323,7 @@ function statusWord(run: VerifyRun): string {
 
 .gate-value {
   font-size: var(--fs-title);
+  font-weight: 400;
   color: var(--text-bright);
 }
 
@@ -1540,7 +1546,7 @@ function statusWord(run: VerifyRun): string {
      keyboard path as a div, and a button is inline-block and centred by default. */
   width: 100%;
   text-align: left;
-  padding: 6px 10px;
+  padding: var(--pad-card);
   margin-bottom: 4px;
   background: var(--bg-hover);
   border: 1px solid var(--border-card);

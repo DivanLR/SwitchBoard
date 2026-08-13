@@ -113,7 +113,7 @@ test('parallel subagents are listed: stream card, header pill, and sidebar rows'
     })
   })
   const card = page.getByTestId('agent-list')
-  await expect(card).toContainText('⑂ AGENTS')
+  await expect(card).toContainText('AGENTS')
   await expect(card).toContainText('2 working in parallel')
   await expect(page.getByTestId('agent-row')).toHaveCount(2)
   await expect(card).toContainText('test-writer')
@@ -151,10 +151,10 @@ test('clicking an agent opens its chat: banner, scoped stream, addressed compose
   await expect(stream).not.toContainText('Planned 9 cases')
 
   // AGENTS card rows advertise the chat and open it.
-  await expect(page.getByTestId('agent-list')).toContainText('chat →')
+  await expect(page.getByTestId('agent-list')).toContainText('chat')
   await page.getByTestId('agent-row').first().click()
 
-  await expect(page.getByTestId('agent-banner')).toContainText('← alpha')
+  await expect(page.getByTestId('agent-banner')).toContainText('alpha')
   await expect(page.getByTestId('agent-banner')).toContainText('Write rotation tests')
   await expect(page.getByTestId('agent-banner')).toContainText('subagent')
   // Scoped stream: the delegating prompt opens the chat, agent output follows,
@@ -164,7 +164,12 @@ test('clicking an agent opens its chat: banner, scoped stream, addressed compose
   await expect(stream).not.toContainText('Main loop narrative.')
 
   // The sidebar marks the open agent; the composer addresses it.
-  await expect(page.getByTestId('sidebar-agent-test-writer')).toContainText('Write rotation tests ←')
+  await expect(page.getByTestId('sidebar-agent-test-writer')).toContainText('Write rotation tests')
+  // And it is marked as the open one. The mark is drawn now rather than a text
+  // arrow, so it is asserted by its own testid rather than by the row's text.
+  await expect(
+    page.getByTestId('sidebar-agent-test-writer').getByTestId('sidebar-agent-selected'),
+  ).toBeVisible()
   await expect(page.getByTestId('composer-to')).toContainText('to Write rotation tests')
   await page.getByTestId('composer-input').fill('prioritise the replay case')
   await page.getByTestId('composer-send').click()

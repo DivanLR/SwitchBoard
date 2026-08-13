@@ -18,6 +18,7 @@ import { useCommandSuggestions } from '@renderer/composables/useCommandSuggestio
 import StreamEvent from '@renderer/components/StreamEvent.vue'
 import QuestionEvent from '@renderer/components/QuestionEvent.vue'
 import MarkdownText from '@renderer/components/MarkdownText.vue'
+import Icon from '@renderer/components/Icon.vue'
 
 const props = defineProps<{ project: ProjectListItem }>()
 const active = useActiveSessionStore()
@@ -280,18 +281,18 @@ function answer(eventId: string, choice: string): void {
   <div class="mcp-view" data-testid="mcp-view">
     <header class="head">
       <div class="head-row">
-        <span class="db-ico">⛁</span>
+        <span class="db-ico"><Icon name="database" /></span>
         <span class="db-name mono">MCP chat</span>
         <span class="db-sub mono">{{ project.name }}</span>
         <span class="spacer"></span>
         <button
           v-if="working"
-          class="stop-btn mono"
+          class="stop-btn"
           data-testid="mcp-stop"
           title="Stop (Ctrl+C)"
           @click="active.interrupt()"
         >
-          ■
+          <Icon name="stop" />
         </button>
       </div>
       <div v-if="serverRows.length > 0" class="mcp-servers mono" data-testid="mcp-servers">
@@ -306,7 +307,7 @@ function answer(eventId: string, choice: string): void {
           :title="s.on ? 'In the active combination — click to leave it out of the chat' : 'Click to include in the chat combination'"
           @click="toggleServer(s.name)"
         >
-          <span class="mcp-tick">{{ s.on ? '☑' : '☐' }}</span>
+          <span class="mcp-tick"><Icon :name="s.on ? 'square-check' : 'square'" :size="12" /></span>
           <span class="mcp-chip-dot" :style="{ background: mcpStatusColor(s.status) }"></span>{{ s.name }}
         </button>
       </div>
@@ -332,7 +333,8 @@ function answer(eventId: string, choice: string): void {
             :disabled="working"
             @click="scan()"
           >
-            {{ currentScan ? '↻ Re-scan' : '▶ Scan' }}
+            <template v-if="currentScan"><Icon name="refresh" :size="11" /> Re-scan</template>
+            <template v-else><Icon name="play" :size="11" /> Scan</template>
           </button>
         </template>
       </div>
@@ -374,12 +376,12 @@ function answer(eventId: string, choice: string): void {
         :disabled="!liveSession || working || activeServers.length === 0"
         @click="scan()"
       >
-        ↻ Re-scan
+        <Icon name="refresh" :size="11" /> Re-scan
       </button>
     </div>
 
     <div v-if="showEmpty" class="empty" data-testid="mcp-empty">
-      <div class="empty-ico">⛁</div>
+      <div class="empty-ico"><Icon name="database" :size="18" /></div>
       <template v-if="!liveSession">
         <div class="empty-title">Start the MCP session</div>
         <div class="empty-sub">
@@ -388,7 +390,7 @@ function answer(eventId: string, choice: string): void {
           across them.
         </div>
         <button class="btn-solid" data-testid="mcp-start-session" @click="startDbSession()">
-          ▶ Start MCP session
+          <Icon name="play" :size="12" /> Start MCP session
         </button>
       </template>
       <template v-else>
@@ -405,7 +407,7 @@ function answer(eventId: string, choice: string): void {
           :title="activeServers.length === 0 ? 'Tick at least one server first' : undefined"
           @click="scan()"
         >
-          ▶ Scan combination
+          <Icon name="play" :size="12" /> Scan combination
         </button>
       </template>
       <div v-if="sessionError" class="empty-hint mono">{{ sessionError }}</div>
@@ -417,7 +419,7 @@ function answer(eventId: string, choice: string): void {
         <span class="faint">from the MCP scan</span>
         <span class="spacer"></span>
         <button class="rescan mono" data-testid="mcp-doc-rescan" :disabled="!liveSession || working || activeServers.length === 0" @click="scan()">
-          ↻ Re-scan
+          <Icon name="refresh" :size="11" /> Re-scan
         </button>
       </div>
       <MarkdownText :text="schemaDoc ?? ''" />
@@ -454,7 +456,7 @@ function answer(eventId: string, choice: string): void {
          (global skills, plugins) go to the session raw with suggestions. -->
     <footer v-if="subtab === 'chat' && liveSession" class="composer">
       <div class="composer-row">
-        <span class="caret mono">❯</span>
+        <span class="caret"><Icon name="chevron-right" :size="12" /></span>
         <div class="input-wrap">
           <div v-if="suggestions.length > 0" class="suggest-list mono" data-testid="mcp-suggest-list">
             <div
@@ -500,7 +502,7 @@ function answer(eventId: string, choice: string): void {
           :disabled="sendDisabled"
           @click="ask()"
         >
-          Send ⏎
+          Send <Icon name="send" :size="12" />
         </button>
       </div>
     </footer>
@@ -531,7 +533,6 @@ function answer(eventId: string, choice: string): void {
 }
 
 .db-ico {
-  font-size: var(--fs-head);
   color: var(--teal);
 }
 
@@ -579,8 +580,7 @@ function answer(eventId: string, choice: string): void {
 }
 
 .mcp-tick {
-  font-size: var(--fs-meta);
-  line-height: 1;
+  display: inline-flex;
 }
 
 .mcp-chip-dot {
@@ -715,7 +715,6 @@ function answer(eventId: string, choice: string): void {
 }
 
 .empty-ico {
-  font-size: 26px;
   color: var(--teal);
 }
 
@@ -779,7 +778,6 @@ function answer(eventId: string, choice: string): void {
 .caret {
   flex-shrink: 0;
   color: var(--teal);
-  font-weight: var(--w-em);
   /* Bottom-pinned row: lift the caret to the buttons' text line. */
   padding-bottom: 6px;
 }

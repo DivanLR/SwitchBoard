@@ -244,7 +244,7 @@ html.sb-light {
      Durations stay where they are. A product UI acknowledges an action; it does
      not perform for you, and the reduced-motion block below still cuts all of
      it to 0.01ms. */
-  --ease: var(--ease);
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
   --bg-hover: rgba(244,244,242, 0.06);
   /* The selected part is washed in mountain gray, the structural neutral. */
   --bg-active: color-mix(in srgb, #B9B6AE 12%, transparent);
@@ -461,6 +461,22 @@ html.sb-light {
      Dark keeps 500: light glyphs on a dark ground lose weight optically, and
      that is the amount they lose. Light lowers it — see html.sb-light. */
   --w-em: 500;
+  /* THE SPACING STEP. Type, radius, elevation and colour all graduated into
+     tokens; spacing never did, and every padding in the sheet was a literal
+     chosen at the call site. That is the mechanism that let one list-item card
+     sit at 12px 14px while its neighbour sat at 10px 13px and a third at 8px
+     12px — five variants of one container across four files, none deliberate.
+     A 4px step with two half-steps where a control needs to sit tighter than
+     its box. Theme-independent: distance is not a palette. */
+  --sp-1: 4px;
+  --sp-2: 6px;
+  --sp-3: 8px;
+  --sp-4: 10px;
+  --sp-5: 13px;
+  --sp-6: 16px;
+  --sp-7: 22px;
+  /* One list-item card, everywhere. */
+  --pad-card: var(--sp-4) var(--sp-5);
   --scrim: rgba(10,11,13, 0.66);
   --shadow-dlg: 0 28px 70px rgba(0,0,0, 0.6), 0 0 0 1px rgba(244,244,242, 0.05) inset;
   --shadow-dd: 0 14px 36px rgba(0,0,0, 0.5);

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en-GB" class="sb-light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Switchboard — design lab</title>
+
+    <!-- THE REAL SHEET. Not a copy: this is src/renderer/styles.css, served
+         live. Edit a token there, refresh here, see it. Everything below is
+         drawn with the app's own classes for the same reason. -->
+    <link rel="stylesheet" href="/app/styles.css" />
+    <link rel="stylesheet" href="lab.css" />
+  </head>
+
+  <body>
+    <header class="lab-bar">
+      <span class="lab-brand mono">switchboard · design lab</span>
+      <span class="lab-hint mono">click any panel to leave a note</span>
+      <span class="lab-spacer"></span>
+      <button id="theme" class="lab-btn mono" type="button">Dark</button>
+      <button id="shownotes" class="lab-btn mono" type="button">Notes <span id="ncount">0</span></button>
+    </header>
+
+    <main class="lab-main">
+      <!-- Sections are declared as data, and lab.js renders them. A panel is
+           the unit a note attaches to, so each one names itself. -->
+      <div id="sections"></div>
+    </main>
+
+    <aside id="notes" class="lab-notes" hidden>
+      <div class="lab-notes-head mono">
+        <span>NOTES.md</span>
+        <button id="closenotes" class="lab-btn mono" type="button">Close</button>
+      </div>
+      <pre id="notesbody" class="lab-notes-body mono"></pre>
+      <p class="lab-notes-foot mono">design-lab/NOTES.md · Claude reads this file</p>
+    </aside>
+
+    <dialog id="noteDialog" class="lab-dialog">
+      <form method="dialog">
+        <p class="lab-dialog-where mono" id="noteWhere"></p>
+        <textarea
+          id="noteText"
+          class="lab-dialog-text mono"
+          rows="4"
+          placeholder="What looks wrong here?"
+        ></textarea>
+        <div class="lab-dialog-acts">
+          <button value="cancel" class="lab-btn mono" type="submit">Cancel</button>
+          <button value="save" id="noteSave" class="lab-btn primary mono" type="submit">
+            Save note
+          </button>
+        </div>
+      </form>
+    </dialog>
+
+    <script type="module" src="lab.js"></script>
+  </body>
+</html>

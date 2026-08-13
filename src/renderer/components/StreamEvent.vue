@@ -3,6 +3,7 @@
 // ✦ SUMMARY cards, approval marker rows, ✗ ERROR cards, ✓ result lines, and
 // mono tool/raw lines (FR-014).
 import { computed, ref } from 'vue'
+import Icon from '@renderer/components/Icon.vue'
 import MarkdownText from '@renderer/components/MarkdownText.vue'
 import UsageCard from '@renderer/components/UsageCard.vue'
 import { parseUsageReport } from '@shared/usage-report'
@@ -209,7 +210,7 @@ const toolLabel = computed(() => {
 
     <!-- ✦ SUMMARY card -->
     <div v-else-if="summary" class="summary-card">
-      <div class="card-label mono"><span style="color: var(--green)">✦</span> SUMMARY</div>
+      <div class="card-label mono"><span style="color: var(--green)"><Icon name="spark" :size="12" /></span> SUMMARY</div>
       <div class="card-body"><MarkdownText :text="summary.text" /></div>
     </div>
 
@@ -217,7 +218,7 @@ const toolLabel = computed(() => {
          output dump (the raw view keeps the full ⏺ Bash(cmd) + ⎿ result). -->
     <div v-else-if="tool" class="tool mono">
       <div :class="{ 'tool-error': tool.isError }">
-        ⏺ {{ toolLabel }}<span v-if="tool.isError" class="tool-failed"> · failed</span>
+        <Icon name="dot" :size="8" /> {{ toolLabel }}<span v-if="tool.isError" class="tool-failed"> · failed</span>
       </div>
     </div>
 
@@ -241,19 +242,19 @@ const toolLabel = computed(() => {
         data-testid="review-in-inbox"
         @click="emit('open-inbox', marker.requestId)"
       >
-        Review in inbox →
+        Review in inbox <Icon name="arrow-right" :size="11" />
       </button>
     </div>
 
     <!-- ✗ ERROR card -->
     <div v-else-if="errorPayload" class="error-card" data-testid="error-event">
-      <div class="card-label mono error-label">✗ ERROR</div>
+      <div class="card-label mono error-label"><Icon name="cross" :size="12" /> ERROR</div>
       <div class="error-body mono">{{ errorPayload.text }}</div>
     </div>
 
     <!-- ✓ result -->
     <div v-else-if="result" class="done mono" data-testid="result-event">
-      ✓ {{ resultLabel(result) }}
+      <Icon name="check" :size="12" /> {{ resultLabel(result) }}
     </div>
 
     <!-- raw output (unswallowed) -->

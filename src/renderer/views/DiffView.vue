@@ -5,6 +5,7 @@
 import { computed, ref } from 'vue'
 import type { DiffFileEntry } from '@shared/domain'
 import { useDiffStore } from '@renderer/stores/diff'
+import Icon from '@renderer/components/Icon.vue'
 
 const props = defineProps<{ projectId: string }>()
 const diff = useDiffStore()
@@ -176,7 +177,9 @@ function countLabel(added: number | null, removed: number | null): string {
             :title="g.dir || '/'"
             @click="toggleFolder(g.dir)"
           >
-            <span class="dfo-caret mono" aria-hidden="true">{{ folded.has(g.dir) ? '▶' : '▼' }}</span>
+            <span class="dfo-caret" aria-hidden="true">
+              <Icon :name="folded.has(g.dir) ? 'chevron-right' : 'chevron-down'" :size="12" />
+            </span>
             <span class="dfo-path mono">{{ g.label }}</span>
             <span class="dfo-count mono" aria-hidden="true">{{ g.total }}</span>
             <span class="dfo-counts mono" aria-hidden="true">{{ countLabel(g.added, g.removed) }}</span>
@@ -307,8 +310,7 @@ function countLabel(added: number | null, removed: number | null): string {
 
 .dfo-caret {
   flex-shrink: 0;
-  width: 8px;
-  font-size: 8px;
+  display: inline-flex;
   color: var(--text-faint);
 }
 

@@ -3,6 +3,7 @@
 // "▸ swallowed N lines · kind" toggle, dark expansion box, and a cap that
 // defers to the raw view (FR-015/016).
 import { computed, ref } from 'vue'
+import Icon from '@renderer/components/Icon.vue'
 import type { SessionEvent } from '@shared/domain'
 
 const props = defineProps<{ events: SessionEvent[]; noiseKind: string }>()
@@ -25,7 +26,8 @@ function textOf(event: SessionEvent): string {
 <template>
   <div class="swallowed" data-testid="swallowed-block">
     <div class="toggle mono" @click="expanded = !expanded">
-      {{ expanded ? '▾' : '▸' }} Worked quietly for a bit · {{ noiseKind }}
+      <Icon :name="expanded ? 'chevron-down' : 'chevron-right'" :size="11" /> Worked quietly for a bit ·
+      {{ noiseKind }}
     </div>
     <div v-if="expanded" class="box">
       <div v-for="event in visibleEvents" :key="event.id" class="line mono">{{ textOf(event) }}</div>

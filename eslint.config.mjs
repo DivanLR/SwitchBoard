@@ -123,5 +123,22 @@ export default tseslint.config(
       },
     },
   },
+  {
+    // The design lab: a plain Node server plus a browser module, neither of
+    // which is part of the app. It runs in both worlds, so it gets both sets of
+    // globals rather than the renderer's stricter rules.
+    files: ['design-lab/**/*.{mjs,js}'],
+    languageOptions: {
+      globals: {
+        process: 'readonly',
+        console: 'readonly',
+        URL: 'readonly',
+        document: 'readonly',
+        window: 'readonly',
+        fetch: 'readonly',
+        localStorage: 'readonly',
+      },
+    },
+  },
   prettier,
 )

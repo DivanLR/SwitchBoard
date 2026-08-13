@@ -10,6 +10,7 @@ import { relativeTime } from '@renderer/relative-time'
 import { normalizeForMatch } from '@renderer/composables/useCommandSuggestions'
 import { useDiagramsStore } from '@renderer/stores/diagrams'
 import MiniTerminal from '@renderer/components/MiniTerminal.vue'
+import Icon from '@renderer/components/Icon.vue'
 
 const props = defineProps<{
   projectId: string
@@ -166,7 +167,8 @@ watch(
         :disabled="props.installing"
         @click="emit('install')"
       >
-        {{ props.installing ? 'Installing…' : '⤓ Download to project' }}
+        <template v-if="props.installing">Installing…</template>
+        <template v-else><Icon name="download" :size="12" /> Download to project</template>
       </button>
     </div>
 
@@ -185,7 +187,8 @@ watch(
         :disabled="diagrams.generating || !description.trim()"
         @click="generate()"
       >
-        {{ diagrams.generating ? 'Asking…' : '✎ Generate' }}
+        <template v-if="diagrams.generating">Asking…</template>
+        <template v-else><Icon name="pencil" :size="12" /> Generate</template>
       </button>
 
       <!-- What else this plugin can do. Drawing is the box to the left; these
@@ -198,7 +201,7 @@ watch(
           :aria-expanded="menuOpen"
           @click="menuOpen = !menuOpen"
         >
-          Commands <span aria-hidden="true">▾</span>
+          Commands <Icon name="chevron-down" :size="11" />
         </button>
         <div v-if="menuOpen" class="cmd-menu" data-testid="diagram-command-menu">
           <button
@@ -287,7 +290,7 @@ watch(
             :data-testid="`diagram-open-${selected}`"
             @click="diagrams.open(projectId, selected)"
           >
-            ↗ Open in browser
+            <Icon name="external" :size="12" /> Open in browser
           </button>
         </div>
         <div v-if="selectedEntry?.description" class="desc">{{ selectedEntry.description }}</div>

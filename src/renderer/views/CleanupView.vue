@@ -8,6 +8,7 @@ import { computed } from 'vue'
 import { CLEANUP_GROUPS, type CleanupCommand, type CleanupGroup } from '@shared/command-catalog'
 import { normalizeForMatch } from '@renderer/composables/useCommandSuggestions'
 import MiniTerminal from '@renderer/components/MiniTerminal.vue'
+import Icon from '@renderer/components/Icon.vue'
 
 const props = defineProps<{
   projectName: string
@@ -112,8 +113,8 @@ function run(command: string): void {
         <span class="group-name mono">{{ g.source }}</span>
         <span class="group-tag">{{ g.tag }}</span>
         <span class="spacer"></span>
-        <span v-if="isInstalled(g)" class="badge installed">✓ Installed</span>
-        <span v-else class="badge missing">○ Not installed</span>
+        <span v-if="isInstalled(g)" class="badge installed"><Icon name="check" :size="11" /> Installed</span>
+        <span v-else class="badge missing"><Icon name="circle" :size="11" /> Not installed</span>
       </div>
       <div class="group-blurb">{{ g.blurb }}</div>
 
@@ -133,7 +134,10 @@ function run(command: string): void {
         >
           <span class="cmd-name mono">{{ c.label }}</span>
           <span class="cmd-desc">{{ c.hint }}</span>
-          <span class="cmd-run">{{ isAvailable(c) ? 'Run →' : 'Not available' }}</span>
+          <span class="cmd-run">
+            <template v-if="isAvailable(c)">Run <Icon name="arrow-right" :size="11" /></template>
+            <template v-else>Not available</template>
+          </span>
         </button>
       </div>
 
@@ -151,7 +155,8 @@ function run(command: string): void {
           :disabled="installing"
           @click="emit('install', g)"
         >
-          {{ installing ? 'Installing…' : '⤓ Download to project' }}
+          <template v-if="installing">Installing…</template>
+          <template v-else><Icon name="download" :size="12" /> Download to project</template>
         </button>
       </div>
     </div>

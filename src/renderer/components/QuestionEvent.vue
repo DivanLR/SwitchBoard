@@ -2,6 +2,7 @@
 // ? QUESTION card — 1:1 with the design reference: amber-tinted card with
 // clickable option chips; answers submit to the session (FR-020).
 import { computed, ref } from 'vue'
+import Icon from '@renderer/components/Icon.vue'
 import type { QuestionPayload } from '@shared/domain'
 
 const props = defineProps<{ payload: QuestionPayload; eventId: string }>()
@@ -64,7 +65,7 @@ function cleanLabel(label: string): string {
         :title="option.description"
         @click="choose(option.label)"
       >
-        <span v-if="option.recommended" class="rec-badge">★ Recommended</span>
+        <span v-if="option.recommended" class="rec-badge"><Icon name="star" :size="11" /> Recommended</span>
         {{ option.display }}
       </button>
       <template v-if="!payload.answered">
@@ -85,13 +86,13 @@ function cleanLabel(label: string): string {
           data-testid="question-custom"
           @click="addingCustom = true"
         >
-          + Other
+          <Icon name="plus" :size="11" /> Other
         </button>
       </template>
     </div>
     <div v-else class="open-hint">Answer through the composer below.</div>
     <div v-if="payload.answered" class="answered mono" data-testid="question-answered">
-      ✓ Answered: {{ cleanLabel(payload.answer ?? '') }}
+<Icon name="check" :size="12" /> Answered: {{ cleanLabel(payload.answer ?? '') }}
     </div>
   </div>
 </template>

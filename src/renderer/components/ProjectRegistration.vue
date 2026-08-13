@@ -13,6 +13,7 @@ import { useModal } from '@renderer/composables/useModal'
 import { isIpcError } from '@shared/ipc-types'
 import { DEFAULT_SESSION_MODE, SESSION_MODES, type SessionMode } from '@shared/domain'
 import { useProjectsStore } from '@renderer/stores/projects'
+import Icon from '@renderer/components/Icon.vue'
 
 const projects = useProjectsStore()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -112,7 +113,7 @@ async function startSession(): Promise<void> {
       aria-label="New session"
       tabindex="-1" data-testid="registration-dialog">
       <div class="reg-head">
-        <div class="title mono"><span style="color: var(--green)">＋</span> New session</div>
+        <div class="title mono"><Icon name="plus" style="color: var(--green)" /> New session</div>
         <p class="sub">Point Claude Code at a folder and it shows up in the sidebar.</p>
       </div>
 
@@ -147,10 +148,10 @@ async function startSession(): Promise<void> {
         <div class="access-label mono">FOLDER ACCESS — DEFAULT</div>
         <div class="access mono">
           <div class="access-row">
-            <span class="ok">✓</span> Read — everything inside this folder, no asking
+            <Icon name="check" class="ok" /> Read — everything inside this folder, no asking
           </div>
           <div class="access-row">
-            <span class="ok">✓</span> Write — create and edit files inside this folder, no asking
+            <Icon name="check" class="ok" /> Write — create and edit files inside this folder, no asking
           </div>
           <div class="access-row">
             <span class="ask">?</span> Anything outside the folder, shell commands, and deletes
@@ -187,7 +188,8 @@ async function startSession(): Promise<void> {
         </label>
       </div>
       <div v-if="mode === 'bypass'" class="bypass-warn" data-testid="bypass-warning">
-        ⚠ Nothing will ask for approval — only use this in throwaway or fully trusted folders.
+        <Icon name="warning" :size="12" /> Nothing will ask for approval — only use this in
+        throwaway or fully trusted folders.
       </div>
       <p class="mode-note">
         Saved on the project: every session it starts uses this, and you can change it in Settings.
@@ -259,7 +261,7 @@ async function startSession(): Promise<void> {
 
 .section-label {
   font-size: var(--fs-micro);
-  letter-spacing: 0.15em;
+  letter-spacing: var(--track-label);
   color: var(--text-faint);
   margin: 18px 0 6px;
 }
@@ -302,7 +304,7 @@ async function startSession(): Promise<void> {
 
 .access-card {
   margin-top: 16px;
-  padding: 12px 14px;
+  padding: var(--pad-card);
   background: var(--bg-card);
   border: 1px solid color-mix(in srgb, var(--green) 18%, transparent);
   border-radius: var(--rc);
@@ -310,7 +312,7 @@ async function startSession(): Promise<void> {
 
 .access-label {
   font-size: var(--fs-micro);
-  letter-spacing: 0.15em;
+  letter-spacing: var(--track-label);
   color: var(--text-faint);
   margin-bottom: 9px;
 }
@@ -369,7 +371,7 @@ async function startSession(): Promise<void> {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 9px 12px;
+  padding: var(--pad-card);
   cursor: pointer;
 }
 

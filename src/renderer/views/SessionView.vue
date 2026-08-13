@@ -39,6 +39,7 @@ import { accentFor } from '@renderer/project-accent'
 import StreamEvent from '@renderer/components/StreamEvent.vue'
 import SwallowedBlock from '@renderer/components/SwallowedBlock.vue'
 import QuestionEvent from '@renderer/components/QuestionEvent.vue'
+import Icon from '@renderer/components/Icon.vue'
 import SpecsView from '@renderer/views/SpecsView.vue'
 import CleanupView from '@renderer/views/CleanupView.vue'
 import TestsView from '@renderer/views/TestsView.vue'
@@ -1031,7 +1032,7 @@ const {
           data-testid="bypass-pill"
           title="Started with --dangerously-skip-permissions"
         >
-          ⚠ Bypass
+          <Icon name="warning" :size="12" /> Bypass
         </span>
         <!-- Indicator and control in one: it reads the mode the CLI reports, and
              clicking it asks for the other. Hidden on a bypass session, which
@@ -1050,7 +1051,7 @@ const {
           "
           @click="active.setPlanMode(!liveSession.inPlanMode)"
         >
-          {{ liveSession.inPlanMode ? '◱ Planning' : '◱ Plan' }}
+          <Icon name="panel" :size="12" /> {{ liveSession.inPlanMode ? 'Planning' : 'Plan' }}
         </button>
         <!-- Stated before the agent is asked for a diff, not discovered mid-task:
              the container mounts only this folder, so git works there exactly
@@ -1061,7 +1062,7 @@ const {
           data-testid="nogit-pill"
           :title="project.gitNotice"
         >
-          ⚠ No git
+          <Icon name="warning" :size="12" /> No git
         </span>
         <!-- The setting is read at spawn, so a toggle flipped mid-session changes
              nothing until the next start. Without this pill that is invisible, and
@@ -1072,14 +1073,14 @@ const {
           data-testid="fanout-pill"
           title="Started with Heavy subagents on: this session is told to split work across as many subagents as it can. Changing the setting applies from the next session."
         >
-          ⑂ Fan-out
+          <Icon name="fork" :size="12" /> Fan-out
         </span>
         <span
           v-if="workingAgents.length > 1"
           class="pill agents-pill"
           data-testid="agents-pill"
         >
-          ⑂ {{ workingAgents.length }} agents
+          <Icon name="fork" :size="12" /> {{ workingAgents.length }} agents
         </span>
         <span
           v-if="backgroundTasks.length > 0"
@@ -1087,7 +1088,7 @@ const {
           data-testid="bg-pill"
           title="Background tasks running"
         >
-          ⧗ {{ backgroundTasks.length }} background
+          <Icon name="clock" :size="12" /> {{ backgroundTasks.length }} background
         </span>
         <span
           v-if="liveSession"
@@ -1172,7 +1173,7 @@ const {
         </div>
       </div>
       <div class="head-meta mono">
-        <span style="white-space: nowrap">⎇ {{ liveSession?.branch ?? endedSession?.branch ?? '—' }}</span>
+        <span style="white-space: nowrap"><Icon name="branch" :size="12" /> {{ liveSession?.branch ?? endedSession?.branch ?? '—' }}</span>
         <span
           v-if="currentModelLabel"
           data-testid="session-model"
@@ -1190,7 +1191,8 @@ const {
               : 'Orchestrator mode: strong model planning, cheap workers executing in parallel'
           "
         >
-          {{ liveSession.currentMode === 'advisor' ? '⚖ Advisor' : '⧉ Orchestrator' }}
+          <Icon :name="liveSession.currentMode === 'advisor' ? 'scales' : 'layers'" :size="12" />
+          {{ liveSession.currentMode === 'advisor' ? 'Advisor' : 'Orchestrator' }}
         </span>
         <span
           v-if="liveSession && liveSession.diffAdds != null"
@@ -1242,7 +1244,8 @@ const {
     <div v-if="dragKind" class="drop-overlay mono" data-testid="drop-overlay">
       <div class="drop-box">
         <div class="drop-title">
-          {{ dragKind === 'project' ? '⇗ Reference this project' : '@ Reference file path' }}
+          <template v-if="dragKind === 'project'"><Icon name="external" :size="14" /> Reference this project</template>
+          <template v-else>@ Reference file path</template>
         </div>
         <div class="drop-sub">
           {{
@@ -1354,10 +1357,10 @@ const {
             :aria-label="`Back to ${project.name}`"
             @click="active.selectAgent(null)"
           >
-            ← {{ project.name }}
+            <Icon name="arrow-left" :size="12" /> {{ project.name }}
           </button>
           <span class="ab-sep">│</span>
-          <span class="ab-dot">●</span>
+          <span class="ab-dot"><Icon name="dot" :size="8" /></span>
           <span class="ab-name">{{ selectedAgent.task || selectedAgent.name }}</span>
           <span class="ab-chip">subagent</span>
           <span class="spacer"></span>
@@ -1393,7 +1396,9 @@ const {
               >
                 <span class="mode-dd-eyebrow">Mode</span>
                 <span class="mode-dd-name mono">{{ startModeLabel }}</span>
-                <span class="mode-dd-arrow mono" aria-hidden="true">{{ modeOpen ? '▲' : '▼' }}</span>
+                <span class="mode-dd-arrow" aria-hidden="true">
+                  <Icon :name="modeOpen ? 'chevron-up' : 'chevron-down'" :size="10" />
+                </span>
               </button>
               <div v-if="modeOpen" class="mode-list" role="listbox" data-testid="start-mode-list">
                 <button
@@ -1475,10 +1480,10 @@ const {
             class="bypass-warn"
             data-testid="bypass-warning"
           >
-            ⚠ Nothing will ask for approval — only use this in throwaway or fully trusted folders.
+            <Icon name="warning" :size="12" /> Nothing will ask for approval — only use this in throwaway or fully trusted folders.
           </div>
           <div v-if="startError" class="mono" style="color: var(--red)" data-testid="start-error">
-            ✗ {{ startError }}
+            <Icon name="cross" :size="12" /> {{ startError }}
           </div>
         </div>
 
@@ -1488,7 +1493,7 @@ const {
           class="load-earlier mono"
           @click="showEarlier()"
         >
-          ▴ show earlier activity
+          <Icon name="chevron-up" :size="11" /> show earlier activity
         </button>
 
         <template
@@ -1533,7 +1538,7 @@ const {
         <!-- Subagents working in parallel (design: replaces the live line) -->
         <div v-else-if="workingAgents.length > 1" class="agents mono" data-testid="agent-list">
           <div class="agents-head">
-            <span class="agents-label">⑂ AGENTS</span>
+            <span class="agents-label"><Icon name="fork" :size="12" /> AGENTS</span>
             <span class="agents-count">{{ workingAgents.length }} working in parallel</span>
             <span class="spacer"></span>
             <button
@@ -1555,10 +1560,10 @@ const {
               :aria-label="`Open ${agent.name}'s chat`"
               @click="active.selectAgent(agent.id)"
             >
-              <span class="agent-dot">●</span>
+              <span class="agent-dot"><Icon name="dot" :size="8" /></span>
               <span class="agent-name">{{ agent.name }}</span>
               <span class="agent-task">{{ agent.task || agent.label }}</span>
-              <span class="agent-chat">chat →</span>
+              <span class="agent-chat">chat <Icon name="arrow-right" :size="11" /></span>
             </button>
             <div
               v-if="!agentsExpanded && workingAgents.length > SHOW_LIMIT"
@@ -1566,7 +1571,7 @@ const {
               data-testid="agents-more"
               @click="agentsExpanded = true"
             >
-              + {{ workingAgents.length - SHOW_LIMIT }} more
+              <Icon name="plus" :size="11" /> {{ workingAgents.length - SHOW_LIMIT }} more
             </div>
           </div>
         </div>
@@ -1605,7 +1610,7 @@ const {
           data-testid="bg-task-list"
         >
           <div class="agents-head">
-            <span class="agents-label bg">⧗ BACKGROUND</span>
+            <span class="agents-label bg"><Icon name="clock" :size="12" /> BACKGROUND</span>
             <span class="agents-count">{{ backgroundTasks.length }} running</span>
             <span class="spacer"></span>
             <button
@@ -1624,7 +1629,7 @@ const {
               class="agent-row bg-row"
               data-testid="bg-task-row"
             >
-              <span class="agent-dot bg">◷</span>
+              <span class="agent-dot bg"><Icon name="clock" :size="8" /></span>
               <span class="agent-task">{{ task.description || task.taskId }}</span>
             </div>
             <div
@@ -1633,7 +1638,7 @@ const {
               data-testid="bg-task-more"
               @click="tasksExpanded = true"
             >
-              + {{ backgroundTasks.length - SHOW_LIMIT }} more
+              <Icon name="plus" :size="11" /> {{ backgroundTasks.length - SHOW_LIMIT }} more
             </div>
           </div>
         </div>
@@ -1669,7 +1674,7 @@ const {
         aria-label="Jump to the newest line"
         @click="scrollToBottom()"
       >
-        ↓
+        <Icon name="arrow-down" :size="14" />
       </button>
       <!-- REFS (design): folders this session may read — floats just above the
            composer, overlapping the bottom of the stream. -->
@@ -1682,10 +1687,15 @@ const {
           :title="r.path"
           :data-testid="`ref-chip-${r.label}`"
         >
-          <span class="ref-ico">⇗</span>
+          <span class="ref-ico"><Icon name="external" :size="12" /></span>
           <span class="ref-name">{{ r.label }}</span>
-          <button class="ref-x" :data-testid="`ref-remove-${r.label}`" @click="removeRef(r.path)">
-            ✕
+          <button
+            class="ref-x"
+            :data-testid="`ref-remove-${r.label}`"
+            :aria-label="`Remove reference ${r.label}`"
+            @click="removeRef(r.path)"
+          >
+            <Icon name="close" :size="11" />
           </button>
         </span>
         <input
@@ -1706,7 +1716,7 @@ const {
           title="Give this session read access to another folder or project — or drag a project from the sidebar onto this view"
           @click="addingRef = true"
         >
-          + reference
+          <Icon name="plus" :size="11" /> reference
         </button>
         <span v-if="refError" class="ref-error" data-testid="ref-error">{{ refError }}</span>
       </div>
@@ -1748,7 +1758,7 @@ const {
             title="Remove from the queue"
             @click="removeQueued(task.id)"
           >
-            ✕
+            <Icon name="close" :size="11" />
           </button>
         </span>
         <span class="queue-note">Runs automatically when the current goal finishes</span>
@@ -1761,23 +1771,28 @@ const {
       </div>
 
       <div v-if="stopConfirm" class="stop-confirm mono" data-testid="stop-confirm">
-        <span class="sc-text">⏹ Ctrl+C again to stop the chat — are you sure?</span>
+        <span class="sc-text"><Icon name="stop" :size="12" /> Ctrl+C again to stop the chat — are you sure?</span>
         <button class="sc-stop" data-testid="stop-confirm-yes" @click="confirmStop()">Stop</button>
         <button class="sc-cancel" data-testid="stop-confirm-no" @click="cancelStop()">Cancel</button>
       </div>
 
       <div class="composer-row">
-        <span v-if="editTarget" class="caret target mono">✎</span>
-        <span v-else class="caret mono">❯</span>
+        <span v-if="editTarget" class="caret target mono"><Icon name="pencil" :size="12" /></span>
+        <span v-else class="caret mono"><Icon name="chevron-right" :size="14" /></span>
         <span
           v-if="editTarget"
           class="target-chip mono"
           data-testid="composer-target"
           title="Spec edit target — your message rewrites this file"
         >
-          → {{ editTarget }}
-          <button class="target-x" data-testid="composer-target-clear" @click="editTarget = null">
-            ✕
+          <Icon name="arrow-right" :size="11" /> {{ editTarget }}
+          <button
+            class="target-x"
+            data-testid="composer-target-clear"
+            aria-label="Clear spec edit target"
+            @click="editTarget = null"
+          >
+            <Icon name="close" :size="11" />
           </button>
         </span>
         <div class="input-wrap">
@@ -1830,7 +1845,7 @@ const {
           :disabled="composerEmpty"
           @click="enqueue()"
         >
-          + Queue
+          <Icon name="plus" :size="11" /> Queue
         </button>
         <button
           class="send-btn mono"
@@ -1838,7 +1853,7 @@ const {
           :disabled="(!liveSession && !editTarget) || busy || composerEmpty"
           @click="send()"
         >
-          Send ⏎
+          Send <Icon name="send" :size="12" />
         </button>
       </div>
     </footer>
@@ -2358,7 +2373,6 @@ const {
 }
 
 .mode-dd-arrow {
-  font-size: 8px;
   color: var(--text-ghost);
 }
 
@@ -2866,18 +2880,10 @@ html.sb-light .bypass-warn {
   flex-shrink: 0;
   color: var(--green);
   font-weight: var(--w-em);
-  /* Matches the field's own 3px, so the sigil stays level with the typed line
-     now that the line is centred rather than dropped to the row's foot. */
-  padding-bottom: 3px;
 }
 
 .caret.target {
-  /* ✎ (a dingbat) renders higher in its line box than ❯, so it needs less
-     bottom lift to land on the composer's baseline. It was 5px below ❯; with ❯
-     now at 3px that difference cannot be kept, so it floors here at 0 and sits
-     3px below instead. */
   color: var(--amber);
-  padding-bottom: 0;
 }
 
 /* Spec-edit target chip in the composer (design ✎ → file). */

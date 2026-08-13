@@ -8,6 +8,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { canPassEval, evalStage, EVAL_RELOOP_RATING, type EvalRun } from '@shared/domain'
 import type { TestSuite } from '@shared/test-catalog'
 import { useEvalsStore } from '@renderer/stores/evals'
+import Icon from '@renderer/components/Icon.vue'
 
 const evals = useEvalsStore()
 
@@ -140,7 +141,7 @@ const shortDate = (iso: string): string =>
         + Add line
       </button>
       <button class="act" data-testid="eval-suites-toggle" @click="showSuites = !showSuites">
-        {{ showSuites ? '▾' : '▸' }} From a suite
+        <Icon :name="showSuites ? 'chevron-down' : 'chevron-right'" :size="12" /> From a suite
       </button>
     </div>
     <div v-if="evals.error" class="err" data-testid="eval-error">{{ evals.error }}</div>
@@ -199,7 +200,7 @@ const shortDate = (iso: string): string =>
         <span class="acc">{{ run.acceptance }}</span>
         <span class="when mono">{{ shortDate(run.createdAt) }}</span>
         <button class="del" :data-testid="`eval-remove-${run.id}`" title="Remove" @click="evals.remove(projectId, run.id)">
-          ✕
+          <Icon name="close" :size="12" />
         </button>
       </div>
 
@@ -225,16 +226,16 @@ const shortDate = (iso: string): string =>
           :data-testid="`eval-run-check-${run.id}`"
           @click="dispatch(run, 'check')"
         >
-          ▷ Run check
+          <Icon name="play" :size="12" /> Run check
         </button>
         <button class="act" :data-testid="`eval-manual-${run.id}`" @click="manualPass(run)">
-          ◱ Launch &amp; look
+          <Icon name="panel" :size="12" /> Launch &amp; look
         </button>
         <button class="act" :data-testid="`eval-attempts-run-${run.id}`" @click="dispatch(run, 'attempts')">
-          ⑃ {{ run.attempts === 1 ? 'Implement' : `${run.attempts} attempts` }}
+          <Icon name="fork" :size="12" /> {{ run.attempts === 1 ? 'Implement' : `${run.attempts} attempts` }}
         </button>
         <button class="act" :data-testid="`eval-judge-run-${run.id}`" @click="dispatch(run, 'judge')">
-          ⚖ Judge
+          <Icon name="scales" :size="12" /> Judge
         </button>
         <span class="sep"></span>
         <span class="lbl">attempts</span>
@@ -286,7 +287,7 @@ const shortDate = (iso: string): string =>
           :title="`${n} of 5`"
           @click="evals.record(projectId, run.id, { rating: run.rating === n ? null : n })"
         >
-          ★
+          <Icon name="star" :size="14" />
         </button>
         <span v-if="needsReloop(run)" class="reloop" :data-testid="`eval-reloop-${run.id}`">
           needs another loop — tighten the check
@@ -407,7 +408,7 @@ const shortDate = (iso: string): string =>
 
 .row {
   max-width: 840px;
-  padding: 11px 13px;
+  padding: var(--pad-card);
   margin-bottom: 9px;
   background: var(--bg-hover);
   box-shadow: var(--elev);

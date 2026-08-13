@@ -2,6 +2,7 @@
 // Structured /usage view: limit meters up top, then each activity window as a
 // dotted list (behaviours + Top skills/subagents/plugins/MCP servers).
 import type { UsageReport } from '@shared/usage-report'
+import Icon from '@renderer/components/Icon.vue'
 
 defineProps<{ report: UsageReport }>()
 
@@ -12,7 +13,7 @@ function barColor(pct: number): string {
 
 <template>
   <div class="usage-card" data-testid="usage-card">
-    <div class="uc-label mono">✦ USAGE</div>
+    <div class="uc-label mono"><Icon name="spark" :size="11" /> USAGE</div>
 
     <!-- Limit meters -->
     <div v-for="l in report.limits" :key="l.label" class="uc-meter" data-testid="usage-meter">
@@ -50,13 +51,16 @@ function barColor(pct: number): string {
   border: 1px solid var(--border-card-alt);
   background: var(--gloss), var(--bg-card);
   border-radius: var(--rc);
-  padding: 12px 14px;
+  padding: var(--pad-card);
   margin-bottom: 13px;
 }
 
 .uc-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   font-size: var(--fs-micro);
-  letter-spacing: 0.13em;
+  letter-spacing: var(--track-label);
   color: var(--green);
   margin-bottom: 9px;
 }
@@ -131,7 +135,7 @@ html.sb-light .uc-bar {
 
 .uc-win-title {
   font-size: var(--fs-micro);
-  letter-spacing: 0.13em;
+  letter-spacing: var(--track-label);
   color: var(--teal);
 }
 

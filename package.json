@@ -22,7 +22,8 @@
     "test:e2e": "playwright test",
     "test:real": "npm run build && playwright test --config playwright.real.config.ts",
     "prune": "tsx src/main/store/prune-cli.ts",
-    "verify-release": "tsx scripts/verify-release.ts"
+    "verify-release": "tsx scripts/verify-release.ts",
+    "design": "node design-lab/server.mjs"
   },
   "author": "Haefele Software",
   "license": "UNLICENSED",

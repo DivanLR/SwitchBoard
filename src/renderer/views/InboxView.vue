@@ -7,6 +7,7 @@ import { useInboxStore } from '@renderer/stores/inbox'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { relativeTime } from '@renderer/relative-time'
 import { useNow } from '@renderer/composables/useNow'
+import Icon from '@renderer/components/Icon.vue'
 
 const RISK_LABEL: Record<'low' | 'medium' | 'high', string> = { low: 'Low', medium: 'Medium', high: 'High' }
 
@@ -341,7 +342,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
          and two interrupts for one event is worse than none. -->
     <div v-if="tab === 'inbox'" class="body" aria-live="polite" aria-relevant="additions">
       <div v-if="inbox.groups.length === 0" class="empty" data-testid="inbox-zero">
-        <div class="empty-icon mono">✓</div>
+        <Icon name="check" class="empty-icon" :size="18" />
         <div class="empty-title">Inbox zero</div>
         <div class="empty-sub">New permission requests from any project land here.</div>
       </div>
@@ -415,7 +416,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
             :aria-expanded="expandedExplain.has(item.id)"
             @click="toggleExplain(item.id)"
           >
-            <span class="hist-arrow mono" :class="{ open: expandedExplain.has(item.id) }">▸</span>
+            <Icon name="chevron-right" class="hist-arrow" :class="{ open: expandedExplain.has(item.id) }" :size="10" />
             Why
           </button>
           <div v-if="expandedExplain.has(item.id)" class="item-explain">{{ item.explanation }}</div>
@@ -465,7 +466,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
             @click="alwaysAllowSimilar(item)"
           >
             {{ isMcpItem(item) ? `Always allow ${toolShortName(item)}` : 'Always allow similar' }}
-            <span aria-hidden="true">→</span>
+            <Icon name="arrow-right" :size="12" />
           </button>
         </div>
       </div>
@@ -484,7 +485,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
           data-testid="history-clear"
           @click="inbox.clearHistory()"
         >
-          <span class="hist-clear-x">✕</span>Clear history
+          <Icon name="close" class="hist-clear-x" :size="11" />Clear history
         </button>
       </div>
       <div v-if="inbox.history.length === 0" class="hist-empty">
@@ -508,23 +509,29 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
         @contextmenu.prevent="openHistCtx(h, $event)"
       >
         <div class="hist-head">
-          <span
-            class="hist-arrow mono"
+          <Icon
+            name="chevron-right"
+            class="hist-arrow"
             :data-testid="`history-arrow-${h.id}`"
             :class="{ open: expandedHistory.has(h.id) }"
-            >▸</span
-          >
-          <span
+            :size="10"
+          />
+          <Icon
             v-if="h.status === 'approved' || h.status === 'rule_approved'"
-            class="hist-mark mono"
+            name="check"
+            class="hist-mark"
             style="color: var(--green)"
             :data-testid="`outcome-${h.status}`"
-          >
-            ✓
-          </span>
-          <span v-else class="hist-mark mono" style="color: var(--red)" :data-testid="`outcome-${h.status}`">
-            ✗
-          </span>
+            :size="12"
+          />
+          <Icon
+            v-else
+            name="cross"
+            class="hist-mark"
+            style="color: var(--red)"
+            :data-testid="`outcome-${h.status}`"
+            :size="12"
+          />
           <div class="hist-main">
             <div class="hist-title">{{ h.title }}</div>
             <div class="hist-sub mono">
@@ -570,11 +577,11 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
             data-testid="hist-ctx-allow"
             @click="allowFromHist"
           >
-            <span style="color: var(--green)">✓</span>
+            <Icon name="check" style="color: var(--green)" :size="12" />
             <span>Always allow <span class="hctx-base">{{ histCtx.allowBase }}</span> commands</span>
           </button>
           <button class="hctx-item mono danger" data-testid="hist-ctx-remove" @click="removeHist">
-            <span>✕</span>
+            <Icon name="close" :size="12" />
             <span>Remove this entry</span>
           </button>
         </div>
@@ -694,7 +701,6 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
 }
 
 .empty-icon {
-  font-size: 22px;
   color: var(--green);
 }
 
@@ -789,7 +795,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   background: var(--gloss), var(--bg-hover);
   border: 1px solid var(--border-card-alt);
   border-radius: var(--rc);
-  padding: 11px 12px;
+  padding: var(--pad-card);
   margin-bottom: 8px;
   animation: sbIn 0.25s var(--ease);
   box-shadow: var(--elev);
@@ -968,7 +974,7 @@ html.sb-light .detail-box {
 
 .hist-count {
   font-size: var(--fs-micro);
-  letter-spacing: 0.14em;
+  letter-spacing: var(--track-label);
   color: var(--text-faint);
 }
 
@@ -1012,6 +1018,7 @@ html.sb-light .detail-box {
   max-width: 330px;
   background: var(--bg-panel-2);
   border: 1px solid var(--border-strong);
+  border-radius: var(--rc);
   box-shadow: var(--shadow-menu);
   padding: 4px;
 }
@@ -1070,13 +1077,13 @@ html.sb-light .detail-box {
 }
 
 .hist-arrow {
-  font-size: var(--fs-micro);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--text-tab);
   width: 14px;
   min-width: 14px;
   height: 16px;
-  line-height: 14px;
-  text-align: center;
   border: 1px solid var(--border-card);
   border-radius: var(--rp);
   transition: transform 0.12s var(--ease);
@@ -1091,7 +1098,6 @@ html.sb-light .detail-box {
 }
 
 .hist-mark {
-  font-size: var(--fs-ui);
   width: 14px;
   min-width: 14px;
 }

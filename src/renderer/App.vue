@@ -18,6 +18,7 @@ import ProjectRegistration from '@renderer/components/ProjectRegistration.vue'
 import SettingsPanel from '@renderer/components/SettingsPanel.vue'
 import GlobalSpinner from '@renderer/components/GlobalSpinner.vue'
 import SessionWaitOverlay from '@renderer/components/SessionWaitOverlay.vue'
+import Icon from '@renderer/components/Icon.vue'
 
 const projects = useProjectsStore()
 const active = useActiveSessionStore()
@@ -122,7 +123,7 @@ const dbProject = computed(() => projects.dbProject)
 <template>
   <div v-if="bridgeMissing" class="bridge-missing">
     <div class="mono" style="font-size: var(--fs-head); font-weight: var(--w-em)">
-      <span style="color: var(--green)">▣</span> switchboard
+      <span style="color: var(--green)"><Icon name="grid" :size="18" /></span> switchboard
     </div>
     <p class="dim">
       The IPC bridge is not available. Start the application with <code>npm run dev</code>.
@@ -172,9 +173,10 @@ const dbProject = computed(() => projects.dbProject)
         v-if="!updates.ready"
         class="ub-dismiss"
         data-testid="update-banner-dismiss"
+        aria-label="Dismiss"
         @click="updateDismissed = true"
       >
-        ✕
+        <Icon name="close" />
       </button>
     </div>
     <div class="panes" :style="{ '--inbox-w': `${inboxWidth}px` }">
@@ -218,7 +220,7 @@ const dbProject = computed(() => projects.dbProject)
           @click="setInboxCollapsed(false)"
         >
           <span v-if="inbox.pendingCount > 0" data-testid="inbox-peek-count">{{ inbox.pendingCount }}</span>
-          <span v-else class="inbox-peek-icon">‹</span>
+          <span v-else class="inbox-peek-icon"><Icon name="chevron-left" :size="12" /></span>
         </button>
         <span class="inbox-rail-label mono">INBOX</span>
       </div>

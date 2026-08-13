@@ -19,6 +19,7 @@ import { useProjectGroups } from '@renderer/composables/useProjectGroups'
 import { UNGROUPED, useProjectDragDrop } from '@renderer/composables/useProjectDragDrop'
 import { trapTabWithin } from '@renderer/composables/useModal'
 import { useNow } from '@renderer/composables/useNow'
+import Icon from '@renderer/components/Icon.vue'
 
 const projects = useProjectsStore()
 const activeSession = useActiveSessionStore()
@@ -555,7 +556,7 @@ async function confirmRemoveNow(): Promise<void> {
     <div class="brand">
       <div class="brand-top">
         <div class="logo mono">
-          <span style="color: var(--green)">▣</span><span v-if="!collapsed"> switchboard</span>
+          <span style="color: var(--green)"><Icon name="grid" :size="collapsed ? 18 : 14" /></span><span v-if="!collapsed"> switchboard</span>
         </div>
         <span class="spacer"></span>
         <button
@@ -569,7 +570,7 @@ async function confirmRemoveNow(): Promise<void> {
           "
           @click="toggleTheme"
         >
-          {{ theme === 'light' ? '☾' : '☀' }}
+          <Icon :name="theme === 'light' ? 'moon' : 'sun'" />
         </button>
         <button
           class="icon-btn mono"
@@ -577,7 +578,7 @@ async function confirmRemoveNow(): Promise<void> {
           :title="collapsed ? 'Expand sidebar' : 'Collapse sidebar'"
           @click="collapsed = !collapsed"
         >
-          {{ collapsed ? '»' : '«' }}
+          <Icon :name="collapsed ? 'chevron-right' : 'chevron-left'" />
         </button>
       </div>
     </div>
@@ -585,7 +586,7 @@ async function confirmRemoveNow(): Promise<void> {
     <!-- Filter (design): narrows the list by project name or branch. -->
     <div v-if="!collapsed" class="filter-wrap">
       <div class="filter" :class="{ on: filterQuery.length > 0 }">
-        <span class="filter-icon mono">⌕</span>
+        <span class="filter-icon mono"><Icon name="search" :size="13" /></span>
         <input
           v-model="filterQuery"
           class="filter-in"
@@ -600,7 +601,7 @@ async function confirmRemoveNow(): Promise<void> {
           title="Clear"
           @click="filterQuery = ''"
         >
-          ✕
+          <Icon name="close" :size="12" />
         </button>
       </div>
     </div>
@@ -640,7 +641,7 @@ async function confirmRemoveNow(): Promise<void> {
         </button>
         <!-- Single line, no surrounding whitespace: a text node around the glyph
              becomes a flex text run with trailing space that shifts + off-centre. -->
-        <button class="add mono" data-testid="add-project" title="New session" @click="emit('add-project')">+</button>
+        <button class="add mono" data-testid="add-project" title="New session" @click="emit('add-project')"><Icon name="plus" :size="13" /></button>
       </div>
 
 
@@ -661,7 +662,7 @@ async function confirmRemoveNow(): Promise<void> {
           @dragleave="groupDrop = groupDrop === (section.group?.id ?? UNGROUPED) ? null : groupDrop"
           @drop="onGroupDrop(section.group, $event)"
         >
-          <span class="group-caret mono">{{ section.folded ? '▶' : '▼' }}</span>
+          <span class="group-caret mono"><Icon :name="section.folded ? 'chevron-right' : 'chevron-down'" :size="8" /></span>
           <span class="group-swatch" :style="{ background: section.color }"></span>
           <input
             v-if="section.group && renamingGroupId === section.group.id"
@@ -695,7 +696,7 @@ async function confirmRemoveNow(): Promise<void> {
             title="Remove this group (its projects stay)"
             @click.stop="removeGroup(section.group.id)"
           >
-            ✕
+            <Icon name="close" :size="12" />
           </button>
         </div>
 
@@ -813,7 +814,7 @@ async function confirmRemoveNow(): Promise<void> {
                 title="Start another session in this project"
                 @click.stop="startAnotherSession(item.id)"
               >
-                ＋
+                <Icon name="plus" :size="12" />
               </button>
               <button
                 class="remove mono"
@@ -821,7 +822,7 @@ async function confirmRemoveNow(): Promise<void> {
                 title="Remove this project"
                 @click.stop="askRemove(item.id)"
               >
-                ✕
+                <Icon name="close" :size="12" />
               </button>
             </template>
           </div>
@@ -831,7 +832,7 @@ async function confirmRemoveNow(): Promise<void> {
                defending against — but it also hid the branch of every project working in
                the background, which is exactly when it is worth reading. -->
           <div v-if="!collapsed && isExpanded(item)" class="meta">
-            <span class="branch code">⎇ {{ item.session?.branch ?? '—' }}</span>
+            <span class="branch code"><Icon name="branch" :size="11" /> {{ item.session?.branch ?? '—' }}</span>
           </div>
           <div v-if="!collapsed && collisions.has(item.name)" class="path code">{{ item.path }}</div>
           <!-- Subsessions. A project runs as many sessions as it is asked to, and each
@@ -888,8 +889,16 @@ async function confirmRemoveNow(): Promise<void> {
                 class="agent-name mono"
                 :class="{ sel: activeSession.selectedAgentId === agent.id }"
               >
-                {{ agent.task || agent.name
-                }}{{ activeSession.selectedAgentId === agent.id ? ' ←' : '' }}
+                {{ agent.task || agent.name }}
+                <!-- Which agent's chat is open. Carries a testid because it is
+                     now a drawn mark rather than a text arrow, so a spec can no
+                     longer assert it by reading the row's text. -->
+                <Icon
+                  v-if="activeSession.selectedAgentId === agent.id"
+                  name="arrow-left"
+                  :size="11"
+                  data-testid="sidebar-agent-selected"
+                />
               </span>
             </div>
           </div>
@@ -917,7 +926,7 @@ async function confirmRemoveNow(): Promise<void> {
         :data-testid="`mcp-server-${s}`"
         @click="activeSession.openMcp(true)"
       >
-        <span class="mcp-ico">⛁</span>
+        <span class="mcp-ico"><Icon name="database" /></span>
         <template v-if="!collapsed">
           <!-- The dot IS the status; spelling it out under the name doubled the
                row's height to repeat what the colour already says. -->
@@ -937,7 +946,7 @@ async function confirmRemoveNow(): Promise<void> {
       "
       @click="toggleTheme"
     >
-      {{ theme === 'light' ? '☾' : '☀' }}
+      <Icon :name="theme === 'light' ? 'moon' : 'sun'" />
     </button>
     <!-- Footer: Settings and the current work model, and nothing else. The
          counters, the token total and the limit meter moved to the window's
@@ -954,7 +963,7 @@ async function confirmRemoveNow(): Promise<void> {
         @keydown.enter.prevent="emit('open-settings')"
         @keydown.space.prevent="emit('open-settings')"
       >
-        <span class="gear mono" aria-hidden="true">⚙</span>
+        <span class="gear mono" aria-hidden="true"><Icon name="settings" /></span>
         <span class="settings-label mono">Settings</span>
         <span class="model-summary mono" data-testid="model-summary">{{ modelSummary }}</span>
       </div>
@@ -971,7 +980,7 @@ async function confirmRemoveNow(): Promise<void> {
       @keydown.enter.prevent="emit('open-settings')"
       @keydown.space.prevent="emit('open-settings')"
     >
-      <span class="gear mono" aria-hidden="true">⚙</span>
+      <span class="gear mono" aria-hidden="true"><Icon name="settings" /></span>
     </div>
   </aside>
 
@@ -985,20 +994,20 @@ async function confirmRemoveNow(): Promise<void> {
     >
       <div class="ctx-name mono">{{ ctx.name }}</div>
       <button class="ctx-item mono" data-testid="ctx-rename" @click="startRename">
-        <span style="color: var(--green)">✎</span>Rename
+        <span style="color: var(--green)"><Icon name="pencil" /></span>Rename
       </button>
       <button class="ctx-item mono" data-testid="ctx-move-up" @click="ctxMove(-1)">
-        <span>↑</span>Move up
+        <span><Icon name="arrow-up" /></span>Move up
       </button>
       <button class="ctx-item mono" data-testid="ctx-move-down" @click="ctxMove(1)">
-        <span>↓</span>Move down
+        <span><Icon name="arrow-down" /></span>Move down
       </button>
       <template v-if="ctx.kind === 'project'">
         <!-- A project can run more than one session; this is how a second one starts.
              It leads the project menu because it is the only item here that makes the
              project DO something rather than describe it. -->
         <button class="ctx-item mono" data-testid="ctx-new-session" @click="ctxNewSession">
-          <span style="color: var(--green)">＋</span>New session here
+          <span style="color: var(--green)"><Icon name="plus" /></span>New session here
         </button>
         <!-- The way back down. A project accumulates sessions — a section starts
              its own — and ending them one at a time is tedious at two. -->
@@ -1008,15 +1017,15 @@ async function confirmRemoveNow(): Promise<void> {
           data-testid="ctx-end-all"
           @click="ctxEndAll"
         >
-          <span style="color: var(--red)">■</span>End all {{ ctxLiveSessions.length }} sessions
+          <span style="color: var(--red)"><Icon name="stop" /></span>End all {{ ctxLiveSessions.length }} sessions
         </button>
         <div class="ctx-sep"></div>
         <button class="ctx-item mono" data-testid="ctx-repoint" @click="startRepoint">
-          <span style="color: var(--green)">⇄</span>Change folder…
+          <span style="color: var(--green)"><Icon name="swap" /></span>Change folder…
         </button>
         <div class="ctx-sep"></div>
         <button class="ctx-item mono" data-testid="ctx-new-group" @click="ctxNewGroup">
-          <span style="color: var(--green)">⊞</span>New group with this
+          <span style="color: var(--green)"><Icon name="grid" /></span>New group with this
         </button>
         <button
           v-for="g in groups"
@@ -1025,7 +1034,7 @@ async function confirmRemoveNow(): Promise<void> {
           :data-testid="`ctx-move-to-${g.name}`"
           @click="ctxAssign(g.id)"
         >
-          <span>→</span>Move to {{ g.name }}
+          <span><Icon name="arrow-right" /></span>Move to {{ g.name }}
         </button>
         <button
           v-if="groupOf[ctx.id]"
@@ -1033,11 +1042,11 @@ async function confirmRemoveNow(): Promise<void> {
           data-testid="ctx-move-to-ungrouped"
           @click="ctxAssign(null)"
         >
-          <span>→</span>Move out of group
+          <span><Icon name="arrow-right" /></span>Move out of group
         </button>
         <div class="ctx-sep"></div>
         <button class="ctx-item mono danger" data-testid="ctx-remove" @click="ctxDelete">
-          <span>🗑</span>Remove from list
+          <span><Icon name="trash" /></span>Remove from list
         </button>
       </template>
       <button
@@ -1046,7 +1055,7 @@ async function confirmRemoveNow(): Promise<void> {
         data-testid="ctx-remove-group"
         @click="ctxRemoveGroup"
       >
-        <span>🗑</span>Remove group (keeps projects)
+        <span><Icon name="trash" /></span>Remove group (keeps projects)
       </button>
     </div>
   </div>
@@ -1060,7 +1069,7 @@ async function confirmRemoveNow(): Promise<void> {
       aria-modal="true"
       aria-labelledby="repoint-dialog-title"
     >
-      <div class="rd-icon" aria-hidden="true">⇄</div>
+      <div class="rd-icon" aria-hidden="true"><Icon name="swap" :size="18" /></div>
       <div id="repoint-dialog-title" class="rd-title mono">
         Change folder for {{ repointTarget.name }}
       </div>
@@ -1105,7 +1114,7 @@ async function confirmRemoveNow(): Promise<void> {
       aria-modal="true"
       aria-labelledby="remove-dialog-title"
     >
-      <div class="rd-icon" aria-hidden="true">🗑</div>
+      <div class="rd-icon" aria-hidden="true"><Icon name="trash" :size="18" /></div>
       <div id="remove-dialog-title" class="rd-title mono">Remove {{ confirmRemove.name }}?</div>
       <div class="rd-body">
         <div class="rd-path faint mono">{{ confirmRemove.path }}</div>
@@ -1314,7 +1323,6 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .filter-icon {
-  font-size: var(--fs-ui);
   color: var(--text-faint);
 }
 
@@ -1496,7 +1504,6 @@ async function confirmRemoveNow(): Promise<void> {
 
 .group-caret {
   width: 8px;
-  font-size: 8px;
   color: var(--text-faint);
 }
 
@@ -1799,7 +1806,6 @@ async function confirmRemoveNow(): Promise<void> {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 17px;
   background: color-mix(in srgb, var(--red) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--red) 35%, transparent);
   border-radius: var(--rc);
@@ -2080,7 +2086,6 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 .mcp-ico {
-  font-size: var(--fs-body);
   color: var(--teal);
   flex-shrink: 0;
 }
@@ -2215,7 +2220,6 @@ html.sb-light .ctx-menu {
 }
 
 .gear {
-  font-size: var(--fs-body);
   color: var(--text-meta);
 }
 

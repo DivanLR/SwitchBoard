@@ -11,6 +11,7 @@
 // Every figure is reported, never estimated, and the test ids move with the
 // markup: the readings are the same truth, in a better place.
 import { computed } from 'vue'
+import Icon from '@renderer/components/Icon.vue'
 import { useProjectsStore } from '@renderer/stores/projects'
 
 const projects = useProjectsStore()
@@ -67,7 +68,7 @@ const anyWorking = computed(() =>
       interrupt
     </span>
     <span class="sb-hint">
-      <kbd>⏎</kbd>
+      <kbd><Icon name="send" :size="10" /></kbd>
       send
     </span>
   </div>
