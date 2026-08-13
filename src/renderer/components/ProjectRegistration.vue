@@ -247,7 +247,7 @@ async function startSession(): Promise<void> {
 
 .title {
   font-size: var(--fs-title);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-bright);
 }
 
@@ -437,7 +437,7 @@ async function startSession(): Promise<void> {
 
 .bypass-label {
   font-size: var(--fs-body);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-title);
 }
 

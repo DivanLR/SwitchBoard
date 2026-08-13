@@ -442,12 +442,12 @@ html.sb-light {
      their names so nothing has to be re-pointed, and three of them now share a
      value with a neighbour. That collapse is the point rather than a shortcut,
      because a grid with six sizes is not a grid. */
-  --fs-micro: 12px;
-  --fs-meta: 12px;
-  --fs-ui: 14px;
-  --fs-body: 14px;
-  --fs-title: 16px;
-  --fs-head: 16px;
+  --fs-micro: 11px;
+  --fs-meta: 11px;
+  --fs-ui: 12.5px;
+  --fs-body: 12.5px;
+  --fs-title: 14px;
+  --fs-head: 14px;
   --scrim: rgba(10,11,13, 0.66);
   --shadow-dlg: 0 28px 70px rgba(0,0,0, 0.6), 0 0 0 1px rgba(244,244,242, 0.05) inset;
   --shadow-dd: 0 14px 36px rgba(0,0,0, 0.5);
@@ -616,7 +616,7 @@ button {
     var(--gloss),
     linear-gradient(135deg, var(--green), var(--green2));
   color: var(--green-ink);
-  font-weight: 600;
+  font-weight: 500;
   font-size: var(--fs-ui);
   font-family: var(--sans);
   padding: 6px 14px;
@@ -642,7 +642,7 @@ html.sb-light .btn-solid {
 .btn-armed {
   background: var(--gloss), var(--amber);
   color: var(--amber-ink);
-  font-weight: 600;
+  font-weight: 500;
   font-size: var(--fs-ui);
   font-family: var(--sans);
   padding: 6px 14px;
@@ -1017,7 +1017,7 @@ html.sb-light .btn-solid {
   white-space: nowrap;
   background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
   color: var(--green-ink);
-  font-weight: 600;
+  font-weight: 500;
   font-size: var(--fs-meta);
   padding: 7px 16px;
   border-radius: var(--rc);
@@ -1296,7 +1296,7 @@ html.sb-light .suggest-list {
 
 .suggest-typed {
   color: var(--text);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 /* Small what-it-does explanation next to a suggested /command. */

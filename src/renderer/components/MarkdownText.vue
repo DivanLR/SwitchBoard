@@ -114,7 +114,7 @@ async function copyBlock(event: MouseEvent): Promise<void> {
 .md :deep(h5),
 .md :deep(h6) {
   font-size: var(--fs-body);
-  font-weight: 700;
+  font-weight: 500;
   color: var(--text-title);
   margin: 12px 0 6px;
 }
@@ -127,7 +127,7 @@ async function copyBlock(event: MouseEvent): Promise<void> {
 
 .md :deep(strong) {
   color: var(--text-title);
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .md :deep(em) {

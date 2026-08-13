@@ -364,7 +364,7 @@ function countLabel(added: number | null, removed: number | null): string {
   width: 14px;
   text-align: center;
   font-size: var(--fs-micro);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-faint);
 }
 

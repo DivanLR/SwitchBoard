@@ -1147,11 +1147,13 @@ async function confirmRemoveNow(): Promise<void> {
   /* 252px fitted a proportional face. The interface moved onto the character
      grid, where a lowercase letter is roughly 0.6em wide instead of ~0.5em, so
      the same project names stopped fitting and truncated to "storef…" and
-     "ml-pip…" — a lane you cannot read is a lane you cannot pick. Widened to
-     hold the same names on the wider grid rather than shrinking the names,
-     because the name is the one thing in the lane that has to be read. */
-  width: 288px;
-  min-width: 288px;
+     "ml-pip…" — a lane you cannot read is a lane you cannot pick. Widened for
+     the grid, then brought back in once the grid itself came down to 12.5px:
+     288px was sized for a 14px cell; 262 was too tight for the one row that
+     carries a pending badge AND a timer beside the name, which is the row that
+     actually sets the width. 276 clears it. */
+  width: 276px;
+  min-width: 276px;
   background: var(--bg-panel);
   box-shadow: var(--hairline-shine);
   border-right: 1px solid var(--border);
@@ -1281,7 +1283,7 @@ async function confirmRemoveNow(): Promise<void> {
 
 .logo {
   font-size: var(--fs-body);
-  font-weight: 700;
+  font-weight: 500;
   color: var(--text-bright);
   letter-spacing: 0.02em;
 }
@@ -1675,7 +1677,7 @@ async function confirmRemoveNow(): Promise<void> {
   height: 12px;
   font-family: var(--mono);
   font-size: 13.8px;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 12px;
   text-align: center;
 }
@@ -1805,7 +1807,7 @@ async function confirmRemoveNow(): Promise<void> {
 
 .rd-title {
   font-size: var(--fs-head);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-bright);
   margin-top: 14px;
 }

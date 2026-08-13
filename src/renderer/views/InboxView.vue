@@ -766,7 +766,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
 
 .link-armed {
   color: var(--amber);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .link-quiet {
@@ -819,7 +819,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
 
 .item-title {
   font-size: var(--fs-body);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-title);
   /* Full ask, wrapped — never truncated or off-screen. */
   overflow-wrap: anywhere;

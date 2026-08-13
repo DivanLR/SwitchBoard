@@ -1922,7 +1922,7 @@ const {
 
 .h-name {
   font-size: var(--fs-head);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-bright);
   white-space: nowrap;
   /* The same treatment .h-path already has, right beside it. Without min-width: 0
@@ -1980,7 +1980,7 @@ const {
 .seg.on {
   background: color-mix(in srgb, var(--green) 24%, transparent);
   color: var(--text-strong);
-  font-weight: 600;
+  font-weight: 500;
   cursor: default;
 }
 
@@ -2254,7 +2254,7 @@ const {
 
 .uw-total {
   color: var(--text-body);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .uw-cost {
@@ -2496,7 +2496,7 @@ html.sb-light .bypass-warn {
 
 .ab-name {
   font-size: var(--fs-ui);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-strong);
 }
 
@@ -2618,7 +2618,7 @@ html.sb-light .bypass-warn {
 
 .agent-name {
   font-size: var(--fs-ui);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-body);
   white-space: nowrap;
 }
@@ -2840,7 +2840,7 @@ html.sb-light .bypass-warn {
   white-space: nowrap;
   border: 1px solid var(--border-strong);
   color: var(--text-mid);
-  font-weight: 600;
+  font-weight: 500;
   font-size: var(--fs-meta);
   padding: 6px 13px;
   border-radius: var(--rc);
@@ -2859,7 +2859,7 @@ html.sb-light .bypass-warn {
 .caret {
   flex-shrink: 0;
   color: var(--green);
-  font-weight: 600;
+  font-weight: 500;
   /* Matches the field's own 3px, so the sigil stays level with the typed line
      now that the line is centred rather than dropped to the row's foot. */
   padding-bottom: 3px;

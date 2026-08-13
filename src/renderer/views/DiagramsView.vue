@@ -266,7 +266,7 @@ watch(
   white-space: nowrap;
   background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
   color: var(--green-ink);
-  font-weight: 600;
+  font-weight: 500;
   font-size: var(--fs-meta);
   padding: 8px 15px;
   border-radius: var(--rc);
@@ -310,7 +310,7 @@ watch(
   flex-shrink: 0;
   padding: 8px 15px;
   font-size: var(--fs-meta);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--green-ink);
   background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
   border-radius: var(--rc);

@@ -38,27 +38,27 @@ typography:
   # listed 15.5 / 13.5 / 13 / 12.5 / 12 / 11 / 10.5 / 10 / 9.5, none of which
   # the code had shipped for some time.
   head:
-    fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif"
-    fontSize: "17px"
+    fontFamily: "'JetBrains Mono', ui-monospace, monospace"
+    fontSize: "14px"
     fontWeight: 600
     lineHeight: 1.3
   title:
     fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif"
-    fontSize: "15.5px"
+    fontSize: "14px"
     fontWeight: 700
     letterSpacing: "0.02em"
   body:
     fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif"
-    fontSize: "14px"
+    fontSize: "12.5px"
     fontWeight: 400
     lineHeight: 1.6
   ui:
     fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif"
-    fontSize: "13px"
+    fontSize: "12.5px"
     fontWeight: 400
   meta:
     fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif"
-    fontSize: "12px"
+    fontSize: "11px"
     fontWeight: 400
   micro:
     fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif"

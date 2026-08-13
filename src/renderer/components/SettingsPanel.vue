@@ -964,7 +964,7 @@ html.sb-light .overlay {
 
 .s-title {
   font-size: var(--fs-body);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-bright);
 }
 
@@ -1153,7 +1153,7 @@ html.sb-light .overlay {
 
 .opt-name {
   font-size: var(--fs-ui);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-body);
 }
 
@@ -1312,7 +1312,7 @@ html.sb-light .overlay {
 .dd-name {
   flex: 1;
   font-size: var(--fs-ui);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-strong);
 }
 
@@ -1392,7 +1392,7 @@ html.sb-light .overlay {
 
 .sr-label {
   font-size: var(--fs-body);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-title);
 }
 

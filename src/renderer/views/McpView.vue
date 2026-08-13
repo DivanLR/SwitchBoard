@@ -537,7 +537,7 @@ function answer(eventId: string, choice: string): void {
 
 .db-name {
   font-size: var(--fs-title);
-  font-weight: 700;
+  font-weight: 500;
   color: var(--text-bright);
 }
 
@@ -573,7 +573,7 @@ function answer(eventId: string, choice: string): void {
 
 .mcp-chip.on {
   color: var(--text-bright);
-  font-weight: 600;
+  font-weight: 500;
   background: var(--bg-hover);
   border-color: var(--border-strong);
 }
@@ -603,7 +603,7 @@ function answer(eventId: string, choice: string): void {
 
 .combo-name {
   color: var(--teal);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .combo-scanned {
@@ -721,7 +721,7 @@ function answer(eventId: string, choice: string): void {
 
 .empty-title {
   font-size: var(--fs-title);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-bright);
 }
 
@@ -779,7 +779,7 @@ function answer(eventId: string, choice: string): void {
 .caret {
   flex-shrink: 0;
   color: var(--teal);
-  font-weight: 600;
+  font-weight: 500;
   /* Bottom-pinned row: lift the caret to the buttons' text line. */
   padding-bottom: 6px;
 }
@@ -790,7 +790,7 @@ function answer(eventId: string, choice: string): void {
    cmd from args, so it overrides the shared ghost colouring. */
 .input-wrap:has(.is-command) .ghost-typed {
   color: var(--teal);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 </style>
