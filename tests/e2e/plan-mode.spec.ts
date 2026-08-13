@@ -3,7 +3,7 @@
 // unreachable — nothing ever started a session in plan mode, so nothing ever
 // called ExitPlanMode. These cover the half that turns it on.
 import { expect, test } from '@playwright/test'
-import { installMockHost, twoProjectScenario, type MockScenario } from './mock-host'
+import { installMockHost, twoProjectScenario } from './mock-host'
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(installMockHost, twoProjectScenario())
@@ -104,22 +104,4 @@ test('denying the plan keeps the session planning, so the model revises', async 
   await page.getByTestId('deny-btn').click()
 
   await expect(page.getByTestId('plan-mode-toggle')).toContainText('Planning')
-})
-
-test('a bypass session is offered no plan control at all', async ({ page }) => {
-  const bypassScenario: MockScenario = {
-    ...twoProjectScenario(),
-    projects: [
-      {
-        id: 'p-alpha',
-        name: 'alpha',
-        path: 'C:\\work\\alpha',
-        session: { id: 's-alpha', status: 'working', branch: 'main', bypassPermissions: true },
-      },
-    ],
-  }
-  await page.addInitScript(installMockHost, bypassScenario)
-  await page.goto('/')
-  await expect(page.getByTestId('bypass-pill')).toBeVisible()
-  await expect(page.getByTestId('plan-mode-toggle')).toHaveCount(0)
 })

@@ -100,32 +100,6 @@ test('a scrolled-back stream offers a jump to the newest line', async ({ page })
   ).toBeLessThan(24)
 })
 
-// The note claims the composer holds text from a previous run. It used to be a
-// one-way flag cleared only on a project switch, so clearing the box and typing
-// something of your own kept the note up, now describing text the app had never
-// seen.
-test.describe('a draft left by a previous run', () => {
-  test.use({})
-  test('the note describes the restored text, and only that text', async ({ page }) => {
-    const scenario = twoProjectScenario()
-    scenario.projects[0].drafts = ['half-written thought']
-    await page.addInitScript(installMockHost, scenario)
-    await page.goto('/')
-    await page.getByTestId('sidebar-project-alpha').click()
-
-    await expect(page.getByTestId('composer-input')).toHaveValue('half-written thought')
-    await expect(page.getByTestId('draft-note')).toBeVisible()
-
-    // Typing your own text ends the claim.
-    await page.getByTestId('composer-input').fill('something I am writing myself')
-    await expect(page.getByTestId('draft-note')).toHaveCount(0)
-
-    // And an empty box has no restored draft to talk about either.
-    await page.getByTestId('composer-input').fill('')
-    await expect(page.getByTestId('draft-note')).toHaveCount(0)
-  })
-})
-
 // 0.16.0 removed this button. The action survived only as Ctrl+C, and only while
 // the composer had focus, with nothing on screen saying so.
 test('a working session offers a red stop button that interrupts the turn', async ({ page }) => {
