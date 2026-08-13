@@ -193,6 +193,25 @@ test('the install card shows only while the plugin is absent from the session co
   await expect(page.getByTestId('diagrams-install')).toHaveCount(0)
 })
 
+// The form a session ACTUALLY reports. A plugin's skills arrive namespaced, and
+// this test exists because the one above used the bare name and therefore passed
+// against an app that was broken for every real user: normalizeForMatch strips
+// the colon rather than the namespace, so "diagram-design:export-diagram"
+// reduced to "diagramdesignexportdiagram" and never equalled the probe's
+// "exportdiagram". Every project with the plugin installed was told it was not,
+// and Download re-installed something already present.
+test('the card retires for the namespaced skill name a session really reports', async ({ page }) => {
+  await page.evaluate(() => window.__mock.setCommands('p-alpha', ['some-other-command']))
+  await page.getByTestId('tab-diagrams').click()
+  await expect(page.getByTestId('diagrams-install')).toBeVisible()
+
+  await page.evaluate(
+    (probe) => window.__mock.setCommands('p-alpha', [`diagram-design:${probe}`]),
+    DIAGRAM_PLUGIN.probeCommand,
+  )
+  await expect(page.getByTestId('diagrams-install')).toHaveCount(0)
+})
+
 // A diagram is drawn in a session the developer never opens, so the wait used to
 // be a static word for however long it took, with no way to tell work from a
 // hang. The events were already streaming to the renderer; nothing rendered

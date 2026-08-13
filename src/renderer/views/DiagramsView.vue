@@ -34,7 +34,15 @@ watch(() => props.projectId, (id) => void diagrams.load(id))
 const installed = computed(() => {
   if (props.available.length === 0) return true
   const key = normalizeForMatch(DIAGRAM_PLUGIN.probeCommand)
-  return props.available.some((c) => normalizeForMatch(c) === key)
+  // Match the command's OWN name, after the plugin namespace. A session reports
+  // this skill as "diagram-design:export-diagram", and normalizeForMatch strips
+  // the colon rather than the namespace, so the whole string reduces to
+  // "diagramdesignexportdiagram" and never equalled the probe's
+  // "exportdiagram". The card therefore claimed the plugin was missing on every
+  // project that had it installed, and clicking Download re-installed something
+  // already present, which changed nothing and looked broken.
+  // CleanupView already does exactly this; the two now agree.
+  return props.available.some((c) => normalizeForMatch(c.slice(c.lastIndexOf(':') + 1)) === key)
 })
 
 const description = ref('')
