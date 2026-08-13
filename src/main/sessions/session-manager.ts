@@ -57,7 +57,14 @@ import { parseApiRequests } from '@main/evals/api-dispatch'
 import type { ApiRequestPlan } from '@shared/api-endpoints'
 import { mainLoopModel } from './model-routing'
 import { resolveClaudeExecutable } from './claude-executable'
-import { ensureSandboxImage, gitNotice, hasNodeModulesVolume, refMounts, sweepOrphanedContainers } from './docker-sandbox'
+import {
+  ensureSandboxImage,
+  gitNotice,
+  gitRoot,
+  hasNodeModulesVolume,
+  refMounts,
+  sweepOrphanedContainers,
+} from './docker-sandbox'
 
 /** Classifier hook installed by the swallow rule engine (FR-015a); null until then. */
 type NoiseClassifier = (event: SessionEvent) => string | null
@@ -209,7 +216,11 @@ async function readGitBranch(projectPath: string): Promise<string | null> {
     // and empty on detached HEAD, unlike rev-parse --abbrev-ref. Async
     // (execFile + promisify) so it never blocks the main-process event loop —
     // this runs on every session start and after every completed turn.
-    const { stdout } = await execFileAsync('git', ['-C', projectPath, 'branch', '--show-current'], {
+    // The repository, which may be one folder below the project root (gitRoot).
+    // Without this a project registered by its containing folder showed no
+    // branch on any of its sessions, and the sidebar had nothing to name them by.
+    const root = gitRoot(projectPath) ?? projectPath
+    const { stdout } = await execFileAsync('git', ['-C', root, 'branch', '--show-current'], {
       timeout: 4000,
       windowsHide: true,
     })
@@ -301,21 +312,30 @@ async function readUntrackedEntry(projectPath: string, path: string): Promise<Di
  * read; `git diff --numstat` then supplies line counts for the tracked ones.
  */
 export async function readDiffList(projectPath: string): Promise<DiffListResult> {
-  const notice = gitNotice(projectPath)
-  if (notice) return { gitNotice: notice, files: [] }
+  // The repository, which is not always the project root: see gitRoot. This
+  // used to refuse outright on any gitNotice, but that notice describes what
+  // will not work INSIDE THE CONTAINER — a worktree pointer at a gitdir outside
+  // the mount, a parent repository the mount does not reach. The diff runs here,
+  // on the host, where none of those limits apply, so a project whose repository
+  // sits one folder down showed an empty Diff tab and a reason that was not
+  // about it.
+  const root = gitRoot(projectPath)
+  if (!root) {
+    return { gitNotice: 'The project is not a git repository — there is no git history to diff.', files: [] }
+  }
 
   let statusOut: string
   try {
     ;({ stdout: statusOut } = await execFileAsync(
       'git',
-      ['-C', projectPath, 'status', '--porcelain=v1', '-z'],
+      ['-C', root, 'status', '--porcelain=v1', '-z'],
       GIT_EXEC_OPTS,
     ))
   } catch {
     return { gitNotice: 'Unable to read this project’s working tree.', files: [] }
   }
 
-  const { byPath: numstat } = await readNumstat(projectPath)
+  const { byPath: numstat } = await readNumstat(root)
   const tokens = statusOut.split('\0').filter((t) => t.length > 0)
   const files: DiffFileEntry[] = []
   const untrackedPaths: string[] = []
@@ -361,7 +381,7 @@ export async function readDiffList(projectPath: string): Promise<DiffListResult>
   const BATCH = 32
   for (let i = 0; i < untrackedPaths.length; i += BATCH) {
     const batch = untrackedPaths.slice(i, i + BATCH)
-    files.push(...(await Promise.all(batch.map((p) => readUntrackedEntry(projectPath, p)))))
+    files.push(...(await Promise.all(batch.map((p) => readUntrackedEntry(root, p)))))
   }
   files.sort((a, b) => a.path.localeCompare(b.path))
   return { gitNotice: null, files }
@@ -403,11 +423,15 @@ function parseUnifiedDiff(diffText: string): FileDiffContent {
  * → an ordinary tracked `git diff`.
  */
 export async function readFileDiff(projectPath: string, path: string): Promise<FileDiffContent | null> {
+  // Same repository resolution as readDiffList, and it has to be: the paths this
+  // is asked about came from that listing, so they are relative to whatever root
+  // it used. Reading them against a different directory finds nothing.
+  const root = gitRoot(projectPath) ?? projectPath
   let statusOut: string
   try {
     ;({ stdout: statusOut } = await execFileAsync(
       'git',
-      ['-C', projectPath, 'status', '--porcelain=v1', '--', path],
+      ['-C', root, 'status', '--porcelain=v1', '--', path],
       GIT_EXEC_OPTS,
     ))
   } catch {
@@ -416,10 +440,10 @@ export async function readFileDiff(projectPath: string, path: string): Promise<F
   if (statusOut.trim().length === 0) return null // no current change for this path
 
   if (statusOut.startsWith('??')) {
-    const entry = await readUntrackedEntry(projectPath, path)
+    const entry = await readUntrackedEntry(root, path)
     if (entry.binary) return { binary: true, lines: [] }
     if (entry.addedLines === null) return null // vanished since the status read
-    const content = await readFile(join(projectPath, path), 'utf8')
+    const content = await readFile(join(root, path), 'utf8')
     const rawLines = content.length === 0 ? [] : content.split('\n')
     if (content.endsWith('\n')) rawLines.pop()
     return { binary: false, lines: rawLines.map((text) => ({ type: 'add', text })) }
@@ -429,7 +453,7 @@ export async function readFileDiff(projectPath: string, path: string): Promise<F
   try {
     ;({ stdout: diffOut } = await execFileAsync(
       'git',
-      ['-C', projectPath, 'diff', '--', path],
+      ['-C', root, 'diff', '--', path],
       GIT_EXEC_OPTS,
     ))
   } catch {

@@ -708,8 +708,17 @@ function onSetTarget(label: string): void {
  * work is no longer in it; the store's refresh surfaces the background session
  * as its own sidebar row, which is where the output is read.
  */
+/**
+ * The background session a section last dispatched to, so the section can show
+ * its output. Held here rather than in each view because every section routes
+ * through this one function, and they all share the one background session.
+ */
+const sectionSessionId = ref<string | null>(null)
+
 function runInSection(text: string): void {
-  void specs.runInSession(props.project.id, text, true)
+  void specs.runInSession(props.project.id, text, true).then((id) => {
+    sectionSessionId.value = id
+  })
 }
 
 /**
@@ -1307,6 +1316,9 @@ const {
       v-else-if="mainTab === 'cleanup'"
       :project-name="project.name"
       :available="availableCommandNames"
+      :session-id="sectionSessionId"
+      :installing="installing !== null"
+      :install-error="installError"
       @run="runInSection"
       @install="installCleanup"
     />

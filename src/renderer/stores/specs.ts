@@ -74,9 +74,12 @@ const store = reactive({
    * verify.ts's surfaceNewSessions for why — and re-applies focus so it doesn't
    * steal the centre pane.
    */
-  async runInSession(projectId: string, text: string, background = false): Promise<void> {
-    await invoke('specs.runInSession', { projectId, text, background })
+  /** Returns the session it went to, so a section can show that session's output
+   *  while it works instead of a static word. */
+  async runInSession(projectId: string, text: string, background = false): Promise<string> {
+    const { sessionId } = await invoke('specs.runInSession', { projectId, text, background })
     if (background) await useProjectsStore().refresh()
+    return sessionId
   },
 
   /**

@@ -7,11 +7,18 @@
 import { computed } from 'vue'
 import { CLEANUP_GROUPS, type CleanupCommand, type CleanupGroup } from '@shared/command-catalog'
 import { normalizeForMatch } from '@renderer/composables/useCommandSuggestions'
+import MiniTerminal from '@renderer/components/MiniTerminal.vue'
 
 const props = defineProps<{
   projectName: string
   /** Available slash-command names for this project (drives install state). */
   available: string[]
+  /** The background session a command was last sent to, for the terminal below. */
+  sessionId?: string | null
+  /** True while a plugin install is running on the host. */
+  installing?: boolean
+  /** Why the install failed, in the CLI's own words. */
+  installError?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -134,16 +141,25 @@ function run(command: string): void {
         <div class="install-text">
           <div class="install-title">Not installed in this project — add it to run these commands</div>
           <div class="install-cmds mono">{{ g.marketplace }} · {{ g.pkg }}</div>
+          <div v-if="installError" class="install-error" :data-testid="`cleanup-install-error-${g.source}`">
+            {{ installError }}
+          </div>
         </div>
         <button
           class="install-btn"
           :data-testid="`cleanup-install-${g.source}`"
+          :disabled="installing"
           @click="emit('install', g)"
         >
-          ⤓ Download to project
+          {{ installing ? 'Installing…' : '⤓ Download to project' }}
         </button>
       </div>
     </div>
+
+    <!-- A cleanup command runs in the background session, so this tab had no way
+         to show that anything was happening: the output was arriving in a
+         session the developer never opens. -->
+    <MiniTerminal v-if="sessionId" :session-id="sessionId" label="running" />
   </div>
 </template>
 
@@ -291,6 +307,12 @@ function run(command: string): void {
 .install-title {
   font-size: var(--fs-ui);
   color: var(--text-body);
+}
+
+.install-error {
+  margin-top: 6px;
+  font-size: var(--fs-micro);
+  color: var(--red);
 }
 
 .install-cmds {

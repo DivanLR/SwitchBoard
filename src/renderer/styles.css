@@ -1150,6 +1150,14 @@ html.sb-light .btn-solid {
   padding-bottom: 3px;
 }
 
+/* The block caret occupies a whole character cell, so on an empty composer it
+   sits ON the placeholder's first letter and eats the S of "Send a message".
+   The placeholder has done its job by the time you are focused and about to
+   type, so it steps aside rather than being sat on. */
+.composer-input:focus::placeholder {
+  color: transparent;
+}
+
 /* Typed text exactly matches a known /command — tint it so the match is clear. */
 /* First token is a command: hide the input's own text (keep the caret) and let
    the ghost mirror colour the command green while the arguments stay normal. */

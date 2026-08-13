@@ -323,6 +323,33 @@ export function sandboxToolsFor(projectPath: string): readonly SuiteTool[] {
  * notice states the truth up front instead — same rule as "browser is not in the
  * bypass container". Unreadable folder → null: a wrong warning is worse than none.
  */
+/**
+ * The directory git commands should actually run in for a project.
+ *
+ * The project root when it is a repository, and otherwise the single
+ * sub-directory that is one. That second case is not exotic: a .NET repository
+ * is routinely registered by its containing folder while the solution and the
+ * .git live one level down, which is the same layout stackEntries already walks
+ * for solution files. Detection coped with it and git did not, so the Tests
+ * section found seven suites for a project whose Diff tab said there was no
+ * repository at all.
+ *
+ * Null when there is no repository at or just below the root. Deliberately only
+ * ONE level: deeper would start guessing which of several nested repositories a
+ * developer meant.
+ */
+export function gitRoot(projectPath: string): string | null {
+  try {
+    if (existsSync(join(projectPath, '.git'))) return projectPath
+    const sub = readdirSync(projectPath, { withFileTypes: true }).find(
+      (entry) => entry.isDirectory() && existsSync(join(projectPath, entry.name, '.git')),
+    )
+    return sub ? join(projectPath, sub.name) : null
+  } catch {
+    return null
+  }
+}
+
 export function gitNotice(projectPath: string): string | null {
   try {
     const dotGit = join(projectPath, '.git')
