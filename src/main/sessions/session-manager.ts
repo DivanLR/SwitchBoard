@@ -114,6 +114,9 @@ export interface HostedEntry {
   /** Started by a section rather than by the developer, so nobody is sitting in
    *  it and it can close itself when its work is done (see endIfIdleBackground). */
   background: boolean
+  /** Whether a turn has ever completed here. A new session reads as idle before
+   *  the section that asked for it has sent anything. */
+  ranATurn: boolean
 }
 
 /**
@@ -704,6 +707,7 @@ export class SessionManager {
       live: new Map(),
       containerised,
       background: opts?.background === true,
+      ranATurn: false,
       session: null as unknown as HostedSession,
     }
 
@@ -871,6 +875,7 @@ export class SessionManager {
           this.pushStatus(entry)
         },
         onTurnComplete: () => {
+          entry.ranATurn = true
           this.observeBranch(entry)
           // A completed turn that left the session idle pulls the next planned task.
           this.maybeDrainQueue(entry.row.projectId)
@@ -1534,6 +1539,7 @@ export class SessionManager {
    */
   private async endIfIdleBackground(entry: HostedEntry): Promise<void> {
     if (!entry.background) return
+    if (!entry.ranATurn) return
     const id = entry.row.id
     if (this.verifyWatch.has(id) || this.apiWatch.has(id) || this.evalWatch.has(id)) return
     if (this.repos.taskQueue.listForProject(entry.row.projectId).length > 0) return

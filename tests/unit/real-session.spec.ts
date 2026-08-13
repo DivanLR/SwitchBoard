@@ -174,6 +174,49 @@ describe.runIf(enabled)('real AskUserQuestion routing (T021 watch item)', () => 
   )
 })
 
+describe.runIf(enabled)('a section dispatching to a session it just started', () => {
+  it(
+    'keeps the background session alive and gets its answer',
+    async () => {
+      const projectDir = mkdtempSync(join(tmpdir(), 'switchboard-bg-'))
+      const db = openDatabase(':memory:')
+      const repos = createRepositories(db)
+      const project = repos.projects.insert({ name: 'bg-smoke', path: projectDir, source: 'manual' })
+
+      const events: SessionEvent[] = []
+      const manager = new SessionManager(repos, {
+        onEvent: (event) => events.push(event),
+        onSessionStatus: () => {},
+        onCountersChanged: () => {},
+        onSessionExit: () => {},
+        onQueueChanged: () => {},
+        onEvalsChanged: () => {},
+        onVerifyChanged: () => {},
+        onApiRequests: () => {},
+        onApiChanged: () => {},
+        onProjectCommands: () => {},
+        gate: async () => ({ behavior: 'allow', updatedInput: {} }) as never,
+      })
+
+      const session = await manager.startSession(project.id, false, undefined, undefined, {
+        background: true,
+      })
+      manager.sendMessage(session.id, 'Reply with the single word DRAWN and nothing else.')
+
+      await vi.waitFor(() => expect(events.some((e) => e.kind === 'result')).toBe(true), WAIT)
+      const said = events
+        .filter((e) => e.kind === 'assistant_text')
+        .map((e) => (e.payload as { text: string }).text)
+        .join(' ')
+      expect(said.toUpperCase()).toContain('DRAWN')
+
+      await manager.stopSession(session.id)
+      db.close()
+    },
+    180_000,
+  )
+})
+
 describe.runIf(!enabled)('real Claude Code session (skipped)', () => {
   it('is opt-in: set REAL_SESSION=1 to run against a live session', () => {
     expect(enabled).toBe(false)

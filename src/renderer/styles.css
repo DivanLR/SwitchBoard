@@ -928,7 +928,6 @@ html.sb-light .btn-solid {
   flex: 1;
   overflow-y: auto;
   padding: 18px 22px;
-  /* A column, so the inner block can be pushed to the bottom. See below. */
   display: flex;
   flex-direction: column;
 }
@@ -947,12 +946,6 @@ html.sb-light .btn-solid {
   margin-top: auto;
 }
 
-/* Except when the pane is holding a CONTROL rather than a conversation. The
-   start panel and the empty state are the same children of .stream-inner as the
-   transcript, so bottom-anchoring pushed "start a session" to the floor of an
-   otherwise empty pane, under a screen of nothing. Content you are catching up
-   with belongs next to the composer; a thing you are being asked to DO belongs
-   where reading starts. */
 .stream-inner:has(> .ended),
 .stream-inner:has(> .stream-empty) {
   margin-top: 0;
