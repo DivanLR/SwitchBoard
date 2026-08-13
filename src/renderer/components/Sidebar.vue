@@ -1144,8 +1144,14 @@ async function confirmRemoveNow(): Promise<void> {
      row's real height, so a group header sticking at this offset would otherwise
      leave a one-pixel sliver of scrolling list showing above it. */
   --section-row-h: calc(var(--add-h) + 2 * var(--section-row-pad) + 1px);
-  width: 252px;
-  min-width: 252px;
+  /* 252px fitted a proportional face. The interface moved onto the character
+     grid, where a lowercase letter is roughly 0.6em wide instead of ~0.5em, so
+     the same project names stopped fitting and truncated to "storef…" and
+     "ml-pip…" — a lane you cannot read is a lane you cannot pick. Widened to
+     hold the same names on the wider grid rather than shrinking the names,
+     because the name is the one thing in the lane that has to be read. */
+  width: 288px;
+  min-width: 288px;
   background: var(--bg-panel);
   box-shadow: var(--hairline-shine);
   border-right: 1px solid var(--border);

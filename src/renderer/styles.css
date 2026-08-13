@@ -434,12 +434,20 @@ html.sb-light {
      that moved the old 9.5px floor onto 10.
      Everything gets one step larger and the gaps widen with it. Density drops a
      little, deliberately: this is a desktop app read for hours, not a chart. */
-  --fs-micro: 11px;
+  /* THREE SIZES, 2026-08-13. A terminal has a character grid, and a grid has
+     one cell size, not six. The six-step ramp lifted earlier the same day was
+     the right answer to the question being asked then (a proportional UI whose
+     tiers were 1px apart and unreadable); the question changed with the
+     direction. Twelve, fourteen, sixteen, nothing between: the tokens keep
+     their names so nothing has to be re-pointed, and three of them now share a
+     value with a neighbour. That collapse is the point rather than a shortcut,
+     because a grid with six sizes is not a grid. */
+  --fs-micro: 12px;
   --fs-meta: 12px;
-  --fs-ui: 13px;
+  --fs-ui: 14px;
   --fs-body: 14px;
-  --fs-title: 15.5px;
-  --fs-head: 17px;
+  --fs-title: 16px;
+  --fs-head: 16px;
   --scrim: rgba(10,11,13, 0.66);
   --shadow-dlg: 0 28px 70px rgba(0,0,0, 0.6), 0 0 0 1px rgba(244,244,242, 0.05) inset;
   --shadow-dd: 0 14px 36px rgba(0,0,0, 0.5);
@@ -474,7 +482,9 @@ body {
   margin: 0;
   height: 100%;
   color: var(--text);
-  font-family: var(--sans);
+  /* The terminal face carries the whole interface, not only the code plate.
+     See .mono below for the direction change this belongs to. */
+  font-family: var(--mono);
   font-size: var(--fs-body);
   overflow: hidden;
   --crease: rgba(244, 244, 242, 0.028);
@@ -751,8 +761,16 @@ html.sb-light .btn-solid {
  * Flipping the declaration rather than editing 406 call sites is deliberate: the
  * class is applied at exactly the places that wanted "not body prose", which is
  * the same set either way. Only the answer to what that means has changed. */
+/* FLIPPED BACK, 2026-08-13, on a new direction: a minimal Mac terminal. The
+   note above is kept because its reasoning was sound for the direction it
+   served, and this is not a correction of it. Chrome set in a UI face is right
+   when the product is an app that shows terminals. It is wrong when the product
+   IS the terminal, which is the direction now being asked for: the character
+   grid stops being a material the code plate wears and becomes the material
+   everything is cut from. The switch the previous author built for this is the
+   reason it costs one declaration instead of 406 edits. */
 .mono {
-  font-family: var(--sans);
+  font-family: var(--mono);
 }
 
 /* Text where the character grid is the point. Apply it deliberately; if a

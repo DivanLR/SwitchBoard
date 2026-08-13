@@ -1,6 +1,6 @@
 ---
 name: Switchboard
-description: A Miura-fold sheet, scored and folded flat, deployed by one pull.
+description: A minimal Mac terminal. One character grid, three sizes, restrained chrome.
 colors:
   sheet-carbon: "#17181B"
   sheet-cornflower: "#F4F6F9"
