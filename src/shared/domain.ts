@@ -445,7 +445,6 @@ export interface SwallowRule {
   enabled: boolean
 }
 
-export type TerseLevel = 'lite' | 'full' | 'ultra'
 
 /** A collapsible sidebar group holding projects; array order is display order. */
 export interface ProjectGroup {
@@ -553,13 +552,6 @@ export interface Settings {
    * workers). Forcing a mode pins every work turn to that pattern.
    */
   modelMode: ModelMode
-  /**
-   * Terse (caveman-style) output mode: appends a concise-style instruction to
-   * every hosted session's system prompt so the model generates fewer output
-   * tokens. Reduces output tokens only; code, commands and errors are preserved.
-   */
-  terseMode: boolean
-  terseLevel: TerseLevel
   /**
    * Heavy subagent mode: instructs every hosted session to decompose work and
    * fan it out across as many subagents as the task graph allows, rather than
@@ -677,8 +669,6 @@ export const DEFAULT_SETTINGS: Settings = {
   workerModel: 'claude-sonnet-5',
   autoModelRouting: true,
   modelMode: 'auto',
-  terseMode: true,
-  terseLevel: 'full',
   // Off by default: fan-out is the right default for big work and the wrong one
   // for a one-line fix, and the user is the one who knows which this is.
   heavySubagents: false,

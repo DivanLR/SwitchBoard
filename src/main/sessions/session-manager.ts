@@ -35,12 +35,10 @@ import { HostedSession, type PermissionGate } from './session'
 import { probeAvailableModels } from './model-catalog'
 import { foldModelTotals, type EventSink } from './message-mapper'
 import {
-  adhdSystemPromptAppend,
   heavySubagentSystemPromptAppend,
   heavySubagentModelMode,
   modesSystemPromptAppend,
   sandboxSystemPromptAppend,
-  terseSystemPromptAppend,
 } from './session-shaping'
 import {
   TRANSCRIPT_EVENT_CAP,
@@ -717,13 +715,6 @@ export class SessionManager {
     // injected as context on every session start (no-op when never scanned).
     // Scans are per-combination now: prefer the ACTIVE combination's doc and
     // fall back to the legacy single db-schema.md from before the split.
-    const terseAppend = terseSystemPromptAppend({
-      terseMode: settings.terseMode,
-      terseLevel: settings.terseLevel,
-    })
-    // ADHD output style as the backbone — on when the global i-have-adhd
-    // always-on flag is set, so app sessions match every other Claude session.
-    const adhdAppend = adhdSystemPromptAppend()
     const activeCombo = settings.mcpActiveServers ?? []
     const schemaDoc = (
       (activeCombo.length > 0 ? readComboDoc(project.path, activeCombo) : null) ??
@@ -786,8 +777,6 @@ export class SessionManager {
           // prefix ahead of it.
           [
             sandboxAppend,
-            adhdAppend,
-            terseAppend,
             modesAppend,
             heavyAppend,
             schemaAppend,

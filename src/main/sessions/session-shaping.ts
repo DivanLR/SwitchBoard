@@ -1,103 +1,19 @@
 // Everything Switchboard injects into every hosted session: the system-prompt
-// appends (output style and the cost-aware mode protocol) and the two mode
-// subagents. One module because they are one decision per session start, applied
+// appends (sandbox notes, heavy-subagent mode and the cost-aware mode protocol)
+// and the two mode subagents. One module because they are one decision per session start, applied
 // at one call site in session-manager, and the mode instructions and the mode
 // subagents must always describe the same pair.
 //
-// All the text here is authored, not third-party: it compresses or shapes the
-// PROSE the model writes back without touching the user's prompts or the context
-// the model reads. Code, commands, paths, identifiers, configuration and error
-// text are preserved byte-for-byte by every level.
-import { existsSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
-import type { AgentDefinition } from '@anthropic-ai/claude-agent-sdk'
-import type { ModelMode, TerseLevel } from '@shared/domain'
-import { effortForRole, type ModelRole } from './model-routing'
-
-// --- Terse output mode (Settings → Terminals) ---
-// Inspired by the caveman skill's premise; the text is original.
-
-const PRESERVE_CLAUSE =
-  'Never abbreviate, reword, or omit code, shell commands, file paths, identifiers, ' +
-  'configuration values, numeric results, or error messages. Reproduce all of those exactly. ' +
-  'Never trade technical accuracy or a required step for brevity.'
-
-// The instruction is prefixed with a hard directive so it is not diluted by the
-// large Claude Code preset system prompt it is appended to. It is repeated at
-// the end so it frames the response on both sides of the preset.
-const HEADER =
-  '## MANDATORY OUTPUT STYLE — THIS OVERRIDES DEFAULT VERBOSITY AND FORMATTING.\n' +
-  'This is a hard constraint, not a preference. It takes precedence over any default ' +
-  'tendency to write at length, add preamble, or restate the request. Apply it to EVERY ' +
-  'response you produce for the rest of this session, including the very first one.\n'
-
-const REINFORCE =
-  '\nReminder: the output-style constraint above is mandatory for this and every later ' +
-  'reply. If a reply reads like normal prose, it is too long — cut it.'
-
-const LEVEL_INSTRUCTIONS: Record<TerseLevel, string> = {
-  lite:
-    HEADER +
-    'Level: LITE. Trim filler, pleasantries, hedging, and preamble. Lead with the conclusion. ' +
-    'Prefer short sentences. Keep enough words to stay clear. ' +
-    PRESERVE_CLAUSE +
-    REINFORCE,
-  full:
-    HEADER +
-    'Level: TERSE (caveman). Compress prose hard. Telegraphic style: drop articles ' +
-    '("the", "a", "an"), drop filler and hedging, drop pleasantries, never restate the ' +
-    'question, no preamble. Use sentence fragments and bullet points, not full sentences. ' +
-    'Conclusion first, then only load-bearing detail. ' +
-    'Aim for well under half the words you would normally use. ' +
-    PRESERVE_CLAUSE +
-    REINFORCE,
-  ultra:
-    HEADER +
-    'Level: ULTRA. Maximum prose compression. Telegraphic fragments only: no articles, no ' +
-    'droppable pronouns, no filler, no restating the question, no preamble. One idea per line, ' +
-    'bullets over sentences, symbols/arrows where clearer than words. ' +
-    PRESERVE_CLAUSE +
-    REINFORCE,
-}
-
-/** The append string for the given settings, or null when terse mode is off. */
-export function terseSystemPromptAppend(options: {
-  terseMode: boolean
-  terseLevel: TerseLevel
-}): string | null {
-  if (!options.terseMode) return null
-  return LEVEL_INSTRUCTIONS[options.terseLevel] ?? LEVEL_INSTRUCTIONS.full
-}
-
-// --- ADHD output style ---
-// The compact ruleset the i-have-adhd project recommends embedding in
-// instruction files, so sessions Switchboard spawns are shaped the same way as
-// the global always-on plugin: action-first, numbered, no preamble. Gated on the
-// SAME opt-in as that plugin, the flag file `$CLAUDE_CONFIG_DIR/.i-have-adhd-always`
-// (default `~/.claude`), so one switch governs both.
+// All the text here is authored, not third-party.
 //
-// Reuses terse's HEADER and PRESERVE_CLAUSE rather than restating either: this can
-// fire alongside terse mode, and two differently-worded "this overrides everything"
-// headers in one system prompt dilute each other rather than reinforcing.
-
-const ADHD_APPEND =
-  HEADER +
-  'Shape each reply so it can be acted on:\n' +
-  '1. Lead with the answer or next action: command, path, or snippet first.\n' +
-  '2. Number multi-step work; state which step this is (e.g. "step 3 of 5"), one ' +
-  'bounded action per step.\n' +
-  '3. End with one next action doable in under two minutes.\n' +
-  '4. Finish the current issue before raising a new one.\n' +
-  '5. Give time estimates in concrete units, never "a bit".\n' +
-  '6. After a change, show what now works.\n' +
-  '7. Errors: state location, cause, and fix. No drama.\n' +
-  '8. Cap lists at 5 items; rank rather than pad.\n' +
-  '9. No preamble, no recaps, no closers.\n' +
-  'Exceptions: explain fully when asked to explain; confirm before destructive ' +
-  'actions; after three failed fixes, stop and name the doubtful assumption; if ' +
-  'the request is ambiguous, ask one short question. ' +
-  PRESERVE_CLAUSE
+// The terse output mode and the ADHD output style were removed on 2026-08-14 at
+// the owner's direction: a standing answer-style preference now governs prose, so
+// a per-session instruction telling the model how to write was redundant. The
+// ADHD accessor was already inert, gated on a flag file created by a plugin that
+// is no longer installed.
+import type { AgentDefinition } from '@anthropic-ai/claude-agent-sdk'
+import type { ModelMode } from '@shared/domain'
+import { effortForRole, type ModelRole } from './model-routing'
 
 // --- Heavy subagent mode ---
 // One thread is the wrong shape for work that decomposes: a five-file audit is
@@ -208,12 +124,6 @@ export function sandboxSystemPromptAppend(
     'A path in the developer\'s message has already been translated to its container path, so use ' +
     'it as given.'
   )
-}
-
-/** The ADHD append when the always-on flag file is present, else null. */
-export function adhdSystemPromptAppend(): string | null {
-  const dir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
-  return existsSync(join(dir, '.i-have-adhd-always')) ? ADHD_APPEND : null
 }
 
 // --- Advisor / Orchestrator model modes (the Fable-5 era cost patterns) ---

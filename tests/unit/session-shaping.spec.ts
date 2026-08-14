@@ -1,17 +1,16 @@
-// What the app injects into every session: output-style appends and the
-// Advisor/Orchestrator mode protocol.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+// What the app injects into every session: the sandbox note, heavy-subagent mode
+// and the Advisor/Orchestrator mode protocol.
+//
+// The terse and ADHD output-style appends were removed on 2026-08-14, and the
+// temp-directory fixtures went with them: only the ADHD accessor touched the
+// filesystem, to read its opt-in flag file.
+import { describe, expect, it } from 'vitest'
 import {
-  adhdSystemPromptAppend,
   heavySubagentModelMode,
   heavySubagentSystemPromptAppend,
   modeAgents,
   modesSystemPromptAppend,
   sandboxSystemPromptAppend,
-  terseSystemPromptAppend,
 } from '@main/sessions/session-shaping'
 
 describe('heavySubagentSystemPromptAppend', () => {
@@ -56,31 +55,6 @@ describe('heavySubagentModelMode', () => {
   })
 })
 
-describe('terseSystemPromptAppend', () => {
-  it('returns null when terse mode is off', () => {
-    expect(terseSystemPromptAppend({ terseMode: false, terseLevel: 'full' })).toBeNull()
-  })
-
-  it('returns a level-specific instruction when on', () => {
-    const lite = terseSystemPromptAppend({ terseMode: true, terseLevel: 'lite' })
-    const full = terseSystemPromptAppend({ terseMode: true, terseLevel: 'full' })
-    const ultra = terseSystemPromptAppend({ terseMode: true, terseLevel: 'ultra' })
-    expect(lite).toContain('LITE')
-    expect(full).toContain('OUTPUT STYLE')
-    expect(ultra).toContain('ULTRA')
-    expect(lite).not.toBe(full)
-    expect(full).not.toBe(ultra)
-  })
-
-  it('always preserves code, commands, and errors byte-for-byte', () => {
-    for (const level of ['lite', 'full', 'ultra'] as const) {
-      const text = terseSystemPromptAppend({ terseMode: true, terseLevel: level })
-      expect(text).toMatch(/code|commands|error/i)
-      expect(text).toMatch(/reproduce|preserv|exactly/i)
-    }
-  })
-})
-
 describe('modesSystemPromptAppend', () => {
   it('teaches only the forced pattern, and both under auto', () => {
     const advisor = modesSystemPromptAppend('advisor')
@@ -100,15 +74,6 @@ describe('modesSystemPromptAppend', () => {
       expect(text).toContain('`advisor`')
       expect(text).toContain('`worker`')
     }
-  })
-
-  it('never both forbids and mandates a closing summary on a default session', () => {
-    // Default settings: terseMode true, terseLevel 'full', modelMode 'auto' — all three
-    // fire together, so this is the combination an audit actually saw.
-    const terse = terseSystemPromptAppend({ terseMode: true, terseLevel: 'full' }) ?? ''
-    const modes = modesSystemPromptAppend('auto')
-    expect(terse).not.toMatch(/no closing summary/i)
-    expect(modes).toContain('ONE SUMMARY')
   })
 
   it('states the advisor cap once, in the agent description, not again in the protocol text', () => {
@@ -146,48 +111,3 @@ describe('sandboxSystemPromptAppend prose', () => {
   })
 })
 
-describe('adhdSystemPromptAppend', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'switchboard-adhd-'))
-  const originalConfigDir = process.env.CLAUDE_CONFIG_DIR
-
-  beforeEach(() => {
-    process.env.CLAUDE_CONFIG_DIR = dir
-  })
-
-  afterEach(() => {
-    if (originalConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
-    else process.env.CLAUDE_CONFIG_DIR = originalConfigDir
-    rmSync(join(dir, '.i-have-adhd-always'), { force: true })
-  })
-
-  it('returns null when the flag file is absent', () => {
-    expect(adhdSystemPromptAppend()).toBeNull()
-  })
-
-  it('shares one output-style header with terse mode, not a competing one', () => {
-    mkdirSync(dir, { recursive: true })
-    writeFileSync(join(dir, '.i-have-adhd-always'), '')
-    const adhd = adhdSystemPromptAppend() ?? ''
-    const terse = terseSystemPromptAppend({ terseMode: true, terseLevel: 'lite' }) ?? ''
-    // Same header text, not a second "THIS OVERRIDES" claim competing with it.
-    const sharedHeader = 'MANDATORY OUTPUT STYLE — THIS OVERRIDES DEFAULT VERBOSITY AND FORMATTING.'
-    expect(adhd).toContain(sharedHeader)
-    expect(terse).toContain(sharedHeader)
-    expect(adhd).not.toContain('ADHD READER')
-  })
-
-  it('routes the preserve rule through the shared constant instead of restating it', () => {
-    mkdirSync(dir, { recursive: true })
-    writeFileSync(join(dir, '.i-have-adhd-always'), '')
-    const adhd = adhdSystemPromptAppend() ?? ''
-    expect(adhd).toContain('Never abbreviate, reword, or omit code')
-  })
-
-  it('does not both mandate restating progress and forbid recaps', () => {
-    mkdirSync(dir, { recursive: true })
-    writeFileSync(join(dir, '.i-have-adhd-always'), '')
-    const adhd = adhdSystemPromptAppend() ?? ''
-    expect(adhd).not.toMatch(/restate progress/i)
-    expect(adhd).toContain('No preamble, no recaps, no closers')
-  })
-})

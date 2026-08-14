@@ -93,7 +93,6 @@ interface HostedSessionOptions {
    *  resume needs it to open the ancestor's home volume, where the transcript the
    *  SDK is being asked to resume actually lives (see homeVolumeFor). */
   resumeFromSessionId?: string
-  /** Terse-mode instruction appended to the Claude Code system prompt, if enabled. */
   systemPromptAppend?: string
   /** Path to the bundled standalone Claude executable (avoids the Electron spawn crash). */
   claudeExecutablePath?: string
@@ -327,8 +326,8 @@ export class HostedSession {
             : undefined,
         permissionMode: resolvePermissionMode(this.options.mode),
         allowDangerouslySkipPermissions: this.bypassing ? true : undefined,
-        // Append-only: keeps Claude Code's own system prompt and adds the terse
-        // output-style instruction on top when terse mode is enabled.
+        // Append-only: keeps Claude Code's own system prompt and adds this app's
+        // own session shaping on top.
         systemPrompt: this.options.systemPromptAppend
           ? { type: 'preset', preset: 'claude_code', append: this.options.systemPromptAppend }
           : undefined,

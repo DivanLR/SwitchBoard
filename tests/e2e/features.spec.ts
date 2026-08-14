@@ -56,16 +56,6 @@ test('the picker follows the account: a new model appears, a retired one goes', 
   await expect(panel.getByTestId('intelligent-model-default')).toBeVisible()
 })
 
-test('settings Terminals tab explains terse mode and its levels', async ({ page }) => {
-  await page.getByTestId('open-settings').click()
-  const panel = page.getByTestId('settings-panel')
-  await panel.getByTestId('settings-tab-term').click()
-  await expect(panel.getByTestId('setting-terse-mode')).toBeVisible()
-  // Terse level cards are shown with explanations while terse mode is on.
-  await expect(panel.getByTestId('terse-level-full')).toBeVisible()
-  await expect(panel).toContainText('conclusion first')
-})
-
 test('settings has a This project tab with a per-project model override', async ({ page }) => {
   await page.getByTestId('open-settings').click()
   const panel = page.getByTestId('settings-panel')
