@@ -33,8 +33,18 @@ const anyWorking = computed(() =>
 
 <template>
   <div class="statusbar mono" data-testid="statusbar">
+    <!-- Each mark takes the hue its own reading already uses. RUN was drawn in
+         --blue, the ATTENTION-OWED hue, which is byte-identical to the --amber
+         that WAIT's figure beside it is set in: two readings, one hue, told apart
+         by their labels alone. A running lane is --running everywhere else on the
+         board, so it is --running here.
+         WAIT stays on the attention hue and does NOT take --idle, even though
+         --idle is the warm amber a status row conventionally wants: this theme's
+         --idle is declared a BAR colour only, never a glyph, precisely so it is
+         never asked to be told apart from the red error mark at the same shape
+         and size — which is exactly what a 6px dot is. See styles.css. -->
     <span class="sb-stat" data-testid="counter-running">
-      <span class="sb-dot" style="background: var(--blue)"></span>
+      <span class="sb-dot" style="background: var(--running)"></span>
       <span class="sb-label">run</span>
       <span class="sb-val" data-testid="counter-running-value">{{ projects.counters.running }}</span>
     </span>
@@ -114,10 +124,13 @@ const anyWorking = computed(() =>
   color: var(--amber);
 }
 
+/* A mark in this world is a cut square, not a bead: --sq is 0 on carbon and 2px
+   on the light sheet, and every other state mark in the app already reads it.
+   These two were the last hard-coded circles. */
 .sb-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--sq);
 }
 
 /* A separator, not a divider: the same hairline the panes use, one glyph high. */

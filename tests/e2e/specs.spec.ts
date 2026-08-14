@@ -70,11 +70,24 @@ test('a project with specs shows chips, progress, and tasks', async ({ page }) =
   await expect(page.getByTestId('spec-sections')).toContainText('Version cart state')
 })
 
-test('the composer stays visible on the Specs tab (chat is always reachable)', async ({ page }) => {
+// Policy change: the composer belongs to the transcript it types into. Off the
+// Session tab it was a second, quieter place to type the same thing, which made
+// every pane look like a chat window that happened to also list tasks.
+test('the composer is hidden off the Session tab', async ({ page }) => {
   await page.getByTestId('tab-specs').click()
-  await expect(page.getByTestId('composer-input')).toBeVisible()
+  await expect(page.getByTestId('composer-input')).toHaveCount(0)
   await page.getByTestId('tab-session').click()
   await expect(page.getByTestId('composer-input')).toBeVisible()
+})
+
+// The one exception, and the reason the rule is not unconditional: Refine sends a
+// section back to the agent, so it needs somewhere to type without leaving Specs.
+test('Refine brings the composer back while staying on the Specs tab', async ({ page }) => {
+  await seedSpec(page)
+  await page.getByTestId('part-spec').click()
+  await page.getByTestId('refine-Summary').click()
+  await expect(page.getByTestId('composer-input')).toBeVisible()
+  await expect(page.getByTestId('specs-view')).toBeVisible()
 })
 
 test('+ New spec opens a description popup that runs /speckit-specify', async ({ page }) => {

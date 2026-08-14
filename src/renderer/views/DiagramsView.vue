@@ -142,11 +142,10 @@ watch(
 </script>
 
 <template>
-  <div class="diagrams" data-testid="diagrams-view">
+  <div class="dgm" data-testid="diagrams-view">
     <div class="intro">
       Describe a diagram and the project's session will draw it with the diagram-design plugin, as a
-      standalone HTML file in <span class="mono">{{ DIAGRAMS_DIR }}</span
-      >.
+      standalone HTML file in <span class="mono">{{ DIAGRAMS_DIR }}</span>.
     </div>
 
     <div v-if="!installed" class="install-card">
@@ -155,24 +154,17 @@ watch(
           diagram-design is not installed in this project — add it to generate diagrams
         </div>
         <div class="install-cmds mono">{{ DIAGRAM_PLUGIN.marketplace }} · {{ DIAGRAM_PLUGIN.pkg }}</div>
-        <!-- Named, not swallowed: this install used to fail silently, so the one
-             thing it must never do again is look identical to doing nothing. -->
         <div v-if="installError" class="install-error" data-testid="diagrams-install-error">
           {{ props.installError }}
         </div>
       </div>
-      <button
-        class="install-btn"
-        data-testid="diagrams-install"
-        :disabled="props.installing"
-        @click="emit('install')"
-      >
+      <button class="install-btn" data-testid="diagrams-install" :disabled="props.installing" @click="emit('install')">
         <template v-if="props.installing">Installing…</template>
         <template v-else><Icon name="download" :size="12" /> Download to project</template>
       </button>
     </div>
 
-    <div class="add">
+    <div class="bar">
       <input
         v-model="description"
         class="in"
@@ -181,26 +173,12 @@ watch(
         :disabled="diagrams.generating"
         @keydown.enter="generate()"
       />
-      <button
-        class="add-btn"
-        data-testid="diagram-generate"
-        :disabled="diagrams.generating || !description.trim()"
-        @click="generate()"
-      >
+      <button class="add-btn" data-testid="diagram-generate" :disabled="diagrams.generating || !description.trim()" @click="generate()">
         <template v-if="diagrams.generating">Asking…</template>
         <template v-else><Icon name="pencil" :size="12" /> Generate</template>
       </button>
-
-      <!-- What else this plugin can do. Drawing is the box to the left; these
-           are its other three commands, which were previously reachable only by
-           knowing they existed and typing one into the conversation. -->
       <div class="cmds">
-        <button
-          class="cmd-btn"
-          data-testid="diagram-commands"
-          :aria-expanded="menuOpen"
-          @click="menuOpen = !menuOpen"
-        >
+        <button class="cmd-btn" data-testid="diagram-commands" :aria-expanded="menuOpen" @click="menuOpen = !menuOpen">
           Commands <Icon name="chevron-down" :size="11" />
         </button>
         <div v-if="menuOpen" class="cmd-menu" data-testid="diagram-command-menu">
@@ -220,34 +198,17 @@ watch(
         </div>
       </div>
     </div>
-    <!-- Click anywhere else to dismiss, without a document listener: the menu is
-         the only thing that opens one, and it closes itself when it acts. -->
     <div v-if="menuOpen" class="cmd-scrim" @click="menuOpen = false"></div>
     <div v-if="diagrams.error" class="err" data-testid="diagram-error">{{ diagrams.error }}</div>
 
-    <!-- A command runs in the section's own background session, which nobody
-         opens, so its output belongs here. -->
     <MiniTerminal v-if="props.sessionId && !pending" :session-id="props.sessionId" label="running" />
 
-    <!-- The row for a diagram that has been asked for and is not on disk yet. It
-         names the file the app already chose, so the wait has something to point
-         at rather than an empty list for a minute. -->
-    <div
-      v-if="pending"
-      class="row pending"
-      data-testid="diagram-pending"
-      :aria-busy="true"
-    >
+    <div v-if="pending" class="row pending" data-testid="diagram-pending" :aria-busy="true">
       <div class="row-head">
         <span class="file mono">{{ pending.file }}</span>
         <span class="when mono">drawing…</span>
       </div>
       <div class="desc">{{ pending.description }}</div>
-      <div class="row-meta">
-        <span class="chip mono">running in the background</span>
-      </div>
-      <!-- The session drawing it is one the developer never opens, so without
-           this the wait is a minute of a static word. -->
       <MiniTerminal :session-id="pending.sessionId" label="drawing" />
     </div>
 
@@ -256,69 +217,225 @@ watch(
       this project.
     </div>
 
-    <!-- Two panes: what you have drawn, and the one you are looking at. The list
-         is narrow on purpose — it is a way back to a diagram, not a report about
-         one, so the detail sits under the picture instead of in every row. -->
-    <div v-if="list.length > 0" class="split">
-      <div class="past" data-testid="diagram-list">
+    <!-- The explorer stretches; the diagram itself renders in a bounded rectangle
+         docked beside it. Chosen in live mode over a rail-and-stage split and a
+         tile grid; the tile grid lost because its thumbnails can only render a
+         diagram the store has already read, so most tiles would sit empty. -->
+    <div v-if="list.length > 0" class="body">
+      <div class="table" data-testid="diagram-list">
+        <div class="thead">
+          <span>{{ DIAGRAMS_DIR }}</span><span class="r">modified</span>
+        </div>
         <button
           v-for="d in list"
           :key="d.file"
           type="button"
-          class="past-row"
-          :class="{ sel: d.file === selected }"
+          class="trow"
+          :class="{ on: d.file === selected }"
           :data-testid="`diagram-row-${d.file}`"
           :title="`${d.file} — double-click to open in your browser`"
           @click="diagrams.select(projectId, d.file)"
           @dblclick="diagrams.open(projectId, d.file)"
         >
-          <span class="past-name mono">{{ d.file.replace(/\.html$/, '') }}</span>
-          <span class="past-when mono">{{ ago(d.modifiedAt) }}</span>
+          <span class="nm">{{ d.file.replace(/\.html$/, '') }}</span>
+          <span class="ag">{{ ago(d.modifiedAt) }}</span>
         </button>
       </div>
-
-      <div class="view">
-        <div class="view-head">
-          <span class="file mono">{{ selectedEntry?.file ?? '—' }}</span>
-          <span class="spacer"></span>
-          <span v-if="selectedEntry?.sessionId" class="chip mono" :title="selectedEntry.sessionId">
-            session {{ selectedEntry.sessionId.slice(0, 8) }}
-          </span>
-          <button
-            v-if="selected"
-            class="act"
-            :data-testid="`diagram-open-${selected}`"
-            @click="diagrams.open(projectId, selected)"
-          >
-            <Icon name="external" :size="12" /> Open in browser
-          </button>
+      <div class="dock">
+        <span class="fn mono">{{ selectedEntry?.file ?? '—' }}</span>
+        <div class="mini">
+          <!-- Scripts refused twice over: no allow-scripts on the frame, and the
+               app's own CSP (script-src 'self') reaches srcdoc content. Never add
+               allow-scripts here. -->
+          <iframe
+            v-if="selectedHtml !== undefined"
+            data-testid="diagram-frame"
+            sandbox=""
+            referrerpolicy="no-referrer"
+            :title="selectedEntry?.file ?? 'diagram'"
+            :srcdoc="selectedHtml"
+          ></iframe>
+          <div v-else class="frame-wait mono">reading…</div>
         </div>
         <div v-if="selectedEntry?.description" class="desc">{{ selectedEntry.description }}</div>
-        <!-- The diagram is HTML this app asked a model to write into the repo. It
-             renders with scripts refused twice over: the frame carries no
-             allow-scripts, and the app's own CSP (script-src 'self') applies to
-             srcdoc content. A diagram that wanted to run code renders as the
-             picture it is. Never add allow-scripts here. -->
-        <iframe
-          v-if="selectedHtml !== undefined"
-          class="frame"
-          data-testid="diagram-frame"
-          sandbox=""
-          referrerpolicy="no-referrer"
-          :title="selectedEntry?.file ?? 'diagram'"
-          :srcdoc="selectedHtml"
-        ></iframe>
-        <div v-else class="frame-wait mono">reading…</div>
+        <!-- Which session drew it. Dropped by the accepted live variant and
+             restored here: a diagram is an artefact of a particular run, and the
+             run is how you find what was asked for. -->
+        <span v-if="selectedEntry?.sessionId" class="chip mono" :title="selectedEntry.sessionId">
+          session {{ selectedEntry.sessionId.slice(0, 8) }}
+        </span>
+        <button v-if="selected" class="act" :data-testid="`diagram-open-${selected}`" @click="diagrams.open(projectId, selected)">
+          <Icon name="external" :size="12" /> Open in browser
+        </button>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.diagrams {
+/* The section stretches to the pane rather than scrolling as one long column:
+   the explorer owns the scroll, so the composer bar and the docked preview stay
+   put while a long list moves under them. Chosen in live mode.
+
+   These rules live HERE, in the SFC's own style block, and not in a <style> tag
+   inside <template>. That is not a preference: Vue's compiler rejects a template
+   containing <style> outright ("Tags with side effect (<script> and <style>) are
+   ignored in client component templates"), so a preview stylesheet written into
+   the template breaks the component every time. See CLAUDE.md. */
+.dgm {
   flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 18px 0;
+}
+
+.bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bar .in {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Explorer left, bounded preview docked right. The dock stays beside rather than
+   under: baked from the accepted variant's parameter values. */
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 12px;
+  padding-bottom: 12px;
+}
+
+.table {
+  /* Narrow on purpose: this is a way back to a diagram, not a report about one,
+     so it gives its width to the page being read. Widened 200px -> 240px on the
+     owner's direction: at 200 the longer generated filenames were ellipsing, and
+     a list you cannot read names in is not a way back to anything. */
+  flex: 0 0 240px;
+  min-width: 0;
+  min-height: 0;
   overflow-y: auto;
-  padding: 18px 22px 52px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--rc);
+  box-shadow: var(--elev);
+}
+
+.thead,
+.trow {
+  display: grid;
+  grid-template-columns: 1fr 84px;
+  gap: 10px;
+  align-items: baseline;
+  /* 6px is the accepted "snug" row height, substituted for the parameter. */
+  padding: 6px 11px;
+}
+
+.thead {
+  position: sticky;
+  top: 0;
+  background: var(--bg-sticky);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--text-meta);
+}
+
+.thead .r {
+  text-align: right;
+}
+
+.trow {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--border-soft);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.trow:hover {
+  background: var(--bg-hover);
+}
+
+.trow.on {
+  background: var(--bg-active);
+}
+
+.trow .nm {
+  font-family: var(--mono);
+  font-size: var(--fs-meta);
+  color: var(--text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trow .ag,
+.trow .sz {
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  /* Figures in a column are compared, so they line up. */
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.dock {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* The filename reads as a caption under the page, not a heading over it. */
+.dock .fn {
+  order: 2;
+  text-align: center;
+}
+
+.dock .fn {
+  font-size: var(--fs-micro);
+  color: var(--text-mid);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The bounded rectangle the diagram renders into. Fixed aspect so a wide drawing
+   and a tall one are framed the same way. */
+/* Portrait, because these are HTML pages and a page is taller than it is wide.
+   HEIGHT-BOUND: the frame takes its height from the pane and derives its width
+   from the ratio, so it cannot overflow vertically at any window size;
+   max-width guards the other axis. */
+.mini {
+  order: 1;
+  flex: 1 1 auto;
+  align-self: center;
+  width: auto;
+  max-width: 100%;
+  min-height: 0;
+  aspect-ratio: 1 / 1.414;
+  overflow: hidden;
+  background: var(--diagram-page);
+  border: 1px solid var(--border-card);
+  border-radius: var(--rp);
+}
+
+.mini iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
 }
 
 .intro {
@@ -365,7 +482,7 @@ watch(
 .install-btn {
   flex-shrink: 0;
   white-space: nowrap;
-  background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
+  background: var(--green);
   color: var(--green-ink);
   font-weight: var(--w-em);
   font-size: var(--fs-meta);
@@ -412,7 +529,7 @@ watch(
   font-size: var(--fs-meta);
   font-weight: var(--w-em);
   color: var(--green-ink);
-  background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
+  background: var(--green);
   border-radius: var(--rc);
   cursor: pointer;
   white-space: nowrap;

@@ -333,7 +333,7 @@ function run(command: string): void {
 .install-btn {
   flex-shrink: 0;
   white-space: nowrap;
-  background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
+  background: var(--green);
   color: var(--green-ink);
   font-weight: var(--w-em);
   font-size: var(--fs-meta);

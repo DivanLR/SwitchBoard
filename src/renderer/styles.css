@@ -39,435 +39,236 @@
    real disagreement between the three palettes this was synthesised from, and
    it is settled here on the letter of the rule rather than on taste. */
 html.sb-light {
-  --bg: #F4F6F9;
-  --bg-panel: #EAEDF2;
-  --bg-sticky: #E2E6EC;
-  /* Pure white, per the reference: the card is the one surface that floats. */
+  /* THE TRACE on a light bench. The same instrument with its backlight up: a
+     neutral near-white ground, the same graticule discipline, and the same rule
+     that colour is spent only outside tolerance. Every accent is re-measured
+     against the light ground rather than transposed. */
+  --bg: #F7F8FA;
+  --bg-panel: #EEF0F3;
+  --bg-sticky: #E7EAEE;
   --bg-card: #FFFFFF;
-  --bg-card-alt: #F9FBFD;
-  --bg-code: #EEF1F5;
-  /* Washes subtract light, as they did on paper: a mark on a bright ground is
-     ink, never a lightening. The ink is --text-bright, not black, so every
-     wash stays inside the one hue family. */
-  --bg-hover: rgba(15, 19, 26, 0.045);
-  --bg-active: color-mix(in srgb, #0F131A 9%, transparent);
-  --bg-seg: rgba(15, 19, 26, 0.08);
-  --bg-chip: rgba(15, 19, 26, 0.05);
-  /* THE BOUNDARY TIERS. These three are a control's own edge — inputs, the
-     outline and quiet buttons, chips, segmented controls, dropdowns, context
-     menus, and the clickable rows in the Cleanup list — so each clears 3:1
-     against the surface behind it. Measured: 4.73, 3.08, 3.11. */
-  --border-strong: rgba(15, 19, 26, 0.6);
-  --border-seg: rgba(15, 19, 26, 0.47);
-  --border-card: rgba(15, 19, 26, 0.46);
-  /* THE SEPARATION TIERS. These rule one surface off another, and the two
-     surfaces already differ in tone, so the hairline is a second cue rather
-     than the only one. Held at the reference's own weight (1.2 to 1.4:1)
-     because that softness IS the modern read being asked for. Raising them to
-     3:1 was tried in one of the three source palettes and draws every card
-     edge as a mid-grey line. */
-  --border: rgba(15, 19, 26, 0.16);
-  --border-code: rgba(15, 19, 26, 0.14);
-  --border-card-alt: rgba(15, 19, 26, 0.13);
-  --border-soft: rgba(15, 19, 26, 0.11);
-  --border-hist: rgba(15, 19, 26, 0.1);
-  /* Cool blue-grey ink at the reference's own hue, so ink and ground are one
-     material lit two ways. Every tier carries real content, so every tier is
-     measured against the DARKEST of the three grounds it can land on
-     (--bg-panel), not the most flattering. Worst tier: 4.64:1. */
-  --text-bright: #0F131A;
-  --text-strong: #1B2027;
-  --text: #1B2027;
-  --text-title: #262B33;
-  --text-name: #22272E;
-  --text-prompt: #2D323A;
-  --text-body: #3A3F47;
-  --text-mid: #545961;
-  --text-meta: #5C6169;
-  --text-tab: #61666E;
-  --text-faint: #61666E;
-  --text-ghost: #61666E;
-  --text-noise: #656A72;
-  --text-label: #656A72;
-  /* Its own role, not a ramp step. Measured against the composites it actually
-     sits on rather than the flat ground: 6.02:1 on a hover wash, 5.48:1 on a
-     selected row. The ramp tier nearest it fails both. */
-  --text-on-wash: #4E535B;
-  /* THE ACTION COLOUR IS GREEN AGAIN. It was cornflower blue for one release,
-     taken from the reference wholesale; the owner asked for green back, so the
-     Cornflower NEUTRALS stay (cool canvas, white cards, soft hairlines, 6px
-     corners) and the accent returns to the foil green the dark sheet uses. The
-     two themes agree on hue once more, and this green is measured on the new
-     cooler grounds rather than inherited from the old paper ones: 5.73:1 as
-     text on the canvas, 5.28:1 on a panel, and 6.20:1 carrying white. */
-  --green: #136F45;
-  --green-hover: #0F5A38;
-  --green2: #115F3C;
+  --bg-card-alt: #FAFBFC;
+  --bg-code: #F0F2F5;
+
+  --bg-hover: rgba(20, 22, 26, 0.05);
+  --bg-active: rgba(20, 22, 26, 0.1);
+  --bg-seg: rgba(20, 22, 26, 0.09);
+  --bg-chip: rgba(20, 22, 26, 0.05);
+
+  --border: rgba(20, 22, 26, 0.14);
+  --border-card: rgba(20, 22, 26, 0.18);
+  --border-card-alt: rgba(20, 22, 26, 0.14);
+  --border-soft: rgba(20, 22, 26, 0.1);
+  --border-code: rgba(20, 22, 26, 0.12);
+  --border-strong: rgba(20, 22, 26, 0.55);
+  --border-seg: rgba(20, 22, 26, 0.35);
+  --border-hist: rgba(20, 22, 26, 0.1);
+
+  /* Measured against --bg-panel, the darkest ground any tier lands on:
+     14.6:1 at the brightest down to 5.2:1 at the palest. */
+  --text-bright: #14161A;
+  --text-strong: #1D2126;
+  --text: #23272D;
+  --text-title: #23272D;
+  --text-name: #23272D;
+  --text-prompt: #23272D;
+  --text-body: #2F343B;
+  --text-mid: #454C55;
+  --text-meta: #545B64;
+  --text-tab: #545B64;
+  --text-noise: #5E656E;
+  --text-label: #545B64;
+  --text-faint: #545B64;
+  --text-ghost: #5E656E;
+  --text-on-wash: #3A4048;
+
+  --green: #12766E;
+  --green-hover: #0D5E58;
+  --green2: #0D5E58;
   --green-ink: #FFFFFF;
-  /* The reference tints its primary shadow with the primary itself, and that is
-     the one place it lets a shadow carry hue. Kept, derived from the token so
-     it cannot drift from the fill. */
-  --green-glow:
-    0 1px 2px color-mix(in srgb, var(--green) 26%, transparent),
-    0 4px 10px color-mix(in srgb, var(--green) 16%, transparent);
-  /* A LIVE SESSION. Kept as its own token even now that it equals --green
-     again: --green is what an ACTION is drawn in, this is what a STATE is drawn
-     in, and the lane bar reads this one. They agreed in dark all along, and
-     disagreed in light for exactly one release, which is the whole argument for
-     the pair existing. 5.73:1 as text. */
-  --running: #136F45;
-  /* NO LIVE SESSION. The other half of the lane bar: orange where --running is
-     green. 4.02:1 at worst against a panel, comfortably past the 3:1 a non-text
-     mark needs, and a warmer, lighter orange than --amber so a lane bar is not
-     mistaken for the attention-owed glyph beside it. */
-  --idle: #A6640B;
-  /* An OFF switch track. It used to read --border-strong, which is a control's
-     boundary weight: 60% ink on a white card drew a near-black pill that looked
-     switched ON. A track is a surface, not an edge, so it gets its own token at
-     a surface's weight. */
-  --switch-off: rgba(15, 19, 26, 0.28);
-  /* Attention owed. See the note at the top on why this is not a bright gold.
-     5.54:1 as text, 6:1 carrying white. --blue holds the same value, as it
-     always has here. */
-  --blue: #8F5600;
-  --amber: #8F5600;
-  --amber-hover: #7A4700;
+  --green-glow: none;
+  --running: #12766E;
+  --idle: #8A5A12;
+  --blue: #8A5A12;
+  --amber: #8A5A12;
+  --amber-hover: #6E4709;
   --amber-ink: #FFFFFF;
-  /* Error, pushed darker than the reference's own destructive so it separates
-     from amber by LUMINANCE as well as hue: 1.34:1 between the two, where a
-     straight transposition of both left them within 1.15:1 of each other and
-     told apart by hue alone. The glyph and its plain-language title still do
-     the work colour cannot for anyone who cannot see the difference. */
-  --red: #A0141B;
-  --red-hover: #860F16;
+  --switch-off: rgba(20, 22, 26, 0.28);
+  --red: #A3282A;
+  --red-hover: #871D1F;
   --red-ink: #FFFFFF;
-  --detail: #545961;
-  /* Project identity, not state. Held to the same 4.5:1 floor because a lane
-     name is set in them. */
-  --teal: #1D6E80;
-  --purple: #6B4E9B;
+  --detail: #545B64;
+  --teal: #1F5F94;
+  --purple: #5B4494;
+
   --surface-inset: #FFFFFF;
-  --surface-inset-line: #D5DAE2;
-  --surface-line: #C9CFD8;
-  --surface-raised: #EAEDF2;
-  --surface-hover: #DDE1E8;
-  --surface-hover-line: #C2C8D2;
-  --surface-sunken: #EEF1F5;
-  --bg-panel-2: #E6E9EF;
-  /* LIGHTER HERE. Dark ink on a bright ground gains weight optically — the same
-     glyph that needs 500 to hold up in light-on-dark reads as bold in
-     dark-on-light, and this interface is monospace throughout, where a heavy
-     stroke closes the counters and costs the face its character. 400 is the
-     face's own regular; the emphasis in light mode is carried by the ink tier
-     and the surface a thing sits on, which is what the reference does. */
-  --w-em: 400;
-  /* Seven opaque tiers, each one step of 1.03 to 1.05:1 from its neighbour, in
-     an even flight rather than a stripe: no two steps are identical and every
-     seam also carries its own hairline. The old paper theme separated its tiers
-     by less than half this and left the hairlines too faint to register, which
-     is how a scrolled sidebar read as one plate. */
-  --elev: inset 0 1px 0 rgba(255, 255, 255, 0.65), 0 1px 2px rgba(15, 19, 26, 0.07);
-  /* A whisper. The reference caps its own elevation at 0.12 alpha and says
-     nothing shouts; a light card does not glaze itself. */
-  --gloss: linear-gradient(rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0));
-  /* The white lip along a pane's top edge. Theme-neutral until now, which meant
-     a 6%-white inset was inherited onto a near-white surface and vanished at
-     all eight of its call sites. On this ground the lip is the strongest cue
-     that a surface is raised, so it is opaque enough to actually read. */
+  --surface-inset-line: rgba(20, 22, 26, 0.14);
+  --surface-line: rgba(20, 22, 26, 0.18);
+  --surface-raised: #EEF0F3;
+  --surface-hover: #E3E6EB;
+  --surface-hover-line: rgba(20, 22, 26, 0.22);
+  --surface-sunken: #F0F2F5;
+  --bg-panel-2: #E9ECF0;
+
+  --sans: system-ui, -apple-system, 'Segoe UI', 'Inter', sans-serif;
+  --w-em: 500;
+  --elev: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 1px 2px rgba(20, 22, 26, 0.06);
+  --gloss: none;
   --hairline-shine: inset 0 1px 0 rgba(255, 255, 255, 0.8);
-  /* 6px HERE ONLY, on the owner's direction. The dark sheet keeps 0: a fold is
-     a cut, and that rule still governs carbon. This is the one place the two
-     themes differ in geometry rather than in colour, and it is what carries
-     most of the "modern" the reference is being asked for. */
-  --rc: 6px;
-  /* Tighter than --rc, deliberately. --rp is the idiom for a tag that REPORTS A
-     FIGURE — a count, a timer, a risk. At 6px on an 18px chip the curve eats
-     the digits and the idiom stops being distinguishable from a button. */
-  --rp: 4px;
+  --rc: 3px;
+  --rp: 2px;
+  --sq: 0px;
   --track-label: 0.08em;
-  --sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
-  /* Raised from 0.32. A dialogue on the light sheet sits over a board that is
-     itself near-white and densely packed, so at 0.32 the page behind it stayed
-     legible and competed with the thing asking for an answer. Changed HERE
-     rather than in the Settings dialog that prompted it: all three dialogues
-     read this one token, and giving one its own override is exactly the drift
-     that had to be undone once already. */
-  --scrim: rgba(15, 19, 26, 0.44);
-  /* Blue-tinted ink, capped at the reference's 0.12 ceiling. A dialogue is
-     seated by its own hairline plus a soft cast, not by a black drop. */
-  --shadow-dlg: 0 24px 60px rgba(15, 19, 26, 0.12), 0 0 0 1px rgba(15, 19, 26, 0.05) inset;
-  --shadow-dd: 0 12px 32px rgba(15, 19, 26, 0.1);
-  --shadow-menu: 0 12px 32px rgba(15, 19, 26, 0.11);
+  --scrim: rgba(20, 22, 26, 0.45);
+  --shadow-dlg: 0 24px 60px rgba(20, 22, 26, 0.14), 0 0 0 1px rgba(20, 22, 26, 0.06);
+  --shadow-dd: 0 12px 32px rgba(20, 22, 26, 0.12);
+  --shadow-menu: 0 12px 32px rgba(20, 22, 26, 0.12);
 }
 
 
 :root {
-  /* THE DEPLOYABLE SHEET — a Miura-fold sheet, scored and folded flat.
-     Ground is carbon-fibre near-black. Semantic accents come from the fold
-     vocabulary and never from expression: foil green is the one action colour,
-     for every action that deploys or advances a lane; valley blue is
-     attention owed, meaning a lane is held awaiting release; a red-pencil mark
-     is a correction, meaning error. A finished lane gets NO hue: it draws a
-     locked fold. Token NAMES are unchanged from the previous world so all 17
-     consuming files keep working; only the values moved. That is why --green
-     now holds foil green and --amber holds valley blue. Direction contract
-     lives at the top of App.vue. */
-  --bg: #17181B;
-  /* The margin pane is dense, not glassy: it is a heavier ply of the same
-     sheet. It also sits a clear step BELOW the sheet it holds, because at
-     near-equal values the three panes read as one flat field with no seam
-     between them. */
-  --bg-panel: #131417;
-  /* Sticky list headings sit a shade denser than the pane they float over, so
-     rows scrolling underneath stay readable through them. */
-  --bg-sticky: #101114;
-  --bg-card: #1D1F23;
-  --bg-card-alt: #1B1D21;
-  /* Code surface: where terminal output and code are printed. */
-  --bg-code: #141518;
-  /* The one deliberately theme-INVARIANT surface, declared here and never
-     overridden in html.sb-light: a rendered diagram is a document with its own
-     page colour, so its ground is white on carbon as well as on the light
-     sheet. Letting the sheet show through a diagram's margins would read as
-     part of the drawing. Every other surface token is themed; this one is a
-     page, not a surface. */
-  --diagram-page: #FFFFFF;
-  /* ONE motion curve, theme-independent because motion has no palette.
-     Everything moved on the browser's `ease` before this, which is symmetric:
-     it accelerates and decelerates equally, so a panel arrives at the same rate
-     it left, and nothing in the physical world does that. This curve leaves
-     quickly and settles slowly, which is what mass looks like. The value is not
-     invented: it is the one already used by the inbox row transform, promoted
-     from a single call site to the token everything shares, so the interface
-     stops having three different motion characters depending on which component
-     you touched.
-     Durations stay where they are. A product UI acknowledges an action; it does
-     not perform for you, and the reduced-motion block below still cuts all of
-     it to 0.01ms. */
-  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
-  --bg-hover: rgba(244,244,242, 0.06);
-  /* The selected part is washed in mountain gray, the structural neutral. */
-  --bg-active: color-mix(in srgb, #B9B6AE 12%, transparent);
-  --bg-seg: rgba(244,244,242, 0.13);
-  --bg-chip: rgba(244,244,242, 0.06);
-  /* Every border in this system is a crease scored into the sheet. */
-  --border: rgba(244,244,242, 0.11);
-  --border-card: rgba(244,244,242, 0.13);
-  --border-card-alt: rgba(244,244,242, 0.12);
-  --border-soft: rgba(244,244,242, 0.09);
-  --border-code: rgba(244,244,242, 0.1);
-  --border-strong: rgba(244,244,242, 0.22);
-  --border-seg: rgba(244,244,242, 0.13);
-  --border-hist: rgba(244,244,242, 0.08);
-  /* The five-line staff token (--staff) is gone; the sheet world has no staff
-     motif to bring back. */
-  /* Warm text against the cool carbon ground on purpose: text and sheet are
-     different materials and should not read as one. */
-  --text-bright: #F4F4F2;
-  --text-strong: #E6E5E1;
-  --text-title: #D8D7D2;
-  --text: #E6E5E1;
-  --text-body: #B7B6B0;
-  --text-name: #D2D1CC;
-  --text-prompt: #C6C5C0;
-  /* Every tier below carries real content (timers, counts, paths, group names,
-     risk labels), so all of them clear 4.5:1 on the sheet. The first cut of this
-     world set them by eye and three failed: measured, not judged. */
-  --text-mid: #9B9A94;
-  --text-meta: #A3A29C;
-  --text-tab: #9B9A94;
-  --text-noise: #97968F;
-  --text-label: #97968F;
-  --text-faint: #A3A29C;
-  --text-ghost: #97968F;
-  /*
-   * The palest text tone that stays legible once a WASH lightens the surface under it.
-   *
-   * The text ramp above was measured against the flat sheet, where Ghost sits
-   * at 4.53:1. It was never re-measured on the two surfaces derived from it: a
-   * --bg-hover card (6% text tone over the sheet) drops Ghost to 3.85:1, and a
-   * --bg-active row (12% mountain gray over the panel) drops it to 4.32:1. Both fail
-   * AA on real content — gate targets, provenance lines, the selected lane's own
-   * timer and branch.
-   *
-   * This is a role rather than a new ramp step: raising Ghost itself would have
-   * pushed it past --text-faint and inverted the ramp. Measured 4.83:1 on a
-   * --bg-hover card and 5.42:1 on a --bg-active row, both with margin, and one
-   * shade from the nearest existing tier so the palette is unchanged.
-   */
-  --text-on-wash: #AEADA6;
-  /*
-   * Foil green: the one action colour, and every action that deploys or advances
-   * a lane. 8.43:1, hue 144.
-   *
-   * CONTRACT AMENDMENT: the direction contract names foil GOLD here, and the
-   * owner has since called for green instead. The luminance is matched to the
-   * gold it replaces (8.43 against 8.44) so this is a hue move only and nothing
-   * else in the system needed retuning.
-   *
-   * The swap also fixes a collision the gold carried. Gold sat 37deg from the
-   * red-pencil error mark, both warm — the same warm-on-warm failure recorded in
-   * --amber's own amendment below, which is why ochre lost that slot. Green sits
-   * 135deg from red. It sits 66deg from valley blue rather than the gold's
-   * 164deg, which is the cost, but the two differ sharply in saturation as well
-   * as hue (a saturated green against a desaturated pale blue), so the two
-   * signals stay separable. Restoring this project's older green (#3FB27F) was
-   * the obvious move and was rejected on measurement: 6.67:1, and only 57deg
-   * from valley blue.
-   */
-  --green: #4DC97E;
-  --green-hover: #6FD695;
-  /* Darker second stop of the action fill, so the button reads as stamped rather
-     than flat. */
-  --green2: #39AC68;
-  --green-ink: #17181B;
-  --green-glow: 0 6px 18px -6px color-mix(in srgb, var(--green) 45%, transparent);
-  /* Working IS the action state, so it borrows the action colour's own hue rather
-     than a fourth colour. Action and state differ here in form, never in hue.
+  /* THE TRACE — an instrument screen.
+     Direction contract: src/renderer/index.html, seed a2e3145d.
 
-     THE STATE'S OWN TOKEN. On carbon this is the action green exactly, so naming
-     it separately changes nothing here. It exists because the two roles stop
-     agreeing on paper: light mode's action colour is cornflower blue, and a lane
-     that reports "working" in the action colour would report it in blue. A
-     running session is green in both themes, so the state keeps its own token and
-     the action keeps --green. */
-  --running: #4DC97E;
-  /* NO LIVE SESSION, the other half of the lane bar. Carbon has no orange at
-     all: --amber here is a pale BLUE, because a warm ochre sat 27 degrees from
-     the error red and the two signals that matter most stopped being tellable
-     apart. So this is a NEW token rather than a reuse of that one, and it is a
-     BAR colour only, never a glyph, so it is never asked to be told from the red
-     mark in the same shape at the same size. 7.6:1 against a sidebar panel. */
-  --idle: #E09B42;
-  /* An OFF switch track. See the light value for why this is not --border-strong. */
-  --switch-off: rgba(244, 244, 242, 0.22);
-  --blue: #8CB8E4;
-  /* Attention owed. CONTRACT AMENDMENT: the original direction named a warm
-     ochre mark here, and on a dark sheet that could not work. Lightened enough
-     to read, ochre and the error red separated by only 27deg of hue and 1.2:1
-     of contrast, so the two signals that matter most became indistinguishable.
-     Valley blue restores the separation, so legibility of state beat the
-     original colour choice. 8.53:1, hue 210. */
-  --amber: #8CB8E4;
-  --amber-hover: #A6C9EC;
-  /* Text on the fill is dark now that the fill is light. 8.53:1 */
-  --amber-ink: #17181B;
-  /* A red-pencil correction mark, and every destructive action. Red is kept here
-     because it is the one colour convention this product must not break. 5.84:1, hue 9. */
-  --red: #E8705C;
-  --red-hover: #EF8975;
-  --red-ink: #17181B;
-  --detail: #9B9A94;
-  /* Graphite steel: the database/MCP hue. The previous accent sat 4deg from the
-     ochre above and was unusable beside it; this blue-violet is a distinct hue
-     and separates cleanly. 7.76:1, hue 203. */
-  --teal: #8FB0C4;
-  /* Part identity only, never state: which fold tick a lane hangs from. 7.01:1 */
-  --purple: #A99BD0;
-  /* Opaque surface + line tokens for view chrome (agent cards, spec panels,
-     sidebar rows). These dark values are the originals the components hardcoded,
-     so the dark view stays byte-identical; html.sb-light redefines them above. */
-  --surface-inset: #141518;
-  --surface-inset-line: rgba(244,244,242, 0.09);
-  --surface-line: rgba(244,244,242, 0.09);
-  --surface-raised: #1D1F23;
-  --surface-hover: #232529;
-  --surface-hover-line: rgba(244,244,242, 0.11);
-  --surface-sunken: #131417;
-  --bg-panel-2: #181A1D;
-  /* Operate surfaces are well served by a system stack, and the outgoing face
-     (Instrument Sans) is a known training-data default. There is no serif in
-     this world; --serif falls back to the same system stack. JetBrains Mono
-     is retained strictly for real terminal output. */
-  --sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
+     Chosen from the familiar register at the developer's request, which suspends
+     the roll and hands the pick to them. Its discipline is the one this board
+     needed: hairline traces on a measurement grid, monospace only where there
+     are actually numbers, and COLOUR SPENT SOLELY ON A MEASUREMENT OUTSIDE
+     TOLERANCE. The board is otherwise monochrome, which is what stops nine lanes
+     competing for the same attention.
+
+     It replaces THE SIXTEEN-COLOUR FIELD, which the developer rejected on the
+     populated board: its 16-dot face could not render below 12px, every type
+     tier rose a step, and the project name and path truncated on six lanes. That
+     is why the scale below returns to 11px and the face returns to a system
+     stack, which the craft floor sanctions for an Operate surface.
+
+     Token NAMES are unchanged so all 22 consuming components keep working; only
+     the values moved. Where a name says --green or --amber, read it as its ROLE.
+     Text tiers are measured against the ground they land on, floor 4.5:1. */
+
+  /* ---- GROUNDS ----------------------------------------------------------
+     Neutral charcoal. Not navy, which the developer ruled out, and not pure
+     black, which sits in the console rut this is leaving. */
+  --bg: #14161A;
+  --bg-panel: #101216;
+  --bg-sticky: #0C0E11;
+  --bg-card: #1A1D22;
+  --bg-card-alt: #171A1F;
+  --bg-code: #0E1013;
+  --diagram-page: #FFFFFF;
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+
+  --bg-hover: rgba(221, 225, 230, 0.05);
+  --bg-active: rgba(221, 225, 230, 0.1);
+  --bg-seg: rgba(221, 225, 230, 0.09);
+  --bg-chip: rgba(221, 225, 230, 0.05);
+
+  /* ---- THE MEASUREMENT GRID --------------------------------------------
+     Every rule in this world is a graticule line: faint, even, and never the
+     loudest thing on screen. An instrument grid you notice is a badly made one. */
+  --border: rgba(221, 225, 230, 0.12);
+  --border-card: rgba(221, 225, 230, 0.16);
+  --border-card-alt: rgba(221, 225, 230, 0.13);
+  --border-soft: rgba(221, 225, 230, 0.08);
+  --border-code: rgba(221, 225, 230, 0.1);
+  --border-strong: rgba(221, 225, 230, 0.3);
+  --border-seg: rgba(221, 225, 230, 0.16);
+  --border-hist: rgba(221, 225, 230, 0.08);
+
+  /* ---- TYPE TIERS ------------------------------------------------------
+     Measured on #14161A and on the card at #1A1D22: 15.5:1 at the brightest,
+     12.7:1 for body, 6.4:1 mid, 5.1:1 at the palest tier. */
+  --text-bright: #F2F5F8;
+  --text-strong: #DDE1E6;
+  --text-title: #DDE1E6;
+  --text: #DDE1E6;
+  --text-name: #DDE1E6;
+  --text-prompt: #DDE1E6;
+  --text-body: #C3C9D1;
+  --text-mid: #9AA2AC;
+  --text-meta: #868F9A;
+  --text-tab: #868F9A;
+  --text-noise: #868F9A;
+  --text-label: #868F9A;
+  --text-faint: #868F9A;
+  --text-ghost: #868F9A;
+  --text-on-wash: #A8B0BA;
+
+  /* ---- THE ONE ACCENT, AND TOLERANCE -----------------------------------
+     The live trace is the only coloured thing on a board where nothing is
+     wrong. Everything else earns colour by being out of tolerance. */
+  --green: #3FBFB4;
+  --green-hover: #57D6CB;
+  --green2: #2E9E95;
+  --green-ink: #0E1013;
+  /* No glow. An instrument screen does not bloom, and the craft floor names a
+     zero-offset coloured halo as decoration rather than depth. */
+  --green-glow: none;
+  --running: #3FBFB4;
+  /* OUT OF TOLERANCE, soft: attention owed. */
+  --idle: #E0A458;
+  --blue: #E0A458;
+  --amber: #E0A458;
+  --amber-hover: #E9B872;
+  --amber-ink: #14161A;
+  --switch-off: rgba(221, 225, 230, 0.2);
+  /* OUT OF TOLERANCE, hard: error. Red stays red. */
+  --red: #E0685E;
+  --red-hover: #E9827A;
+  --red-ink: #14161A;
+  --detail: #868F9A;
+  /* IDENTITY, never state. Held clear of the trace accent so a database surface
+     is never mistaken for a running lane. */
+  --teal: #6FA8DC;
+  --purple: #A98BD6;
+
+  --surface-inset: #0E1013;
+  --surface-inset-line: rgba(221, 225, 230, 0.12);
+  --surface-line: rgba(221, 225, 230, 0.16);
+  --surface-raised: #1A1D22;
+  --surface-hover: #21252B;
+  --surface-hover-line: rgba(221, 225, 230, 0.22);
+  --surface-sunken: #101216;
+  --bg-panel-2: #131519;
+
+  /* ---- FACES -----------------------------------------------------------
+     A system stack, which the craft floor sanctions for Operate and Read
+     surfaces, and which has no legibility floor to fight at 11px. DotGothic16
+     is gone with the world that needed it. JetBrains Mono stays exactly where
+     the previous world put it: machine text only, where column alignment is a
+     correctness requirement rather than a costume. */
+  --sans: system-ui, -apple-system, 'Segoe UI', 'Inter', sans-serif;
   --mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
   --serif: system-ui, -apple-system, 'Segoe UI', sans-serif;
-  /* Depth is a hairline lip of light on a sheet edge, never elevation. The gloss
-     is deliberately a no-op gradient in dark; light adds the sheen. */
-  --elev: inset 0 1px 0 rgba(244,244,242,.05),0 1px 2px rgba(0,0,0,.4);
-  --gloss: linear-gradient(rgba(244,244,242,.03),rgba(244,244,242,0));
-  /* The lip of light along a pane's own top edge, used where a surface butts
-     against the one above it (pane headers, the sidebar, the inbox rail, the
-     composer). Eight declarations across five files each spelled this value out
-     by hand; it is one token so the sheet's edges cannot drift apart.
-     Deliberately theme-neutral: the value is what both themes already rendered,
-     so extracting it changed nothing. Give html.sb-light its own if paper should
-     ever catch this edge differently. */
-  --hairline-shine: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  /* A fold is a cut, not a curve, so corners stay sharp at 0. The outgoing
-     world's 10px-everywhere was the loudest single signal of the look being
-     replaced. */
-  --rc: 0px;
-  /* The value-reporting idiom. The outgoing world bowed these to 99px; a fold
-     is a cut, so a tag that reports a figure is scored square like everything
-     else. One token because 37 declarations across 13 files used to decide it
-     independently. */
-  --rp: 0px;
-  /* One tracking value for every uppercase label, replacing fourteen ad-hoc ones.
-     0.08em rather than the 0.11em this token was declared at and never applied
-     with: 0.11em is a wordmark's tracking, and at 11px on a label it opens the
-     word until it stops reading as a word. */
+
+  /* ---- MATERIALS -------------------------------------------------------
+     A hairline lip, not a bevel: the previous world's stamped edges belonged to
+     its pixel grammar. */
+  --elev: inset 0 1px 0 rgba(221, 225, 230, 0.06);
+  --gloss: none;
+  --hairline-shine: inset 0 1px 0 rgba(221, 225, 230, 0.06);
+  /* Barely radiused. An instrument is crisp, but the modern-clean half of this
+     brief is not served by hard 0 on every card. */
+  --rc: 3px;
+  --rp: 2px;
+  --sq: 0px;
   --track-label: 0.08em;
 
-  /* --- Type scale ---------------------------------------------------------
-     Six steps, whole pixels, each visibly apart from the next. Theme-neutral,
-     so it is declared once here and not again on html.sb-light.
-
-     What it replaces: twelve near-duplicate sizes between 9.5px and 15.5px,
-     hand-set at 377 declarations. Pairs a third of a pixel apart (10 vs 10.5,
-     11.5 vs 11.8, 12.5 vs 12.8) cannot be told apart by eye, so they were never
-     a hierarchy — they were noise that made every surface look slightly wrong
-     beside every other one. Whole pixels also land on the pixel grid, and a
-     face rendered on the grid rather than between it is most of the difference
-     between crisp and soft at these sizes.
-
-     Steps are named for the job, not the size, so a surface picks a role and
-     the ramp decides the number.
-
-     The ramp collapses DOWNWARD wherever it can: 10.5 and 11 both land on 10,
-     11.5 lands on 11, 15.5 lands on 15. Only the 9.5px floor moves up, onto 10,
-     because a floor nobody can read is not a tier. Nothing in the interface got
-     bigger.
-
-     Glyphs are not on this ramp and must not be swept onto it. An icon is sized
-     to its optical weight, which is why .group-caret is 8px, .rd-icon is 17px
-     and .mark .glyph is 13.8px. None of those values appear as a step here. */
-  /* The ramp lifted by one step, 2026-08-13. Counting real usage found it
-     inverted: 287 of 407 uses sat on the two smallest tiers (158 at 10px, 129
-     at 11px) while the largest was used six times. So seven tenths of the
-     interface was reading at 10 to 11px, and the two tiers carrying most of the
-     hierarchy were 1px apart, which at that size is a difference a reader
-     cannot see. A tier nobody can distinguish is not a tier, the same reasoning
-     that moved the old 9.5px floor onto 10.
-     Everything gets one step larger and the gaps widen with it. Density drops a
-     little, deliberately: this is a desktop app read for hours, not a chart. */
-  /* THREE SIZES, 2026-08-13. A terminal has a character grid, and a grid has
-     one cell size, not six. The six-step ramp lifted earlier the same day was
-     the right answer to the question being asked then (a proportional UI whose
-     tiers were 1px apart and unreadable); the question changed with the
-     direction. Twelve, fourteen, sixteen, nothing between: the tokens keep
-     their names so nothing has to be re-pointed, and three of them now share a
-     value with a neighbour. That collapse is the point rather than a shortcut,
-     because a grid with six sizes is not a grid. */
+  /* ---- TYPE SCALE ------------------------------------------------------
+     Back to dense. This is the fault that killed the previous world, so it is
+     the first thing restored: a system face is legible at 11px, so the board
+     holds six lanes, a branch, a path, a timer and a count on one row again. */
   --fs-micro: 11px;
   --fs-meta: 11px;
   --fs-ui: 12.5px;
-  --fs-body: 12.5px;
-  --fs-title: 14px;
-  --fs-head: 14px;
-  /* THE ONE EMPHASIS WEIGHT. JetBrains Mono here is a variable face (wght
-     400–800), so this is a real interpolated weight rather than a synthetic
-     one, and a theme can hold a different value without changing anything else.
-     Dark keeps 500: light glyphs on a dark ground lose weight optically, and
-     that is the amount they lose. Light lowers it — see html.sb-light. */
+  --fs-body: 13px;
+  --fs-title: 17px;
+  --fs-head: 20px;
+  /* Weight is available again: a system face has real weights, where the
+     outgoing bitmap face had exactly one. */
   --w-em: 500;
-  /* THE SPACING STEP. Type, radius, elevation and colour all graduated into
-     tokens; spacing never did, and every padding in the sheet was a literal
-     chosen at the call site. That is the mechanism that let one list-item card
-     sit at 12px 14px while its neighbour sat at 10px 13px and a third at 8px
-     12px — five variants of one container across four files, none deliberate.
-     A 4px step with two half-steps where a control needs to sit tighter than
-     its box. Theme-independent: distance is not a palette. */
+
   --sp-1: 4px;
   --sp-2: 6px;
   --sp-3: 8px;
@@ -475,12 +276,16 @@ html.sb-light {
   --sp-5: 13px;
   --sp-6: 16px;
   --sp-7: 22px;
-  /* One list-item card, everywhere. */
   --pad-card: var(--sp-4) var(--sp-5);
-  --scrim: rgba(10,11,13, 0.66);
-  --shadow-dlg: 0 28px 70px rgba(0,0,0, 0.6), 0 0 0 1px rgba(244,244,242, 0.05) inset;
-  --shadow-dd: 0 14px 36px rgba(0,0,0, 0.5);
-  --shadow-menu: 0 14px 36px rgba(0,0,0, 0.55);
+
+  --scrim: rgba(10, 12, 15, 0.7);
+  /* Offset and blur, as the craft floor requires of a shadow. The previous
+     world's hard block shadows were earned by its pixel grammar; this one has
+     no such licence. */
+  --shadow-dlg: 0 24px 60px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(221, 225, 230, 0.1);
+  --shadow-dd: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --shadow-menu: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --crease: transparent;
 }
 
 * {
@@ -503,24 +308,24 @@ html,
   font-variant-numeric: tabular-nums;
 }
 
-/* A scored sheet in carbon fibre. The 60-degree crease lattice is this world's
-   signature ground: two repeating rules at the mountain and valley angles, kept
-   faint enough to sit under dense monospace output without competing with it. It
-   is painted on <body>, which never scrolls, so it costs nothing per frame. */
+/* The ground of THE TRACE: flat neutral charcoal, ruled by the measurement
+   grid the border tokens draw. No texture on the open field; an instrument
+   graticule belongs to the panels that measure something, not to empty space. */
 body {
   margin: 0;
   height: 100%;
   color: var(--text);
-  /* The terminal face carries the whole interface, not only the code plate.
-     See .mono below for the direction change this belongs to. */
-  font-family: var(--mono);
+  /* THE INTERFACE FACE, via --sans: a system stack, which the craft floor
+     sanctions for an Operate surface and which fights no legibility floor at
+     11px. This one declaration is the whole typeface change and it is the one
+     a retheme misses: the world before last set it to --mono on the rule that
+     "the product IS the terminal", so redefining --sans alone reached nothing.
+     .mono and .code below opt machine text back in, which is why the swap costs
+     one declaration rather than 406 edits. */
+  font-family: var(--sans);
   font-size: var(--fs-body);
-  overflow: hidden;
-  --crease: rgba(244, 244, 242, 0.028);
-  background:
-    repeating-linear-gradient(60deg, var(--crease) 0 1px, transparent 1px 84px),
-    repeating-linear-gradient(-60deg, var(--crease) 0 1px, transparent 1px 84px),
-    #17181b;
+  overflow: hidden;
+  background: var(--bg);
 }
 
 /* The crease lattice does not survive the move to Cornflower, and it should not:
@@ -534,7 +339,7 @@ body {
    declared: naming only the colour would drop the two gradient layers the dark
    rule sets, which is precisely what has to happen. Keep it in step with --bg. */
 html.sb-light body {
-  background: #F4F6F9;
+  background: var(--bg);
 }
 
 /* .spec-label, .scored-rule and .chamfer were declared here and applied by nothing:
@@ -595,7 +400,7 @@ a:hover {
    had no visible thumb on the light sheet at all. Ink, subtractive, like every other
    light-theme wash in this file. */
 html.sb-light ::-webkit-scrollbar-thumb {
-  background: rgba(15, 19, 26, 0.22);
+  background: rgba(20, 22, 26, 0.22);
 }
 
 ::-webkit-scrollbar-track {
@@ -646,10 +451,7 @@ button {
    purpose: any stronger and it reads as a glossy 2000s button, which is the opposite
    of foil pressed into a sheet. */
 .btn-solid {
-  background:
-    linear-gradient(118deg, rgba(255, 255, 255, 0.18) 0%, rgba(255, 255, 255, 0) 46%),
-    var(--gloss),
-    linear-gradient(135deg, var(--green), var(--green2));
+  background: var(--green);
   color: var(--green-ink);
   font-weight: var(--w-em);
   font-size: var(--fs-ui);
@@ -666,7 +468,7 @@ button {
    shouts. The fill is left flat here and the gloss layer alone carries the top
    light. */
 html.sb-light .btn-solid {
-  background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
+  background: var(--green);
 }
 
 .btn-solid:hover:not(:disabled) {
@@ -674,7 +476,7 @@ html.sb-light .btn-solid {
 }
 
 .btn-armed {
-  background: var(--gloss), var(--amber);
+  background: var(--amber);
   color: var(--amber-ink);
   font-weight: var(--w-em);
   font-size: var(--fs-ui);
@@ -1041,19 +843,24 @@ html.sb-light .btn-solid {
    is. Deleting the override lets the shared input/textarea/select:focus rule
    above give it the same 1px proof-cyan ring as every other field. */
 
+/* The send target sits on its own rule under the composer, indented to the
+   input's own left edge. The pane's 18px padding is already in force here, so
+   this is only what the caret costs: the 14px glyph plus the row's 10px gap. */
+.to-row {
+  margin-top: 5px;
+  padding-left: 24px;
+}
+
 .to {
-  flex-shrink: 0;
   white-space: nowrap;
   font-size: var(--fs-micro);
   color: var(--text-faint);
-  /* Bottom-pinned row: lift the small label to the buttons' text line. */
-  padding-bottom: 8px;
 }
 
 .send-btn {
   flex-shrink: 0;
   white-space: nowrap;
-  background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
+  background: var(--green);
   color: var(--green-ink);
   font-weight: var(--w-em);
   font-size: var(--fs-meta);
@@ -1146,7 +953,7 @@ html.sb-light .btn-solid {
   position: absolute;
   inset: 0;
   z-index: -1;
-  background: var(--gloss), var(--bg-panel);
+  background: var(--bg-panel);
   border: 1px solid var(--border-strong);
   border-radius: var(--rc);
   /* A sheet laid on the sheet. Nothing inside a dialog takes focus through this

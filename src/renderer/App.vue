@@ -286,7 +286,7 @@ const dbProject = computed(() => projects.dbProject)
 }
 
 .ub-install {
-  background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
+  background: var(--green);
   color: var(--green-ink);
   font-weight: var(--w-em);
   font-size: var(--fs-meta);
@@ -327,7 +327,7 @@ const dbProject = computed(() => projects.dbProject)
   align-items: center;
   gap: 12px;
   padding-top: 12px;
-  background: var(--gloss), var(--bg-panel);
+  background: var(--bg-panel);
   border-left: 1px solid var(--border);
   box-shadow: var(--hairline-shine);
 }
@@ -356,7 +356,7 @@ const dbProject = computed(() => projects.dbProject)
 /* Pending items: amber pill that pulses so it draws the eye. */
 .inbox-peek.glow {
   color: var(--amber-ink);
-  background: var(--gloss), var(--amber);
+  background: var(--amber);
   border-color: var(--amber);
   font-weight: var(--w-em);
   animation: inboxPeekGlow 1.8s ease-in-out infinite;
@@ -381,21 +381,20 @@ const dbProject = computed(() => projects.dbProject)
   }
 }
 
-/* The centre pane is the sheet itself, so it carries the world's ground: a faint
-   60-degree crease lattice at the mountain and valley angles. It lives here rather
-   than on <body> because the three panes paint over the body entirely, and this is
-   the largest field the developer actually sees. Painted on a pane that does not
-   itself scroll, so it is composited once, not per frame. */
+/* The centre pane carries the world's ground, and in THE SIXTEEN-COLOUR FIELD that
+   ground is flat ink. The 60-degree crease lattice that used to rule this pane was
+   the deployable sheet's signature; it is removed outright rather than faded to a
+   transparent no-op, because a stylesheet that paints nothing through two live
+   gradients is a motif nobody deleted rather than a decision anybody made.
+   This world's texture is an ordered dither, and it belongs to the panels and bars
+   the idiom layer draws, never to the open field: the source dithers a gradient it
+   cannot render, not the ground it can. */
 .main {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  --crease: rgba(244, 244, 242, 0.03);
-  background:
-    repeating-linear-gradient(60deg, var(--crease) 0 1px, transparent 1px 92px),
-    repeating-linear-gradient(-60deg, var(--crease) 0 1px, transparent 1px 92px),
-    var(--bg);
+  background: var(--bg);
 }
 
 /* No crease in light mode. The lattice is the scored-sheet world's signature and
@@ -404,9 +403,9 @@ const dbProject = computed(() => projects.dbProject)
    Setting --crease transparent leaves the gradients in place but paints nothing,
    so the shorthand above stays the single declaration of this pane's background.
    See the matching note on html.sb-light body in styles.css. */
-html.sb-light .main {
-  --crease: transparent;
-}
+/* The light-mode crease override is gone with the crease itself. It existed to
+   switch the lattice off on the Cornflower ground; there is no lattice in either
+   theme now, and the two grounds are the same world's two inks. */
 
 /* Drag handle on the inbox's left edge (design seam sits on the inbox border). */
 .inbox-resize {

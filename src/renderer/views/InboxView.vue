@@ -595,7 +595,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   /* Width is user-resizable (App sets --inbox-w on the panes container). */
   width: var(--inbox-w, 332px);
   min-width: var(--inbox-w, 332px);
-  background: var(--gloss), var(--bg-panel);
+  background: var(--bg-panel);
   box-shadow: var(--hairline-shine);
   border-left: 1px solid var(--border);
   display: flex;
@@ -792,7 +792,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
 
 .item {
   /* Design fills this card from --bg-hover (not --bg-card) with a glass blur. */
-  background: var(--gloss), var(--bg-hover);
+  background: var(--bg-hover);
   border: 1px solid var(--border-card-alt);
   border-radius: var(--rc);
   padding: var(--pad-card);
@@ -986,7 +986,7 @@ html.sb-light .detail-box {
   gap: 6px;
   font-size: var(--fs-micro);
   color: var(--text-body);
-  background: var(--gloss), var(--bg-hover);
+  background: var(--bg-hover);
   box-shadow: var(--elev);
   border: 1px solid var(--border-strong);
   border-radius: var(--rc);

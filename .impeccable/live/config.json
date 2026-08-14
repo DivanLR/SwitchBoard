@@ -1,5 +1,7 @@
 {
-  "files": ["src/renderer/index.html", "src/renderer/design.html"],
+  "files": [
+    "src/renderer/design.html"
+  ],
   "insertBefore": "</body>",
   "commentSyntax": "html",
   "cspChecked": true

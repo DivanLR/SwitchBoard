@@ -1198,11 +1198,27 @@ async function confirmRemoveNow(): Promise<void> {
   font-size: var(--fs-head);
 }
 
+/* Centres its glyph on both axes. It was display: block with line-height 17px,
+   so a 14px icon rested on a text baseline and read as sitting low in its 28x21
+   box. Fixed on the base rule rather than on the one button that was reported:
+   all three users of this class had it, and a modifier would have left two
+   visibly off-centre icons beside a class asserting the third was correct.
+   min-width and min-height hold the previous outer size, so nothing reflows. */
 .icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* The sidebar's own control height, not a literal: --add-h is what the
+     section-row buttons use, so the brand row stays in step with them. Setting
+     line-height: 1 for the centring above had dropped these to 18px. A fixed box
+     also makes the two toggles equal structurally rather than by both happening
+     to hold a 14px glyph. box-sizing is border-box, so this is the outer size. */
+  min-width: 26px;
+  min-height: var(--add-h);
   color: var(--text-faint);
   font-size: var(--fs-meta);
   padding: 1px 6px;
-  line-height: 17px;
+  line-height: 1;
   border: 1px solid var(--border-card-alt);
 }
 
@@ -2066,7 +2082,7 @@ async function confirmRemoveNow(): Promise<void> {
   align-items: center;
   gap: 9px;
   border: 1px solid var(--border-card-alt);
-  background: var(--gloss), var(--bg-card-alt);
+  background: var(--bg-card-alt);
   border-radius: var(--rc);
   cursor: pointer;
   user-select: none;

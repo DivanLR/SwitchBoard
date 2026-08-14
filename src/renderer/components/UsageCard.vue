@@ -49,7 +49,7 @@ function barColor(pct: number): string {
 <style scoped>
 .usage-card {
   border: 1px solid var(--border-card-alt);
-  background: var(--gloss), var(--bg-card);
+  background: var(--bg-card);
   border-radius: var(--rc);
   padding: var(--pad-card);
   margin-bottom: 13px;
@@ -100,7 +100,7 @@ function barColor(pct: number): string {
    measure it against, so the empty part of the meter carried no information.
    Ink here, subtractive, like every other light-theme wash. */
 html.sb-light .uc-bar {
-  background: rgba(15, 19, 26, 0.09);
+  background: rgba(20, 22, 26, 0.09);
 }
 
 .uc-fill {

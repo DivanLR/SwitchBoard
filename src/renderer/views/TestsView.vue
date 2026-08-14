@@ -1264,7 +1264,7 @@ function statusWord(run: VerifyRun): string {
   font-size: var(--fs-meta);
   font-weight: var(--w-em);
   color: var(--green-ink);
-  background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
+  background: var(--green);
   border-radius: var(--rc);
   cursor: pointer;
 }

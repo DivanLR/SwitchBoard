@@ -25,49 +25,549 @@
       contract — seeds enough content that no pane is empty, then boots the same
       application.
 
-          npm run dev:renderer   →   http://localhost:5199/design.html
+          npm run dev:renderer   →   http://localhost:5199/src/renderer/design.html
+
+      WHY THE SEED IS THIS LARGE. Judging a visual world on empty states is how a
+      retheme ships looking finished and then falls apart on the first real board:
+      an empty sidebar has no state marks to tell apart, an unrun Tests section
+      shows a stack picker rather than six gates, and Inbox zero shows none of the
+      risk tiers that carry the most important colour decisions in the product.
+      So every surface here is populated: six projects across every lane state,
+      a session stream carrying each event kind, specs with phases, a finished
+      verification run filling all six gates, a working-tree diff across folders,
+      diagrams, cleanup commands, a queue, and an inbox holding all three risk
+      tiers at once.
+
+      Runs cannot simply be handed to the driver: reportVerifyResult and
+      reportApiResult finish a run that is already in flight, exactly as the main
+      process does. So this seed calls the real IPC methods through the mock's own
+      window.switchboard to start them, then reports the result. That is also why
+      the script is a module with top-level await.
+
+      Project names here are deliberately generic. This page is committed, and a
+      styling fixture is no place for the names of real client repositories.
     -->
     <div id="app"></div>
     <script type="module">
       import { installMockHost, twoProjectScenario } from '../../tests/e2e/mock-host'
 
-      installMockHost(twoProjectScenario())
+      // Built from twoProjectScenario rather than hand-written, so `settings` stays
+      // DEFAULT_SETTINGS and `suites` stays the real catalog's detection. A
+      // hand-rolled scenario here would drift from both.
+      const scenario = twoProjectScenario()
+
+      const alpha = scenario.projects[0]
+      alpha.name = 'storefront'
+      alpha.path = 'C:\\work\\storefront'
+      alpha.session.branch = 'fix/cart-empty'
+      alpha.drafts = ['also drop the legacy null branch once the guard lands']
+      // Seeded on the project rather than pushed later: the diff store loads before
+      // a later setDiff() call could land, and storefront is the selected project.
+      alpha.diff = {
+        gitNotice: null,
+        files: [
+          { path: 'package.json', status: 'modified', addedLines: 2, removedLines: 0, binary: false },
+          { path: 'src/cart/reducer.ts', status: 'modified', addedLines: 15, removedLines: 5, binary: false },
+          { path: 'src/cart/CartPlaceholder.tsx', status: 'added', addedLines: 34, removedLines: 0, binary: false },
+          { path: 'src/cart/__tests__/reducer.test.ts', status: 'modified', addedLines: 9, removedLines: 0, binary: false },
+          { path: 'src/checkout/totals.ts', status: 'modified', addedLines: 3, removedLines: 3, binary: false },
+          { path: 'public/cart-empty.png', status: 'added', addedLines: null, removedLines: null, binary: true },
+          { path: 'notes.md', status: 'untracked', addedLines: 6, removedLines: 0, binary: false },
+        ],
+      }
+
+      const beta = scenario.projects[1]
+      beta.name = 'api-server'
+      beta.path = 'C:\\work\\api-server'
+      beta.session.branch = 'feat/auth'
+      beta.session.status = 'needs_you'
+
+      scenario.projects.push(
+        {
+          id: 'p-ml',
+          name: 'ml-pipeline',
+          path: 'C:\\work\\ml-pipeline',
+          defaultSessionMode: 'bypass',
+          session: {
+            id: 's-ml',
+            status: 'working',
+            branch: 'train/sweep-7',
+            // A bypass session runs in the sandbox container, which is what makes the
+            // Tests section name the suites that environment cannot run.
+            bypassPermissions: true,
+          },
+        },
+        {
+          id: 'p-docs',
+          name: 'docs-site',
+          path: 'C:\\work\\docs-site',
+          session: { id: 's-docs', status: 'done', branch: 'main' },
+        },
+        // No session at all: the idle lane, which is the only way to see the
+        // outline state mark beside the filled ones.
+        { id: 'p-infra', name: 'infra', path: 'C:\\work\\infra' },
+        { id: 'p-webext', name: 'web-ext', path: 'C:\\work\\web-ext' },
+        {
+          id: 'p-db',
+          name: 'Database',
+          path: 'C:\\userdata\\database-mcp',
+          reserved: true,
+          session: {
+            id: 's-db',
+            status: 'working',
+            mcpServers: [
+              { name: 'postgres — production', status: 'connected' },
+              { name: 'mssql — reporting', status: 'connected' },
+              { name: 'github', status: 'connected' },
+              { name: 'filesystem', status: 'connected' },
+            ],
+          },
+        },
+      )
+
+      scenario.settings = {
+        ...scenario.settings,
+        // Designates which servers combine into the one Database MCP surface. Without
+        // this the sidebar's MCP section never appears.
+        databaseMcpServers: ['postgres — production', 'mssql — reporting'],
+        // Skips the stack picker so the Tests section opens on its six gates.
+        projectTestStacks: { 'p-alpha': 'node' },
+      }
+
+      installMockHost(scenario)
 
       // Seeded BEFORE the app boots, so the first refresh reads it: the mock
       // keeps this in its own state, and pushing to listeners that do not exist
       // yet would land nowhere.
       const m = window.__mock
-      m.emitEvent('s-alpha', 'prompt', { text: 'Add the usage meter to the sidebar rows.', pending: false })
-      m.emitEvent('s-alpha', 'assistant_text', {
-        text: 'Reading the sidebar and the session status shape first.\n\nThe meter belongs on the row, not in the header: it is per session, and the header only ever shows the selected one.',
-        partial: false,
-      })
-      m.emitEvent('s-alpha', 'tool_activity', { toolName: 'Read', inputPreview: 'src/renderer/components/Sidebar.vue' })
-      m.emitEvent('s-alpha', 'tool_activity', { toolName: 'Bash', inputPreview: 'npm run typecheck' })
-      m.emitEvent('s-alpha', 'error', { text: 'vue-tsc: Property "usageUtilization" does not exist on type Session.', fatal: false })
-      m.emitEvent('s-alpha', 'assistant_text', {
-        text: 'The field was missing from the shared type. Added it to `Session` and the meter typechecks.',
-        partial: false,
-      })
-      m.setUsage('s-alpha', 0.62, 143, 'session')
 
+      // ---- THE SESSION STREAM ------------------------------------------------
+      // One of every event kind the clean view can draw, in the order a real turn
+      // produces them: the prompt, narrative, tool activity, a failure with its
+      // output, the recovery, and the turn's own result line.
+      m.emitEvent('s-alpha', 'prompt', {
+        text: 'Make the empty cart render the placeholder instead of returning null.',
+        pending: false,
+      })
+      m.emitEvent('s-alpha', 'assistant_text', {
+        text: 'Reading the reducer to find where the empty branch bails out.',
+        partial: false,
+      })
+      m.emitEvent('s-alpha', 'tool_activity', { toolName: 'Read', inputPreview: 'src/cart/reducer.ts' })
+      m.emitEvent('s-alpha', 'tool_activity', {
+        toolName: 'Read',
+        inputPreview: 'src/cart/__tests__/reducer.test.ts',
+      })
+      m.emitEvent('s-alpha', 'tool_activity', {
+        toolName: 'Bash',
+        inputPreview: '{"command":"npm test -- cart","description":"Run the cart suite"}',
+      })
+      m.emitEvent('s-alpha', 'error', {
+        text: '1 of 14 failed — cart/reducer > empty state\n\nexpected  <CartPlaceholder />\nreceived  null\n    at reducer.ts:44:11',
+        fatal: false,
+      })
+      m.emitEvent('s-alpha', 'tool_activity', { toolName: 'Edit', inputPreview: 'src/cart/reducer.ts' })
+      m.emitEvent('s-alpha', 'assistant_text', {
+        text: 'The guard returned `null` before reaching the placeholder branch. Moved it below and re-ran the suite: **14 passed in 1.9s**.\n\nThe legacy null path is still there and is not reachable; removing it is a separate change.',
+        partial: false,
+      })
+      m.emitEvent('s-alpha', 'summary', {
+        text: 'Empty cart now renders the placeholder. One guard moved, one test added.',
+      })
+      m.completeTurn('s-alpha', 0.42)
+      // A message typed mid-turn and not yet delivered: the one prompt state that
+      // is still editable, and the only one drawn differently.
+      m.emitEvent('s-alpha', 'prompt', { text: 'Then run the e2e suite once.', pending: true })
+      m.setUsage('s-alpha', 0.62, 143, 'session')
+      m.setBackgroundTasks('s-alpha', [
+        { taskId: 'bg-1', description: 'Regenerating cart API docs' },
+      ])
+
+      m.emitEvent('s-ml', 'prompt', { text: 'Sweep learning rates 1e-4 to 1e-2 on the ranker.', pending: false })
+      m.emitEvent('s-ml', 'tool_activity', {
+        toolName: 'Bash',
+        inputPreview: '{"command":"python train.py --sweep lr","description":"Start the sweep"}',
+      })
+      m.emitEvent('s-ml', 'assistant_text', {
+        text: 'Epoch 12/40 — val loss 0.412, best 0.407.',
+        partial: true,
+      })
+      m.setUsage('s-ml', 0.91, 22, 'week')
+
+      m.emitEvent('s-beta', 'prompt', { text: 'Add refresh-token rotation to the auth service.', pending: false })
+      m.emitEvent('s-beta', 'tool_activity', { toolName: 'Edit', inputPreview: 'src/auth/service.ts' })
+      // A question renders in the stream and drives "needs you"; it is deliberately
+      // NOT an inbox item.
+      m.askQuestion('s-beta', 'The migration drops the old refresh_tokens column. Keep a copy first?', [
+        'Keep a copy',
+        'Drop it',
+      ])
+
+      m.emitEvent('s-docs', 'prompt', { text: 'Regenerate the API reference.', pending: false })
+      m.emitEvent('s-docs', 'assistant_text', { text: 'Done. 41 pages rewritten.', partial: false })
+      m.completeTurn('s-docs', 0.08)
+
+      // The raw view is a separate render of the same session, so it needs its own
+      // lines or Raw looks broken next to a full Clean view.
+      m.emitLines('s-alpha', [
+        '❯ Make the empty cart render the placeholder instead of returning null.',
+        '⏺ Read(src/cart/reducer.ts)',
+        '⎿  84 lines',
+        '⏺ Bash(npm test -- cart)',
+        '⎿  FAIL src/cart/__tests__/reducer.test.ts',
+        '   ● cart/reducer › empty state',
+        '     expected  <CartPlaceholder />',
+        '     received  null',
+        '⏺ Edit(src/cart/reducer.ts)',
+        '⎿  +12 −4',
+        '⏺ Bash(npm test -- cart)',
+        '⎿  PASS  14 passed in 1.9s',
+      ])
+
+      // ---- THE INBOX ---------------------------------------------------------
+      // All three risk tiers, and two items on one project so the group header
+      // earns its Approve all. High risk is what draws the confirm step and the
+      // red edge, so the palette's most consequential decision is on screen.
+      m.raisePermission({
+        projectId: 'p-alpha',
+        toolName: 'Edit',
+        title: 'Edit src/cart/reducer.ts',
+        explanation: 'Move the empty-cart guard below the placeholder branch.',
+        detail: 'src/cart/reducer.ts · 16 lines',
+        risk: 'low',
+      })
       m.raisePermission({
         projectId: 'p-alpha',
         toolName: 'Bash',
-        title: 'Run npm run check',
-        explanation: 'Typecheck, lint, unit and end-to-end suites.',
-        detail: 'npm run check',
+        title: 'Run the cart suite',
+        explanation: 'Unit tests for the cart module only.',
+        detail: 'npm test -- cart',
         risk: 'low',
       })
       m.raisePermission({
         projectId: 'p-beta',
         toolName: 'Bash',
-        title: 'Force-push feature/x',
-        explanation: 'Rewrites the remote branch history.',
-        detail: 'git push --force origin feature/x',
+        title: 'Run a database migration against dev',
+        explanation: 'Drops refresh_tokens.legacy_hash. Not reversible.',
+        detail: 'npm run migrate -- --env dev',
         risk: 'high',
       })
-      m.askQuestion('s-beta', 'The migration drops the old column. Keep a copy first?', ['Keep a copy', 'Drop it'])
+      m.raisePermission({
+        projectId: 'p-ml',
+        toolName: 'Write',
+        title: 'Write train/config.yaml',
+        explanation: 'New sweep configuration.',
+        detail: 'train/config.yaml · new file',
+        risk: 'medium',
+      })
+      m.raisePermission({
+        projectId: 'p-beta',
+        type: 'plan_approval',
+        title: 'Plan: rotate refresh tokens in three steps',
+        explanation: 'Read-only until you approve it.',
+        detail: '1. add rotation column  2. dual-write  3. drop legacy',
+        risk: 'medium',
+      })
+
+      // ---- SPECS -------------------------------------------------------------
+      m.setSpecKit('p-alpha', {
+        installed: true,
+        specs: [
+          { id: '003-empty-cart', title: 'Empty cart placeholder', status: 'in_progress', tasksTotal: 4, tasksDone: 2 },
+          { id: '002-cart-totals', title: 'Cart totals rounding', status: 'complete', tasksTotal: 3, tasksDone: 3 },
+          { id: '001-checkout-guards', title: 'Checkout guard rails', status: 'complete', tasksTotal: 5, tasksDone: 5 },
+        ],
+        details: {
+          '003-empty-cart': {
+            id: '003-empty-cart',
+            title: 'Empty cart placeholder',
+            status: 'in_progress',
+            tasksTotal: 4,
+            tasksDone: 2,
+            description:
+              'An empty cart returns null and renders nothing, so the page looks broken rather than empty. Render a placeholder that names the state and offers the catalogue.',
+            path: 'specs/003-empty-cart',
+            sections: [
+              {
+                title: 'Summary',
+                body: 'The reducer bails out on an empty item list before it reaches the placeholder branch. Move the guard and render a real empty state.',
+              },
+              {
+                title: 'Acceptance',
+                body: '- An empty cart renders CartPlaceholder\n- The placeholder links to the catalogue\n- The legacy null branch is unreachable and removed',
+              },
+            ],
+            plan: [
+              {
+                title: 'Approach',
+                body: 'Reducer first, then the component, then the e2e pass. No API change: the empty state is entirely client-side.',
+              },
+            ],
+            clarifications: [
+              'Should a cart emptied by the user read differently from one that was never filled?',
+            ],
+            resolvedClarifications: [
+              {
+                question: 'Does the placeholder need to survive a page reload?',
+                answer: 'No — the cart is server-held, so an empty cart is empty on reload too.',
+              },
+            ],
+            phases: [
+              {
+                label: 'Phase 1: Reducer',
+                tasks: [
+                  { id: 'T001', label: 'Reproduce the empty-cart null return', done: true },
+                  { id: 'T002', label: 'Return placeholder state from the reducer', done: true },
+                ],
+              },
+              {
+                label: 'Phase 2: Component',
+                tasks: [
+                  { id: 'T003', label: 'CartPlaceholder with a catalogue link', done: false },
+                  { id: 'T004', label: 'Remove the legacy null branch', done: false },
+                ],
+              },
+            ],
+          },
+        },
+      })
+
+      // ---- CLEANUP -----------------------------------------------------------
+      // Namespaced exactly as a session reports plugin commands, which is what makes
+      // the groups read as installed and each row as runnable.
+      m.setCommands('p-alpha', [
+        { name: 'dotnet-claude-kit:de-sloppify', description: 'Formatting, dead code, warnings' },
+        { name: 'dotnet-claude-kit:code-review', description: 'Multi-dimensional review' },
+        { name: 'dotnet-claude-kit:security-scan', description: 'Six-layer security pass' },
+        { name: 'dotnet-claude-kit:health-check', description: 'Letter-graded health report' },
+        { name: 'ponytail:ponytail-review', description: 'Review for over-engineering' },
+        { name: 'ponytail:ponytail-audit', description: 'Whole-repo bloat audit' },
+        { name: 'diagram-design:export-diagram', description: 'Export a diagram to SVG and PNG' },
+        { name: 'speckit-specify', description: 'Scaffold a spec' },
+      ])
+
+      // ---- DIAGRAMS ----------------------------------------------------------
+      m.addDiagram('p-alpha', {
+        file: 'cart-state-machine.html',
+        path: 'docs/diagrams/cart-state-machine.html',
+        description: 'Cart state machine, empty through checkout',
+        sessionId: 's-alpha',
+        modifiedAt: new Date(Date.now() - 1000 * 60 * 9).toISOString(),
+        bytes: 8400,
+      })
+      m.addDiagram('p-alpha', {
+        file: 'checkout-sequence.html',
+        path: 'docs/diagrams/checkout-sequence.html',
+        description: 'Checkout sequence across cart, payment and fulfilment',
+        sessionId: 's-alpha',
+        modifiedAt: new Date(Date.now() - 1000 * 60 * 60 * 5).toISOString(),
+        bytes: 12800,
+      })
+      m.addDiagram('p-alpha', {
+        file: 'reducer-data-flow.html',
+        path: 'docs/diagrams/reducer-data-flow.html',
+        description: 'Reducer data flow',
+        sessionId: 's-alpha',
+        modifiedAt: new Date(Date.now() - 1000 * 60 * 60 * 30).toISOString(),
+        bytes: 5100,
+      })
+
+      // ---- DATABASE MCP ------------------------------------------------------
+      m.setMcpSchema(
+        'p-db',
+        [
+          '# db-schema.md',
+          '',
+          'Scanned 12 tables across 2 servers.',
+          '',
+          '## public.orders',
+          '',
+          '- `id` uuid PK',
+          '- `customer_id` uuid FK → public.customers.id',
+          '- `status` text — one of placed, paid, shipped, cancelled',
+          '- `total_cents` integer NOT NULL',
+          '',
+          '## public.cart_items',
+          '',
+          '- `cart_id` uuid FK → public.carts.id',
+          '- `sku` text',
+          '- `qty` integer CHECK (qty > 0)',
+        ].join('\n'),
+        ['postgres — production', 'mssql — reporting'],
+      )
+      m.emitEvent('s-db', 'prompt', { text: 'How many orders are stuck in paid but never shipped?', pending: false })
+      m.emitEvent('s-db', 'assistant_text', {
+        text: '41 orders. The oldest has been paid for 19 days; all 41 share the same fulfilment region.',
+        partial: false,
+      })
+
+      // ---- DIFF PANE ---------------------------------------------------------
+      m.setFileDiff('p-alpha', 'src/cart/reducer.ts', {
+        binary: false,
+        lines: [
+          { type: 'context', text: 'export function cartReducer(state, action) {' },
+          { type: 'context', text: '  switch (action.type) {' },
+          { type: 'del', text: '    case CLEAR: return null' },
+          { type: 'add', text: '    case CLEAR: return { ...state, items: [], placeholder: true }' },
+          { type: 'add', text: '    case RESTORE: return hydrate(action.payload)' },
+          { type: 'context', text: '    default: return state' },
+          { type: 'context', text: '  }' },
+          { type: 'context', text: '}' },
+        ],
+      })
+      m.setFileDiff('p-alpha', 'notes.md', {
+        binary: false,
+        lines: [
+          { type: 'add', text: '# Cart notes' },
+          { type: 'add', text: '' },
+          { type: 'add', text: 'The null return predates the placeholder branch.' },
+        ],
+      })
+
+      // ---- MANUAL QA ---------------------------------------------------------
+      const qa = await window.switchboard.invoke('evals.add', {
+        projectId: 'p-alpha',
+        text: 'An empty cart shows the placeholder and its catalogue link works',
+      })
+      await window.switchboard.invoke('evals.add', {
+        projectId: 'p-alpha',
+        text: 'Clearing a full cart does not flash the old items',
+      })
+      if (qa?.ok !== false && qa?.data?.id) {
+        m.reportEvalResult('p-alpha', qa.data.id, { checkStatus: 'pass', judge: 'pass' })
+      }
+
+      // ---- A FINISHED VERIFICATION RUN --------------------------------------
+      // Started through the real IPC method because reportVerifyResult finishes a
+      // run already in flight, exactly as the main process does. This also creates
+      // the Tests section's own background session, which is what puts subsession
+      // rows under storefront in the rail.
+      await window.switchboard.invoke('verify.start', {
+        projectId: 'p-alpha',
+        stackId: 'node',
+        suiteIds: ['node-unit', 'node-coverage', 'node-e2e', 'node-api', 'node-lint', 'node-mutation'],
+      })
+      m.reportVerifyResult('p-alpha', 'fail', {
+        suites: [
+          { id: 'node-unit', label: 'Unit tests', status: 'pass', detail: '640 passed, 3 skipped', verified: true },
+          { id: 'node-coverage', label: 'Coverage', status: 'pass', detail: 'vitest --coverage', verified: true },
+          { id: 'node-e2e', label: 'UI end-to-end', status: 'fail', detail: '1 of 224 failed — empty-cart placeholder' },
+          { id: 'node-api', label: 'HTTP smoke', status: 'pass', detail: '9 routes, all 2xx' },
+          { id: 'node-lint', label: 'Types and lint', status: 'pass', detail: '0 problems', verified: true },
+          { id: 'node-mutation', label: 'Mutation testing', status: 'skipped', detail: 'slow suite, not ticked' },
+        ],
+        coverage: {
+          line: { value: 81.4, source: 'vitest --coverage', verified: true },
+          changed: { value: 93, source: 'coverage vs git diff' },
+          files: [
+            { path: 'src/cart/reducer.ts', pct: 96 },
+            { path: 'src/cart/CartPlaceholder.tsx', pct: 74 },
+            { path: 'src/checkout/totals.ts', pct: 41 },
+          ],
+        },
+        quality: {
+          gate: 'pass',
+          gateSource: 'sonarqube',
+          duplication: { value: 1.2, source: 'sonarqube' },
+          debt: '2d 4h',
+          mutation: { value: null, source: null },
+          mutationKilled: null,
+          mutationSurvived: null,
+          survivors: [],
+          archViolations: { value: 2, source: 'architecture suite' },
+          findings: [
+            'src/cart imports src/checkout/totals directly, bypassing the module boundary',
+            'src/renderer/views/DiffView.vue calls invoke() outside a store',
+          ],
+        },
+        evidence: [
+          {
+            kind: 'http',
+            what: 'GET /api/v1/cart with an emptied cart',
+            result: '200 · {"items":[],"placeholder":true}',
+            path: 'src/cart/reducer.ts',
+          },
+          {
+            kind: 'screenshot',
+            what: 'Empty cart rendered in a real browser',
+            result: 'CartPlaceholder visible, catalogue link present',
+            path: '.switchboard/evidence/empty-cart.png',
+          },
+        ],
+        endpoints: [
+          {
+            method: 'GET',
+            path: '/api/v1/cart/{id}',
+            status: 200,
+            ms: 84,
+            response: '{"id":"C-4417","items":[],"placeholder":true}',
+            dataSource: 'postgres — production (read only)',
+            dataQuery: "select id from carts where item_count = 0 limit 1",
+            dataAssertion: 'the row holds no items; the response listed none',
+            outcome: 'pass',
+            detail: 'answered with the cart the query named',
+          },
+          {
+            method: 'POST',
+            path: '/api/v1/cart/{id}/clear',
+            status: 500,
+            ms: 612,
+            response: '{"error":"cannot read properties of null"}',
+            dataSource: 'postgres — production (read only)',
+            dataQuery: "select id from carts where item_count > 0 limit 1",
+            dataAssertion: 'clearing a full cart should answer 204',
+            outcome: 'fail',
+            detail: 'the null return is reachable through the API, not only the reducer',
+          },
+        ],
+      })
+
+      // ---- A FINISHED API EVAL SET ------------------------------------------
+      await window.switchboard.invoke('api.start', {
+        projectId: 'p-alpha',
+        endpoints: [
+          { method: 'GET', template: '/api/v1/cart/{id}' },
+          { method: 'POST', template: '/api/v1/cart/{id}/clear' },
+        ],
+        target: 'local',
+      })
+      m.reportApiResult(
+        'p-alpha',
+        'fail',
+        [
+          {
+            request: {
+              method: 'GET',
+              path: '/api/v1/cart/C-4417',
+              expect: { status: 200, minItems: null, mustContain: 'placeholder' },
+              note: 'an emptied cart reports the placeholder flag',
+              dataSource: 'postgres — production',
+              dataQuery: "select id from carts where item_count = 0 limit 1",
+            },
+            status: 200,
+            ms: 84,
+            outcome: 'pass',
+            detail: 'body carried placeholder: true',
+            body: '{"id":"C-4417","items":[],"placeholder":true}',
+          },
+          {
+            request: {
+              method: 'POST',
+              path: '/api/v1/cart/C-9910/clear',
+              expect: { status: 204, minItems: null, mustContain: null },
+              note: 'clearing a full cart answers no content',
+              dataSource: 'postgres — production',
+              dataQuery: "select id from carts where item_count > 0 limit 1",
+            },
+            status: 500,
+            ms: 612,
+            outcome: 'fail',
+            detail: 'answered 500; the reducer null path is reachable from the API',
+            body: '{"error":"cannot read properties of null"}',
+          },
+        ],
+        'One of two calls failed. The failure is the same null return the spec is about.',
+      )
 
       import('./main.ts')
     </script>

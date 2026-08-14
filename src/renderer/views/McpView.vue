@@ -520,7 +520,7 @@ function answer(eventId: string, choice: string): void {
 .head {
   padding: 14px 18px 0;
   border-bottom: 1px solid var(--border);
-  background: var(--gloss), var(--bg-panel);
+  background: var(--bg-panel);
   box-shadow: var(--hairline-shine);
 }
 
@@ -663,7 +663,7 @@ function answer(eventId: string, choice: string): void {
   gap: 2px;
   padding: 0 16px;
   border-bottom: 1px solid var(--border);
-  background: var(--gloss), var(--bg-panel);
+  background: var(--bg-panel);
   box-shadow: var(--hairline-shine);
 }
 

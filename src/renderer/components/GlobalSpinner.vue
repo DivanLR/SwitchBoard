@@ -65,7 +65,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   border-radius: var(--rp);
-  background: var(--gloss), var(--bg-panel);
+  background: var(--bg-panel);
   border: 1px solid var(--border-strong);
   box-shadow: var(--shadow-dd);
   pointer-events: none;

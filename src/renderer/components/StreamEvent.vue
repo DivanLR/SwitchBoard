@@ -384,7 +384,7 @@ html.sb-light .prompt {
 
 
 .summary-card {
-  background: var(--gloss), var(--bg-hover);
+  background: var(--bg-hover);
   border: 1px solid var(--border-card-alt);
   border-radius: var(--rc);
   padding: 11px 13px;

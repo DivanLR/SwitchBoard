@@ -670,8 +670,21 @@ const partTabs: { id: Part; label: string }[] = [
   text-align: left;
 }
 
+/* Fills the pane. The 840px cap left the whole section in the left two thirds
+   of a 1364px pane, which on a board this wide reads as broken rather than
+   measured. Structural content takes the room; only PROSE keeps a measure below,
+   because a paragraph set across 1300px is unreadable and the craft floor puts
+   body copy at 65-75ch. */
 .has-specs {
-  max-width: 840px;
+  max-width: none;
+}
+
+/* The three prose blocks, and only those. Tasks, phases, chips, cards and the
+   command grid are not prose and span the full width. */
+.sec-body,
+.q-text,
+.sc-desc {
+  max-width: 78ch;
 }
 
 /* Spec chips */
@@ -806,7 +819,7 @@ const partTabs: { id: Part; label: string }[] = [
 
 .ns-box {
   width: min(520px, 90%);
-  background: var(--gloss), var(--bg-panel);
+  background: var(--bg-panel);
   border: 1px solid var(--border-strong);
   border-radius: var(--rc);
   padding: 18px 20px;
@@ -871,7 +884,7 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .impl-btn {
-  background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
+  background: var(--green);
   color: var(--green-ink);
   font-weight: var(--w-em);
   font-size: var(--fs-meta);
@@ -1147,7 +1160,7 @@ const partTabs: { id: Part; label: string }[] = [
 
 .sug-run {
   flex-shrink: 0;
-  background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
+  background: var(--green);
   color: var(--green-ink);
   font-weight: var(--w-em);
   font-size: var(--fs-meta);

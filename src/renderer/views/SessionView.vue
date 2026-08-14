@@ -1133,7 +1133,7 @@ const {
           :disabled="ending"
           @click="stop()"
         >
-          {{ ending ? 'Ending' : 'End' }}
+          {{ ending ? 'Ending…' : 'End session' }}
         </button>
         <!-- Ending blocks the window for the whole teardown, and looks exactly
              like starting one does: same wait, same screen. `ending` spans the
@@ -1147,30 +1147,6 @@ const {
           sub="Draining the session and tearing its container down."
           ring-testid="ending-bar"
         />
-        <div class="segments mono" data-testid="view-toggle" role="tablist" aria-label="Stream view">
-          <button
-            type="button"
-            class="seg"
-            :class="{ on: active.view === 'clean' }"
-            data-testid="view-clean"
-            role="tab"
-            :aria-selected="active.view === 'clean'"
-            @click="switchView('clean')"
-          >
-            Clean
-          </button>
-          <button
-            type="button"
-            class="seg"
-            :class="{ on: active.view === 'raw' }"
-            data-testid="view-raw"
-            role="tab"
-            :aria-selected="active.view === 'raw'"
-            @click="switchView('raw')"
-          >
-            Raw
-          </button>
-        </div>
       </div>
       <div class="head-meta mono">
         <span style="white-space: nowrap"><Icon name="branch" :size="12" /> {{ liveSession?.branch ?? endedSession?.branch ?? '—' }}</span>
@@ -1298,6 +1274,42 @@ const {
       >
         Diagrams
       </button>
+      <!-- Clean/Raw belongs on this rule, not in the header above it. It switches
+           how THE STREAM is drawn, so it sits with the tabs that choose what the
+           pane shows, right-aligned on the same seam — and it only exists while
+           the stream does. In the header it rode beside End and the status pill,
+           which are about the session's life, and it stayed on screen on Specs,
+           Tests and Diff, where there is no stream for it to switch. -->
+      <div
+        v-if="mainTab === 'session'"
+        class="segments mono"
+        data-testid="view-toggle"
+        role="tablist"
+        aria-label="Stream view"
+      >
+        <button
+          type="button"
+          class="seg"
+          :class="{ on: active.view === 'clean' }"
+          data-testid="view-clean"
+          role="tab"
+          :aria-selected="active.view === 'clean'"
+          @click="switchView('clean')"
+        >
+          Clean
+        </button>
+        <button
+          type="button"
+          class="seg"
+          :class="{ on: active.view === 'raw' }"
+          data-testid="view-raw"
+          role="tab"
+          :aria-selected="active.view === 'raw'"
+          @click="switchView('raw')"
+        >
+          Raw
+        </button>
+      </div>
     </div>
 
     <SpecsView
@@ -1658,7 +1670,12 @@ const {
       </div>
     </div>
 
-    <footer class="composer">
+    <!-- The composer belongs to the SESSION tab and is hidden on the others: a
+             field for talking to the session has no business under a diff. The one
+             exception is a spec-edit target, because Specs Refine sets one and then
+             expects this field to type it into; hiding it unconditionally would
+             delete that flow rather than tidy it. -->
+        <footer v-if="mainTab === 'session' || editTarget" class="composer">
       <!-- Jump to the newest line. Anchored to the composer rather than to the
            stream, because the stream is the scrolling box: anything absolute
            inside it scrolls away with the content. The composer is the fixed
@@ -1766,7 +1783,7 @@ const {
       <div v-if="queuedEditError" class="queued-edit-error mono" data-testid="queued-edit-error">
         {{ queuedEditError }}
       </div>
-      <div v-if="restoredDraft !== null && composer === restoredDraft" class="draft-note" data-testid="draft-note">
+      <div v-if="restoredDraft !== null && composer === restoredDraft" class="draft-float" data-testid="draft-note">
         Restored draft from the previous run — send to deliver it.
       </div>
 
@@ -1836,7 +1853,7 @@ const {
             @scroll="onComposerScroll"
           ></textarea>
         </div>
-        <span class="to mono" data-testid="composer-to">to {{ sendTo }}</span>
+        <span class="to-inline mono" data-testid="composer-to">to {{ sendTo }}</span>
         <button
           v-if="!editTarget"
           class="queue-btn mono"
@@ -1861,6 +1878,38 @@ const {
 </template>
 
 <style scoped>
+/* THE COMPOSER FOOTER. Reworked in live mode: shorter, with the restored-draft
+   note lifted out of the flow so it costs no height, and confined to the Session
+   tab. Accepted variant: density, tight padding, meta line kept.
+
+   Selectors are semantic. The live accept splices the chosen markup in and drops
+   its data-impeccable-* attributes, so any rule keyed to those matches nothing
+   the moment it lands. */
+/* IN FLOW, as the composer's first row, so the floating REFS row sits above it
+   rather than under it. It was absolute for two rounds to save the footer a row
+   of height; the owner asked for REFS on top, and REFS itself floats at
+   bottom: 100%, so the only way to sit beneath it is to stop floating. The cost
+   is one row, and only while a restored draft actually exists. */
+.draft-float {
+  margin-bottom: 5px;
+  padding: 4px 8px;
+  font-size: var(--fs-micro);
+  color: var(--amber);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--rc);
+  box-shadow: var(--shadow-dd);
+}
+
+/* Inline, so the send target no longer needs a rule of its own under the field. */
+.to-inline {
+  flex: none;
+  padding-bottom: 8px;
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
 .session-view {
   display: flex;
   flex-direction: column;
@@ -1974,6 +2023,10 @@ const {
   border-radius: var(--rp);
   overflow: hidden;
   font-size: var(--fs-ui);
+  /* Pushed to the far end of the tab rule and centred on it. The tabs claim the
+     rule's full height so their underline lands on the seam; a bordered control
+     cannot, so it centres in the leftover instead of stretching. */
+  margin: auto 0 auto auto;
 }
 
 /* Sentence case, not the spec-label uppercase the rest of the chrome uses: a
@@ -2719,165 +2772,18 @@ html.sb-light .bypass-warn {
   border-color: var(--green);
 }
 
-.composer-row {
-  align-items: flex-end;
-}
-
-
-/* Ctrl+C stop confirmation bubble above the composer. */
-.stop-confirm {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
-  padding: 6px 11px;
-  font-size: var(--fs-meta);
-  color: var(--amber);
-  background: color-mix(in srgb, var(--amber) 8%, transparent);
-  border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
-  border-radius: var(--rc);
-  animation: sbIn 0.15s var(--ease);
-}
-
-.sc-text {
-  flex: 1;
-}
-
-.sc-stop {
-  font-size: var(--fs-meta);
-  /* Not #fff: white on the light red-pencil correction red measures 2.78:1. --red-ink is the
-     token that exists for exactly this, at 6.34:1 — the same fix styles.css
-     already applied to .stop-btn:hover. */
-  color: var(--red-ink);
-  background: var(--red);
-  border: none;
-  border-radius: var(--rc);
-  padding: 3px 12px;
-  cursor: pointer;
-}
-
-.sc-cancel {
-  font-size: var(--fs-meta);
-  color: var(--text-tab);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--rc);
-  padding: 3px 12px;
-  background: transparent;
-  cursor: pointer;
-}
-
-.draft-note {
-  font-size: var(--fs-meta);
-  color: var(--amber);
-  margin-bottom: 6px;
-}
-
-/* The turn finished while the editor was open and the message went as typed.
-   Red because the developer's intent was not carried out. */
-.queued-edit-error {
-  font-size: var(--fs-meta);
-  color: var(--red);
-  margin-bottom: 6px;
-}
-
-/* "UP NEXT": a horizontal strip of queued-goal chips above the composer. */
-.queue {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 10px 18px 0;
-}
-
-.queue-label {
-  font-size: var(--fs-micro);
-  letter-spacing: 0.14em;
-  color: var(--text-faint);
-}
-
-.queue-chip {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: var(--fs-meta);
-  color: var(--text-body);
-  background: var(--bg-hover);
-  box-shadow: var(--elev);
-  border: 1px solid var(--border-card-alt);
-  border-radius: var(--rc);
-  padding: 4px 10px;
-  max-width: 280px;
-}
-
-.queue-num {
-  color: var(--text-faint);
-}
-
-/* A button rather than a span so clicking it to edit is reachable by keyboard and
-   announced as an action; the base reset already strips the chrome, so it keeps
-   the chip's own type and colour. */
-.queue-text {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  text-align: left;
-  min-width: 0;
-}
-.queue-text:hover {
-  color: var(--text);
-  text-decoration: underline dotted;
-}
-
-/* Same width as the text it replaces, so opening an edit does not resize the row. */
-.queue-edit {
-  flex: 1;
-  min-width: 120px;
-  font-size: var(--fs-meta);
-  color: var(--text);
-  background: var(--bg-panel);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--rc);
-  padding: 1px 5px;
-}
-
-.queue-x {
-  cursor: pointer;
-  color: var(--text-faint);
-  font-size: var(--fs-meta);
-}
-
-.queue-x:hover {
-  color: var(--red);
-}
-
-.queue-note {
-  font-size: var(--fs-micro);
-  color: var(--text-ghost);
-}
-
-.queue-btn {
-  flex-shrink: 0;
-  white-space: nowrap;
-  border: 1px solid var(--border-strong);
-  color: var(--text-mid);
-  font-weight: var(--w-em);
-  font-size: var(--fs-meta);
-  padding: 6px 13px;
-  border-radius: var(--rc);
-}
-
-.queue-btn:hover:not(:disabled) {
-  border-color: var(--green);
-  color: var(--text-strong);
-}
-
-.queue-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
+/* Its own centred box, not a glyph on a baseline. The row is align-items:
+   flex-end so a growing input pushes upward while the controls stay on the
+   bottom line; a bare inline span therefore sat the 14px chevron on a 13px text
+   baseline and it read as low in a 28px row. A fixed box centres it on both axes
+   and keeps the row's flex-end behaviour intact. */
 .caret {
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 20px;
   color: var(--green);
   font-weight: var(--w-em);
 }

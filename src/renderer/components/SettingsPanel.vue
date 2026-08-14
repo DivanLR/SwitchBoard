@@ -6,7 +6,7 @@
 import { useTemplateRef, computed, onMounted, ref, watch } from 'vue'
 import { useModal } from '@renderer/composables/useModal'
 import { MATCHER_KIND_LABEL, useAllowedRules } from '@renderer/composables/useAllowedRules'
-import type { ModelChoice, SessionMode, Settings, TerseLevel } from '@shared/domain'
+import type { ModelChoice, SessionMode, Settings } from '@shared/domain'
 import { modelLabel, modelPrice, SESSION_MODES } from '@shared/domain'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { useProjectsStore } from '@renderer/stores/projects'
@@ -126,14 +126,6 @@ const FONT_SIZES = [
   ['md', 'Medium'],
   ['lg', 'Large'],
 ] as const satisfies readonly (readonly [Settings['fontSize'], string])[]
-
-const TERSE_LEVELS = ['lite', 'full', 'ultra'] as const satisfies readonly TerseLevel[]
-
-const terseExplain: Record<TerseLevel, string> = {
-  lite: 'Light touch: drops filler and pleasantries, keeps full sentences.',
-  full: 'Compact: fragments and bullets, conclusion first, no preamble.',
-  ultra: 'Maximum: telegraphic notes only. Densest, least conversational.',
-}
 
 // Models this subscription can select, read from the CLI by the main process
 // and owned by the settings store. The cards are built from that list alone —
@@ -767,27 +759,6 @@ const updateLine = computed(() => {
 
             <div class="setting-row">
               <div class="sr-text">
-                <div class="sr-label">Terse mode</div>
-                <div class="sr-desc">
-                  Compresses only Claude's replies to you (output tokens), saving cost and time. Your
-                  prompts and the context Claude reads are unchanged; code, commands, and errors stay
-                  exact.
-                </div>
-              </div>
-              <button
-                class="switch"
-                :class="{ on: settings.terseMode }"
-                data-testid="setting-terse-mode"
-                role="switch"
-                :aria-checked="settings.terseMode"
-                @click="save({ terseMode: !settings.terseMode })"
-              >
-                <span class="knob"></span>
-              </button>
-            </div>
-
-            <div class="setting-row">
-              <div class="sr-text">
                 <div class="sr-label">Heavy subagents</div>
                 <div class="sr-desc">
                   Divide and conquer. Every session is told to split work into independent parts
@@ -813,27 +784,6 @@ const updateLine = computed(() => {
               >
                 <span class="knob"></span>
               </button>
-            </div>
-
-            <div v-if="settings.terseMode" class="group">
-              <div class="group-label mono">TERSE LEVEL</div>
-              <div class="group-desc">How aggressively replies are compressed.</div>
-              <div class="cards">
-                <button
-                  v-for="level in TERSE_LEVELS"
-                  :key="level"
-                  class="card-opt"
-                  :class="{ sel: settings.terseLevel === level }"
-                  :data-testid="`terse-level-${level}`"
-                  @click="save({ terseLevel: level })"
-                >
-                  <span class="opt-dot" :class="{ on: settings.terseLevel === level }"></span>
-                  <div class="opt-body">
-                    <div class="opt-name mono">{{ level }}</div>
-                    <div class="opt-sub">{{ terseExplain[level] }}</div>
-                  </div>
-                </button>
-              </div>
             </div>
 
             <div class="group-label mono" style="margin-top: 8px">BYPASS SANDBOX</div>
@@ -1204,7 +1154,7 @@ html.sb-light .overlay {
 
 .mcp-check.on {
   border-color: var(--green);
-  background: var(--gloss), linear-gradient(135deg, var(--green), var(--green2));
+  background: var(--green);
 }
 
 .mcp-ico {
