@@ -269,16 +269,23 @@ const workingAgents = computed(() =>
 // Live background tasks (deep-research workflows, backgrounded subagents/bash).
 const backgroundTasks = computed(() => liveSession.value?.backgroundTasks ?? [])
 
-// Summaries produced WHILE background work runs are interim noise — record their
-// ids so they stay hidden even after the tasks drain (only the final,
-// post-settle summary renders). Cleared when the session changes.
+// Summaries that arrive WHILE background work runs are interim noise: during a
+// fan-out the clean view would otherwise fill with half-finished restatements of a
+// turn that has not landed yet. Their ids are recorded here so they can be hidden
+// while that run is live.
 //
-// Only summaries that ARRIVE during background work, which is what the sentence
-// above always claimed and the code did not do. It re-scanned the whole event
-// list on every tick, so the first background task to start retro-marked every
-// summary already in the session — including ones from an hour earlier that had
-// nothing to do with it — and nothing ever un-marked them. The developer saw a
-// summary they had been reading vanish from the clean view and stay gone.
+// Hidden while it is live, and no longer. Two earlier versions of this hid more
+// than they should have and never gave anything back:
+//
+//   - the first re-scanned the whole event list on every tick, so the first
+//     background task to start retro-marked every summary already in the session,
+//     including ones from an hour earlier that had nothing to do with it;
+//   - the second stopped that, but still hid the marked ones for the remaining
+//     life of the session, so a summary written during a fan-out was gone for
+//     good and the developer could not scroll back to what the agent had said.
+//
+// Interim is a statement about the moment, not about the content. Once the run
+// drains, these are simply history, and history renders.
 //
 // `scanned` is the high-water mark of events already considered. Events are
 // append-only and ordered by seq, so everything below it has had its answer.
@@ -292,6 +299,11 @@ watch(
       for (let i = scanned; i < events.length; i++) {
         if (events[i].kind === 'summary') interimSummaries.value.add(events[i].id)
       }
+    } else if (interimSummaries.value.size > 0) {
+      // The run has drained, so the set empties and everything it was holding back
+      // returns to the transcript. This is the half that makes the hiding safe:
+      // nothing is suppressed for longer than the work it belonged to.
+      interimSummaries.value = new Set()
     }
     // Advanced even when nothing is running, which is the half that fixes it:
     // an event seen while the session was quiet can never be marked later.
@@ -415,6 +427,13 @@ watch(
 const DERIVE_WINDOW = 1500
 const deriveWindow = ref(DERIVE_WINDOW)
 
+// Whether the transcript window follows the tail; false once the developer pages
+// back. Declared up here with the window it governs because the project watcher
+// below resets it and runs `immediate`, so a declaration further down would be in
+// its temporal dead zone and the component would not mount at all. See the render
+// window near `MAX_RENDER` for what it is actually for.
+const followTail = ref(true)
+
 watch(
   () => props.project.id,
   (projectId, prevId) => {
@@ -439,8 +458,10 @@ watch(
     // a second Ctrl+C means to stop a session the developer never asked about.
     cancelStop()
     // Per-project too: a window widened by paging through one long session must
-    // not carry into the next project and derive over its whole history.
+    // not carry into the next project and derive over its whole history. Following
+    // resumes with it, so the next project opens on its latest output.
     deriveWindow.value = DERIVE_WINDOW
+    followTail.value = true
     resetSuggestions()
     void loadHistory(projectId)
     void specs.loadState(projectId)
@@ -599,15 +620,47 @@ const items = computed<StreamItem[]>(() => {
 // Simple windowing keeps the DOM bounded on flood-heavy sessions (SC-007).
 const MAX_RENDER = 500
 const renderStart = ref(0)
+
+// `followTail` (declared with `deriveWindow` above) is the whole fix for the worst
+// thing this view did: the watcher below used to recompute the start from the END
+// of the list on every arriving event, so history paged in by `showEarlier` was
+// thrown straight back out by the next token. On a working session that made
+// anything above the fold unreachable. The developer would page back to a summary
+// they wanted to re-read and watch it leave again as the agent kept talking.
+//
+// Nothing turns following back on within a session, on purpose. The alternative is
+// scroll-position tracking to guess when the developer has returned to the bottom,
+// and a wrong guess there deletes their history all over again.
 watch(
   () => items.value.length,
   (length) => {
-    renderStart.value = Math.max(0, length - MAX_RENDER)
+    const tail = Math.max(0, length - MAX_RENDER)
+    if (followTail.value) {
+      renderStart.value = tail
+      return
+    }
+    // Pinned, but never past the end: switching sessions shortens the list under
+    // a start index that was valid for the longer one.
+    if (renderStart.value > length) renderStart.value = tail
   },
 )
 const visibleItems = computed(() => items.value.slice(renderStart.value))
 
+// Paging back also has to hold the DERIVATION open. `derived` slices the last
+// `deriveWindow` events, so on a session still producing output the front of that
+// slice walks forward and silently eats the history the developer just paged in —
+// the same bug as above, one layer down, and slower to notice because it needs a
+// flood to show up. Growing the window costs derivation time on a long session,
+// which is the trade the developer implicitly accepted by asking to read back.
+watch(
+  () => active.events.length,
+  (count) => {
+    if (!followTail.value && deriveWindow.value < count) deriveWindow.value = count
+  },
+)
+
 function showEarlier(): void {
+  followTail.value = false
   renderStart.value = Math.max(0, renderStart.value - MAX_RENDER)
   if (renderStart.value > 0) return
   // Widen before reaching for the store: what the developer is asking for may
@@ -1503,6 +1556,7 @@ const {
           v-if="renderStart > 0 || deriveWindow < active.events.length || active.hasMoreHistory"
           type="button"
           class="load-earlier mono"
+          data-testid="show-earlier"
           @click="showEarlier()"
         >
           <Icon name="chevron-up" :size="11" /> show earlier activity

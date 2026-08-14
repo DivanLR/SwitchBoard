@@ -230,3 +230,31 @@ test('clean view tool rows are command-free — description only, no command or 
   await page.getByTestId('view-raw').click()
   await expect(page.getByTestId('stream')).toContainText('rm -rf dist')
 })
+
+// The window that keeps the DOM bounded used to be recomputed from the END of the
+// list on every arriving event, which meant it fought the developer: page back to
+// read something, and the next token threw it away again. On a working session
+// that made the whole history above the fold unreachable.
+test('history paged in with "show earlier" survives new output', async ({ page }) => {
+  // Past MAX_RENDER (500), so the window genuinely starts part-way down and the
+  // first line is outside it.
+  await page.evaluate(() => {
+    for (let i = 0; i < 620; i++) {
+      window.__mock.emitEvent('s-alpha', 'assistant_text', { text: `line ${i}`, partial: false })
+    }
+  })
+  const first = page.getByTestId('stream').getByText('line 0', { exact: true })
+  await expect(first).toHaveCount(0)
+
+  await page.getByTestId('show-earlier').click()
+  await expect(first).toBeVisible()
+
+  // The session keeps talking. The line the developer paged back to must stay.
+  await page.evaluate(() => {
+    for (let i = 0; i < 40; i++) {
+      window.__mock.emitEvent('s-alpha', 'assistant_text', { text: `after ${i}`, partial: false })
+    }
+  })
+  await expect(page.getByTestId('stream').getByText('after 39', { exact: true })).toBeVisible()
+  await expect(first).toBeVisible()
+})

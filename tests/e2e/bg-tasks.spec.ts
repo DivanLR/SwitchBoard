@@ -47,15 +47,19 @@ test('interim summaries are hidden while background work runs; turn-complete sta
   await expect(page.getByTestId('result-event')).toBeVisible()
   await expect(page.getByTestId('stream').getByTestId('stream-event-summary')).toHaveCount(0)
 
-  // Once background work settles, a summary renders normally.
+  // Once background work settles, the suppression lifts and BOTH render. Hiding is
+  // about the moment, not the content: the interim summary was noise while five
+  // auditors were still reporting, and is history once they are done. Keeping it
+  // hidden for the rest of the session meant the developer could not scroll back to
+  // what the agent said during the fan-out, which is the bug this asserts against.
   await page.evaluate(() => {
     window.__mock.setBackgroundTasks('s-alpha', [])
-    window.__mock.emitEvent('s-alpha', 'summary', { text: 'All done — consolidated report.' })
+    window.__mock.emitEvent('s-alpha', 'summary', { text: 'All done, consolidated report.' })
   })
-  // Only the final summary renders — the interim one stays hidden.
   const summaries = page.getByTestId('stream').getByTestId('stream-event-summary')
-  await expect(summaries).toHaveCount(1)
-  await expect(summaries).toContainText('consolidated report')
+  await expect(summaries).toHaveCount(2)
+  await expect(summaries.first()).toContainText('Five auditors running')
+  await expect(summaries.last()).toContainText('consolidated report')
 })
 
 test('Ctrl+C only stops when the composer is focused, and confirms first', async ({ page }) => {
@@ -98,12 +102,14 @@ test('background work hides only the summaries that arrive during it', async ({ 
   // The earlier one is still there. This is the regression: it used to vanish.
   await expect(page.getByTestId('stream')).toContainText('Earlier summary')
 
-  // And it stays after the work drains, along with the real closing summary.
+  // Once the work drains, everything is history and everything reads back: the
+  // earlier summary, the closing one, and the interim chatter that was suppressed
+  // only for as long as the work it belonged to was still running.
   await page.evaluate(() => {
     window.__mock.setBackgroundTasks('s-alpha', [])
     window.__mock.emitEvent('s-alpha', 'summary', { text: 'Final consolidated summary' })
   })
   await expect(page.getByTestId('stream')).toContainText('Final consolidated summary')
   await expect(page.getByTestId('stream')).toContainText('Earlier summary')
-  await expect(page.getByTestId('stream')).not.toContainText('Interim chatter')
+  await expect(page.getByTestId('stream')).toContainText('Interim chatter')
 })
