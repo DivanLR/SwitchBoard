@@ -1,284 +1,61 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-07-30T00:00:00.000Z",
+  "generatedAt": "2026-08-13T00:00:00.000Z",
   "title": "Design System: Switchboard",
   "extensions": {
     "colorMeta": {
-      "sheet-carbon": {
-        "role": "neutral",
-        "displayName": "Carbon (dark ground)",
-        "canonical": "#17181B"
-      },
-      "sheet-white": {
-        "role": "neutral",
-        "displayName": "Sheet White (light ground)",
-        "canonical": "#F7F7F7"
-      },
-      "panel-carbon": {
-        "role": "neutral",
-        "displayName": "Panel, carbon",
-        "canonical": "#131417"
-      },
-      "panel-paper": {
-        "role": "neutral",
-        "displayName": "Panel, paper",
-        "canonical": "#F1F0EC"
-      },
-      "card-carbon": {
-        "role": "neutral",
-        "displayName": "Card, carbon",
-        "canonical": "#1D1F23"
-      },
-      "card-paper": {
-        "role": "neutral",
-        "displayName": "Card, paper",
-        "canonical": "#FBFBFA"
-      },
-      "code-plate-carbon": {
-        "role": "neutral",
-        "displayName": "Code plate, carbon",
-        "canonical": "#141518"
-      },
-      "code-plate-paper": {
-        "role": "neutral",
-        "displayName": "Code plate, paper",
-        "canonical": "#F4F3F0"
-      },
-      "border": {
-        "role": "neutral",
-        "displayName": "Border (crease)",
-        "canonical": "rgba(244,244,242,0.11)"
-      },
-      "border-strong": {
-        "role": "neutral",
-        "displayName": "Border Strong",
-        "canonical": "rgba(244,244,242,0.22)"
-      },
-      "ink-bright": {
-        "role": "neutral",
-        "displayName": "Ink Bright (16.12:1 on carbon)",
-        "canonical": "#F4F4F2"
-      },
-      "ink-primary": {
-        "role": "neutral",
-        "displayName": "Ink Strong / default text (14.08:1)",
-        "canonical": "#E6E5E1"
-      },
-      "ink-body": {
-        "role": "neutral",
-        "displayName": "Ink Body (8.73:1)",
-        "canonical": "#B7B6B0"
-      },
-      "ink-tab": {
-        "role": "neutral",
-        "displayName": "Ink Mid / Tab (6.29:1; identical hex for two roles on the dark theme only, distinct on light)",
-        "canonical": "#9B9A94"
-      },
-      "ink-ghost": {
-        "role": "neutral",
-        "displayName": "Ink Ghost (5.98:1, the tightest ramp tier)",
-        "canonical": "#97968F"
-      },
-      "ink-on-wash": {
-        "role": "neutral",
-        "displayName": "Ink On Wash (role tier for text over --bg-hover/--bg-active; printed contrast figures in the source comment did not reproduce under recomputation)",
-        "canonical": "#AEADA6"
-      },
-      "mountain-gray": {
-        "role": "neutral",
-        "displayName": "Mountain Gray (structure; sole consumer is the hardcoded mix inside --bg-active)",
-        "canonical": "#B9B6AE"
-      },
-      "foil-gold": {
+      "trace-green": {
         "role": "primary",
-        "displayName": "Foil Gold (the one action colour)",
-        "canonical": "#D4AF37",
-        "tonalRamp": [
-          "oklch(0.18 0.05 91)",
-          "oklch(0.28 0.08 91)",
-          "oklch(0.38 0.11 91)",
-          "oklch(0.49 0.13 91)",
-          "oklch(0.60 0.15 91)",
-          "oklch(0.71 0.15 91)",
-          "oklch(0.84 0.10 91)",
-          "oklch(0.95 0.04 91)"
-        ]
+        "displayName": "The Trace",
+        "canonical": "#3FBFB4",
+        "tonalRamp": ["#0E1013", "#134943", "#186158", "#207A70", "#2E9E95", "#3FBFB4", "#57D6CB", "#B7EDE8"]
       },
-      "foil-gold-hover": {
-        "role": "primary",
-        "displayName": "Foil Gold, hover",
-        "canonical": "#E2C25C"
-      },
-      "valley-blue": {
+      "tolerance-amber": {
         "role": "secondary",
-        "displayName": "Valley Blue (attention owed; contract amendment, was named ochre)",
-        "canonical": "#8CB8E4",
-        "tonalRamp": [
-          "oklch(0.19 0.02 249)",
-          "oklch(0.29 0.04 249)",
-          "oklch(0.39 0.05 249)",
-          "oklch(0.49 0.06 249)",
-          "oklch(0.60 0.07 249)",
-          "oklch(0.71 0.08 249)",
-          "oklch(0.84 0.06 249)",
-          "oklch(0.95 0.03 249)"
-        ]
+        "displayName": "Tolerance Amber",
+        "canonical": "#E0A458",
+        "tonalRamp": ["#241A0A", "#4A3212", "#6E4709", "#8A5A12", "#B37D2E", "#E0A458", "#E9B872", "#F5DDB8"]
       },
-      "red-pencil": {
+      "tolerance-red": {
         "role": "secondary",
-        "displayName": "Red-Pencil (correction / error)",
-        "canonical": "#E8705C",
-        "tonalRamp": [
-          "oklch(0.17 0.05 31)",
-          "oklch(0.27 0.08 31)",
-          "oklch(0.37 0.11 31)",
-          "oklch(0.47 0.14 31)",
-          "oklch(0.58 0.16 31)",
-          "oklch(0.68 0.15 31)",
-          "oklch(0.82 0.10 31)",
-          "oklch(0.94 0.04 31)"
-        ]
+        "displayName": "Tolerance Red",
+        "canonical": "#E0685E",
+        "tonalRamp": ["#210A08", "#4A1512", "#711D1A", "#A3282A", "#C24842", "#E0685E", "#E9827A", "#F5C3BE"]
       },
-      "graphite-steel": {
+      "identity-teal": {
         "role": "tertiary",
-        "displayName": "Graphite Steel (database/MCP; source comment also calls this value \"blue-violet\", a leftover from a previous world's teal, which was a different hex)",
-        "canonical": "#8FB0C4",
-        "tonalRamp": [
-          "oklch(0.18 0.015 235)",
-          "oklch(0.28 0.025 235)",
-          "oklch(0.38 0.032 235)",
-          "oklch(0.48 0.038 235)",
-          "oklch(0.59 0.042 235)",
-          "oklch(0.70 0.045 235)",
-          "oklch(0.83 0.035 235)",
-          "oklch(0.95 0.015 235)"
-        ]
+        "displayName": "Identity Teal",
+        "canonical": "#6FA8DC",
+        "tonalRamp": ["#0A1A28", "#123049", "#1F5F94", "#2F7BB8", "#4E93CC", "#6FA8DC", "#96C2E7", "#D2E7F6"]
       },
-      "identity-violet": {
+      "identity-purple": {
         "role": "tertiary",
-        "displayName": "Identity Violet (one of six accent tokens rotated for project/group identity, not a dedicated identity-only hue)",
-        "canonical": "#A99BD0",
-        "tonalRamp": [
-          "oklch(0.18 0.025 297)",
-          "oklch(0.28 0.04 297)",
-          "oklch(0.38 0.05 297)",
-          "oklch(0.48 0.06 297)",
-          "oklch(0.59 0.07 297)",
-          "oklch(0.70 0.075 297)",
-          "oklch(0.83 0.055 297)",
-          "oklch(0.95 0.025 297)"
-        ]
+        "displayName": "Identity Purple",
+        "canonical": "#A98BD6",
+        "tonalRamp": ["#180F26", "#2C1E48", "#5B4494", "#7860B0", "#8F79C3", "#A98BD6", "#C2ACE5", "#E6DAF3"]
+      },
+      "ground": {
+        "role": "neutral",
+        "displayName": "Neutral Charcoal",
+        "canonical": "#14161A",
+        "tonalRamp": ["#0C0E11", "#101216", "#14161A", "#1A1D22", "#454C55", "#868F9A", "#C3C9D1", "#F2F5F8"]
       }
     },
     "typographyMeta": {
-      "headline": {
-        "displayName": "Headline",
-        "purpose": "The ceiling of the ramp at 15.5px: the bridge-missing fallback lockup and the remove-project dialogue title. 2 declarations."
-      },
-      "title": {
-        "displayName": "Title",
-        "purpose": "Brand lockup and view/profile headers. 6 declarations."
-      },
-      "body": {
-        "displayName": "Body",
-        "purpose": "Prose and stream text; also the base size on html. 24 declarations."
-      },
-      "bodyCompact": {
-        "displayName": "Body Compact",
-        "purpose": "Dense prose inside cards. 19 declarations."
-      },
-      "ui": {
-        "displayName": "UI",
-        "purpose": "Control and row labels. 45 declarations."
-      },
-      "label": {
-        "displayName": "Label",
-        "purpose": "Section headings. Only the sidebar's own PROJECTS heading carries the intended 0.08em tracking; a full scan found 12 distinct hardcoded letter-spacing values (0.02em-0.18em) across 14 files, with Sidebar.vue alone using three different values on three elements. 53 declarations at this size overall."
-      },
-      "meta": {
-        "displayName": "Meta",
-        "purpose": "The most-used size in the application, 66 declarations. Secondary lines, timestamps, pills, footer readings."
-      },
-      "caption": {
-        "displayName": "Caption",
-        "purpose": "Sub-labels, chip text, agent lines. 50 declarations."
-      },
-      "micro": {
-        "displayName": "Micro",
-        "purpose": "The floor of the ramp. 25 declarations."
-      },
-      "mono": {
-        "displayName": "Mono",
-        "purpose": "JetBrains Mono, 11.5px, weight 600 on the button/pill/chip/badge idiom. The .mono CSS class itself resolves to the sans face, not this font; see The Earned Monospace Rule."
-      },
-      "glyph": {
-        "displayName": "Glyph (not type)",
-        "purpose": "Icon and symbol glyphs are sized to optical weight, outside the ramp by design. Four selectors are the design-detector hook's current documented carve-out: .group-caret (8px), .rd-icon (17px), .empty-icon (22px), .ni-icon (20px). A fifth, McpView.vue's .empty-ico (26px), is the same kind of glyph but is not yet in that carve-out."
-      }
+      "ui": { "displayName": "UI", "purpose": "Buttons, labels, tabs, chrome — the bulk of the interface." },
+      "body": { "displayName": "Body", "purpose": "Stream content and composer prose." },
+      "title": { "displayName": "Title", "purpose": "Panel and dialog titles." },
+      "head": { "displayName": "Head", "purpose": "Section headers." },
+      "meta": { "displayName": "Meta", "purpose": "Pills, chips, timers, badge counts." },
+      "machine": { "displayName": "Machine", "purpose": "Code, diffs, paths, ids, ticking figures — earned monospace only." }
     },
     "shadows": [
-      {
-        "name": "elev",
-        "value": "inset 0 1px 0 rgba(244,244,242,.05), 0 1px 2px rgba(0,0,0,.4) (dark); inset 0 1px 0 rgba(255,255,255,.7), 0 1px 2px rgba(10,10,10,.09) (light)",
-        "purpose": "Default for any card or dialogue. A lip of light on an edge, not elevation."
-      },
-      {
-        "name": "green-glow",
-        "value": "0 6px 18px -6px color-mix(in srgb, var(--green) 45%, transparent)",
-        "purpose": "Primary (foil-gold) buttons only. The one place the system permits a coloured shadow."
-      },
-      {
-        "name": "shadow-dd",
-        "value": "0 14px 36px rgba(0,0,0,.5) (dark); 0 14px 36px rgba(10,10,10,.17) (light)",
-        "purpose": "Dropdowns and suggestion menus."
-      },
-      {
-        "name": "shadow-menu",
-        "value": "0 14px 36px rgba(0,0,0,.55) (dark); 0 14px 36px rgba(10,10,10,.19) (light)",
-        "purpose": "Context menus."
-      },
-      {
-        "name": "shadow-dlg",
-        "value": "0 28px 70px rgba(0,0,0,.6), 0 0 0 1px rgba(244,244,242,.05) inset (dark); 0 28px 70px rgba(10,10,10,.2), 0 0 0 1px rgba(10,10,10,.06) inset (light)",
-        "purpose": "Modal dialogues only, the sole tier allowed a real cast shadow."
-      }
+      { "name": "elevation-hairline", "value": "inset 0 1px 0 rgba(221, 225, 230, 0.06)", "purpose": "The only depth cue a flat card or panel gets." },
+      { "name": "dialog", "value": "0 24px 60px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(221, 225, 230, 0.1)", "purpose": "Modal overlays only — the one tier granted a real shadow." },
+      { "name": "dropdown-menu", "value": "0 12px 32px rgba(0, 0, 0, 0.45)", "purpose": "Suggestion lists, context menus." }
     ],
     "motion": [
-      {
-        "name": "sbFade",
-        "value": "sbFade 1.6s-2.2s ease infinite",
-        "purpose": "Small unrelated status squares/dots (parallel-agent indicators, the update-banner dot). Not the sidebar's signature idiom, which carries no motion of its own."
-      },
-      {
-        "name": "sbIn",
-        "value": "sbIn 0.12s-0.25s ease",
-        "purpose": "Entrance for dialogues, context menus, the armed button state."
-      },
-      {
-        "name": "sbPulse",
-        "value": "sbPulse 1.8s ease infinite",
-        "purpose": "Expanding-ring pulse on InboxView's own group-dot."
-      },
-      {
-        "name": "sbBlink",
-        "value": "sbBlink 1.1s steps(1) infinite",
-        "purpose": "Terminal caret. Steps rather than eases, because a caret does not fade."
-      },
-      {
-        "name": "inboxPeekGlow",
-        "value": "inboxPeekGlow 1.8s ease-in-out infinite",
-        "purpose": "Collapsed-inbox reopen badge, while items are pending."
-      },
-      {
-        "name": "gs-spin",
-        "value": "gs-spin 0.7s linear infinite",
-        "purpose": "The global loading spinner ring, the one element deliberately exempt from the flat-corner rule because it rotates."
-      },
-      {
-        "name": "now-line (REMOVED)",
-        "value": "none",
-        "purpose": "The previous world's one shared, authored motion (a breathing rule crossing every lane) was deleted outright with the score it belonged to. Nothing replaced it; a sheet at rest does not pulse."
-      }
+      { "name": "ease-standard", "value": "cubic-bezier(0.2, 0.7, 0.3, 1)", "purpose": "Default easing for entrances and toggles." }
     ],
     "breakpoints": []
   },
@@ -287,141 +64,97 @@
       "name": "Primary Button",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "The one action colour, filled foil gold under a shallow raking highlight.",
-      "html": "<button class=\"ds-btn-primary\">Send</button>",
-      "css": ".ds-btn-primary { background: linear-gradient(118deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0) 46%), linear-gradient(135deg, #D4AF37, #B8952A); color: #17181B; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; font-weight: 600; padding: 6px 14px; border: none; border-radius: 0; cursor: pointer; user-select: none; box-shadow: 0 6px 18px -6px rgba(212,175,55,0.45); } .ds-btn-primary:hover { background: #E2C25C; } .ds-btn-primary:focus-visible { outline: 1px solid #D4AF37; outline-offset: 2px; } .ds-btn-primary:disabled { opacity: 0.45; cursor: default; }"
+      "description": "The trace-green solid action button (Send, Approve).",
+      "html": "<button class=\"ds-btn-solid\">Approve</button>",
+      "css": ".ds-btn-solid { background: #3FBFB4; color: #0E1013; font-weight: 500; font-size: 12.5px; font-family: system-ui, -apple-system, 'Segoe UI', 'Inter', sans-serif; padding: 6px 14px; border-radius: 3px; border: none; cursor: pointer; } .ds-btn-solid:hover { background: #57D6CB; } .ds-btn-solid:focus-visible { outline: 1px solid #3FBFB4; } .ds-btn-solid:disabled { opacity: 0.45; cursor: default; }"
     },
     {
       "name": "Armed Button",
       "kind": "button",
       "refersTo": "button-armed",
-      "description": "Second step of a destructive confirmation, filled valley blue. Enters with a rise-and-fade so the state change is visible.",
-      "html": "<button class=\"ds-btn-armed\">Confirm high risk</button>",
-      "css": ".ds-btn-armed { background: #8CB8E4; color: #17181B; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; font-weight: 600; padding: 6px 14px; border: none; border-radius: 0; cursor: pointer; user-select: none; animation: dsIn 0.2s ease; } .ds-btn-armed:hover { background: #A6C9EC; } .ds-btn-armed:focus-visible { outline: 1px solid #D4AF37; outline-offset: 2px; } @keyframes dsIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }"
+      "description": "Amber confirmation-step button for a high-risk action.",
+      "html": "<button class=\"ds-btn-armed\">Confirm deny</button>",
+      "css": ".ds-btn-armed { background: #E0A458; color: #14161A; font-weight: 500; font-size: 12.5px; font-family: system-ui, -apple-system, 'Segoe UI', 'Inter', sans-serif; padding: 6px 14px; border-radius: 3px; border: none; cursor: pointer; } .ds-btn-armed:hover { background: #E9B872; }"
     },
     {
       "name": "Outline Button",
       "kind": "button",
       "refersTo": "button-outline",
-      "description": "The cancel-and-destroy idiom: transparent at rest, hover turns red-pencil rather than the neutral foil-gold that Quiet uses.",
-      "html": "<button class=\"ds-btn-outline\">Cancel</button>",
-      "css": ".ds-btn-outline { background: transparent; color: #9B9A94; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; padding: 6px 14px; border: 1px solid rgba(244,244,242,0.22); border-radius: 0; cursor: pointer; user-select: none; } .ds-btn-outline:hover { border-color: rgba(232,112,92,0.5); color: #E8705C; } .ds-btn-outline:focus-visible { outline: 1px solid #D4AF37; outline-offset: 2px; }"
+      "description": "Transparent bordered button; hover reddens toward a destructive action.",
+      "html": "<button class=\"ds-btn-outline\">Deny</button>",
+      "css": ".ds-btn-outline { background: transparent; color: #9AA2AC; border: 1px solid rgba(221, 225, 230, 0.3); font-size: 12.5px; font-family: system-ui, -apple-system, 'Segoe UI', 'Inter', sans-serif; padding: 6px 14px; border-radius: 3px; cursor: pointer; } .ds-btn-outline:hover { border-color: rgba(224, 104, 94, 0.5); color: #E0685E; }"
     },
     {
-      "name": "Input Field",
-      "kind": "input",
-      "refersTo": "input-field",
-      "description": "Code-plate fill with a hairline border. The 1px foil-gold focus outline is the only focus treatment in the system.",
-      "html": "<input class=\"ds-input\" type=\"text\" placeholder=\"Filter\" />",
-      "css": ".ds-input { background: #141518; color: #E6E5E1; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; font-size: 13px; padding: 6px 10px; border: 1px solid rgba(244,244,242,0.22); border-radius: 0; } .ds-input::placeholder { color: #A3A29C; } .ds-input:focus { outline: 1px solid #D4AF37; }"
-    },
-    {
-      "name": "Risk Chip (High)",
+      "name": "Risk Chip",
       "kind": "chip",
       "refersTo": "chip-risk",
-      "description": "The loudest of three risk steps: low is a bare border, medium adds valley blue, high adds a red-pencil wash behind the border.",
-      "html": "<span class=\"ds-chip-risk-high\">high</span>",
-      "css": ".ds-chip-risk-high { display: inline-block; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; color: #E8705C; background: rgba(232,112,92,0.07); border: 1px solid rgba(232,112,92,0.45); border-radius: 0; padding: 1px 6px; white-space: nowrap; }"
+      "description": "Low/medium/high/plan risk label on an inbox card.",
+      "html": "<span class=\"ds-chip-risk ds-chip-risk--high\">high</span>",
+      "css": ".ds-chip-risk { font-size: 11px; border-radius: 3px; padding: 1px 6px; white-space: nowrap; font-family: system-ui, -apple-system, 'Segoe UI', 'Inter', sans-serif; } .ds-chip-risk--high { color: #E0685E; border: 1px solid rgba(224, 104, 94, 0.45); background: rgba(224, 104, 94, 0.07); }"
     },
     {
-      "name": "Count Badge",
+      "name": "Marker Chip",
       "kind": "chip",
-      "refersTo": "badge-count",
-      "description": "Counts decisions a human owes. Sharp-cornered like everything else in this world, not the round pill a badge name might suggest; the value-reporting idiom used to mean fully round and now means fully square.",
-      "html": "<span class=\"ds-badge-count\">3</span>",
-      "css": ".ds-badge-count { display: inline-block; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; color: #8CB8E4; background: rgba(140,184,228,0.13); border: 1px solid rgba(140,184,228,0.35); border-radius: 0; padding: 0 6px; line-height: 16px; white-space: nowrap; }"
+      "refersTo": "chip-marker",
+      "description": "Approved/denied/pending/expired marker on a stream event.",
+      "html": "<span class=\"ds-chip-marker ds-chip-marker--pending\">pending</span>",
+      "css": ".ds-chip-marker { border-radius: 3px; padding: 1px 7px; font-size: 11px; white-space: nowrap; font-family: system-ui, -apple-system, 'Segoe UI', 'Inter', sans-serif; } .ds-chip-marker--pending { color: #E0A458; border: 1px solid rgba(224, 164, 88, 0.4); background: rgba(224, 164, 88, 0.07); }"
     },
     {
-      "name": "Toggle Switch",
-      "kind": "custom",
-      "refersTo": "switch",
-      "description": "Settings toggle. Sharp-cornered rectangle, not a pill; fills foil gold when on.",
-      "html": "<button class=\"ds-switch ds-switch--on\" aria-pressed=\"true\"><span class=\"ds-switch__knob\"></span></button>",
-      "css": ".ds-switch { position: relative; width: 38px; min-width: 38px; height: 21px; border: none; border-radius: 0; background: rgba(244,244,242,0.22); cursor: pointer; } .ds-switch--on { background: #D4AF37; } .ds-switch__knob { position: absolute; top: 2px; left: 2px; width: 17px; height: 17px; border-radius: 0; background: #A3A29C; transition: all 0.15s ease; } .ds-switch--on .ds-switch__knob { left: auto; right: 2px; background: #17181B; } .ds-switch:focus-visible { outline: 1px solid #D4AF37; outline-offset: 2px; }"
+      "name": "Field / Composer Input",
+      "kind": "input",
+      "refersTo": "composer-input",
+      "description": "Multi-line composer field with a block caret and earned monospace.",
+      "html": "<textarea class=\"ds-input\" placeholder=\"Send a message\"></textarea>",
+      "css": ".ds-input { font-family: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace; font-size: 13px; color: #DDE1E6; background: #0E1013; border: 1px solid rgba(221, 225, 230, 0.3); border-radius: 3px; padding: 6px 10px; caret-shape: block; caret-color: #3FBFB4; } .ds-input:focus { outline: 1px solid #3FBFB4; }"
     },
     {
-      "name": "Status Mark (Held)",
-      "kind": "custom",
-      "refersTo": "lane-active",
-      "description": "Signature component. A held lane draws one crease scored but not yet folded, valley blue, with no motion of its own. Paired with the plain word \"Needs you\" via markTitle() so the shape never has to be learned on its own.",
-      "html": "<span class=\"ds-mark ds-mark--held\" title=\"Needs you\"><svg viewBox=\"0 0 16 14\" width=\"16\" height=\"14\" aria-hidden=\"true\"><path d=\"M3 12 L8 2 L13 12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\"/></svg></span>",
-      "css": ".ds-mark { display: inline-flex; align-items: center; color: #A3A29C; } .ds-mark--held { color: #8CB8E4; }"
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "The base panel/card surface: flat, hairline-bordered, no shadow.",
+      "html": "<div class=\"ds-card\">Card content</div>",
+      "css": ".ds-card { background: #1A1D22; border: 1px solid rgba(221, 225, 230, 0.16); border-radius: 3px; padding: 10px 13px; box-shadow: inset 0 1px 0 rgba(221, 225, 230, 0.06); }"
     },
     {
-      "name": "Status Mark (Deploying)",
-      "kind": "custom",
-      "refersTo": "lane-active",
-      "description": "A working lane draws three facets opening out of the packet, foil gold, the same hue as the primary action because working is the action state in this system.",
-      "html": "<span class=\"ds-mark ds-mark--deploying\" title=\"Working\"><svg viewBox=\"0 0 16 14\" width=\"16\" height=\"14\" aria-hidden=\"true\"><path d=\"M2 12 L5.6 2.6 L8 12 Z\" fill=\"currentColor\" opacity=\".55\"/><path d=\"M8 12 L10.4 2.6 L14 12 Z\" fill=\"currentColor\"/></svg></span>",
-      "css": ".ds-mark--deploying { color: #D4AF37; }"
-    },
-    {
-      "name": "Project Lane",
+      "name": "Sidebar Row (selected)",
       "kind": "nav",
-      "refersTo": "lane-active",
-      "description": "The application's real navigation: a per-lane 1px fold tick in the project's rotated identity colour, and a mountain-gray wash on the selected lane. Carries no staff, no now-line, and no per-lane animation.",
-      "html": "<div class=\"ds-lane ds-lane--active\" tabindex=\"0\" role=\"option\" aria-selected=\"true\"><span class=\"ds-lane__tick\" aria-hidden=\"true\"><svg viewBox=\"0 0 5 26\" width=\"5\" height=\"26\"><path d=\"M4.2 1.5 L1.2 8 L1.2 18 L4.2 24.5\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.2\"/></svg></span><span class=\"ds-lane__name\">api-server</span></div>",
-      "css": ".ds-lane { position: relative; display: flex; align-items: center; gap: 7px; padding: 8px 18px 8px 13px; cursor: pointer; transition: background 0.12s ease; } .ds-lane:hover { background: rgba(244,244,242,0.06); } .ds-lane:focus-visible { outline: none; box-shadow: inset 0 0 0 1px #D4AF37; } .ds-lane--active { background: color-mix(in srgb, #B9B6AE 12%, transparent); border-radius: 8px; } .ds-lane__tick { position: absolute; left: 1px; top: 50%; transform: translateY(-50%); opacity: 0.75; color: #A99BD0; } .ds-lane--active .ds-lane__tick { opacity: 1; } .ds-lane__name { flex: 1; min-width: 0; font-size: 12px; font-weight: 500; color: #D2D1CC; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .ds-lane--active .ds-lane__name { color: #F4F4F2; }"
+      "refersTo": "sidebar-row",
+      "description": "Project sidebar row with the carry-over 2px inset selection mark, recorded as a defect, not a rule to copy.",
+      "html": "<div class=\"ds-sidebar-row ds-sidebar-row--sel\">project-name</div>",
+      "css": ".ds-sidebar-row { font-family: system-ui, -apple-system, 'Segoe UI', 'Inter', sans-serif; font-size: 12.5px; color: #DDE1E6; padding: 6px 10px; } .ds-sidebar-row--sel { background: rgba(221, 225, 230, 0.1); box-shadow: inset 2px 0 0 #3FBFB4; }"
     }
   ],
   "narrative": {
-    "northStar": "The Deployable Sheet",
-    "overview": "The thesis is a sheet, scored and folded flat, deployed by one pull. It is a deliberate double refusal: not the dark-IDE-plus-neon default, not the white SaaS dashboard, and not this project's own previous world either, which drew every state as music notation and asked the developer to learn that vocabulary first. This world asks the developer to learn nothing.\n\nThe material is the same physical object in two lights, not two designs. In carbon fibre (#17181B), the ground reads as dense composite under a faint sixty-degree crease lattice; on paper (#F7F7F7), the same lattice scores darker, because ink marking paper is subtractive while a crease catching light on carbon is additive. Three semantic accents carry meaning and meaning alone: foil gold is the one action colour, valley blue is attention owed, the red-pencil mark is a correction. A finished lane earns no hue at all, drawing a locked fold instead of a coloured badge. Project identity is a separate concern from state, carried by a 1px fold tick colour-rotated from the same six accent tokens the rest of the system uses for meaning.\n\nThis build's own finish clause states that unreviewed and undocumented is unfinished. Several of the direction contract's own promises (angled hairlines, mono spec labels on identifiers, the flat-round exception being singular rather than threefold) are not yet built; this document records those gaps as open rather than smoothing them into the description.",
+    "northStar": "The Trace",
+    "overview": "The Trace is an instrument screen, not a console and not a dashboard. It refuses the console-with-one-neon-accent register and the white-card-dashboard register alike, and it refuses its own predecessor, The Sixteen-Colour Field, an indexed sixteen-ink palette with a bitmap face that could not render below 12px and cost the board its density on a populated screen. The ground is neutral charcoal, ruled by a faint graticule of hairline borders; the interface is otherwise monochrome, and the one accent colour marks the live trace. Every other colour that appears is a reading outside tolerance, never decoration.\n\nThe build is dense by requirement, not by style preference: PRODUCT.md fixes information density as a structural constraint, because the application is watched for hours with several sessions in flight, and it must hold six lanes, a branch, a filesystem path, a timer and a count on one row without truncating. That is the exact fault that killed the previous world, so this one returns to an 11px floor on a system typeface with real weights, rather than a display face with a legibility floor.\n\nPRODUCT.md's Brand Commitments state plainly that no visual register is binding: palette, typeface, corner geometry, rule weight, density and elevation are all replaceable, and this record describes the current build, not a locked identity. Two prior worlds, The Engraved Score and The Deployable Sheet, and the sixteen-ink world named above, are rejected and stand only as anti-reference; nothing from them survives in the build and nothing here should be read as reviving them.",
     "keyCharacteristics": [
-      "Two token sets, one object: html.sb-light and :root are the same sheet under carbon-fibre and paper light, sharing all 17 files that consume the semantic accent tokens by name.",
-      "Three accents carry state (foil gold for action/working, valley blue for attention owed, red-pencil for error); a finished lane carries none.",
-      "Corners are cut, not rounded: --rc and --rp are both 0px, with three named, deliberate circle exceptions (a spinner, a connection dot, a tally dot).",
-      "Project identity is a 1px fold tick in the lane's own colour, rotated across the same six accent tokens used for state elsewhere, never a coloured edge bar.",
-      "Every translucent accent wash is derived from its solid token with color-mix(), never a hardcoded accent rgba() triplet.",
-      "Essentially no authored motion. The previous world's one signature animation, a shared now-line breath, was deleted outright and nothing replaced it."
+      "Neutral charcoal ground (never navy, never pure black) under a faint hairline graticule.",
+      "One accent, a teal-green trace colour, reserved for action and running state.",
+      "Every other colour is earned by being out of tolerance: amber for attention owed, red for error.",
+      "A system UI typeface throughout, 11-20px; monospace reserved for machine text where the character grid carries meaning.",
+      "Materials are flat: a hairline lip for depth, no gradients, no glows, no bevels."
     ],
     "rules": [
-      {
-        "name": "The Two-Track Wash Rule",
-        "body": "Every translucent wash and accent border derives from its solid token by construction, color-mix(in srgb, var(--token) N%, transparent), never a hardcoded accent rgba() hue. Verified at 128 declarations across 14 files, with zero stray accent rgba() triplets found anywhere in the renderer.",
-        "section": "colors"
-      },
-      {
-        "name": "The Contract Amendment Rule",
-        "body": "When a named material colour cannot clear the contrast floor without colliding with another state signal, the amendment is recorded in the token's own code comment rather than silently changed. Valley blue's substitution for the contract's original ochre attention-owed colour is the current example.",
-        "section": "colors"
-      },
-      {
-        "name": "The Fine Gets No Hue Rule",
-        "body": "A finished lane draws a locked fold in neutral ink, not a success colour. Only three states carry colour (held, working, error); finished/ended is deliberately colourless so it never competes with a lane that still needs the developer.",
-        "section": "colors"
-      },
-      {
-        "name": "The Earned Monospace Rule",
-        "body": "JetBrains Mono is for content that is genuinely code, a command, a path, or terminal output, plus the button/pill/chip idiom that borrows its voice. The .mono CSS class resolves to the sans face; reaching for it expecting monospace is the mistake this rule exists to name.",
-        "section": "typography"
-      },
-      {
-        "name": "The Available But Unadopted Rule",
-        "body": "The direction contract states, present tense, that identifiers carry mono spec labels via a --track-label token and a .spec-label utility, and that hairlines terminate at an angle via a .scored-rule utility. Both utilities are real, working CSS; both are applied nowhere, zero call sites across every .vue file and the production build. The label-tracking drift .spec-label was meant to close (12 distinct hardcoded values, 0.02em-0.18em, across 14 files) is unchanged from before the utility existed. The parallelogram shear and corner tabs from the source world's component board go a step further: they are not even declared, absent rather than unadopted.",
-        "section": "typography"
-      },
-      {
-        "name": "The Earned Shadow Rule",
-        "body": "Only the overlay/dialogue tier casts a real shadow. A card that wants to lift off its panel is asking for the wrong tier.",
-        "section": "elevation"
-      }
+      { "name": "The Tolerance Rule", "body": "Colour is spent solely on a measurement outside tolerance. A board with nothing wrong is monochrome except for the one live trace; amber and red are earned by an actual reading, never applied for emphasis or decoration.", "section": "colors" },
+      { "name": "The Fine Gets No Hue Rule", "body": "A finished lane draws no colour, so it cannot compete for attention with a lane that still needs the developer. `.pill.done` is neutral ink, not green, even though green is otherwise the \"good\" colour elsewhere in the system.", "section": "colors" },
+      { "name": "The Identity-Never-State Rule", "body": "Teal and purple identify a surface (e.g. a database connection); they never report status. Status colours are exactly trace-green, amber and red.", "section": "colors" },
+      { "name": "The Monospace Is Earned Rule", "body": "`.mono`/`.code` are applied only where the character grid carries meaning: code, commands, paths, ids, diffs, and figures that tick. Labels, names, statuses, buttons and tabs are interface chrome and are set in the UI face.", "section": "typography" },
+      { "name": "The Legible-At-Density Rule", "body": "No type tier may require a face with a legibility floor above roughly 11px. A type system that forces a larger floor to stay legible is disqualified regardless of how it reads on an empty screen.", "section": "typography" },
+      { "name": "The Earned Shadow Rule", "body": "A real, blurred box-shadow is granted only to the overlay tier (dialogs, dropdowns, menus). Every other surface is flat with, at most, the elevation hairline.", "section": "elevation" },
+      { "name": "No Glow Rule", "body": "A coloured shadow is elevation, and elevation says \"this is the one thing to do here.\" It is reserved for the composer's Send button and nothing else.", "section": "elevation" }
     ],
     "dos": [
-      "Do call the attention-owed colour Valley Blue, and the error colour Red-Pencil, not \"ochre\" or \"red\" loosely; the contract amendment recorded in the code exists precisely because those two nearly collided.",
-      "Do treat --rc and --rp as 0px for everything except the three named round point-markers (.gs-ring, .mcp-dot, .foot-dot) and the small 2px/6px/8px interactive-patch exceptions.",
-      "Do derive every wash from its solid token with color-mix(in srgb, var(--token) N%, transparent). Never hardcode an accent rgba() triplet.",
-      "Do keep JetBrains Mono for terminal output, commands, and the button/pill/chip/badge idiom. Everything else is the system sans stack; there is no serif face anywhere in this world.",
-      "Do add explicit dark and light values for any new token; --bg-active is currently the one known exception and should be treated as a gap, not a pattern.",
-      "Do pair any new status mark with a plain-language title or label, the way markTitle() does, so a shape never has to be learned before it is understood."
+      "Do reserve colour for a reading outside tolerance: trace-green for action/running, amber for attention owed, red for error. A monochrome board is the correct default state.",
+      "Do set every label, button, tab and status string in the system UI face; reserve monospace for code, paths, ids, diffs and ticking figures.",
+      "Do keep shadows flat except at the overlay tier (dialog, dropdown, menu), and always pair an offset with a blur when a shadow is used.",
+      "Do hold identity colours (teal, purple) clear of the status colours (green, amber, red) so an identity marker can never be misread as a state."
     ],
     "donts": [
-      "Don't reintroduce a coloured edge bar for project identity. A fold tick is a 1px stroke; anything thicker is the habit this world refused.",
-      "Don't reintroduce backdrop-filter blur on a panel or sticky heading. It appears exactly once in the renderer, on the modal scrim.",
-      "Don't add a media query or a percentage-based breakpoint. The target is one fixed desktop window (min-width: 1080px on .panes, matched in BrowserWindow).",
-      "Don't assume .spec-label, .scored-rule, or the .chamfer utility are live just because they are declared in styles.css. None is applied anywhere in the current templates or build output; treat each as available but unadopted. The parallelogram shear and corner tabs from the source world's component board are absent entirely, not even declared.",
-      "Don't copy the specific decimal contrast figures printed in the --text-on-wash code comments without re-checking them; independent recomputation gives different, though still passing, numbers.",
-      "Don't give a new empty-state glyph the class name .empty-title without checking McpView.vue (14.5px/600) and InboxView.vue (13px/400) first; both currently use that exact class name for visually different treatments."
+      "Don't add a gradient, a gloss layer, or a coloured glow to any button or panel. `--gloss` and `--green-glow` are both `none` throughout the build.",
+      "Don't revive the sixteen-ink indexed palette, the DotGothic16 bitmap face, ordered dither, hard block shadows, bevelled edges, 0px card radii, or a 12px+ type floor. That world was built and explicitly rejected; PRODUCT.md records it as anti-reference, not as a style to draw from.",
+      "Don't treat a 2px coloured border-left/inset rule as a system pattern for \"selected.\" It appears on a few rows as a carried-over defect from an earlier world, not as an established selection idiom; the craft floor for this world holds selection marks to 1px.",
+      "Don't promise a drawn measurement graticule or per-lane stepping traces as shipped behaviour. Neither is built; both remain plain hairline borders and static rows respectively."
     ]
   }
 }
