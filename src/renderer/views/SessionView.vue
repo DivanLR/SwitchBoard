@@ -780,6 +780,24 @@ function runInSection(text: string): void {
 }
 
 /**
+ * A plugin's own slash command, run where that plugin exists.
+ *
+ * NOT the background session, unlike everything else a section dispatches. The
+ * background session is containerised, and a containerised session's ~/.claude is
+ * a Docker volume of its own with the credentials copied in and nothing else —
+ * no plugins. So a command detected in the project's live session and sent to the
+ * container came back "Unknown command: /diagram-design:export-diagram", which is
+ * true of the environment it arrived in and says nothing about the developer.
+ *
+ * The cost is that the command's output lands in the conversation. That is the
+ * correct trade for these three: they are short, they end in a file path, and an
+ * answer in the wrong place beats no answer at all.
+ */
+function runPluginCommand(text: string): void {
+  void specs.runInSession(props.project.id, text, false)
+}
+
+/**
  * A child tab reports it dispatched something. Same reasoning as runInSection
  * above — no tab switch; the dispatch surfaces as its own sidebar row.
  */
@@ -1408,7 +1426,7 @@ const {
       :installing="installing === DIAGRAM_PLUGIN.pkg"
       :install-error="installError"
       @install="installDiagramPlugin"
-      @run="runInSection"
+      @run="runPluginCommand"
     />
 
     <!-- Clean stream (an open agent chat always renders clean) -->

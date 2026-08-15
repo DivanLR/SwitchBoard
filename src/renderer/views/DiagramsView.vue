@@ -43,6 +43,21 @@ const input = ref<HTMLInputElement | null>(null)
  */
 const isCommand = computed(() => description.value.trimStart().startsWith('/'))
 
+/**
+ * The command currently in the box, when it is one this plugin ships.
+ *
+ * Drives the hint under the bar. Every command here takes a FILE — none of them
+ * draws anything — and the developer who has just picked one from a menu headed
+ * "Commands" has no way to know that. The first real use of this menu was
+ * `/export-diagram Generate a diagram of all my endpoints`, which is a drawing
+ * request handed to the exporter.
+ */
+const pickedCommand = computed(() => {
+  const first = description.value.trim().split(/\s+/)[0] ?? ''
+  const name = first.slice(first.lastIndexOf(':') + 1).replace(/^\//, '')
+  return DIAGRAM_COMMANDS.find((c) => c.command === name) ?? null
+})
+
 async function generate(): Promise<void> {
   const text = description.value.trim()
   if (!text) return
@@ -253,6 +268,16 @@ watch(
           </button>
         </div>
       </div>
+    </div>
+    <!-- What the command in the box actually takes. Sits under the bar rather than
+         in the placeholder, because by the time a command is in the field the
+         placeholder is gone. -->
+    <div v-if="pickedCommand" class="cmd-hint mono" data-testid="diagram-command-hint">
+      <span class="ch-args">{{ pickedCommand.argumentHint }}</span>
+      <span class="ch-desc">{{ pickedCommand.description }}</span>
+      <span class="ch-note">
+        Takes a file. To draw something new, clear this and describe it instead.
+      </span>
     </div>
     <div v-if="menuOpen" class="cmd-scrim" @click="menuOpen = false"></div>
     <div v-if="diagrams.error" class="err" data-testid="diagram-error">{{ diagrams.error }}</div>
@@ -694,6 +719,27 @@ watch(
 .cmd-args {
   font-size: var(--fs-micro);
   color: var(--text-faint);
+}
+
+.cmd-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0 2px;
+  font-size: var(--fs-micro);
+}
+
+.ch-args {
+  color: var(--teal);
+}
+
+.ch-desc {
+  color: var(--text-meta);
+}
+
+.ch-note {
+  color: var(--amber);
 }
 
 /* The plan strip: facts about the drawing, set as data rather than prose. */

@@ -485,3 +485,53 @@ test('a missing command installs the plugin from the menu', async ({ page }) => 
     .poll(async () => (await page.evaluate(() => window.__mock.state().pluginInstalls)).length)
     .toBeGreaterThan(0)
 })
+
+// The bug this pins: a containerised session's ~/.claude is a Docker volume with
+// the credentials copied in and nothing else, so it holds NO plugins. Commands
+// were detected in the project's live session and dispatched into that container,
+// which answered "Unknown command: /diagram-design:export-diagram" — true of where
+// it arrived, and nothing to do with the command being wrong.
+test('a plugin command runs in the live session, which is the one that has the plugin', async ({
+  page,
+}) => {
+  await page.evaluate(() =>
+    window.__mock.setCommands('p-alpha', [
+      'diagram-design:export-diagram',
+      'diagram-design:import-mermaid',
+      'diagram-design:import-drawio',
+    ]),
+  )
+  await page.getByTestId('tab-session').click()
+  await page.getByTestId('tab-diagrams').click()
+
+  await page.getByTestId('diagram-commands').click()
+  await page.getByTestId('diagram-command-export-diagram').click()
+  await page.getByTestId('diagram-generate').click()
+
+  await expect
+    .poll(async () => (await page.evaluate(() => window.__mock.state().sends)).at(-1)?.sessionId)
+    .toBe('s-alpha')
+})
+
+// Every command this plugin ships takes a FILE. None of them draws anything, and
+// the first real use of the menu was the exporter handed a drawing request.
+test('a picked command says what it takes, and that it does not draw', async ({ page }) => {
+  await page.evaluate(() =>
+    window.__mock.setCommands('p-alpha', ['diagram-design:export-diagram']),
+  )
+  await page.getByTestId('tab-session').click()
+  await page.getByTestId('tab-diagrams').click()
+
+  await expect(page.getByTestId('diagram-command-hint')).toHaveCount(0)
+
+  await page.getByTestId('diagram-commands').click()
+  await page.getByTestId('diagram-command-export-diagram').click()
+
+  const hint = page.getByTestId('diagram-command-hint')
+  await expect(hint).toContainText('<html-file>')
+  await expect(hint).toContainText('To draw something new')
+
+  // Clearing the command clears the hint with it.
+  await page.getByTestId('diagram-input').fill('the auth flow')
+  await expect(hint).toHaveCount(0)
+})
