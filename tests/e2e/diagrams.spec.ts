@@ -25,6 +25,7 @@ test('lists existing diagrams, newest first, with the file name and the session 
       description: 'Auth flow for login',
       sessionId: 's-alpha',
       modifiedAt: '2026-08-01T00:00:00.000Z',
+      plan: null,
       bytes: 4200,
     })
     window.__mock.addDiagram('p-alpha', {
@@ -33,6 +34,7 @@ test('lists existing diagrams, newest first, with the file name and the session 
       description: 'Billing webhook sequence',
       sessionId: 's-alpha',
       modifiedAt: '2026-08-10T00:00:00.000Z',
+      plan: null,
       bytes: 5100,
     })
   })
@@ -72,6 +74,7 @@ test('clicking a past diagram shows it, and double-clicking opens it in the brow
         description: file,
         sessionId: 's-alpha',
         modifiedAt: at,
+        plan: null,
         bytes: 4200,
       })
     }
@@ -102,6 +105,7 @@ test('the diagram frame refuses script, by sandbox as well as by CSP', async ({ 
       description: 'Auth flow',
       sessionId: 's-alpha',
       modifiedAt: '2026-08-01T00:00:00.000Z',
+      plan: null,
       bytes: 4200,
     })
   })
@@ -148,6 +152,7 @@ test('the diagram you asked for is the one showing when it arrives', async ({ pa
       description: 'An earlier diagram',
       sessionId: 's-alpha',
       modifiedAt: new Date(Date.now() - 60_000).toISOString(),
+      plan: null,
       bytes: 2048,
     })
   })
@@ -171,6 +176,7 @@ test('the diagram you asked for is the one showing when it arrives', async ({ pa
       description: 'Auth flow for login',
       sessionId: 's-alpha',
       modifiedAt: new Date().toISOString(),
+      plan: null,
       bytes: 8192,
     })
   }, file)
@@ -199,6 +205,7 @@ test('the section offers the plugin commands, and runs one on the diagram in the
       description: 'Auth flow',
       sessionId: 's-alpha',
       modifiedAt: '2026-08-10T00:00:00.000Z',
+      plan: null,
       bytes: 4200,
     })
   })
@@ -215,9 +222,13 @@ test('the section offers the plugin commands, and runs one on the diagram in the
   await expect(page.getByTestId('diagram-command-export-diagram')).toContainText('.svg')
   // Reported by the session, so it is offered; the other two are not, and say so.
   await expect(page.getByTestId('diagram-command-export-diagram')).toBeEnabled()
-  await expect(page.getByTestId('diagram-command-import-mermaid')).toBeDisabled()
-  await expect(page.getByTestId('diagram-command-import-mermaid')).toContainText(
-    'not in this project',
+  // A command the project does not have is NOT a dead row. It used to be disabled
+  // and labelled "not in this project", which named the problem and offered no way
+  // out: the big install card is suppressed once a project has diagrams, so this
+  // menu was the only place the absence was mentioned and it could not act on it.
+  await expect(page.getByTestId('diagram-command-import-mermaid')).toBeEnabled()
+  await expect(page.getByTestId('diagram-install-hint-import-mermaid')).toContainText(
+    'install diagram-design',
   )
 
   await page.getByTestId('diagram-command-export-diagram').click()
@@ -254,6 +265,7 @@ test('opening a diagram calls through to the host with the right file', async ({
       description: 'Auth flow for login',
       sessionId: 's-alpha',
       modifiedAt: '2026-08-01T00:00:00.000Z',
+      plan: null,
       bytes: 4200,
     }),
   )
@@ -353,6 +365,7 @@ test('a project with diagrams is never offered the download', async ({ page }) =
       description: 'Auth flow for login',
       sessionId: 's-alpha',
       modifiedAt: new Date().toISOString(),
+      plan: null,
       bytes: 4096,
     })
   })
@@ -382,4 +395,36 @@ test('installing the plugin retires the install card', async ({ page }) => {
   // And it reached the CLI with the right package, not just hid the card.
   const installs = await page.evaluate(() => window.__mock.state().pluginInstalls)
   expect(installs.at(-1)?.pkg).toBe(DIAGRAM_PLUGIN.pkg)
+})
+
+// The dead end this fixes: a project that already HAS diagrams suppresses the
+// install card by design, so a developer whose plugin is missing saw three
+// commands, each reporting itself absent, and nothing anywhere offering to add it.
+test('a missing command installs the plugin from the menu', async ({ page }) => {
+  await page.evaluate(() => window.__mock.setCommands('p-alpha', ['some-other:command']))
+  await page.evaluate(() => {
+    window.__mock.addDiagram('p-alpha', {
+      file: 'auth-flow.html',
+      path: 'docs/diagrams/auth-flow.html',
+      description: 'Auth flow',
+      sessionId: 's-alpha',
+      modifiedAt: '2026-08-10T00:00:00.000Z',
+      plan: null,
+      bytes: 4200,
+    })
+  })
+  await page.getByTestId('tab-session').click()
+  await page.getByTestId('tab-diagrams').click()
+
+  // Precondition: diagrams exist, so the install card is not on screen.
+  await expect(page.getByTestId('diagrams-install')).toHaveCount(0)
+
+  await page.getByTestId('diagram-commands').click()
+  await page.getByTestId('diagram-command-export-diagram').click()
+
+  // The menu closes and the install runs, the same one the card would have started.
+  await expect(page.getByTestId('diagram-command-menu')).toHaveCount(0)
+  await expect
+    .poll(async () => (await page.evaluate(() => window.__mock.state().pluginInstalls)).length)
+    .toBeGreaterThan(0)
 })

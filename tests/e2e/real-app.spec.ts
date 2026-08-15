@@ -146,9 +146,12 @@ test('Run verification crosses the real boundary without the clone error', async
   await page.getByTestId('sidebar-project-sample-api').click()
   await page.getByTestId('tab-tests').click()
   // Mutation testing is heavy, so it starts unticked. Tick it to reach the exact
-  // state the report came from: all seven suites selected.
+  // state the report came from: every suite in the stack selected. Nine since the
+  // SonarQube gate and Roslyn analysis joined the .NET stack; both are answered
+  // through an MCP server rather than a command, and neither is heavy, so they
+  // arrive already ticked.
   await page.getByTestId('tests-suite-dotnet-mutation').click()
-  await expect(page.getByTestId('tests-suite-count')).toContainText('7 of 7')
+  await expect(page.getByTestId('tests-suite-count')).toContainText('9 of 9')
 
   await page.getByTestId('tests-run').click()
 

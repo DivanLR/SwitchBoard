@@ -533,6 +533,21 @@ const MIGRATIONS: Migration[] = [
       `)
     },
   },
+  {
+    // The plan the drawing session states before it draws: the visual type, the
+    // semantic pattern, the size preset, and whatever the complexity budget forced
+    // out. The diagram-design skill already announces these — its own checklist
+    // requires it — and the section threw them away with the rest of the chat.
+    //
+    // Nullable and JSON, deliberately. Nullable because every diagram drawn before
+    // this has no plan and never will, and a diagram is still a diagram without
+    // one. JSON because the shape belongs to the skill, not to this app: a new dial
+    // in a later version of it should widen the record, not need a migration.
+    name: '025-diagram-plan',
+    up: (db) => {
+      db.exec(`ALTER TABLE diagram_requests ADD COLUMN plan TEXT;`)
+    },
+  },
 ]
 
 /**

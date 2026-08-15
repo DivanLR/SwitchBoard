@@ -48,7 +48,8 @@ import {
   writeTranscript,
 } from './transcript'
 import { parseEvalMarker } from '@main/evals/eval-dispatch'
-import { parseVerifyReport, verifyMarkerBroken } from '@main/evals/verify-dispatch'
+import { parseSuiteProgress, parseVerifyReport, verifyMarkerBroken } from '@main/evals/verify-dispatch'
+import { parseDiagramPlan } from '@shared/diagram'
 import { reconcile } from '@main/evals/artefacts'
 import { scanArtefacts } from '@main/evals/artefact-scan'
 import { parseApiRequests } from '@main/evals/api-dispatch'
@@ -1269,6 +1270,29 @@ export class SessionManager {
     this.scanEvalMarker(entry, kind, payload)
     this.scanVerifyReport(entry, kind, payload)
     this.scanApiRequests(entry, kind, payload)
+    this.scanDiagramPlan(entry, kind, payload)
+  }
+
+  /**
+   * The plan a drawing session states before it draws: type, pattern, size, and
+   * whatever the complexity budget forced out.
+   *
+   * Attached to the project's NEWEST diagram request rather than to a watch,
+   * because unlike a verify run there is no id to carry: the request row is written
+   * immediately before the session is asked, and a project draws one diagram at a
+   * time in the session they share. A plan arriving with no request behind it
+   * updates nothing, which is the right answer for a session that echoed the
+   * sentinel without having been asked for a diagram.
+   */
+  private scanDiagramPlan(entry: HostedEntry, kind: EventKind, payload: unknown): void {
+    if (!SessionManager.EVAL_SCAN_KINDS.has(kind)) return
+    const text = (payload as { text?: string }).text
+    if (!text) return
+    const plan = parseDiagramPlan(text)
+    if (!plan) return
+    const file = this.repos.diagramRequests.latestFileFor(entry.row.projectId)
+    if (!file) return
+    this.repos.diagramRequests.notePlan(entry.row.projectId, file, plan)
   }
 
   // --- API eval sets ---
@@ -1308,6 +1332,14 @@ export class SessionManager {
     if (!watch || !SessionManager.EVAL_SCAN_KINDS.has(kind)) return
     const text = (payload as { text?: string }).text
     if (!text) return
+    // Progress first, and it never closes the watch: a suite announcing itself is
+    // not the run reporting. Checked before the report parse so a turn that emits
+    // both in one chunk still records the suite.
+    const progress = parseSuiteProgress(text)
+    if (progress && watch.kind !== 'evidence') {
+      this.repos.verifyRuns.noteSuite(watch.runId, progress)
+      this.callbacks.onVerifyChanged(entry.row.projectId)
+    }
     const report = parseVerifyReport(text)
     if (!report) {
       // A report line arrived and could not be read. The watch stays open — the

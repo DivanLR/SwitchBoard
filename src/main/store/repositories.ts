@@ -2,6 +2,7 @@
 // are serialised here so the rest of the main process works with domain types.
 import { randomUUID } from 'node:crypto'
 import { transaction, type AppDatabase } from './db'
+import type { DiagramPlan } from '@shared/diagram'
 import type {
   DecisionOutcome,
   DecisionRecord,
@@ -21,6 +22,7 @@ import type {
   ProjectSource,
   QueuedTask,
   Session,
+  SuiteResult,
   SessionEndReason,
   SessionEvent,
   SessionMode,
@@ -1059,6 +1061,25 @@ export class VerifyRunsRepo {
       .run(status, report ? JSON.stringify(report) : null, note, nowIso(), id)
   }
 
+  /**
+   * One suite's outcome, recorded while the run is still going, so the picker can
+   * mark each suite as it lands instead of staying blank until the whole run ends.
+   *
+   * Guarded on `status = 'running'` for the same reason `finish` writes a verdict
+   * once: a progress line that arrives after the run settled must not reopen a
+   * finished report or contradict the settled figures. First writer wins per suite
+   * id — a suite states its result once, and a restatement later in the same turn
+   * is narration, not a second run.
+   */
+  noteSuite(id: string, result: SuiteResult): void {
+    const run = this.byId(id)
+    if (!run || run.status !== 'running') return
+    const report = run.report ?? emptyVerifyReport()
+    if (report.suites.some((s) => s.id === result.id)) return
+    report.suites = [...report.suites, result]
+    this.db.prepare('UPDATE verify_runs SET report = ? WHERE id = ?').run(JSON.stringify(report), id)
+  }
+
   /** Evidence is captured after the fact and attaches to the run it proves
    *  (FR-059), without touching its verdict or its figures. */
   attachEvidence(id: string, evidence: EvidenceItem[]): void {
@@ -1263,11 +1284,53 @@ export class DiagramRequestsRepo {
   }
 
   /** Keyed by file name, for joining onto whatever the folder actually holds. */
-  forProject(projectId: string): Map<string, { sessionId: string | null; description: string }> {
+  forProject(
+    projectId: string,
+  ): Map<string, { sessionId: string | null; description: string; plan: DiagramPlan | null }> {
     const rows = this.db
-      .prepare('SELECT file, sessionId, description FROM diagram_requests WHERE projectId = ?')
-      .all(projectId) as { file: string; sessionId: string | null; description: string }[]
-    return new Map(rows.map((r) => [r.file, { sessionId: r.sessionId, description: r.description }]))
+      .prepare('SELECT file, sessionId, description, plan FROM diagram_requests WHERE projectId = ?')
+      .all(projectId) as {
+      file: string
+      sessionId: string | null
+      description: string
+      plan: string | null
+    }[]
+    return new Map(
+      rows.map((r) => [
+        r.file,
+        {
+          sessionId: r.sessionId,
+          description: r.description,
+          // Stored JSON is only ever written by notePlan, but a row hand-edited or
+          // written by an older build must not take the section down with it.
+          plan: r.plan ? ((JSON.parse(r.plan) as DiagramPlan) ?? null) : null,
+        },
+      ]),
+    )
+  }
+
+  /** The newest requested file for a project: the one currently being drawn. */
+  latestFileFor(projectId: string): string | null {
+    const row = this.db
+      .prepare(
+        'SELECT file FROM diagram_requests WHERE projectId = ? ORDER BY createdAt DESC LIMIT 1',
+      )
+      .get(projectId) as { file: string } | undefined
+    return row?.file ?? null
+  }
+
+  /**
+   * The plan the session stated before drawing. Matched on the file name the app
+   * chose, which is the only handle the two sides share.
+   *
+   * Recorded against a row that already exists — `record` runs before the session
+   * is asked — so a plan for an unknown file is dropped rather than inserted: it
+   * would be a row with no request behind it.
+   */
+  notePlan(projectId: string, file: string, plan: DiagramPlan): void {
+    this.db
+      .prepare('UPDATE diagram_requests SET plan = ? WHERE projectId = ? AND file = ?')
+      .run(JSON.stringify(plan), projectId, file)
   }
 }
 

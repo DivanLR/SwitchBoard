@@ -299,6 +299,14 @@ function expectWords(e: ApiExpect): string {
 const report = computed(() => latest.value?.report ?? null)
 const evidence = computed(() => report.value?.evidence ?? [])
 
+// Suite outcome by id, so each chip in the picker can mark itself the moment that
+// suite reports rather than staying blank until the whole run settles. A Map and
+// not a find-per-chip: the picker renders every suite in the catalogue on every
+// tick of a running report.
+const suiteResults = computed(
+  () => new Map((report.value?.suites ?? []).map((s) => [s.id, s])),
+)
+
 // The two quality tiles whose text is a decision rather than a value: an absent
 // figure and a figure of "not configured" mean different things and must not
 // read the same, and debt only has a source when there is a debt figure at all.
@@ -481,12 +489,37 @@ function statusWord(run: VerifyRun): string {
           <template v-for="s in suites" :key="s.id">
             <button
               class="chip suite"
-              :class="{ on: isSelected(s), dev: !!blockedReason(s) }"
+              :class="[
+                {
+                  on: isSelected(s),
+                  dev: !!blockedReason(s),
+                },
+                suiteResults.get(s.id) ? `ran-${suiteResults.get(s.id)!.status}` : '',
+              ]"
               :disabled="!!blockedReason(s)"
-              :title="blockedReason(s) ?? s.command"
+              :title="suiteResults.get(s.id)?.detail ?? blockedReason(s) ?? s.command"
               :data-testid="`tests-suite-${s.id}`"
               @click="toggleSuite(s)"
             >
+              <!-- The outcome sits before the label, where the eye lands first: the
+                   question this row answers is "did it pass", not "what is it called".
+                   A tick only ever means pass. A failed suite gets its own mark and
+                   its own colour, because a green tick on a failure is the one
+                   mistake this panel must never make. -->
+              <span
+                v-if="suiteResults.get(s.id)"
+                class="suite-mark"
+                :data-testid="`tests-suite-mark-${s.id}`"
+                aria-hidden="true"
+              >
+                <Icon
+                  v-if="suiteResults.get(s.id)!.status === 'pass'"
+                  name="check"
+                  :size="11"
+                />
+                <template v-else-if="suiteResults.get(s.id)!.status === 'fail'">✕</template>
+                <template v-else>–</template>
+              </span>
               {{ s.label }}
               <span v-if="blockedReason(s)" class="dev-tag">{{ blockedReason(s) }}</span>
               <span v-else-if="s.heavy" class="heavy-tag mono">slow</span>
@@ -1226,6 +1259,40 @@ function statusWord(run: VerifyRun): string {
   color: var(--green);
   border-color: color-mix(in srgb, var(--green) 50%, transparent);
   background: color-mix(in srgb, var(--green) 10%, transparent);
+}
+
+/* Outcome, once a suite has reported. Stronger than the `.on` selection tint it
+   sits on top of, because after a run the question is what happened, not what was
+   picked. These win by being declared after `.chip.on`. */
+.suite-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  font-size: var(--fs-micro);
+  line-height: 1;
+}
+
+.chip.suite.ran-pass {
+  color: var(--green);
+  border-color: var(--green);
+  background: color-mix(in srgb, var(--green) 16%, transparent);
+}
+
+.chip.suite.ran-fail {
+  color: var(--red);
+  border-color: var(--red);
+  background: color-mix(in srgb, var(--red) 16%, transparent);
+}
+
+/* Skipped, not run, unavailable: reported, but nothing was proved. Deliberately
+   colourless — the one thing worse than no mark is a mark that reads as a pass. */
+.chip.suite.ran-skipped,
+.chip.suite.ran-not_run,
+.chip.suite.ran-unavailable {
+  color: var(--text-meta);
+  border-color: var(--border-strong);
+  background: transparent;
 }
 
 .heavy-tag {

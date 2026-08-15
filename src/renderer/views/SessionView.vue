@@ -249,6 +249,10 @@ const sessionTimer = computed(() =>
   liveSession.value ? elapsedClock(liveSession.value.startedAt, now.value) : null,
 )
 
+// Matches the sidebar's clocks: one setting governs both, so the header cannot end
+// up ticking while the rows are silent. Defaults to shown before settings load.
+const showTimer = computed(() => settingsStore.settings?.showSessionTimer ?? true)
+
 /**
  * The run's id, quoted short the way a commit hash is. Eight characters is
  * enough to name one run in conversation or to match this pane against a log
@@ -1231,7 +1235,10 @@ const {
           <span style="color: var(--green)">+{{ liveSession.diffAdds }}</span>
           <span style="color: var(--red)"> −{{ liveSession.diffDels ?? 0 }}</span>
         </span>
-        <span v-if="sessionTimer" style="color: var(--text-faint); white-space: nowrap">
+        <span
+          v-if="sessionTimer && showTimer"
+          style="color: var(--text-faint); white-space: nowrap"
+        >
           session <span style="color: var(--text-meta)">{{ sessionTimer }}</span>
         </span>
         <span

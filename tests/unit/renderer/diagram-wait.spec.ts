@@ -29,6 +29,7 @@ const entry = (file: string): DiagramEntry => ({
   description: 'Auth flow',
   sessionId: 's1',
   modifiedAt: '2026-08-12T09:00:00.000Z',
+  plan: null,
   bytes: 2048,
 })
 

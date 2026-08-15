@@ -94,6 +94,10 @@ function timerOf(startedAt: string): string {
   return elapsedClock(startedAt, now.value)
 }
 
+// Defaults to shown, including in the moment before settings have loaded: a clock
+// that appears a beat late is a smaller surprise than one that flickers away.
+const showTimer = computed(() => settings.settings?.showSessionTimer ?? true)
+
 /**
  * Which state matters most when a project is running several sessions at once. The
  * project row can only draw one mark, and it must be the one that needs the developer:
@@ -800,7 +804,7 @@ async function confirmRemoveNow(): Promise<void> {
               </span>
               <!-- Design: the elapsed time rides on the title line, not below it. -->
               <span
-                v-if="item.session && !item.session.endedAt"
+                v-if="item.session && !item.session.endedAt && showTimer"
                 class="timer mono"
                 :data-testid="`timer-${item.name}`"
               >
@@ -869,7 +873,9 @@ async function confirmRemoveNow(): Promise<void> {
                    identical on all of them and the rows read as one repeated
                    row. A section's session knows what it was started for. -->
               <span class="sub-name code">{{ s.name ?? s.branch ?? s.id.slice(0, 8) }}</span>
-              <span v-if="!s.endedAt" class="timer mono">{{ timerOf(s.startedAt) }}</span>
+              <span v-if="!s.endedAt && showTimer" class="timer mono">{{
+                timerOf(s.startedAt)
+              }}</span>
             </button>
           </div>
           <div

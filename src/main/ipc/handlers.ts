@@ -207,7 +207,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
           .filter((id): id is string => !!id),
         diagrams: [...repos.diagramRequests.forProject(project.id).values()],
       }
-      const sessions = rows.map((s) => ({ ...s, name: sessionName(s.id, work) }))
+      const sessions = rows.map((s) => ({ ...s, name: sessionName(s.id, work, s.branch) }))
       return {
         ...project,
         session: sessions[0] ?? null,
@@ -375,6 +375,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
             path: `${DIAGRAMS_DIR}/${file}`,
             description: known?.description ?? null,
             sessionId: known?.sessionId ?? null,
+            plan: known?.plan ?? null,
             modifiedAt: stat.mtime.toISOString(),
             bytes: stat.size,
           }

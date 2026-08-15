@@ -22,6 +22,13 @@ import { firstJsonObject, markerTail, str } from './parse'
 /** Sentinel the session is told to emit, once, on its own line. */
 export const VERIFY_MARKER = 'SWB_VERIFY'
 
+/**
+ * Per-suite progress, emitted as each suite finishes. Deliberately a different
+ * sentinel from VERIFY_MARKER so the scanner cannot mistake a progress line for
+ * the closing report and settle the run four suites early.
+ */
+export const SUITE_MARKER = 'SWB_SUITE'
+
 /** A suite as the run sees it: the command, and whether this environment can run it. */
 export interface PlannedSuite {
   suite: TestSuite
@@ -256,7 +263,17 @@ export function verifyPrompt(
     `Verify the working tree of this ${stackLabel} project. This is a verification pass: ` +
     'run things and report what happened. Do not fix anything and do not edit any file.\n\n' +
     'Run these in order, and STOP at the first one that fails:\n' +
-    runnable.map((p) => `- ${p.suite.id} (${p.suite.label}): ${p.suite.command}`).join('\n') +
+    // An MCP-answered suite is not a command line, so it is not offered as one:
+    // told to "run" it, a session tries to execute the sentence in a shell.
+    runnable
+      .map((p) =>
+        p.suite.mcp
+          ? `- ${p.suite.id} (${p.suite.label}) — through the ${p.suite.mcp} MCP server, not a ` +
+            `shell command. If that server is not connected, report status "skipped" with that ` +
+            `as the reason and carry on. ${p.suite.command}`
+          : `- ${p.suite.id} (${p.suite.label}): ${p.suite.command}`,
+      )
+      .join('\n') +
     (apiSuites.length > 0
       ? '\n(The endpoint pass described below is the exception to that stop rule.)'
       : '') +
@@ -272,6 +289,15 @@ export function verifyPrompt(
     endpointSection(apiSuites, dbServers) +
     qualitySection(flags) +
     `\n${HONESTY}\n\n` +
+    // Progress, not the verdict. Without this a six-suite run shows nothing at all
+    // until every suite has finished, so the developer cannot tell a slow suite
+    // from a stuck one.
+    `As soon as EACH suite finishes, before you start the next one, print one line ` +
+    `on its own starting with ${SUITE_MARKER}: followed by JSON (one line, no code ` +
+    `fence):\n{"id": "<suite id>", "status": "pass|fail|skipped|not_run", ` +
+    `"detail": "<one line: counts, or the first failure>"}\n` +
+    `Print it for every suite you run, including the ones that fail. Then carry on ` +
+    `with the next suite.\n\n` +
     `Finish your reply with one line, on its own, starting with ${VERIFY_MARKER}: followed by ` +
     `JSON of this shape (one line, no code fence):\n${buildSchema(flags)}`
   )
@@ -339,6 +365,32 @@ export function parseVerifyReport(text: string): VerifyReport | null {
  */
 export function verifyMarkerBroken(text: string): boolean {
   return markerTail(text, VERIFY_MARKER) !== null && parseVerifyReport(text) === null
+}
+
+/**
+ * One suite's outcome, announced the moment that suite finishes rather than in
+ * the report at the end.
+ *
+ * The final marker is still the record: this is progress, and progress is allowed
+ * to be wrong in a way a verdict is not. A suite ticked green here that the closing
+ * report calls failed loses the argument, because `finish` overwrites the whole
+ * suites array with the settled one. The value is that a run covering six suites
+ * stops being a spinner for four minutes.
+ *
+ * The FIRST occurrence wins per suite, unlike the closing report where the last
+ * marker wins: a suite announces itself once, and a later restatement in the
+ * summary text must not be read as a second, contradictory run of it.
+ */
+export function parseSuiteProgress(text: string): SuiteResult | null {
+  const tail = markerTail(text, SUITE_MARKER)
+  if (tail === null) return null
+  const json = firstJsonObject(tail)
+  if (json === null) return null
+  try {
+    return toSuiteResult(JSON.parse(json))
+  } catch {
+    return null
+  }
 }
 
 function normalizeReport(raw: unknown): VerifyReport | null {

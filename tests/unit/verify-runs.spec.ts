@@ -340,3 +340,92 @@ describe('a second pass started before the first reported', () => {
     expect(repos.verifyRuns.byId(finished.id)?.status).toBe('running')
   })
 })
+
+// A run covering six suites used to be a spinner until every one of them had
+// finished, so a slow suite and a stuck one looked identical. Each suite now
+// announces itself as it lands, and the picker marks it.
+describe('per-suite progress while the run is still going', () => {
+  const suiteLine = (id: string, status: string): string =>
+    `SWB_SUITE: {"id":"${id}","status":"${status}","detail":"done"}`
+
+  it('records a suite the moment it reports, without settling the run', () => {
+    const { repos, manager, start, scan } = setup()
+    const run = start()
+    manager.watchVerifyReport('s1', run.id, 'suites')
+
+    scan('assistant_text', { text: suiteLine('node-unit', 'pass') })
+
+    const stored = repos.verifyRuns.byId(run.id)
+    expect(stored?.status).toBe('running')
+    expect(stored?.report?.suites).toEqual([
+      { id: 'node-unit', label: 'node-unit', status: 'pass', detail: 'done' },
+    ])
+  })
+
+  it('keeps every suite in the order they landed', () => {
+    const { repos, manager, start, scan } = setup()
+    const run = start()
+    manager.watchVerifyReport('s1', run.id, 'suites')
+
+    scan('assistant_text', { text: suiteLine('node-unit', 'pass') })
+    scan('assistant_text', { text: suiteLine('node-e2e', 'fail') })
+
+    expect(repos.verifyRuns.byId(run.id)?.report?.suites.map((s) => s.id)).toEqual([
+      'node-unit',
+      'node-e2e',
+    ])
+  })
+
+  // Progress is allowed to be wrong in a way a verdict is not, so a suite states
+  // its result once. A restatement later in the same turn is narration.
+  it('ignores a second announcement of the same suite', () => {
+    const { repos, manager, start, scan } = setup()
+    const run = start()
+    manager.watchVerifyReport('s1', run.id, 'suites')
+
+    scan('assistant_text', { text: suiteLine('node-unit', 'pass') })
+    scan('assistant_text', { text: suiteLine('node-unit', 'fail') })
+
+    expect(repos.verifyRuns.byId(run.id)?.report?.suites).toEqual([
+      { id: 'node-unit', label: 'node-unit', status: 'pass', detail: 'done' },
+    ])
+  })
+
+  // The closing report is the record: it overwrites the whole suites array, so a
+  // suite ticked green by progress that the report calls failed loses.
+  it('lets the closing report overrule what progress claimed', () => {
+    const { repos, manager, start, scan } = setup()
+    const run = start()
+    manager.watchVerifyReport('s1', run.id, 'suites')
+
+    scan('assistant_text', { text: suiteLine('node-unit', 'pass') })
+    scan('assistant_text', {
+      text: 'SWB_VERIFY: {"suites":[{"id":"node-unit","status":"fail","detail":"1 failed"}]}',
+    })
+
+    const stored = repos.verifyRuns.byId(run.id)
+    expect(stored?.status).not.toBe('running')
+    expect(stored?.report?.suites).toEqual([
+      { id: 'node-unit', label: 'node-unit', status: 'fail', detail: '1 failed' },
+    ])
+  })
+
+  // A progress line arriving after the run settled must not reopen it.
+  it('drops progress for a run that has already finished', () => {
+    const { repos, manager, start, scan } = setup()
+    const run = start()
+    manager.watchVerifyReport('s1', run.id, 'suites')
+
+    scan('assistant_text', {
+      text: 'SWB_VERIFY: {"suites":[{"id":"node-unit","status":"pass","detail":"12 passed"}]}',
+    })
+    repos.verifyRuns.noteSuite(run.id, {
+      id: 'node-e2e',
+      label: 'node-e2e',
+      status: 'pass',
+      detail: 'late',
+    })
+
+    expect(repos.verifyRuns.byId(run.id)?.report?.suites.map((s) => s.id)).toEqual(['node-unit'])
+  })
+})

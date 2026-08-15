@@ -704,6 +704,25 @@ const updateLine = computed(() => {
 
             <div class="setting-row">
               <div class="sr-text">
+                <div class="sr-label">Session timer</div>
+                <div class="sr-desc">
+                  Show how long each session has been open, in the sidebar and the header
+                </div>
+              </div>
+              <button
+                class="switch"
+                :class="{ on: settings.showSessionTimer }"
+                data-testid="setting-session-timer"
+                role="switch"
+                :aria-checked="settings.showSessionTimer"
+                @click="save({ showSessionTimer: !settings.showSessionTimer })"
+              >
+                <span class="knob"></span>
+              </button>
+            </div>
+
+            <div class="setting-row">
+              <div class="sr-text">
                 <div class="sr-label">Timestamps</div>
                 <div class="sr-desc">Show the time next to every event in the Clean view</div>
               </div>

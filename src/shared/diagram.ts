@@ -12,6 +12,77 @@
 /** Project-relative, forward slashes: the folder every diagram is written to. */
 export const DIAGRAMS_DIR = 'docs/diagrams'
 
+/**
+ * What the session decided before it drew.
+ *
+ * The skill's own rule (its §3, "Confirm before drawing") is to state the chosen
+ * visual type, the semantic pattern where one is routed, the size preset, and
+ * anything the complexity budget forces out. That message is the most useful
+ * sentence in the whole transcript for judging a drawing — it says what the
+ * picture was TRYING to be — and it was scrolling past in the session log while
+ * the section showed only a file name.
+ *
+ * Every field is optional because this is a record of what was said, not a
+ * demand. A skill that omits the pattern has not failed; it has drawn something
+ * with no pattern to name.
+ */
+export interface DiagramPlan {
+  /** Chosen visual type, e.g. `flow`, `matrix`, `timeline`. */
+  type: string | null
+  /** Semantic pattern, where the skill routed to one. */
+  pattern: string | null
+  /** Size preset, e.g. `doc-inline`, `slide-16x9`, `print-a4-landscape`. */
+  size: string | null
+  /** What the complexity budget forced out, in the skill's own words. */
+  cuts: string[]
+}
+
+/** Sentinel for the plan line, matching the SWB_ convention used by verify runs. */
+export const DIAGRAM_PLAN_MARKER = 'SWB_DIAGRAM'
+
+/**
+ * Read a plan out of session text, tolerantly: anything unreadable is no plan
+ * rather than a half-filled one. The LAST marker wins, because the prompt names
+ * the sentinel and a turn may restate it.
+ */
+export function parseDiagramPlan(text: string): DiagramPlan | null {
+  const at = text.lastIndexOf(`${DIAGRAM_PLAN_MARKER}:`)
+  if (at === -1) return null
+  const tail = text.slice(at + DIAGRAM_PLAN_MARKER.length + 1)
+  const start = tail.indexOf('{')
+  if (start === -1) return null
+  let depth = 0
+  let end = -1
+  for (let i = start; i < tail.length; i++) {
+    if (tail[i] === '{') depth++
+    else if (tail[i] === '}' && --depth === 0) {
+      end = i + 1
+      break
+    }
+  }
+  if (end === -1) return null
+  let raw: unknown
+  try {
+    raw = JSON.parse(tail.slice(start, end))
+  } catch {
+    return null
+  }
+  if (typeof raw !== 'object' || raw === null) return null
+  const record = raw as Record<string, unknown>
+  const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null)
+  const plan: DiagramPlan = {
+    type: str(record.type),
+    pattern: str(record.pattern),
+    size: str(record.size),
+    cuts: Array.isArray(record.cuts)
+      ? record.cuts.map(str).filter((c): c is string => c !== null)
+      : [],
+  }
+  // A plan that says nothing is not a plan. Recording it would put an empty strip
+  // above every diagram drawn by a version of the skill that does not announce.
+  return plan.type || plan.pattern || plan.size || plan.cuts.length > 0 ? plan : null
+}
+
 /** The plugin's own marketplace and package, run as two slash commands in order. */
 // Plain identifiers, as the `claude plugin` subcommands take them. These were
 // `/plugin …` slash commands sent to a session as chat, which an Agent SDK
@@ -125,6 +196,16 @@ export function diagramPrompt(description: string, file: string): string {
     'walkthroughs or a reading order below it. One caption line under the drawing',
     'is the whole of the prose budget; if something needs explaining, label it in',
     'the picture instead.',
+    '',
+    // The skill already decides these and states them before drawing; this only
+    // asks for the same facts in a shape the section can keep. Asked for BEFORE
+    // the drawing so a run that dies mid-render still leaves what it intended.
+    'Before you draw, print one line on its own starting with',
+    `${DIAGRAM_PLAN_MARKER}: followed by JSON (one line, no code fence):`,
+    '{"type": "<the visual type you chose>", "pattern": "<the semantic pattern, or',
+    'null>", "size": "<the size preset>", "cuts": ["<anything the complexity budget',
+    'forced out>"]}',
+    'Then draw it.',
     '',
     `When it is written, reply with the one line: wrote ${DIAGRAMS_DIR}/${file}`,
   ].join('\n')

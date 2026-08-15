@@ -46,6 +46,18 @@ export interface TestSuite {
   command: string
   /** What has to exist for the command to run at all. */
   needs: SuiteTool
+  /**
+   * Answered through an MCP server rather than by running a shell command, naming
+   * the server to use. `command` then holds the instruction rather than a command
+   * line, and the run says so instead of telling the session to execute it.
+   *
+   * Needed because the two most useful checks a .NET project has are not commands:
+   * a quality gate lives in SonarQube and is read over its API, and Roslyn analysis
+   * runs in a language server. Shelling out to a scanner would need a host URL and
+   * a token, which this app deliberately does not ask anyone to paste into it; the
+   * MCP server already holds that connection.
+   */
+  mcp?: string
   /** Minutes, not seconds: excluded from a default run, opt in per run (FR-058). */
   heavy?: boolean
   /**
@@ -155,6 +167,35 @@ export const TEST_STACKS: readonly TestStack[] = [
         acceptance: 'formatting and analyzer rules are clean',
         command: 'dotnet format --verify-no-changes && dotnet build --nologo -warnaserror',
         needs: 'dotnet',
+      },
+      {
+        id: 'dotnet-sonar',
+        kind: 'quality',
+        label: 'SonarQube gate',
+        acceptance: 'the code-quality gate passes on this branch',
+        // Read, never run. The scanner needs a host and a token; the MCP server
+        // already holds both, and asking the developer to paste a token into this
+        // app to duplicate that would be a worse answer to the same question.
+        command:
+          'Read the quality gate, duplication, technical debt and open issue counts for this ' +
+          'project through the SonarQube MCP server, and name the server as the source. If the ' +
+          'gate has never been computed for this branch, say so — do not report the main branch ' +
+          "figures as though they were this branch's.",
+        needs: 'dotnet',
+        mcp: 'sonarqube',
+      },
+      {
+        id: 'dotnet-roslyn',
+        kind: 'quality',
+        label: 'Roslyn analysis',
+        acceptance: 'no compiler diagnostics, dead code or circular dependencies were introduced',
+        command:
+          'Through the Roslyn navigator MCP server: get diagnostics for the solution, detect ' +
+          'anti-patterns and circular dependencies, and find dead code. Report errors and ' +
+          'warnings separately, and count only what this working tree introduced — compare ' +
+          'against the diff rather than reporting the solution\'s whole backlog as a failure.',
+        needs: 'dotnet',
+        mcp: 'roslyn-navigator',
       },
       {
         id: 'dotnet-mutation',

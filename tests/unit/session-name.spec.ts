@@ -10,12 +10,32 @@ import { describe, expect, it } from 'vitest'
 import { sessionName } from '@shared/domain'
 
 describe('sessionName', () => {
-  it('names a verification run', () => {
-    expect(sessionName('s1', { verifyRunSessionIds: ['s1'] })).toBe('Verification run')
+  // The section AND the branch: the section says what the session is for, the
+  // branch says which checkout it is answering for. Running the same harness on
+  // two branches at once is the case that needs both.
+  it('names a test run after the section and the branch', () => {
+    expect(sessionName('s1', { verifyRunSessionIds: ['s1'] }, 'main')).toBe('Tests - main')
   })
 
-  it('names an API run', () => {
-    expect(sessionName('s1', { apiRunSessionIds: ['s1'] })).toBe('API run')
+  it('names an API run the same way', () => {
+    expect(sessionName('s1', { apiRunSessionIds: ['s1'] }, 'release/DL/Fixes')).toBe(
+      'API - release/DL/Fixes',
+    )
+  })
+
+  // A detached head or a session recorded before branches were tracked. The
+  // section alone still says more than the bare id it would otherwise show.
+  it('names the section alone when the branch is unknown', () => {
+    expect(sessionName('s1', { verifyRunSessionIds: ['s1'] })).toBe('Tests')
+    expect(sessionName('s1', { verifyRunSessionIds: ['s1'] }, null)).toBe('Tests')
+  })
+
+  // The description says which drawing this is, which beats the branch, and the
+  // two together do not fit the row.
+  it('leaves a diagram named after its description, not the branch', () => {
+    expect(
+      sessionName('s1', { diagrams: [{ sessionId: 's1', description: 'Auth flow' }] }, 'main'),
+    ).toBe('Diagram: Auth flow')
   })
 
   it('names a diagram after the sentence that asked for it', () => {

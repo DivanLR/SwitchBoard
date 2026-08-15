@@ -1,6 +1,8 @@
 // Domain types mirrored from specs/001-terminal-switchboard/data-model.md.
 // All timestamps are ISO 8601 UTC strings; identifiers are UUIDv7.
 
+import type { DiagramPlan } from './diagram'
+
 export type ProjectSource = 'suggested' | 'manual'
 
 export type SessionStatus = 'working' | 'needs_you' | 'done' | 'error'
@@ -574,6 +576,13 @@ export interface Settings {
   timestamps: boolean
   /** Keep the view pinned to the newest line while the session works. */
   autoscroll: boolean
+  /**
+   * Show how long each session has been open: the ticking clock on every sidebar
+   * row and in the session header. On by default, because how long something has
+   * been running is the first question asked of a session that looks stuck. Off
+   * for developers who read a permanent stopwatch as pressure rather than status.
+   */
+  showSessionTimer: boolean
   /** Per-project INTELLIGENT-model overrides; 'global'/absent follows the global one. */
   projectModels: Record<string, string>
   /**
@@ -678,6 +687,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showToolRows: false,
   timestamps: false,
   autoscroll: true,
+  showSessionTimer: true,
   projectModels: {},
   projectWorkerModels: {},
   projectTestStacks: {},
@@ -1201,14 +1211,23 @@ export function sessionName(
     /** Diagram file name by the session that drew it. */
     diagrams?: readonly { sessionId: string | null; description: string }[]
   },
+  branch?: string | null,
 ): string | null {
   const diagram = work.diagrams?.find((d) => d.sessionId === sessionId)
   if (diagram) {
+    // Not suffixed with the branch. The description already says which drawing
+    // this is, which is the more useful of the two facts, and a six-word
+    // description plus a branch like release/DL/SonarqubeFixes does not fit the row.
     const words = diagram.description.trim().split(/\s+/).slice(0, 6).join(' ')
     return words ? `Diagram: ${words}` : 'Diagram'
   }
-  if (work.verifyRunSessionIds?.includes(sessionId)) return 'Verification run'
-  if (work.apiRunSessionIds?.includes(sessionId)) return 'API run'
+  // Section runs read as "<section> - <branch>". The section says what the session
+  // is for and the branch says which checkout it is answering for, which is the
+  // pair the developer needs when the same harness is running on two branches at
+  // once. Sessions carry their own branch, so a worktree names itself correctly.
+  const on = branch ? ` - ${branch}` : ''
+  if (work.verifyRunSessionIds?.includes(sessionId)) return `Tests${on}`
+  if (work.apiRunSessionIds?.includes(sessionId)) return `API${on}`
   return null
 }
 
@@ -1221,6 +1240,12 @@ export interface DiagramEntry {
   description: string | null
   /** The session that produced it, when known. */
   sessionId: string | null
+  /**
+   * What the drawing session said it was about to draw: type, pattern, size, and
+   * what it had to leave out. Null for a file this app did not ask for, and for
+   * every diagram drawn before the section started recording it.
+   */
+  plan: DiagramPlan | null
   /** File mtime, ISO. The only timestamp that is true of the file itself. */
   modifiedAt: string
   bytes: number

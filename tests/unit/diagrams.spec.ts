@@ -66,7 +66,7 @@ describe('DiagramRequestsRepo', () => {
     repos.diagramRequests.record(projectId, 'auth-flow.html', 'Auth flow for login', 's1')
 
     const map = repos.diagramRequests.forProject(projectId)
-    expect(map.get('auth-flow.html')).toEqual({ sessionId: 's1', description: 'Auth flow for login' })
+    expect(map.get('auth-flow.html')).toEqual({ sessionId: 's1', description: 'Auth flow for login', plan: null })
   })
 
   it('updates rather than throwing on a second request for the same file', () => {
@@ -76,7 +76,7 @@ describe('DiagramRequestsRepo', () => {
 
     const map = repos.diagramRequests.forProject(projectId)
     expect(map.size).toBe(1)
-    expect(map.get('auth-flow.html')).toEqual({ sessionId: 's2', description: 'Auth flow, revised' })
+    expect(map.get('auth-flow.html')).toEqual({ sessionId: 's2', description: 'Auth flow, revised', plan: null })
   })
 
   it('never leaks a row from one project into another project\'s map', () => {

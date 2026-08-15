@@ -418,8 +418,31 @@ const dbProject = computed(() => projects.dbProject)
   background: transparent;
 }
 
+/* A grip, because a handle nobody can see is a feature nobody has. This one was
+   fully working and drag-persisted, and was still reported as missing: it was
+   6px of transparency that only appeared once the pointer was already on it.
+   Three short strokes at the vertical centre, quiet enough to ignore and
+   specific enough to aim at. */
+.inbox-resize::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 22px;
+  transform: translate(-50%, -50%);
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  opacity: 0.7;
+  transition: opacity 120ms ease;
+}
+
 .inbox-resize:hover {
   background: var(--border);
+}
+
+.inbox-resize:hover::after {
+  opacity: 0;
 }
 
 .no-project {

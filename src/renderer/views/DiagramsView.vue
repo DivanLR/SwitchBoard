@@ -128,6 +128,12 @@ function runCommand(entry: (typeof commands.value)[number]): void {
   description.value = ''
 }
 
+/** Install from the command menu, for the case where the install card is not shown. */
+function installFromMenu(): void {
+  menuOpen.value = false
+  emit('install')
+}
+
 
 // Opening the tab on a project that already has diagrams shows one rather than an
 // empty pane. The newest is the one most likely to be the reason you came here.
@@ -182,18 +188,31 @@ watch(
           Commands <Icon name="chevron-down" :size="11" />
         </button>
         <div v-if="menuOpen" class="cmd-menu" data-testid="diagram-command-menu">
+          <!-- A missing command installs the plugin instead of doing nothing. The
+               big install card is deliberately suppressed once this project has
+               diagrams (see `installed`), which left this menu as a dead end: it
+               named three commands, said each was absent, and offered no way to
+               fix that. Same action the card's button emits. -->
           <button
             v-for="c in commands"
             :key="c.command"
             class="cmd-item"
+            :class="{ missing: !c.available }"
             :data-testid="`diagram-command-${c.command}`"
-            :disabled="!c.available"
-            @click="runCommand(c)"
+            :disabled="props.installing"
+            @click="c.available ? runCommand(c) : installFromMenu()"
           >
             <span class="cmd-name mono">/{{ c.command }}</span>
             <span class="cmd-desc">{{ c.description }}</span>
             <span class="cmd-args mono">{{ c.argumentHint }}</span>
-            <span v-if="!c.available" class="cmd-missing">not in this project</span>
+            <span
+              v-if="!c.available"
+              class="cmd-missing"
+              :data-testid="`diagram-install-hint-${c.command}`"
+            >
+              <Icon name="download" :size="11" />
+              {{ props.installing ? 'installing…' : 'install diagram-design' }}
+            </span>
           </button>
         </div>
       </div>
@@ -258,6 +277,33 @@ watch(
           <div v-else class="frame-wait mono">reading…</div>
         </div>
         <div v-if="selectedEntry?.description" class="desc">{{ selectedEntry.description }}</div>
+        <!-- What the session decided before it drew. The diagram-design skill states
+             its type, semantic pattern, size preset and the cuts the complexity
+             budget forced, then draws; that message used to scroll past in the
+             transcript and the section kept only a file name. It is the one thing
+             that says what the picture was TRYING to be, which is what you need in
+             order to judge whether it succeeded. -->
+        <div v-if="selectedEntry?.plan" class="plan" data-testid="diagram-plan">
+          <span v-if="selectedEntry.plan.type" class="pl mono" data-testid="diagram-plan-type">
+            <span class="pk">type</span>{{ selectedEntry.plan.type }}
+          </span>
+          <span v-if="selectedEntry.plan.pattern" class="pl mono" data-testid="diagram-plan-pattern">
+            <span class="pk">pattern</span>{{ selectedEntry.plan.pattern }}
+          </span>
+          <span v-if="selectedEntry.plan.size" class="pl mono" data-testid="diagram-plan-size">
+            <span class="pk">size</span>{{ selectedEntry.plan.size }}
+          </span>
+          <!-- Cuts are the honest half: what would not fit. Kept last and marked,
+               because "this drawing omits X" is a caveat, not a specification. -->
+          <span
+            v-for="cut in selectedEntry.plan.cuts"
+            :key="cut"
+            class="pl cut mono"
+            data-testid="diagram-plan-cut"
+          >
+            <span class="pk">cut</span>{{ cut }}
+          </span>
+        </div>
         <!-- Which session drew it. Dropped by the accepted live variant and
              restored here: a diagram is an artefact of a particular run, and the
              run is how you find what was asked for. -->
@@ -613,9 +659,48 @@ watch(
   color: var(--text-faint);
 }
 
+/* The plan strip: facts about the drawing, set as data rather than prose. */
+.plan {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.pl {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 6px;
+  font-size: var(--fs-micro);
+  color: var(--text-body);
+  border: 1px solid var(--border-card-alt);
+  border-radius: var(--rp);
+}
+
+.pk {
+  color: var(--text-ghost);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.pl.cut {
+  color: var(--amber);
+  border-color: color-mix(in srgb, var(--amber) 40%, transparent);
+}
+
 .cmd-missing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: var(--fs-micro);
   color: var(--amber);
+}
+
+/* An absent command is still a live row: it installs. Dimming it the way a
+   disabled control is dimmed would say the opposite. */
+.cmd-item.missing .cmd-name,
+.cmd-item.missing .cmd-desc {
+  color: var(--text-meta);
 }
 
 .cmd-scrim {
