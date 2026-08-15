@@ -359,3 +359,23 @@ describe('the bind-mount lock note', () => {
     expect(verifyPrompt(plan, '.NET', null, [])).not.toContain('MSB3021')
   })
 })
+
+// Both learned by watching Stryker refuse on a real solution, not guessed: it
+// must start from a directory holding a test project, and it needs --project when
+// that test project references more than one. Neither refusal is a fault in the
+// code being verified, and both cost a whole run to discover.
+describe('the Stryker invocation note', () => {
+  it('is present whenever a mutation suite is in the run', () => {
+    const dotnet = stackById('dotnet')!
+    const plan = planSuites(dotnet.suites, ['dotnet-mutation'], DOTNET_BOX)
+    const prompt = verifyPrompt(plan, '.NET', ['dotnet'], [])
+    expect(prompt).toMatch(/must be started from a directory holding a TEST project/i)
+    expect(prompt).toContain('--project')
+  })
+
+  it('is absent from a run with no mutation suite', () => {
+    const dotnet = stackById('dotnet')!
+    const plan = planSuites(dotnet.suites, ['dotnet-unit'], DOTNET_BOX)
+    expect(verifyPrompt(plan, '.NET', ['dotnet'], [])).not.toMatch(/Running Stryker/i)
+  })
+})

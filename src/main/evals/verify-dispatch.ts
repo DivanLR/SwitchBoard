@@ -230,6 +230,15 @@ function qualitySection(flags: SchemaFlags): string {
         "equivalent for this stack) rather than typing a remembered figure. Give the score, how " +
         'many mutants were killed versus survived, and the surviving mutants worth a look, worst ' +
         'first.',
+      // Two facts about invoking Stryker, both learned by watching it refuse on a
+      // real solution rather than guessed at. The catalogue's bare `dotnet
+      // stryker` is a guess about a conventional layout, and neither of these
+      // refusals is a fault in the code being verified.
+      '- Running Stryker: it must be started from a directory holding a TEST project, not from ' +
+        'the repository root — at the root it finds nothing to mutate. If that test project ' +
+        'references more than one project, Stryker refuses until told which to mutate: pass ' +
+        '--project <the csproj it names>. It lists the candidates in the refusal, so read them ' +
+        'and pick the one under test rather than guessing.',
     )
   }
   return lines.length === 0 ? '' : `\n\nThen gather the quality figures, without re-running the tests:\n${lines.join('\n')}\n`
