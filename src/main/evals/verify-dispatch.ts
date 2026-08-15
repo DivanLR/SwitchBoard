@@ -284,7 +284,22 @@ export function verifyPrompt(
       : '') +
     (sandbox
       ? `\n\nYou are inside the bypass container: it has git, ripgrep and ${sandbox.join(', ')}` +
-        ', and nothing else. Do not install a toolchain to work around that.'
+        ', and nothing else. Do not install a toolchain to work around that.' +
+        // The project folder is a bind mount shared with the host, so a file the
+        // HOST has open cannot be replaced from in here. The MSBuild error for it
+        // names a path and a permission and gives no hint of the cause, and the
+        // obvious reading — the container lacks rights — is wrong: it can create
+        // new files in that very directory. Observed on a real run, where the
+        // developer's own API was running on the host and holding the DLLs its
+        // build wanted to overwrite.
+        '\n\n/workspace is the developer\'s own folder, shared live with their machine. ' +
+        'If a build fails with MSB3021 or "Access to the path ... is denied" for a file ' +
+        'under bin/ or obj/, that file is LOCKED BY A PROCESS ON THE HOST — usually the ' +
+        'application itself running outside this container. It is not a permissions ' +
+        'problem here and not a fault in the code. Report that suite as "skipped", say ' +
+        'which file and that it is locked by a host process, and name the project so it ' +
+        'can be stopped. Do not delete bin/ or obj/ to get around it: those are the ' +
+        "developer's build outputs and something is using them."
       : '') +
     endpointSection(apiSuites, dbServers) +
     qualitySection(flags) +

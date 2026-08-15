@@ -585,3 +585,40 @@ test('a drawing session that dies stops the wait and says why', async ({ page })
   await expect(error).toContainText('exit 137')
   await expect(page.getByTestId('diagram-pending')).toHaveCount(0)
 })
+
+// A section dispatches into a background session, and that session can ask a
+// question. The answer card used to render only in the conversation, so the
+// section showed the question as ordinary output with no controls under it and
+// the run waited for a reply that had nowhere to come from.
+test('a question from the drawing session can be answered in the section', async ({ page }) => {
+  await page.getByTestId('diagram-input').fill('every endpoint and where it points')
+  await page.getByTestId('diagram-generate').click()
+  await expect(page.getByTestId('diagram-pending')).toBeVisible()
+
+  const sessionId = await page.evaluate(
+    () => window.__mock.state().sends.at(-1)?.sessionId as string,
+  )
+  await page.evaluate(
+    (id) =>
+      window.__mock.emitEvent(id, 'assistant_text', {
+        text:
+          'Question 1 of 1\n\n| Option | Description |\n' +
+          '| A | Six per-domain sheets |\n| B | One wall chart |\n\nReply with the option letter.',
+        partial: false,
+      }),
+    sessionId,
+  )
+
+  // The card appears in the section, not only in the conversation.
+  const card = page.getByTestId('diagrams-view').getByTestId('mini-terminal-question')
+  await expect(card).toBeVisible()
+
+  const before = await page.evaluate(() => window.__mock.state().sends.length)
+  await card.getByRole('button', { name: /^A/ }).click()
+
+  // The answer goes to the SESSION THAT ASKED, not the open conversation.
+  await expect
+    .poll(async () => (await page.evaluate(() => window.__mock.state().sends)).at(-1))
+    .toMatchObject({ sessionId, text: 'A' })
+  expect(await page.evaluate(() => window.__mock.state().sends.length)).toBe(before + 1)
+})

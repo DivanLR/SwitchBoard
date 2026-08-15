@@ -45,3 +45,38 @@ export function parseInlineQuestion(text: string): QuestionPayload | null {
     answered: false,
   }
 }
+
+/**
+ * The unanswered question at the end of a session's events, or null.
+ *
+ * Shared because two surfaces need the same answer and must not drift: the
+ * conversation, which has always rendered these, and a SECTION's mini terminal,
+ * which had no way to answer one at all. A section dispatches into a background
+ * session; when that session asked something — "how should the every-endpoint
+ * view be shaped?" — the card appeared nowhere, the run stopped, and the pane
+ * showed a question with no controls under it.
+ *
+ * Scans backwards, because only the LATEST question is live:
+ *  - a `prompt` after it means it has already been answered;
+ *  - tool rows, markers and results in between say nothing either way, so they
+ *    are skipped rather than treated as an answer.
+ *
+ * `answeredId` locally retires a card the developer has just clicked, so a second
+ * click cannot send twice before the echoed prompt event lands.
+ */
+export function pendingQuestion(
+  events: readonly { id: string; kind: string; payload: unknown }[],
+  answeredId?: string | null,
+): { eventId: string; payload: QuestionPayload } | null {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i]
+    if (event.kind === 'prompt') return null
+    if (event.kind === 'assistant_text' || event.kind === 'summary') {
+      if (event.id === answeredId) return null
+      const text = (event.payload as { text?: string }).text ?? ''
+      const payload = parseInlineQuestion(text)
+      return payload ? { eventId: event.id, payload } : null
+    }
+  }
+  return null
+}

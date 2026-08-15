@@ -338,3 +338,24 @@ describe('asking for real endpoint calls', () => {
     expect(prompt).not.toContain('postgres-main')
   })
 })
+
+// Observed on a real run: the developer's own API was running on the host and
+// holding the DLLs its build wanted to overwrite. MSBuild reports that as
+// MSB3021 "Access to the path ... is denied", which reads as the container
+// lacking rights — and it does not: it can create new files in that same folder.
+// Left unexplained, the session reports the developer's code as broken.
+describe('the bind-mount lock note', () => {
+  it('tells a containerised run what a denied bin path actually means', () => {
+    const plan = planSuites(stackById('dotnet')!.suites, ['dotnet-unit'], DOTNET_BOX)
+    const prompt = verifyPrompt(plan, '.NET', ['dotnet'], [])
+    expect(prompt).toContain('MSB3021')
+    expect(prompt).toMatch(/locked by a process on the host/i)
+    // The remedy must not be to delete the developer's build outputs.
+    expect(prompt).toMatch(/Do not delete bin\/ or obj\//i)
+  })
+
+  it('says nothing about it when the run is not containerised', () => {
+    const plan = planSuites(stackById('dotnet')!.suites, ['dotnet-unit'], null)
+    expect(verifyPrompt(plan, '.NET', null, [])).not.toContain('MSB3021')
+  })
+})

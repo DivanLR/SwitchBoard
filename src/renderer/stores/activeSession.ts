@@ -207,6 +207,18 @@ const store = reactive({
     return invoke('sessions.send', { sessionId: this.sessionId, text, agentId })
   },
 
+  /**
+   * Sends to a NAMED session rather than the open conversation.
+   *
+   * For answering a question asked by a session the developer is watching but not
+   * sitting in — a section's background run. `send` above is deliberately bound to
+   * `this.sessionId`, and reusing it here would deliver a section's answer into
+   * the chat, where nothing is waiting for it.
+   */
+  async sendTo(sessionId: string, text: string): Promise<void> {
+    await invoke('sessions.send', { sessionId, text })
+  },
+
   /** Open (or close, with null) a subagent's chat view. */
   selectAgent(agentId: string | null): void {
     this.selectedAgentId = agentId

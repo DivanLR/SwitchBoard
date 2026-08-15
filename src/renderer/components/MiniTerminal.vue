@@ -12,6 +12,8 @@
 // through is in the session itself, whole and paged.
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { toRawLines } from '@shared/stream-lines'
+import { pendingQuestion } from '@shared/inline-question'
+import QuestionEvent from '@renderer/components/QuestionEvent.vue'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 
 const props = defineProps<{
@@ -38,6 +40,27 @@ onUnmounted(() => active.unwatchTail(props.sessionId))
 // dates, and the answer to "when" is "now" — that is the whole point of a tail.
 const lines = computed(() => toRawLines(active.tails[props.sessionId] ?? [], false))
 
+/**
+ * A question this session is waiting on, answerable here.
+ *
+ * Without it a section could be stopped dead with no way forward: the run asks
+ * something, the card renders only in the conversation, and the section shows the
+ * question as ordinary output with no controls under it. Watching a session and
+ * being unable to answer it is worse than not watching it, because the tail says
+ * work is happening when nothing is.
+ *
+ * Same derivation as the conversation's, from @shared/inline-question, so the two
+ * cannot disagree about what counts as still-open.
+ */
+const answered = ref<string | null>(null)
+const question = computed(() => pendingQuestion(active.tails[props.sessionId] ?? [], answered.value))
+
+function answer(eventId: string, choice: string): void {
+  answered.value = eventId
+  // The ★ Recommended marker is display convention — send the bare option.
+  void active.sendTo(props.sessionId, choice.replace(/\s*\(recommended\)\s*$/i, ''))
+}
+
 // Pinned to the newest line, always. Unlike the main stream there is no reading
 // position to preserve here: a tail nobody scrolls is a tail showing the past.
 watch(lines, () => {
@@ -58,6 +81,15 @@ watch(lines, () => {
         {{ line.text }}
       </div>
     </div>
+    <!-- OUTSIDE the scrolling box, so an answer cannot scroll out of reach while
+         the session keeps printing underneath it. -->
+    <QuestionEvent
+      v-if="question"
+      :event-id="question.eventId"
+      :payload="question.payload"
+      data-testid="mini-terminal-question"
+      @answer="answer"
+    />
   </div>
 </template>
 
