@@ -4,7 +4,7 @@
 // project's own docs/diagrams. Drawing one has no slash command — the skill
 // activates on an ordinary request — but the plugin does ship commands for
 // exporting and importing, and those are offered in the Commands menu.
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { DIAGRAM_COMMANDS, DIAGRAM_PLUGIN, DIAGRAMS_DIR } from '@shared/diagram'
 import { relativeTime } from '@renderer/relative-time'
 import { normalizeForMatch } from '@renderer/composables/useCommandSuggestions'
@@ -31,10 +31,28 @@ onMounted(() => void diagrams.load(props.projectId))
 watch(() => props.projectId, (id) => void diagrams.load(id))
 
 const description = ref('')
+/** The command/description field, so picking a command can put the caret after it. */
+const input = ref<HTMLInputElement | null>(null)
+
+/**
+ * A field holding a slash command is a command, not a description of a drawing.
+ *
+ * The one field does both because the alternative is a second input that is empty
+ * and meaningless most of the time. The leading slash is the whole test, and it is
+ * the same test the session's own composer applies.
+ */
+const isCommand = computed(() => description.value.trimStart().startsWith('/'))
 
 async function generate(): Promise<void> {
   const text = description.value.trim()
   if (!text) return
+  if (isCommand.value) {
+    // Sent verbatim, including whatever was typed after the command. Picking a
+    // command from the menu only writes it here; sending stays the developer's.
+    emit('run', text)
+    description.value = ''
+    return
+  }
   // The drawing happens in a background session and the finished file turns up
   // in the list below, so there is nothing to switch to and nothing to watch.
   if (await diagrams.generate(props.projectId, text)) description.value = ''
@@ -112,20 +130,35 @@ const commands = computed(() =>
 )
 
 /**
- * Dispatches a command with the argument this section already knows.
+ * Writes the command into the box, in front of whatever is being typed, and sends
+ * nothing.
  *
- * Every one of these takes a file. For the export that file is the diagram in
- * the pane, so it runs on what is on screen without anyone typing a path; for
- * the two importers the source is a file this app has never heard of, so
- * whatever is in the box is passed through and an empty box leaves the session
- * to ask — which is visible now, in the terminal below.
+ * It used to dispatch on click, which made picking a command and composing the
+ * message it needs two different acts in two different orders: anything typed
+ * afterwards was a new, separate request, and anything typed BEFORE was silently
+ * swallowed as the command's argument. Now the menu writes and the developer
+ * sends, so what runs is what is on screen.
+ *
+ * The path is filled in for a command that takes the diagram in the pane, because
+ * that is the argument the section already knows and typing it back by hand proves
+ * nothing. Everything after the command survives, so a half-typed message is not
+ * lost by opening the menu.
  */
-function runCommand(entry: (typeof commands.value)[number]): void {
+function pickCommand(entry: (typeof commands.value)[number]): void {
   menuOpen.value = false
-  const typed = description.value.trim()
-  const argument = typed || (entry.takesDiagram && selected.value ? `${DIAGRAMS_DIR}/${selected.value}` : '')
-  emit('run', `/${DIAGRAM_PLUGIN.namespace}:${entry.command}${argument ? ` ${argument}` : ''}`)
-  description.value = ''
+  const rest = description.value.replace(/^\s*\/\S*\s*/, '').trim()
+  const argument = entry.takesDiagram && selected.value ? ` ${DIAGRAMS_DIR}/${selected.value}` : ''
+  description.value = `/${DIAGRAM_PLUGIN.namespace}:${entry.command}${argument} ${rest}`.trimEnd() + ' '
+  // Focus with the caret at the END, after the render that carries the new value.
+  // Without this the field keeps the caret at 0 and the next keystroke lands in
+  // FRONT of the command, which turns the whole line back into a description and
+  // draws a diagram called "--png-only/diagram-design:export-diagram".
+  void nextTick(() => {
+    const field = input.value
+    if (!field) return
+    field.focus()
+    field.setSelectionRange(field.value.length, field.value.length)
+  })
 }
 
 /** Install from the command menu, for the case where the install card is not shown. */
@@ -172,6 +205,7 @@ watch(
 
     <div class="bar">
       <input
+        ref="input"
         v-model="description"
         class="in"
         data-testid="diagram-input"
@@ -179,8 +213,11 @@ watch(
         :disabled="diagrams.generating"
         @keydown.enter="generate()"
       />
+      <!-- One button, two jobs, and it says which: a field holding a slash command
+           sends that command, and anything else describes a drawing. -->
       <button class="add-btn" data-testid="diagram-generate" :disabled="diagrams.generating || !description.trim()" @click="generate()">
         <template v-if="diagrams.generating">Asking…</template>
+        <template v-else-if="isCommand"><Icon name="chevron-right" :size="12" /> Send</template>
         <template v-else><Icon name="pencil" :size="12" /> Generate</template>
       </button>
       <div class="cmds">
@@ -200,7 +237,7 @@ watch(
             :class="{ missing: !c.available }"
             :data-testid="`diagram-command-${c.command}`"
             :disabled="props.installing"
-            @click="c.available ? runCommand(c) : installFromMenu()"
+            @click="c.available ? pickCommand(c) : installFromMenu()"
           >
             <span class="cmd-name mono">/{{ c.command }}</span>
             <span class="cmd-desc">{{ c.description }}</span>

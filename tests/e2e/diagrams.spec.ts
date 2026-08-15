@@ -231,13 +231,70 @@ test('the section offers the plugin commands, and runs one on the diagram in the
     'install diagram-design',
   )
 
+  const before = await page.evaluate(() => window.__mock.state().sends.length)
   await page.getByTestId('diagram-command-export-diagram').click()
   await expect(menu).toHaveCount(0)
 
-  // Dispatched with the diagram on screen as its argument — no path typed.
+  // Picking WRITES the command, with the diagram on screen already filled in as
+  // its argument, and sends nothing. Dispatching on click made choosing a command
+  // and composing its message two acts in two orders, and swallowed anything
+  // typed first as the argument.
+  await expect(page.getByTestId('diagram-input')).toHaveValue(
+    `/${DIAGRAM_PLUGIN.namespace}:export-diagram ${DIAGRAMS_DIR}/auth-flow.html `,
+  )
+  expect(await page.evaluate(() => window.__mock.state().sends.length)).toBe(before)
+
+  // The developer sends it, and what runs is exactly what was on screen.
+  await page.getByTestId('diagram-generate').click()
   await expect
     .poll(async () => (await page.evaluate(() => window.__mock.state().sends)).at(-1)?.text)
     .toBe(`/${DIAGRAM_PLUGIN.namespace}:export-diagram ${DIAGRAMS_DIR}/auth-flow.html`)
+  await expect(page.getByTestId('diagram-input')).toHaveValue('')
+})
+
+// The point of prefixing rather than dispatching: the command carries the message
+// typed after it, instead of the message becoming a second, separate request.
+test('a command keeps the message typed after it, and sends both', async ({ page }) => {
+  await page.evaluate(() =>
+    window.__mock.setCommands('p-alpha', [
+      'diagram-design:export-diagram',
+      'diagram-design:import-mermaid',
+      'diagram-design:import-drawio',
+    ]),
+  )
+  await page.getByTestId('tab-session').click()
+  await page.getByTestId('tab-diagrams').click()
+
+  await page.getByTestId('diagram-commands').click()
+  await page.getByTestId('diagram-command-export-diagram').click()
+  await page.getByTestId('diagram-input').pressSequentially('--png-only')
+  await page.getByTestId('diagram-input').press('Enter')
+
+  await expect
+    .poll(async () => (await page.evaluate(() => window.__mock.state().sends)).at(-1)?.text)
+    .toBe(`/${DIAGRAM_PLUGIN.namespace}:export-diagram --png-only`)
+})
+
+// Text already in the box is not lost by opening the menu, and is not swallowed
+// as the command's argument either: it survives after the command.
+test('picking a command keeps what was already typed, after the command', async ({ page }) => {
+  await page.evaluate(() =>
+    window.__mock.setCommands('p-alpha', [
+      'diagram-design:export-diagram',
+      'diagram-design:import-mermaid',
+      'diagram-design:import-drawio',
+    ]),
+  )
+  await page.getByTestId('tab-session').click()
+  await page.getByTestId('tab-diagrams').click()
+
+  await page.getByTestId('diagram-input').fill('drawings/source.mmd')
+  await page.getByTestId('diagram-commands').click()
+  await page.getByTestId('diagram-command-import-mermaid').click()
+
+  await expect(page.getByTestId('diagram-input')).toHaveValue(
+    `/${DIAGRAM_PLUGIN.namespace}:import-mermaid drawings/source.mmd `,
+  )
 })
 
 test('Generate does nothing on an empty or whitespace-only description', async ({ page }) => {
