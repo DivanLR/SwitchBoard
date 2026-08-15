@@ -266,6 +266,27 @@ ENV PATH="/home/node/.dotnet/tools:\${PATH}"
 # lands in the HOME above, and pinned to a major version so an image rebuilt
 # months from now does not quietly change what the suite measures.
 RUN dotnet tool install --global dotnet-stryker --version "4.*"
+USER root
+# The SDK image carries ONLY its own runtime, and a project's target framework is
+# not the SDK's version. A net8.0 test project builds fine under the 10 SDK and
+# then cannot RUN: VSTest starts a net8.0 test host, no 8.0 runtime exists, the
+# host dies before reporting, and every tool downstream sees an empty result set.
+#
+# Stryker's own words for that were "No test result reported. Make sure your test
+# project contains test and is compatible with VsTest", on a project holding 35
+# tests it had just counted — which reads as the tests being broken and is really
+# a missing runtime. \`dotnet test\` gives an equally indirect answer.
+#
+# ASP.NET Core rather than the bare runtime because it is a superset: a web
+# project needs it and a class library does not care. Add another --channel line
+# here for any framework a project in this app actually targets; each is about
+# 100 MB, so they are added on evidence rather than in advance.
+RUN apt-get update && apt-get install -y --no-install-recommends curl \\
+ && rm -rf /var/lib/apt/lists/* \\
+ && curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \\
+ && bash /tmp/dotnet-install.sh --channel 8.0 --runtime aspnetcore --install-dir /usr/share/dotnet --no-path \\
+ && rm /tmp/dotnet-install.sh
+USER node
 ${browserEnv(browser)}WORKDIR /workspace
 ENTRYPOINT ["/entrypoint.sh"]
 `
