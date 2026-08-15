@@ -284,6 +284,24 @@ watch(
 
     <MiniTerminal v-if="props.sessionId && !pending" :session-id="props.sessionId" label="running" />
 
+    <!-- The gap between pressing Generate and having something to watch.
+         `diagrams.generate` cannot return a session id until one exists, and the
+         session it uses is containerised, so on the first diagram of a run that
+         wait is a Docker container starting: long enough that the section looked
+         inert, with nothing on screen claiming the button had done anything. -->
+    <div
+      v-if="diagrams.generating && !pending"
+      class="row pending"
+      data-testid="diagram-starting"
+      :aria-busy="true"
+    >
+      <div class="row-head">
+        <span class="file mono">{{ description.trim() || 'diagram' }}</span>
+        <span class="when mono">starting…</span>
+      </div>
+      <div class="desc">Starting the container session that will draw this.</div>
+    </div>
+
     <div v-if="pending" class="row pending" data-testid="diagram-pending" :aria-busy="true">
       <div class="row-head">
         <span class="file mono">{{ pending.file }}</span>

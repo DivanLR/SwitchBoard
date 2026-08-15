@@ -535,3 +535,22 @@ test('a picked command says what it takes, and that it does not draw', async ({ 
   await page.getByTestId('diagram-input').fill('the auth flow')
   await expect(hint).toHaveCount(0)
 })
+
+// Between pressing Generate and having a session to watch there is a real wait:
+// the id cannot exist until the session does, and that session is containerised,
+// so the first diagram of a run waits for a Docker container to start. The
+// section used to show nothing at all for that whole time.
+test('the section says it is starting before there is a session to watch', async ({ page }) => {
+  await page.getByTestId('diagram-input').fill('the auth flow')
+  await page.getByTestId('diagram-generate').click()
+
+  const starting = page.getByTestId('diagram-starting')
+  await expect(starting).toBeVisible()
+  await expect(starting).toContainText('starting')
+  await expect(starting).toContainText('container session')
+
+  // It gives way to the real row, with the tail of the session doing the work.
+  await expect(page.getByTestId('diagram-pending')).toBeVisible()
+  await expect(page.getByTestId('diagram-starting')).toHaveCount(0)
+  await expect(page.getByTestId('diagram-pending').getByTestId('mini-terminal')).toBeVisible()
+})

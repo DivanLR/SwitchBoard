@@ -810,6 +810,11 @@ export function installMockHost(scenario: MockScenario): void {
     'diagrams.generate': async (req) => {
       const projectId = String(req.projectId)
       const description = String(req.description)
+      // A real generate cannot answer until a session exists, and the session it
+      // uses is containerised — so on the first diagram of a run this is a Docker
+      // container starting. The delay keeps that waiting state observable instead
+      // of resolving inside a single frame. Same reason as sessions.start.
+      await new Promise((resolve) => setTimeout(resolve, 250))
       const requested = diagramRequestedFiles.get(projectId) ?? new Set<string>()
       const taken = [...(diagramsByProject.get(projectId) ?? []).map((d) => d.file), ...requested]
       const file = pickDiagramFileName(description, taken)
