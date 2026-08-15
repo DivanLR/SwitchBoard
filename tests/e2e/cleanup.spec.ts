@@ -18,17 +18,22 @@ test('the Cleanup tab lists grouped commands and runs one in the session', async
   await expect(page.getByTestId('cleanup-view')).toContainText('ponytail')
   await expect(page.getByTestId('cleanup-cmd-code-review')).toBeVisible()
 
-  // Running a command sends it to the project's BACKGROUND session and leaves
-  // the developer where they were. It used to jump to the Session tab, which
-  // now shows the conversation the work is deliberately no longer in.
+  // Running a command leaves the developer where they were: it used to jump to
+  // the Session tab, which shows the conversation the work is not in.
   await page.getByTestId('cleanup-cmd-de-sloppify').click()
   await expect(page.getByTestId('tab-cleanup')).toHaveClass(/sel/)
   await expect
     .poll(() => page.evaluate(() => window.__mock.state().sends.map((x) => x.text)))
     .toContain('/de-sloppify')
+
+  // It goes to the LIVE session, and this assertion is the reverse of what it
+  // used to be. These are plugin commands, and the background session is
+  // containerised: its ~/.claude is a fresh Docker volume with no plugins in it,
+  // so seven of the nine commands here could never resolve there however healthy
+  // the "Installed" badge looked. Same fix, and the same trade, as Diagrams.
   const sends = await page.evaluate(() => window.__mock.state().sends)
   const run = sends.find((s) => s.text === '/de-sloppify')
-  expect(run?.sessionId).not.toBe('s-alpha')
+  expect(run?.sessionId).toBe('s-alpha')
 })
 
 test('a stack-specific plugin is not advertised to a project that has not installed it', async ({

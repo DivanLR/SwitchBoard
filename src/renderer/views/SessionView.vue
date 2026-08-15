@@ -1420,7 +1420,7 @@ const {
       :session-id="sectionSessionId"
       :installing="installing !== null"
       :install-error="installError"
-      @run="runInSection"
+      @run="runPluginCommand"
       @install="installCleanup"
     />
     <!-- No @ran: a diagram is drawn in a background session, so asking for one
