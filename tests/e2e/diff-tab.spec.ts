@@ -97,3 +97,130 @@ test('starts reflecting a project once its session starts, without a project swi
   await expect(page.getByTestId('diff-not-live')).not.toBeVisible()
   await expect(page.getByTestId('diff-no-changes')).toBeVisible()
 })
+
+// Commenting on a region: the same gesture as a pull-request comment, except the
+// comment is carried out. The instruction goes to the containerised session,
+// which has the working tree mounted, so the edit lands in this same diff.
+async function openDiffWithLines(page: Page): Promise<void> {
+  const scenario = twoProjectScenario()
+  scenario.projects[0].diff = {
+    gitNotice: null,
+    files: [{ path: 'src/app.ts', status: 'modified', addedLines: 2, removedLines: 1, binary: false }],
+  }
+  await page.addInitScript(installMockHost, scenario)
+  await page.goto('/')
+  await page.evaluate(() => {
+    window.__mock.setFileDiff('p-alpha', 'src/app.ts', {
+      binary: false,
+      lines: [
+        { type: 'context', text: 'const x = 1' },
+        { type: 'del', text: 'const timeout = 500' },
+        { type: 'add', text: 'const timeout = 5000' },
+        { type: 'context', text: 'return timeout' },
+      ],
+    })
+  })
+  await openProject(page, 'alpha')
+  await page.getByTestId('diff-file-src/app.ts').click()
+  await expect(page.getByTestId('diff-pane-lines')).toBeVisible()
+}
+
+test('a comment on one diff line is applied by the container session', async ({ page }) => {
+  await openDiffWithLines(page)
+
+  // Nothing is offered until a line is pointed at.
+  await expect(page.getByTestId('diff-comment')).toHaveCount(0)
+
+  await page.getByTestId('diff-line-2').click()
+  await expect(page.getByTestId('diff-comment-count')).toContainText('1 line selected')
+
+  await page.getByTestId('diff-comment-input').fill('make this configurable')
+  await page.getByTestId('diff-comment-send').click()
+
+  // The region travels as TEXT, markers intact, not as line numbers: numbers are
+  // wrong the moment anything above them moves, and the first edit invalidates
+  // the very diff the selection was made from.
+  await expect
+    .poll(async () => (await page.evaluate(() => window.__mock.state().diffApplies)).at(-1))
+    .toEqual({
+      projectId: 'p-alpha',
+      path: 'src/app.ts',
+      lines: ['+const timeout = 5000'],
+      instruction: 'make this configurable',
+    })
+
+  // Sent, so the composer closes and the selection is released.
+  await expect(page.getByTestId('diff-comment')).toHaveCount(0)
+})
+
+test('shift-click extends the selection over several lines, in order', async ({ page }) => {
+  await openDiffWithLines(page)
+
+  await page.getByTestId('diff-line-1').click()
+  await page.getByTestId('diff-line-3').click({ modifiers: ['Shift'] })
+  await expect(page.getByTestId('diff-comment-count')).toContainText('3 lines selected')
+
+  await page.getByTestId('diff-comment-input').fill('extract these')
+  await page.getByTestId('diff-comment-send').click()
+
+  await expect
+    .poll(async () => (await page.evaluate(() => window.__mock.state().diffApplies)).at(-1)?.lines)
+    .toEqual(['-const timeout = 500', '+const timeout = 5000', ' return timeout'])
+})
+
+// Selecting upwards is the same region. Anchoring on the first click and letting
+// the second be either side of it is what makes that work.
+test('extending upwards selects the same region as extending down', async ({ page }) => {
+  await openDiffWithLines(page)
+
+  await page.getByTestId('diff-line-3').click()
+  await page.getByTestId('diff-line-1').click({ modifiers: ['Shift'] })
+
+  await page.getByTestId('diff-comment-input').fill('x')
+  await page.getByTestId('diff-comment-send').click()
+
+  await expect
+    .poll(async () => (await page.evaluate(() => window.__mock.state().diffApplies)).at(-1)?.lines)
+    .toEqual(['-const timeout = 500', '+const timeout = 5000', ' return timeout'])
+})
+
+test('an empty instruction cannot be sent', async ({ page }) => {
+  await openDiffWithLines(page)
+  await page.getByTestId('diff-line-2').click()
+
+  await expect(page.getByTestId('diff-comment-send')).toBeDisabled()
+  await page.getByTestId('diff-comment-input').fill('   ')
+  await expect(page.getByTestId('diff-comment-send')).toBeDisabled()
+})
+
+// Line indices belong to the file they were read from.
+test('changing file drops a selection made in the previous one', async ({ page }) => {
+  const scenario = twoProjectScenario()
+  scenario.projects[0].diff = {
+    gitNotice: null,
+    files: [
+      { path: 'src/app.ts', status: 'modified', addedLines: 2, removedLines: 1, binary: false },
+      { path: 'other.ts', status: 'modified', addedLines: 1, removedLines: 0, binary: false },
+    ],
+  }
+  await page.addInitScript(installMockHost, scenario)
+  await page.goto('/')
+  await page.evaluate(() => {
+    window.__mock.setFileDiff('p-alpha', 'src/app.ts', {
+      binary: false,
+      lines: [{ type: 'add', text: 'one' }],
+    })
+    window.__mock.setFileDiff('p-alpha', 'other.ts', {
+      binary: false,
+      lines: [{ type: 'add', text: 'two' }],
+    })
+  })
+  await openProject(page, 'alpha')
+
+  await page.getByTestId('diff-file-src/app.ts').click()
+  await page.getByTestId('diff-line-0').click()
+  await expect(page.getByTestId('diff-comment')).toBeVisible()
+
+  await page.getByTestId('diff-file-other.ts').click()
+  await expect(page.getByTestId('diff-comment')).toHaveCount(0)
+})

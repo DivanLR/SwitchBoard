@@ -61,6 +61,48 @@ const store = reactive({
     }
   },
 
+  /**
+   * Hands a selected region and an instruction to the containerised session.
+   *
+   * The session runs with /workspace bind-mounted read-write, so the edit lands
+   * in the working tree this very diff is reading. `applying` is a single flag
+   * rather than one per file: only one region can be selected at a time, so a
+   * second dispatch is a second thing to wait for, not a parallel one.
+   *
+   * Errors are held rather than thrown. The caller is a composer sitting over a
+   * diff, and the useful place to say "no live session" is in that composer,
+   * beside the button that was pressed.
+   */
+  applying: false,
+  applyError: null as string | null,
+  /** The session the last dispatch went to, so the view can offer to watch it. */
+  appliedSessionId: null as string | null,
+
+  async applyToRegion(
+    projectId: string,
+    path: string,
+    lines: string[],
+    instruction: string,
+  ): Promise<boolean> {
+    if (this.applying) return false
+    this.applying = true
+    this.applyError = null
+    try {
+      const { sessionId } = await invoke('diff.apply', { projectId, path, lines, instruction })
+      this.appliedSessionId = sessionId
+      return true
+    } catch (e) {
+      this.applyError = isIpcError(e)
+        ? e.code === 'NOT_LIVE'
+          ? 'Start a session for this project first.'
+          : e.message
+        : 'That could not be sent.'
+      return false
+    } finally {
+      this.applying = false
+    }
+  },
+
   /** Fetches one file's diff content, only on selection (FR-006). */
   async selectFile(projectId: string, path: string): Promise<void> {
     const token = ++fileToken

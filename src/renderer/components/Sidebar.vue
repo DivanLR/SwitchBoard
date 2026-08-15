@@ -197,6 +197,17 @@ function focusSub(projectId: string, sessionId: string): void {
   projects.focusSession(projectId, sessionId)
 }
 
+/**
+ * Ends one session, leaving the project and its other sessions alone.
+ *
+ * No confirmation. Ending a session is not destructive — the transcript stays,
+ * the row stays, and it can be resumed — and the existing End session control in
+ * the header does not ask either. A dialogue here would be the only one.
+ */
+function endOneSession(sessionId: string): void {
+  void projects.endSessions([sessionId])
+}
+
 function pendingFor(projectId: string): number {
   return inbox.pending.filter((p) => p.projectId === projectId).length
 }
@@ -850,9 +861,16 @@ async function confirmRemoveNow(): Promise<void> {
             class="subs"
             :data-testid="`sidebar-subsessions-${item.name}`"
           >
-            <button
+            <!-- A row is a div holding two buttons, not one button: the close
+                 control is a button of its own and a button cannot be nested
+                 inside another. -->
+            <div
               v-for="(s, i) in item.sessions"
               :key="s.id"
+              class="sub-row"
+              :class="{ sel: item.session?.id === s.id }"
+            >
+            <button
               type="button"
               class="sub-line"
               :class="{ sel: item.session?.id === s.id }"
@@ -877,6 +895,21 @@ async function confirmRemoveNow(): Promise<void> {
                 timerOf(s.startedAt)
               }}</span>
             </button>
+            <!-- Ends THIS session, not the project. Only on a live one: an ended
+                 row is history, and offering to close what is already closed is
+                 how a developer learns to distrust a control. -->
+            <button
+              v-if="!s.endedAt"
+              type="button"
+              class="sub-x"
+              :data-testid="`session-end-${s.id}`"
+              :title="`End session ${i + 1}`"
+              :aria-label="`End session ${i + 1}`"
+              @click.stop="endOneSession(s.id)"
+            >
+              <Icon name="close" :size="10" />
+            </button>
+            </div>
           </div>
           <div
             v-if="!collapsed && agentsFor(item).length > 0"
@@ -1960,6 +1993,45 @@ async function confirmRemoveNow(): Promise<void> {
   gap: 2px;
   margin-top: 5px;
   padding-left: 15px;
+}
+
+/* The row: the session button takes the width, the close control sits at its end
+   and appears on hover or focus. Always-visible would put a small X on every row
+   of a busy sidebar, which reads as clutter and invites a mis-click. */
+.sub-row {
+  display: flex;
+  align-items: center;
+}
+
+.sub-row .sub-line {
+  flex: 1;
+  min-width: 0;
+}
+
+.sub-x {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  color: var(--text-ghost);
+  background: none;
+  border: none;
+  border-radius: var(--rp);
+  opacity: 0;
+  cursor: pointer;
+}
+
+.sub-row:hover .sub-x,
+.sub-x:focus-visible {
+  opacity: 1;
+}
+
+.sub-x:hover {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 14%, transparent);
 }
 
 .sub-line {

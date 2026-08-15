@@ -26,7 +26,9 @@ test('one session lists no subsessions, because the lane already is that session
 test('a project runs a second session alongside the first, and lists both', async ({ page }) => {
   await startSecond(page)
 
-  const rows = page.getByTestId('sidebar-subsessions-alpha').getByRole('button')
+  // Counted by row rather than by button: each row now carries its own close
+  // control, so "every button in the list" is two per session.
+  const rows = page.getByTestId(/^sidebar-subsession-s/)
   await expect(rows).toHaveCount(2)
   // The pre-seeded session is still there: the second one was added, not swapped in.
   await expect(page.getByTestId('sidebar-subsession-s-alpha')).toBeVisible()
@@ -40,8 +42,9 @@ test('the new session takes focus, since it is the one just asked for', async ({
   await startSecond(page)
   // The seeded session is no longer the focused row; the new one is.
   await expect(page.getByTestId('sidebar-subsession-s-alpha')).not.toHaveClass(/sel/)
-  const rows = page.getByTestId('sidebar-subsessions-alpha').getByRole('button')
-  await expect(rows.filter({ has: page.locator('.sel') })).toHaveCount(0)
+  // Session rows only: each row also carries its own close control now, so
+  // "every button in the list" would be two per session.
+  const rows = page.getByTestId(/^sidebar-subsession-s/)
   await expect(rows.nth(1)).toHaveClass(/sel/)
 })
 
@@ -71,7 +74,7 @@ test('every session in a project can be ended at once, and the list comes back d
   page,
 }) => {
   await startSecond(page)
-  await expect(page.getByTestId('sidebar-subsessions-alpha').getByRole('button')).toHaveCount(2)
+  await expect(page.getByTestId(/^sidebar-subsession-s/)).toHaveCount(2)
 
   await page.getByTestId('sidebar-project-alpha').click({ button: 'right' })
   const endAll = page.getByTestId('ctx-end-all')
@@ -91,4 +94,23 @@ test('the end-all item stays hidden while a project runs a single session', asyn
   await page.getByTestId('sidebar-project-alpha').click({ button: 'right' })
   await expect(page.getByTestId('project-ctx-menu')).toBeVisible()
   await expect(page.getByTestId('ctx-end-all')).toHaveCount(0)
+})
+
+// Ending sessions one at a time meant focusing each and using the header button,
+// or ending all of them together. Neither is "close that one".
+test('each session row closes its own session and leaves the rest running', async ({ page }) => {
+  await startSecond(page)
+  await expect(page.getByTestId(/^sidebar-subsession-s/)).toHaveCount(2)
+
+  await page.getByTestId('session-end-s-alpha').click()
+
+  // One down, one still running — so the list retires, because a lone session IS
+  // the lane and a single child row would be noise.
+  await expect(page.getByTestId('sidebar-subsessions-alpha')).toHaveCount(0)
+  await expect(page.getByTestId('sidebar-subsession-s-alpha')).toHaveCount(0)
+
+  // The one that closed is the one that was asked to. If the click had ended the
+  // project rather than the session, this banner would be up.
+  await expect(page.getByTestId('ended-banner')).toHaveCount(0)
+  await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
 })

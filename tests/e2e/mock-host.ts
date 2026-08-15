@@ -152,6 +152,8 @@ export interface MockDriver {
     diagramOpens: { projectId: string; file: string }[]
     /** Every host-side plugin install asked for, in order. */
     pluginInstalls: { marketplace: string; pkg: string }[]
+    /** Every diff region handed to a session to apply, in order. */
+    diffApplies: { projectId: string; path: string; lines: string[]; instruction: string }[]
   }
 }
 
@@ -225,6 +227,7 @@ export function installMockHost(scenario: MockScenario): void {
   const diagramRequestedFiles = new Map<string, Set<string>>()
   const diagramOpens: { projectId: string; file: string }[] = []
   const pluginInstalls: { marketplace: string; pkg: string }[] = []
+  const diffApplies: { projectId: string; path: string; lines: string[]; instruction: string }[] = []
   /**
    * Inlined from src/shared/diagram.ts (DIAGRAMS_DIR / diagramFileName /
    * diagramPrompt): this host is serialised into the page (addInitScript), so it
@@ -775,6 +778,24 @@ export function installMockHost(scenario: MockScenario): void {
         throw { code: 'NOT_LIVE', message: 'No live session for this project' }
       }
       return fileDiffByProject.get(`${String(req.projectId)}|${String(req.path)}`) ?? null
+    },
+    // Records the dispatch rather than pretending to edit anything: what a spec
+    // needs to assert is that the selected region and the words reached the
+    // background session, not that a file changed on a disk this host does not
+    // have. Same NOT_LIVE guard as the rest of the tab.
+    'diff.apply': (req) => {
+      const project = projects.find((p) => p.id === req.projectId)
+      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
+      if (!project.session || project.session.endedAt) {
+        throw { code: 'NOT_LIVE', message: 'No live session for this project' }
+      }
+      diffApplies.push({
+        projectId: String(req.projectId),
+        path: String(req.path),
+        lines: req.lines as string[],
+        instruction: String(req.instruction),
+      })
+      return { sessionId: project.session.id }
     },
     // Reads the folder back off disk in the real host, so here it reads the
     // closure map __mock.addDiagram writes to — newest file first, same as a
@@ -1766,6 +1787,7 @@ export function installMockHost(scenario: MockScenario): void {
       planModeChanges: [...planModeChanges],
       diagramOpens: [...diagramOpens],
       pluginInstalls: [...pluginInstalls],
+      diffApplies: [...diffApplies],
     }),
   }
 }

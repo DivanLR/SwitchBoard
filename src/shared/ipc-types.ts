@@ -310,6 +310,30 @@ export interface InvokeMap {
   /** One file's diff content, fetched only on selection. Null when the file
    *  no longer matches a current changed-file entry. */
   'diff.file': { req: { projectId: string; path: string }; res: FileDiffContent | null }
+  /**
+   * Apply an instruction to one region of a changed file, the way a reviewer
+   * leaves a comment on a pull request — except the comment is carried out.
+   *
+   * Runs in the section's containerised background session, not the conversation:
+   * /workspace is bind-mounted read-write, so the edit lands in the developer's
+   * own working tree and shows up in this same diff, while the session it runs in
+   * cannot be derailed by whatever the developer is talking about in the chat.
+   *
+   * `lines` is the selected diff text verbatim rather than line numbers. Numbers
+   * drift the moment anything above them changes, and the region is being handed
+   * to a model that can find text far more reliably than it can count.
+   */
+  'diff.apply': {
+    req: {
+      projectId: string
+      path: string
+      /** The selected diff lines, in order, with their +/-/space markers intact. */
+      lines: string[]
+      /** What to do to that region, in the developer's words. */
+      instruction: string
+    }
+    res: { sessionId: string }
+  }
   /** Every diagram in the project's docs/diagrams folder, newest first. Reads the
    *  folder itself, so a file deleted from the repo leaves the list even though
    *  the app still holds the request that made it. */

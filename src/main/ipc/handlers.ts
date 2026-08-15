@@ -6,6 +6,7 @@ import { dialog, ipcMain, shell, type BrowserWindow } from 'electron'
 import type { DiagramEntry, Session, SessionEvent } from '@shared/domain'
 import { canPassEval, isDangerousCommand, sessionName } from '@shared/domain'
 import { DIAGRAMS_DIR, diagramFileName, diagramPrompt } from '@shared/diagram'
+import { applyToRegionPrompt } from '@shared/diff-apply'
 import type {
   Counters,
   InvokeMap,
@@ -354,6 +355,48 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         throw { code: 'NOT_LIVE', message: 'No live session for this project' } satisfies IpcError
       }
       return readFileDiff(project.path, req.path)
+    },
+    /**
+     * A review comment that is carried out instead of recorded.
+     *
+     * Sent to the section's containerised background session rather than the
+     * conversation, for the same reason every other section uses that one: the
+     * developer is in the middle of something in the chat, and an edit dispatched
+     * into it would queue behind whatever is being said and then reply into it.
+     *
+     * NOT_LIVE is deliberately the same guard the rest of this tab carries. The
+     * whole feature reads a working tree that only a live project has, and the
+     * background session is started against that project — offering to apply a
+     * comment to a project that is not running would start one silently.
+     */
+    'diff.apply': async (req) => {
+      const project = repos.projects.byId(req.projectId)
+      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
+      if (!manager.liveEntryForProject(req.projectId)) {
+        throw { code: 'NOT_LIVE', message: 'No live session for this project' } satisfies IpcError
+      }
+      const instruction = req.instruction.trim()
+      if (!instruction) {
+        throw { code: 'INVALID_PATH', message: 'Say what to change' } satisfies IpcError
+      }
+      if (req.lines.length === 0) {
+        throw { code: 'INVALID_PATH', message: 'Select at least one line' } satisfies IpcError
+      }
+      // Resolved through the same guard as opening a diagram: `path` crosses from
+      // the renderer, and this one ends in an instruction to edit that file.
+      const target = resolve(project.path, req.path)
+      if (target !== project.path && !target.startsWith(project.path + sep)) {
+        throw {
+          code: 'INVALID_PATH',
+          message: 'That file is outside the project',
+        } satisfies IpcError
+      }
+      const session = await manager.backgroundSessionFor(req.projectId)
+      manager.sendMessage(
+        session.id,
+        applyToRegionPrompt({ path: req.path, lines: req.lines, instruction }),
+      )
+      return { sessionId: session.id }
     },
     // The folder IS the list (see DiagramRequestsRepo): a missing docs/diagrams is
     // a project that has generated nothing, not a failure. Requests join onto
