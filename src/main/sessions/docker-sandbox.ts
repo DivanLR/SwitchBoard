@@ -9,6 +9,7 @@
 // inside the container. A named volume persists the container-side ~/.claude
 // between runs (transcripts, so bypass→bypass resume works).
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { cpus, homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
@@ -303,12 +304,45 @@ function imageFor(projectPath: string): {
     // bypass container" message, never a broken session.
   }
   const base = dotnet ? DOTNET_IMAGE : IMAGE
-  return { image: browser ? base + BROWSER_SUFFIX : base, dotnet, browser, node }
+  const name = browser ? base + BROWSER_SUFFIX : base
+  return { image: `${name}:${recipeTag(dotnet, browser)}`, dotnet, browser, node }
+}
+
+/**
+ * A tag derived from the Dockerfile that produces the image.
+ *
+ * `ensureSandboxImage` builds only when `docker image inspect` misses, which is
+ * the right rule — a rebuild on every session start would be unusable. It was
+ * paired with a FIXED tag, so once an image existed under that name it was never
+ * built again no matter how the recipe changed. Editing the Dockerfile did
+ * nothing on any machine that had already run one session.
+ *
+ * That is not hypothetical. The mutation suite runs `dotnet stryker`, the .NET
+ * image gained a `dotnet tool install --global dotnet-stryker` line to support
+ * it, and machines built before that line kept running the old image: every
+ * mutation run came back "Could not execute because the specified command or
+ * file was not found", which reads as the developer's project being broken.
+ *
+ * Content-addressed, so a changed recipe is a different tag, misses the inspect,
+ * and builds — reusing Docker's layer cache for everything that did not change.
+ * The old image is left behind rather than removed: it may still back a running
+ * container, and reclaiming disk is `docker image prune`'s job, not a session
+ * start's.
+ */
+export function recipeTag(dotnet: boolean, browser: boolean): string {
+  const recipe = dotnet ? dotnetDockerfile(browser) : dockerfile(browser)
+  return createHash('sha256').update(recipe).digest('hex').slice(0, 12)
 }
 
 /** What a bypass session for this project can run, from the very same detection
  *  that picks the image, so the two can never disagree. A project without browser
  *  test infrastructure gets no browser here AND no browser in its container. */
+/** The image a project's bypass session runs in, tag and all. Exported for the
+ *  test that proves a changed recipe is a changed tag. */
+export function sandboxImageFor(projectPath: string): string {
+  return imageFor(projectPath).image
+}
+
 export function sandboxToolsFor(projectPath: string): readonly SuiteTool[] {
   const { dotnet, browser } = imageFor(projectPath)
   return sandboxTools(dotnet, browser)

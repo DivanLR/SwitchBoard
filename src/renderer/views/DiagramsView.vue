@@ -538,11 +538,23 @@ watch(
 }
 
 /* The bounded rectangle the diagram renders into. Fixed aspect so a wide drawing
-   and a tall one are framed the same way. */
-/* Portrait, because these are HTML pages and a page is taller than it is wide.
-   HEIGHT-BOUND: the frame takes its height from the pane and derives its width
-   from the ratio, so it cannot overflow vertically at any window size;
-   max-width guards the other axis. */
+   and a tall one are framed the same way.
+
+   LANDSCAPE, at a browser's proportions rather than a sheet of paper's. It was
+   A4 portrait on the reasoning that these are pages, which had the ratio right
+   for printing and wrong for reading: the file is a standalone HTML page opened
+   in a browser, drawn by a skill whose own size presets are `doc-wide`,
+   `slide-16x9` and `print-a4-landscape` — every one of them wider than tall. A
+   portrait frame squeezed a landscape drawing into the middle third and left
+   bands of empty page down both sides.
+
+   16 / 10 rather than 16 / 9: it is the shape of a browser VIEWPORT, which is a
+   window minus its chrome, and this frame is showing exactly that.
+
+   Still HEIGHT-BOUND. The frame takes its height from the pane and derives its
+   width from the ratio, so it cannot overflow vertically at any window size, and
+   max-width guards the other axis. That is what keeps it inside the small area
+   rather than growing to fill the pane. */
 .mini {
   order: 1;
   flex: 1 1 auto;
@@ -550,7 +562,7 @@ watch(
   width: auto;
   max-width: 100%;
   min-height: 0;
-  aspect-ratio: 1 / 1.414;
+  aspect-ratio: 16 / 10;
   overflow: hidden;
   background: var(--diagram-page);
   border: 1px solid var(--border-card);

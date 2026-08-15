@@ -11,7 +11,9 @@ import {
   cpuShare,
   gitNotice,
   homeVolumeFor,
+  recipeTag,
   refMounts,
+  sandboxImageFor,
   sandboxMemoryArg,
   toContainerPaths,
 } from '@main/sessions/docker-sandbox'
@@ -362,5 +364,39 @@ describe('a container is not a permission decision', () => {
     const detail = explainExit('exited with code 137', true)
     expect(detail).toContain('Sandbox memory')
     expect(detail).not.toContain('bypass sandbox')
+  })
+})
+
+// The image is built only when `docker image inspect` misses it, which is right:
+// rebuilding on every session start would be unusable. Paired with a FIXED tag it
+// meant an image, once built, was never rebuilt however the recipe changed.
+//
+// That cost a real feature. The mutation suite runs `dotnet stryker`; the .NET
+// image gained a `dotnet tool install --global dotnet-stryker` line to support
+// it; and every machine that had already run one session kept the old image. The
+// suite came back "Could not execute because the specified command or file was
+// not found" — which reads as the developer's project being broken, and is
+// exactly the confusion FR-057 exists to prevent.
+describe('the sandbox image tag', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sbimg-'))
+
+  it('is content-addressed, so the tag is stable while the recipe is', () => {
+    const first = sandboxImageFor(dir)
+    expect(sandboxImageFor(dir)).toBe(first)
+    expect(first).toMatch(/^switchboard-sandbox(-dotnet)?(-browser)?:[0-9a-f]{12}$/)
+  })
+
+  // The property that matters: a DIFFERENT recipe is a different tag, which is
+  // what makes the inspect miss and the build actually happen. Asserted on the
+  // recipes themselves rather than through folder detection, so this test is
+  // about tagging and not about what a temporary directory looks like.
+  it('gives every distinct recipe its own tag', () => {
+    const tags = new Set([
+      recipeTag(false, false),
+      recipeTag(false, true),
+      recipeTag(true, false),
+      recipeTag(true, true),
+    ])
+    expect(tags.size).toBe(4)
   })
 })
