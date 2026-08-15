@@ -350,8 +350,13 @@ describe('the bind-mount lock note', () => {
     const prompt = verifyPrompt(plan, '.NET', ['dotnet'], [])
     expect(prompt).toContain('MSB3021')
     expect(prompt).toMatch(/locked by a process on the host/i)
-    // The remedy must not be to delete the developer's build outputs.
-    expect(prompt).toMatch(/Do not delete bin\/ or obj\//i)
+    // The remedy that actually works, proven on a real run: the lock is on the
+    // configuration the host is running, so building the other one writes to a
+    // different folder and the suite completes instead of failing.
+    expect(prompt).toMatch(/RETRY IN THE OTHER CONFIGURATION/i)
+    expect(prompt).toContain('-c Release')
+    // And never by deleting the developer's build outputs.
+    expect(prompt).toMatch(/Never delete bin\/ or obj\//i)
   })
 
   it('says nothing about it when the run is not containerised', () => {

@@ -305,10 +305,18 @@ export function verifyPrompt(
         'If a build fails with MSB3021 or "Access to the path ... is denied" for a file ' +
         'under bin/ or obj/, that file is LOCKED BY A PROCESS ON THE HOST — usually the ' +
         'application itself running outside this container. It is not a permissions ' +
-        'problem here and not a fault in the code. Report that suite as "skipped", say ' +
-        'which file and that it is locked by a host process, and name the project so it ' +
-        'can be stopped. Do not delete bin/ or obj/ to get around it: those are the ' +
-        "developer's build outputs and something is using them."
+        'problem here and not a fault in the code: this container can create NEW files in ' +
+        'that same directory, it just cannot replace one the host holds open.\n' +
+        // The remedy, proven on a real run: the lock is on the configuration the host is
+        // running, so building the other one writes to a different folder entirely. A
+        // Debug-locked project mutated cleanly in Release, 968 killed of 1078.
+        'RETRY IN THE OTHER CONFIGURATION before giving up. The lock is on the ' +
+        'configuration the host is running, almost always Debug, and Release writes to ' +
+        'bin/Release instead — so `-c Release` (or `--configuration Release` for Stryker) ' +
+        'usually just works. Only if that fails too, report the suite as "skipped", name ' +
+        'the locked file and the process holding it so it can be stopped. Never delete ' +
+        "bin/ or obj/ to get around it: those are the developer's build outputs and " +
+        'something is using them.'
       : '') +
     endpointSection(apiSuites, dbServers) +
     qualitySection(flags) +
