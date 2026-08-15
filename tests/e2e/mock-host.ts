@@ -978,6 +978,15 @@ export function installMockHost(scenario: MockScenario): void {
       pushCounters()
       return { ...session }
     },
+    'sessions.fate': (req) => {
+      const s = sessions.get(String(req.sessionId))
+      if (!s) return null
+      return {
+        endedAt: s.endedAt ?? null,
+        endReason: s.endReason ?? null,
+        statusDetail: s.statusDetail ?? null,
+      }
+    },
     'sessions.stop': async (req) => {
       const session = sessions.get(String(req.sessionId))
       if (!session) throw { code: 'NOT_FOUND', message: 'Session not found' }

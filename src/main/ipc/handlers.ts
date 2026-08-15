@@ -303,6 +303,16 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       manager.setPlanMode(req.sessionId, req.enabled)
     },
     'sessions.stop': (req) => manager.stopSession(req.sessionId),
+    // Straight from the row, not from the sidebar's view of it: see the contract.
+    'sessions.fate': (req) => {
+      const session = repos.sessions.byId(req.sessionId)
+      if (!session) return null
+      return {
+        endedAt: session.endedAt,
+        endReason: session.endReason,
+        statusDetail: session.statusDetail,
+      }
+    },
     'sessions.interrupt': (req) => manager.interruptSession(req.sessionId),
     'sessions.send': (req) => {
       const result = manager.sendMessage(req.sessionId, req.text, req.agentId)

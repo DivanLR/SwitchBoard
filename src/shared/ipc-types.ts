@@ -275,6 +275,20 @@ export interface InvokeMap {
    *  Refused for a bypass session (RULE_NOT_ALLOWED). */
   'sessions.setPlanMode': { req: { sessionId: string; enabled: boolean }; res: void }
   'sessions.stop': { req: { sessionId: string }; res: void }
+  /**
+   * One session's fate, by id. Null when no such session exists.
+   *
+   * Needed because `projects.list` is a view for the SIDEBAR, not a register of
+   * sessions: it reports the live rows and falls back to the newest ended one
+   * only when there are none, so a background session that dies while the chat
+   * session is still running vanishes from it entirely. Anything waiting on that
+   * background session — a diagram being drawn, say — then cannot tell "still
+   * working" from "died four minutes ago" and waits out its whole budget.
+   */
+  'sessions.fate': {
+    req: { sessionId: string }
+    res: { endedAt: string | null; endReason: string | null; statusDetail: string | null } | null
+  }
   'sessions.interrupt': { req: { sessionId: string }; res: { stillQueued: number } }
   'sessions.send': {
     req: { sessionId: string; text: string; agentId?: string }

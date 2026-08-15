@@ -794,7 +794,15 @@ function runInSection(text: string): void {
  * answer in the wrong place beats no answer at all.
  */
 function runPluginCommand(text: string): void {
-  void specs.runInSession(props.project.id, text, false)
+  void specs.runInSession(props.project.id, text, false).then((id) => {
+    // Pointed at the section's own terminal, even though this ran in the
+    // conversation's session. Where it RUNS is a fact about which environment has
+    // the plugin; where it is WATCHED is a fact about where the developer asked
+    // from, and they asked from the Diagrams tab. Routing it to the live session
+    // without this left the section silent and the answer somewhere they were not
+    // looking.
+    sectionSessionId.value = id
+  })
 }
 
 /**

@@ -511,6 +511,12 @@ test('a plugin command runs in the live session, which is the one that has the p
   await expect
     .poll(async () => (await page.evaluate(() => window.__mock.state().sends)).at(-1)?.sessionId)
     .toBe('s-alpha')
+
+  // Run there, WATCHED here. Where it runs is a fact about which environment holds
+  // the plugin; where it is watched is a fact about where the developer asked
+  // from, and they asked from this tab. Sending it to the live session without
+  // this left the section silent and the answer in the conversation behind them.
+  await expect(page.getByTestId('diagrams-view').getByTestId('mini-terminal')).toBeVisible()
 })
 
 // Every command this plugin ships takes a FILE. None of them draws anything, and
@@ -553,4 +559,29 @@ test('the section says it is starting before there is a session to watch', async
   await expect(page.getByTestId('diagram-pending')).toBeVisible()
   await expect(page.getByTestId('diagram-starting')).toHaveCount(0)
   await expect(page.getByTestId('diagram-pending').getByTestId('mini-terminal')).toBeVisible()
+})
+
+// What actually happened to a real diagram: the container drawing it was killed
+// with exit 137 — out of memory — four minutes in, having read a few dozen source
+// files. Nothing was ever written. The section went on showing the row as on its
+// way for the rest of a twenty-minute budget, then blamed the budget. The session
+// knew, and had already said why in its own words.
+test('a drawing session that dies stops the wait and says why', async ({ page }) => {
+  await page.getByTestId('diagram-input').fill('the whole project')
+  await page.getByTestId('diagram-generate').click()
+  await expect(page.getByTestId('diagram-pending')).toBeVisible()
+
+  const sessionId = await page.evaluate(
+    () => window.__mock.state().sends.at(-1)?.sessionId as string,
+  )
+  await page.evaluate(
+    (id) => window.__mock.crashSession(id, 'The sandbox container was killed: exit 137 is SIGKILL.'),
+    sessionId,
+  )
+
+  // The session's own words, not a guess, and not after twenty minutes.
+  const error = page.getByTestId('diagram-error')
+  await expect(error).toBeVisible({ timeout: 15_000 })
+  await expect(error).toContainText('exit 137')
+  await expect(page.getByTestId('diagram-pending')).toHaveCount(0)
 })

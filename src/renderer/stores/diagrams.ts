@@ -94,6 +94,39 @@ const store = reactive({
       // The developer switched project, or asked for something else: this poll
       // is no longer about anything on screen.
       if (this.pending?.projectId !== projectId || this.pending.file !== file) return
+
+      // Did the session drawing this DIE? Polling for a file cannot tell the
+      // difference between slow and dead, and this waited twenty minutes either
+      // way. A real one crashed four minutes in — the container was killed with
+      // exit 137, out of memory, having read a few dozen source files — and the
+      // section went on claiming the drawing was on its way for the rest of the
+      // wait, then blamed the twenty-minute budget. The session already knew, and
+      // says why in its own words.
+      // Asked of the session itself rather than looked up in the project list:
+      // that list reports live rows and falls back to the newest ended one only
+      // when there are none, so a background session that dies while the chat
+      // session keeps running disappears from it and takes its cause of death
+      // with it.
+      const drawing = await invoke('sessions.fate', { sessionId: this.pending.sessionId }).catch(
+        () => null,
+      )
+      if (drawing?.endedAt) {
+        // One more read first: the file may have landed in the same beat the
+        // session finished, and reporting a crash over a delivered diagram would
+        // be the worse mistake.
+        await this.load(projectId)
+        if (this.forProject(projectId).some((d) => d.file === file)) {
+          this.pending = null
+          await this.select(projectId, file)
+          return
+        }
+        this.error =
+          drawing.statusDetail ??
+          `The session drawing ${file} ended before it wrote anything. Open that session to see why, or ask again.`
+        this.pending = null
+        return
+      }
+
       await this.load(projectId)
       if (this.forProject(projectId).some((d) => d.file === file)) {
         // It landed. Clearing `pending` here is what ends the wait: the file is

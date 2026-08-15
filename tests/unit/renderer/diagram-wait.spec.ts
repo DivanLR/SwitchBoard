@@ -11,12 +11,24 @@ import type { DiagramEntry } from '@shared/domain'
 
 const listed: DiagramEntry[][] = []
 
-// The store's only transport. Queued answers are returned one per poll, so a
-// test says "empty, empty, then the file" and reads like the wait it describes.
+/**
+ * The session's fate, as the poll now asks for it each round. Null by default —
+ * "still going" — because these tests are about the file arriving or not.
+ *
+ * Dispatched BY METHOD rather than answered from one queue. It used to answer
+ * every call with the next queued listing, so the moment the poll gained a second
+ * call each round it ate two entries per round and every wait desynchronised.
+ */
+let fate: { endedAt: string | null; endReason: string | null; statusDetail: string | null } | null =
+  null
+
 vi.mock('@renderer/ipc', async () => {
   const actual = await vi.importActual<typeof import('@shared/ipc-types')>('@shared/ipc-types')
   return {
-    invoke: vi.fn(async () => listed.shift() ?? []),
+    invoke: vi.fn(async (method: string) => {
+      if (method === 'sessions.fate') return fate
+      return listed.shift() ?? []
+    }),
     errorMessage: actual.errorMessage,
   }
 })
@@ -45,6 +57,7 @@ function waiting(file: string): ReturnType<typeof useDiagramsStore> {
 describe('diagrams store: waiting for the file to land', () => {
   beforeEach(() => {
     listed.length = 0
+    fate = null
     vi.useFakeTimers()
   })
   afterEach(() => {
@@ -87,5 +100,54 @@ describe('diagrams store: waiting for the file to land', () => {
     // The superseded wait must not report on, or clear, the request that replaced it.
     expect(store.error).toBeNull()
     expect(store.pending?.file).toBe('billing.html')
+  })
+})
+
+// The third ending, and the one that actually happened: the session drawing it
+// died. The container was killed with exit 137 — out of memory — four minutes in,
+// having read a few dozen source files, and nothing was ever written. The wait
+// could not tell dead from slow, so it kept claiming the drawing was on its way
+// for the remaining sixteen minutes and then blamed its own budget.
+describe('diagrams store: the session drawing it dies', () => {
+  beforeEach(() => {
+    listed.length = 0
+    fate = null
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('stops the wait at once and reports the session’s own reason', async () => {
+    const store = waiting('auth-flow.html')
+    listed.push([])
+    fate = {
+      endedAt: '2026-08-13T10:30:30.630Z',
+      endReason: 'crashed',
+      statusDetail: 'The sandbox container was killed from outside the process: exit 137 is SIGKILL.',
+    }
+
+    const wait = store.awaitFile('p1', 'auth-flow.html')
+    await vi.advanceTimersByTimeAsync(2600)
+    await wait
+
+    expect(store.pending).toBeNull()
+    expect(store.error).toContain('exit 137')
+  })
+
+  // A file landing in the same beat the session ended is a SUCCESS. Reporting a
+  // crash over a delivered diagram would be the worse of the two mistakes.
+  it('prefers the delivered file when the session ended in the same beat', async () => {
+    const store = waiting('auth-flow.html')
+    listed.push([entry('auth-flow.html')])
+    fate = { endedAt: '2026-08-13T10:30:30.630Z', endReason: 'completed', statusDetail: null }
+
+    const wait = store.awaitFile('p1', 'auth-flow.html')
+    await vi.advanceTimersByTimeAsync(2600)
+    await wait
+
+    expect(store.pending).toBeNull()
+    expect(store.error).toBeNull()
+    expect(store.selected).toEqual({ projectId: 'p1', file: 'auth-flow.html' })
   })
 })
