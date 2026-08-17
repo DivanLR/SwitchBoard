@@ -28,13 +28,21 @@ function matchesInput(matcher: RiskInputMatcher, input: Record<string, unknown>)
   }
 }
 
+/**
+ * `rules` MUST already be in position order. This runs on the main thread on
+ * EVERY permission check, and copying the whole rule array and re-sorting it
+ * on every single call was wasted work for a list that only changes when the
+ * developer edits a rule — RuleSet (rule-set.ts) now sorts once when it
+ * rebuilds its cache and hands out that same ordered array to every check, so
+ * classifyRisk just iterates in the order it is given. A caller that builds
+ * an ad-hoc array (tests, mainly) is responsible for sorting it first.
+ */
 export function classifyRisk(
   rules: RiskClassificationRule[],
   toolName: string,
   input: Record<string, unknown>,
 ): RiskLevel {
-  const ordered = [...rules].sort((a, b) => a.position - b.position)
-  for (const rule of ordered) {
+  for (const rule of rules) {
     if (rule.toolMatcher !== '*' && rule.toolMatcher !== toolName) continue
     if (rule.inputMatcher && !matchesInput(rule.inputMatcher, input)) continue
     return rule.risk

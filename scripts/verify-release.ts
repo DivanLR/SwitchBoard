@@ -3,6 +3,7 @@
 // a stale latest.yml (wrong version, or regenerated after a re-build changed
 // the exe) ships silently and users auto-update into an installer that either
 // electron-updater can't find or whose hash check fails client-side.
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -65,5 +66,53 @@ if (actualSha512 !== top.sha512) {
   );
 }
 console.log('checking SHA-512 matches installer on disk: match');
+
+/**
+ * Whether the installer carries a valid Authenticode signature.
+ *
+ * A WARNING rather than a failure, deliberately. The project ships unsigned on
+ * purpose today (electron-builder.yml records why, and what turning it on takes),
+ * so failing here would only break a release flow that is working as intended.
+ * What it fixes is the invisibility: without signing, auto-update integrity rests
+ * entirely on the SHA-512 checked immediately above — a hash published in the same
+ * release as the file it validates, which catches a corrupted download and cannot
+ * catch a compromised release step. That is worth reading once per release rather
+ * than being something a user first learns from a SmartScreen prompt.
+ *
+ * It turns into a pass on its own the day a certificate is configured, so the
+ * check needs no second edit later.
+ */
+function signingState(exe: string): string {
+  if (process.platform !== 'win32') return 'unknown (not on Windows)';
+  try {
+    const status = execFileSync(
+      'powershell',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `(Get-AuthenticodeSignature -LiteralPath '${exe.replace(/'/g, "''")}').Status`,
+      ],
+      { encoding: 'utf8', windowsHide: true },
+    ).trim();
+    return status.length > 0 ? status : 'unknown (no status reported)';
+  } catch {
+    // PowerShell missing or refused: not knowing is not a reason to block a
+    // release whose installer and feed already agree.
+    return 'unknown (could not be read)';
+  }
+}
+
+const signature = signingState(installerPath);
+if (signature === 'Valid') {
+  console.log('checking Authenticode signature: signed and valid');
+} else {
+  console.warn(
+    `WARN: the installer is not validly signed (Authenticode status: ${signature}). ` +
+      'Windows SmartScreen will warn on first run, and auto-update integrity rests on the ' +
+      'SHA-512 above, which is published in the same release as the file it validates. ' +
+      'See the win: block in electron-builder.yml for the two ways to turn signing on.',
+  );
+}
 
 console.log('OK: release is publishable — installer and latest.yml agree.');

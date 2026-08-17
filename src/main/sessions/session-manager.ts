@@ -18,6 +18,7 @@ import type {
   EventPayloadMap,
   FileDiffContent,
   ModelMode,
+  Project,
   ProjectCommand,
   QueuedTask,
   Session,
@@ -62,7 +63,9 @@ import {
   gitRoot,
   hasNodeModulesVolume,
   refMounts,
+  removeNodeModulesVolume,
   sweepOrphanedContainers,
+  sweepStaleVolumes,
 } from './docker-sandbox'
 
 /** Classifier hook installed by the swallow rule engine (FR-015a); null until then. */
@@ -468,6 +471,21 @@ export class SessionManager {
   private hosted = new Map<string, HostedEntry>()
   /* The starting-reservation guard is gone; a project is no longer capped at
      one session (see startSession's doc). */
+  /**
+   * A DIFFERENT reservation from the one the comment above retired: this one
+   * guards MAX_CONTAINERS, not "one session per project", and is very much
+   * still needed. Session ids that have passed refuseWhenContainersFull's
+   * synchronous check but have not yet reached `hosted.set` — closing the gap
+   * between that check and ensureSandboxImage's image build, which can take
+   * MINUTES on a first run. Without this, two containerised starts landing in
+   * that window both pass the same synchronous count and together
+   * oversubscribe MAX_CONTAINERS, which is the exact crash the cap exists to
+   * prevent. Counted alongside `hosted` in refuseWhenContainersFull; always
+   * released in startSession's `finally`, on every exit path, because a leaked
+   * entry here ratchets the count up forever and refuses starts that should
+   * succeed.
+   */
+  private reservedContainerIds = new Set<string>()
   private classifier: NoiseClassifier | null = null
   /** Pending debounced transcript writes, keyed by session id. */
   private transcriptTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -525,6 +543,13 @@ export class SessionManager {
     // outlives a hard kill, so reconciling the rows without reaping those would
     // leave an autonomous agent running against the project folder.
     sweepOrphanedContainers()
+    // The container-per-session volumes accumulate credentials and disk (see
+    // HOME_VOLUME_PREFIX in docker-sandbox.ts) — this bounds both, ageing a
+    // volume out 7 days after ITS session ended (never a live one). Age comes
+    // from this table, which is why the sweep lives here and not in
+    // docker-sandbox.ts alone: Docker's own volume metadata has no timestamp
+    // that answers "when did the session that owns this end".
+    sweepStaleVolumes((id) => this.repos.sessions.byId(id))
   }
 
   /**
@@ -613,6 +638,14 @@ export class SessionManager {
    * a live crash, not a hypothetical: this comment previously said inventing a
    * number would be guessing, and the number that got used instead was infinity.
    * See MAX_CONTAINERS.
+   *
+   * The count alone is not enough, though: it is read here synchronously and
+   * ensureSandboxImage (awaited by startSessionBody, below) can take MINUTES on
+   * a first build, and two containerised starts landing in that gap both saw
+   * the same pre-build count and both passed. reservedContainerIds (see its own
+   * comment) closes that window; the try/finally here is what makes releasing
+   * it on every exit — including the two throws startSessionBody can raise
+   * before a row is even hosted — structural rather than a rule to remember.
    */
   async startSession(
     projectId: string,
@@ -636,6 +669,52 @@ export class SessionManager {
     // for a container without asking for bypass, which is the combination the
     // sections need: isolated from the developer's checkout, still gated.
     const containerised = opts?.containerised === true || bypassPermissions
+    if (containerised) this.refuseWhenContainersFull()
+    // Reserved the INSTANT the check above passes — before startSessionBody ever
+    // reaches ensureSandboxImage's image build, the slow step whose gap this
+    // closes (see reservedContainerIds and this method's own doc). Generated
+    // here rather than inside startSessionBody so the reservation and the row
+    // that session eventually gets share the one id.
+    const sessionId = newId()
+    if (containerised) this.reservedContainerIds.add(sessionId)
+    try {
+      return await this.startSessionBody(
+        sessionId,
+        project,
+        mode,
+        bypassPermissions,
+        containerised,
+        resume,
+        carryTranscriptFrom,
+        opts,
+      )
+    } finally {
+      // Runs on every exit from startSessionBody — its own throws (Docker down,
+      // Claude Code missing, the guarded HostedSession construction failing
+      // below) and its successful return alike — which is what makes "always
+      // released" a property of the code rather than a rule someone has to
+      // remember to uphold at each new exit path.
+      if (containerised) this.reservedContainerIds.delete(sessionId)
+    }
+  }
+
+  /**
+   * Everything startSession does once the reservation above is in place. Split
+   * out only so that reservation's try/finally does not have to wrap this
+   * entire body at one extra indent level — the cut is not a meaningful
+   * boundary on its own, and nothing here is safe to call outside that guard.
+   */
+  private async startSessionBody(
+    sessionId: string,
+    project: Project,
+    mode: SessionMode,
+    bypassPermissions: boolean,
+    containerised: boolean,
+    resume: boolean,
+    carryTranscriptFrom: string | undefined,
+    opts: { containerised?: boolean; background?: boolean } | undefined,
+  ): Promise<Session> {
+    const projectId = project.id
     // No "already active" refusal (see startSession's doc). `resume` still means
     // "the last session that ended here", not "the only one".
     // A containerised session needs the image (docker-sandbox): fail here, before a
@@ -644,7 +723,6 @@ export class SessionManager {
     // the .NET one) — the renderer awaits with its busy state.
     // Before the image, because a queue behind a slow image build is a queue
     // whose wait nobody can account for.
-    if (containerised) this.refuseWhenContainersFull()
     if (containerised) await ensureSandboxImage(project.path)
     // The app drives the user's own Claude Code CLI and no longer bundles a copy
     // (that binary is ~245 MB). Every Switchboard user has Claude Code, so this
@@ -669,7 +747,10 @@ export class SessionManager {
     }
 
     const row: Session = {
-      id: newId(),
+      // Reused from the reservation in startSession, not a fresh id: the
+      // reservedContainerIds entry and this row's id must be the SAME value or
+      // the reservation would be tracking a session this row never becomes.
+      id: sessionId,
       projectId,
       sdkSessionId: null,
       status: 'working',
@@ -1689,6 +1770,13 @@ export class SessionManager {
     // The last write of the transcript, with the row's end time in it, so the file
     // a following session reads says when this one finished.
     this.flushTranscript(entry.row.id)
+    // This session's OWN node_modules volume (see NODE_MODULES_VOLUME_PREFIX):
+    // nothing ever reads it again once this container is gone, unlike the home
+    // volume a RESUMING session may still need (homeVolumeFor) — so it is safe
+    // to remove right here rather than waiting for the 7-day sweep that catches
+    // the home volume. Native sessions never had one; the guard just skips the
+    // no-op docker call for the common case.
+    if (entry.containerised) removeNodeModulesVolume(entry.row.id)
     this.pushStatus(entry)
   }
 
@@ -1704,14 +1792,22 @@ export class SessionManager {
    * nothing on screen to say why and no point at which the developer could
    * decide it was not worth waiting for. Naming the limit and the two sessions
    * already holding it gives them the choice a silent wait takes away.
+   *
+   * Counts reservedContainerIds alongside `hosted`, not `hosted` alone: a start
+   * that has passed this very check but is still awaiting ensureSandboxImage's
+   * image build has not reached `hosted.set` yet, so counting only `hosted`
+   * let a second concurrent start see the same under-the-limit count and pass
+   * too — the two together then oversubscribed MAX_CONTAINERS, which is the
+   * exact crash this method exists to prevent. See reservedContainerIds.
    */
   private refuseWhenContainersFull(): void {
-    const running = [...this.hosted.values()].filter((e) => e.containerised && !e.row.endedAt)
-    if (running.length < MAX_CONTAINERS) return
+    const hostedCount = [...this.hosted.values()].filter((e) => e.containerised && !e.row.endedAt).length
+    const total = hostedCount + this.reservedContainerIds.size
+    if (total < MAX_CONTAINERS) return
     throw {
       code: 'SANDBOX_FULL',
       message:
-        `${running.length} sessions already run in a container, which is the limit: they share one ` +
+        `${total} sessions already run in a container, which is the limit: they share one ` +
         'virtual machine, and one more can exhaust it and kill a session that did nothing wrong. ' +
         'End one of them, then start this again.',
     } satisfies IpcError

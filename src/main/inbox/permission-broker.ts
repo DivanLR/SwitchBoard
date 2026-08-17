@@ -143,7 +143,13 @@ function describeTool(toolName: string, input: Record<string, unknown>): {
   return {
     title: `Use the ${toolName} tool`,
     explanation: `Claude wants to use the ${toolName} tool.`,
-    detail: JSON.stringify(input, null, 2),
+    // Bounded like the Write branch above (4000 chars): this is persisted to
+    // SQLite and pushed across the IPC bridge to the renderer, and unlike the
+    // named branches above, an MCP tool's input shape is arbitrary — nothing
+    // stops one from carrying a multi-megabyte field. The detail is evidence
+    // for a decision, not an archive, so truncate it rather than storing and
+    // shipping the whole thing.
+    detail: JSON.stringify(input, null, 2).slice(0, 4000),
   }
 }
 

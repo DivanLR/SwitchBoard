@@ -32,14 +32,27 @@ const settings = useSettingsStore()
 // so other rows stay plain; push agent names via sessionStatus if that matters.
 const parallelAgents = computed(() => activeAgents(activeSession.events))
 
-function agentsFor(
-  item: (typeof projects.items)[number],
-): { id: string; name: string; task: string }[] {
-  if (item.id !== projects.selectedProjectId) return []
-  if (statusOf(item) !== 'working') return []
-  const agents = parallelAgents.value
-  return agents.length > 1 ? agents : []
-}
+/**
+ * Agents-by-project, cached instead of rebuilt on every read.
+ *
+ * The old agentsFor(item) function ran TWICE per project row — the v-if
+ * gating the block and the v-for reading it — allocating a fresh array each
+ * time, which also left the v-for's source referentially unstable across
+ * renders (a new array identity every render, even when nothing changed).
+ * Only the selected, working project can ever have an entry (see the
+ * ponytail note above: agent events only exist client-side for the selected
+ * project's session), so this map holds at most one key regardless of how
+ * many projects are in the list.
+ */
+const agentsByProject = computed<Record<string, { id: string; name: string; task: string }[]>>(
+  () => {
+    const selectedId = projects.selectedProjectId
+    const selected = selectedId ? projects.items.find((p) => p.id === selectedId) : undefined
+    if (!selected || statusOf(selected) !== 'working') return {}
+    const agents = parallelAgents.value
+    return agents.length > 1 ? { [selected.id]: agents } : {}
+  },
+)
 
 function openAgent(agentId: string): void {
   activeSession.selectAgent(agentId)
@@ -58,6 +71,13 @@ const modelSummary = computed(() => {
 
 // --- Theme + collapse toggles (design: icon buttons beside the logo) ---
 const collapsed = ref(false)
+// Theme reads localStorage directly rather than the settings store, and this is
+// deliberate, not an oversight: the theme class has to be on <html> before first
+// paint, localStorage is synchronous and readable at module init, and the
+// settings store's load() is an await behind an IPC round trip — routing theme
+// through it would flash the wrong theme on every launch. It is also pure
+// renderer chrome with nothing in the main process that ever reads it, unlike
+// every other preference, which lives in SQLite via the settings store.
 const theme = ref<'dark' | 'light'>(localStorage.getItem('sb-theme') === 'light' ? 'light' : 'dark')
 
 function applyTheme(): void {
@@ -208,9 +228,23 @@ function endOneSession(sessionId: string): void {
   void projects.endSessions([sessionId])
 }
 
-function pendingFor(projectId: string): number {
-  return inbox.pending.filter((p) => p.projectId === projectId).length
-}
+/**
+ * Pending-request count per project, resolved once per change instead of
+ * per read.
+ *
+ * pendingFor used to re-scan the whole of inbox.pending with a fresh
+ * .filter() on every call, and the template calls it FOUR times per project
+ * row (the two badges, each printing the count and gating on it) plus once
+ * more per section in `sections`' reduce — and useNow(1000) redraws this
+ * entire list every second, so that was a full re-scan of the inbox for
+ * every row, every tick. Exactly the cost statusById above already exists to
+ * avoid, just against inbox.pending instead of projects.items.
+ */
+const pendingByProject = computed<Record<string, number>>(() => {
+  const out: Record<string, number> = {}
+  for (const item of inbox.pending) out[item.projectId] = (out[item.projectId] ?? 0) + 1
+  return out
+})
 
 // --- Global database session (design: one project-less MCP chat, bound to the
 // reserved "Database" project — see main/index.ts — rather than to whichever
@@ -279,7 +313,7 @@ const sections = computed(() => {
         name: section.group?.name ?? 'Ungrouped',
         color: section.group?.color ?? 'var(--text-faint)',
         folded,
-        pending: section.items.reduce((sum, item) => sum + pendingFor(item.id), 0),
+        pending: section.items.reduce((sum, item) => sum + (pendingByProject.value[item.id] ?? 0), 0),
         // Only a real, open, unfiltered group invites a drop when it is empty.
         emptyOpen: !!section.group && !folded && !filtering && section.items.length === 0,
       }
@@ -786,11 +820,11 @@ async function confirmRemoveNow(): Promise<void> {
             <template v-if="collapsed">
               <span class="initials mono">{{ initials(item.name) }}</span>
               <span
-                v-if="pendingFor(item.id) > 0"
+                v-if="(pendingByProject[item.id] ?? 0) > 0"
                 class="badge-count collapsed-badge"
                 :data-testid="`project-badge-${item.name}`"
               >
-                {{ pendingFor(item.id) }}
+                {{ pendingByProject[item.id] ?? 0 }}
               </span>
             </template>
             <template v-else>
@@ -807,11 +841,11 @@ async function confirmRemoveNow(): Promise<void> {
               />
               <span v-else class="name mono">{{ item.name }}</span>
               <span
-                v-if="pendingFor(item.id) > 0"
+                v-if="(pendingByProject[item.id] ?? 0) > 0"
                 class="badge-count"
                 :data-testid="`project-badge-${item.name}`"
               >
-                {{ pendingFor(item.id) }}
+                {{ pendingByProject[item.id] ?? 0 }}
               </span>
               <!-- Design: the elapsed time rides on the title line, not below it. -->
               <span
@@ -912,12 +946,12 @@ async function confirmRemoveNow(): Promise<void> {
             </div>
           </div>
           <div
-            v-if="!collapsed && agentsFor(item).length > 0"
+            v-if="!collapsed && (agentsByProject[item.id]?.length ?? 0) > 0"
             class="agents"
             :data-testid="`sidebar-agents-${item.name}`"
           >
             <div
-              v-for="agent in agentsFor(item)"
+              v-for="agent in agentsByProject[item.id] ?? []"
               :key="agent.id"
               class="agent-line"
               :data-testid="`sidebar-agent-${agent.name}`"
@@ -1731,14 +1765,18 @@ async function confirmRemoveNow(): Promise<void> {
 
 /* The state is set, not drawn. The glyph box is a fixed 14x12, so the mark takes
    the same room down the lane whichever of the five characters lands in it, on
-   the collapsed rail as well as in the list. The size is a glyph size, tuned to
-   optical weight rather than to the type ramp (DESIGN.md, "Glyph sizing is not
-   type sizing"). */
+   the collapsed rail as well as in the list. The size is tuned to optical weight
+   rather than to the type ramp, so it lives in styles.css as --fs-glyph: it is
+   off the ramp on purpose and a value that escapes the design system is the one
+   value that needs a name there. See that token for the open question about
+   whether DESIGN.md should document a glyph step or the mark should move to
+   --fs-micro. (This comment previously cited a DESIGN.md rule, "Glyph sizing is
+   not type sizing", which DESIGN.md does not contain.) */
 .mark .glyph {
   width: 14px;
   height: 12px;
   font-family: var(--mono);
-  font-size: 13.8px;
+  font-size: var(--fs-glyph);
   font-weight: var(--w-em);
   line-height: 12px;
   text-align: center;

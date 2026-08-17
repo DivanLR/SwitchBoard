@@ -70,7 +70,12 @@ describe('diagrams store: waiting for the file to land', () => {
     listed.push([], [], [entry('auth-flow.html')])
 
     const wait = store.awaitFile('p1', 'auth-flow.html')
-    await vi.advanceTimersByTimeAsync(3 * 2500)
+    // awaitFile (diagrams.ts) doubles the cadence after every empty round,
+    // capped at 10s, rather than polling at a flat 2500ms — so the three
+    // rounds below land at 2500, then 5000, then 10000ms, not 2500 x 3. This
+    // used to advance a flat `3 * 2500` and hang until vitest's own 5000ms
+    // test timeout, because the third setTimeout (10000ms) never fired.
+    await vi.advanceTimersByTimeAsync(2500 + 5000 + 10_000)
     await wait
 
     expect(store.error).toBeNull()
@@ -82,7 +87,14 @@ describe('diagrams store: waiting for the file to land', () => {
     const store = waiting('auth-flow.html')
 
     const wait = store.awaitFile('p1', 'auth-flow.html')
-    await vi.advanceTimersByTimeAsync(20 * 60_000 + 2500)
+    // The 20-minute deadline is wall clock, checked only BETWEEN rounds, so the
+    // wait can run past it by up to one full round at the 10s cap, not by the
+    // old flat 2500ms poll. Advancing only `+2500` therefore stopped short of
+    // the round in which the loop actually notices the deadline has passed,
+    // and the test hung waiting on a promise that could not yet have resolved.
+    // Advance well past the worst-case overshoot; once the wait has already
+    // settled, extra fake time here is a no-op.
+    await vi.advanceTimersByTimeAsync(20 * 60_000 + 20_000)
     await wait
 
     expect(store.error).toMatch(/has not appeared after twenty minutes/)

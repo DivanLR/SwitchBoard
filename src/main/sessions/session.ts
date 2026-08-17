@@ -394,7 +394,19 @@ export class HostedSession {
         return
       }
       const raw = error instanceof Error ? error.message : String(error)
-      const detail = explainExit(raw, this.containerised)
+      let detail = explainExit(raw, this.containerised)
+      // A hard `docker run` failure (a bad mount, a name conflict, an invalid
+      // --memory value) dies before anything inside the container starts, so
+      // the SDK never gets a message shaped for explainExit's exit-137/exit-13
+      // wording to read — that wording stays exactly as it was above, since it
+      // is still the right diagnosis when there IS an SDK-shaped message.
+      // `lastStderr()` (only set for a containerised session — see `sandbox`)
+      // is the one other trace of what went wrong, previously only ever
+      // console.error'd inside docker-sandbox.ts and never seen by the
+      // developer. Appended as further evidence, not a replacement, and
+      // truncated: this is a supporting detail, not the headline.
+      const sandboxTail = this.sandbox?.lastStderr().trim()
+      if (sandboxTail) detail += `\n\nSandbox stderr: ${sandboxTail.slice(-500)}`
       this.fatal = true
       this.mapper.fatalError(detail)
       this.setStatus('error', detail)
@@ -860,7 +872,26 @@ export class HostedSession {
     // Bounded, because a hung CLI must not hold the app open: past the grace
     // period we stop waiting and quit anyway. A late onExit after that is
     // harmless, since finaliseRow ignores an already-finalised row.
-    await Promise.race([this.runLoop, delay(EXIT_GRACE_MS)])
+    //
+    // The grace timer gets its own AbortController, aborted the instant the
+    // race settles: an ordinary FAST stop (the loop drains well inside 5s,
+    // the common case) used to leave this timer running uncancelled in the
+    // background for the rest of the grace period, for no reason once its side
+    // of the race had already lost. The `.catch` sits on the delay itself, not
+    // on the race: aborting AFTER runLoop has already won makes the delay
+    // promise reject, and by then Promise.race is no longer awaiting either of
+    // its inputs — an unhandled rejection unless something already had a
+    // handler attached.
+    const abort = new AbortController()
+    const grace = delay(EXIT_GRACE_MS, undefined, { signal: abort.signal }).catch(() => {
+      // Rejects on abort (runLoop won the race) or resolves on timeout (it
+      // didn't) — either way there is nothing left to act on here.
+    })
+    try {
+      await Promise.race([this.runLoop, grace])
+    } finally {
+      abort.abort()
+    }
   }
 
   /** Composer messages never delivered; preserved as drafts on app exit. */

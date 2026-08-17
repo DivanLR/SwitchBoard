@@ -3,7 +3,7 @@
 // fenced code blocks, headings, lists). The HTML comes from renderMarkdown,
 // which HTML-escapes first and emits only a fixed, attribute-free tag set, so
 // v-html is safe here (no injection surface).
-import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, onUnmounted, ref, useTemplateRef, watch } from 'vue'
 import { renderMarkdown } from '@shared/markdown'
 
 const props = defineProps<{ text: string }>()
@@ -83,6 +83,16 @@ async function copyBlock(event: MouseEvent): Promise<void> {
     markCopied()
   }, 1200)
 }
+
+// Harmless today only because markCopied() guards on mdEl.value being null once
+// the component is torn down, so a timer firing after unmount finds nothing to
+// mark. That guard is not a substitute for cleanup — it just happens to make
+// this particular timer's callback a no-op — so clear it explicitly here. The
+// pairing keeps the next timer someone adds to this file safe by default,
+// instead of relying on it to rediscover the same accidental guard.
+onUnmounted(() => {
+  if (clearTimer) clearTimeout(clearTimer)
+})
 </script>
 
 <template>

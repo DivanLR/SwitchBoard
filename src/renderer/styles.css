@@ -265,6 +265,20 @@ html.sb-light {
   --fs-body: 13px;
   --fs-title: 17px;
   --fs-head: 20px;
+  /* The sidebar's status mark, and the one size that is NOT a step of the ramp
+     above. It sits in a fixed 14x12 box and has to hold five different
+     characters (! » × · —) at the same optical weight, which is a glyph-fitting
+     problem rather than a reading-size one.
+     It is a token rather than a literal in the component because a value that
+     escapes the design system is exactly the value that needs a name: as a
+     literal it was invisible to the system and to review, and it carried a
+     comment citing a DESIGN.md rule ("Glyph sizing is not type sizing") that
+     DESIGN.md does not contain. DESIGN.md's own Micro tier currently claims the
+     stop-control glyph at 11px, so the ramp and this value openly disagree.
+     OPEN: either DESIGN.md gains a documented glyph step and this stays, or the
+     mark moves to --fs-micro and this token goes. Not decided here, because it
+     changes how every lane in the sidebar reads and that is a design call. */
+  --fs-glyph: 13.8px;
   /* Weight is available again: a system face has real weights, where the
      outgoing bitmap face had exactly one. */
   --w-em: 500;
@@ -324,7 +338,7 @@ body {
      one declaration rather than 406 edits. */
   font-family: var(--sans);
   font-size: var(--fs-body);
-  overflow: hidden;
+  overflow: hidden;
   background: var(--bg);
 }
 

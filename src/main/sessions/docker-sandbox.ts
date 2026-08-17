@@ -89,9 +89,15 @@ const NPM_CACHE_VOLUME = 'switchboard-npm-cache'
 // containerised now, so that collision is reachable, not theoretical. Keying the
 // volume to the session itself means no two running sessions ever open the same
 // one. A resuming session is the one deliberate exception — see homeVolumeFor.
-// ponytail: volumes now accumulate one per session forever (Docker never prunes
-// them on its own). Fine at today's usage; add a sweep keyed off `endedAt` once
-// disk use actually shows it.
+// Superseded: this used to say volumes accumulate one per session forever,
+// fine at today's usage, add a sweep keyed off `endedAt` once disk use actually
+// shows it. Disk was not the reason that stopped being true — the entrypoint
+// copies the host's OAuth credentials into EVERY one of these volumes
+// (SHARED_SETUP), so an unbounded set of them is an unbounded set of places a
+// copy of the developer's login sits on disk. sweepStaleVolumes below removes
+// one 7 days after its session ended (never a live one — see homeVolumeFor for
+// why a volume cannot simply be deleted at session end instead: a RESUMING
+// session still has to open its ancestor's).
 const HOME_VOLUME_PREFIX = 'switchboard-claude-home-'
 
 /**
@@ -369,6 +375,39 @@ export function sandboxToolsFor(projectPath: string): readonly SuiteTool[] {
   return sandboxTools(dotnet, browser)
 }
 
+/** How long a gitRoot/gitNotice answer is trusted before it is re-read. */
+const GIT_CACHE_TTL_MS = 30_000
+
+/**
+ * Memoise a path-keyed synchronous read for GIT_CACHE_TTL_MS.
+ *
+ * handlers.ts's projectList() calls gitNotice for EVERY project on EVERY
+ * `projects.list` invoke — and a session start, an archive, a rename and a
+ * section dispatch all trigger one of those refreshes — and gitNotice is
+ * existsSync + statSync + a parent-directory walk + readdirSync, synchronously,
+ * on the main thread (gitRoot is the same shape, minus the statSync). That is
+ * the storm this collapses.
+ *
+ * A TTL, not a permanent cache: a permanent one needs invalidation wired
+ * through every place that could change the answer (git init, a repo cloned
+ * into a project folder, a worktree turned into a plain checkout), and there
+ * is no single choke point for all of those to invalidate through. A short TTL
+ * needs none of that plumbing and still collapses the same-tick storm above —
+ * the trade is a stale answer for up to 30s after one of those events, made on
+ * purpose here rather than left as an accident of no caching at all.
+ */
+function memoizeGitRead<T>(fn: (projectPath: string) => T): (projectPath: string) => T {
+  const cache = new Map<string, { value: T; expiresAt: number }>()
+  return (projectPath: string): T => {
+    const now = Date.now()
+    const hit = cache.get(projectPath)
+    if (hit && hit.expiresAt > now) return hit.value
+    const value = fn(projectPath)
+    cache.set(projectPath, { value, expiresAt: now + GIT_CACHE_TTL_MS })
+    return value
+  }
+}
+
 /**
  * Why git will not work at /workspace, or null when it will.
  *
@@ -393,7 +432,7 @@ export function sandboxToolsFor(projectPath: string): readonly SuiteTool[] {
  * ONE level: deeper would start guessing which of several nested repositories a
  * developer meant.
  */
-export function gitRoot(projectPath: string): string | null {
+function gitRootImpl(projectPath: string): string | null {
   try {
     if (existsSync(join(projectPath, '.git'))) return projectPath
     const sub = readdirSync(projectPath, { withFileTypes: true }).find(
@@ -405,7 +444,7 @@ export function gitRoot(projectPath: string): string | null {
   }
 }
 
-export function gitNotice(projectPath: string): string | null {
+function gitNoticeImpl(projectPath: string): string | null {
   try {
     const dotGit = join(projectPath, '.git')
     if (existsSync(dotGit)) {
@@ -440,9 +479,27 @@ export function gitNotice(projectPath: string): string | null {
   }
 }
 
+// Both keep gitRootImpl/gitNoticeImpl's exact signature and return values —
+// callers (session-manager.ts, handlers.ts, the test suites) see no difference
+// except that a repeated call inside GIT_CACHE_TTL_MS is free.
+export const gitRoot = memoizeGitRead(gitRootImpl)
+export const gitNotice = memoizeGitRead(gitNoticeImpl)
+
 function credsPath(): string {
   return join(homedir(), '.claude', '.credentials.json')
 }
+
+/**
+ * In-flight image builds, keyed by the content-addressed tag (recipeTag), so
+ * two sessions that both need an image nobody has built yet share ONE `docker
+ * build` instead of racing two. session-manager.ts already solved the same
+ * shape of problem for probeAvailableModels (see its `probingModels` field) —
+ * this is that pattern again, at module scope because docker-sandbox.ts has no
+ * instance to hang a field off. Cleared once the build settles, success or
+ * failure alike: a failed build must not poison every later retry with a
+ * promise that can only ever reject again.
+ */
+const buildingImages = new Map<string, Promise<void>>()
 
 /**
  * Fail-closed readiness check before a bypass session starts: Docker daemon up,
@@ -472,8 +529,17 @@ export async function ensureSandboxImage(projectPath: string): Promise<void> {
   } catch {
     // Image missing — build it (cached after the first time).
   }
-  await new Promise<void>((resolve, reject) => {
-    const build = spawn('docker', ['build', '-t', image, '-'], {
+  // A second session that needs this SAME never-built image joins the build
+  // already in flight rather than starting its own: without this, two sessions
+  // on their very first run each spawned `docker build`, doubling the wait and
+  // racing two builds against one tag.
+  const existing = buildingImages.get(image)
+  if (existing) {
+    await existing
+    return
+  }
+  const build = new Promise<void>((resolve, reject) => {
+    const proc = spawn('docker', ['build', '-t', image, '-'], {
       windowsHide: true,
       stdio: ['pipe', 'ignore', 'pipe'],
       // The .NET SDK layer is ~1 GB to pull; 10 minutes is not enough on a slow
@@ -481,16 +547,25 @@ export async function ensureSandboxImage(projectPath: string): Promise<void> {
       timeout: dotnet ? 2_400_000 : browser ? 1_200_000 : 600_000,
     })
     let stderr = ''
-    build.stderr.on('data', (chunk) => {
+    proc.stderr.on('data', (chunk) => {
       stderr += String(chunk)
     })
-    build.on('error', reject)
-    build.on('exit', (code) => {
+    proc.on('error', reject)
+    proc.on('exit', (code) => {
       if (code === 0) resolve()
       else reject(new Error(`Sandbox image build failed: ${stderr.slice(-400)}`))
     })
-    build.stdin.end(dotnet ? dotnetDockerfile(browser) : dockerfile(browser))
+    proc.stdin.end(dotnet ? dotnetDockerfile(browser) : dockerfile(browser))
   })
+  buildingImages.set(image, build)
+  try {
+    await build
+  } finally {
+    // Only the caller that created the entry clears it, once it settles either
+    // way — a later caller sharing `build` via the `existing` branch above never
+    // reaches this finally, so there is no race over who deletes it.
+    buildingImages.delete(image)
+  }
 }
 
 /**
@@ -513,6 +588,91 @@ export function sweepOrphanedContainers(): void {
   )
 }
 
+/**
+ * One ended session's own node_modules volume — the large one, and the one
+ * nothing ever reads again once this session is gone (see
+ * NODE_MODULES_VOLUME_PREFIX: it exists only to shadow the host's tree for the
+ * lifetime of ONE container). Unlike the home volume, no later session can
+ * legitimately want this one back, so it is removed at session end rather than
+ * left for the 7-day sweep below — the sweep is the backstop for the volume
+ * that CANNOT be removed this eagerly, not the primary path for this one.
+ *
+ * Fire-and-forget and silent on failure: a volume still attached to a
+ * container that has not fully torn down yet simply fails to remove, and
+ * sweepStaleVolumes catches it on the next app launch.
+ */
+export function removeNodeModulesVolume(sessionId: string): void {
+  execFile(
+    'docker',
+    ['volume', 'rm', `${NODE_MODULES_VOLUME_PREFIX}${safeName(sessionId)}`],
+    { windowsHide: true },
+    () => {},
+  )
+}
+
+/** How long an ended session's home/node_modules volumes may sit before
+ *  sweepStaleVolumes removes them — see HOME_VOLUME_PREFIX for what this
+ *  bounds (an accumulating set of copies of the developer's OAuth login) and
+ *  why 7 days: long enough that "I'll resume that later today" still works
+ *  (a resuming session bridges into its ANCESTOR's home volume — see
+ *  homeVolumeFor — so removing it too soon breaks a used feature), short
+ *  enough that the credentials copy and the disk it sits on are both bounded
+ *  rather than growing forever. */
+const STALE_VOLUME_AGE_MS = 7 * 24 * 60 * 60 * 1000
+
+/**
+ * Startup sweep: remove home and node_modules volumes for sessions old enough
+ * — or gone from the sessions table entirely — that nothing can still want
+ * them.
+ *
+ * Age comes from the sessions TABLE (via `sessionById`), not from Docker's own
+ * volume metadata: a volume carries no timestamp Docker itself keeps current
+ * with "when did the session that owns this end", so the app's own record is
+ * the only source that can answer that. Three answers `sessionById` can give,
+ * each handled differently:
+ *   - no row at all (`undefined`) — stale immediately. Nothing remembers
+ *     starting this session, so nothing can be waiting to resume it either.
+ *   - a row with `endedAt: null` — NEVER removed. This is a live session (or
+ *     one this app still believes is live), and removing HOME_VOLUME_PREFIX's
+ *     volume out from under a running container is a worse bug than the one
+ *     this sweep exists to fix.
+ *   - a row with `endedAt` older than STALE_VOLUME_AGE_MS — removed.
+ *
+ * Listed with a plain `docker volume ls -q` rather than a `--filter name=`
+ * regex (the way sweepOrphanedContainers filters containers): the shared
+ * caches (NUGET_VOLUME, NPM_CACHE_VOLUME, BROWSER_VOLUME) are NOT session-keyed
+ * and must never be swept, and matching them out by two exact prefixes
+ * client-side is simpler to get right than trusting a server-side filter to
+ * anchor the same way for volumes as it does for containers.
+ *
+ * Fire-and-forget and silent on failure, the same as sweepOrphanedContainers:
+ * a best-effort startup tidy, never something a session start should wait on.
+ */
+export function sweepStaleVolumes(
+  sessionById: (sessionId: string) => { endedAt: string | null } | undefined,
+): void {
+  execFile('docker', ['volume', 'ls', '-q'], { windowsHide: true }, (error, stdout) => {
+    if (error) return
+    const stale: string[] = []
+    for (const name of stdout.split('\n').map((line) => line.trim()).filter(Boolean)) {
+      const prefix = name.startsWith(HOME_VOLUME_PREFIX)
+        ? HOME_VOLUME_PREFIX
+        : name.startsWith(NODE_MODULES_VOLUME_PREFIX)
+          ? NODE_MODULES_VOLUME_PREFIX
+          : null
+      if (!prefix) continue
+      const session = sessionById(name.slice(prefix.length))
+      if (!session) {
+        stale.push(name)
+        continue
+      }
+      if (session.endedAt === null) continue // still live — never touched
+      if (Date.now() - Date.parse(session.endedAt) > STALE_VOLUME_AGE_MS) stale.push(name)
+    }
+    if (stale.length > 0) execFile('docker', ['volume', 'rm', ...stale], { windowsHide: true }, () => {})
+  })
+}
+
 export interface Mount {
   host: string
   container: string
@@ -527,6 +687,17 @@ export interface SandboxPlan {
   mounts: Mount[]
   /** Drop-in for the SDK's spawnClaudeCodeProcess option. */
   spawn: (options: SdkSpawnOptions) => SpawnedProcess
+  /**
+   * The docker CLIENT's own stderr tail from the most recent spawn (empty
+   * string until spawn() has actually run). A hard `docker run` failure — a
+   * bad mount, a name conflict, an invalid --memory value — dies before
+   * anything inside the container ever starts, so the SDK never sees a
+   * message shaped for explainExit to read; this is the only trace left of
+   * WHY, and it used to only ever reach console.error (see spawn's own drain
+   * comment below) rather than the developer. session.ts's run() reads it
+   * here to append to a fatal exit's detail.
+   */
+  lastStderr: () => string
 }
 
 /** REFS chips mount read-only under /refs/<basename>; duplicates get an index. */
@@ -596,9 +767,15 @@ export function sandboxSpawn(config: {
   const containerName = `${NAME_PREFIX}${safeName(config.sessionId)}`
   const homeVolume = homeVolumeFor(config.sessionId, config.resumeFromSessionId)
   const { image, dotnet, browser, node } = imageFor(config.projectPath)
+  // Declared here, not inside `spawn`, so it survives past one call and
+  // `lastStderr()` can still answer once the docker process has already
+  // exited — session.ts's run() reads it from its catch block, after the
+  // container is gone.
+  let stderrTail = ''
   return {
     additionalDirectories: ['/workspace', ...refs.map((r) => r.container)],
     mounts: [{ host: config.projectPath, container: '/workspace' }, ...refs],
+    lastStderr: () => stderrTail,
     spawn: (options) => {
       const args = [
         'run',
@@ -688,8 +865,9 @@ export function sandboxSpawn(config: {
       // The SDK drains stderr only on its own spawn path (SpawnedProcess doesn't
       // even declare it), so a custom spawn MUST drain it here: an unread pipe
       // fills at ~64 KB and blocks the container mid-session. The tail is kept so
-      // a failed `docker run` (mount denied, name conflict) isn't silent.
-      let stderrTail = ''
+      // a failed `docker run` (mount denied, name conflict) isn't silent — it used
+      // to only ever reach console.error below; now lastStderr() on the SandboxPlan
+      // (declared above, outside this closure) lets session.ts surface it too.
       child.stderr?.setEncoding('utf8')
       child.stderr?.on('data', (chunk: string) => {
         stderrTail = (stderrTail + chunk).slice(-2000)

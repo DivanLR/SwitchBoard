@@ -2,11 +2,11 @@
 // Per-project specs view backed by GitHub Spec Kit — 1:1 with the design
 // (Switchboard.dc.html). When Spec Kit is not installed, an install button
 // scaffolds it per-project.
-import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
+import { computed, onUnmounted, ref, useTemplateRef, watch } from 'vue'
 import type { SpecPhase, SpecStatus } from '@shared/domain'
 import { SPEC_KIT_COMMANDS } from '@shared/command-catalog'
 import { useSpecsStore } from '@renderer/stores/specs'
-import { trapTabWithin } from '@renderer/composables/useModal'
+import { useNewSpecDialog } from '@renderer/composables/useNewSpecDialog'
 import MarkdownText from '@renderer/components/MarkdownText.vue'
 import Icon from '@renderer/components/Icon.vue'
 
@@ -15,49 +15,15 @@ const specs = useSpecsStore()
 
 // New spec: a small popup collects a short description, then /speckit-specify
 // runs it in the background session (output streams into the Session tab).
-const showNewSpec = ref(false)
-const newSpecDesc = ref('')
-
-function newSpec(): void {
-  newSpecDesc.value = ''
-  showNewSpec.value = true
-}
-
-async function submitNewSpec(): Promise<void> {
-  const desc = newSpecDesc.value.trim()
-  if (!desc) return // empty Enter is a no-op, matching the disabled Create button
-  showNewSpec.value = false
-  await specs.runInSession(props.projectId, `/speckit-specify ${desc}`, true)
-  emit('ran') // jump to the Session tab so the run is visible
-}
-
-function cancelNewSpec(): void {
-  showNewSpec.value = false
-  newSpecDesc.value = ''
-}
-
-// Keeps Tab inside the new-spec dialog and lets Escape close it from anywhere,
-// not just from the textarea. Written here rather than through useModal because
-// the dialog is a `v-if` block in a view that mounts once, so the composable's
-// onMounted would fire long before the dialog exists — the same reason Sidebar's
-// overlays call trapTabWithin directly. Without this, Tab walks out of an open
-// modal into the spec list behind it.
+// The dialog's own state, its keydown handling and its document listener live
+// in the composable; this view only owns the template ref useModal's
+// convention says the caller should own (see the composable for why this
+// dialog bypasses useModal itself).
 const newSpecDialog = useTemplateRef<HTMLElement>('newSpecDialog')
-
-function onNewSpecKeydown(event: KeyboardEvent): void {
-  if (!showNewSpec.value) return
-  if (event.key === 'Escape') {
-    event.stopPropagation()
-    cancelNewSpec()
-    return
-  }
-  if (event.key !== 'Tab' || !newSpecDialog.value) return
-  trapTabWithin(newSpecDialog.value, event)
-}
-
-onMounted(() => {
-  // Capture phase: the textarea must not swallow Escape before we see it.
-  document.addEventListener('keydown', onNewSpecKeydown, true)
+const { showNewSpec, newSpecDesc, newSpec, submitNewSpec, cancelNewSpec } = useNewSpecDialog({
+  projectId: () => props.projectId,
+  dialog: newSpecDialog,
+  onRan: () => emit('ran'), // jump to the Session tab so the run is visible
 })
 
 // Read the spec aloud (design: "listen in on a spec") via the native Web Speech
@@ -106,9 +72,11 @@ function listen(): void {
   synth.speak(utter)
 }
 
+// The keydown listener for the new-spec dialog is added and removed inside
+// useNewSpecDialog itself now — this onUnmounted only owns what this view
+// registered directly (speech synthesis, below).
 onUnmounted(() => {
   window.speechSynthesis.cancel()
-  document.removeEventListener('keydown', onNewSpecKeydown, true)
 })
 
 // The spec/project can change out from under a running narration (chip click or

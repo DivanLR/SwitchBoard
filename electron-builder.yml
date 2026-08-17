@@ -57,13 +57,31 @@ win:
   # corrupted download but not against a compromised release step.
   #
   # Signing needs a certificate that must be bought; it cannot be configured from
-  # the repo alone. When one exists, either:
-  #   - a traditional OV/EV certificate: set CSC_LINK and CSC_KEY_PASSWORD in the
-  #     build environment and electron-builder signs automatically; or
-  #   - Azure Trusted Signing: add an `azureSignOptions` block here, which avoids
-  #     holding a certificate file at all.
-  # EV and Azure Trusted Signing clear the SmartScreen warning immediately; a
-  # plain OV certificate has to accumulate reputation first.
+  # the repo alone. Both routes are spelled out below so that turning it on is an
+  # edit rather than a research task. EV and Azure Trusted Signing clear the
+  # SmartScreen warning immediately; a plain OV certificate has to accumulate
+  # reputation first.
+  #
+  # ROUTE 1 — a certificate file (OV or EV). Nothing to add here at all: set two
+  # variables in the build environment and electron-builder signs on its own.
+  #   $env:CSC_LINK = "C:\path\to\cert.pfx"   # or a base64 blob, or an https URL
+  #   $env:CSC_KEY_PASSWORD = "…"
+  # An EV certificate normally lives on a hardware token, so the build has to run
+  # on the machine holding it; that is why route 2 usually wins for CI.
+  #
+  # ROUTE 2 — Azure Trusted Signing. No certificate file exists anywhere, which
+  # removes the one secret most likely to leak. Uncomment and fill in, and set
+  # AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET in the environment:
+  #
+  # azureSignOptions:
+  #   publisherName: Haefele Software
+  #   endpoint: https://weu.codesigning.azure.net/
+  #   codeSigningAccountName: <trusted-signing-account>
+  #   certificateProfileName: <profile-name>
+  #
+  # `npm run verify-release` reports the signing state of the built installer, so
+  # an unsigned release is a line in the release check rather than something a
+  # user discovers from a SmartScreen prompt.
 
 nsis:
   oneClick: false

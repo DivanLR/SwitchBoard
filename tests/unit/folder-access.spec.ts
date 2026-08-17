@@ -1,13 +1,13 @@
 // Registering a project seeds read/write standing rules for its own folder.
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Session } from '@shared/domain'
 import { openDatabase } from '@main/store/db'
 import { createRepositories } from '@main/store/repositories'
 import { registerProject, repointProject } from '@main/projects/discovery'
-import { matchesRule } from '@main/inbox/standing-rules'
+import { isPathWithinProject, matchesRule } from '@main/inbox/standing-rules'
 
 const dirs: string[] = []
 afterEach(() => {
@@ -51,6 +51,71 @@ describe('registerProject folder-access seeding', () => {
 
     // An active duplicate is still rejected.
     expect(() => registerProject(repos, { path: folder })).toThrowError(/already registered/)
+  })
+})
+
+/**
+ * Containment must survive a link, not just a `..`.
+ *
+ * The containment check used to compare paths LEXICALLY: resolve() collapses
+ * `.` and `..` but does not follow a symbolic link, so a link sitting inside the
+ * project resolved as being inside it. That is the one escape that mattered,
+ * because the file tools inside a project folder are auto-approved WITHOUT an
+ * inbox prompt — so a Write through the link left the project silently, which is
+ * exactly the containment this app exists to provide. Git creates links on
+ * checkout when core.symlinks is on, so this is a repository's contents, not an
+ * exotic setup.
+ *
+ * Both halves are asserted deliberately. A check that rejects the link is easy
+ * to write by rejecting far too much, and the second case is what proves it did
+ * not: a file that does not exist yet is the ordinary case for Write, and it has
+ * no realpath of its own to resolve.
+ */
+describe('project containment follows symbolic links', () => {
+  /** Returns false when the platform refuses to make one at all — Windows needs
+   *  developer mode or elevation for a file symlink, so the test states that it
+   *  could not run rather than passing without having checked anything. */
+  function linkOrSkip(target: string, path: string): boolean {
+    try {
+      // 'junction' is the Windows spelling that needs no privilege; it is
+      // ignored on POSIX, where 'dir' is the same thing.
+      symlinkSync(target, path, process.platform === 'win32' ? 'junction' : 'dir')
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  it('rejects a path that leaves the project through a link inside it', () => {
+    const project = mkdtempSync(join(tmpdir(), 'fa-link-project-'))
+    const outside = mkdtempSync(join(tmpdir(), 'fa-link-outside-'))
+    dirs.push(project, outside)
+    writeFileSync(join(outside, 'secret.txt'), 'not the project\'s to write')
+
+    const link = join(project, 'escape')
+    if (!linkOrSkip(outside, link)) {
+      console.warn('skipped: this platform refused to create a link (Windows needs developer mode)')
+      return
+    }
+
+    // Lexically inside the project. Actually somewhere else entirely.
+    expect(isPathWithinProject(project, { file_path: join(link, 'secret.txt') })).toBe(false)
+
+    // And the seeded path_glob rule, which is the other door onto the same check.
+    const db = openDatabase(':memory:')
+    const repos = createRepositories(db)
+    const registered = registerProject(repos, { path: project })
+    const writeRule = repos.standingRules
+      .listForProject(registered.id)
+      .find((r) => r.toolName === 'Write')!
+    expect(matchesRule(writeRule, 'Write', { file_path: join(link, 'secret.txt') })).toBe(false)
+  })
+
+  it('still allows a file that does not exist yet, which is what Write asks about', () => {
+    const project = mkdtempSync(join(tmpdir(), 'fa-new-file-'))
+    dirs.push(project)
+    // Nothing on disk at any level below the project root.
+    expect(isPathWithinProject(project, { file_path: join(project, 'src', 'new', 'a.ts') })).toBe(true)
   })
 })
 

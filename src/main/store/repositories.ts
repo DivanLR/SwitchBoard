@@ -353,13 +353,89 @@ export class SessionsRepo {
 export class EventsRepo {
   constructor(private db: AppDatabase) {}
 
+  /**
+   * Events awaiting their next flush to disk. Buffered rather than written on
+   * the spot: at streaming rates (SessionManager's sink calls `insert` once per
+   * emitted chunk) an auto-committed INSERT is its own WAL frame plus its own
+   * WAL-index update, and db.ts's synchronous=NORMAL comment already names that
+   * per-event cost. Grouping one burst into a single transaction is the real,
+   * well-understood win at these rates.
+   *
+   * Never reordered — only pushed to and drained whole. Events are append-only
+   * and ordered by per-session `seq` alone (never by timestamp), so the order
+   * they land in this array IS the order they must reach the table in.
+   */
+  private pending: SessionEvent[] = []
+  private flushTimer: NodeJS.Timeout | null = null
+
+  // Comparable to the renderer's own ~33ms batch-repaint interval, not copied
+  // from it — short enough that "buffered" never reads as "delayed" to a human
+  // watching the stream, long enough to actually coalesce a burst of chunks.
+  private static readonly FLUSH_INTERVAL_MS = 33
+
   insert(event: SessionEvent): void {
-    this.db
-      .prepare(
-        `INSERT INTO events (id, sessionId, seq, kind, payload, noiseKind, createdAt)
-         VALUES (@id, @sessionId, @seq, @kind, @payload, @noiseKind, @createdAt)`,
-      )
-      .run({ ...event, payload: JSON.stringify(event.payload) })
+    this.pending.push(event)
+    if (!this.flushTimer) {
+      this.flushTimer = setTimeout(() => this.flush(), EventsRepo.FLUSH_INTERVAL_MS)
+      // A pending flush must never be a reason the process stays alive. The
+      // guaranteed delivery path on a clean quit is the explicit flush() call
+      // main/index.ts makes before db.close(), not this timer.
+      this.flushTimer.unref()
+    }
+  }
+
+  /**
+   * Writes every buffered event in ONE transaction and empties the buffer.
+   *
+   * Called by the timer above, and — this is the part the whole design rests
+   * on — at the top of every OTHER method below that reads or mutates the
+   * events table. A buffered event a reader cannot yet see would be a
+   * correctness bug wearing a performance win's costume, so nothing on this
+   * repo may touch the table without flushing first. Idempotent: draining an
+   * empty buffer is a no-op, so paying for the call on every path costs
+   * nothing once a burst has already landed.
+   *
+   * What a crash between flushes costs: at most one FLUSH_INTERVAL_MS window
+   * of events for whichever session was mid-burst. db.ts already spends this
+   * exact budget once, calling this store's events "a transcript, not money"
+   * to justify synchronous=NORMAL; batching the insert on top does not open a
+   * second one.
+   *
+   * Public because retention.ts deletes from this table directly (raw SQL, own
+   * file — see the reasoning below) and main/index.ts's composition root calls
+   * this immediately before handing it the database, and again before
+   * db.close() in the before-quit handler, so neither a scheduled sweep nor a
+   * quit can observe or lose a buffered row.
+   *
+   * Retention safety, checked against store/retention.ts rather than assumed:
+   * its DELETE only ever targets sessions OUTSIDE the most recent
+   * SESSIONS_PER_PROJECT (2) per project — `sessionId NOT IN (... rn <= ?)`.
+   * A buffered event can only belong to the session currently emitting it,
+   * which is always that project's most recent (rn = 1) and therefore always
+   * inside the keep-set. So even a retention pass that ran on a table with
+   * unflushed rows could never delete one of them out from under this buffer —
+   * the rows it deletes were never candidates for buffering by the time it
+   * looks. The index.ts flush before each run exists anyway, because "could
+   * never" should not be the only thing standing between a sweep and a live
+   * buffer.
+   */
+  flush(): void {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer)
+      this.flushTimer = null
+    }
+    if (this.pending.length === 0) return
+    const batch = this.pending
+    this.pending = []
+    const insert = this.db.prepare(
+      `INSERT INTO events (id, sessionId, seq, kind, payload, noiseKind, createdAt)
+       VALUES (@id, @sessionId, @seq, @kind, @payload, @noiseKind, @createdAt)`,
+    )
+    transaction(this.db, () => {
+      for (const event of batch) {
+        insert.run({ ...event, payload: JSON.stringify(event.payload) })
+      }
+    })
   }
 
   /**
@@ -367,6 +443,7 @@ export class EventsRepo {
    * and question status changes, tool result pairing, and final partial text.
    */
   updatePayload<K extends EventKind>(id: string, payload: EventPayloadMap[K], kind?: K): void {
+    this.flush()
     if (kind !== undefined) {
       this.db
         .prepare('UPDATE events SET kind = ?, payload = ? WHERE id = ?')
@@ -377,10 +454,12 @@ export class EventsRepo {
   }
 
   setNoiseKind(id: string, noiseKind: string | null): void {
+    this.flush()
     this.db.prepare('UPDATE events SET noiseKind = ? WHERE id = ?').run(noiseKind, id)
   }
 
   maxSeq(sessionId: string): number {
+    this.flush()
     const row = this.db
       .prepare('SELECT MAX(seq) AS maxSeq FROM events WHERE sessionId = ?')
       .get(sessionId) as { maxSeq: number | null }
@@ -389,6 +468,7 @@ export class EventsRepo {
 
   /** Paged history, newest last (ipc-contract.md `sessions.events`). */
   page(sessionId: string, beforeSeq?: number, limit = 200): SessionEvent[] {
+    this.flush()
     const rows = this.db
       .prepare(
         `SELECT * FROM (
@@ -401,6 +481,7 @@ export class EventsRepo {
   }
 
   costSince(sinceIso: string): number {
+    this.flush()
     const row = this.db
       .prepare(
         `SELECT COALESCE(SUM(json_extract(payload, '$.totalCostUsd')), 0) AS total
@@ -411,6 +492,7 @@ export class EventsRepo {
   }
 
   tokensSince(sinceIso: string): number {
+    this.flush()
     // Total processed tokens = fresh input + output + BOTH cache tiers. On
     // Claude Code turns the cache tiers dominate (inputTokens is only the
     // uncached remainder), so omitting them made "Tokens today" undercount by

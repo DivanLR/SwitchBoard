@@ -54,7 +54,22 @@ const api: SwitchboardApi = {
     const wrapped =
       channel === 'push.event'
         ? (_event: IpcRendererEvent, batch: PushMap[C][]) => {
-            for (const item of batch) listener(item)
+            // Each item gets its OWN try/catch. Events are append-only with no
+            // re-fetch trigger (see activeSession.ts), so a listener that threw
+            // partway through a batch used to silently drop every item after it —
+            // the live view then stayed desynchronised until a manual reload, with
+            // nothing in the console pointing at why. One item failing to apply
+            // must not cost its neighbours in the same batch.
+            for (const item of batch) {
+              try {
+                listener(item)
+              } catch (err) {
+                console.error(
+                  'push.event listener threw for one item; the rest of the batch still applies',
+                  err,
+                )
+              }
+            }
           }
         : (_event: IpcRendererEvent, payload: PushMap[C]) => listener(payload)
     ipcRenderer.on(channel, wrapped as (event: IpcRendererEvent, ...args: unknown[]) => void)

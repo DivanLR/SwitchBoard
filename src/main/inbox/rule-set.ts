@@ -24,7 +24,14 @@ export class RuleSet {
 
   reload(): void {
     const prefs = this.repos.rulePrefs.list()
-    this.risk = effectiveRiskRules(prefs)
+    // Sorted ONCE here rather than by classifyRisk on every permission check
+    // (risk-rules.ts): reload() only runs when the developer actually changes
+    // a rule, so this is the cheap place to pay for ordering. effectiveRiskRules
+    // already emits ascending positions (0..n-1, one per array slot), so this
+    // sort is a no-op today — it exists to make "the cached array is in
+    // position order" a guarantee of THIS class, not an accident of how
+    // effectiveRiskRules happens to build its array.
+    this.risk = [...effectiveRiskRules(prefs)].sort((a, b) => a.position - b.position)
     this.swallow = effectiveSwallowRules(prefs)
   }
 

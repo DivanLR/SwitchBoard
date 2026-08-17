@@ -14,13 +14,19 @@ const composerDrafts = new Map<string, string>()
 // (FR-014..019a, R2 resume).
 import { computed, nextTick, onMounted, onUnmounted, onWatcherCleanup, ref, watch } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
-import { agentIdOf, DEFAULT_SESSION_MODE, SESSION_MODES } from '@shared/domain'
-import type { SessionEvent, SessionMode } from '@shared/domain'
+import { agentIdOf } from '@shared/domain'
+import type { SessionEvent } from '@shared/domain'
 import type { CleanupGroup } from '@shared/command-catalog'
 import { DIAGRAM_PLUGIN } from '@shared/diagram'
 import { activeAgents } from '@shared/agents'
 import { parseInlineQuestion } from '@shared/inline-question'
-import { errorMessage, isIpcError, type ProjectListItem } from '@shared/ipc-types'
+import type { ProjectListItem } from '@shared/ipc-types'
+// Single door for the words describing what came back through the IPC bridge —
+// see the re-export comment in ipc.ts. `ProjectListItem` stays imported from
+// '@shared/ipc-types' itself: that module owns the wire type, and ipc.ts only
+// re-exports `errorMessage`. (`isIpcError` moved out with `start()`, its only
+// caller in this file, into useSessionStart — see that composable.)
+import { errorMessage } from '@renderer/ipc'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { useInboxStore } from '@renderer/stores/inbox'
@@ -30,6 +36,8 @@ import { useCommandSuggestions } from '@renderer/composables/useCommandSuggestio
 import { useProjectRefs } from '@renderer/composables/useProjectRefs'
 import { formatTokens as fmtTok, useSessionUsage } from '@renderer/composables/useSessionUsage'
 import { useQueuedTasks } from '@renderer/composables/useQueuedTasks'
+import { useSessionStart } from '@renderer/composables/useSessionStart'
+import { useStopConfirm } from '@renderer/composables/useStopConfirm'
 import { useNow } from '@renderer/composables/useNow'
 import { elapsedClock } from '@renderer/relative-time'
 import { toRawLines } from '@shared/stream-lines'
@@ -106,30 +114,10 @@ const editTarget = ref<string | null>(null)
  * the claim is about THAT text and is not true of anything else.
  */
 const restoredDraft = ref<string | null>(null)
-const busy = ref(false)
-// Ended-banner start controls. Two of them, where there used to be two buttons
-// and three switches: WHICH mode the next session runs in, and WHETHER it picks
-// up the last conversation. The three switches could describe states the SDK
-// cannot spawn in (plan and bypass both on meant one silently won), and they
-// only ever offered two of the six modes the SDK actually has.
-const startMode = ref<SessionMode>(DEFAULT_SESSION_MODE)
-const modeOpen = ref(false)
-/** Resume the previous conversation rather than starting an empty one. */
-const resumeSession = ref(false)
-
-/**
- * WHERE the next session runs: a container, or this machine.
- *
- * Its own switch because it is its own question. Bypass has always forced a
- * container (on Windows there is no other isolation boundary) and that stays
- * true, so the switch reads as on and locked in that mode rather than quietly
- * disagreeing with what is about to happen.
- */
-const runInContainer = ref(false)
-const containerForced = computed(() => startMode.value === 'bypass')
-const containerOn = computed(() => containerForced.value || runInContainer.value)
-/** Session-start failure (e.g. Docker down for a bypass session), ended banner. */
-const startError = ref<string | null>(null)
+// Ended-banner start controls (mode picker, Resume, container switch, busy,
+// start()) live in useSessionStart — see its construction below, deliberately
+// placed AFTER the project-switch watcher; the composable's own comment there
+// explains why the order cannot be the other way round.
 const streamEl = ref<HTMLElement | null>(null)
 const composerEl = ref<HTMLTextAreaElement | null>(null)
 
@@ -177,7 +165,6 @@ const liveSession = computed(() =>
 const endedSession = computed(() =>
   props.project.session && props.project.session.endedAt ? props.project.session : null,
 )
-const canResume = computed(() => Boolean(endedSession.value?.sdkSessionId))
 
 const pendingCount = computed(
   () => inbox.pending.filter((p) => p.projectId === props.project.id).length,
@@ -186,48 +173,20 @@ const pendingCount = computed(
 // Session timer (HH:MM:SS, ticking) and usage figures from loaded result events.
 const now = useNow(1000)
 
-// Ctrl+C stop-confirm: the first Ctrl+C (composer focused, session working)
-// shows a confirmation above the input; a second Ctrl+C (or the Stop button)
-// actually interrupts. Auto-dismisses so a stray press never lingers.
-const stopConfirm = ref(false)
-let stopConfirmTimer: ReturnType<typeof setTimeout> | undefined
-
-function askStop(): void {
-  stopConfirm.value = true
-  clearTimeout(stopConfirmTimer)
-  stopConfirmTimer = setTimeout(() => (stopConfirm.value = false), 4000)
-}
-function cancelStop(): void {
-  stopConfirm.value = false
-  clearTimeout(stopConfirmTimer)
-}
-async function confirmStop(): Promise<void> {
-  cancelStop()
-  await interrupt()
-}
-
-// Ctrl+C only acts when the COMPOSER is focused (elsewhere it's a normal copy).
-// If text is selected it copies as usual; otherwise it opens the stop-confirm.
-function onGlobalKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Escape' && stopConfirm.value) {
-    cancelStop()
-    return
-  }
-  if (!event.ctrlKey || (event.key !== 'c' && event.key !== 'C') || event.altKey || event.metaKey) {
-    return
-  }
-  if (document.activeElement !== composerEl.value) return // must be in the text box
-  const selection = window.getSelection()?.toString() ?? ''
-  if (selection.length > 0) return // preserve copy of a selection
-  if (!liveSession.value || liveSession.value.status !== 'working') return
-  event.preventDefault()
-  if (stopConfirm.value) void confirmStop()
-  else askStop()
-}
+// Ctrl+C stop-confirm cluster (composer-focus guard, session-working guard,
+// selection guard, Escape dismiss, 4s auto-dismiss) — extracted to its own
+// composable; it owns its own keydown listener and cleanup. `interrupt` is a
+// hoisted function declaration (defined further down as `async function
+// interrupt()`), so referencing it here before its textual line is safe — it is
+// only ever CALLED later, once the user actually confirms a stop.
+const { stopConfirm, cancelStop, confirmStop } = useStopConfirm({
+  composerEl,
+  liveSession: () => liveSession.value,
+  interrupt: () => interrupt(),
+})
 
 let unsubscribeCommands: (() => void) | undefined
 onMounted(() => {
-  window.addEventListener('keydown', onGlobalKeydown)
   // A session's init message delivers its slash commands / skills after start;
   // pick them up live so a newly-added project's suggestions load without a
   // project switch.
@@ -236,13 +195,16 @@ onMounted(() => {
   })
 })
 onUnmounted(() => {
-  clearTimeout(stopConfirmTimer)
-  window.removeEventListener('keydown', onGlobalKeydown)
+  // The stop-confirm timer/listener and the crash-watch drain both moved into
+  // their own composables (useStopConfirm, useSessionStart) — each owns its own
+  // onUnmounted now, so doing it again here would be cleaning up twice (the
+  // second removeEventListener/clearTimeout would be a harmless no-op, but the
+  // point of "own your own cleanup" is that this file no longer needs to know
+  // these two things exist to clean up).
   unsubscribeCommands?.()
   // Opening another view (MCP, no selection) unmounts us without firing the
   // project-switch watcher — save the draft here so it survives the round-trip.
   composerDrafts.set(props.project.id, composer.value)
-  for (const stop of pendingCrashWatches.splice(0)) stop()
 })
 
 const sessionTimer = computed(() =>
@@ -438,6 +400,20 @@ const deriveWindow = ref(DERIVE_WINDOW)
 // window near `MAX_RENDER` for what it is actually for.
 const followTail = ref(true)
 
+// Forward-declared, assigned right after this watcher (see the comment beside
+// that assignment for why it has to be this way round): the project watcher
+// below needs to call the composable's `reset()` on every switch, but the
+// composable's OWN internal ended-session watcher has to be registered AFTER
+// this watcher so it runs second and wins (see useSessionStart.ts). A `const`
+// declared after this point could not be referenced inside this watcher's own
+// body without a TDZ error even though the reference only ever fires later;
+// `let`, declared first and assigned second, sidesteps that. On this
+// component's very first mount the immediate call below runs before the
+// assignment has happened, so `sessionStart` is still undefined there and the
+// optional call is a no-op — harmless, because useSessionStart seeds its own
+// refs with the same values `reset()` would have produced.
+let sessionStart: ReturnType<typeof useSessionStart> | undefined
+
 watch(
   () => props.project.id,
   (projectId, prevId) => {
@@ -448,14 +424,11 @@ watch(
     restoredDraft.value = null
     mainTab.value = 'session'
     editTarget.value = null
-    // Per-project, all of these: a start failure from the project we left must
-    // not read as this one's, and a chosen mode must never carry over and
-    // silently start the NEXT project's session with permissions skipped.
-    startError.value = null
-    busy.value = false
-    modeOpen.value = false
-    resumeSession.value = false
-    startMode.value = props.project.defaultSessionMode ?? DEFAULT_SESSION_MODE
+    // Per-project: a start failure from the project we left must not read as
+    // this one's, and a chosen mode must never carry over and silently start
+    // the NEXT project's session with permissions skipped. Delegated to
+    // useSessionStart's own reset() — see the forward-declaration above.
+    sessionStart?.reset()
     // Also per-project: this component instance is reused across projects, so an
     // armed "press Ctrl+C again to stop" left over from the project being left
     // would otherwise sit above the composer of the project being entered, where
@@ -506,50 +479,32 @@ watch(mainTab, (tab) => {
   if (tab === 'diff') void diff.loadList(props.project.id)
 })
 
-// The picker opens on however the last session began — not on where it ended up.
-// A session toggled out of plan mode mid-flight still STARTED as one, and
-// offering that again is the choice the developer actually made. Declared after
-// the project watcher so it wins on a switch.
-watch(
-  () => endedSession.value?.id ?? null,
-  (id) => {
-    if (!id) return
-    const previous = endedSession.value
-    startMode.value = previous?.bypassPermissions
-      ? 'bypass'
-      : previous?.planMode
-        ? 'plan'
-        : (props.project.defaultSessionMode ?? DEFAULT_SESSION_MODE)
-  },
-  { immediate: true },
-)
-
-/**
- * The modes a start may pick right now. Everything, until Resume is on: a bypass
- * session's transcript lives in that project's container volume rather than in
- * the host's ~/.claude, so resuming one as a native session looks in the wrong
- * place and silently finds nothing (and the reverse). Rather than let the
- * developer choose a pair that cannot work, the impossible half is not offered.
- */
-const modeChoices = computed(() => {
-  if (!resumeSession.value) return SESSION_MODES
-  const wasBypass = endedSession.value?.bypassPermissions === true
-  return SESSION_MODES.filter((m) => (m.value === 'bypass') === wasBypass)
+// The ended-session start controls: mode picker, Resume switch, container
+// switch, start()/watchForImmediateCrash(). Constructed HERE and not earlier —
+// its own internal "prefill mode from the ended session" watcher must be
+// registered after the project watcher above so it wins on a project switch
+// (see the forward-declared `sessionStart` and its comment). This is also
+// where the original file declared that watcher, so nothing else's relative
+// order shifts.
+sessionStart = useSessionStart({
+  project: () => props.project,
+  endedSession,
 })
-
-/** Turning Resume on can rule out the mode already picked; move off it. */
-watch([resumeSession, modeChoices], () => {
-  if (!modeChoices.value.some((m) => m.value === startMode.value)) {
-    startMode.value = modeChoices.value[0]?.value ?? DEFAULT_SESSION_MODE
-  }
-})
-
-const startModeLabel = computed(
-  () => SESSION_MODES.find((m) => m.value === startMode.value)?.label ?? 'Default',
-)
-const startModeDetail = computed(
-  () => SESSION_MODES.find((m) => m.value === startMode.value)?.detail ?? '',
-)
+const {
+  startMode,
+  modeOpen,
+  resumeSession,
+  runInContainer,
+  containerForced,
+  containerOn,
+  startError,
+  modeChoices,
+  startModeLabel,
+  startModeDetail,
+  canResume,
+  busy,
+  start,
+} = sessionStart
 
 // --- Clean view derivation (FR-015): consecutive same-noiseKind grouping ---
 type StreamItem =
@@ -898,82 +853,10 @@ async function enqueue(): Promise<void> {
   resetSuggestions()
 }
 
-async function start(): Promise<void> {
-  // This view is reused across projects and a bypass start can take minutes
-  // (first-run image build), so the call is pinned to the project it was made
-  // for — otherwise its result lands on whichever project is on screen when it
-  // finally settles.
-  const target = props.project.id
-  const wasResuming = resumeSession.value && canResume.value
-  busy.value = true
-  startError.value = null
-  modeOpen.value = false
-  try {
-    const session = await projects.startSession(
-      target,
-      // Resume only claims to resume when there is something to resume from.
-      wasResuming,
-      // The picker always sends a concrete mode. It opens on the project's own
-      // default, so sending it explicitly changes nothing until it is changed.
-      startMode.value,
-      undefined,
-      runInContainer.value,
-    )
-    // sessions.start resolves once the CLI is spawned, not once it has proven
-    // it can run — watch the row it returned for the crash that would otherwise
-    // surface only as a beat-later ended banner, easy to miss.
-    watchForImmediateCrash(target, session.id, wasResuming)
-  } catch (e) {
-    // Docker down / not logged in (bypass sessions run containerised) — show
-    // it in the ended banner instead of dying as an unhandled rejection.
-    if (props.project.id === target) {
-      const message = isIpcError(e) ? e.message : String(e)
-      // A resume attempt that failed must not stay armed for the next click —
-      // retrying it unchanged would only fail the same way again.
-      startError.value = wasResuming ? `Resume failed, starting fresh — ${message}` : message
-      if (wasResuming) resumeSession.value = false
-    }
-  } finally {
-    if (props.project.id === target) busy.value = false
-  }
-}
-
-/**
- * `sessions.start` resolves as soon as the CLI process is spawned; the run
- * loop that actually proves it can run is async and un-awaited, so a start
- * that dies immediately (most often an invalid resume — a bypass session's
- * transcript lives in that project's container volume, so rebuilding the
- * sandbox image orphans it) reports success here and only shows up later as
- * an ended row, with the reason sitting in the banner's small detail line.
- *
- * Watches that one row (looked up through the store, not `props.project` —
- * the developer may have switched away from `projectId` while it was still
- * spawning) and promotes a crash to the same start error a synchronous
- * failure gets, and turns Resume back off so a failed resume cannot silently
- * re-arm the next click.
- */
-function watchForImmediateCrash(projectId: string, sessionId: string, wasResuming: boolean): void {
-  const found = computed(
-    () => projects.items.find((p) => p.id === projectId)?.sessions.find((s) => s.id === sessionId) ?? null,
-  )
-  const stop = watch(
-    found,
-    (session) => {
-      if (!session?.endedAt) return
-      stop() // this row is settled either way — nothing more to watch for
-      if (session.endReason !== 'crashed' || props.project.id !== projectId) return
-      const reason = session.statusDetail ?? 'The session ended immediately after starting.'
-      startError.value = wasResuming ? `Resume failed, starting fresh — ${reason}` : reason
-      if (wasResuming) resumeSession.value = false
-    },
-    { immediate: true },
-  )
-  pendingCrashWatches.push(stop)
-}
-
-/** Crash watches still waiting on a row when this view unmounts. Each stops
- *  itself once its row settles; this only covers the ones that never did. */
-const pendingCrashWatches: (() => void)[] = []
+// start(), watchForImmediateCrash() and the pendingCrashWatches it fills now
+// live in useSessionStart — see its construction above. `start` is destructured
+// from that composable's return and used directly by the template's
+// start-session button.
 
 // Ctrl+C, like a terminal (the design has no interrupt button).
 async function interrupt(): Promise<void> {

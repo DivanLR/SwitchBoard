@@ -5,7 +5,8 @@
 import { dialog, ipcMain, shell, type BrowserWindow } from 'electron'
 import type { DiagramEntry, Session, SessionEvent } from '@shared/domain'
 import { canPassEval, isDangerousCommand, sessionName } from '@shared/domain'
-import { DIAGRAMS_DIR, diagramFileName, diagramPrompt } from '@shared/diagram'
+import { DIAGRAM_PLUGIN, DIAGRAMS_DIR, diagramFileName, diagramPrompt } from '@shared/diagram'
+import { CLEANUP_GROUPS } from '@shared/command-catalog'
 import { applyToRegionPrompt } from '@shared/diff-apply'
 import type {
   Counters,
@@ -31,7 +32,13 @@ import {
   repointProject,
   suggestProjects,
 } from '@main/projects/discovery'
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+// existsSync/readdirSync survive here only for 'diagrams.generate' (unaffected
+// by this pass — it names a NEW file rather than statting an existing one, so
+// it never carried the per-file stat fan-out the audit flagged). Every other
+// caller that used to reach into 'node:fs' synchronously now reads through
+// 'node:fs/promises' below, off the main thread.
+import { existsSync, readdirSync } from 'node:fs'
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import { detectStacks, stackById, stackEntries } from '@shared/test-catalog'
 import { attemptsPrompt, checkPrompt, judgePrompt } from '@main/evals/eval-dispatch'
@@ -84,6 +91,19 @@ export class RendererPush {
       this.flushTimer = null
     }
     if (this.eventBuffer.length === 0) return
+    // Self-healing rather than a dispose() nobody calls: nothing tells this
+    // class when `mainWindow` is destroyed, so a flushTimer already pending at
+    // that moment used to fire anyway and hand its batch to `send`, which
+    // no-ops silently. Checked here instead so the batch is dropped
+    // explicitly, and — the actual bug — so a background session that keeps
+    // producing events after the window is gone (a verify or API-eval run in
+    // its own container does not stop just because the window closed) is not
+    // left quietly rearming a fresh 33ms timer forever with nowhere to deliver.
+    const window = this.getWindow()
+    if (!window || window.isDestroyed()) {
+      this.eventBuffer = []
+      return
+    }
     const batch = this.eventBuffer.splice(0)
     this.send('push.event', batch)
   }
@@ -92,6 +112,11 @@ export class RendererPush {
     if (this.counterTimer) return
     this.counterTimer = setTimeout(() => {
       this.counterTimer = null
+      // Same self-healing check as flushEvents: skip computeCounters() (a real
+      // query) entirely once there is no window left to show it to, rather
+      // than computing an answer only for `send` to throw away.
+      const window = this.getWindow()
+      if (!window || window.isDestroyed()) return
       this.send('push.counters', this.computeCounters())
     }, COUNTER_DEBOUNCE_MS)
   }
@@ -177,6 +202,64 @@ function diagramPath(repos: Repositories, projectId: string, file: string): stri
   }
   return target
 }
+
+/**
+ * Pre-fetches exactly the directory listings `stackEntries` (test-catalog.ts)
+ * would ask its synchronous `(dir) => string[]` reader for: the project root,
+ * plus each immediate child stackEntries itself descends into.
+ *
+ * stackEntries keeps its own walk (the SKIP set, the dot-prefix rule) private,
+ * and its signature is pinned — test-catalog.spec.ts asserts it takes a plain
+ * synchronous reader, because it is shared with the sandbox-image decision,
+ * which has no async budget of its own. So the directory reads have to happen
+ * BEFORE stackEntries runs, into a plain Map, with a synchronous closure handed
+ * to stackEntries that only ever looks an already-fetched answer up. The SKIP
+ * set is duplicated rather than imported for the same reason: it is not
+ * exported, and importing a private implementation detail would be a more
+ * fragile coupling than a short literal that only has to agree with a walk
+ * this file already reads in full above.
+ *
+ * If the two walks ever drift, a directory this prefetch missed reads back as
+ * `undefined` and the closure below throws — which stackEntries' own try/catch
+ * already treats as "not a directory", the same outcome a real ENOTDIR gets.
+ * Drift here degrades gracefully; it does not crash the handler.
+ */
+async function preReadStackEntries(root: string): Promise<Map<string, string[]>> {
+  const SKIP = new Set(['node_modules', '.git', 'bin', 'obj', 'dist', 'out', 'release', '.vs'])
+  const listing = new Map<string, string[]>()
+  const top = await readdir(root)
+  listing.set(root, top)
+  await Promise.all(
+    top
+      .filter((name) => !SKIP.has(name.toLowerCase()) && !name.startsWith('.'))
+      .map(async (name) => {
+        try {
+          listing.set(`${root}/${name}`, await readdir(join(root, name)))
+        } catch {
+          // Not a directory, or unreadable — stackEntries' own catch handles
+          // this the same way when its (dir) => string[] reader throws.
+        }
+      }),
+  )
+  return listing
+}
+
+/**
+ * Every {marketplace, pkg} pair 'plugins.install' may actually hand to the CLI.
+ *
+ * `req.marketplace`/`req.pkg` cross straight from the renderer into
+ * `installPlugin` (plugin-install.ts), which clones a remote repo and installs
+ * whatever it finds at USER scope with no validation of its own — by design,
+ * since it is meant to run exactly the strings it is given. Every real caller
+ * offers one of the plugins already catalogued for the Cleanup section
+ * (CLEANUP_GROUPS) or the diagram skill (DIAGRAM_PLUGIN), so a request naming
+ * anything else did not come from this app's own UI, and is refused here
+ * before the CLI ever runs rather than trusted as far as a child process.
+ */
+const ALLOWED_PLUGINS: ReadonlySet<string> = new Set([
+  ...CLEANUP_GROUPS.map((group) => `${group.marketplace}|${group.pkg}`),
+  `${DIAGRAM_PLUGIN.marketplace}|${DIAGRAM_PLUGIN.pkg}`,
+])
 
 export function registerIpcHandlers(deps: HandlerDeps): void {
   const { repos, manager, broker, dbProjectId } = deps
@@ -412,28 +495,45 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     // a project that has generated nothing, not a failure. Requests join onto
     // whatever mtime/readdir found, so a hand-dropped or pre-app file still lists,
     // with nulls for what the app never learned.
-    'diagrams.list': (req) => {
+    'diagrams.list': async (req) => {
       const project = repos.projects.byId(req.projectId)
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
       const dir = join(project.path, DIAGRAMS_DIR)
-      if (!existsSync(dir)) return []
+      // This used to be existsSync + readdirSync + statSync-per-file, all
+      // synchronous on the main thread — and the renderer polls this method
+      // every 2.5s for up to twenty minutes while a diagram generates (see
+      // 'diagrams.generate'), so a folder with many diagrams stalled the whole
+      // window on a timer the developer never asked to notice. fs/promises
+      // moves every read off the main thread; ENOENT is still exactly the
+      // "the project has generated nothing yet" case existsSync used to catch,
+      // so it is the only rejection folded into an empty list rather than
+      // left to propagate.
+      let files: string[]
+      try {
+        files = await readdir(dir)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+        throw error
+      }
       const requests = repos.diagramRequests.forProject(req.projectId)
-      return readdirSync(dir)
-        .filter((file) => file.toLowerCase().endsWith('.html'))
-        .map((file): DiagramEntry => {
-          const stat = statSync(join(dir, file))
-          const known = requests.get(file)
-          return {
-            file,
-            path: `${DIAGRAMS_DIR}/${file}`,
-            description: known?.description ?? null,
-            sessionId: known?.sessionId ?? null,
-            plan: known?.plan ?? null,
-            modifiedAt: stat.mtime.toISOString(),
-            bytes: stat.size,
-          }
-        })
-        .sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt))
+      const entries = await Promise.all(
+        files
+          .filter((file) => file.toLowerCase().endsWith('.html'))
+          .map(async (file): Promise<DiagramEntry> => {
+            const info = await stat(join(dir, file))
+            const known = requests.get(file)
+            return {
+              file,
+              path: `${DIAGRAMS_DIR}/${file}`,
+              description: known?.description ?? null,
+              sessionId: known?.sessionId ?? null,
+              plan: known?.plan ?? null,
+              modifiedAt: info.mtime.toISOString(),
+              bytes: info.size,
+            }
+          }),
+      )
+      return entries.sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt))
     },
     'diagrams.generate': async (req) => {
       const project = repos.projects.byId(req.projectId)
@@ -459,16 +559,27 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       const openError = await shell.openPath(diagramPath(repos, req.projectId, req.file))
       if (openError) throw { code: 'INVALID_PATH', message: openError } satisfies IpcError
     },
-    'diagrams.read': (req) => {
+    'diagrams.read': async (req) => {
       const target = diagramPath(repos, req.projectId, req.file)
       // A diagram is one page of inline SVG. A file this size is not one, and
       // reading it would push megabytes of string across the bridge to render
       // something no one asked to see.
       const MAX_BYTES = 8 * 1024 * 1024
-      if (!existsSync(target) || statSync(target).size > MAX_BYTES) {
+      // Stat before read, not read-then-check: an oversized file must be
+      // refused without ever pulling it into memory, and a stat that throws
+      // (missing file) folds into the same refusal existsSync used to produce.
+      // Both readFileSync and existsSync/statSync used to run synchronously on
+      // the main thread; fs/promises moves both off it.
+      let size: number
+      try {
+        size = (await stat(target)).size
+      } catch {
         throw { code: 'NOT_FOUND', message: 'That diagram is missing or too large to show' } satisfies IpcError
       }
-      return { html: readFileSync(target, 'utf8') }
+      if (size > MAX_BYTES) {
+        throw { code: 'NOT_FOUND', message: 'That diagram is missing or too large to show' } satisfies IpcError
+      }
+      return { html: await readFile(target, 'utf8') }
     },
     'mcp.readSchema': (req) => {
       const project = repos.projects.byId(req.projectId)
@@ -479,7 +590,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       return { content }
     },
     'mcp.scanHistory': (req) => repos.mcpScans.listForProject(req.projectId),
-    'mcp.recordScan': (req) => {
+    'mcp.recordScan': async (req) => {
       const project = repos.projects.byId(req.projectId)
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
       // Only record when the scan actually produced the combination's doc, and
@@ -487,8 +598,15 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       // the honest older timestamp instead of passing itself off as fresh.
       if (!req.servers.length) return null
       const docPath = comboDocPath(project.path, req.servers)
-      if (!existsSync(docPath)) return null
-      const scannedAt = statSync(docPath).mtime.toISOString()
+      // existsSync + statSync used to run synchronously here; a stat that
+      // rejects (missing doc) folds into the same "nothing to record" null the
+      // existsSync check used to return.
+      let scannedAt: string
+      try {
+        scannedAt = (await stat(docPath)).mtime.toISOString()
+      } catch {
+        return null
+      }
       return repos.mcpScans.upsert(req.projectId, comboKey(req.servers), req.servers, scannedAt)
     },
     'specs.runInSession': async (req) => {
@@ -544,7 +662,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     },
     // What this project can be tested with, from its own tooling — the app
     // writes no runners, it only knows the commands (FR-035/FR-037).
-    'evals.suites': (req) => {
+    'evals.suites': async (req) => {
       const project = repos.projects.byId(req.projectId)
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
       try {
@@ -555,13 +673,44 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         // Blazor front end, or both — so it is not offered suites that prove
         // nothing about it. A file that will not open reads as absent evidence,
         // never as a detection failure.
-        return detectStacks(stackEntries(project.path, (dir) => readdirSync(dir)), (entry) => {
-          try {
-            return readFileSync(join(project.path, entry), 'utf8')
-          } catch {
-            return null
-          }
+        //
+        // stackEntries and detectStacks both take a SYNCHRONOUS reader (pinned
+        // by test-catalog.spec.ts, and shared with the sandbox-image decision,
+        // which has no async budget either), so the actual directory and file
+        // reads happen up front here, off the main thread, into plain Maps —
+        // see preReadStackEntries above. The closures handed to the two
+        // functions below do nothing but look an already-fetched answer up.
+        const listing = await preReadStackEntries(project.path)
+        const entries = stackEntries(project.path, (dir) => {
+          const found = listing.get(dir)
+          if (found === undefined) throw new Error(`not listed: ${dir}`)
+          return found
         })
+        // The only files detectStacks might actually open: .csproj/Program.cs/
+        // Startup.cs for app-shape detection, package.json for the
+        // coverage-provider check (detectAppShapes/hasCoverageProvider in
+        // test-catalog.ts). Reading every match up front is simpler than
+        // mirroring that file's own slicing a second time, and a handful of
+        // small reads at a project root is cheap next to what it replaces.
+        const candidates = entries.filter((entry) => {
+          const lower = entry.toLowerCase()
+          return (
+            lower.endsWith('.csproj') ||
+            lower.endsWith('program.cs') ||
+            lower.endsWith('startup.cs') ||
+            /(^|[/\\])package\.json$/.test(lower)
+          )
+        })
+        const contents = new Map<string, string | null>()
+        await Promise.all(
+          candidates.map(async (entry) => {
+            // Unreadable reads as absent evidence, never as a detection
+            // failure — the same rule the old readFileSync-in-a-try/catch
+            // enforced.
+            contents.set(entry, await readFile(join(project.path, entry), 'utf8').catch(() => null))
+          }),
+        )
+        return detectStacks(entries, (entry) => contents.get(entry) ?? null)
       } catch {
         // Unreadable folder (removed, permissions): no stack, not a crash.
         return []
@@ -802,7 +951,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     },
     // The report for a finished run: written from the recorded calls alone, so it
     // is a transcript of what happened rather than an account of it.
-    'api.report': (req) => {
+    'api.report': async (req) => {
       const project = repos.projects.byId(req.projectId)
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
       const run = req.runId
@@ -821,9 +970,11 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         } satisfies IpcError
       }
       const dir = join(project.path, '.switchboard', 'reports')
-      mkdirSync(dir, { recursive: true })
+      // mkdirSync + writeFileSync used to run synchronously here, on the main
+      // thread, for what can be a several-KB markdown file.
+      await mkdir(dir, { recursive: true })
       const path = join(dir, apiReportFileName(run))
-      writeFileSync(
+      await writeFile(
         path,
         apiReportMarkdown(run, {
           projectName: project.name,
@@ -956,6 +1107,15 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     // Host-side, and deliberately not a session message: see plugin-install.ts.
     // Awaited to completion so the renderer learns whether it actually worked.
     'plugins.install': async (req) => {
+      // Checked against the catalogue before the CLI ever sees these strings —
+      // see ALLOWED_PLUGINS above for why an unlisted pair is refused rather
+      // than passed through.
+      if (!ALLOWED_PLUGINS.has(`${req.marketplace}|${req.pkg}`)) {
+        throw {
+          code: 'RULE_NOT_ALLOWED',
+          message: 'That plugin is not one this app offers to install.',
+        } satisfies IpcError
+      }
       await installPlugin(req.marketplace, req.pkg)
       // The install happened on the host, outside every session, so nothing else
       // would ever tell them. Without this the card that just installed a plugin
@@ -988,10 +1148,18 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       ) {
         return { ok: false, error: { code: 'INTERNAL', message: 'Untrusted IPC sender' } }
       }
-      const handler = handlers[method]
-      if (!handler) {
+      // Object.hasOwn, not a truthy `handlers[method]` lookup: `handlers` is a
+      // plain object, so `method` values like "constructor" or "toString" that
+      // never appear in InvokeMap still resolve through the prototype chain and
+      // pass a truthy check — handing the request straight to Object.prototype's
+      // own method. Unreachable today because the sender-trust check above runs
+      // first and every real caller is InvokeMethod-typed, but `method` is still
+      // an unvalidated string crossing a trust boundary, and a dynamic property
+      // lookup on one should never trust the prototype chain to stay empty.
+      if (!Object.hasOwn(handlers, method)) {
         return { ok: false, error: { code: 'NOT_FOUND', message: `Unknown method ${method}` } }
       }
+      const handler = handlers[method]
       try {
         const value = await (handler as (r: unknown) => unknown)(req)
         return { ok: true, value: value ?? null }

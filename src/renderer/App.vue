@@ -39,6 +39,10 @@ const bridgeMissing = ref(false)
 const updateDismissed = ref(false)
 
 // The inbox panel is drag-resizable; its width persists across launches.
+// localStorage, not the settings store: this is renderer chrome with no
+// main-process consumer, and reading it back is synchronous at module init —
+// the settings store's load() is an await behind an IPC round trip, and this
+// value is needed for the very first layout, before that reply could ever land.
 const INBOX_MIN = 280
 const INBOX_MAX = 680
 function clampInbox(w: number): number {
@@ -47,12 +51,21 @@ function clampInbox(w: number): number {
 const inboxWidth = ref(clampInbox(Number(localStorage.getItem('sb-inbox-w')) || 332))
 
 // The inbox can be collapsed to reclaim width; a glowing badge in the top-right
-// reopens it and shows the pending count.
+// reopens it and shows the pending count. Persisted the same way and for the
+// same reason as inboxWidth above: renderer-only layout state, needed before
+// the settings store has anything to say.
 const inboxCollapsed = ref(localStorage.getItem('sb-inbox-collapsed') === '1')
 function setInboxCollapsed(v: boolean): void {
   inboxCollapsed.value = v
   localStorage.setItem('sb-inbox-collapsed', v ? '1' : '0')
 }
+
+// Tracks the live drag's own teardown, so onUnmounted (below) can run the exact
+// same cleanup a mouseup would have — remove both window listeners and restore
+// the body's userSelect/cursor — if the component goes away mid-drag instead.
+// Nulled out once a drag finishes normally, so an unmount afterwards has
+// nothing left to tear down.
+let stopInboxResize: (() => void) | null = null
 
 function startInboxResize(event: MouseEvent): void {
   event.preventDefault()
@@ -65,6 +78,7 @@ function startInboxResize(event: MouseEvent): void {
     inboxWidth.value = clampInbox(startW - (e.clientX - startX))
   }
   const onUp = (): void => {
+    stopInboxResize = null
     window.removeEventListener('mousemove', onMove)
     window.removeEventListener('mouseup', onUp)
     document.body.style.userSelect = ''
@@ -73,6 +87,14 @@ function startInboxResize(event: MouseEvent): void {
   }
   window.addEventListener('mousemove', onMove)
   window.addEventListener('mouseup', onUp)
+  // Mousemove/mouseup are registered on window rather than the handle, so they
+  // survive the pointer leaving the 6px strip — but that also means they only
+  // ever got removed by mouseup firing. Unmounting mid-drag (a project switch,
+  // say, while the mouse is still down) used to leak both listeners onto window
+  // for the rest of the app's life, with onMove going on to write inboxWidth
+  // into a ref whose owning component was already gone, and the body left
+  // stuck in userSelect: none / cursor: col-resize with no drag left to end it.
+  stopInboxResize = onUp
 }
 
 const unsubscribers: (() => void)[] = []
@@ -111,6 +133,9 @@ onMounted(async () => {
 
 onUnmounted(() => {
   for (const unsubscribe of unsubscribers) unsubscribe()
+  // See the note on stopInboxResize above: a no-op unless a drag is actually
+  // in flight when this component goes away.
+  stopInboxResize?.()
 })
 
 const selectedProject = computed(() => projects.selected)

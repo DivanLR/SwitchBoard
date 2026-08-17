@@ -3,8 +3,7 @@
 // transport separation), mirroring stores/specs.ts and stores/diff.ts.
 import { reactive } from 'vue'
 import type { DiagramEntry } from '@shared/domain'
-import { invoke } from '@renderer/ipc'
-import { errorMessage } from '@shared/ipc-types'
+import { errorMessage, invoke } from '@renderer/ipc'
 
 // Guards a keyed write in byProject against a stale response landing after a
 // newer load superseded it. Not scoped to the project id, the same way
@@ -89,8 +88,18 @@ const store = reactive({
    */
   async awaitFile(projectId: string, file: string): Promise<void> {
     const deadline = Date.now() + 20 * 60_000
+    // Each round below is a synchronous directory scan in the main process, and a
+    // diagram that took the full twenty minutes to land used to cost roughly 480
+    // of them at a flat 2500ms cadence. Doubling the wait after every empty round,
+    // capped at 10s, keeps a fast diagram noticed fast (the common case: most
+    // land in the first poll or two) while a long draw settles into a fraction of
+    // that traffic instead of all 480 rounds landing at the same 2.5s cadence.
+    // The deadline above stays WALL CLOCK (Date.now() vs deadline, not a loop
+    // count), so a slower cadence near the end costs traffic, never the budget.
+    let delay = 2500
     while (Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 2500))
+      await new Promise((resolve) => setTimeout(resolve, delay))
+      delay = Math.min(delay * 2, 10_000)
       // The developer switched project, or asked for something else: this poll
       // is no longer about anything on screen.
       if (this.pending?.projectId !== projectId || this.pending.file !== file) return

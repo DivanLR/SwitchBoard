@@ -388,7 +388,19 @@ async function main(): Promise<void> {
     getWindow: () => mainWindow,
     dbProjectId: dbProject.id,
   })
-  scheduleRetention(() => runRetention(db))
+  // Retention deletes straight from the events table with its own raw SQL
+  // (retention.ts), bypassing EventsRepo entirely, so it never inherits the
+  // repo's own flush-before-read discipline. repositories.ts's EventsRepo.flush
+  // works out that a buffered row can never actually be one retention would
+  // have deleted (it only targets sessions outside the two most recent per
+  // project, and a buffered row belongs only to the one currently emitting it,
+  // which is always the most recent). This flush is the belt to that
+  // braces: it costs nothing when the buffer is already empty, and it means
+  // that reasoning never has to be the ONLY thing keeping a sweep honest.
+  scheduleRetention(() => {
+    repos.events.flush()
+    runRetention(db)
+  })
   initUpdater({ onStatus: (status) => pusher.push('push.updateStatus', status) })
 
   createWindow()
@@ -433,6 +445,11 @@ async function main(): Promise<void> {
     }
     void manager.endAllForAppExit().finally(() => {
       shutdownComplete = true
+      // Buffered events (repositories.ts EventsRepo) live only in memory until
+      // their next timer flush. Without this, a quit landing inside that
+      // window would close the database out from under them and the last
+      // burst of a session's transcript would simply never have existed.
+      repos.events.flush()
       db.close()
       app.quit()
     })

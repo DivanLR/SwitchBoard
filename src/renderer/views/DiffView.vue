@@ -225,6 +225,24 @@ function countLabel(added: number | null, removed: number | null): string {
   if (added === null || removed === null) return 'binary'
   return `+${added} −${removed}`
 }
+
+/**
+ * The lines of the selected file's diff, each paired with a stable v-for key.
+ *
+ * `diff.fileDiff.lines` is replaced wholesale on every file selection rather
+ * than patched in place, so a bare index key was not WRONG today — but it is
+ * the anti-pattern the house rules call out anyway: an index key defeats
+ * Vue's reuse the moment a line is ever inserted or removed without the whole
+ * array being swapped, and by then it is a silent rendering bug, not a lint
+ * warning. The key composes the line's own identity (type + text) with its
+ * position, because two context lines can read identically and the index
+ * alone is exactly what an identity key is meant to stop leaning on. Built
+ * once here, where the lines are prepared, rather than as an expression
+ * re-evaluated in the template on every line of every render.
+ */
+const keyedLines = computed(() =>
+  (diff.fileDiff?.lines ?? []).map((line, i) => ({ line, i, key: `${i}:${line.type}:${line.text}` })),
+)
 </script>
 
 <template>
@@ -307,20 +325,20 @@ function countLabel(added: number | null, removed: number | null): string {
                comment on. Shift-click extends, which is why the title says so —
                nothing else on screen could tell you that. -->
           <button
-            v-for="(line, i) in diff.fileDiff.lines"
-            :key="i"
+            v-for="row in keyedLines"
+            :key="row.key"
             type="button"
             class="diff-line"
-            :class="[line.type, { picked: isSelected(i) }]"
-            :data-testid="`diff-line-${i}`"
-            :aria-pressed="isSelected(i)"
+            :class="[row.line.type, { picked: isSelected(row.i) }]"
+            :data-testid="`diff-line-${row.i}`"
+            :aria-pressed="isSelected(row.i)"
             title="Click to comment on this line, shift-click to extend the selection"
-            @click="pickLine(i, $event.shiftKey)"
+            @click="pickLine(row.i, $event.shiftKey)"
           >
             <span class="dl-marker" aria-hidden="true">{{
-              line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' '
+              row.line.type === 'add' ? '+' : row.line.type === 'del' ? '-' : ' '
             }}</span>
-            <span class="dl-text">{{ line.text }}</span>
+            <span class="dl-text">{{ row.line.text }}</span>
           </button>
         </div>
 
