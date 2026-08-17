@@ -206,6 +206,54 @@ test('a run sends the chosen suites to the session, and its report fills the gat
   await expect(page.getByTestId('tests-result-node-unit')).toContainText('142 passed')
 })
 
+/**
+ * A red suite is the one you actually want to try again.
+ *
+ * Until this, the chips were selection ONLY: the single Run verification button
+ * ran everything ticked, so re-running one failed suite meant unticking the
+ * other six, running, and ticking them all back afterwards — at which point the
+ * tick boxes no longer described the next full run either.
+ *
+ * So the re-run is its own control and deliberately does NOT touch the
+ * selection: "run this one again" is a different statement from "change what a
+ * full run covers", and conflating them is what made the manual route so
+ * tedious.
+ */
+test('a suite that has run can be re-run on its own, leaving the selection alone', async ({ page }) => {
+  await openTests(page)
+  await page.getByTestId('tests-stack-node').click()
+  await startRun(page)
+  await page.evaluate(
+    (r) => window.__mock.reportVerifyResult('p-alpha', 'fail', r),
+    report({
+      suites: [
+        { id: 'node-unit', label: 'Unit tests', status: 'fail', detail: '3 failed' },
+        { id: 'node-api', label: 'HTTP smoke', status: 'pass', detail: '9 routes, all 2xx' },
+      ],
+    }),
+  )
+  await expect(page.getByTestId('tests-suite-node-unit')).toHaveClass(/ran-fail/)
+
+  const before = await page.getByTestId('tests-suite-count').textContent()
+  await page.getByTestId('tests-suite-rerun-node-unit').click()
+
+  // The dispatch names that suite and nothing else.
+  const sent = await lastSend(page)
+  expect(sent).toContain('node-unit')
+  expect(sent).not.toContain('node-api')
+  // And what a full run would cover is exactly what it was before.
+  await expect(page.getByTestId('tests-suite-count')).toHaveText(before ?? '')
+})
+
+// A suite that never ran has no result to try again, so offering the control
+// there would be a button that means nothing.
+test('a suite that has not run offers no re-run control', async ({ page }) => {
+  await openTests(page)
+  await page.getByTestId('tests-stack-node').click()
+  await expect(page.getByTestId('tests-suite-node-unit')).toBeVisible()
+  await expect(page.getByTestId('tests-suite-rerun-node-unit')).toHaveCount(0)
+})
+
 // A run whose session dies used to leave the button disabled with no way back
 // inside the app: the only recovery was to restart it.
 test('a run in progress can be stopped, and the panel says who stopped it', async ({ page }) => {

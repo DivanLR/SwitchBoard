@@ -19,7 +19,7 @@ import {
   type SandboxEnv,
   type TestSuite,
 } from '@shared/test-catalog'
-import { estimateRunMs, humanDuration, type VerifyRun } from '@shared/domain'
+import { estimateRunMs, humanDuration, type SuiteResult, type VerifyRun } from '@shared/domain'
 import { type ApiExpect } from '@shared/api-endpoints'
 import { useEvalsStore } from '@renderer/stores/evals'
 import { useVerifyStore } from '@renderer/stores/verify'
@@ -248,6 +248,30 @@ async function runVerify(): Promise<void> {
   }
 }
 
+/**
+ * Run ONE suite again, leaving the selection exactly as it was.
+ *
+ * The mark on a chip answers "did it pass". Nothing answered "try that again":
+ * the single Run verification button runs everything ticked, so re-running one
+ * failed suite meant unticking the other six, running, and ticking them all
+ * back — and in between, the ticks no longer described what a full run covers,
+ * which is the one thing they are for. Those are two different statements, so
+ * this is a separate control and it does not touch `selected`.
+ *
+ * Guarded on the same conditions as the Run button, because it is the same
+ * dispatch: a run already holding the session cannot be joined, and a suite
+ * this environment cannot run never gets offered the control (blockedReason).
+ *
+ * Lands on the same panel a full run does, for the same reason — the result of
+ * pressing a run control should always appear in the same place.
+ */
+async function runOne(suite: TestSuite): Promise<void> {
+  if (!stack.value || running.value || verify.starting || blockedReason(suite)) return
+  if (await verify.start(props.projectId, stack.value.id, [suite.id])) {
+    subTab.value = 'evidence'
+  }
+}
+
 async function captureEvidence(): Promise<void> {
   if (await verify.captureEvidence(props.projectId, latest.value?.id)) {
     subTab.value = 'evidence'
@@ -305,6 +329,17 @@ const evidence = computed(() => report.value?.evidence ?? [])
 // tick of a running report.
 const suiteResults = computed(
   () => new Map((report.value?.suites ?? []).map((s) => [s.id, s])),
+)
+
+/** Each offered suite paired with its own result row, resolved once here rather
+ *  than in the template. The chip template used to call suiteResults.get(s.id)
+ *  six or seven times per chip per render, three of them followed by a `!`
+ *  non-null assertion to get past the possibly-undefined return — a lookup
+ *  called twice in the same expression is not narrowed by TypeScript just
+ *  because the first call happened to be truthy. Joining once here gives the
+ *  template a single value per chip that a nested v-if narrows properly. */
+const suiteRows = computed<{ suite: TestSuite; result: SuiteResult | null }[]>(() =>
+  suites.value.map((s) => ({ suite: s, result: suiteResults.value.get(s.id) ?? null })),
 )
 
 // The two quality tiles whose text is a decision rather than a value: an absent
@@ -486,20 +521,20 @@ function statusWord(run: VerifyRun): string {
         <!-- Suite picker: heavy suites are opt-in, and what the environment
              cannot run says so here rather than failing mid-run (FR-057). -->
         <div class="suites" data-testid="tests-suites">
-          <template v-for="s in suites" :key="s.id">
+          <template v-for="row in suiteRows" :key="row.suite.id">
             <button
               class="chip suite"
               :class="[
                 {
-                  on: isSelected(s),
-                  dev: !!blockedReason(s),
+                  on: isSelected(row.suite),
+                  dev: !!blockedReason(row.suite),
                 },
-                suiteResults.get(s.id) ? `ran-${suiteResults.get(s.id)!.status}` : '',
+                row.result ? `ran-${row.result.status}` : '',
               ]"
-              :disabled="!!blockedReason(s)"
-              :title="suiteResults.get(s.id)?.detail ?? blockedReason(s) ?? s.command"
-              :data-testid="`tests-suite-${s.id}`"
-              @click="toggleSuite(s)"
+              :disabled="!!blockedReason(row.suite)"
+              :title="row.result?.detail ?? blockedReason(row.suite) ?? row.suite.command"
+              :data-testid="`tests-suite-${row.suite.id}`"
+              @click="toggleSuite(row.suite)"
             >
               <!-- The outcome sits before the label, where the eye lands first: the
                    question this row answers is "did it pass", not "what is it called".
@@ -507,31 +542,48 @@ function statusWord(run: VerifyRun): string {
                    its own colour, because a green tick on a failure is the one
                    mistake this panel must never make. -->
               <span
-                v-if="suiteResults.get(s.id)"
+                v-if="row.result"
                 class="suite-mark"
-                :data-testid="`tests-suite-mark-${s.id}`"
+                :data-testid="`tests-suite-mark-${row.suite.id}`"
                 aria-hidden="true"
               >
                 <Icon
-                  v-if="suiteResults.get(s.id)!.status === 'pass'"
+                  v-if="row.result.status === 'pass'"
                   name="check"
                   :size="11"
                 />
-                <template v-else-if="suiteResults.get(s.id)!.status === 'fail'">✕</template>
+                <template v-else-if="row.result.status === 'fail'">✕</template>
                 <template v-else>–</template>
               </span>
-              {{ s.label }}
-              <span v-if="blockedReason(s)" class="dev-tag">{{ blockedReason(s) }}</span>
-              <span v-else-if="s.heavy" class="heavy-tag mono">slow</span>
-              <span v-if="commandOverrides[s.id]" class="heavy-tag mono">edited</span>
+              {{ row.suite.label }}
+              <span v-if="blockedReason(row.suite)" class="dev-tag">{{ blockedReason(row.suite) }}</span>
+              <span v-else-if="row.suite.heavy" class="heavy-tag mono">slow</span>
+              <span v-if="commandOverrides[row.suite.id]" class="heavy-tag mono">edited</span>
+            </button>
+            <!-- Try that one again. Rides beside the chip for the same reason the
+                 edit affordance below does — the chip itself is the on/off target,
+                 and a control nested in it would swallow that click. Only once
+                 there is a result to re-run: on a suite that has never run it
+                 would be a second, quieter Run button meaning something subtly
+                 different, which is how a panel stops being readable. -->
+            <button
+              v-if="row.result && !blockedReason(row.suite)"
+              class="chip suite-rerun mono"
+              :disabled="running || verify.starting"
+              :data-testid="`tests-suite-rerun-${row.suite.id}`"
+              :title="`Run ${row.suite.label} again on its own — the ticks stay as they are`"
+              :aria-label="`Run ${row.suite.label} again`"
+              @click="runOne(row.suite)"
+            >
+              <Icon name="refresh" :size="12" />
             </button>
             <!-- The catalogue's command is a guess about a conventional layout; this
                  is how it gets corrected without editing the app's source. -->
             <button
               class="chip cmd-edit mono"
-              :data-testid="`tests-suite-edit-${s.id}`"
-              :title="`Edit the command for ${s.label}`"
-              @click="editCommand(s)"
+              :data-testid="`tests-suite-edit-${row.suite.id}`"
+              :title="`Edit the command for ${row.suite.label}`"
+              @click="editCommand(row.suite)"
             >
               <Icon name="pencil" :size="12" />
             </button>
@@ -1306,6 +1358,25 @@ function statusWord(run: VerifyRun): string {
   padding: 4px 7px;
   margin-left: -4px;
   color: var(--text-ghost);
+}
+
+/* Same rider position as .cmd-edit, and quiet for the same reason: it is a
+   per-suite action, not a second Run button. It takes the action colour on
+   hover because unlike editing a command it actually starts work. */
+.suite-rerun {
+  padding: 4px 7px;
+  margin-left: -4px;
+  color: var(--text-ghost);
+}
+
+.suite-rerun:hover:not(:disabled) {
+  color: var(--green);
+  border-color: var(--green);
+}
+
+.suite-rerun:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .cmd-row {
