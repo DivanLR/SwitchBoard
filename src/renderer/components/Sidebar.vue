@@ -212,6 +212,20 @@ function glyphFor(status: string): string {
 /** A single session's lane state; see statusOfSession, which this simply names. */
 const sessionStatus = statusOfSession
 
+/**
+ * Whether this subsession row is the one the centre pane is showing.
+ *
+ * `item.session` is every project's OWN focused session and is set whether or
+ * not that project is the one open, so testing it alone marked a row selected
+ * in every project at once: switch to another project and the row you left
+ * stayed lit, claiming to be what the pane was showing when it was not. The
+ * selection mark answers "is this what I am looking at", and that is two facts,
+ * not one — the project has to be the open one as well.
+ */
+function isFocusedSub(item: (typeof projects.items)[number], sessionId: string): boolean {
+  return item.id === projects.selectedProjectId && item.session?.id === sessionId
+}
+
 function focusSub(projectId: string, sessionId: string): void {
   projects.select(projectId)
   projects.focusSession(projectId, sessionId)
@@ -902,12 +916,12 @@ async function confirmRemoveNow(): Promise<void> {
               v-for="(s, i) in item.sessions"
               :key="s.id"
               class="sub-row"
-              :class="{ sel: item.session?.id === s.id }"
+              :class="{ sel: isFocusedSub(item, s.id) }"
             >
             <button
               type="button"
               class="sub-line"
-              :class="{ sel: item.session?.id === s.id }"
+              :class="{ sel: isFocusedSub(item, s.id) }"
               :data-testid="`sidebar-subsession-${s.id}`"
               :title="`${markTitle(sessionStatus(s))} — ${s.name ?? s.branch ?? 'no branch'} · session ${s.id}`"
               @click.stop="focusSub(item.id, s.id)"

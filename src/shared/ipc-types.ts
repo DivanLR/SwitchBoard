@@ -406,7 +406,19 @@ export interface InvokeMap {
    * who typed into the chat expects the answer in the chat.
    */
   'specs.runInSession': {
-    req: { projectId: string; text: string; background?: boolean }
+    req: {
+      projectId: string
+      text: string
+      background?: boolean
+      /**
+       * This dispatch may write a diagram, so tell the Diagrams section when the
+       * turn ends rather than leaving it to find out. Set by the Diagrams tab's
+       * Commands row: a plugin command draws through the skill's own machinery,
+       * so the app never learns the file name and cannot poll for it the way the
+       * Generate button does.
+       */
+      watchDiagrams?: boolean
+    }
     res: { sessionId: string }
   }
   /** Eval loop (spec 002 US7): acceptance lines with their verdicts + ratings.
@@ -453,8 +465,37 @@ export interface InvokeMap {
    * reported as skipped with the reason rather than attempted (FR-057).
    */
   'verify.start': {
-    req: { projectId: string; stackId: string; suiteIds: string[] }
-    res: { sessionId: string; runs: VerifyRun[] }
+    req: {
+      projectId: string
+      stackId: string
+      suiteIds: string[]
+      /**
+       * Opt in to running each chosen suite in its OWN fresh container,
+       * sequentially, rather than sending the whole set to one combined
+       * background session. Absent or false is EXACTLY today's behaviour in
+       * every respect: one session, one prompt naming every suite, one report.
+       *
+       * The reason to opt in is memory isolation, not speed — it is strictly
+       * slower, since a container starts fresh per suite instead of once for
+       * the lot. Suites sharing one container share its memory ceiling, and a
+       * heavy suite has been killing that container out from under the others
+       * (exit 137, SIGKILL, no stderr — nothing left behind to explain why the
+       * whole run went quiet). Closing each suite's container before the next
+       * one starts means a suite that blows its own budget takes down only
+       * itself.
+       */
+      isolated?: boolean
+    }
+    /**
+     * `sessionId` is the background session this call opened to plan the run.
+     * NULL on the isolated path, and that is the honest answer rather than a
+     * gap: an isolated run opens no shared session, because each suite opens
+     * and closes its own in turn. Opening one anyway, purely so this field
+     * could be a string, would strand a container that nothing ever reclaims —
+     * a background session that never runs a turn is one endIfIdleBackground
+     * will not close, and there are only two container slots on the machine.
+     */
+    res: { sessionId: string | null; runs: VerifyRun[] }
   }
   /** Capture evidence for a finished run without re-running its tests (FR-059).
    *  Attaches to `runId`, or to the newest run when omitted. */
@@ -676,6 +717,26 @@ export interface VerifyChangedPush {
   runs: VerifyRun[]
 }
 
+/**
+ * A project's diagram folder, pushed the moment the session drawing one finishes
+ * its turn.
+ *
+ * The section used to learn about a finished diagram only by asking: the store
+ * polled `diagrams.list` on a timer, so a drawing that landed a moment after a
+ * tick sat there unseen until the next one. The app is not what writes the file —
+ * the session is — but the app knows exactly when that session's turn ended, and
+ * a turn that ended is a file that exists. That is a push, not a question worth
+ * repeating for twenty minutes.
+ *
+ * Carries the whole folder listing rather than just the project id, like every
+ * other channel here, so the section redraws from the push instead of answering
+ * it with another round trip.
+ */
+export interface DiagramsChangedPush {
+  projectId: string
+  entries: DiagramEntry[]
+}
+
 /** An API eval set's calls, pushed as the run finishes: the requests the app sent
  *  and the statuses it received, so the panel fills in without a refresh. */
 export interface ApiChangedPush {
@@ -692,6 +753,7 @@ export interface PushMap {
   'push.queueChanged': QueueChangedPush
   'push.evalsChanged': EvalsChangedPush
   'push.verifyChanged': VerifyChangedPush
+  'push.diagramsChanged': DiagramsChangedPush
   'push.apiChanged': ApiChangedPush
   'push.projectCommands': ProjectCommandsPush
   'push.focusRequest': FocusRequestPush
@@ -717,6 +779,7 @@ const PUSH_CHANNEL_KEYS: Record<PushChannel, true> = {
   'push.queueChanged': true,
   'push.evalsChanged': true,
   'push.verifyChanged': true,
+  'push.diagramsChanged': true,
   'push.apiChanged': true,
   'push.projectCommands': true,
   'push.focusRequest': true,

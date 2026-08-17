@@ -603,6 +603,33 @@ export interface Settings {
    * empty string.
    */
   projectSuiteCommands: Record<string, Record<string, string>>
+  /**
+   * Suite ids ticked for a project's Tests section, so leaving the section (or
+   * switching project and back) does not reset a choice the developer already
+   * made. Absent means nothing chosen yet, and the section falls back to
+   * defaultSelection() the same way it always has.
+   *
+   * A restored value is not trusted outright: TestsView narrows it against
+   * whatever this project's own detection currently offers, the same filter it
+   * already applies to a live selection when detection narrows mid-session — a
+   * suite id this project was never offered must never reach verify.start, and
+   * the count must never read "9 of 7".
+   */
+  projectTestSelection: Record<string, string[]>
+  /**
+   * Run each ticked suite in its own fresh container, one at a time, instead of
+   * every suite in the run sharing the project's one background container.
+   *
+   * Off (absent, or false) is exactly today's behaviour: one prompt naming every
+   * chosen suite, dispatched to one container. On trades wall-clock time for
+   * memory isolation — the reason it exists is a heavy suite killing the shared
+   * container out from under the others (exit 137, SIGKILL, no stderr).
+   *
+   * Persisted per project for the same reason as projectTestSelection: a
+   * per-run choice the developer has to re-tick on every project switch is a
+   * choice the app keeps forgetting.
+   */
+  projectIsolatedRuns: Record<string, boolean>
   /** Base URL an API eval set calls for a project, e.g. http://localhost:5057.
    *  Absent means it is read from the project's launchSettings.json instead. */
   projectApiBase: Record<string, string>
@@ -692,6 +719,8 @@ export const DEFAULT_SETTINGS: Settings = {
   projectWorkerModels: {},
   projectTestStacks: {},
   projectSuiteCommands: {},
+  projectTestSelection: {},
+  projectIsolatedRuns: {},
   projectApiBase: {},
   projectApiStart: {},
   projectApiQa: {},

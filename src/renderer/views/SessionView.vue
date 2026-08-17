@@ -748,8 +748,8 @@ function runInSection(text: string): void {
  * correct trade for these three: they are short, they end in a file path, and an
  * answer in the wrong place beats no answer at all.
  */
-function runPluginCommand(text: string): void {
-  void specs.runInSession(props.project.id, text, false).then((id) => {
+function runPluginCommand(text: string, watchDiagrams = false): void {
+  void specs.runInSession(props.project.id, text, false, watchDiagrams).then((id) => {
     // Pointed at the section's own terminal, even though this ran in the
     // conversation's session. Where it RUNS is a fact about which environment has
     // the plugin; where it is WATCHED is a fact about where the developer asked
@@ -758,6 +758,20 @@ function runPluginCommand(text: string): void {
     // looking.
     sectionSessionId.value = id
   })
+}
+
+/**
+ * A diagram command: a plugin command that may WRITE something.
+ *
+ * The same dispatch as any other plugin command, with one extra fact told to the
+ * main process — this turn may leave a diagram behind, so announce the folder
+ * when it ends. Without it the Generate button's drawings appeared the instant
+ * they landed and a command's did not appear at all until some later, unrelated
+ * load: two routes to the same folder behaving differently, which is exactly the
+ * kind of difference nobody can guess at from the outside.
+ */
+function runDiagramCommand(text: string): void {
+  runPluginCommand(text, true)
 }
 
 /**
@@ -1317,7 +1331,7 @@ const {
       :installing="installing === DIAGRAM_PLUGIN.pkg"
       :install-error="installError"
       @install="installDiagramPlugin"
-      @run="runPluginCommand"
+      @run="runDiagramCommand"
     />
 
     <!-- Clean stream (an open agent chat always renders clean) -->
@@ -1872,9 +1886,12 @@ const {
 }
 
 /* Inline, so the send target no longer needs a rule of its own under the field. */
+/* The 8px padding-bottom that used to sit here was a nudge to fake alignment
+   against the row's flex-end, and it is gone: styles.css now gives every
+   control in this row one shared height so their centres agree without any
+   per-control compensation. */
 .to-inline {
   flex: none;
-  padding-bottom: 8px;
   font-size: var(--fs-micro);
   color: var(--text-faint);
   white-space: nowrap;

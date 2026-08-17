@@ -88,18 +88,23 @@ const store = reactive({
    */
   async awaitFile(projectId: string, file: string): Promise<void> {
     const deadline = Date.now() + 20 * 60_000
-    // Each round below is a synchronous directory scan in the main process, and a
-    // diagram that took the full twenty minutes to land used to cost roughly 480
-    // of them at a flat 2500ms cadence. Doubling the wait after every empty round,
-    // capped at 10s, keeps a fast diagram noticed fast (the common case: most
-    // land in the first poll or two) while a long draw settles into a fraction of
-    // that traffic instead of all 480 rounds landing at the same 2.5s cadence.
-    // The deadline above stays WALL CLOCK (Date.now() vs deadline, not a loop
-    // count), so a slower cadence near the end costs traffic, never the budget.
-    let delay = 2500
+    // This is the FALLBACK now, not the mechanism. push.diagramsChanged fires the
+    // moment the drawing session's turn ends and applyChanged() below shows the
+    // file then, so in the ordinary case this loop never gets to report anything.
+    //
+    // It stays because it answers two questions the push cannot: a session that
+    // DIED (no turn end, so no push — see the fate check below) and a drawing that
+    // never arrives at all, which is what the twenty-minute message is for.
+    //
+    // The cadence went back to a flat 2.5s. It had been backed off to 10s when
+    // every round was a synchronous directory scan in the main process; that
+    // handler is asynchronous now, so the traffic the back-off was buying against
+    // is largely gone — and the back-off was paid for in the one place it is felt,
+    // as up to ten seconds between a diagram landing and appearing. The deadline
+    // stays WALL CLOCK (Date.now() vs deadline, never a loop count).
+    const POLL_MS = 2500
     while (Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, delay))
-      delay = Math.min(delay * 2, 10_000)
+      await new Promise((resolve) => setTimeout(resolve, POLL_MS))
       // The developer switched project, or asked for something else: this poll
       // is no longer about anything on screen.
       if (this.pending?.projectId !== projectId || this.pending.file !== file) return
@@ -158,6 +163,29 @@ const store = reactive({
       this.error = `${file} has not appeared after twenty minutes. The background session may still be drawing it, or it may have failed — open that session to see, or ask again.`
       this.pending = null
     }
+  },
+
+  /**
+   * The folder as the main process just found it, pushed the instant the drawing
+   * session's turn ended.
+   *
+   * This is what makes a finished diagram appear immediately instead of on the
+   * next poll. It carries the whole listing, so nothing is fetched in response.
+   *
+   * It also resolves the pending row, and has to: the poll in awaitFile is what
+   * used to notice the file and select it, and if the push gets there first that
+   * loop would otherwise keep claiming the drawing is on its way until its own
+   * next round. Selecting it is deliberate for the same reason the poll does it —
+   * waiting minutes for one drawing and then having to hunt for it in the list
+   * reads as the drawing having failed.
+   */
+  applyChanged(projectId: string, entries: DiagramEntry[]): void {
+    this.byProject[projectId] = entries
+    const waiting = this.pending
+    if (!waiting || waiting.projectId !== projectId) return
+    if (!entries.some((d) => d.file === waiting.file)) return
+    this.pending = null
+    void this.select(projectId, waiting.file)
   },
 
   async open(projectId: string, file: string): Promise<void> {

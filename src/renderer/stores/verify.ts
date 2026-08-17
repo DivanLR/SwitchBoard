@@ -51,12 +51,27 @@ const store = reactive({
     this.byProject[projectId] = runs
   },
 
-  /** Start a run over the chosen suites. Resolves to true when it was dispatched. */
-  async start(projectId: string, stackId: string, suiteIds: string[]): Promise<boolean> {
+  /**
+   * Start a run over the chosen suites.
+   *
+   * `isolated` runs each suite in its own fresh container, sequentially, rather
+   * than sharing the project's one background container for the whole run — the
+   * opt-in fix for a heavy suite killing that shared container's memory ceiling
+   * out from under the others (exit 137, SIGKILL, no stderr). Defaulted to
+   * false so every existing caller keeps dispatching exactly as it always has.
+   *
+   * Resolves to true when it was dispatched.
+   */
+  async start(
+    projectId: string,
+    stackId: string,
+    suiteIds: string[],
+    isolated = false,
+  ): Promise<boolean> {
     this.error = null
     this.starting = true
     try {
-      const { runs } = await invoke('verify.start', { projectId, stackId, suiteIds })
+      const { runs } = await invoke('verify.start', { projectId, stackId, suiteIds, isolated })
       this.byProject[projectId] = runs
       await surfaceNewSessions()
       return true

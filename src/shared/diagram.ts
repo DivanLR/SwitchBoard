@@ -114,6 +114,32 @@ export const DIAGRAM_PLUGIN = {
  * diagram this section already knows about — those can run on the one in the
  * pane without the developer typing a path.
  */
+/**
+ * A plugin command from the Diagrams tab, told where this section actually looks.
+ *
+ * The Generate button goes through diagramPrompt, which names the folder in its
+ * first instruction. A command typed or picked from the Commands menu was sent
+ * verbatim instead, so the plugin used its own default — `docs/` — and the file
+ * landed one directory above the only folder `diagrams.list` reads. The section
+ * then showed nothing, for a drawing that had been written perfectly well.
+ *
+ * Confirmed rather than assumed: two real files, bundles-worker-architecture and
+ * bundles-worker-steps, sit in a project's `docs/` today with no `docs/diagrams`
+ * beside them, both produced by `/diagram-design:export-diagram`.
+ *
+ * Appended rather than injected into the command itself, because what the
+ * developer typed is theirs and the plugin parses its own arguments: this adds a
+ * sentence after it, exactly as a person would.
+ */
+export function diagramCommandText(typed: string): string {
+  return (
+    `${typed}\n\n` +
+    `Write any diagram file you create or export into ${DIAGRAMS_DIR}/, creating ` +
+    'that folder if it does not exist. It is the only folder this application ' +
+    'lists diagrams from, so a file written anywhere else will not appear.'
+  )
+}
+
 export const DIAGRAM_COMMANDS = [
   {
     command: 'export-diagram',

@@ -68,6 +68,7 @@ function setup() {
     onQueueChanged: () => {},
     onEvalsChanged: () => {},
     onVerifyChanged: () => {},
+    onDiagramsChanged: () => {},
     onApiRequests: () => {},
     onApiChanged: () => {},
     onProjectCommands: () => {},

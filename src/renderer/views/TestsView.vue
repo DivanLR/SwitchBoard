@@ -123,6 +123,55 @@ const suites = computed<TestSuite[]>(() => {
 })
 const blockedReason = (suite: TestSuite): string | null => unavailableReason(suite, sandboxed.value)
 
+/**
+ * What hovering a suite chip says.
+ *
+ * A red chip provokes exactly one question — why — and the title used to answer
+ * it with the bare `detail` string and nothing else, so "3 failed" was the whole
+ * story and the command that produced it was only visible on a suite that had
+ * never run. Both belong here: knowing what actually ran is most of knowing why
+ * it failed, especially on a project whose command has been overridden.
+ *
+ * A native title rather than a hover panel, because that is the idiom this row
+ * already uses for the blocked reason and the command, and the run's full
+ * per-suite detail already has a permanent home in the Results panel below —
+ * this is the glance, not the record.
+ */
+/**
+ * A suite that failed and is ticked for the next run.
+ *
+ * "Failed" is a fact about the last run; "queued" is an intention about the
+ * next. A chip that only ever says the first leaves the developer counting
+ * ticks to work out what pressing Run would actually do — so the moment a red
+ * chip is selected, it is no longer only a failure, it is a failure about to be
+ * tried again. Excluded while `retrying`, because at that point it is not
+ * queued any more, it is running, and that has its own amber state.
+ */
+function isQueuedRetry(row: {
+  suite: TestSuite
+  result: SuiteResult | null
+  retrying: boolean
+}): boolean {
+  return !row.retrying && row.result?.status === 'fail' && isSelected(row.suite)
+}
+
+function chipTitle(row: {
+  suite: TestSuite
+  result: SuiteResult | null
+  retrying: boolean
+}): string {
+  if (row.retrying) return `${row.suite.label} — running now\n\ncommand: ${row.suite.command}`
+  const blocked = blockedReason(row.suite)
+  if (blocked) return `${row.suite.label} — ${blocked}`
+  if (!row.result) return row.suite.command
+  const detail = row.result.detail ? `\n${row.result.detail}` : ''
+  // Worth saying: a verified figure came from the runner's own report file
+  // rather than from the session's account of it, which is the difference
+  // between a measurement and a claim.
+  const verified = row.result.verified ? '\nchecked against the runner’s own report file' : ''
+  return `${row.suite.label} — ${row.result.status}${detail}${verified}\n\ncommand: ${row.suite.command}`
+}
+
 const commandOverrides = computed<Record<string, string>>(
   () => settingsStore.settings?.projectSuiteCommands?.[props.projectId] ?? {},
 )
@@ -159,6 +208,13 @@ function saveCommand(suite: TestSuite): void {
   void settingsStore.save({ projectSuiteCommands: { ...all, [props.projectId]: mine } })
 }
 
+/** The developer's own ticks for this project (Settings.projectTestSelection),
+ *  read back so leaving the section — or switching project and back — does not
+ *  reset a choice already made. Null means nothing was ever chosen here. */
+const storedSelection = computed<string[] | null>(
+  () => settingsStore.settings?.projectTestSelection?.[props.projectId] ?? null,
+)
+
 // The default selection follows the environment: heavy suites are opt-in, and a
 // suite this environment cannot run starts unticked instead of failing later.
 watch(
@@ -169,7 +225,16 @@ watch(
       return
     }
     if (selected.value === null) {
-      selected.value = defaultSelection(list, sandbox)
+      // A restored selection is narrowed against what THIS environment actually
+      // offers before it is trusted at all — the exact rule the "kept" branch
+      // below enforces on a live selection once detection narrows mid-session.
+      // Without this, a selection saved under one stack (or one bypass state)
+      // could restore an id this project no longer offers, and the count would
+      // read "9 of 7".
+      const offered = new Set(list.map((suite) => suite.id))
+      selected.value = storedSelection.value
+        ? storedSelection.value.filter((id) => offered.has(id))
+        : defaultSelection(list, sandbox)
       return
     }
     // The offered list narrows once detection lands — a .NET project turns out to
@@ -182,6 +247,16 @@ watch(
   },
   { immediate: true },
 )
+
+// Persist every change — ticking a chip, or the narrowing above — the same
+// reasoning as projectTestStacks/projectSuiteCommands elsewhere in this file.
+// Skipped while `selected` is null: no stack chosen yet, or detection has not
+// landed, which is an absence of a choice, not a choice to remember.
+watch(selected, (ids) => {
+  if (ids === null) return
+  const current = settingsStore.settings?.projectTestSelection ?? {}
+  void settingsStore.save({ projectTestSelection: { ...current, [props.projectId]: ids } })
+})
 
 function toggleSuite(suite: TestSuite): void {
   if (blockedReason(suite)) return
@@ -208,6 +283,27 @@ const detectHint = computed(() =>
     ? `Looks like ${detected.value.map((s) => s.stackLabel).join(' + ')} from the project files — confirm that or pick another.`
     : 'Nothing conclusive in the project files — pick the stack yourself.',
 )
+
+/**
+ * Run each ticked suite in its own fresh container, one at a time, instead of
+ * every suite in the run sharing the project's one background container.
+ *
+ * Persisted per project (Settings.projectIsolatedRuns) for the same reason as
+ * the suite selection above: a per-run choice the developer has to re-tick on
+ * every project switch is a choice the app keeps forgetting. A plain computed
+ * rather than a seeded ref — unlike `selected` it has no narrowing to do
+ * against detection, so there is nothing to reconcile on a project switch.
+ */
+const isolated = computed(() => settingsStore.settings?.projectIsolatedRuns?.[props.projectId] ?? false)
+
+function toggleIsolated(): void {
+  void settingsStore.save({
+    projectIsolatedRuns: {
+      ...(settingsStore.settings?.projectIsolatedRuns ?? {}),
+      [props.projectId]: !isolated.value,
+    },
+  })
+}
 
 function chooseStack(id: string): void {
   selected.value = null
@@ -243,7 +339,7 @@ const subTabs = computed(() =>
 // The session tab is one click away for the raw output.
 async function runVerify(): Promise<void> {
   if (!stack.value || (selected.value ?? []).length === 0) return
-  if (await verify.start(props.projectId, stack.value.id, selected.value ?? [])) {
+  if (await verify.start(props.projectId, stack.value.id, selected.value ?? [], isolated.value)) {
     subTab.value = 'evidence'
   }
 }
@@ -338,8 +434,30 @@ const suiteResults = computed(
  *  called twice in the same expression is not narrowed by TypeScript just
  *  because the first call happened to be truthy. Joining once here gives the
  *  template a single value per chip that a nested v-if narrows properly. */
-const suiteRows = computed<{ suite: TestSuite; result: SuiteResult | null }[]>(() =>
-  suites.value.map((s) => ({ suite: s, result: suiteResults.value.get(s.id) ?? null })),
+/**
+ * The suites the live run was asked for, while it is still running them.
+ *
+ * A re-run clears the board: the new run's report is null until it reports, so
+ * the suite you just asked to try again loses its mark and reads as though it
+ * had never run at all — which is the opposite of what pressing retry should
+ * look like. These are the ids with a question in flight.
+ *
+ * Taken from the run's own `requested` list rather than from what was clicked,
+ * so a full run marks everything it covers and a single re-run marks exactly
+ * one, with no click state to keep in step.
+ */
+const inFlight = computed<Set<string>>(() =>
+  running.value ? new Set(latest.value?.requested ?? []) : new Set<string>(),
+)
+
+const suiteRows = computed<
+  { suite: TestSuite; result: SuiteResult | null; retrying: boolean }[]
+>(() =>
+  suites.value.map((s) => ({
+    suite: s,
+    result: suiteResults.value.get(s.id) ?? null,
+    retrying: inFlight.value.has(s.id),
+  })),
 )
 
 // The two quality tiles whose text is a decision rather than a value: an absent
@@ -528,11 +646,12 @@ function statusWord(run: VerifyRun): string {
                 {
                   on: isSelected(row.suite),
                   dev: !!blockedReason(row.suite),
+                  'q-surface': isQueuedRetry(row),
                 },
-                row.result ? `ran-${row.result.status}` : '',
+                row.retrying ? 'ran-retry' : row.result ? `ran-${row.result.status}` : '',
               ]"
               :disabled="!!blockedReason(row.suite)"
-              :title="row.result?.detail ?? blockedReason(row.suite) ?? row.suite.command"
+              :title="chipTitle(row)"
               :data-testid="`tests-suite-${row.suite.id}`"
               @click="toggleSuite(row.suite)"
             >
@@ -541,8 +660,19 @@ function statusWord(run: VerifyRun): string {
                    A tick only ever means pass. A failed suite gets its own mark and
                    its own colour, because a green tick on a failure is the one
                    mistake this panel must never make. -->
+              <!-- A run is in flight for this suite: neither a pass nor a
+                   failure, and painting it as either would claim an outcome the
+                   run has not produced yet. -->
               <span
-                v-if="row.result"
+                v-if="row.retrying"
+                class="suite-mark"
+                :data-testid="`tests-suite-mark-${row.suite.id}`"
+                aria-hidden="true"
+              >
+                <Icon name="dot" :size="9" />
+              </span>
+              <span
+                v-else-if="row.result"
                 class="suite-mark"
                 :data-testid="`tests-suite-mark-${row.suite.id}`"
                 aria-hidden="true"
@@ -627,6 +757,24 @@ function statusWord(run: VerifyRun): string {
           >
             Cancel
           </button>
+          <!-- Opt-in memory isolation: one container per suite instead of every
+               chosen suite sharing the project's one container for the whole run.
+               The idiom is SessionView's .bypass-inline switch, not a new control. -->
+          <span class="iso-inline mono">
+            <button
+              class="switch"
+              :class="{ on: isolated }"
+              data-testid="tests-isolated"
+              role="switch"
+              :aria-checked="isolated"
+              :disabled="verify.starting || running"
+              title="Each suite runs in its own fresh container, one at a time, so a heavy suite cannot exhaust the memory the others need. Only one suite runs at a time, so an isolated run takes longer than a combined one."
+              @click="toggleIsolated()"
+            >
+              <span class="knob"></span>
+            </button>
+            <span>Isolate each suite</span>
+          </span>
           <button
             class="run"
             :disabled="verify.starting || running || (selected ?? []).length === 0"
@@ -1337,6 +1485,33 @@ function statusWord(run: VerifyRun): string {
   background: color-mix(in srgb, var(--red) 16%, transparent);
 }
 
+/* Failed, and queued to run again -------------------------------------------
+   A failed suite that is ticked for the next run. Amber because DESIGN.md
+   spends colour only on a reading outside tolerance, and "attention owed" is
+   exactly what a queued retry is.
+
+   Declared AFTER .ran-fail so it wins on a chip that is both: once you have
+   said you are running it again, what happens next matters more than what
+   happened last time. It deliberately takes the same amber the chip wears while
+   running (.ran-retry below), so queued and running are one story told twice
+   rather than two unrelated colours the eye has to learn separately. */
+.chip.suite.q-surface {
+  color: var(--amber);
+  border-color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 16%, transparent);
+}
+
+/* Asked for, not yet answered. Amber because it is neither outcome: a chip that
+   went back to plain grey the moment you pressed retry read as though the run
+   had never happened, and painting it green or red would claim a result the run
+   has not produced. It wins over .ran-* by being declared first and overwritten
+   by nothing — the class is applied instead of the outcome, not on top of it. */
+.chip.suite.ran-retry {
+  color: var(--amber);
+  border-color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 16%, transparent);
+}
+
 /* Skipped, not run, unavailable: reported, but nothing was proved. Deliberately
    colourless — the one thing worse than no mark is a mark that reads as a pass. */
 .chip.suite.ran-skipped,
@@ -1394,6 +1569,18 @@ function statusWord(run: VerifyRun): string {
   border: 1px solid var(--border-strong);
   border-radius: var(--rc);
   color: var(--text-body);
+}
+
+/* The isolate switch + its label, riding beside the Run button. Same shape as
+   SessionView's .bypass-inline (a .switch is too small to read alone in a row
+   of button chips) — reused here rather than invented, per the design tooling
+   note above about following this codebase's own switch idiom. */
+.iso-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--fs-meta);
+  color: var(--text-faint);
 }
 
 .run {

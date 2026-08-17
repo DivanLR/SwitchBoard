@@ -244,11 +244,24 @@ test('the section offers the plugin commands, and runs one on the diagram in the
   )
   expect(await page.evaluate(() => window.__mock.state().sends.length)).toBe(before)
 
-  // The developer sends it, and what runs is exactly what was on screen.
+  // The developer sends it, and what runs STARTS with exactly what was on
+  // screen. It is no longer only that: the dispatch appends one sentence naming
+  // this section's folder, because a command sent truly verbatim let the plugin
+  // fall back to its own default of docs/ — one directory above the only folder
+  // the list reads — so a drawing that succeeded appeared nowhere. What the
+  // developer typed is still theirs and still first; the folder is stated after
+  // it, exactly as a person would add it.
   await page.getByTestId('diagram-generate').click()
   await expect
     .poll(async () => (await page.evaluate(() => window.__mock.state().sends)).at(-1)?.text)
-    .toBe(`/${DIAGRAM_PLUGIN.namespace}:export-diagram ${DIAGRAMS_DIR}/auth-flow.html`)
+    .toBe(
+      `/${DIAGRAM_PLUGIN.namespace}:export-diagram ${DIAGRAMS_DIR}/auth-flow.html
+
+` +
+        `Write any diagram file you create or export into ${DIAGRAMS_DIR}/, creating that ` +
+        'folder if it does not exist. It is the only folder this application lists ' +
+        'diagrams from, so a file written anywhere else will not appear.',
+    )
   await expect(page.getByTestId('diagram-input')).toHaveValue('')
 })
 
@@ -270,9 +283,18 @@ test('a command keeps the message typed after it, and sends both', async ({ page
   await page.getByTestId('diagram-input').pressSequentially('--png-only')
   await page.getByTestId('diagram-input').press('Enter')
 
+  // Same contract as above: the typed command and its argument survive intact
+  // as the first line, and the folder instruction follows it.
   await expect
     .poll(async () => (await page.evaluate(() => window.__mock.state().sends)).at(-1)?.text)
-    .toBe(`/${DIAGRAM_PLUGIN.namespace}:export-diagram --png-only`)
+    .toBe(
+      `/${DIAGRAM_PLUGIN.namespace}:export-diagram --png-only
+
+` +
+        `Write any diagram file you create or export into ${DIAGRAMS_DIR}/, creating that ` +
+        'folder if it does not exist. It is the only folder this application lists ' +
+        'diagrams from, so a file written anywhere else will not appear.',
+    )
 })
 
 // Text already in the box is not lost by opening the menu, and is not swallowed

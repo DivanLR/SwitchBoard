@@ -1,12 +1,26 @@
 // Diff tab (specs/003-diff-tab): readDiffList / readFileDiff against a real
 // git working tree — the porcelain/numstat/untracked-file-read combination
 // research.md decided on, not a mocked git.
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { execSync } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readDiffList, readFileDiff } from '@main/sessions/session-manager'
+
+// Every test here spawns several REAL git subprocesses (init, commit, add,
+// commit again, then readDiffList's own status/diff/numstat calls) rather than
+// mocking child_process — session-manager.ts's GIT_EXEC_OPTS already allows
+// each of those up to 8s (see its own comment), and vitest's 5s default test
+// timeout used to clear that with room to spare. It stopped doing so reliably
+// once the isolated-verify-suite feature added more test files that spawn
+// their own real subprocesses (verify-isolated.spec.ts, diagram-watch.spec.ts)
+// to the same parallel run: under that extra CPU/IO contention a legitimate,
+// eventually-successful git spawn can now take longer than 5s on a loaded
+// Windows box, and vitest killed the test before git ever got the chance to
+// finish OR hit its own 8s ceiling. Raised past that ceiling so the test's
+// deadline is never tighter than the operation it is exercising.
+vi.setConfig({ testTimeout: 20_000 })
 
 function initRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), 'diff-tab-'))

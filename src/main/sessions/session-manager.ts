@@ -25,10 +25,11 @@ import type {
   SessionEvent,
   SessionMode,
   SessionStatus,
+  SuiteResult,
   TranscriptSummary,
   VerifyReport,
 } from '@shared/domain'
-import { SWALLOWABLE_KINDS, verifyVerdict } from '@shared/domain'
+import { SWALLOWABLE_KINDS, emptyVerifyReport, verifyVerdict } from '@shared/domain'
 import type { IpcError, SessionStatusPush } from '@shared/ipc-types'
 import { newId, nowIso, type Repositories } from '@main/store/repositories'
 import { readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
@@ -49,12 +50,19 @@ import {
   writeTranscript,
 } from './transcript'
 import { parseEvalMarker } from '@main/evals/eval-dispatch'
-import { parseSuiteProgress, parseVerifyReport, verifyMarkerBroken } from '@main/evals/verify-dispatch'
+import {
+  parseSuiteProgress,
+  parseVerifyReport,
+  verifyMarkerBroken,
+  verifyPrompt,
+  type PlannedSuite,
+} from '@main/evals/verify-dispatch'
 import { parseDiagramPlan } from '@shared/diagram'
 import { reconcile } from '@main/evals/artefacts'
 import { scanArtefacts } from '@main/evals/artefact-scan'
 import { parseApiRequests } from '@main/evals/api-dispatch'
 import type { ApiRequestPlan } from '@shared/api-endpoints'
+import type { SandboxEnv, TestSuite } from '@shared/test-catalog'
 import { mainLoopModel } from './model-routing'
 import { resolveClaudeExecutable } from './claude-executable'
 import {
@@ -85,6 +93,16 @@ interface SessionManagerCallbacks {
   /** Fired when a verification run's report lands (or the run closes without
    *  one), so the Tests tab's gates and panels update as it finishes. */
   onVerifyChanged: (projectId: string) => void
+  /**
+   * Fired when the session drawing a diagram finishes a turn, so the section
+   * shows the file the moment it exists rather than on the next poll.
+   *
+   * A turn that ended is a file that exists: the app does not write the diagram,
+   * the session does, but the app knows exactly when that session stopped
+   * working. Only the diagram session's turns fire this — a verify pass
+   * completing says nothing about a drawing.
+   */
+  onDiagramsChanged: (projectId: string) => void
   /**
    * Fired when a session reports the request data for an API eval set. The app
    * then makes the calls itself — this callback carries data, never a result.
@@ -119,6 +137,16 @@ export interface HostedEntry {
   /** Whether a turn has ever completed here. A new session reads as idle before
    *  the section that asked for it has sent anything. */
   ranATurn: boolean
+  /**
+   * Set only on an isolated-verify suite session, to the RUN's id rather than
+   * this session's own — see sandboxSpawn's `nodeModulesVolumeKey`. Its
+   * presence is also what tells finaliseRow NOT to remove the node_modules
+   * volume when this one session ends: that volume is shared with the run's
+   * other suites, still to come, and runSuitesIsolated removes it itself once
+   * the whole run is over. Undefined for every ordinary session, which is what
+   * keeps their own end-of-life cleanup exactly as it was.
+   */
+  nodeModulesVolumeKey?: string
 }
 
 /**
@@ -467,6 +495,24 @@ export async function readFileDiff(projectPath: string, path: string): Promise<F
   return parseUnifiedDiff(diffOut)
 }
 
+/**
+ * A thrown value's message, tolerant of the two shapes this file's own errors
+ * take: a real `Error` (`.message`) and the plain `{ code, message } satisfies
+ * IpcError` objects thrown all over this class (startSession's "Project not
+ * found", "Sandbox full", …). `String(error)` on the latter gives the useless
+ * "[object Object]" — exactly the kind of unhelpful, non-null-but-meaningless
+ * detail this file's own HONESTY rule (verify-dispatch.ts) exists to forbid a
+ * SESSION from writing; runOneIsolatedSuite would otherwise commit the same
+ * sin on the app's own behalf when a suite's session fails to start.
+ */
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    return String((error as { message: unknown }).message)
+  }
+  return String(error)
+}
+
 export class SessionManager {
   private hosted = new Map<string, HostedEntry>()
   /* The starting-reservation guard is gone; a project is no longer capped at
@@ -655,8 +701,11 @@ export class SessionManager {
     carryTranscriptFrom?: string,
     /** Run in a container while keeping the mode's own permission behaviour. The
      *  sections ask for this; nothing else does. `background` marks a session
-     *  started FOR a section rather than by the developer. */
-    opts?: { containerised?: boolean; background?: boolean },
+     *  started FOR a section rather than by the developer. `nodeModulesVolumeKey`
+     *  is the isolated-verify path's own override — see sandboxSpawn and
+     *  HostedEntry's field of the same name; every other caller omits it and
+     *  gets today's per-session volume, unchanged. */
+    opts?: { containerised?: boolean; background?: boolean; nodeModulesVolumeKey?: string },
   ): Promise<Session> {
     const project = this.repos.projects.byId(projectId)
     if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
@@ -712,7 +761,7 @@ export class SessionManager {
     containerised: boolean,
     resume: boolean,
     carryTranscriptFrom: string | undefined,
-    opts: { containerised?: boolean; background?: boolean } | undefined,
+    opts: { containerised?: boolean; background?: boolean; nodeModulesVolumeKey?: string } | undefined,
   ): Promise<Session> {
     const projectId = project.id
     // No "already active" refusal (see startSession's doc). `resume` still means
@@ -789,6 +838,7 @@ export class SessionManager {
       background: opts?.background === true,
       ranATurn: false,
       session: null as unknown as HostedSession,
+      nodeModulesVolumeKey: opts?.nodeModulesVolumeKey,
     }
 
     const settings = this.repos.settings.get()
@@ -887,6 +937,10 @@ export class SessionManager {
         },
         mode,
         containerised,
+        // Isolated-verify suites only (see HostedEntry's field of the same
+        // name); every other caller leaves this undefined and sandboxSpawn
+        // defaults it to the session id, exactly as before.
+        nodeModulesVolumeKey: opts?.nodeModulesVolumeKey,
         // What the CLI itself reports, not what was asked for: a CLI too old to
         // honour 'plan' would otherwise leave the header claiming a restriction
         // that is not in force.
@@ -955,6 +1009,13 @@ export class SessionManager {
           this.observeBranch(entry)
           // A completed turn that left the session idle pulls the next planned task.
           this.maybeDrainQueue(entry.row.projectId)
+          // The turn that ends a drawing is the turn that wrote it — or the turn
+          // that failed to, which the section equally needs to stop waiting on.
+          // Either way the watch is spent, and releasing it here is what lets
+          // endIfIdleBackground close the session afterwards.
+          if (this.diagramWatch.delete(row.id)) {
+            this.callbacks.onDiagramsChanged(projectId)
+          }
         },
         onExit: (reason, detail) => this.handleExit(entry, reason, detail),
       })
@@ -1105,10 +1166,17 @@ export class SessionManager {
    * report), and queuing it into the chat session blocked the conversation and
    * interleaved build output with the developer's own work.
    *
-   * Reuse is keyed off the sessionId already persisted on the newest verify run,
-   * API run, or diagram request — no new table, and no second registry that
-   * could disagree with the work itself — so a verify run, an API set, and a
-   * diagram in the same project share one session.
+   * Reuse is keyed off the sessionId already persisted on the newest verify or
+   * API run — no new table, and no second registry that could disagree with the
+   * work itself — so a verify run and an API set in the same project share one
+   * session.
+   *
+   * Diagrams no longer do. They had joined this pool on the reasoning that a
+   * drawing is the same KIND of work — a long turn whose output you look at
+   * afterwards — which is true and turned out not to be the point. Sharing meant
+   * a diagram queued behind a verification pass, and its section sat saying
+   * "drawing…" for however long the suites took. Isolation is what the developer
+   * asked for, and diagramSessionFor below is where it lives.
    *
    * Deliberately never falls back to `activeForProject`: that IS the removed
    * behaviour, and a fallback would restore the bug on the first run after a
@@ -1118,11 +1186,39 @@ export class SessionManager {
     const candidates = [
       this.repos.verifyRuns.listForProject(projectId)[0]?.sessionId,
       this.repos.apiRuns.listForProject(projectId)[0]?.sessionId,
-      // Diagram generation joined this rather than taking a third session of its
-      // own: it is the same kind of work, a long turn whose output the developer
-      // wants to look at afterwards rather than watch arrive.
-      this.repos.diagramRequests.latestSessionFor(projectId),
     ]
+    return this.reuseOrStartBackground(projectId, candidates)
+  }
+
+  /**
+   * A drawing gets a container of its own. Every time, with no reuse.
+   *
+   * Separate from the Tests pool so a drawing never waits behind a verification
+   * pass, and — the developer's explicit direction on 2026-08-17 — separate from
+   * the PREVIOUS drawing too. Reusing a live drawing session was the obvious
+   * economy and it is not what was asked for: two diagrams sharing one session
+   * means the second queues behind the first, which is the same blocking this
+   * separation exists to remove, just moved one place along.
+   *
+   * The costs are real and neither is hidden. A containerised session holds one
+   * of MAX_CONTAINERS, which is 2 for the whole machine because they share one
+   * virtual machine, so two drawings at once consume it entirely and the next
+   * background dispatch anywhere is refused with SANDBOX_FULL until one ends.
+   * And a fresh container means a cold node_modules volume rather than a warm
+   * one. What makes that affordable is diagramWatch: the session closes itself
+   * on the turn that finishes the drawing, so a slot is held for the length of
+   * one drawing rather than for the rest of the day.
+   */
+  async diagramSessionFor(projectId: string): Promise<Session> {
+    return this.reuseOrStartBackground(projectId, [])
+  }
+
+  /** Shared tail of the two resolvers above: take the first candidate that is
+   *  still alive, else start a background session. */
+  private async reuseOrStartBackground(
+    projectId: string,
+    candidates: readonly (string | null | undefined)[],
+  ): Promise<Session> {
     for (const id of candidates) {
       if (!id) continue
       const existing = this.repos.sessions.byId(id)
@@ -1154,8 +1250,21 @@ export class SessionManager {
     const run = this.repos.verifyRuns.byId(runId)
     if (!run) throw { code: 'NOT_FOUND', message: 'Run not found' } satisfies IpcError
     if (run.status !== 'running') return
-    if (run.sessionId) await this.interruptSession(run.sessionId).catch(() => {})
-    this.verifyWatch.delete(run.sessionId ?? '')
+    // The isolated path (runSuitesIsolated) never puts a session on the row
+    // itself — a fresh one starts per suite — so the ordinary run.sessionId
+    // branch below has nothing to interrupt for it. isolatedRuns is the only
+    // record of which session is currently live, and `cancelled` is what stops
+    // the QUEUE: runSuitesIsolated's loop checks it before every suite, so a
+    // cancel here reaches suites that have not even started yet, not only the
+    // one in flight.
+    const isolated = this.isolatedRuns.get(runId)
+    if (isolated) {
+      isolated.cancelled = true
+      if (isolated.sessionId) await this.interruptSession(isolated.sessionId).catch(() => {})
+    } else {
+      if (run.sessionId) await this.interruptSession(run.sessionId).catch(() => {})
+      this.verifyWatch.delete(run.sessionId ?? '')
+    }
     this.repos.verifyRuns.finish(runId, 'inconclusive', null, CANCEL_NOTE)
     this.callbacks.onVerifyChanged(run.projectId)
   }
@@ -1350,6 +1459,7 @@ export class SessionManager {
   private scanMarkers(entry: HostedEntry, kind: EventKind, payload: unknown): void {
     this.scanEvalMarker(entry, kind, payload)
     this.scanVerifyReport(entry, kind, payload)
+    this.scanIsolatedSuiteReport(entry, kind, payload)
     this.scanApiRequests(entry, kind, payload)
     this.scanDiagramPlan(entry, kind, payload)
   }
@@ -1384,6 +1494,37 @@ export class SessionManager {
 
   watchApiRequests(sessionId: string, runId: string): void {
     this.apiWatch.set(sessionId, { runId })
+  }
+
+  // --- Diagrams ---
+  /**
+   * A drawing in flight, so nothing closes the session out from under it.
+   *
+   * This exists because three real diagram requests died four to six seconds
+   * after being asked for, with the session still reading 'working'. The cause
+   * was not the model: endIfIdleBackground closes a background session the moment
+   * it looks idle, and "idle" was defined as no verify watch, no API watch, no
+   * eval watch and an empty task queue. A diagram registered none of those, so a
+   * 'done' still in flight from the session's PREVIOUS turn was enough to have it
+   * stopped while it was drawing. The drawing was the one kind of section work
+   * with nothing standing up for it.
+   *
+   * Keyed by session like the three watches above, and cleared on the turn that
+   * finishes the drawing — which is also exactly when the file exists and the
+   * section should be told (see onTurnComplete).
+   */
+  private diagramWatch = new Map<string, { file: string | null }>()
+
+  /**
+   * `file` is optional because the two callers know different amounts. The
+   * Generate button names the file it already chose; a plugin command typed in
+   * the Commands row (/diagram-design:export-diagram) does not, since the skill
+   * decides that itself. Neither needs it to work — the watch's whole job is to
+   * mark that a drawing is in flight in this session — so the name is recorded
+   * for legibility rather than read.
+   */
+  watchDiagram(sessionId: string, file?: string): void {
+    this.diagramWatch.set(sessionId, { file: file ?? null })
   }
 
   private scanApiRequests(entry: HostedEntry, kind: EventKind, payload: unknown): void {
@@ -1503,6 +1644,244 @@ export class SessionManager {
     this.callbacks.onVerifyChanged(entry.row.projectId)
   }
 
+  // --- Isolated verify suites (opt-in: one fresh container per suite, run
+  // sequentially — see runSuitesIsolated) ---
+  //
+  // This is deliberately its own tiny map rather than a third `kind` on
+  // verifyWatch above. verifyWatch's report handler FINISHES THE WHOLE RUN the
+  // moment a report lands (see scanVerifyReport / watchVerifyReport's own
+  // comment on why one watch per session is the rule) — exactly wrong for an
+  // isolated suite, where a report is one suite of several still to come, and
+  // the run closes once, at the very end, in runSuitesIsolated itself.
+  // Reusing parseVerifyReport (not a second parser) because the prompt each
+  // isolated session gets IS an ordinary verifyPrompt over a one-entry plan, so
+  // its answer is an ordinary VerifyReport whose `suites` array happens to
+  // have one element.
+  private isolatedSuiteWatch = new Map<string, { suite: TestSuite; settle: (result: SuiteResult) => void }>()
+
+  private scanIsolatedSuiteReport(entry: HostedEntry, kind: EventKind, payload: unknown): void {
+    const watch = this.isolatedSuiteWatch.get(entry.row.id)
+    if (!watch || !SessionManager.EVAL_SCAN_KINDS.has(kind)) return
+    const text = (payload as { text?: string }).text
+    if (!text) return
+    const report = parseVerifyReport(text)
+    // A single-entry plan means at most one suite can legitimately appear.
+    // Nothing here (a broken marker, or none yet) is left to the turn-end /
+    // deadline path in waitForIsolatedSuite to settle instead — the same
+    // "never left waiting forever" guarantee verifyWatch gives the shared path.
+    const result = report?.suites[0]
+    if (!result) return
+    watch.settle(result)
+  }
+
+  /**
+   * The turn ended (or the session died) with no report for the suite this
+   * session was asked to run. Mirrors closeUnreportedVerify's job for the
+   * isolated path: `not_run` names what proved nothing, never a pass and never
+   * silently dropped from the run's report.
+   */
+  private closeUnreportedIsolatedSuite(entry: HostedEntry): void {
+    const watch = this.isolatedSuiteWatch.get(entry.row.id)
+    if (!watch) return
+    watch.settle({
+      id: watch.suite.id,
+      label: watch.suite.label,
+      status: 'not_run',
+      detail: 'The session ended before this suite reported a result — open its output to see what ran.',
+    })
+  }
+
+  /**
+   * Wait for one isolated suite's outcome: its report arriving (settled by
+   * scanIsolatedSuiteReport), its turn ending or its session dying without one
+   * (closeUnreportedIsolatedSuite, called from handleStatusChange/handleExit),
+   * or this deadline — RUN_DEADLINE_MS, the same ceiling the shared-container
+   * watchdog uses, because a suite that never finishes needs the same "give up
+   * eventually" rule a whole run does, not a fresh guess.
+   *
+   * `settle` is idempotent and always clears the watch entry, so whichever of
+   * the three paths gets there first wins and the other two become no-ops —
+   * there is exactly one outcome per suite, however it arrives.
+   */
+  private waitForIsolatedSuite(sessionId: string, suite: TestSuite): Promise<SuiteResult> {
+    return new Promise<SuiteResult>((resolve) => {
+      let settled = false
+      const settle = (result: SuiteResult): void => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        this.isolatedSuiteWatch.delete(sessionId)
+        resolve(result)
+      }
+      const timer = setTimeout(() => {
+        settle({
+          id: suite.id,
+          label: suite.label,
+          status: 'not_run',
+          detail:
+            'This suite went quiet for long enough that its session is presumed dead, so nothing it measured is known.',
+        })
+      }, RUN_DEADLINE_MS)
+      timer.unref?.()
+      this.isolatedSuiteWatch.set(sessionId, { suite, settle })
+    })
+  }
+
+  /**
+   * In-flight isolated verify runs, keyed by run id, so cancelVerifyRun can
+   * reach one. Unlike the shared-container path, an isolated run's row never
+   * names one session (VerifyRun.sessionId) — a fresh session starts per
+   * suite — so this is the only record of which session is currently live.
+   * `cancelled` is checked before every suite in runSuitesIsolated's loop, so
+   * a cancel stops the QUEUE, not just whatever is running right now.
+   */
+  private isolatedRuns = new Map<string, { cancelled: boolean; sessionId: string | null }>()
+
+  /**
+   * The opt-in alternative to the shared-container verify run (see this
+   * feature's contract in the task that added it): each RUNNABLE suite in
+   * `plan` gets its OWN fresh containerised session, run one at a time, its
+   * container gone before the next suite's begins. The reason is memory
+   * isolation — suites sharing one container and one memory ceiling had a
+   * heavy suite killing that container out from under the others (exit 137,
+   * no stderr) — and sequential-with-a-fresh-container-each is the fix.
+   *
+   * Suites carrying `.unavailable` are skipped outright: they were never going
+   * to run, and whatever built this plan (planSuites) already reports them as
+   * skipped through the normal channel — recording them again here would be a
+   * second, redundant report of the same fact.
+   *
+   * Resolves once every suite has settled and the run has been closed with ONE
+   * `finish()` call — never per suite — matching the existing shared-container
+   * contract that a run closes once (repos.verifyRuns.finish) no matter how
+   * many suites it covered.
+   */
+  async runSuitesIsolated(input: {
+    runId: string
+    projectId: string
+    plan: PlannedSuite[]
+    stackLabel: string
+    sandboxed: SandboxEnv
+    dbServers: readonly string[]
+  }): Promise<void> {
+    const { runId, projectId, plan, stackLabel, sandboxed, dbServers } = input
+    const control: { cancelled: boolean; sessionId: string | null } = { cancelled: false, sessionId: null }
+    this.isolatedRuns.set(runId, control)
+    const provedNothing: string[] = []
+    try {
+      for (const planned of plan) {
+        // Checked before every suite, not just once: this is what makes a
+        // cancel stop the QUEUE rather than only the suite already running.
+        if (control.cancelled) break
+        if (planned.unavailable) continue
+        const result = await this.runOneIsolatedSuite(
+          runId,
+          projectId,
+          planned,
+          stackLabel,
+          sandboxed,
+          dbServers,
+          control,
+        )
+        // noteSuite is itself guarded on the run still being 'running' (see its
+        // own comment), so a report arriving after a cancel already finished
+        // this run is a harmless no-op rather than reopening a settled verdict.
+        this.repos.verifyRuns.noteSuite(runId, result)
+        this.callbacks.onVerifyChanged(projectId)
+        if (result.status === 'not_run') provedNothing.push(result.id)
+      }
+    } finally {
+      this.isolatedRuns.delete(runId)
+      // The run's own node_modules volume (see nodeModulesVolumeKey on
+      // HostedEntry and in docker-sandbox.ts) — nothing after this run reads it
+      // again, unlike a session's OWN volume which finaliseRow already leaves
+      // alone mid-run for exactly the opposite reason (a sibling suite still
+      // needs it). A no-op docker call when the run never touched a Node
+      // project.
+      removeNodeModulesVolume(runId)
+    }
+    const run = this.repos.verifyRuns.byId(runId)
+    // A cancel finishes the row immediately (see cancelVerifyRun) rather than
+    // waiting for the in-flight suite to unwind, so by the time this loop ends
+    // the row may already be settled. Finishing it again here would overwrite
+    // that verdict with one built from a report the developer already told the
+    // app to discard.
+    if (!run || run.status !== 'running') return
+    const report = run.report ?? emptyVerifyReport()
+    const note =
+      provedNothing.length > 0
+        ? `${provedNothing.length === 1 ? 'This suite' : 'These suites'} proved nothing: ${provedNothing.join(', ')}.`
+        : null
+    this.repos.verifyRuns.finish(runId, verifyVerdict(report), report, note)
+    this.callbacks.onVerifyChanged(projectId)
+  }
+
+  /**
+   * One suite, start to finish: a fresh containerised background session, the
+   * ordinary verifyPrompt over a plan of just this suite, a wait for it to
+   * settle, then the session stopped and its container gone — awaited, so the
+   * caller's next iteration never starts a second container while this one is
+   * still tearing down (the entire point of the isolated path).
+   *
+   * Never throws: a suite whose session could not even start (Docker down, the
+   * two-container ceiling already spent by something else) is recorded the
+   * same way a suite that started and then reported nothing is — `not_run`,
+   * not dropped and not a pass — so one bad suite never takes the rest of the
+   * queue down with it.
+   */
+  private async runOneIsolatedSuite(
+    runId: string,
+    projectId: string,
+    planned: PlannedSuite,
+    stackLabel: string,
+    sandboxed: SandboxEnv,
+    dbServers: readonly string[],
+    control: { cancelled: boolean; sessionId: string | null },
+  ): Promise<SuiteResult> {
+    let session: Session
+    try {
+      session = await this.startSession(projectId, false, undefined, undefined, {
+        containerised: true,
+        background: true,
+        // Sequential by construction — see this key's own comment in
+        // docker-sandbox.ts for why sharing one node_modules volume across the
+        // whole run is safe here and nowhere else.
+        nodeModulesVolumeKey: runId,
+      })
+    } catch (error) {
+      return {
+        id: planned.suite.id,
+        label: planned.suite.label,
+        status: 'not_run',
+        detail: errorMessage(error),
+      }
+    }
+    control.sessionId = session.id
+    try {
+      // A cancel landing while this suite's container was still starting: stop
+      // it unused rather than sending a suite the developer already told the
+      // app to abandon.
+      if (control.cancelled) {
+        return { id: planned.suite.id, label: planned.suite.label, status: 'not_run', detail: CANCEL_NOTE }
+      }
+      const settle = this.waitForIsolatedSuite(session.id, planned.suite)
+      // The SAME prompt builder a shared-container run uses, over a one-entry
+      // plan, so wording, schema flags and sandbox notes never drift from what
+      // a normal run produces (see verifyPrompt's own contract).
+      this.sendMessage(session.id, verifyPrompt([planned], stackLabel, sandboxed, dbServers))
+      return await settle
+    } finally {
+      control.sessionId = null
+      // Awaited: the caller's loop must never start the next suite's container
+      // while this one is still shutting down.
+      await this.stopSession(session.id).catch(() => {
+        // Already gone (its own turn-end path — endIfIdleBackground — may have
+        // raced this and won; both are safe, stop() is idempotent and a second
+        // requireLive miss here is exactly "already stopped").
+      })
+    }
+  }
+
   /** Sink for the permission broker: markers and questions enter the stream here. */
   sinkFor(sessionId: string): EventSink {
     const entry = this.hosted.get(sessionId)
@@ -1615,6 +1994,7 @@ export class SessionManager {
       this.closeUnreportedVerify(entry)
       this.closeUnreportedApi(entry)
       this.closeUnreportedEval(entry)
+      this.closeUnreportedIsolatedSuite(entry)
     }
     entry.row.status = status
     entry.row.statusDetail = detail ?? null
@@ -1648,7 +2028,17 @@ export class SessionManager {
     if (!entry.background) return
     if (!entry.ranATurn) return
     const id = entry.row.id
-    if (this.verifyWatch.has(id) || this.apiWatch.has(id) || this.evalWatch.has(id)) return
+    // A drawing counts as outstanding work exactly like a run does. Leaving it
+    // out is what let three diagram sessions be stopped mid-draw — see
+    // diagramWatch for the incident this guard is written against.
+    if (
+      this.verifyWatch.has(id) ||
+      this.apiWatch.has(id) ||
+      this.evalWatch.has(id) ||
+      this.diagramWatch.has(id)
+    ) {
+      return
+    }
     if (this.repos.taskQueue.listForProject(entry.row.projectId).length > 0) return
     // Re-checked after the await inside stopSession's own path: a section can
     // dispatch again between the turn ending and this running.
@@ -1688,6 +2078,14 @@ export class SessionManager {
     this.closeUnreportedVerify(entry)
     this.closeUnreportedApi(entry)
     this.closeUnreportedEval(entry)
+    this.closeUnreportedIsolatedSuite(entry)
+    // A session that died mid-drawing releases its watch too, and tells the
+    // section — which then reads the file that is not there and says the session
+    // ended before it wrote anything, rather than waiting out twenty minutes for
+    // a drawing that stopped existing five seconds in.
+    if (this.diagramWatch.delete(entry.row.id)) {
+      this.callbacks.onDiagramsChanged(entry.row.projectId)
+    }
     if (reason === 'crashed') {
       entry.row.status = 'error'
       entry.row.statusDetail = detail ?? 'Session process ended unexpectedly'
@@ -1776,7 +2174,14 @@ export class SessionManager {
     // to remove right here rather than waiting for the 7-day sweep that catches
     // the home volume. Native sessions never had one; the guard just skips the
     // no-op docker call for the common case.
-    if (entry.containerised) removeNodeModulesVolume(entry.row.id)
+    //
+    // NOT here, though, when nodeModulesVolumeKey names a RUN rather than this
+    // session: that volume is shared with the isolated run's other suites,
+    // still to come, and removing it the moment this one suite's container ends
+    // would hand the next suite an empty tree — exactly the cold-install cost
+    // the shared key exists to avoid. runSuitesIsolated removes it itself, once,
+    // after the whole run is over.
+    if (entry.containerised && !entry.nodeModulesVolumeKey) removeNodeModulesVolume(entry.row.id)
     this.pushStatus(entry)
   }
 

@@ -871,6 +871,53 @@ html.sb-light .btn-solid {
   color: var(--text-faint);
 }
 
+/* One shared control height for the composer row -----------------------------
+   The row is `align-items: flex-end`, so every control's BOTTOM edge is the
+   alignment reference and its centre lands wherever its own box height puts it.
+   That was being managed per control by hand — .caret got a 20px box, .to-inline
+   an 8px padding-bottom, .send-btn 7px of vertical padding, and .queue-btn no
+   rule at all — so four controls sat at four different heights and none of them
+   agreed. Giving them one height makes the centres line up by construction,
+   which is the only version of this that survives someone changing the type
+   scale later. 27px is .send-btn's own natural height (11px meta text plus its
+   7px padding pair), so the row's tallest control keeps its size and the other
+   three grow to meet it. */
+.composer-row .caret,
+.composer-row .to-inline,
+.composer-row .queue-btn,
+.composer-row .send-btn {
+  min-height: 27px;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Add-to-queue, beside Send. It previously had NO rule anywhere: it was a bare
+   button carrying only .mono, which is why it sat lower than everything else
+   and why its label had no chip of its own. Quiet rather than solid, because
+   the row already has one affirmative action and two would compete. */
+.queue-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+  gap: 4px;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-mid);
+  font-size: var(--fs-meta);
+  padding: 6px 12px;
+  border-radius: var(--rc);
+  user-select: none;
+}
+
+.queue-btn:hover:not(:disabled) {
+  color: var(--text-strong);
+  border-color: var(--green);
+}
+
+.queue-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .send-btn {
   flex-shrink: 0;
   white-space: nowrap;

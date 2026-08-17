@@ -3,7 +3,7 @@
 // error codes survive Electron's error serialisation. Push channels batch
 // stream events at >= 30 Hz flushes (SC-007).
 import { dialog, ipcMain, shell, type BrowserWindow } from 'electron'
-import type { DiagramEntry, Session, SessionEvent } from '@shared/domain'
+import type { Session, SessionEvent } from '@shared/domain'
 import { canPassEval, isDangerousCommand, sessionName } from '@shared/domain'
 import { DIAGRAM_PLUGIN, DIAGRAMS_DIR, diagramFileName, diagramPrompt } from '@shared/diagram'
 import { CLEANUP_GROUPS } from '@shared/command-catalog'
@@ -52,6 +52,7 @@ import { comboDocPath, readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
 import { comboKey } from '@shared/mcp-combo'
 import { installSpecKit, readSpecDetail, readSpecKitState } from '@main/specs/spec-kit'
 import { readDiffList, readFileDiff } from '@main/sessions/session-manager'
+import { readDiagramList } from '@main/diagrams/list'
 import { check as checkForUpdates, installNow } from '@main/updater'
 
 const EVENT_FLUSH_INTERVAL_MS = 33 // >= 30 Hz (contract)
@@ -498,42 +499,10 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'diagrams.list': async (req) => {
       const project = repos.projects.byId(req.projectId)
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
-      const dir = join(project.path, DIAGRAMS_DIR)
-      // This used to be existsSync + readdirSync + statSync-per-file, all
-      // synchronous on the main thread — and the renderer polls this method
-      // every 2.5s for up to twenty minutes while a diagram generates (see
-      // 'diagrams.generate'), so a folder with many diagrams stalled the whole
-      // window on a timer the developer never asked to notice. fs/promises
-      // moves every read off the main thread; ENOENT is still exactly the
-      // "the project has generated nothing yet" case existsSync used to catch,
-      // so it is the only rejection folded into an empty list rather than
-      // left to propagate.
-      let files: string[]
-      try {
-        files = await readdir(dir)
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
-        throw error
-      }
-      const requests = repos.diagramRequests.forProject(req.projectId)
-      const entries = await Promise.all(
-        files
-          .filter((file) => file.toLowerCase().endsWith('.html'))
-          .map(async (file): Promise<DiagramEntry> => {
-            const info = await stat(join(dir, file))
-            const known = requests.get(file)
-            return {
-              file,
-              path: `${DIAGRAMS_DIR}/${file}`,
-              description: known?.description ?? null,
-              sessionId: known?.sessionId ?? null,
-              plan: known?.plan ?? null,
-              modifiedAt: info.mtime.toISOString(),
-              bytes: info.size,
-            }
-          }),
-      )
-      return entries.sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt))
+      // The listing itself lives in main/diagrams/list.ts: the push that fires
+      // when a drawing session finishes its turn answers the same question, and
+      // two copies of it would eventually disagree about one folder.
+      return readDiagramList(project.path, repos.diagramRequests.forProject(req.projectId))
     },
     'diagrams.generate': async (req) => {
       const project = repos.projects.byId(req.projectId)
@@ -543,12 +512,22 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       const file = diagramFileName(req.description, taken)
       // Never the chat session. Drawing a diagram is a long turn whose output the
       // developer wants to LOOK at, not watch arrive, and queued into the
-      // conversation it would block whatever they were actually doing. Same
-      // reasoning, and the same session, as a verify run.
-      const session = await manager.backgroundSessionFor(req.projectId)
+      // conversation it would block whatever they were actually doing.
+      //
+      // And no longer the Tests session either: this is diagramSessionFor, which
+      // is the project's own drawing session and nothing else's. Sharing one with
+      // verification meant a diagram queued behind a suite run and the section
+      // said "drawing…" for as long as the suites took. See its doc comment for
+      // what isolation costs against MAX_CONTAINERS.
+      const session = await manager.diagramSessionFor(req.projectId)
       // Recorded before the prompt is sent, so a crash mid-generation still leaves
       // the reason the file appeared (see DiagramRequestsRepo.record).
       repos.diagramRequests.record(req.projectId, file, req.description, session.id)
+      // Registered BEFORE the prompt, and that ordering is the whole point: the
+      // session is a background session, and a background session with nothing
+      // outstanding gets closed as idle. Three real drawings were stopped four
+      // seconds in because nothing said one was under way. See watchDiagram.
+      manager.watchDiagram(session.id, file)
       manager.sendMessage(session.id, diagramPrompt(req.description, file))
       return { sessionId: session.id, file }
     },
@@ -614,6 +593,12 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         ? await manager.backgroundSessionFor(req.projectId)
         : (repos.sessions.activeForProject(req.projectId) ??
           (await manager.startSession(req.projectId)))
+      // A diagram command dispatched from the Diagrams tab. Registered so the
+      // section is told the moment that turn ends, exactly as the Generate
+      // button already is: without it, a diagram written by a plugin command
+      // fired no push at all, and the folder it landed in was only re-read on
+      // some later, unrelated load. Same watch, so the two paths cannot drift.
+      if (req.watchDiagrams) manager.watchDiagram(session.id)
       manager.sendMessage(session.id, req.text)
       return { sessionId: session.id }
     },
@@ -754,14 +739,31 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       // The project's own verify session, not whichever session happens to be
       // open. A run is a long turn; in the chat session it blocks the
       // conversation for its whole duration. See SessionManager.verifySessionFor.
-      const session = await manager.backgroundSessionFor(req.projectId)
-      // A bypass session runs in the sandbox container, which ships node (plus
-      // .NET for a .NET project) and nothing else — the rest are named as
-      // skipped up front rather than attempted and reported as failures of the
-      // code (FR-057).
+      //
+      // NOT opened at all for an isolated run, and that is load-bearing rather
+      // than tidiness. An isolated run never sends this session anything —
+      // runSuitesIsolated opens and closes one container per suite — so a
+      // session opened here purely for its facts would be a background session
+      // that never runs a turn, and endIfIdleBackground only closes one that
+      // HAS (`if (!entry.ranATurn) return`). It could therefore never be
+      // reclaimed, and it would hold one of only two machine-wide container
+      // slots for the rest of the process. The two facts it was being opened
+      // for are both available without it, below.
+      const session = req.isolated ? null : await manager.backgroundSessionFor(req.projectId)
       const project = repos.projects.byId(req.projectId)
+      // What the suites will actually run INSIDE, so an environment limit is
+      // named before the run rather than reported afterwards as a failure of the
+      // developer's code (FR-057).
+      //
+      // Read from the project rather than from a session on the isolated path:
+      // every isolated suite is containerised by construction (runSuitesIsolated
+      // passes `containerised: true`), whichever permission mode the project
+      // uses, so the container's toolset is decided by the project's own stack
+      // and not by whether some session happens to be a bypass one.
       const sandboxed =
-        session.bypassPermissions === true && project ? sandboxToolsFor(project.path) : null
+        project && (req.isolated || session?.bypassPermissions === true)
+          ? sandboxToolsFor(project.path)
+          : null
       // A command the developer corrected for this project's layout replaces the
       // catalogue's guess. Applied here as well as in the panel so what runs is
       // exactly what the chip said it would run; suite ids are untouched, so gate
@@ -783,11 +785,31 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       const run = repos.verifyRuns.start({
         projectId: req.projectId,
         stackId: stack.id,
-        sessionId: session.id,
-        branch: session.branch ?? null,
+        // Isolated: no single session runs this run. Each suite gets its OWN
+        // fresh container in turn (SessionManager.runSuitesIsolated), so there
+        // is no session whose transcript the row could honestly point at —
+        // `sessionId` is nullable already (VerifyRun / verifyRuns.start both
+        // type it `string | null`), and that is exactly the case it exists for.
+        //
+        // The alternative — storing the shared background session's id here,
+        // the one opened just above for its sandbox/MCP facts — was rejected:
+        // nothing on the isolated path ever sends that session a message, so
+        // the panel's MiniTerminal would sit under the "verifying" label
+        // showing either nothing, or worse, whatever unrelated conversation
+        // that shared session already had before this run started. A stalled-
+        // looking terminal is a worse failure than no terminal, and TestsView's
+        // own `v-if="running && latest?.sessionId"` already treats a missing
+        // one as "nothing to show" rather than crashing — so this needs no
+        // renderer change, only the note that an isolated run's progress
+        // reaches the panel exclusively through the suite-by-suite
+        // `push.verifyChanged` updates, with no live terminal alongside them.
+        sessionId: session?.id ?? null,
+        // No session, so no branch to read off one. The run is still traceable
+        // by its own suite results; the branch label is the one fidelity an
+        // isolated run gives up for not stranding a container.
+        branch: session?.branch ?? null,
         requested: plan.map((p) => p.suite.id),
       })
-      manager.watchVerifyReport(session.id, run.id, 'suites')
       // Database MCP servers the run can actually reach: named in settings AND
       // reporting connected on this session. A name that is configured but absent
       // must not be offered, or the session queries a server that is not there.
@@ -795,10 +817,54 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       // This waits, because it has to: when the session above was just started,
       // its server list has not arrived yet, and reading it immediately would name
       // nothing at all. See SessionManager.connectedMcpServers.
+      //
+      // On the isolated path there is no shared session to ask, and asking one
+      // would be the wrong question anyway: each suite runs in its OWN fresh
+      // container, and what that container has connected is a fact only it can
+      // report. So the configured names travel down as the WANTED list and
+      // runSuitesIsolated narrows them per suite, against the session actually
+      // about to run it.
       const configured = repos.settings.get().databaseMcpServers ?? []
-      const dbServers = await manager.connectedMcpServers(session.id, configured)
-      manager.sendMessage(session.id, verifyPrompt(plan, stack.label, sandboxed, dbServers))
-      return { sessionId: session.id, runs: repos.verifyRuns.listForProject(req.projectId) }
+      const dbServers =
+        req.isolated || !session ? configured : await manager.connectedMcpServers(session.id, configured)
+      if (req.isolated) {
+        // Fire-and-forget, on purpose (the contract requires it): this handler
+        // must hand the caller its runs list immediately, and the queue this
+        // starts can run for as long as every chosen suite takes to boot a
+        // fresh container, run, and tear it down — strictly one at a time by
+        // design, never in parallel, so a heavy suite's container going down
+        // cannot take a sibling's memory with it. Suite results land through
+        // the same repos.verifyRuns.noteSuite the combined-container run's
+        // SWB_SUITE lines already use, and the run closes once at the end
+        // through the same finish() — no new table, no new column.
+        void manager.runSuitesIsolated({
+          runId: run.id,
+          projectId: req.projectId,
+          plan,
+          stackLabel: stack.label,
+          sandboxed,
+          dbServers,
+        })
+      } else if (session) {
+        // `session` is non-null on this branch by construction — it is created
+        // above exactly when `isolated` is false. Narrowed with a real check
+        // rather than an assertion, because the two conditions are the same
+        // fact expressed twice and a cast is how they would quietly drift
+        // apart later.
+        manager.watchVerifyReport(session.id, run.id, 'suites')
+        manager.sendMessage(session.id, verifyPrompt(plan, stack.label, sandboxed, dbServers))
+      }
+      // The response's own `sessionId` is unchanged by `isolated`: it names the
+      // background session this call used to plan the run (sandbox facts, MCP
+      // servers), not the run's own `sessionId` column, which is where the
+      // isolated/shared distinction actually lives. Nothing in the renderer
+      // reads this field today (verify.ts's store destructures only `runs`),
+      // and the response shape is fixed by the contract regardless.
+      // Null on the isolated path: this call opened no session, because each
+      // suite opens and closes its own. Nothing in the renderer reads this
+      // field (verify.ts destructures only `runs`), and the contract types it
+      // as part of the response rather than as a promise that one exists.
+      return { sessionId: session?.id ?? null, runs: repos.verifyRuns.listForProject(req.projectId) }
     },
     'verify.evidence': async (req) => {
       const run = req.runId

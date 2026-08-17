@@ -5,7 +5,7 @@
 // activates on an ordinary request — but the plugin does ship commands for
 // exporting and importing, and those are offered in the Commands menu.
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { DIAGRAM_COMMANDS, DIAGRAM_PLUGIN, DIAGRAMS_DIR } from '@shared/diagram'
+import { DIAGRAM_COMMANDS, DIAGRAM_PLUGIN, DIAGRAMS_DIR, diagramCommandText } from '@shared/diagram'
 import { relativeTime } from '@renderer/relative-time'
 import { normalizeForMatch } from '@renderer/composables/useCommandSuggestions'
 import { useDiagramsStore } from '@renderer/stores/diagrams'
@@ -62,9 +62,12 @@ async function generate(): Promise<void> {
   const text = description.value.trim()
   if (!text) return
   if (isCommand.value) {
-    // Sent verbatim, including whatever was typed after the command. Picking a
+    // What the developer typed, plus one sentence naming this section's own
+    // folder. It used to be sent truly verbatim, and the plugin then wrote to
+    // its own default of docs/ — one directory above the only folder the list
+    // below reads — so a drawing that succeeded showed up nowhere. Picking a
     // command from the menu only writes it here; sending stays the developer's.
-    emit('run', text)
+    emit('run', diagramCommandText(text))
     description.value = ''
     return
   }

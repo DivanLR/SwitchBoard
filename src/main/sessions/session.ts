@@ -93,6 +93,13 @@ interface HostedSessionOptions {
    *  resume needs it to open the ancestor's home volume, where the transcript the
    *  SDK is being asked to resume actually lives (see homeVolumeFor). */
   resumeFromSessionId?: string
+  /** Isolated-verify suites only: key the node_modules volume to the verify
+   *  RUN rather than this session, so every suite in that run shares one
+   *  `npm ci` instead of each container paying its own. Forwarded verbatim to
+   *  sandboxSpawn — see that parameter's own comment for why this is safe only
+   *  because runSuitesIsolated runs its sessions strictly one at a time.
+   *  Every other caller omits it and gets sandboxSpawn's per-session default. */
+  nodeModulesVolumeKey?: string
   systemPromptAppend?: string
   /** Path to the bundled standalone Claude executable (avoids the Electron spawn crash). */
   claudeExecutablePath?: string
@@ -297,6 +304,7 @@ export class HostedSession {
           refDirs: this.options.refDirs ?? [],
           sandboxMemory: this.options.sandboxMemory,
           resumeFromSessionId: this.options.resumeFromSessionId,
+          nodeModulesVolumeKey: this.options.nodeModulesVolumeKey,
         })
       : null
     this.sandbox = sandbox

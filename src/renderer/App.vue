@@ -7,6 +7,7 @@ import { useProjectsStore } from '@renderer/stores/projects'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useInboxStore } from '@renderer/stores/inbox'
 import { useQueueStore } from '@renderer/stores/queue'
+import { useDiagramsStore } from '@renderer/stores/diagrams'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { useUpdatesStore } from '@renderer/stores/updates'
 import Sidebar from '@renderer/components/Sidebar.vue'
@@ -24,6 +25,7 @@ const projects = useProjectsStore()
 const active = useActiveSessionStore()
 const inbox = useInboxStore()
 const queue = useQueueStore()
+const diagrams = useDiagramsStore()
 const settingsStore = useSettingsStore()
 const updates = useUpdatesStore()
 
@@ -111,6 +113,11 @@ onMounted(async () => {
     window.switchboard.on('push.counters', (counters) => projects.setCounters(counters)),
     window.switchboard.on('push.inboxChanged', (push) => inbox.applyInboxPush(push)),
     window.switchboard.on('push.queueChanged', (push) => queue.applyQueuePush(push)),
+    // A diagram appears the moment its session stops drawing, rather than on the
+    // next tick of the store's own poll.
+    window.switchboard.on('push.diagramsChanged', (push) =>
+      diagrams.applyChanged(push.projectId, push.entries),
+    ),
     window.switchboard.on('push.focusRequest', (push) => {
       if (push.target === 'inbox') {
         inbox.focusRequest(push.requestId)

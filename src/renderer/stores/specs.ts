@@ -76,8 +76,20 @@ const store = reactive({
    */
   /** Returns the session it went to, so a section can show that session's output
    *  while it works instead of a static word. */
-  async runInSession(projectId: string, text: string, background = false): Promise<string> {
-    const { sessionId } = await invoke('specs.runInSession', { projectId, text, background })
+  async runInSession(
+    projectId: string,
+    text: string,
+    background = false,
+    /** This dispatch may draw a diagram: have the main process announce the
+     *  folder when the turn ends, so the section updates without polling. */
+    watchDiagrams = false,
+  ): Promise<string> {
+    const { sessionId } = await invoke('specs.runInSession', {
+      projectId,
+      text,
+      background,
+      watchDiagrams,
+    })
     if (background) await useProjectsStore().refresh()
     return sessionId
   },

@@ -17,6 +17,7 @@ import { createNotifier } from './notifications'
 import { parseDeepLink, PROTOCOL_SCHEME } from './deep-link'
 import { registerProject } from './projects/discovery'
 import { computeCounters, registerIpcHandlers, RendererPush } from './ipc/handlers'
+import { readDiagramList } from './diagrams/list'
 import { initUpdater } from './updater'
 import { completeApiRun } from './evals/api-runner'
 
@@ -291,6 +292,18 @@ async function main(): Promise<void> {
       pusher.push('push.evalsChanged', { projectId, runs: repos.evals.listForProject(projectId) }),
     onVerifyChanged: (projectId) =>
       pusher.push('push.verifyChanged', { projectId, runs: repos.verifyRuns.listForProject(projectId) }),
+    // The diagram is on disk the moment its session's turn ends, so the section
+    // is told rather than left to ask again on a timer. Reads the folder through
+    // the same function the `diagrams.list` handler uses, so the pushed list and
+    // a fetched one cannot disagree. A read that fails pushes nothing: the
+    // section keeps what it had and its own poll is still there behind this.
+    onDiagramsChanged: (projectId) => {
+      const project = repos.projects.byId(projectId)
+      if (!project) return
+      void readDiagramList(project.path, repos.diagramRequests.forProject(projectId))
+        .then((entries) => pusher.push('push.diagramsChanged', { projectId, entries }))
+        .catch(() => {})
+    },
     // The session has produced request data for an API eval set; the app makes
     // the calls and judges them itself from here on (api-runner.ts).
     onApiRequests: (projectId, runId, requests) =>

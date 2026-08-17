@@ -69,6 +69,17 @@ const NUGET_VOLUME = 'switchboard-nuget'
  *
  * The cost is a cold tree per session, which NPM_CACHE_VOLUME below is there to
  * blunt.
+ *
+ * ADDENDUM, for the isolated-verify path (session-manager.ts's
+ * runSuitesIsolated): that path starts a FRESH session per suite on purpose
+ * (memory isolation — see its own doc comment), which under the per-session
+ * default above means one cold npm install per suite, eight for an eight-suite
+ * run. sandboxSpawn's `nodeModulesVolumeKey` lets that path key this volume to
+ * the RUN instead, and it is safe there for the exact reason it is unsafe in
+ * general: the run's suites never run at the same time, so nothing is racing
+ * to delete-and-rebuild the directory underneath a sibling — the one failure
+ * mode this being per-session exists to prevent. See sandboxSpawn's own comment
+ * on that field for where this stops being true.
  */
 const NODE_MODULES_VOLUME_PREFIX = 'switchboard-node-modules-'
 /**
@@ -190,9 +201,15 @@ export function cpuShare(): string {
 //
 // Still no Python: nothing in the catalog needs it inside a container yet.
 // The two answers must change together, here and in shared/test-catalog.ts.
+// The entrypoint copies rather than symlinks, and copies into the container's
+// OWN ~/.claude: the CLI writes into that tree (caches, state), so pointing it
+// at a read-only mount fails the first time it tries. `cp -r <src>/.` copies the
+// CONTENTS, which is what makes a re-run on a persisted home volume refresh the
+// plugins in place instead of nesting plugins/plugins. Both copies are guarded
+// on the mount existing, so a developer with no plugins installed still boots.
 const SHARED_SETUP = `git ripgrep ca-certificates && rm -rf /var/lib/apt/lists/* \\
  && npm install -g @anthropic-ai/claude-code \\
- && printf '#!/bin/sh\\nmkdir -p "$HOME/.claude"\\n[ -f /creds/.credentials.json ] && cp /creds/.credentials.json "$HOME/.claude/.credentials.json"\\nexec "$@"\\n' > /entrypoint.sh \\
+ && printf '#!/bin/sh\\nmkdir -p "$HOME/.claude"\\n[ -f /creds/.credentials.json ] && cp /creds/.credentials.json "$HOME/.claude/.credentials.json"\\n[ -d /creds/plugins ] && mkdir -p "$HOME/.claude/plugins" && cp -r /creds/plugins/. "$HOME/.claude/plugins/"\\nexec "$@"\\n' > /entrypoint.sh \\
  && chmod +x /entrypoint.sh`
 
 /* Chromium needs a set of shared libraries that node:22-slim does not carry. This
@@ -490,6 +507,26 @@ function credsPath(): string {
 }
 
 /**
+ * The host's installed plugins, mounted read-only so a container can use them.
+ *
+ * A containerised session's ~/.claude is a fresh volume with the credentials
+ * copied in and nothing else, which meant it had none of the developer's
+ * plugins or skills. That is not a detail — the Diagrams section asks a
+ * containerised session to draw "with the diagram-design plugin", and a skill
+ * that is not installed cannot activate, so the session fell back to writing
+ * whatever HTML it could reason out unaided. The same absence is why Cleanup's
+ * plugin commands could never resolve in a background session.
+ *
+ * READ-ONLY, deliberately: the container gets to use the developer's plugins
+ * and never to change them. The entrypoint copies them into the container's own
+ * ~/.claude, because the CLI writes into that tree and a read-only mount at the
+ * destination would fail the first time it tried.
+ */
+function pluginsPath(): string {
+  return join(homedir(), '.claude', 'plugins')
+}
+
+/**
  * In-flight image builds, keyed by the content-addressed tag (recipeTag), so
  * two sessions that both need an image nobody has built yet share ONE `docker
  * build` instead of racing two. session-manager.ts already solved the same
@@ -762,6 +799,23 @@ export function sandboxSpawn(config: {
    *  to resume a transcript that lived in another one. An optional field cannot
    *  be forgotten if the compiler will not let it be. */
   resumeFromSessionId: string | undefined
+  /**
+   * Key for the node_modules volume, defaulting to `sessionId` below — every
+   * caller but one omits this and gets exactly today's behaviour. The one
+   * exception is session-manager.ts's runSuitesIsolated, which passes the
+   * verify RUN's id so every suite session it starts shares one volume instead
+   * of each paying a cold `npm ci`.
+   *
+   * SAFE ONLY BECAUSE THAT PATH IS SEQUENTIAL: sharing a volume across
+   * sessions that could be live AT THE SAME TIME is precisely the race
+   * NODE_MODULES_VOLUME_PREFIX's own comment describes — two containers
+   * deleting and rebuilding one directory underneath each other. This
+   * parameter exists to be keyed to something broader than a session ONLY
+   * because runSuitesIsolated guarantees at most one of that run's sessions is
+   * ever alive at once; the moment anyone parallelises that loop, this is the
+   * line that reopens the exact bug the per-session default was built to fix.
+   */
+  nodeModulesVolumeKey?: string
 }): SandboxPlan {
   const refs = refMounts(config.refDirs)
   const containerName = `${NAME_PREFIX}${safeName(config.sessionId)}`
@@ -790,6 +844,11 @@ export function sandboxSpawn(config: {
         `${homeVolume}:/home/node/.claude`,
         '-v',
         `${credsPath()}:/creds/.credentials.json:ro`,
+        // The developer's own plugins and skills, read-only. Only when the
+        // directory exists: Docker CREATES a missing bind source as an empty
+        // directory owned by root, which would leave a stray ~/.claude/plugins
+        // on the host of a developer who has none.
+        ...(existsSync(pluginsPath()) ? ['-v', `${pluginsPath()}:/creds/plugins:ro`] : []),
         // Shared across projects on purpose: NuGet packages are immutable per
         // version, so one cache serves every .NET sandbox.
         ...(dotnet ? ['-v', `${NUGET_VOLUME}:/home/node/.nuget/packages`] : []),
@@ -798,7 +857,10 @@ export function sandboxSpawn(config: {
         ...(node
           ? [
               '-v',
-              `${NODE_MODULES_VOLUME_PREFIX}${safeName(config.sessionId)}:/workspace/node_modules`,
+              // Defaults to the session id — see nodeModulesVolumeKey's own
+              // comment above for the one caller that passes something else,
+              // and why that is safe only there.
+              `${NODE_MODULES_VOLUME_PREFIX}${safeName(config.nodeModulesVolumeKey ?? config.sessionId)}:/workspace/node_modules`,
               '-v',
               `${NPM_CACHE_VOLUME}:/home/node/.npm`,
             ]
