@@ -192,6 +192,28 @@ const SWEEP_INTERVAL_MS = 60 * 1000
  *  its own, which reads the same on the row without this. */
 const CANCEL_NOTE = 'You stopped this run before it reported, so nothing it measured is known.'
 
+/**
+ * Section kinds where every dispatch takes a session of its own, with no reuse.
+ *
+ * A drawing was the first: two diagrams sharing one session means the second
+ * queues behind the first, which is the blocking the per-kind split exists to
+ * remove, moved one place along.
+ *
+ * Spec Kit joined it on the developer's direction on 2026-08-22, for the same
+ * reason and a sharper case. Its commands are the longest-running work in the
+ * app — /speckit-specify writes a spec folder over several minutes, and
+ * /speckit-implement can run for an hour — and they are dispatched from a panel
+ * that offers all of them at once. Sharing one `spec` session meant a plan sent
+ * while a specify was still writing waited for it with nothing on screen saying
+ * so. Each command now answers in its own session and closes itself when its
+ * turn ends (endIfIdleBackground), so the cost is a row per command rather than
+ * a queue behind one.
+ *
+ * The other kinds keep reuse deliberately: a diff comment, a cleanup command
+ * and a test run are each short or already serialised by their own section.
+ */
+const NEVER_REUSED: ReadonlySet<SectionKind> = new Set(['diagram', 'spec'])
+
 const UPDATABLE_KINDS: ReadonlySet<EventKind> = new Set([
   'prompt',
   'assistant_text',
@@ -1238,12 +1260,10 @@ export class SessionManager {
    * section's session ends.
    */
   async backgroundSessionFor(projectId: string, kind: SectionKind): Promise<Session> {
-    // A drawing is the one kind that never reuses, and the rule lives here rather
-    // than only in diagramSessionFor because both routes to a drawing come
-    // through this method: the Generate button, and a plugin's own diagram
-    // command from the Diagrams tab. Split across two places they would drift,
-    // and one of the two would quietly queue.
-    if (kind !== 'diagram') {
+    // Two kinds never reuse, and the rule lives here rather than in each caller
+    // because every route to them comes through this method; split across two
+    // places it would drift and one route would quietly queue.
+    if (!NEVER_REUSED.has(kind)) {
       for (const entry of this.hosted.values()) {
         if (entry.row.projectId !== projectId) continue
         if (entry.sectionKind !== kind || entry.row.endedAt) continue

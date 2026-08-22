@@ -107,6 +107,21 @@ test('renaming a project inline updates its name', async ({ page }) => {
   await expect(page.getByTestId('sidebar-project-beta-renamed')).toBeVisible()
 })
 
+test('a renamed project may contain spaces, typed key by key', async ({ page }) => {
+  // fill() sets the value without pressing anything, which is why the test above
+  // passed throughout: the row's own keydown.space handler was swallowing the
+  // space bar, so a name typed by hand could never contain one.
+  await page.getByTestId('sidebar-project-beta').click({ button: 'right' })
+  await page.getByTestId('ctx-rename').click()
+  const input = page.getByTestId('rename-input-beta')
+  await expect(input).toBeVisible()
+  await input.press('Control+a')
+  await input.pressSequentially('beta two')
+  await expect(input).toHaveValue('beta two')
+  await input.press('Enter')
+  await expect(page.getByTestId('sidebar-project-beta two')).toBeVisible()
+})
+
 test('the context menu moves a project up and down the sidebar', async ({ page }) => {
   // Scenario order: alpha, beta. Move beta up → beta first.
   await page.getByTestId('sidebar-project-beta').click({ button: 'right' })

@@ -72,3 +72,50 @@ test('a second diagram takes a session of its own, unlike a second test run', as
   expect(first).toBeTruthy()
   expect(second).not.toBe(first)
 })
+
+test('two Spec Kit commands take two sessions, and neither is the chat', async ({ page }) => {
+  // Spec Kit's commands are the longest work in the app: /speckit-specify writes
+  // a spec folder over minutes and /speckit-implement can run for an hour. When
+  // they shared the project's one `spec` session, a command sent while another
+  // was still running simply waited, with nothing on screen saying so.
+  await page.getByTestId('composer-input').fill('what does this project do?')
+  await page.getByTestId('composer-send').click()
+  await expect.poll(async () => (await sends(page)).length).toBeGreaterThan(0)
+  const chat = (await sends(page)).at(-1)?.sessionId
+
+  await page.evaluate(() =>
+    window.__mock.setSpecKit('p-alpha', {
+      installed: true,
+      specs: [{ id: '001-x', title: 'X', status: 'draft', tasksTotal: 0, tasksDone: 0 }],
+      details: {
+        '001-x': {
+          id: '001-x', title: 'X', status: 'draft', tasksTotal: 0, tasksDone: 0,
+          description: 'desc', path: 'specs/001-x', sections: [], phases: [], clarifications: [], tasks: [],
+        },
+      },
+    }),
+  )
+  await page.getByTestId('tab-specs').click()
+
+  await page.getByTestId('spec-new').click()
+  await page.getByTestId('new-spec-input').fill('A per-domain container')
+  await page.getByTestId('new-spec-submit').click()
+  await expect
+    .poll(async () => (await sends(page)).some((s) => s.text.startsWith('/speckit-specify')))
+    .toBe(true)
+  const specify = (await sends(page)).find((s) => s.text.startsWith('/speckit-specify'))?.sessionId
+
+  await page.getByTestId('spec-new').click()
+  await page.getByTestId('new-spec-input').fill('A second feature')
+  await page.getByTestId('new-spec-submit').click()
+  await expect
+    .poll(async () => (await sends(page)).filter((s) => s.text.startsWith('/speckit-specify')).length)
+    .toBe(2)
+  const second = (await sends(page))
+    .filter((s) => s.text.startsWith('/speckit-specify'))
+    .at(-1)?.sessionId
+
+  expect(specify).toBeTruthy()
+  expect(second).not.toBe(specify)
+  expect(new Set([chat, specify, second]).size).toBe(3)
+})

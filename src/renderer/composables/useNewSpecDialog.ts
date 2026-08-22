@@ -14,7 +14,9 @@
 // it directly rather than through useModal.
 import { onMounted, onUnmounted, ref, toValue, type MaybeRefOrGetter, type Ref } from 'vue'
 import { trapTabWithin } from '@renderer/composables/useModal'
+import { errorMessage } from '@renderer/ipc'
 import { useSpecsStore } from '@renderer/stores/specs'
+import { useToastsStore } from '@renderer/stores/toasts'
 
 export function useNewSpecDialog(opts: {
   projectId: MaybeRefOrGetter<string>
@@ -41,7 +43,17 @@ export function useNewSpecDialog(opts: {
     const desc = newSpecDesc.value.trim()
     if (!desc) return // empty Enter is a no-op, matching the disabled Create button
     showNewSpec.value = false
-    await specs.runInSession(projectId(), `/speckit-specify ${desc}`, true)
+    // createSpec, not a bare dispatch: it also watches for the spec folder, so
+    // the section shows the spec when it lands instead of on its next mount.
+    // The failure is reported rather than left as an unhandled rejection — a
+    // dispatch that cannot start a session (no container slot, for instance)
+    // used to close the dialog and say nothing at all.
+    try {
+      await specs.createSpec(projectId(), desc)
+    } catch (e) {
+      useToastsStore().show('error', 'Could not start the spec', errorMessage(e))
+      return
+    }
     opts.onRan()
   }
 

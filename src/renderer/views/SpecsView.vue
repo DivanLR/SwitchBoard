@@ -5,7 +5,9 @@
 import { computed, onUnmounted, ref, useTemplateRef, watch } from 'vue'
 import type { SpecPhase, SpecStatus } from '@shared/domain'
 import { SPEC_KIT_COMMANDS } from '@shared/command-catalog'
+import { errorMessage } from '@renderer/ipc'
 import { useSpecsStore } from '@renderer/stores/specs'
+import { useToastsStore } from '@renderer/stores/toasts'
 import { useNewSpecDialog } from '@renderer/composables/useNewSpecDialog'
 import MarkdownText from '@renderer/components/MarkdownText.vue'
 import Icon from '@renderer/components/Icon.vue'
@@ -90,10 +92,28 @@ watch([() => props.projectId, () => specs.selectedSpecId], () => {
 type Part = 'spec' | 'plan' | 'tasks' | 'clarify' | 'cmds'
 const part = ref<Part>('tasks')
 
+/**
+ * Report a dispatch that never started.
+ *
+ * Every command here now opens a session of its own, and starting one can fail
+ * for reasons the developer can act on — a containerised project has two
+ * container slots for the whole machine, so a third command in flight is
+ * refused. Left as a bare `void`, that refusal was an unhandled rejection and
+ * the panel simply did not change.
+ */
+function reportDispatch(p: Promise<unknown>): void {
+  void p.catch((e: unknown) => {
+    useToastsStore().show('error', 'Could not start that command', errorMessage(e))
+  })
+}
+
 /** Send a stage command scoped to the selected spec (design: cmd + spec id). */
 function runCommand(command: string): void {
   const suffix = detail.value ? ` ${detail.value.id}` : ''
-  void specs.runInSession(props.projectId, `/${command}${suffix}`, true)
+  // runSpecCommand, not a bare dispatch: it re-reads the spec while the command
+  // runs, so plan.md and tasks.md appear when they are written rather than on
+  // this panel's next mount.
+  reportDispatch(specs.runSpecCommand(props.projectId, `/${command}${suffix}`, `Running /${command}`))
   emit('ran') // jump to the Session tab so the run is visible
 }
 
@@ -108,11 +128,11 @@ function startImplementation(): void {
   if (!detail.value) return
   runningPhase.value = null
   emit('ran') // jump to the Session tab so the run is visible
-  void specs.startPhase(
+  reportDispatch(specs.startPhase(
     props.projectId,
     detail.value.id,
     `/speckit-implement-scaffold Work through the remaining tasks in ${detail.value.path}/tasks.md, marking each [X] as it completes.`,
-  )
+  ))
 }
 
 /** Start implementing one phase, scoped by its label. */
@@ -125,13 +145,13 @@ function startPhase(phase: SpecPhase): void {
     .map((t) => t.id)
     .filter(Boolean)
     .join(', ')
-  void specs.startPhase(
+  reportDispatch(specs.startPhase(
     props.projectId,
     detail.value.id,
     `/speckit-implement-scaffold Implement "${phase.label}" in ${detail.value.path}` +
       (ids ? ` (tasks ${ids})` : '') +
       `. Complete only that phase's tasks and mark each [X] in tasks.md as you finish.`,
-  )
+  ))
 }
 
 function phaseDone(phase: SpecPhase): boolean {
@@ -212,6 +232,7 @@ watch(() => props.projectId, (projectId) => void goToLatestSpec(projectId), { im
 const state = computed(() => specs.stateFor(props.projectId))
 const detail = computed(() => specs.detail)
 const running = computed(() => specs.isRunning(props.projectId))
+const commandLabel = computed(() => specs.runningLabel(props.projectId))
 watch(running, (r) => {
   if (!r) runningPhase.value = null
 })
@@ -353,12 +374,21 @@ const partTabs: { id: Part; label: string }[] = [
     <div v-else-if="state.specs.length === 0" class="not-installed" data-testid="specs-empty">
       <div class="ni-icon"><Icon name="diamond" :size="18" /></div>
       <div class="ni-title">No specs in this project</div>
-      <div class="ni-sub">
-        Describe a feature and <span class="mono">/speckit.specify</span> scaffolds a spec for it.
-      </div>
-      <button class="btn-solid ni-btn" data-testid="specs-new-empty" @click="newSpec">
-        <Icon name="plus" :size="12" /> New spec
-      </button>
+      <!-- Scaffolding takes minutes, and until it says so this panel is
+           identical to the one before the button was pressed. -->
+      <template v-if="commandLabel">
+        <div class="ni-sub" data-testid="specs-scaffolding">
+          {{ commandLabel }}. It appears here when it lands; the Session tab shows the run.
+        </div>
+      </template>
+      <template v-else>
+        <div class="ni-sub">
+          Describe a feature and <span class="mono">/speckit.specify</span> scaffolds a spec for it.
+        </div>
+        <button class="btn-solid ni-btn" data-testid="specs-new-empty" @click="newSpec">
+          <Icon name="plus" :size="12" /> New spec
+        </button>
+      </template>
     </div>
 
     <!-- Specs present -->
@@ -376,6 +406,9 @@ const partTabs: { id: Part; label: string }[] = [
           <span class="chip-dot" :style="{ color: statusDot(s.status) }"><Icon name="dot" :size="8" /></span>{{ s.id }}
         </button>
         <button class="chip chip-new mono" data-testid="spec-new" @click="newSpec"><Icon name="plus" :size="11" /> New spec</button>
+        <span v-if="commandLabel" class="chip-scaffolding mono" data-testid="specs-scaffolding">
+          <Icon name="dot" :size="8" /> {{ commandLabel }}…
+        </span>
       </div>
 
       <template v-if="detail">
@@ -552,7 +585,7 @@ const partTabs: { id: Part; label: string }[] = [
                out where the implementation had got to. -->
           <div v-if="detail.phases.length > 1" class="stepper" data-testid="spec-stepper">
             <div class="step-track" role="progressbar" :aria-valuenow="specProgress" aria-valuemin="0" aria-valuemax="100">
-              <span class="step-fill" :style="{ width: `${specProgress}%` }"></span>
+              <span class="step-fill" :style="{ transform: `scaleX(${specProgress / 100})` }"></span>
             </div>
             <ol class="step-list">
               <li
@@ -1304,6 +1337,17 @@ const partTabs: { id: Part; label: string }[] = [
   animation: sbFade 1.6s var(--ease) infinite;
 }
 
+/* Same reading as a running phase, because it is the same fact: work is in
+   flight and this panel is waiting on it. */
+.chip-scaffolding {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-micro);
+  color: var(--blue);
+  animation: sbFade 1.6s var(--ease) infinite;
+}
+
 .phase-done {
   font-size: var(--fs-micro);
   color: var(--green);
@@ -1412,11 +1456,16 @@ const partTabs: { id: Part; label: string }[] = [
   overflow: hidden;
 }
 
+/* Scaled, not widened: the bar is drawn at full width and squeezed from the
+   left, so the 300ms fill is a compositor transform rather than a layout pass
+   on every frame. Same reading, same origin, no reflow. */
 .step-fill {
   display: block;
+  width: 100%;
   height: 100%;
   background: var(--green);
-  transition: width 300ms var(--ease-overlay);
+  transform-origin: left center;
+  transition: transform 300ms var(--ease-overlay);
 }
 
 .step-list {

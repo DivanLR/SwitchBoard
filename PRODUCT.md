@@ -49,7 +49,7 @@ reason about it, or answer it on the developer's behalf.
 ## Operating Context
 
 - Windows desktop. Requires an authenticated Claude Code installation and Node
-  22.5 or newer (`package.json` engines). Current version 0.18.0.
+  22.5 or newer (`package.json` engines). Current version 0.20.1.
 - A project may run as many sessions as the developer starts. They appear as
   subsession rows inside the project's own row in the sidebar, and one of them is
   focused at a time: the focused session is what the centre pane, the composer and
@@ -101,6 +101,16 @@ reason about it, or answer it on the developer's behalf.
   WSL container is in public preview until its general availability, targeted at
   autumn 2026. Sizes must be given with an uppercase unit (`6G`, not `6g`); the
   app normalises the setting, so a value stored either way works.
+- Section work runs in the section's own session, not in the conversation: Specs,
+  Tests, Diff, Cleanup, Diagrams and Skills each hold one, so a verification pass
+  does not block the chat and a cleanup command does not queue behind a test
+  report. Two kinds hold none and take a fresh session per dispatch instead: a
+  drawing, and (from 2026-08-22, at the owner's direction) every Spec Kit command.
+  Those are the longest-running work in the app and are dispatched from a panel
+  offering all of them at once, so sharing one session meant a plan sent during a
+  specify simply waited. Each closes itself when its turn ends. On a project with
+  containers switched on the machine-wide ceiling of two applies, so a third
+  concurrent command is refused and says so.
 - Retention runs automatically: raw output for the current and previous session
   per project, and decision history for 30 days.
 - Updates arrive in-app from the GitHub release feed.

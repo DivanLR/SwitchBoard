@@ -658,9 +658,12 @@ export function installMockHost(scenario: MockScenario): void {
   let clipboardFails = false
 
   const sectionSessions = new Map<string, MockSession>()
+  /** Mirrors SessionManager.NEVER_REUSED: a drawing and a Spec Kit command each
+   *  take a session of their own, every time. */
+  const neverReused: ReadonlySet<SectionKind> = new Set(['diagram', 'spec'])
   async function sectionSession(projectId: string, kind: SectionKind): Promise<MockSession> {
     const key = `${projectId}|${kind}`
-    const live = kind === 'diagram' ? undefined : sectionSessions.get(key)
+    const live = neverReused.has(kind) ? undefined : sectionSessions.get(key)
     if (live && !live.endedAt) return live
     const started = (await invokeHandlers['sessions.start']({ projectId })) as MockSession
     sectionSessions.set(key, started)

@@ -102,6 +102,10 @@ test('+ New spec opens a description popup that runs /speckit-specify', async ({
   await expect
     .poll(() => page.evaluate(() => window.__mock.state().sends.map((x) => x.text)))
     .toContain('/speckit-specify A per-domain container')
+  // And the section says so meanwhile. Scaffolding takes minutes; without this
+  // the panel is identical to the one before the button was pressed, which is
+  // how a working dispatch got reported as a button that does nothing.
+  await expect(page.getByTestId('specs-scaffolding')).toBeVisible()
 })
 
 async function seedSpec(page: import('@playwright/test').Page): Promise<void> {
