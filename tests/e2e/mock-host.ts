@@ -93,6 +93,10 @@ export interface MockDriver {
    *  resolved. */
   crashSession: (sessionId: string, detail: string) => void
   setSpecKit: (projectId: string, state: Record<string, unknown>) => void
+  /** How long 'sessions.start' takes to resolve, in ms (default 250). Raised by
+   *  a test that needs the window between a click and the session existing to
+   *  stay open long enough to assert on. */
+  setStartDelay: (ms: number) => void
   /** Diff tab (specs/003-diff-tab): seeds what 'diff.list' answers for a
    *  project — there is no real git repo behind this in-browser mock. */
   setDiff: (projectId: string, result: { gitNotice: string | null; files: Record<string, unknown>[] }) => void
@@ -657,6 +661,11 @@ export function installMockHost(scenario: MockScenario): void {
   /** Forces `clipboard.write` to refuse, for the failure-label test. */
   let clipboardFails = false
 
+  /** How long a start takes. A real one spawns the CLI, and on a containerised
+   *  project brings an image up first; 250ms stands in for that so a waiting
+   *  state is observable rather than resolving inside one frame. */
+  let startDelayMs = 250
+
   const sectionSessions = new Map<string, MockSession>()
   /** Mirrors SessionManager.NEVER_REUSED: a drawing and a Spec Kit command each
    *  take a session of their own, every time. */
@@ -924,7 +933,7 @@ export function installMockHost(scenario: MockScenario): void {
       // uses is containerised — so on the first diagram of a run this is a Docker
       // container starting. The delay keeps that waiting state observable instead
       // of resolving inside a single frame. Same reason as sessions.start.
-      await new Promise((resolve) => setTimeout(resolve, 250))
+      await new Promise((resolve) => setTimeout(resolve, startDelayMs))
       const requested = diagramRequestedFiles.get(projectId) ?? new Set<string>()
       const taken = [...(diagramsByProject.get(projectId) ?? []).map((d) => d.file), ...requested]
       const file = pickDiagramFileName(description, taken)
@@ -1763,6 +1772,9 @@ export function installMockHost(scenario: MockScenario): void {
       availableModels = models
     },
     setSpecKit: (projectId, state) => specKitByProject.set(projectId, state),
+    setStartDelay: (ms) => {
+      startDelayMs = ms
+    },
     setDiff: (projectId, result) => diffByProject.set(projectId, result),
     setFileDiff: (projectId, path, content) => fileDiffByProject.set(`${projectId}|${path}`, content),
     setMcpSchema: (projectId, content, servers) =>

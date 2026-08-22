@@ -6,10 +6,12 @@ import { computed, onUnmounted, ref, useTemplateRef, watch } from 'vue'
 import type { SpecPhase, SpecStatus } from '@shared/domain'
 import { SPEC_KIT_COMMANDS } from '@shared/command-catalog'
 import { errorMessage } from '@renderer/ipc'
-import { useSpecsStore } from '@renderer/stores/specs'
+import { NEW_SPEC_KEY, useSpecsStore } from '@renderer/stores/specs'
+import { useProjectsStore } from '@renderer/stores/projects'
 import { useToastsStore } from '@renderer/stores/toasts'
 import { useNewSpecDialog } from '@renderer/composables/useNewSpecDialog'
 import MarkdownText from '@renderer/components/MarkdownText.vue'
+import MiniTerminal from '@renderer/components/MiniTerminal.vue'
 import Icon from '@renderer/components/Icon.vue'
 
 const props = defineProps<{ projectId: string }>()
@@ -25,7 +27,7 @@ const newSpecDialog = useTemplateRef<HTMLElement>('newSpecDialog')
 const { showNewSpec, newSpecDesc, newSpec, submitNewSpec, cancelNewSpec } = useNewSpecDialog({
   projectId: () => props.projectId,
   dialog: newSpecDialog,
-  onRan: () => emit('ran'), // jump to the Session tab so the run is visible
+  onRan: () => emit('ran'), // the shell scrolls its stream; the state stays on the control
 })
 
 // Read the spec aloud (design: "listen in on a spec") via the native Web Speech
@@ -89,6 +91,11 @@ watch([() => props.projectId, () => specs.selectedSpecId], () => {
   speaking.value = false
 })
 
+/** The two implement controls, named so their state can be read back.
+ *  A phase's key carries its label: two phases run independently. */
+const IMPLEMENT_KEY = 'implement'
+const phaseKey = (label: string): string => `implement:${label}`
+
 type Part = 'spec' | 'plan' | 'tasks' | 'clarify' | 'cmds'
 const part = ref<Part>('tasks')
 
@@ -107,14 +114,43 @@ function reportDispatch(p: Promise<unknown>): void {
   })
 }
 
+/**
+ * Where one control has got to, and what it should say.
+ *
+ * Every control in this section starts a session of its own, and starting one
+ * is not instant — on a containerised project an image may have to come up
+ * first. A control that does not change until output arrives reads as a click
+ * that missed, so the wait has its own state before the running one.
+ */
+function controlPhase(key: string): 'starting' | 'running' | null {
+  return specs.phaseOf(props.projectId, key)
+}
+
+/** Starting, then running, then whatever the control normally says. */
+function controlText(key: string, idle: string): string {
+  const phase = controlPhase(key)
+  return phase === 'starting' ? 'Starting…' : phase === 'running' ? 'Running' : idle
+}
+
+/** A turning arc while the session is being started, a pulsing dot once it is
+ *  running, and the control's own glyph the rest of the time. The two are
+ *  deliberately different shapes: waiting and running are different facts, and
+ *  colour alone would not say which is which. */
+function controlIcon(key: string, idle: string): string {
+  const phase = controlPhase(key)
+  return phase === 'starting' ? 'refresh' : phase === 'running' ? 'dot' : idle
+}
+
 /** Send a stage command scoped to the selected spec (design: cmd + spec id). */
 function runCommand(command: string): void {
+  if (controlPhase(command)) return // already in flight from this control
   const suffix = detail.value ? ` ${detail.value.id}` : ''
   // runSpecCommand, not a bare dispatch: it re-reads the spec while the command
   // runs, so plan.md and tasks.md appear when they are written rather than on
   // this panel's next mount.
-  reportDispatch(specs.runSpecCommand(props.projectId, `/${command}${suffix}`, `Running /${command}`))
-  emit('ran') // jump to the Session tab so the run is visible
+  reportDispatch(
+    specs.runSpecCommand(props.projectId, `/${command}${suffix}`, command, `Running /${command}`),
+  )
 }
 
 // The phase whose "Start phase" launched the current run (design: ● Running…).
@@ -127,31 +163,37 @@ const runningPhase = ref<string | null>(null)
 function startImplementation(): void {
   if (!detail.value) return
   runningPhase.value = null
-  emit('ran') // jump to the Session tab so the run is visible
-  reportDispatch(specs.startPhase(
-    props.projectId,
-    detail.value.id,
-    `/speckit-implement-scaffold Work through the remaining tasks in ${detail.value.path}/tasks.md, marking each [X] as it completes.`,
-  ))
+  emit('ran') // the shell scrolls its stream; the state stays on this control
+  reportDispatch(
+    specs.startPhase(
+      props.projectId,
+      detail.value.id,
+      `/speckit-implement-scaffold Work through the remaining tasks in ${detail.value.path}/tasks.md, marking each [X] as it completes.`,
+      IMPLEMENT_KEY,
+    ),
+  )
 }
 
 /** Start implementing one phase, scoped by its label. */
 function startPhase(phase: SpecPhase): void {
   if (!detail.value) return
   runningPhase.value = phase.label
-  emit('ran') // jump to the Session tab so the run is visible
+  emit('ran') // the shell scrolls its stream; the state stays on this control
   const ids = phase.tasks
     .filter((t) => !t.done)
     .map((t) => t.id)
     .filter(Boolean)
     .join(', ')
-  reportDispatch(specs.startPhase(
-    props.projectId,
-    detail.value.id,
-    `/speckit-implement-scaffold Implement "${phase.label}" in ${detail.value.path}` +
-      (ids ? ` (tasks ${ids})` : '') +
-      `. Complete only that phase's tasks and mark each [X] in tasks.md as you finish.`,
-  ))
+  reportDispatch(
+    specs.startPhase(
+      props.projectId,
+      detail.value.id,
+      `/speckit-implement-scaffold Implement "${phase.label}" in ${detail.value.path}` +
+        (ids ? ` (tasks ${ids})` : '') +
+        `. Complete only that phase's tasks and mark each [X] in tasks.md as you finish.`,
+      phaseKey(phase.label),
+    ),
+  )
 }
 
 function phaseDone(phase: SpecPhase): boolean {
@@ -233,6 +275,43 @@ const state = computed(() => specs.stateFor(props.projectId))
 const detail = computed(() => specs.detail)
 const running = computed(() => specs.isRunning(props.projectId))
 const commandLabel = computed(() => specs.runningLabel(props.projectId))
+/**
+ * The sessions this section's own commands are running in.
+ *
+ * Shown as tails here for the reason every other section shows one: a command
+ * runs in a session the developer never opened, and when it ASKS something the
+ * card that answers it renders only where that session's events are. Specs was
+ * the one section without a tail, so /speckit-clarify — a command whose whole
+ * purpose is to ask questions — could stop dead with the question unanswerable
+ * and nothing on screen admitting it.
+ */
+const runningSessions = computed(() => specs.runningIn(props.projectId))
+
+/**
+ * Re-read the spec whenever ANY of this project's sessions stops working.
+ *
+ * The per-command watch covers what this section started. It cannot cover what
+ * it did not: tasks ticked off by the developer's own conversation, or by a
+ * session started from somewhere else, are written to tasks.md by a session this
+ * panel knows nothing about. That is how a phase finished 10 of 10 and went on
+ * offering "Start phase", and how a spec that was complete never said so.
+ *
+ * A turn ending is the right moment and a cheap signal: the app already tracks
+ * every session's status, the files are settled by then, and the read is two
+ * IPC calls. It deliberately does not watch the filesystem — an edit made
+ * outside the app still waits for the next mount, which is the one case worth
+ * paying nothing for.
+ */
+const projects = useProjectsStore()
+const working = computed(
+  () =>
+    projects.items
+      .find((p) => p.id === props.projectId)
+      ?.sessions.filter((session) => session.status === 'working').length ?? 0,
+)
+watch(working, (now, before) => {
+  if (before !== undefined && now < before) void specs.reloadSpec(props.projectId)
+})
 watch(running, (r) => {
   if (!r) runningPhase.value = null
 })
@@ -378,15 +457,32 @@ const partTabs: { id: Part; label: string }[] = [
            identical to the one before the button was pressed. -->
       <template v-if="commandLabel">
         <div class="ni-sub" data-testid="specs-scaffolding">
-          {{ commandLabel }}. It appears here when it lands; the Session tab shows the run.
+          {{ commandLabel }}. It appears here when it lands.
+        </div>
+        <!-- The run itself, so a question it asks can be answered here. A create
+             is the one command with no spec to hang a tail under yet. -->
+        <div
+          v-for="run in runningSessions"
+          :key="run.sessionId"
+          class="ni-term"
+          :data-testid="`spec-run-${run.key}`"
+        >
+          <MiniTerminal :session-id="run.sessionId" :label="run.label" />
         </div>
       </template>
       <template v-else>
         <div class="ni-sub">
           Describe a feature and <span class="mono">/speckit.specify</span> scaffolds a spec for it.
         </div>
-        <button class="btn-solid ni-btn" data-testid="specs-new-empty" @click="newSpec">
-          <Icon name="plus" :size="12" /> New spec
+        <button
+          class="btn-solid ni-btn"
+          :class="controlPhase(NEW_SPEC_KEY)"
+          :disabled="!!controlPhase(NEW_SPEC_KEY)"
+          data-testid="specs-new-empty"
+          @click="newSpec"
+        >
+          <Icon :name="controlIcon(NEW_SPEC_KEY, 'plus')" :size="12" />
+          {{ controlText(NEW_SPEC_KEY, 'New spec') }}
         </button>
       </template>
     </div>
@@ -405,10 +501,26 @@ const partTabs: { id: Part; label: string }[] = [
         >
           <span class="chip-dot" :style="{ color: statusDot(s.status) }"><Icon name="dot" :size="8" /></span>{{ s.id }}
         </button>
-        <button class="chip chip-new mono" data-testid="spec-new" @click="newSpec"><Icon name="plus" :size="11" /> New spec</button>
+        <button
+          class="chip chip-new mono"
+          :class="controlPhase(NEW_SPEC_KEY)"
+          :disabled="!!controlPhase(NEW_SPEC_KEY)"
+          data-testid="spec-new"
+          @click="newSpec"
+        >
+          <Icon :name="controlIcon(NEW_SPEC_KEY, 'plus')" :size="11" />
+          {{ controlText(NEW_SPEC_KEY, 'New spec') }}
+        </button>
         <span v-if="commandLabel" class="chip-scaffolding mono" data-testid="specs-scaffolding">
           <Icon name="dot" :size="8" /> {{ commandLabel }}…
         </span>
+      </div>
+
+      <!-- Each running command's own session, above the spec itself: a command
+           that asks a question can only be answered where its events are, and
+           this section had nowhere for that card to render. -->
+      <div v-for="run in runningSessions" :key="run.sessionId" :data-testid="`spec-run-${run.key}`">
+        <MiniTerminal :session-id="run.sessionId" :label="run.label" />
       </div>
 
       <template v-if="detail">
@@ -436,10 +548,13 @@ const partTabs: { id: Part; label: string }[] = [
             <button
               v-if="detail.status !== 'complete' && !running && detail.tasksTotal > 0"
               class="impl-btn mono"
+              :class="controlPhase(IMPLEMENT_KEY)"
+              :disabled="!!controlPhase(IMPLEMENT_KEY)"
               data-testid="start-implementation"
               @click="startImplementation"
             >
-              <Icon name="play" :size="12" /> Start implementation
+              <Icon :name="controlIcon(IMPLEMENT_KEY, 'play')" :size="12" />
+              {{ controlText(IMPLEMENT_KEY, 'Start implementation') }}
             </button>
             <span v-if="running" class="impl-running mono" data-testid="implementing">
               <Icon name="dot" :size="8" /> Implementing…
@@ -547,10 +662,13 @@ const partTabs: { id: Part; label: string }[] = [
               <span class="sug-why">{{ suggested.why }}</span>
               <button
                 class="sug-run mono"
+                :class="controlPhase(suggested.command)"
+                :disabled="!!controlPhase(suggested.command)"
                 data-testid="suggested-run"
                 @click="runCommand(suggested.command)"
               >
-                <Icon name="play" :size="12" /> Run
+                <Icon :name="controlIcon(suggested.command, 'play')" :size="12" />
+                {{ controlText(suggested.command, 'Run') }}
               </button>
             </div>
           </template>
@@ -561,13 +679,18 @@ const partTabs: { id: Part; label: string }[] = [
               v-for="c in SPEC_KIT_COMMANDS"
               :key="c.command"
               class="cmd-card"
+              :class="controlPhase(c.command)"
+              :disabled="!!controlPhase(c.command)"
               :data-testid="`speckit-cmd-${c.command}`"
               @click="runCommand(c.command)"
             >
               <div class="cmd-row">
                 <span class="cmd-name mono">{{ c.label }}</span>
                 <span class="spacer"></span>
-                <span class="cmd-run mono"><Icon name="play" :size="11" /> Run</span>
+                <span class="cmd-run mono">
+                  <Icon :name="controlIcon(c.command, 'play')" :size="11" />
+                  {{ controlText(c.command, 'Run') }}
+                </span>
               </div>
               <div class="cmd-desc">{{ c.hint }}</div>
             </button>
@@ -628,13 +751,16 @@ const partTabs: { id: Part; label: string }[] = [
               <span v-if="phaseRunning(phase)" class="phase-running mono"><Icon name="dot" :size="8" /> Running…</span>
               <span v-else-if="phaseDone(phase)" class="phase-done mono"><Icon name="check" :size="11" /> Done</span>
               <button
-                v-else-if="!running"
+                v-else-if="!running || controlPhase(phaseKey(phase.label))"
                 class="phase-start mono"
+                :class="controlPhase(phaseKey(phase.label))"
+                :disabled="!!controlPhase(phaseKey(phase.label))"
                 :data-testid="`start-phase-${phase.label}`"
                 title="Implement this phase; tasks tick off as they complete"
                 @click="startPhase(phase)"
               >
-                <Icon name="play" :size="11" /> Start phase
+                <Icon :name="controlIcon(phaseKey(phase.label), 'play')" :size="11" />
+                {{ controlText(phaseKey(phase.label), 'Start phase') }}
               </button>
             </div>
             <div class="phase-tasks">
@@ -1456,6 +1582,65 @@ const partTabs: { id: Part; label: string }[] = [
   overflow: hidden;
 }
 
+/* The empty state centres its content; a tail inside it needs the width back. */
+.ni-term {
+  width: 100%;
+  max-width: 640px;
+  margin-top: var(--sp-3);
+  text-align: left;
+}
+
+/* THE TWO STATES EVERY CONTROL IN THIS SECTION WEARS.
+   Applied as a class on the control itself rather than as a variant per button
+   type, because the fact is the same wherever it appears: this control started
+   something, and it is either waiting for a session or watching one run.
+
+   `starting` stays neutral and only dims: nothing has happened yet, and green
+   at that moment would claim a run that does not exist. `running` is green
+   because a run IS the reading this world spends colour on. */
+.starting {
+  opacity: 0.65;
+  cursor: progress;
+}
+
+.running {
+  background: var(--green) !important;
+  border-color: var(--green) !important;
+  color: var(--green-ink) !important;
+  cursor: default;
+}
+
+.running .cmd-run,
+.running .cmd-name,
+.running .cmd-desc {
+  color: var(--green-ink);
+}
+
+/* Waiting turns, running pulses. A control that only changed colour would
+   make the two states depend on reading a word; motion tells them apart at a
+   glance, and the shapes differ as well for anyone the motion is off for. */
+.starting :deep(svg) {
+  animation: sbSpin 900ms linear infinite;
+  transform-origin: center;
+}
+
+.running :deep(svg) {
+  animation: sbFade 1.6s var(--ease) infinite;
+}
+
+@keyframes sbSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .starting :deep(svg),
+  .running :deep(svg) {
+    animation: none;
+  }
+}
+
 /* Scaled, not widened: the bar is drawn at full width and squeezed from the
    left, so the 300ms fill is a compositor transform rather than a layout pass
    on every frame. Same reading, same origin, no reflow. */
@@ -1471,27 +1656,32 @@ const partTabs: { id: Part; label: string }[] = [
 .step-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 0;
+  gap: 10px 0;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-/* The connector. Drawn on the step rather than between them so it cannot fall
-   out of step with wrapping, and suppressed on the first of each row by the
-   flex gap doing the separating instead. */
+/* The connector runs in the GAP before a step's dot, never across the step
+   itself. It used to be drawn full width under the button, and since the button
+   has no ground of its own the line came out through the middle of the phase
+   label, reading as a strikethrough on every step after the first. */
 .step {
   position: relative;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
+}
+
+.step + .step {
+  padding-left: 18px;
 }
 
 .step + .step::before {
   content: '';
   position: absolute;
-  left: 0;
+  left: 1px;
   top: 13px;
-  width: 100%;
+  width: 16px;
   height: 1px;
   background: var(--border);
   z-index: 0;
@@ -1511,11 +1701,24 @@ const partTabs: { id: Part; label: string }[] = [
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 0 10px 0 0;
+  padding: 2px 10px 2px 0;
   background: none;
   border: 0;
+  border-radius: var(--rp);
   text-align: left;
   cursor: pointer;
+}
+
+/* A step is clickable — it scrolls to its tasks — so it answers the pointer.
+   Hover only, and only on the label: the dot carries state colour and must not
+   change meaning under the cursor. */
+.step-btn:hover .step-label {
+  color: var(--text-strong);
+}
+
+.step-btn:focus-visible {
+  outline: 1px solid var(--green);
+  outline-offset: 2px;
 }
 
 .step-dot {
@@ -1557,6 +1760,7 @@ const partTabs: { id: Part; label: string }[] = [
 
 .step-label {
   font-size: var(--fs-meta);
+  line-height: 1.3;
   color: var(--text-meta);
   overflow: hidden;
   text-overflow: ellipsis;

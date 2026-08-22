@@ -101,4 +101,43 @@ describe('pendingQuestion', () => {
     ])
     expect(found?.eventId).toBe('e3')
   })
+
+  // A question the SDK asked as a tool call rather than as prose. The
+  // conversation renders these from the stream; a section tail has no stream, so
+  // it asks here. Before this a Spec Kit command that asked one sat in its own
+  // session with the question showing and nothing to answer it with.
+  describe('a question asked as a tool call', () => {
+    const asked = (id: string, over: Record<string, unknown> = {}) => ({
+      id,
+      kind: 'question',
+      payload: {
+        text: 'Which authentication should the scanner use?',
+        options: [{ label: 'Device code' }, { label: 'Personal access token' }],
+        answered: false,
+        ...over,
+      },
+    })
+
+    it('is offered with its options', () => {
+      const found = pendingQuestion([asked('q1')])
+      expect(found?.eventId).toBe('q1')
+      expect(found?.payload.options.map((o) => o.label)).toEqual([
+        'Device code',
+        'Personal access token',
+      ])
+    })
+
+    it('is gone once answered, by the record on the event or by this click', () => {
+      expect(pendingQuestion([asked('q1', { answered: true })])).toBeNull()
+      expect(pendingQuestion([asked('q1')], 'q1')).toBeNull()
+    })
+
+    it('is gone once the run has moved on past it', () => {
+      expect(pendingQuestion([asked('q1'), ev('e2', 'assistant_text', 'Wrote plan.md.')])).toBeNull()
+    })
+
+    it('is ignored when it carries no options to choose from', () => {
+      expect(pendingQuestion([asked('q1', { options: [] })])).toBeNull()
+    })
+  })
 })

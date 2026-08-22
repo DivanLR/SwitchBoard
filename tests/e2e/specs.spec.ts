@@ -168,3 +168,104 @@ test('start phase sends an implement command to the background session and shows
   await expect(page.getByTestId('tab-specs')).toHaveClass(/sel/)
   await expect(page.getByTestId('implementing')).toBeVisible()
 })
+
+// A Spec Kit command runs in a session of its own, and /speckit-clarify's whole
+// purpose is to ask questions. Until the section showed that session, the
+// question had nowhere to render: the card lives with the session's events, the
+// conversation's composer addresses a different session, and the run simply sat
+// there looking like work in progress. Answering has to be possible from where
+// the command was started.
+test('a question from a spec command is answerable in the section', async ({ page }) => {
+  await seedSpec(page)
+  await page.getByTestId('part-cmds').click()
+  await page.getByTestId('speckit-cmd-speckit-clarify').click()
+
+  // The session the dispatch actually went to, not a guess.
+  const sessionId = await page.evaluate(async () => {
+    for (let i = 0; i < 60; i += 1) {
+      const sent = window.__mock.state().sends.find((s) => s.text.startsWith('/speckit-clarify'))
+      if (sent) return sent.sessionId
+      await new Promise((r) => setTimeout(r, 50))
+    }
+    return ''
+  })
+  expect(sessionId).not.toBe('')
+
+  const term = page.getByTestId('specs-view').getByTestId('mini-terminal')
+  await expect(term).toBeVisible()
+
+  await page.evaluate(
+    (id) =>
+      window.__mock.askQuestion(id, 'Which authentication should the scanner use?', [
+        'Device code',
+        'Personal access token',
+      ]),
+    sessionId,
+  )
+
+  const question = page.getByTestId('specs-view').getByTestId('mini-terminal-question')
+  await expect(question).toBeVisible()
+  await question.getByText('Device code').click()
+
+  // The answer goes back to the command's own session, not to the conversation.
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (id) =>
+          window.__mock
+            .state()
+            .sends.filter((s) => s.sessionId === id)
+            .map((s) => s.text),
+        sessionId,
+      ),
+    )
+    .toContain('Device code')
+})
+
+// Tasks are ticked off in tasks.md by whichever session is doing the work, and
+// that is often the developer's own conversation rather than anything this
+// section started. The panel read the spec on mount and never again, so a phase
+// that had finished 10 of 10 went on offering "Start phase", and a spec whose
+// tasks were all done never said so.
+test('a phase finished by another session shows as done without leaving the tab', async ({
+  page,
+}) => {
+  await seedSpec(page)
+  await page.getByTestId('part-tasks').click()
+  await expect(page.getByTestId('specs-view')).toContainText('0/2 tasks')
+  await expect(page.getByTestId('start-phase-Phase 1: Core')).toBeVisible()
+
+  // The conversation does the work and ticks both tasks off.
+  await page.getByTestId('tab-session').click()
+  await page.getByTestId('composer-input').fill('implement phase 1 please')
+  await page.getByTestId('composer-send').click()
+  await page.getByTestId('tab-specs').click()
+  await page.evaluate(() =>
+    window.__mock.setSpecKit('p-alpha', {
+      installed: true,
+      specs: [{ id: '001-x', title: 'X', status: 'complete', tasksTotal: 2, tasksDone: 2 }],
+      details: {
+        '001-x': {
+          id: '001-x', title: 'X', status: 'complete', tasksTotal: 2, tasksDone: 2,
+          description: 'desc', path: 'specs/001-x',
+          sections: [{ title: 'Summary', body: 'body' }],
+          phases: [{ label: 'Phase 1: Core', tasks: [
+            { id: 'T001', label: 'Do a thing', done: true },
+            { id: 'T002', label: 'Do another', done: true },
+          ] }],
+          clarifications: [],
+          resolvedClarifications: [],
+        },
+      },
+    }),
+  )
+
+  // Nothing on screen changes until that session's turn ends, which is the
+  // moment the files are settled.
+  await page.evaluate(() => window.__mock.completeTurn('s-alpha'))
+
+  await expect(page.getByTestId('specs-view')).toContainText('2/2 tasks')
+  await expect(page.getByTestId('specs-view')).toContainText('All tasks complete')
+  await expect(page.getByTestId('start-phase-Phase 1: Core')).toHaveCount(0)
+  await expect(page.getByTestId('specs-view')).toContainText('Done')
+})

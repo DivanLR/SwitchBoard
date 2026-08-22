@@ -97,6 +97,16 @@ test('two Spec Kit commands take two sessions, and neither is the chat', async (
   )
   await page.getByTestId('tab-specs').click()
 
+  // Two different controls, because that is the case that used to queue: a plan
+  // sent while a specify was still writing.
+  await page.getByTestId('part-cmds').click()
+  await page.getByTestId('speckit-cmd-speckit-plan').click()
+  await expect
+    .poll(async () => (await sends(page)).some((s) => s.text.startsWith('/speckit-plan')))
+    .toBe(true)
+  const plan = (await sends(page)).find((s) => s.text.startsWith('/speckit-plan'))?.sessionId
+
+  await page.getByTestId('part-spec').click()
   await page.getByTestId('spec-new').click()
   await page.getByTestId('new-spec-input').fill('A per-domain container')
   await page.getByTestId('new-spec-submit').click()
@@ -105,17 +115,42 @@ test('two Spec Kit commands take two sessions, and neither is the chat', async (
     .toBe(true)
   const specify = (await sends(page)).find((s) => s.text.startsWith('/speckit-specify'))?.sessionId
 
-  await page.getByTestId('spec-new').click()
-  await page.getByTestId('new-spec-input').fill('A second feature')
-  await page.getByTestId('new-spec-submit').click()
-  await expect
-    .poll(async () => (await sends(page)).filter((s) => s.text.startsWith('/speckit-specify')).length)
-    .toBe(2)
-  const second = (await sends(page))
-    .filter((s) => s.text.startsWith('/speckit-specify'))
-    .at(-1)?.sessionId
-
+  expect(plan).toBeTruthy()
   expect(specify).toBeTruthy()
-  expect(second).not.toBe(specify)
-  expect(new Set([chat, specify, second]).size).toBe(3)
+  expect(new Set([chat, plan, specify]).size).toBe(3)
+})
+
+test('a command that is running says so on the control that started it', async ({ page }) => {
+  await page.evaluate(() =>
+    window.__mock.setSpecKit('p-alpha', {
+      installed: true,
+      specs: [{ id: '001-x', title: 'X', status: 'draft', tasksTotal: 0, tasksDone: 0 }],
+      details: {
+        '001-x': {
+          id: '001-x', title: 'X', status: 'draft', tasksTotal: 0, tasksDone: 0,
+          description: 'desc', path: 'specs/001-x', sections: [], phases: [], clarifications: [], tasks: [],
+        },
+      },
+    }),
+  )
+  await page.getByTestId('tab-specs').click()
+  await page.getByTestId('part-cmds').click()
+
+  const plan = page.getByTestId('speckit-cmd-speckit-plan')
+  const tasks = page.getByTestId('speckit-cmd-speckit-tasks')
+  // Hold the start open: this is the window a real containerised project spends
+  // bringing an image up, and it is the half of the feedback that was missing.
+  await page.evaluate(() => window.__mock.setStartDelay(3000))
+  await plan.click()
+
+  // First the wait, on the control that was clicked and nowhere else.
+  await expect(plan).toContainText('Starting')
+  await expect(plan).toBeDisabled()
+  await expect(tasks).toContainText('Run')
+
+  // Then the run itself, once the session exists.
+  await expect(plan).toContainText('Running', { timeout: 10_000 })
+  await expect(plan).toBeDisabled()
+  await expect(tasks).toContainText('Run')
+  await expect(tasks).toBeEnabled()
 })

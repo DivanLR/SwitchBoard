@@ -937,14 +937,24 @@ async function send(): Promise<void> {
   if (!text) return
   busy.value = true
   try {
-    // Spec-edit target: the message rewrites the referenced spec via the session.
+    // Spec-edit target: the message rewrites the referenced spec.
+    //
+    // In the SPECS section's own session, not the conversation. It used to go to
+    // whichever session was open, which is the one place left where a Specs
+    // action could interrupt a chat the developer was in the middle of, and it
+    // meant an edit queued behind whatever that session was doing. The section
+    // shows it running and re-reads the spec when it lands, so there is nothing
+    // left for the Session tab to show that the panel does not.
     if (editTarget.value) {
       const target = editTarget.value
       composer.value = ''
       editTarget.value = null
-      await specs.runInSession(props.project.id, `✎ Spec edit → ${target}: ${text}`)
-      mainTab.value = 'session' // watch the edit run
-      scrollToBottom()
+      await specs.runSpecCommand(
+        props.project.id,
+        `✎ Spec edit → ${target}: ${text}`,
+        'spec-edit',
+        'Applying your edit',
+      )
       return
     }
     if (!liveSession.value) return

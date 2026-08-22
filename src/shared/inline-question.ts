@@ -71,6 +71,16 @@ export function pendingQuestion(
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const event = events[i]
     if (event.kind === 'prompt') return null
+    // A question the SDK asked as a tool call, not as prose. The conversation
+    // renders these from the stream itself; a tail has no stream to render them
+    // in, so it asks here and gets the same card. Without this a section could
+    // show a run sitting on a question it had no way to answer.
+    if (event.kind === 'question') {
+      if (event.id === answeredId) return null
+      const payload = event.payload as QuestionPayload & { answered?: boolean }
+      if (payload?.answered || !payload?.options?.length) return null
+      return { eventId: event.id, payload }
+    }
     if (event.kind === 'assistant_text' || event.kind === 'summary') {
       if (event.id === answeredId) return null
       const text = (event.payload as { text?: string }).text ?? ''
