@@ -74,6 +74,34 @@ export function seedRealApp(): SeededApp {
     bypassPermissions: false,
   })
 
+  // An assistant message carrying a fenced code block, so the real app has a
+  // real code card to click. Seeded here rather than pushed at runtime because
+  // the real app has no mock host: the only way to get a stream event into it
+  // without starting a paid Claude session is to put one in its database.
+  //
+  // This exists for the clipboard test. Copying was broken for two releases by a
+  // main-process permission handler, and the mock-host suite could not see it —
+  // it renders the same renderer in a plain browser, where Chromium's own
+  // permission model applies. The regression is only visible from here.
+  repos.events.insert({
+    id: 'seeded-code-event',
+    sessionId: 'seeded-session',
+    seq: 1,
+    kind: 'assistant_text',
+    payload: {
+      text: ['Here is the resolver:', '', '```ts', 'const timeout = input.timeout ?? 5_000', '```'].join(
+        '\n',
+      ),
+      // Required, and not incidental: an event whose `partial` is undefined is
+      // treated as a message still arriving, and the clean view renders a
+      // settled one differently.
+      partial: false,
+    },
+    noiseKind: null,
+    createdAt: new Date().toISOString(),
+  })
+  repos.events.flush()
+
   // Land straight on the .NET stack: the picker is not what is under test.
   repos.settings.set({ ...DEFAULT_SETTINGS, projectTestStacks: { [project.id]: 'dotnet' } })
 

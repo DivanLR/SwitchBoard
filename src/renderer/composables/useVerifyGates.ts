@@ -23,6 +23,15 @@ export interface GateFace {
    * typed into a report.
    */
   verified?: boolean
+  /**
+   * True when there is no measurement here to contradict, so the developer may
+   * mark the tile green themselves. False for every measured face, including a
+   * figure that came back UNDER target — that is a real shortfall, and offering
+   * to click it away would launder data rather than record a judgement.
+   */
+  acceptable?: boolean
+  /** True when they have. The tile reads green and says who decided. */
+  accepted?: boolean
 }
 
 export type GateView = VerifyGate & GateFace
@@ -35,7 +44,24 @@ export const pct = (m: Measured): string => (m.value === null ? '—' : `${round
 export const sourceOf = (m: Measured, fallback = 'nothing measured it'): string =>
   m.source ?? fallback
 
-export function useVerifyGates(latest: ComputedRef<VerifyRun | null>) {
+/**
+ * A face nothing measured, which is therefore a judgement the developer is
+ * entitled to make. Two shapes qualify: the gate is absent from the run ('—'),
+ * or its suite reported back that it never executed here.
+ */
+function isAcceptable(face: GateFace): boolean {
+  return face.status === 'none' || (face.status === 'warn' && face.value === 'skipped')
+}
+
+/**
+ * @param accepted Gate ids the developer has accepted for this project. Absent
+ *   (the default) means none, which is what every caller but the Tests section
+ *   wants — the overlay is a UI affordance, not part of a run's verdict.
+ */
+export function useVerifyGates(
+  latest: ComputedRef<VerifyRun | null>,
+  accepted?: ComputedRef<ReadonlySet<string>>,
+) {
   /** Suites of the latest run whose catalog kind matches, ignoring ones that
    *  never executed — a skipped suite is not a pass and not a failure. */
   function suiteGate(kinds: readonly string[]): GateFace {
@@ -85,13 +111,35 @@ export function useVerifyGates(latest: ComputedRef<VerifyRun | null>) {
     }
   }
 
+  /**
+   * The face, plus whatever the developer has said about it.
+   *
+   * Deliberately applied AFTER the face is computed rather than inside each
+   * branch: acceptance can then only ever see a finished verdict, so there is no
+   * path by which it reaches a measured figure.
+   */
+  function overlay(gate: VerifyGate, face: GateFace): GateView {
+    const canAccept = isAcceptable(face)
+    if (!canAccept || !accepted?.value.has(gate.id)) return { ...gate, ...face, acceptable: canAccept }
+    return {
+      ...gate,
+      status: 'pass',
+      // Never a number and never the word "passed": this gate did not pass, it
+      // was excused, and the tile has to keep saying which of the two happened.
+      value: 'accepted',
+      sub: `you accepted this · ${face.sub}`,
+      acceptable: true,
+      accepted: true,
+    }
+  }
+
   const gates = computed<GateView[]>(() =>
     VERIFY_GATES.map((gate) => {
       const report = latest.value?.report
       const quality = report?.quality
       switch (gate.id) {
         case 'unit':
-          return { ...gate, ...suiteGate(['unit']) }
+          return overlay(gate, suiteGate(['unit']))
         case 'integration': {
           // The integration gate answers "does the API work", so a failed real
           // call fails it even when the suite that made the call reported pass.
@@ -99,7 +147,7 @@ export function useVerifyGates(latest: ComputedRef<VerifyRun | null>) {
           // the API is broken sits red in the panel below it.
           const face = suiteGate(['api'])
           const failed = (report?.endpoints ?? []).filter((e) => e.outcome === 'fail')
-          if (failed.length === 0) return { ...gate, ...face }
+          if (failed.length === 0) return overlay(gate, face)
           return {
             ...gate,
             status: 'fail',
@@ -112,7 +160,7 @@ export function useVerifyGates(latest: ComputedRef<VerifyRun | null>) {
         }
         case 'architecture': {
           const violations = quality?.archViolations
-          if (!violations || violations.value === null) return { ...gate, ...suiteGate(['quality']) }
+          if (!violations || violations.value === null) return overlay(gate, suiteGate(['quality']))
           return {
             ...gate,
             status: violations.value === 0 ? 'pass' : 'fail',
@@ -124,26 +172,25 @@ export function useVerifyGates(latest: ComputedRef<VerifyRun | null>) {
           }
         }
         case 'mutation':
-          return { ...gate, ...figureGate(quality?.mutation ?? unmeasured, 70) }
+          return overlay(gate, figureGate(quality?.mutation ?? unmeasured, 70))
         case 'coverage': {
           const changed = quality ? report?.coverage.changed : null
           const line = report?.coverage.line ?? unmeasured
           if (changed && changed.value !== null) {
-            return {
-              ...gate,
-              ...figureGate(changed, 90, `${pct(changed)} of changed lines · line ${pct(line)}`),
-            }
+            return overlay(
+              gate,
+              figureGate(changed, 90, `${pct(changed)} of changed lines · line ${pct(line)}`),
+            )
           }
-          return { ...gate, ...figureGate(line, 80) }
+          return overlay(gate, figureGate(line, 80))
         }
         default: {
           if (!quality?.gate || quality.gate === 'not_configured') {
-            return {
-              ...gate,
+            return overlay(gate, {
               status: 'none',
               value: '—',
               sub: latest.value ? 'no quality service connected' : 'no run yet',
-            }
+            })
           }
           const dup = quality.duplication
           return {
@@ -169,7 +216,10 @@ export function useVerifyGates(latest: ComputedRef<VerifyRun | null>) {
    * measured, rendering "—" like any other unmeasured figure.
    */
   const score = computed(() => {
-    const measured = gates.value.filter((g) => g.status !== 'none')
+    // An ACCEPTED gate is excluded on the same grounds as a '—' one: it was not
+    // measured. Counting it would put a judgement into a figure PRODUCT.md
+    // principle 2 says is counted, and the tile already states it was accepted.
+    const measured = gates.value.filter((g) => g.status !== 'none' && !g.accepted)
     if (measured.length === 0) return null
     const passed = measured.filter((g) => g.status === 'pass').length
     return {

@@ -2,7 +2,7 @@
 // invoke channel carries every method with a WireResult envelope so stable
 // error codes survive Electron's error serialisation. Push channels batch
 // stream events at >= 30 Hz flushes (SC-007).
-import { dialog, ipcMain, shell, type BrowserWindow } from 'electron'
+import { clipboard, dialog, ipcMain, shell, type BrowserWindow } from 'electron'
 import type { Session, SessionEvent } from '@shared/domain'
 import { canPassEval, isDangerousCommand, sessionName } from '@shared/domain'
 import { DIAGRAM_PLUGIN, DIAGRAMS_DIR, diagramFileName, diagramPrompt } from '@shared/diagram'
@@ -47,12 +47,14 @@ import { apiDataPrompt } from '@main/evals/api-dispatch'
 import { resolveApiHost, scanProjectEndpoints } from '@main/evals/api-scan'
 import { recentEndpoints } from '@shared/api-endpoints'
 import { apiReportFileName, apiReportMarkdown } from '@shared/api-report'
-import { gitNotice, sandboxToolsFor } from '@main/sessions/docker-sandbox'
+import { gitNotice, sandboxToolsFor } from '@main/sessions/wslc-sandbox'
 import { comboDocPath, readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
 import { comboKey } from '@shared/mcp-combo'
 import { installSpecKit, readSpecDetail, readSpecKitState } from '@main/specs/spec-kit'
 import { readDiffList, readFileDiff } from '@main/sessions/session-manager'
 import { readDiagramList } from '@main/diagrams/list'
+import { importSkills } from '@main/skills/import'
+import { disableSkill, enableSkill, removeSkill } from '@main/skills/install'
 import { check as checkForUpdates, installNow } from '@main/updater'
 
 const EVENT_FLUSH_INTERVAL_MS = 33 // >= 30 Hz (contract)
@@ -137,6 +139,9 @@ export class RendererPush {
 interface HandlerDeps {
   repos: Repositories
   manager: SessionManager
+  /** Where imported skills are staged (see main/skills/install.ts). Passed in
+   *  rather than derived here so the handlers stay free of Electron's `app`. */
+  skillsStagingRoot: string
   broker: PermissionBroker
   /** The trusted main window; IPC is accepted only from its webContents (A17). */
   getWindow: () => BrowserWindow | null
@@ -263,7 +268,7 @@ const ALLOWED_PLUGINS: ReadonlySet<string> = new Set([
 ])
 
 export function registerIpcHandlers(deps: HandlerDeps): void {
-  const { repos, manager, broker, dbProjectId } = deps
+  const { repos, manager, broker, dbProjectId, skillsStagingRoot } = deps
 
   const projectList = (): ProjectListItem[] =>
     repos.projects.listActive().map((project) => {
@@ -291,8 +296,14 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
           .map((r) => r.sessionId)
           .filter((id): id is string => !!id),
         diagrams: [...repos.diagramRequests.forProject(project.id).values()],
+        kinds: manager.sectionKinds(project.id),
       }
-      const sessions = rows.map((s) => ({ ...s, name: sessionName(s.id, work, s.branch) }))
+      // A typed name wins over the derived one: `label` is a fact only the
+      // developer knows, and nothing the app works out may overwrite it.
+      const sessions = rows.map((s) => ({
+        ...s,
+        name: s.label ?? sessionName(s.id, work, s.branch),
+      }))
       return {
         ...project,
         session: sessions[0] ?? null,
@@ -375,18 +386,35 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       }
       repos.projects.archive(req.projectId)
     },
+    // Read at spawn like the mode is, so a live session keeps whatever it
+    // started in and this applies from the next one.
+    'projects.setUseContainers': (req) => {
+      if (!repos.projects.byId(req.projectId)) {
+        throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
+      }
+      repos.projects.setUseContainers(req.projectId, req.on)
+    },
+    'sessions.rename': (req) => manager.renameSession(req.sessionId, req.label),
     'sessions.start': (req) =>
       // No mode default here: undefined has to reach the manager as "unspecified"
       // so it can fall back to the project's own choice.
       manager.startSession(req.projectId, req.resume ?? false, req.mode, req.carryTranscriptFrom, {
         containerised: req.containerised === true,
       }),
+    // Text out only. There is deliberately no clipboard READ endpoint: that is
+    // the direction that could lift whatever the developer last copied from
+    // another application, and nothing in this app needs it.
+    'clipboard.write': (req) => {
+      clipboard.writeText(req.text)
+    },
     'transcripts.save': (req) => manager.saveTranscript(req.sessionId),
     'transcripts.list': () => manager.listTranscripts(),
     'sessions.setPlanMode': (req) => {
       manager.setPlanMode(req.sessionId, req.enabled)
     },
-    'sessions.stop': (req) => manager.stopSession(req.sessionId),
+    // The note is what stops this being indistinguishable afterwards from a
+    // session that closed itself or died — see SessionManager.stopSession.
+    'sessions.stop': (req) => manager.stopSession(req.sessionId, 'You ended this session.'),
     // Straight from the row, not from the sidebar's view of it: see the contract.
     'sessions.fate': (req) => {
       const session = repos.sessions.byId(req.sessionId)
@@ -418,6 +446,72 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'sessions.events': (req) => repos.events.page(req.sessionId, req.beforeSeq, req.limit),
     'sessions.promptHistory': (req) => repos.commandHistory.recent(req.projectId, req.limit),
     'projects.commands': (req) => repos.projectCommands.get(req.projectId),
+    'skills.list': () => repos.customSkills.list(),
+    /*
+     * Import, then switch on, then report the whole list back.
+     *
+     * The registry is written only AFTER the files are on disk, and each skill is
+     * enabled one at a time with its row already inserted, so a failure half way
+     * leaves rows that match the filesystem rather than a registry describing
+     * skills that never landed. importSkills itself removes a half-written skill
+     * directory before it throws.
+     */
+    'skills.import': async (req) => {
+      const result = await importSkills(req.url, skillsStagingRoot, repos.customSkills.names())
+      repos.customSkills.insertMany(result.imported)
+      for (const skill of result.imported) {
+        try {
+          await enableSkill(skillsStagingRoot, skill.name)
+        } catch {
+          // The files are staged and the row exists; it simply is not live. The
+          // switch in Settings is what fixes that, and it now has something to
+          // switch. Failing the whole import over one copy would throw away the
+          // other nine skills that did land.
+          repos.customSkills.setEnabled(skill.name, false)
+        }
+      }
+      // Live sessions re-read their skills, so one that is already open picks the
+      // new command up without being restarted (same reason plugins.install does).
+      await manager.reloadPlugins()
+      return result
+    },
+    'skills.setEnabled': async (req) => {
+      if (!repos.customSkills.byName(req.name)) {
+        throw { code: 'NOT_FOUND', message: 'No such skill.' } satisfies IpcError
+      }
+      if (req.enabled) await enableSkill(skillsStagingRoot, req.name)
+      else await disableSkill(req.name)
+      repos.customSkills.setEnabled(req.name, req.enabled)
+      await manager.reloadPlugins()
+      return repos.customSkills.list()
+    },
+    'skills.remove': async (req) => {
+      await removeSkill(skillsStagingRoot, req.name)
+      repos.customSkills.remove(req.name)
+      await manager.reloadPlugins()
+      return repos.customSkills.list()
+    },
+    /*
+     * Run one, in the Skills section's own session.
+     *
+     * Refused unless the skill is enabled, because a disabled skill is not in
+     * ~/.claude/skills and the session would answer "Unknown command" — a refusal
+     * that names the reason beats a session reporting a mystery.
+     */
+    'skills.run': async (req) => {
+      const skill = repos.customSkills.byName(req.name)
+      if (!skill) throw { code: 'NOT_FOUND', message: 'No such skill.' } satisfies IpcError
+      if (!skill.enabled) {
+        throw {
+          code: 'RULE_NOT_ALLOWED',
+          message: 'That skill is switched off. Turn it on in Settings, then run it.',
+        } satisfies IpcError
+      }
+      const session = await manager.backgroundSessionFor(req.projectId, 'skills')
+      const argument = req.argument?.trim()
+      manager.sendMessage(session.id, argument ? `/${skill.name} ${argument}` : `/${skill.name}`)
+      return { sessionId: session.id }
+    },
     'specs.state': (req) => {
       const project = repos.projects.byId(req.projectId)
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
@@ -485,7 +579,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
           message: 'That file is outside the project',
         } satisfies IpcError
       }
-      const session = await manager.backgroundSessionFor(req.projectId)
+      const session = await manager.backgroundSessionFor(req.projectId, 'diff')
       manager.sendMessage(
         session.id,
         applyToRegionPrompt({ path: req.path, lines: req.lines, instruction }),
@@ -590,7 +684,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     },
     'specs.runInSession': async (req) => {
       const session = req.background
-        ? await manager.backgroundSessionFor(req.projectId)
+        ? await manager.backgroundSessionFor(req.projectId, req.kind ?? 'spec')
         : (repos.sessions.activeForProject(req.projectId) ??
           (await manager.startSession(req.projectId)))
       // A diagram command dispatched from the Diagrams tab. Registered so the
@@ -719,7 +813,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       // Same dedicated session the verification runs use: a check or a judge pass
       // is Tests-section work, and Tests-section work does not queue behind the
       // developer's conversation.
-      const session = await manager.backgroundSessionFor(req.projectId)
+      const session = await manager.backgroundSessionFor(req.projectId, 'tests')
       // Re-running a check clears the previous outcome, so a stale PASS can never
       // stand in for the run that is only just starting.
       if (req.kind === 'check') repos.evals.update(req.id, { checkStatus: 'not_run' })
@@ -749,7 +843,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       // reclaimed, and it would hold one of only two machine-wide container
       // slots for the rest of the process. The two facts it was being opened
       // for are both available without it, below.
-      const session = req.isolated ? null : await manager.backgroundSessionFor(req.projectId)
+      const session = req.isolated ? null : await manager.backgroundSessionFor(req.projectId, 'tests')
       const project = repos.projects.byId(req.projectId)
       // What the suites will actually run INSIDE, so an environment limit is
       // named before the run rather than reported afterwards as a failure of the
@@ -878,7 +972,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       // in its context. Otherwise it takes a fresh verify session like any run.
       const ran = run.sessionId ? repos.sessions.byId(run.sessionId) : undefined
       const session =
-        ran && !ran.endedAt ? ran : await manager.backgroundSessionFor(req.projectId)
+        ran && !ran.endedAt ? ran : await manager.backgroundSessionFor(req.projectId, 'tests')
       // The acceptance lines still waiting on a verdict say what the evidence has
       // to show; without any, the session works from the diff alone.
       const hints = repos.evals
@@ -963,7 +1057,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       if ('error' in host) throw { code: 'INVALID_PATH', message: host.error } satisfies IpcError
       // The Tests section's own session, shared with verification runs. See
       // SessionManager.backgroundSessionFor.
-      const session = await manager.backgroundSessionFor(req.projectId)
+      const session = await manager.backgroundSessionFor(req.projectId, 'tests')
       const run = repos.apiRuns.start({
         projectId: req.projectId,
         baseUrl: host.baseUrl,

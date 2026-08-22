@@ -103,7 +103,7 @@ export const SESSION_MODES: readonly {
   {
     value: 'bypass',
     label: 'Bypass',
-    detail: 'Nothing asks for approval. Runs inside a disposable Docker container.',
+    detail: 'Nothing asks for approval. Runs inside a disposable WSL container.',
   },
 ]
 
@@ -129,6 +129,56 @@ export interface Project {
    * and no caller needs a fallback.
    */
   defaultSessionMode: SessionMode
+  /**
+   * Whether this project's SECTION work — a spec action, a test run, a diff
+   * comment, a cleanup command, a diagram — runs inside a WSL container, and
+   * the default the start controls offer for a chat session.
+   *
+   * One switch rather than one per section, because the question is about the
+   * machine and not about the work: either containers are something this project
+   * uses or they are not. Off by default (migration 026); a bypass session still
+   * forces a container whatever this says.
+   *
+   * The runtime behind it is `wslc`, which ships inside WSL and needs WSL 2.9.3
+   * or newer. It was Docker Desktop until 2026-08-19.
+   */
+  useContainers: boolean
+}
+
+/**
+ * A skill the developer imported from a Git host, as the app records it.
+ *
+ * `name` is the identity: the directory under ~/.claude/skills, the word the CLI
+ * knows the skill by, and the slash command that runs it. Everything else is
+ * provenance and state.
+ */
+export interface CustomSkill {
+  name: string
+  description: string
+  /** The URL that was pasted, kept verbatim so a skill can say where it is from. */
+  sourceUrl: string
+  /** Repository-relative directory the skill was read out of, for the same reason. */
+  sourcePath: string
+  /**
+   * Switched on. Enabled means the skill's files are present in ~/.claude/skills
+   * and every session can see it; disabled means they are not.
+   *
+   * There is no third state and no per-project override. A skill is a user-level
+   * fact in Claude Code — the CLI reads one directory, for every project — so a
+   * per-project switch would be this app pretending to a granularity the runtime
+   * does not have.
+   */
+  enabled: boolean
+  /** How many files were written, so a listing can show what arrived. */
+  fileCount: number
+  importedAt: string
+}
+
+/** What an import found and installed, reported back to the view that asked. */
+export interface SkillImportResult {
+  imported: CustomSkill[]
+  /** Skills in the repository that were skipped, each with the reason. */
+  skipped: { name: string; reason: string }[]
 }
 
 /** An MCP server the session reported in its init message (sidebar MCP row). */
@@ -160,12 +210,23 @@ export interface Session {
    * main process fills it when it builds the project list (see sessionName), and
    * a row read straight from the database has it absent. Null for a plain
    * conversation, which has no such fact to state.
+   *
+   * `label` below wins over it when the developer has typed one.
    */
   name?: string | null
   /**
+   * The name the DEVELOPER typed for this session, persisted (migration 026).
+   *
+   * Separate from `name` because the two answer different questions and only one
+   * of them can be wrong: `name` states what the app started the session for and
+   * is re-derived on every list, so a stored copy would go stale; `label` is a
+   * fact only the developer knows and nothing may overwrite it. Null until named.
+   */
+  label?: string | null
+  /**
    * Started with --dangerously-skip-permissions (header "⚠ Bypass" pill), which
-   * also means the session ran inside the Docker sandbox. Persisted, because a
-   * bypass session's transcript lives in a container volume rather than the
+   * also means the session ran inside the WSL container sandbox. Persisted,
+   * because such a transcript lives in a container volume rather than the
    * host's ~/.claude: resuming one as a native session (or the reverse) would
    * look for that transcript in the wrong place and silently find nothing.
    */
@@ -583,13 +644,19 @@ export interface Settings {
    * for developers who read a permanent stopwatch as pressure rather than status.
    */
   showSessionTimer: boolean
-  /** Per-project INTELLIGENT-model overrides; 'global'/absent follows the global one. */
-  projectModels: Record<string, string>
-  /**
-   * Per-project WORKER-model overrides — 'global' or absent follows the global
-   * worker model.
+  /*
+   * There is deliberately no per-project model override here.
+   *
+   * `projectModels` and `projectWorkerModels` used to sit at this spot, letting a
+   * project pick a different intelligent or worker model from the global one. The
+   * owner removed the scope on 2026-08-21: the Models tab could say one thing
+   * while a session ran on another, and the only way to find out which was to
+   * open the project tab and check. Both models are global, full stop.
+   *
+   * Stored values from before that decision are simply ignored — the settings row
+   * is JSON merged over DEFAULT_SETTINGS, so a key nothing reads is inert. Do not
+   * reintroduce either field without reintroducing the choice deliberately.
    */
-  projectWorkerModels: Record<string, string>
   /** The verification stack chosen for a project's Tests section (a TEST_STACKS
    *  id). Absent means nothing chosen yet, so the section shows the picker with
    *  whatever detection found. */
@@ -630,6 +697,20 @@ export interface Settings {
    * choice the app keeps forgetting.
    */
   projectIsolatedRuns: Record<string, boolean>
+  /**
+   * Gate ids the developer has ACCEPTED for a project: a tile nothing measured,
+   * marked green by hand because they know why it is absent — a mutation tool the
+   * stack has none of, a quality service this project will never connect to, a
+   * suite deliberately skipped here.
+   *
+   * Only ever an overlay on an ABSENT measurement, never on a present one. The
+   * gate faces are computed first and acceptance applies to a '—' or a skipped
+   * suite alone, so a coverage figure that came back under target cannot be
+   * clicked green — that is a measured shortfall, and painting over it is the one
+   * thing this section exists not to do (FR-072). A later run that does measure
+   * the gate wins outright, without the acceptance being cleared.
+   */
+  projectAcceptedGates: Record<string, string[]>
   /** Base URL an API eval set calls for a project, e.g. http://localhost:5057.
    *  Absent means it is read from the project's launchSettings.json instead. */
   projectApiBase: Record<string, string>
@@ -680,9 +761,10 @@ export interface Settings {
    */
   mcpActiveServers: string[]
   /**
-   * Memory cap for each bypass sandbox container (docker --memory): any Docker
-   * size ("6g", "12g"), or "0" for no cap. The SWITCHBOARD_SANDBOX_MEMORY env
-   * var still overrides it — see sandboxMemoryArg for why both exist.
+   * Memory cap for each sandbox container (`wslc run --memory`): a size such as
+   * "6g" or "12g", or "0" for no cap. The SWITCHBOARD_SANDBOX_MEMORY env var
+   * still overrides it — see sandboxMemoryArg, which also records why this is a
+   * softer cap under wslc than it was under Docker.
    */
   sandboxMemory: string
 }
@@ -700,14 +782,26 @@ export interface McpScan {
 export const DEFAULT_SETTINGS: Settings = {
   defaultView: 'clean',
   notificationsEnabled: true,
-  intelligentModel: 'default',
+  // Named rather than left at the account default, so a fresh install arrives on
+  // the strong model without a trip to Settings. A concrete id rather than the
+  // 'opus' family alias because the Models tab marks its selection by matching
+  // this against a CLI-REPORTED id, and an alias matches no card — the picker
+  // would open with nothing selected and read as broken.
+  intelligentModel: 'claude-opus-5',
   // The worker defaults to the cheaper everyday model, per the pairing modes.
   workerModel: 'claude-sonnet-5',
   autoModelRouting: true,
   modelMode: 'auto',
-  // Off by default: fan-out is the right default for big work and the wrong one
-  // for a one-line fix, and the user is the one who knows which this is.
-  heavySubagents: false,
+  // On by default. This was off, on the argument that fan-out is right for big
+  // work and wrong for a one-line fix, so the user should choose per task. That
+  // argument lost: the setting has to be re-found on every fresh install, and
+  // the cost of over-delegating a small change is smaller than the cost of a
+  // large one running single-threaded because nobody visited the Models tab.
+  //
+  // Note the coupling: heavy subagents force the ORCHESTRATOR protocol whatever
+  // modelMode says (heavySubagentModelMode), so shipping this on also means a
+  // new install runs Orchestrator rather than the 'auto' the card below claims.
+  heavySubagents: true,
   summaries: true,
   fontSize: 'md',
   // Clean view is narrative + approvals by default; tool rows live in Raw.
@@ -715,12 +809,11 @@ export const DEFAULT_SETTINGS: Settings = {
   timestamps: false,
   autoscroll: true,
   showSessionTimer: true,
-  projectModels: {},
-  projectWorkerModels: {},
   projectTestStacks: {},
   projectSuiteCommands: {},
   projectTestSelection: {},
   projectIsolatedRuns: {},
+  projectAcceptedGates: {},
   projectApiBase: {},
   projectApiStart: {},
   projectApiQa: {},
@@ -1223,6 +1316,22 @@ export interface DiffListResult {
  * or generated before this app knew about it, still lists.
  */
 /**
+ * The kinds of work that each get a session of their own.
+ *
+ * A section's dispatch used to land in one shared background session (and a spec
+ * action, in the developer's chat), so a diagram queued behind a verification
+ * pass and a cleanup command interleaved its output with a spec's. One session
+ * per kind: the five here never wait on each other.
+ *
+ * Not one session per DISPATCH. A background session closes itself on the turn
+ * that finishes its work (endIfIdleBackground), so consecutive runs of the same
+ * kind already get fresh sessions; reuse only ever applies while the previous run
+ * of that same kind is still going, where queueing is the correct answer anyway.
+ * 'diagram' is the exception and keeps its no-reuse rule — see diagramSessionFor.
+ */
+export type SectionKind = 'spec' | 'tests' | 'diff' | 'cleanup' | 'diagram' | 'skills'
+
+/**
  * What a session is ABOUT, in a few words, for a list that otherwise shows the
  * same branch name on every row of a project.
  *
@@ -1239,6 +1348,11 @@ export function sessionName(
     apiRunSessionIds?: readonly string[]
     /** Diagram file name by the session that drew it. */
     diagrams?: readonly { sessionId: string | null; description: string }[]
+    /** What each LIVE section session was opened for, from the manager's own
+     *  map. Covers the kinds that leave no run row behind — a spec action, a
+     *  diff comment, a cleanup command — which would otherwise all read as the
+     *  bare branch and be indistinguishable in the sidebar. */
+    kinds?: Readonly<Record<string, SectionKind>>
   },
   branch?: string | null,
 ): string | null {
@@ -1255,9 +1369,20 @@ export function sessionName(
   // pair the developer needs when the same harness is running on two branches at
   // once. Sessions carry their own branch, so a worktree names itself correctly.
   const on = branch ? ` - ${branch}` : ''
+  const kind = work.kinds?.[sessionId]
+  if (kind) return `${SECTION_LABELS[kind]}${on}`
   if (work.verifyRunSessionIds?.includes(sessionId)) return `Tests${on}`
   if (work.apiRunSessionIds?.includes(sessionId)) return `API${on}`
   return null
+}
+
+const SECTION_LABELS: Record<SectionKind, string> = {
+  spec: 'Specs',
+  tests: 'Tests',
+  diff: 'Diff',
+  cleanup: 'Cleanup',
+  diagram: 'Diagram',
+  skills: 'Skills',
 }
 
 export interface DiagramEntry {

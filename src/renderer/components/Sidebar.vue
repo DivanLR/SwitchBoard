@@ -78,7 +78,12 @@ const collapsed = ref(false)
 // through it would flash the wrong theme on every launch. It is also pure
 // renderer chrome with nothing in the main process that ever reads it, unlike
 // every other preference, which lives in SQLite via the settings store.
-const theme = ref<'dark' | 'light'>(localStorage.getItem('sb-theme') === 'light' ? 'light' : 'dark')
+// LIGHT is the default from 2026-08-21, on the owner's direction: the app's
+// world moved to a light card surface, and a dark default would mean every new
+// install met a theme the design no longer leads with. An existing developer's
+// stored choice still wins, in either direction, which is why this reads the
+// key for 'dark' rather than assuming an absent key means the old default.
+const theme = ref<'dark' | 'light'>(localStorage.getItem('sb-theme') === 'dark' ? 'dark' : 'light')
 
 function applyTheme(): void {
   document.documentElement.classList.toggle('sb-light', theme.value === 'light')

@@ -14,9 +14,10 @@ import {
   recipeTag,
   refMounts,
   sandboxImageFor,
+  normalizeSize,
   sandboxMemoryArg,
   toContainerPaths,
-} from '@main/sessions/docker-sandbox'
+} from '@main/sessions/wslc-sandbox'
 import { sandboxSystemPromptAppend } from '@main/sessions/session-shaping'
 import { explainExit } from '@main/sessions/session'
 import {
@@ -197,13 +198,13 @@ describe('sandboxMemoryArg', () => {
 
   it('defaults to 6g with no setting and no env var', () => {
     delete process.env.SWITCHBOARD_SANDBOX_MEMORY
-    expect(sandboxMemoryArg(undefined)).toEqual(['--memory', '6g', '--memory-swap', '6g'])
-    expect(sandboxMemoryArg('   ')).toEqual(['--memory', '6g', '--memory-swap', '6g'])
+    expect(sandboxMemoryArg(undefined)).toEqual(['--memory', '6G'])
+    expect(sandboxMemoryArg('   ')).toEqual(['--memory', '6G'])
   })
 
   it('uses the Settings value', () => {
     delete process.env.SWITCHBOARD_SANDBOX_MEMORY
-    expect(sandboxMemoryArg('12g')).toEqual(['--memory', '12g', '--memory-swap', '12g'])
+    expect(sandboxMemoryArg('12g')).toEqual(['--memory', '12G'])
   })
 
   it("removes the cap entirely for '0'", () => {
@@ -213,23 +214,55 @@ describe('sandboxMemoryArg', () => {
 
   it('lets the env var override the setting', () => {
     process.env.SWITCHBOARD_SANDBOX_MEMORY = '9g'
-    expect(sandboxMemoryArg('12g')).toEqual(['--memory', '9g', '--memory-swap', '9g'])
+    expect(sandboxMemoryArg('12g')).toEqual(['--memory', '9G'])
   })
 
-  // The cap only caps if swap is pinned to it. With --memory alone, Docker
-  // permits swap up to the same figure again, so a 12g container could reach
-  // ~24 GiB: more than the whole WSL VM on a 32 GB machine, at which point the
-  // VM's kernel kills some container that was within its own limit and the
-  // developer is told their code crashed. Every branch that emits a cap must
-  // emit both halves of it, which is what this asserts rather than the values.
-  it('always pins swap to the same figure, so the cap is a ceiling and not a hint', () => {
+  // This used to assert the opposite: that every branch emitting a cap emitted
+  // `--memory-swap` pinned to the same figure, because with `--memory` alone
+  // Docker permitted swap up to the same figure again and a 12g container could
+  // reach ~24 GiB, more than the whole VM on a 32 GB machine.
+  //
+  // wslc has no `--memory-swap`. So the cap is a soft one again, and the honest
+  // test is the one that says so: this pins the ABSENCE, so that reintroducing
+  // the flag is a deliberate act that updates a test rather than something that
+  // drifts in unnoticed. Flip it back the day wslc gains the flag.
+  it('emits the cap alone, because wslc has no --memory-swap to pin it with', () => {
     delete process.env.SWITCHBOARD_SANDBOX_MEMORY
     for (const setting of [undefined, '4g', '12g', '512m']) {
       const args = sandboxMemoryArg(setting)
-      const memory = args[args.indexOf('--memory') + 1]
-      expect(args).toContain('--memory-swap')
-      expect(args[args.indexOf('--memory-swap') + 1]).toBe(memory)
+      expect(args).not.toContain('--memory-swap')
+      expect(args[args.indexOf('--memory') + 1]).toBe(args[1])
+      expect(args).toHaveLength(2)
     }
+  })
+
+  // Every branch that emits a cap must emit it in the form wslc accepts, which
+  // is not the form this app has always stored. `wslc run -m 6g` is refused
+  // outright ("Invalid memory argument value: '6g'"), and the stored setting,
+  // the default, and the SWITCHBOARD_SANDBOX_MEMORY on at least one real machine
+  // are all lowercase, so without normalising, every containerised session died
+  // at spawn on an argument nobody had reason to think was wrong. Asserted on
+  // the emitted args and not only on normalizeSize, because it is the argv that
+  // reaches wslc.
+  it('emits the cap in the case wslc accepts, whatever case it was stored in', () => {
+    delete process.env.SWITCHBOARD_SANDBOX_MEMORY
+    expect(sandboxMemoryArg('512m')).toEqual(['--memory', '512M'])
+    expect(sandboxMemoryArg('1gb')).toEqual(['--memory', '1G'])
+    expect(sandboxMemoryArg('2GiB')).toEqual(['--memory', '2G'])
+    expect(sandboxMemoryArg('1.5g')).toEqual(['--memory', '1.5G'])
+    // Already right stays right, rather than being mangled by a second pass.
+    expect(sandboxMemoryArg('12G')).toEqual(['--memory', '12G'])
+  })
+
+  // A value wslc genuinely cannot read must reach wslc unchanged, so its own
+  // error names it. Rewriting it into something plausible would replace a clear
+  // complaint about the developer's input with a silent substitution.
+  it('passes an unrecognisable size through rather than inventing one', () => {
+    delete process.env.SWITCHBOARD_SANDBOX_MEMORY
+    expect(normalizeSize('lots')).toBe('lots')
+    expect(normalizeSize('6 gigs')).toBe('6 gigs')
+    // Bare byte counts carry no unit to upcase and are already valid.
+    expect(normalizeSize('1073741824')).toBe('1073741824')
   })
 })
 
@@ -246,7 +279,7 @@ describe('cpuShare', () => {
   })
 })
 
-// Two containerised sessions of the SAME project used to share one Docker home
+// Two containerised sessions of the SAME project used to share one home
 // volume (keyed by projectId) and collide on the CLI's own storage key, which is
 // derived from cwd alone (always /workspace inside the container) — confirmed to
 // let them read each other's transcripts. Keying the volume to the session itself
@@ -367,7 +400,7 @@ describe('a container is not a permission decision', () => {
   })
 })
 
-// The image is built only when `docker image inspect` misses it, which is right:
+// The image is built only when `wslc image inspect` misses it, which is right:
 // rebuilding on every session start would be unusable. Paired with a FIXED tag it
 // meant an image, once built, was never rebuilt however the recipe changed.
 //

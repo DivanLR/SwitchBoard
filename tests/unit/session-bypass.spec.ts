@@ -1,4 +1,4 @@
-// Bypass sessions run inside the Docker sandbox and keep their SDK transcript in
+// Bypass sessions run inside the WSL container sandbox and keep their SDK transcript in
 // a per-project container volume rather than the host's ~/.claude. Resume has to
 // send the next session to the same place, so the flag has to survive the app
 // process — these cover the 0/1 <-> boolean round trip and the pre-migration rows

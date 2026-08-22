@@ -39,11 +39,22 @@ export function useSessionStart(opts: {
    * container (on Windows there is no other isolation boundary) and that stays
    * true, so the switch reads as on and locked in that mode rather than quietly
    * disagreeing with what is about to happen.
+   *
+   * The PROJECT holds the answer, not this composable. It used to be a local
+   * ref that reset to false on every mount, which meant the same question was
+   * asked in two places with two answers: this switch for a chat session, and a
+   * hard-coded true for every section dispatch. One switch, one stored fact
+   * (Project.useContainers), and the checkbox in the header writes the same one.
    */
-  const runInContainer = ref(false)
+  const runInContainer = computed({
+    get: () => project().useContainers,
+    set: (on: boolean) => {
+      void projects.setUseContainers(project().id, on)
+    },
+  })
   const containerForced = computed(() => startMode.value === 'bypass')
   const containerOn = computed(() => containerForced.value || runInContainer.value)
-  /** Session-start failure (e.g. Docker down for a bypass session), ended banner. */
+  /** Session-start failure (e.g. wslc missing for a bypass session), ended banner. */
   const startError = ref<string | null>(null)
 
   const canResume = computed(() => Boolean(endedSession()?.sdkSessionId))
@@ -189,8 +200,8 @@ export function useSessionStart(opts: {
       // surface only as a beat-later ended banner, easy to miss.
       watchForImmediateCrash(target, session.id, wasResuming)
     } catch (e) {
-      // Docker down / not logged in (bypass sessions run containerised) — show
-      // it in the ended banner instead of dying as an unhandled rejection.
+      // wslc missing or the host not logged in (bypass sessions run containerised)
+      // — show it in the ended banner instead of dying as an unhandled rejection.
       if (project().id === target) {
         const message = isIpcError(e) ? e.message : String(e)
         // A resume attempt that failed must not stay armed for the next click —

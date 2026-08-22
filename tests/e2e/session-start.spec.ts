@@ -17,6 +17,41 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByTestId('ended-banner')).toBeVisible()
 })
 
+// The composer on an ended session. It used to look identical to a live one:
+// `.composer-input` sets its own `color`, which beats the browser's disabled
+// dimming, so the only cues were a changed placeholder and a greyed Send button.
+test('the composer greys out when the session has ended', async ({ page }) => {
+  const composer = page.getByTestId('composer-dead')
+  await expect(composer).toBeVisible()
+  await expect(page.getByTestId('composer-live')).toHaveCount(0)
+
+  // Nothing can be typed, which is what the grey is reporting.
+  await expect(page.getByTestId('composer-input')).toBeDisabled()
+  await expect(page.getByTestId('composer-input')).toHaveAttribute('placeholder', 'Start a session first')
+
+  const dead = await composer.evaluate((el) => ({
+    row: getComputedStyle(el.querySelector('.composer-row')!).opacity,
+    panel: getComputedStyle(el).backgroundColor,
+    caret: getComputedStyle(el.querySelector('.composer-input')!).caretColor,
+  }))
+  expect(Number(dead.row)).toBeLessThan(1)
+  // The block caret is the composer's "ready" signal; a green cursor blinking in
+  // a box that cannot send is the wrong promise.
+  expect(dead.caret).toBe('rgba(0, 0, 0, 0)')
+
+  // The contrast that matters: a project whose session is still live is not dimmed,
+  // so this is a state and not a new permanent look for the composer.
+  await page.getByTestId('sidebar-project-beta').click()
+  const live = page.getByTestId('composer-live')
+  await expect(live).toBeVisible()
+  const alive = await live.evaluate((el) => ({
+    row: getComputedStyle(el.querySelector('.composer-row')!).opacity,
+    panel: getComputedStyle(el).backgroundColor,
+  }))
+  expect(Number(alive.row)).toBe(1)
+  expect(alive.panel).not.toBe(dead.panel)
+})
+
 test('the mode picker offers every mode the SDK can spawn, each with its description', async ({
   page,
 }) => {
@@ -31,8 +66,8 @@ test('the mode picker offers every mode the SDK can spawn, each with its descrip
 
   // The description is on the row itself and repeated on hover.
   const bypass = list.getByTestId('start-mode-bypass')
-  await expect(bypass).toContainText('disposable Docker container')
-  await expect(bypass).toHaveAttribute('title', /disposable Docker container/)
+  await expect(bypass).toContainText('disposable WSL container')
+  await expect(bypass).toHaveAttribute('title', /disposable WSL container/)
 })
 
 test('choosing bypass states what it means, rather than only colouring the control', async ({
@@ -155,21 +190,24 @@ test('a failed resume turns Resume back off, and says why in the message', async
   await expect(page.getByTestId('resume-session')).toHaveAttribute('aria-checked', 'false')
 })
 
-test('heavy subagent mode is off by default and can be turned on', async ({ page }) => {
+// On by default since a fresh install should not have to visit the Models tab to
+// get fan-out (see DEFAULT_SETTINGS). What still has to hold is the reverse trip:
+// a default the developer cannot switch off is a policy, not a default.
+test('heavy subagent mode is on by default and can be turned off', async ({ page }) => {
   await page.getByTestId('open-settings').click()
   await page.getByTestId('settings-tab-term').click()
   const toggle = page.getByTestId('setting-heavy-subagents')
   await expect(toggle).toBeVisible()
-  await expect(toggle).toHaveAttribute('aria-checked', 'false')
+  await expect(toggle).toHaveAttribute('aria-checked', 'true')
 
   await toggle.click()
-  await expect(toggle).toHaveAttribute('aria-checked', 'true')
+  await expect(toggle).toHaveAttribute('aria-checked', 'false')
 
   // It survives closing the panel, because it shapes every session that starts after.
   await page.getByTestId('settings-done').click()
   await page.getByTestId('open-settings').click()
   await page.getByTestId('settings-tab-term').click()
-  await expect(page.getByTestId('setting-heavy-subagents')).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByTestId('setting-heavy-subagents')).toHaveAttribute('aria-checked', 'false')
 })
 
 // WHERE a session runs used to be decided for you: bypass meant a container and

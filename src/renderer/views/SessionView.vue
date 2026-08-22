@@ -15,7 +15,7 @@ const composerDrafts = new Map<string, string>()
 import { computed, nextTick, onMounted, onUnmounted, onWatcherCleanup, ref, watch } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
 import { agentIdOf } from '@shared/domain'
-import type { SessionEvent } from '@shared/domain'
+import type { SectionKind, SessionEvent } from '@shared/domain'
 import type { CleanupGroup } from '@shared/command-catalog'
 import { DIAGRAM_PLUGIN } from '@shared/diagram'
 import { activeAgents } from '@shared/agents'
@@ -53,9 +53,13 @@ import CleanupView from '@renderer/views/CleanupView.vue'
 import TestsView from '@renderer/views/TestsView.vue'
 import DiffView from '@renderer/views/DiffView.vue'
 import DiagramsView from '@renderer/views/DiagramsView.vue'
+import SkillsView from '@renderer/views/SkillsView.vue'
 import SessionWaitOverlay from '@renderer/components/SessionWaitOverlay.vue'
 
 const props = defineProps<{ project: ProjectListItem }>()
+/** The Skills section's "Manage skills" link. Settings is owned by App, so the
+ *  view asks rather than reaching for it. */
+const emit = defineEmits<{ (e: 'open-settings', tab: 'skills'): void }>()
 
 const projects = useProjectsStore()
 const active = useActiveSessionStore()
@@ -95,7 +99,9 @@ function pillLabel(status: string): string {
 // Main-area tab: the live session stream, the project's Spec Kit specs, the
 // verification section, the working-tree diff, or the review/cleanup command
 // launcher.
-const mainTab = ref<'session' | 'specs' | 'tests' | 'diff' | 'cleanup' | 'diagrams'>('session')
+const mainTab = ref<'session' | 'specs' | 'tests' | 'diff' | 'cleanup' | 'diagrams' | 'skills'>(
+  'session',
+)
 const specCount = computed(() => specs.stateFor(props.project.id).specs.length)
 const diffCount = computed(() => diff.resultFor(props.project.id).files.length)
 
@@ -323,6 +329,15 @@ const composerPlaceholder = computed(() => {
   return liveSession.value ? `Send a message to ${sendTo.value}…` : 'Start a session first'
 })
 
+/**
+ * Nothing can be sent from here: the session has ended and this is not an edit.
+ *
+ * The same expression the textarea and the send button were each testing
+ * separately. Named because a third reader now needs it — the composer greys
+ * itself out — and three copies of one condition is how the three stop agreeing.
+ */
+const composerDead = computed(() => !liveSession.value && !editTarget.value)
+
 /** Nothing to send. Both buttons ask the same question, so they ask it once. */
 const composerEmpty = computed(() => composer.value.trim().length === 0)
 
@@ -341,7 +356,17 @@ async function openFullUsage(): Promise<void> {
 }
 
 watch(
-  () => liveSession.value?.id ?? null,
+  // The FOCUSED session, live or ended — not `liveSession`, which is null the
+  // moment a session ends.
+  //
+  // Keyed on liveSession, this called `active.open(null)` for every ended
+  // session, and open(null) clears the stream and returns. The consequence was
+  // larger than it looks: startup reconciliation ends every session a previous
+  // run left open, so after ANY restart the whole board is ended and not one
+  // conversation could be read back — while the ended banner sitting on top of
+  // the empty stream says "The conversation can be resumed". The events were on
+  // disk and `sessions.events` served them the whole time; nothing ever asked.
+  () => (liveSession.value ?? endedSession.value)?.id ?? null,
   async (sessionId) => {
     interimSummaries.value = new Set() // reset per session
     // A session can be superseded while its history is still loading (starting a
@@ -704,6 +729,97 @@ watch(
   },
 )
 
+/**
+ * Naming the focused session, in the developer's own words.
+ *
+ * `null` means the field is closed; a string means it is open and holding an
+ * edit in progress, which is why the empty string has to be a valid open state
+ * and cannot double as "closed". Saving an empty one clears the stored name and
+ * the derived one takes over again, so there is no second control for undoing it.
+ */
+const nameDraft = ref<string | null>(null)
+const nameInputEl = ref<HTMLInputElement | null>(null)
+
+function openNameEdit(): void {
+  const target = liveSession.value ?? endedSession.value
+  if (!target) return
+  nameDraft.value = target.label ?? ''
+  void nextTick(() => nameInputEl.value?.select())
+}
+
+function saveName(): void {
+  const draft = nameDraft.value
+  const target = liveSession.value ?? endedSession.value
+  nameDraft.value = null
+  if (draft === null || !target || draft.trim() === (target.label ?? '')) return
+  void projects.renameSession(target.id, draft)
+}
+
+/**
+ * Another session in this project, started from the header.
+ *
+ * Deliberately the project's own defaults and nothing else — no mode picker, no
+ * resume. The full start controls already exist on an ended session's panel; this
+ * is the one-click case, for a developer who wants a second conversation going in
+ * the same checkout while the first is busy.
+ */
+function startAnother(): void {
+  void projects.startSession(props.project.id)
+}
+
+/** The project's container switch. Uncontrolled input read back from the event:
+ *  the store writes the project optimistically and re-reads on failure, so the
+ *  box follows the stored fact rather than holding a second copy of it. */
+function onContainersToggle(e: Event): void {
+  void projects.setUseContainers(props.project.id, (e.target as HTMLInputElement).checked)
+}
+
+/**
+ * The command palette's grouping and match highlighting.
+ *
+ * Grouped by the plugin that ships each command, which is what a namespaced name
+ * already encodes: `/ponytail:ponytail-review` belongs under PONYTAIL, a bare
+ * `/init` under COMMANDS. With fifty commands matching a single slash, an
+ * unlabelled list is a wall; the labels are the difference between scanning and
+ * reading. Follows the pinned reference (design.dev command palette), which
+ * groups results under uppercase section labels.
+ *
+ * Each row carries its FLAT index, because keyboard navigation still walks the
+ * one-dimensional `suggestions` array that `suggestIndex` indexes. Grouping is a
+ * presentation of that array, never a second source of truth for it.
+ */
+const suggestGroups = computed<{ label: string; items: { cmd: string; index: number }[] }[]>(() => {
+  const groups = new Map<string, { cmd: string; index: number }[]>()
+  suggestions.value.forEach((cmd, index) => {
+    const bare = cmd.replace(/^\//, '')
+    const colon = bare.indexOf(':')
+    const label = colon === -1 ? 'Commands' : bare.slice(0, colon)
+    const list = groups.get(label)
+    if (list) list.push({ cmd, index })
+    else groups.set(label, [{ cmd, index }])
+  })
+  return [...groups].map(([label, items]) => ({ label, items }))
+})
+
+/** The `/token` being typed, so the palette can show which part of each row
+ *  actually matched. Read off the composer rather than threaded out of the
+ *  composable: it is a presentation concern and nothing else needs it. */
+const typedToken = computed<string>(() => {
+  const match = /(?:^|\s)\/([^\s]*)$/.exec(composer.value)
+  return match ? match[1].toLowerCase() : ''
+})
+
+/** A command split around the matched run, for highlighting. Case-insensitive
+ *  and substring, matching how the suggestions themselves were filtered; a
+ *  highlight that disagreed with the filter would be worse than none. */
+function matchParts(cmd: string): { before: string; hit: string; after: string } {
+  const token = typedToken.value
+  if (token === '') return { before: cmd, hit: '', after: '' }
+  const at = cmd.toLowerCase().indexOf(token)
+  if (at === -1) return { before: cmd, hit: '', after: '' }
+  return { before: cmd.slice(0, at), hit: cmd.slice(at, at + token.length), after: cmd.slice(at + token.length) }
+}
+
 // --- Actions ---
 // A Refine action in SpecsView sets a spec-edit target. Stay on the Specs tab
 // (the composer footer is shared across tabs) and focus it, so the developer can
@@ -722,41 +838,35 @@ function onSetTarget(label: string): void {
  * as its own sidebar row, which is where the output is read.
  */
 /**
- * The background session a section last dispatched to, so the section can show
- * its output. Held here rather than in each view because every section routes
- * through this one function, and they all share the one background session.
+ * The session each section last dispatched to, so that section can show its
+ * own output. Keyed by section: the sections no longer share one background
+ * session, so one shared id would have pointed the Cleanup terminal at
+ * whichever drawing happened to run most recently.
  */
-const sectionSessionId = ref<string | null>(null)
+const sectionSessionIds = ref<Partial<Record<SectionKind, string>>>({})
 
-function runInSection(text: string): void {
-  void specs.runInSession(props.project.id, text, true).then((id) => {
-    sectionSessionId.value = id
+function runInSection(text: string, kind: SectionKind): void {
+  void specs.runInSession(props.project.id, text, true, false, kind).then((id) => {
+    sectionSessionIds.value = { ...sectionSessionIds.value, [kind]: id }
   })
 }
 
 /**
- * A plugin's own slash command, run where that plugin exists.
+ * A plugin's own slash command, in its section's own session like anything else.
  *
- * NOT the background session, unlike everything else a section dispatches. The
- * background session is containerised, and a containerised session's ~/.claude is
- * a Docker volume of its own with the credentials copied in and nothing else —
- * no plugins. So a command detected in the project's live session and sent to the
- * container came back "Unknown command: /diagram-design:export-diagram", which is
- * true of the environment it arrived in and says nothing about the developer.
- *
- * The cost is that the command's output lands in the conversation. That is the
- * correct trade for these three: they are short, they end in a file path, and an
- * answer in the wrong place beats no answer at all.
+ * This used to run in the CONVERSATION. A containerised session's ~/.claude was
+ * a volume with the credentials copied in and nothing else, so a command detected
+ * in the project's live session and sent to the container came back "Unknown
+ * command: /diagram-design:export-diagram" — true of the environment it arrived
+ * in and nothing to do with the developer. The sandbox mounts the host's
+ * ~/.claude/plugins read-only as of 0.20.0 (see pluginsPath in wslc-sandbox), and
+ * a section session is native unless the project asks for containers at all, so
+ * both ways out of that hole are now open and the output can land where the
+ * developer asked from instead of in the middle of their conversation.
  */
-function runPluginCommand(text: string, watchDiagrams = false): void {
-  void specs.runInSession(props.project.id, text, false, watchDiagrams).then((id) => {
-    // Pointed at the section's own terminal, even though this ran in the
-    // conversation's session. Where it RUNS is a fact about which environment has
-    // the plugin; where it is WATCHED is a fact about where the developer asked
-    // from, and they asked from the Diagrams tab. Routing it to the live session
-    // without this left the section silent and the answer somewhere they were not
-    // looking.
-    sectionSessionId.value = id
+function runPluginCommand(text: string, kind: SectionKind, watchDiagrams = false): void {
+  void specs.runInSession(props.project.id, text, true, watchDiagrams, kind).then((id) => {
+    sectionSessionIds.value = { ...sectionSessionIds.value, [kind]: id }
   })
 }
 
@@ -771,7 +881,7 @@ function runPluginCommand(text: string, watchDiagrams = false): void {
  * kind of difference nobody can guess at from the outside.
  */
 function runDiagramCommand(text: string): void {
-  runPluginCommand(text, true)
+  runPluginCommand(text, 'diagram', true)
 }
 
 /**
@@ -1000,7 +1110,10 @@ const {
     @dragleave="onPaneDragLeave"
     @drop="onPaneDrop"
   >
-    <header class="head">
+    <!-- The project header and the tab strip below both stand down when a section
+         has the whole window. Hiding the strip means the section owns the way
+         back, which is why the section renders an exit control of its own. -->
+    <header v-if="!active.fullScreenSection" class="head">
       <div class="head-row">
         <span class="h-dot" :style="{ background: headerColor }"></span>
         <span class="h-name mono" data-testid="session-project-name">{{ project.name }}</span>
@@ -1079,6 +1192,38 @@ const {
           {{ pillLabel(liveSession.status) }}
         </span>
         <span v-else-if="endedSession" class="pill ended">Ended</span>
+        <!-- One question, asked once, for the whole project: does its work run in
+             a container? It governs every section's session (specs, tests, diff
+             comments, cleanup, diagrams) AND what the start controls below offer
+             a chat session, because it is the same question each time. Read at
+             spawn, so it applies from the next session.
+
+             Labelled WSL, not Docker: the runtime is wslc, which ships inside WSL
+             (see wslc-sandbox.ts). Naming it is not pedantry, because it is what
+             the developer has to have installed for the box to do anything. -->
+        <label class="wsl-check mono" data-testid="project-containers">
+          <input
+            type="checkbox"
+            data-testid="project-containers-input"
+            :checked="project.useContainers"
+            :title="
+              project.useContainers
+                ? 'This project runs its work inside WSL containers: the project folder is mounted, nothing else is. Slower to start, and only two containers may run at once machine-wide.'
+                : 'This project runs its work on this machine. Tick to run it inside WSL containers instead: isolated from the rest of your drive, slower to start, two at a time. Needs WSL 2.9.3 or newer.'
+            "
+            @change="onContainersToggle"
+          />
+          WSL
+        </label>
+        <button
+          class="ctl mono"
+          data-testid="new-session"
+          title="Start another session in this project, on its own defaults"
+          :disabled="projects.starting"
+          @click="startAnother()"
+        >
+          + Session
+        </button>
         <!-- No interrupt button and no transcript glyph here. Both appeared only
              mid-turn or mid-session, so the row reflowed under the developer while
              they were reading it. Ctrl+C still interrupts (onGlobalKeydown, and the
@@ -1129,6 +1274,32 @@ const {
         />
       </div>
       <div class="head-meta mono">
+        <!-- The session's name, edited in place. It is the first thing on the
+             row because it is the one fact that tells two sessions of the same
+             project apart — every one of them runs against the same checkout,
+             so the branch beside it is identical on all of them. Untyped, it
+             shows whatever the app derived from the work. -->
+        <input
+          v-if="nameDraft !== null"
+          ref="nameInputEl"
+          v-model="nameDraft"
+          class="name-input mono"
+          data-testid="session-name-input"
+          maxlength="60"
+          placeholder="Name this session"
+          @keydown.enter="saveName()"
+          @keydown.esc="nameDraft = null"
+          @blur="saveName()"
+        />
+        <button
+          v-else-if="liveSession || endedSession"
+          class="name-btn"
+          data-testid="session-name"
+          title="Name this session"
+          @click="openNameEdit()"
+        >
+          {{ (liveSession ?? endedSession)?.name ?? 'Name this session' }}
+        </button>
         <span style="white-space: nowrap"><Icon name="branch" :size="12" /> {{ liveSession?.branch ?? endedSession?.branch ?? '—' }}</span>
         <span
           v-if="currentModelLabel"
@@ -1216,7 +1387,7 @@ const {
       </div>
     </div>
 
-    <div class="main-tabs mono">
+    <div v-if="!active.fullScreenSection" class="main-tabs mono">
       <button
         class="mt"
         :class="{ sel: mainTab === 'session' }"
@@ -1256,6 +1427,17 @@ const {
         @click="mainTab = 'diagrams'"
       >
         Diagrams
+      </button>
+      <!-- The developer's own imported skills. Last on the rule because it is the
+           only section whose contents they supply themselves; the five before it
+           are the app's own. -->
+      <button
+        class="mt"
+        :class="{ sel: mainTab === 'skills' }"
+        data-testid="tab-skills"
+        @click="mainTab = 'skills'"
+      >
+        Skills
       </button>
       <!-- Clean/Raw belongs on this rule, not in the header above it. It switches
            how THE STREAM is drawn, so it sits with the tabs that choose what the
@@ -1306,7 +1488,7 @@ const {
       :project-id="project.id"
       :project-name="project.name"
       :branch="liveSession?.branch ?? endedSession?.branch ?? null"
-      @run="runInSection"
+      @run="(text: string) => runInSection(text, 'tests')"
       @ran="onRanInSection"
     />
     <DiffView v-else-if="mainTab === 'diff'" :project-id="project.id" />
@@ -1314,10 +1496,10 @@ const {
       v-else-if="mainTab === 'cleanup'"
       :project-name="project.name"
       :available="availableCommandNames"
-      :session-id="sectionSessionId"
+      :session-id="sectionSessionIds.cleanup ?? null"
       :installing="installing !== null"
       :install-error="installError"
-      @run="runPluginCommand"
+      @run="(text: string) => runPluginCommand(text, 'cleanup')"
       @install="installCleanup"
     />
     <!-- No @ran: a diagram is drawn in a background session, so asking for one
@@ -1327,11 +1509,19 @@ const {
       v-else-if="mainTab === 'diagrams'"
       :project-id="project.id"
       :available="availableCommandNames"
-      :session-id="sectionSessionId"
+      :session-id="sectionSessionIds.diagram ?? null"
       :installing="installing === DIAGRAM_PLUGIN.pkg"
       :install-error="installError"
       @install="installDiagramPlugin"
       @run="runDiagramCommand"
+    />
+    <SkillsView
+      v-else-if="mainTab === 'skills'"
+      :project-id="project.id"
+      :project-name="project.name"
+      :session-id="sectionSessionIds.skills ?? null"
+      @ran="(id: string) => (sectionSessionIds = { ...sectionSessionIds, skills: id })"
+      @manage="emit('open-settings', 'skills')"
     />
 
     <!-- Clean stream (an open agent chat always renders clean) -->
@@ -1441,6 +1631,14 @@ const {
               <span :class="{ faint: !canResume }">Resume session</span>
             </span>
 
+            <!-- The SAME project setting as the WSL box in the header, not a
+                 per-start toggle. It used to be one: a local ref that reset to off
+                 on every mount, so flipping it affected exactly the next start and
+                 nothing else. It now writes Project.useContainers, which is what
+                 makes "one checkbox" true, and that means flipping it here also
+                 decides where this project's specs, tests, diff comments, cleanup
+                 and diagrams run from now on. The label has to say so, or the
+                 control lies about its own blast radius. -->
             <span class="bypass-inline mono">
               <button
                 class="switch"
@@ -1452,13 +1650,13 @@ const {
                 :title="
                   containerForced
                     ? 'Bypass always runs in a container: it approves every tool call, so the container is the only thing left standing between it and your files.'
-                    : 'Run this session inside a Linux container instead of on this machine. Your project folder is mounted, nothing else is, and the session cannot reach the rest of your drive. Slower to start, and only two containers may run at once.'
+                    : 'The same setting as the WSL box in the header, for the whole project: every session and every section run goes into a WSL container. Your project folder is mounted, nothing else is. Slower to start, only two containers at once, and it needs WSL 2.9.3 or newer.'
                 "
                 @click="containerForced || (runInContainer = !runInContainer)"
               >
                 <span class="knob"></span>
               </button>
-              <span :class="{ faint: containerForced }">Run in container</span>
+              <span :class="{ faint: containerForced }">Use WSL containers</span>
             </span>
 
             <button class="btn-solid" data-testid="start-session" :disabled="busy" @click="start()">
@@ -1659,7 +1857,12 @@ const {
              exception is a spec-edit target, because Specs Refine sets one and then
              expects this field to type it into; hiding it unconditionally would
              delete that flow rather than tidy it. -->
-        <footer v-if="mainTab === 'session' || editTarget" class="composer">
+        <footer
+          v-if="mainTab === 'session' || editTarget"
+          class="composer"
+          :class="{ dead: composerDead }"
+          :data-testid="composerDead ? 'composer-dead' : 'composer-live'"
+        >
       <!-- Jump to the newest line. Anchored to the composer rather than to the
            stream, because the stream is the scrolling box: anything absolute
            inside it scrolls away with the content. The composer is the fixed
@@ -1797,18 +2000,38 @@ const {
           </button>
         </span>
         <div class="input-wrap">
-          <div v-if="suggestions.length > 0" class="suggest-list mono" data-testid="suggest-list">
-            <div
-              v-for="(cmd, index) in suggestions"
-              :key="cmd"
-              class="suggest-item"
-              :class="{ active: index === suggestIndex }"
-              :data-testid="`suggest-item-${index}`"
-              @mousedown.prevent="acceptSuggestion(cmd)"
-              @mouseenter="suggestIndex = index"
-            >
-              <span class="suggest-typed">{{ cmd }}</span>
-              <span v-if="hintFor(cmd)" class="suggest-desc">{{ hintFor(cmd) }}</span>
+          <div
+            v-if="suggestions.length > 0"
+            class="suggest-list mono"
+            data-testid="suggest-list"
+            role="listbox"
+            aria-label="Commands"
+          >
+            <div v-for="group in suggestGroups" :key="group.label" class="suggest-group">
+              <!-- One label per plugin. Uppercase and small, per the reference:
+                   it has to name the group without competing with the commands. -->
+              <div class="suggest-label">{{ group.label }}</div>
+              <div
+                v-for="row in group.items"
+                :id="`suggest-opt-${row.index}`"
+                :key="row.cmd"
+                class="suggest-item"
+                :class="{ active: row.index === suggestIndex }"
+                :data-testid="`suggest-item-${row.index}`"
+                role="option"
+                :aria-selected="row.index === suggestIndex"
+                @mousedown.prevent="acceptSuggestion(row.cmd)"
+                @mouseenter="suggestIndex = row.index"
+              >
+                <!-- The matched run carries the accent. It is the one thing on the
+                     row that answers "why is this here". -->
+                <span class="suggest-typed"
+                  >{{ matchParts(row.cmd).before
+                  }}<span class="suggest-hit">{{ matchParts(row.cmd).hit }}</span
+                  >{{ matchParts(row.cmd).after }}</span
+                >
+                <span v-if="hintFor(row.cmd)" class="suggest-desc">{{ hintFor(row.cmd) }}</span>
+              </div>
             </div>
           </div>
           <!-- Inline ghost-text completion behind the input. When the first token
@@ -1829,7 +2052,7 @@ const {
             data-testid="composer-input"
             rows="1"
             :placeholder="composerPlaceholder"
-            :disabled="!liveSession && !editTarget"
+            :disabled="composerDead"
             spellcheck="false"
             autocomplete="off"
             @input="onComposerInput"
@@ -1851,7 +2074,7 @@ const {
         <button
           class="send-btn mono"
           data-testid="composer-send"
-          :disabled="(!liveSession && !editTarget) || busy || composerEmpty"
+          :disabled="composerDead || busy || composerEmpty"
           @click="send()"
         >
           Send <Icon name="send" :size="12" />
@@ -2062,6 +2285,72 @@ const {
 .ctl:disabled {
   opacity: 0.7;
   cursor: default;
+}
+
+/* The project's container switch. A checkbox rather than the switch the start
+   controls use: those switches decide what happens to THIS session, and this one
+   states a standing fact about the project, which is what a checkbox reads as.
+   Quiet by default and only coloured when ticked, because off is the common
+   answer and an always-lit control stops carrying information. */
+.wsl-check {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-ui);
+  color: var(--text-tab);
+  cursor: pointer;
+  user-select: none;
+}
+
+.wsl-check:hover {
+  color: var(--text-strong);
+}
+
+.wsl-check input {
+  accent-color: var(--blue);
+  cursor: pointer;
+  margin: 0;
+}
+
+.wsl-check:has(input:checked) {
+  color: var(--blue);
+}
+
+/* The session's own name, on the meta row. Reads as text until hovered: it is a
+   label first and a control second, and an untyped session shows the prompt in
+   the faint tier so it invites without shouting. */
+.name-btn {
+  font-family: var(--mono);
+  font-size: var(--fs-meta);
+  color: var(--text-body);
+  border-bottom: 1px dashed transparent;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: text;
+}
+
+.name-btn:hover {
+  color: var(--text-strong);
+  border-bottom-color: var(--border-strong);
+}
+
+.name-input {
+  font-family: var(--mono);
+  font-size: var(--fs-meta);
+  color: var(--text-strong);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-seg);
+  border-radius: var(--rp);
+  padding: 1px 6px;
+  width: 220px;
+}
+
+.name-input:focus {
+  outline: none;
+  border-color: var(--blue);
 }
 
 /* Red, because it is the one control here that stops work already running. It
@@ -2729,6 +3018,42 @@ html.sb-light .bypass-warn {
 .composer {
   position: relative;
   box-shadow: var(--hairline-shine);
+}
+
+/* ENDED. Nothing typed here can go anywhere, and until now the box did not say
+   so: `.composer-input` sets its own `color`, which beats the browser's disabled
+   dimming, so a dead composer looked exactly like a live one. The only cues were
+   a changed placeholder and a greyed Send.
+
+   The panel recedes to the canvas colour so the box stops reading as a surface
+   you can act on, and everything in the row fades with it. Including the buttons:
+   the queue is project-scoped, so a queued message would outlive the session and
+   run on the next one — but the textarea is disabled here, so nothing can be
+   typed, `composerEmpty` stays true, and Queue is unreachable as well. Nothing in
+   this row is actionable, and the row should say exactly that much. */
+.composer.dead {
+  background: var(--bg);
+  box-shadow: none;
+}
+
+.composer.dead .composer-row {
+  opacity: 0.55;
+}
+
+.composer.dead .composer-input,
+.composer.dead .ghost-typed,
+.composer.dead .to-inline {
+  color: var(--text-ghost);
+}
+
+.composer.dead .composer-input::placeholder {
+  color: var(--text-ghost);
+}
+
+/* The block caret is the composer's "ready" signal. On a dead one it would be a
+   green cursor blinking in a box that cannot send. */
+.composer.dead .composer-input {
+  caret-color: transparent;
 }
 
 /* The one round thing in a world of cut corners, and deliberately so: it is a

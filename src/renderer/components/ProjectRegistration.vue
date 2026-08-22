@@ -81,8 +81,8 @@ async function startSession(): Promise<void> {
           try {
             await projects.startSession(existing.id)
           } catch (startError) {
-            // Starting can fail on its own terms (a bypass session needs Docker
-            // running). Report it here rather than letting it escape this catch
+            // Starting can fail on its own terms (a bypass session needs WSL
+            // container). Report it here rather than letting it escape this catch
             // block as an unhandled rejection with the dialog looking idle.
             error.value = isIpcError(startError) ? startError.message : String(startError)
             return

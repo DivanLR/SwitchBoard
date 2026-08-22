@@ -64,7 +64,16 @@ function setup() {
     onNeedsYou: () => {},
   })
   const window = fakeWindow()
-  registerIpcHandlers({ repos, manager, broker, getWindow: () => window as never, dbProjectId: 'db-project' })
+  registerIpcHandlers({
+    repos,
+    manager,
+    broker,
+    getWindow: () => window as never,
+    dbProjectId: 'db-project',
+    // A temp path: this suite never imports a skill, and the handlers only read
+    // this when one is imported.
+    skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),
+  })
 
   const listener = registered.get(INVOKE_CHANNEL)
   if (!listener) throw new Error(`nothing registered on ${INVOKE_CHANNEL}`)

@@ -144,10 +144,15 @@ test('sidebar collapses to an initials rail and the theme toggle flips light mod
   await page.getByTestId('collapse-toggle').click()
   await expect(alpha.locator('.name')).toHaveText('alpha')
 
-  await page.getByTestId('theme-toggle').click()
+  // LIGHT is the default as of 2026-08-21, so a fresh profile opens on the light
+  // world and the first click goes the other way. This asserted the reverse until
+  // then; the direction of the first click is the part that changed, not the
+  // toggle. Both states are pinned so neither default can drift unnoticed.
   await expect(page.locator('html')).toHaveClass(/sb-light/)
   await page.getByTestId('theme-toggle').click()
   await expect(page.locator('html')).not.toHaveClass(/sb-light/)
+  await page.getByTestId('theme-toggle').click()
+  await expect(page.locator('html')).toHaveClass(/sb-light/)
 })
 
 test('a reference can be added by project name and removed from the REFS row', async ({

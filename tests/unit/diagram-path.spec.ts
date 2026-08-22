@@ -86,6 +86,9 @@ function setup() {
     broker,
     getWindow: () => window as never,
     dbProjectId: 'db-project',
+    // A temp path: these suites never import a skill, and the handlers only
+    // read this when one is imported.
+    skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),
   })
 
   const listener = registered.get(INVOKE_CHANNEL)

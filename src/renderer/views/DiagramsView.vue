@@ -290,7 +290,7 @@ watch(
     <!-- The gap between pressing Generate and having something to watch.
          `diagrams.generate` cannot return a session id until one exists, and the
          session it uses is containerised, so on the first diagram of a run that
-         wait is a Docker container starting: long enough that the section looked
+         wait is a container starting: long enough that the section looked
          inert, with nothing on screen claiming the button had done anything. -->
     <div
       v-if="diagrams.generating && !pending"

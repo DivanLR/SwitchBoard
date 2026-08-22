@@ -183,6 +183,67 @@ test('before any run, every gate says nothing measured it', async ({ page }) => 
   await expect(page.getByTestId('tests-gate-coverage')).toContainText('≥ 80% line')
 })
 
+// A gate nothing measured used to be grey forever: the stack has no mutation
+// tool, or the quality service is never getting connected, and the tile sat
+// there implying unfinished work. These cover the control that clears it, and the
+// line it must not cross.
+test('a gate nothing measured can be accepted, and then reads green', async ({ page }) => {
+  await openTests(page)
+  await page.getByTestId('tests-stack-node').click()
+
+  const gate = page.getByTestId('tests-gate-mutation')
+  await expect(gate).toContainText('no run yet')
+
+  await page.getByTestId('tests-gate-accept-mutation').click()
+
+  // Green, which is what was asked for. Asserted on the class the hue comes from
+  // AND on the words, because the colour is the thing that must never be the
+  // whole story: a measured pass and an accepted gate share it, and only the text
+  // says which of the two you are looking at.
+  await expect(gate).toHaveClass(/gate pass/)
+  await expect(gate).toContainText('accepted')
+  await expect(gate).toContainText('you accepted this')
+
+  // And it is a decision, not a one-way door.
+  await page.getByTestId('tests-gate-accept-mutation').click()
+  await expect(gate).toContainText('no run yet')
+  await expect(gate).not.toHaveClass(/gate pass/)
+})
+
+test('accepting a gate survives leaving the section, because it is a project fact', async ({
+  page,
+}) => {
+  await openTests(page)
+  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-gate-accept-mutation').click()
+  await expect(page.getByTestId('tests-gate-mutation')).toContainText('accepted')
+
+  // Tabs, not openTests — that helper reloads the page and reinstalls the mock
+  // host, which would reset the very thing under test.
+  await page.getByTestId('tab-session').click()
+  await page.getByTestId('tab-tests').click()
+
+  await expect(page.getByTestId('tests-gate-mutation')).toContainText('accepted')
+})
+
+test('a measured figure offers no way to accept it away', async ({ page }) => {
+  // The line the feature must not cross. A coverage figure that came back UNDER
+  // target is a real shortfall, and a button that painted it green would make
+  // this section a place where bad numbers go to look good.
+  await openTests(page)
+  await page.getByTestId('tests-stack-node').click()
+  await startRun(page)
+  await page.evaluate(
+    (r) => window.__mock.reportVerifyResult('p-alpha', 'fail', r),
+    report({ coverage: { line: { value: 11, source: 'a real runner' }, changed: null, files: [] } }),
+  )
+
+  const gate = page.getByTestId('tests-gate-coverage')
+  await expect(gate).toContainText('11%')
+  await expect(gate).toContainText('under target')
+  await expect(page.getByTestId('tests-gate-accept-coverage')).toHaveCount(0)
+})
+
 test('a run sends the chosen suites to the session, and its report fills the gates', async ({ page }) => {
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
@@ -219,7 +280,27 @@ test('a run sends the chosen suites to the session, and its report fills the gat
  * full run covers", and conflating them is what made the manual route so
  * tedious.
  */
-test('a suite that has run can be re-run on its own, leaving the selection alone', async ({ page }) => {
+// Removed at the owner's request. It was a third target in a row whose own chip
+// is already the thing you aim at: tick what you want, press Run. Asserted on a
+// suite that HAS run, which is the only state that ever offered it.
+test('no suite offers a per-suite re-run control', async ({ page }) => {
+  await openTests(page)
+  await page.getByTestId('tests-stack-node').click()
+  await expect(page.getByTestId('tests-suite-node-unit')).toBeVisible()
+  await expect(page.getByTestId('tests-suite-rerun-node-unit')).toHaveCount(0)
+
+  await startRun(page)
+  await page.evaluate((r) => window.__mock.reportVerifyResult('p-alpha', 'pass', r), report())
+
+  await expect(page.getByTestId('tests-suite-node-unit')).toHaveClass(/ran-pass/)
+  await expect(page.getByTestId('tests-suite-rerun-node-unit')).toHaveCount(0)
+})
+
+// Selection was invisible on exactly the chips where it mattered: the outcome
+// rules for skipped / not-run / unavailable set `background: transparent` and
+// outrank `.chip.on`, so a grey suite looked the same ticked and unticked. An API
+// suite reporting `not_run` is the common case, which is how it was found.
+test('a ticked suite is visibly ticked even when its outcome left it grey', async ({ page }) => {
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
   await startRun(page)
@@ -227,31 +308,27 @@ test('a suite that has run can be re-run on its own, leaving the selection alone
     (r) => window.__mock.reportVerifyResult('p-alpha', 'fail', r),
     report({
       suites: [
-        { id: 'node-unit', label: 'Unit tests', status: 'fail', detail: '3 failed' },
-        { id: 'node-api', label: 'HTTP smoke', status: 'pass', detail: '9 routes, all 2xx' },
+        { id: 'node-unit', label: 'Unit tests', status: 'pass', detail: '142 passed' },
+        { id: 'node-api', label: 'HTTP smoke', status: 'not_run', detail: 'no test database' },
       ],
     }),
   )
-  await expect(page.getByTestId('tests-suite-node-unit')).toHaveClass(/ran-fail/)
 
-  const before = await page.getByTestId('tests-suite-count').textContent()
-  await page.getByTestId('tests-suite-rerun-node-unit').click()
+  const grey = page.getByTestId('tests-suite-node-api')
+  await expect(grey).toHaveClass(/ran-not_run/)
+  // Still ticked from the run, and the class that draws the ring is present.
+  await expect(grey).toHaveClass(/ on/)
 
-  // The dispatch names that suite and nothing else.
-  const sent = await lastSend(page)
-  expect(sent).toContain('node-unit')
-  expect(sent).not.toContain('node-api')
-  // And what a full run would cover is exactly what it was before.
-  await expect(page.getByTestId('tests-suite-count')).toHaveText(before ?? '')
-})
+  // The ring itself, not merely the class: a shadow is what survives the outcome
+  // rules, and it is the whole reason this is fixed rather than reordered.
+  const ringed = await grey.evaluate((el) => getComputedStyle(el).boxShadow)
+  expect(ringed).not.toBe('none')
 
-// A suite that never ran has no result to try again, so offering the control
-// there would be a button that means nothing.
-test('a suite that has not run offers no re-run control', async ({ page }) => {
-  await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
-  await expect(page.getByTestId('tests-suite-node-unit')).toBeVisible()
-  await expect(page.getByTestId('tests-suite-rerun-node-unit')).toHaveCount(0)
+  // Untick it, and the ring goes.
+  await grey.click()
+  await expect(grey).not.toHaveClass(/ on/)
+  const bare = await grey.evaluate((el) => getComputedStyle(el).boxShadow)
+  expect(bare).toBe('none')
 })
 
 // A run whose session dies used to leave the button disabled with no way back
@@ -705,6 +782,95 @@ test('the working tree is the only verify target offered', async ({ page }) => {
   // an inert control on the screen that reports what a run measured only misleads.
   await expect(page.getByTestId('tests-target-head')).toHaveCount(0)
   await expect(page.getByTestId('tests-target-spec')).toHaveCount(0)
+})
+
+// The section used to sit in an 840px column whatever the window was. On a wide
+// monitor that meant a narrow strip of tests beside empty canvas, with the six
+// gate tiles wrapping onto rows they had the room to lay out in one.
+test('the section uses the width it is given, rather than an 840px column', async ({ page }) => {
+  // A WIDE window, because that is the only place the cap was visible. At the
+  // default 1280 the sidebar and inbox leave the pane narrower than 840, so the
+  // column was never the binding constraint there — which is why this is set
+  // explicitly rather than left to the default.
+  await page.setViewportSize({ width: 1800, height: 900 })
+  await openTests(page)
+  await page.getByTestId('tests-stack-node').click()
+
+  const pane = await page.getByTestId('tests-view').evaluate((el) => el.clientWidth)
+  // Guards the test itself: below the old cap, everything after this would pass
+  // without proving anything.
+  expect(pane).toBeGreaterThan(880)
+
+  for (const id of ['tests-gates', 'tests-suites']) {
+    const width = await page.getByTestId(id).evaluate((el) => el.getBoundingClientRect().width)
+    expect(width, id).toBeGreaterThan(840)
+  }
+
+  // Prose keeps its measure. Widening sentences was never the point, and a
+  // paragraph running the full width of an ultrawide is worse than the column was.
+  const prose = await page
+    .getByTestId('tests-view')
+    .locator('.intro')
+    .evaluate((el) => el.getBoundingClientRect().width)
+  expect(prose).toBeLessThanOrEqual(841)
+})
+
+// FULL SCREEN. Widening the section inside the pane was half of it; this is the
+// other half — the sidebar, inbox, project header and tab strip stand down so the
+// section has every pixel.
+test('the section can take the whole window, and give it back', async ({ page }) => {
+  await page.setViewportSize({ width: 1800, height: 900 })
+  await openTests(page)
+  await page.getByTestId('tests-stack-node').click()
+
+  const before = await page.getByTestId('tests-view').evaluate((el) => el.clientWidth)
+  await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
+
+  await page.getByTestId('tests-full-screen').click()
+
+  // Every piece of chrome the shell owns is gone.
+  await expect(page.getByTestId('sidebar-project-alpha')).toHaveCount(0)
+  await expect(page.getByTestId('tab-tests')).toHaveCount(0)
+  await expect(page.getByTestId('inbox-rail')).toHaveCount(0)
+  // And the section actually got the space, rather than merely losing its
+  // neighbours.
+  const after = await page.getByTestId('tests-view').evaluate((el) => el.clientWidth)
+  expect(after).toBeGreaterThan(before)
+
+  // The way back, since the tab strip that would normally offer one is hidden.
+  await page.getByTestId('tests-full-screen').click()
+  await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
+  await expect(page.getByTestId('tab-tests')).toBeVisible()
+})
+
+test('Escape leaves full screen, so the chrome is never trapped away', async ({ page }) => {
+  await page.setViewportSize({ width: 1800, height: 900 })
+  await openTests(page)
+  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-full-screen').click()
+  await expect(page.getByTestId('tab-tests')).toHaveCount(0)
+
+  await page.keyboard.press('Escape')
+
+  await expect(page.getByTestId('tab-tests')).toBeVisible()
+  await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
+})
+
+test('leaving the project hands the chrome back rather than stranding the app', async ({ page }) => {
+  // The failure this prevents: full screen hides the tab strip, so anything that
+  // unmounts the section while it is on would leave an app with no sidebar, no
+  // tabs, and no control that brings either back.
+  await page.setViewportSize({ width: 1800, height: 900 })
+  await openTests(page)
+  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-full-screen').click()
+  await expect(page.getByTestId('sidebar-project-alpha')).toHaveCount(0)
+
+  await page.keyboard.press('Escape')
+  await page.getByTestId('sidebar-project-beta').click()
+
+  await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
+  await expect(page.getByTestId('tab-tests')).toBeVisible()
 })
 
 test('the stack choice persists per project and can be changed', async ({ page }) => {

@@ -508,12 +508,16 @@ test('a missing command installs the plugin from the menu', async ({ page }) => 
     .toBeGreaterThan(0)
 })
 
-// The bug this pins: a containerised session's ~/.claude is a Docker volume with
-// the credentials copied in and nothing else, so it holds NO plugins. Commands
-// were detected in the project's live session and dispatched into that container,
-// which answered "Unknown command: /diagram-design:export-diagram" — true of where
-// it arrived, and nothing to do with the command being wrong.
-test('a plugin command runs in the live session, which is the one that has the plugin', async ({
+// This assertion has been the reverse of itself twice, and both turns were
+// right at the time. A containerised session's ~/.claude was a Docker volume with
+// the credentials copied in and nothing else, so it held NO plugins and a command
+// dispatched into one answered "Unknown command: /diagram-design:export-diagram";
+// running it in the live session was the fix. Since 0.20.0 the sandbox mounts the
+// host's ~/.claude/plugins read-only, and a section session is native unless the
+// project asks for Docker at all — so the constraint that forced it into the
+// conversation is gone, and a drawing command belongs where every other drawing
+// goes: a session of its own, which is what the developer asked for.
+test("a plugin command runs in the Diagrams section's own session, not the conversation", async ({
   page,
 }) => {
   await page.evaluate(() =>
@@ -532,12 +536,10 @@ test('a plugin command runs in the live session, which is the one that has the p
 
   await expect
     .poll(async () => (await page.evaluate(() => window.__mock.state().sends)).at(-1)?.sessionId)
-    .toBe('s-alpha')
+    .not.toBe('s-alpha')
 
-  // Run there, WATCHED here. Where it runs is a fact about which environment holds
-  // the plugin; where it is watched is a fact about where the developer asked
-  // from, and they asked from this tab. Sending it to the live session without
-  // this left the section silent and the answer in the conversation behind them.
+  // And WATCHED here, in the tab the developer asked from. Sending it anywhere
+  // without this left the section silent and the answer somewhere else.
   await expect(page.getByTestId('diagrams-view').getByTestId('mini-terminal')).toBeVisible()
 })
 

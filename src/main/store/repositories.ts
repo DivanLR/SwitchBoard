@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { transaction, type AppDatabase } from './db'
 import type { DiagramPlan } from '@shared/diagram'
 import type {
+  CustomSkill,
   DecisionOutcome,
   DecisionRecord,
   Draft,
@@ -54,10 +55,16 @@ interface ProjectRow {
   refs: string | null
   /** NOT NULL with a DEFAULT since migration 022, so this is never null. */
   defaultSessionMode: SessionMode
+  /** SQLite has no boolean type: 0/1, NOT NULL since migration 026. */
+  useContainers: number
 }
 
 function toProject(row: ProjectRow): Project {
-  return { ...row, refs: row.refs ? (JSON.parse(row.refs) as ProjectRef[]) : [] }
+  return {
+    ...row,
+    refs: row.refs ? (JSON.parse(row.refs) as ProjectRef[]) : [],
+    useContainers: row.useContainers === 1,
+  }
 }
 
 interface SessionRow {
@@ -79,6 +86,8 @@ interface SessionRow {
   bypassPermissions: number | null
   /** How the session STARTED, never where it is now — see Session.planMode. */
   planMode: number | null
+  /** The developer's own name for this session; null until they type one. */
+  label: string | null
 }
 
 /** SessionRow is the raw shape; Session wants real booleans for the flags. */
@@ -146,6 +155,9 @@ export class ProjectsRepo {
       archivedAt: null,
       refs: [],
       defaultSessionMode: input.defaultSessionMode ?? DEFAULT_SESSION_MODE,
+      // Not a column in the INSERT below: migration 026's DEFAULT 0 supplies it,
+      // and one source for the default beats two that can disagree.
+      useContainers: false,
     }
     this.db
       .prepare(
@@ -168,6 +180,12 @@ export class ProjectsRepo {
   /** Takes effect on the project's next session; the SDK mode is fixed at spawn. */
   setSessionMode(id: string, mode: SessionMode): void {
     this.db.prepare('UPDATE projects SET defaultSessionMode = ? WHERE id = ?').run(mode, id)
+  }
+
+  /** Same rule as the mode above: read at spawn, so a live session keeps whatever
+   *  it started in and this applies from the next one. */
+  setUseContainers(id: string, on: boolean): void {
+    this.db.prepare('UPDATE projects SET useContainers = ? WHERE id = ?').run(on ? 1 : 0, id)
   }
 
   byId(id: string): Project | undefined {
@@ -296,6 +314,7 @@ export class SessionsRepo {
         | 'usageLimitType'
         | 'endedAt'
         | 'endReason'
+        | 'label'
       >
     >,
   ): void {
@@ -338,13 +357,28 @@ export class SessionsRepo {
   }
 
   /** Startup reconciliation: any session left open by a previous run is marked ended (FR-022). */
-  reconcileAllEnded(reason: SessionEndReason): number {
+  /**
+   * Close every session a previous run left open (FR-022).
+   *
+   * `note` is written only where the row has none, and it exists because these
+   * rows were the single largest source of the developer's own complaint that
+   * "sessions just close with no message". Every row this touches belongs to a
+   * session that was ALIVE when the application went away without closing it: a
+   * crash, a kill, a power loss, or a graceful quit whose grace period expired.
+   * The session did not close; Switchboard did. Saying nothing made those
+   * indistinguishable from a session the developer had ended on purpose.
+   *
+   * Guarded with COALESCE rather than overwriting: a session that recorded its own
+   * diagnosis before dying has the more useful answer of the two.
+   */
+  reconcileAllEnded(reason: SessionEndReason, note?: string): number {
     const result = this.db
       .prepare(
-        `UPDATE sessions SET endedAt = ?, endReason = ?, status = CASE WHEN status = 'error' THEN 'error' ELSE 'done' END
+        `UPDATE sessions SET endedAt = ?, endReason = ?, statusDetail = COALESCE(statusDetail, ?),
+           status = CASE WHEN status = 'error' THEN 'error' ELSE 'done' END
          WHERE endedAt IS NULL`,
       )
-      .run(nowIso(), reason)
+      .run(nowIso(), reason, note ?? null)
     return Number(result.changes)
   }
 
@@ -1416,6 +1450,60 @@ export class DiagramRequestsRepo {
   }
 }
 
+/**
+ * The imported-skills registry. Rows only: the skill's files live on disk (see
+ * main/skills/install.ts for why they are not in here).
+ */
+export class CustomSkillsRepo {
+  constructor(private db: AppDatabase) {}
+
+  list(): CustomSkill[] {
+    return (
+      this.db
+        .prepare('SELECT * FROM custom_skills ORDER BY name')
+        .all() as (Omit<CustomSkill, 'enabled'> & { enabled: number })[]
+    ).map((row) => ({ ...row, enabled: row.enabled === 1 }))
+  }
+
+  names(): Set<string> {
+    return new Set(this.list().map((skill) => skill.name))
+  }
+
+  /** Insert the results of one import. A name that already exists is rejected by
+   *  the primary key rather than overwritten, which is the point of keying on it. */
+  insertMany(skills: readonly CustomSkill[]): void {
+    const insert = this.db.prepare(
+      `INSERT INTO custom_skills (name, description, sourceUrl, sourcePath, enabled, fileCount, importedAt)
+       VALUES (@name, @description, @sourceUrl, @sourcePath, @enabled, @fileCount, @importedAt)`,
+    )
+    for (const skill of skills) {
+      insert.run({
+        name: skill.name,
+        description: skill.description,
+        sourceUrl: skill.sourceUrl,
+        sourcePath: skill.sourcePath,
+        enabled: skill.enabled ? 1 : 0,
+        fileCount: skill.fileCount,
+        importedAt: skill.importedAt,
+      })
+    }
+  }
+
+  setEnabled(name: string, enabled: boolean): void {
+    this.db
+      .prepare('UPDATE custom_skills SET enabled = ? WHERE name = ?')
+      .run(enabled ? 1 : 0, name)
+  }
+
+  remove(name: string): void {
+    this.db.prepare('DELETE FROM custom_skills WHERE name = ?').run(name)
+  }
+
+  byName(name: string): CustomSkill | undefined {
+    return this.list().find((skill) => skill.name === name)
+  }
+}
+
 export interface Repositories {
   projects: ProjectsRepo
   sessions: SessionsRepo
@@ -1433,6 +1521,7 @@ export interface Repositories {
   verifyRuns: VerifyRunsRepo
   apiRuns: ApiRunsRepo
   diagramRequests: DiagramRequestsRepo
+  customSkills: CustomSkillsRepo
 }
 
 export function createRepositories(db: AppDatabase): Repositories {
@@ -1453,5 +1542,6 @@ export function createRepositories(db: AppDatabase): Repositories {
     verifyRuns: new VerifyRunsRepo(db),
     apiRuns: new ApiRunsRepo(db),
     diagramRequests: new DiagramRequestsRepo(db),
+    customSkills: new CustomSkillsRepo(db),
   }
 }

@@ -56,15 +56,24 @@ test('the picker follows the account: a new model appears, a retired one goes', 
   await expect(panel.getByTestId('intelligent-model-default')).toBeVisible()
 })
 
-test('settings has a This project tab with a per-project model override', async ({ page }) => {
+// This asserted the opposite until 2026-08-21: that the This-project tab carried
+// its own intelligent- and worker-model pickers. The owner removed that scope,
+// because a project override meant the Models tab could say one thing while a
+// session ran on another. The tab still exists and still configures the project;
+// the models are simply not among the things it decides, and this pins that so
+// the pickers cannot drift back in unnoticed.
+test('the This project tab configures the project, but never its models', async ({ page }) => {
   await page.getByTestId('open-settings').click()
   const panel = page.getByTestId('settings-panel')
   await panel.getByTestId('settings-tab-proj').click()
   await expect(panel.getByTestId('proj-settings-picker')).toBeVisible()
-  // Defaults to the global model; picking a card overrides for this project only.
-  await expect(panel.getByTestId('proj-model-global')).toHaveClass(/sel/)
-  await panel.getByTestId('proj-model-claude-haiku-4-5-20251001').click()
-  await expect(panel.getByTestId('proj-model-claude-haiku-4-5-20251001')).toHaveClass(/sel/)
+
+  await expect(panel.getByTestId('proj-model-global')).toHaveCount(0)
+  await expect(panel.getByTestId('proj-worker-global')).toHaveCount(0)
+
+  // The one place a model is chosen, for every project at once.
+  await panel.getByTestId('settings-tab-models').click()
+  await expect(panel.getByTestId('intelligent-model-default')).toBeVisible()
 })
 
 test('no subscription rate-limit meter is rendered, even once usage reports', async ({ page }) => {

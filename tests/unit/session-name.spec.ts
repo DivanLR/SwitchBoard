@@ -80,4 +80,25 @@ describe('sessionName', () => {
   it('falls back to a plain label when the description slugifies to nothing', () => {
     expect(sessionName('s1', { diagrams: [{ sessionId: 's1', description: '   ' }] })).toBe('Diagram')
   })
+
+  // The kinds that leave no run row behind. A spec action, a diff comment and a
+  // cleanup command each take a session of their own now, and without this every
+  // one of them read as the bare branch — three rows a developer cannot tell
+  // apart, which is the exact problem this function exists to solve.
+  it('names a section that leaves no run row behind', () => {
+    expect(sessionName('s1', { kinds: { s1: 'cleanup' } }, 'main')).toBe('Cleanup - main')
+    expect(sessionName('s1', { kinds: { s1: 'diff' } })).toBe('Diff')
+    expect(sessionName('s1', { kinds: { s1: 'spec' } }, 'main')).toBe('Specs - main')
+  })
+
+  // The live kind is what the session IS; a run row only says what it once did.
+  it('prefers the live kind over a stale run row', () => {
+    expect(sessionName('s1', { kinds: { s1: 'cleanup' }, verifyRunSessionIds: ['s1'] })).toBe(
+      'Cleanup',
+    )
+  })
+
+  it("leaves another session's kind alone", () => {
+    expect(sessionName('mine', { kinds: { theirs: 'tests' } })).toBeNull()
+  })
 })

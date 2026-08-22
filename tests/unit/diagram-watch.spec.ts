@@ -30,9 +30,17 @@ vi.mock('@main/sessions/claude-executable', () => ({
   resolveClaudeExecutable: () => 'C:\\fake\\claude.exe',
 }))
 
-vi.mock('@main/sessions/docker-sandbox', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@main/sessions/docker-sandbox')>()
-  return { ...actual, ensureSandboxImage: () => Promise.resolve() }
+vi.mock('@main/sessions/wslc-sandbox', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@main/sessions/wslc-sandbox')>()
+  // Both pre-flights, not just the image one: a containerised start also
+  // creates its named volumes up front now (wslc is not documented to create
+  // them on first mount the way Docker did), and an unstubbed one would spawn
+  // a real wslc on whatever machine runs this suite.
+  return {
+    ...actual,
+    ensureSandboxImage: () => Promise.resolve(),
+    ensureSandboxVolumes: () => Promise.resolve(),
+  }
 })
 
 const { openDatabase } = await import('@main/store/db')
@@ -131,7 +139,13 @@ describe('a diagram in flight keeps its session open', () => {
     inner.handleStatusChange(inner.hosted.get(session.id), 'done')
     await new Promise((r) => setTimeout(r, 10))
 
-    expect(stopped).toHaveBeenCalledWith(session.id)
+    // The note is asserted too, not just the call: a section session that closes
+    // itself is the one close nobody asked for, so it has to say so or it reads as
+    // a fault. See SessionManager.stopSession.
+    expect(stopped).toHaveBeenCalledWith(
+      session.id,
+      expect.stringContaining('closed itself when that work finished'),
+    )
   })
 
   it('tells the section the moment the drawing turn ends, and releases the watch', async () => {
@@ -151,14 +165,57 @@ describe('a diagram in flight keeps its session open', () => {
 
   it('gives diagrams a session of their own, not the Tests one', async () => {
     const { project, manager } = setup()
-    const tests = await manager.backgroundSessionFor(project.id)
+    const tests = await manager.backgroundSessionFor(project.id, 'tests')
     const drawing = await manager.diagramSessionFor(project.id)
     // Sharing one session is what made a diagram queue behind a suite run.
     expect(drawing.id).not.toBe(tests.id)
   })
 
-  it('takes a fresh container per draw, and the machine-wide ceiling is what stops the next', async () => {
+  it('gives every section kind its own session, and reuses within a kind', async () => {
     const { project, manager } = setup()
+    const kinds = ['spec', 'tests', 'diff', 'cleanup'] as const
+    const ids = new Set<string>()
+    for (const kind of kinds) ids.add((await manager.backgroundSessionFor(project.id, kind)).id)
+    // Four kinds, four sessions: a cleanup command no longer queues behind a
+    // spec's implement phase, which is the whole point of the split.
+    expect(ids.size).toBe(kinds.length)
+    // Within one kind the live session is reused. A second verification pass
+    // while the first is still running SHOULD queue; that is not the blocking
+    // this removes, and starting a session per dispatch would never converge.
+    const again = await manager.backgroundSessionFor(project.id, 'tests')
+    expect(ids.has(again.id)).toBe(true)
+  })
+
+  it('runs a section natively until the project asks for containers', async () => {
+    const { project, repos, manager } = setup()
+    const inner = manager as unknown as { hosted: Map<string, { containerised: boolean }> }
+    const native = await manager.backgroundSessionFor(project.id, 'spec')
+    // Off by default (migration 026): five section kinds cannot share two
+    // container slots, so the ceiling has to be opt-in rather than forced.
+    expect(inner.hosted.get(native.id)?.containerised).toBe(false)
+
+    repos.projects.setUseContainers(project.id, true)
+    const boxed = await manager.backgroundSessionFor(project.id, 'cleanup')
+    expect(inner.hosted.get(boxed.id)?.containerised).toBe(true)
+  })
+
+  it("names a session in the developer's own words, and clearing it restores the derived one", async () => {
+    const { project, repos, manager } = setup()
+    const session = await manager.backgroundSessionFor(project.id, 'tests')
+    manager.renameSession(session.id, '  release smoke  ')
+    expect(repos.sessions.byId(session.id)?.label).toBe('release smoke')
+    // The live row too: the project list reads a running session from the
+    // manager, so a rename that only touched the column would not show.
+    expect(manager.liveSessionRow(session.id)?.label).toBe('release smoke')
+    manager.renameSession(session.id, '   ')
+    expect(repos.sessions.byId(session.id)?.label).toBe(null)
+  })
+
+  it('takes a fresh container per draw, and the machine-wide ceiling is what stops the next', async () => {
+    const { project, repos, manager } = setup()
+    // The ceiling only exists for a project that asked for containers; with the
+    // switch off a drawing runs natively and nothing is rationed.
+    repos.projects.setUseContainers(project.id, true)
     const first = await manager.diagramSessionFor(project.id)
     const second = await manager.diagramSessionFor(project.id)
     // No reuse: a second drawing never queues behind the first.

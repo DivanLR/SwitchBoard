@@ -12,7 +12,7 @@ import {
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
 import { DEFAULT_SESSION_MODE, modelLabel, type AvailableModel, type McpServer, type ModelMode, type ProjectCommand, type SessionMode, type SessionStatus } from '@shared/domain'
-import { sandboxSpawn, toContainerPaths, type SandboxPlan } from './docker-sandbox'
+import { sandboxSpawn, toContainerPaths, type SandboxPlan } from './wslc-sandbox'
 import { MessageMapper, type EventSink } from './message-mapper'
 import { toAvailableModels } from './model-catalog'
 import { classifyWorkload, effortForRole, mainLoopModel, nextStrongestModel } from './model-routing'
@@ -295,7 +295,7 @@ export class HostedSession {
   start(): void {
     // A containerised session runs the CLI in a disposable Linux container: no
     // OS sandbox exists on native Windows, so the container is the isolation
-    // boundary (docker-sandbox.ts). Paths handed to the CLI must then be
+    // boundary (wslc-sandbox.ts). Paths handed to the CLI must then be
     // container-side (/workspace, /refs/*), not host paths.
     const sandbox = this.containerised
       ? sandboxSpawn({
@@ -410,7 +410,7 @@ export class HostedSession {
       // is still the right diagnosis when there IS an SDK-shaped message.
       // `lastStderr()` (only set for a containerised session — see `sandbox`)
       // is the one other trace of what went wrong, previously only ever
-      // console.error'd inside docker-sandbox.ts and never seen by the
+      // console.error'd inside wslc-sandbox.ts and never seen by the
       // developer. Appended as further evidence, not a replacement, and
       // truncated: this is a supporting detail, not the headline.
       const sandboxTail = this.sandbox?.lastStderr().trim()

@@ -64,7 +64,7 @@ reason about it, or answer it on the developer's behalf.
 
   Two consequences are open rather than settled, and should not be mistaken for
   finished thinking. There is no ceiling on the number of concurrent sessions: each
-  one is a CLI child process and each bypass session is a Docker container, so a
+  one is a CLI child process and each bypass session is a WSL container, so a
   ceiling is a product decision nobody has taken yet, and the code deliberately does
   not invent one. And retention still speaks of "the current and previous session per
   project", which was unambiguous when a project had one at a time; with several
@@ -77,11 +77,30 @@ reason about it, or answer it on the developer's behalf.
   `%APPDATA%\terminal-switchboard\switchboard.db`, protected by the operating
   system account boundary and disk encryption rather than by application
   cryptography.
-- Sessions granted bypass permissions run inside a disposable Docker Linux
-  container, because no operating system sandbox exists on native Windows. This
-  requires Docker Desktop to be running. The container's memory ceiling is a
-  setting, read at session start, so a change applies to the next bypass session
-  rather than the running one.
+- Sessions granted bypass permissions run inside a disposable Linux container,
+  because no operating system sandbox exists on native Windows. The runtime is
+  WSL container (`wslc`), which ships inside WSL and requires WSL 2.9.3 or newer;
+  it replaced Docker Desktop on 2026-08-19. Any project may opt into the same
+  container for its section work through one switch in its header. The container's
+  memory ceiling is a setting, read at session start, so a change applies to the
+  next containerised session rather than the running one.
+
+  One guarantee was lost with Docker and is not yet recoverable: wslc implements
+  no capability dropping (`--cap-drop`) and no privilege-escalation bar
+  (`--security-opt`), verified against `wslc run --help` on 2.9.4.0. What partly
+  replaces it is that wslc gives each session its own utility virtual machine
+  rather than sharing one, which is a stronger boundary and a different one.
+
+  Two others survived the move by another route. The process-table cap is back
+  as `--ulimit nproc`, which bounds a fork bomb per UID rather than per cgroup;
+  the container runs as one unprivileged user, so the difference is small. And
+  the memory ceiling holds without `--memory-swap`, because the WSL kernel
+  reports no swap-limit capability at all, so there is no swap allowance for a
+  missing flag to leave unpinned.
+
+  WSL container is in public preview until its general availability, targeted at
+  autumn 2026. Sizes must be given with an uppercase unit (`6G`, not `6g`); the
+  app normalises the setting, so a value stored either way works.
 - Retention runs automatically: raw output for the current and previous session
   per project, and decision history for 30 days.
 - Updates arrive in-app from the GitHub release feed.

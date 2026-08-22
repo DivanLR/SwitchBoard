@@ -4,6 +4,7 @@
 
 import type {
   AvailableModel,
+  CustomSkill,
   DecisionRecord,
   DiagramEntry,
   DiffListResult,
@@ -22,10 +23,12 @@ import type {
   QueuedTask,
   RiskLevel,
   RuleKind,
+  SectionKind,
   Session,
   SessionEvent,
   SessionMode,
   Settings,
+  SkillImportResult,
   SpecDetail,
   SpecKitState,
   TranscriptSummary,
@@ -226,6 +229,10 @@ export interface InvokeMap {
   /** Change an existing project's session mode. Takes effect on its next start,
    *  never on a session already running: the SDK mode is fixed at spawn. */
   'projects.setSessionMode': { req: { projectId: string; mode: SessionMode }; res: void }
+  /** Turn containers on or off for this project's section work (and for what the
+   *  start controls offer a chat session). Read at spawn, so it applies from
+   *  the next session and never to one already running. */
+  'projects.setUseContainers': { req: { projectId: string; on: boolean }; res: void }
   'projects.rename': { req: { projectId: string; name: string }; res: void }
   /** Point a project at a different folder; keeps id, sessions, and history. */
   'projects.repoint': { req: { projectId: string; path: string }; res: Project }
@@ -252,7 +259,7 @@ export interface InvokeMap {
        */
       mode?: SessionMode
       /**
-       * WHERE this session runs, chosen at start: true for a Docker container,
+       * WHERE this session runs, chosen at start: true for a WSL container,
        * false for the developer's own machine.
        *
        * Separate from `mode`, which decides what the session may DO. Bypass
@@ -306,11 +313,47 @@ export interface InvokeMap {
    * events land, so this is for the moment a developer wants the file on disk
    * before doing something risky, not the only way one gets written.
    */
+  /** Name a session in the developer's own words. An empty string clears the
+   *  name and the derived one (Session.name) takes over again. */
+  'sessions.rename': { req: { sessionId: string; label: string }; res: void }
+  /**
+   * Put text on the system clipboard, through the MAIN process.
+   *
+   * Not `navigator.clipboard` in the renderer, and the reason is a bug this
+   * feature hit twice. That API is gated by Electron's permission handlers, and
+   * this app denies renderer permissions by default; it also requires a focused
+   * document, and rejects without one. Both failures look identical to the
+   * developer: a click that reports it could not copy. The main process has
+   * unconditional clipboard access, so this path cannot be denied, cannot depend
+   * on focus, and cannot break again when a security handler is tightened.
+   */
+  'clipboard.write': { req: { text: string }; res: void }
   'transcripts.save': { req: { sessionId: string }; res: TranscriptSummary }
   /** Unexpired transcripts, newest first. Expired files are swept on every read. */
   'transcripts.list': { req: Record<string, never>; res: TranscriptSummary[] }
   /** Available slash commands / skills (plugins) for the project, for composer suggestions. */
   'projects.commands': { req: { projectId: string }; res: ProjectCommand[] }
+  /**
+   * Custom skills: the ones the developer imported from a Git host themselves,
+   * as opposed to the curated plugin commands the Cleanup section offers.
+   *
+   * User-level, not per-project, and the contract says so by taking no projectId:
+   * the CLI reads ONE user skills directory for every project, so a per-project
+   * switch here would be this app inventing a granularity the runtime does not
+   * have. `skills.run` is the exception, because running one has to happen
+   * somewhere.
+   */
+  'skills.list': { req: void; res: CustomSkill[] }
+  /** Import every skill under a github.com URL. Fetches over HTTPS and writes
+   *  files; it never runs anything from the repository. */
+  'skills.import': { req: { url: string }; res: SkillImportResult }
+  /** Switch one on or off, which physically adds or removes its directory from
+   *  ~/.claude/skills. Applies to sessions started afterwards. */
+  'skills.setEnabled': { req: { name: string; enabled: boolean }; res: CustomSkill[] }
+  /** Forget a skill and delete both copies of its files. */
+  'skills.remove': { req: { name: string }; res: CustomSkill[] }
+  /** Dispatch `/<name>` into this project's own Skills session. */
+  'skills.run': { req: { projectId: string; name: string; argument?: string }; res: { sessionId: string } }
   /** Spec Kit state for a project: installed? plus the spec summaries. */
   'specs.state': { req: { projectId: string }; res: SpecKitState }
   /** Full detail for one spec. */
@@ -410,6 +453,12 @@ export interface InvokeMap {
       projectId: string
       text: string
       background?: boolean
+      /**
+       * Which section this dispatch belongs to, and so which of the project's
+       * background sessions it lands in. Only read when `background` is set.
+       * Defaults to 'spec', which is what this endpoint was built for.
+       */
+      kind?: SectionKind
       /**
        * This dispatch may write a diagram, so tell the Diagrams section when the
        * turn ends rather than leaving it to find out. Set by the Diagrams tab's

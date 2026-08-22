@@ -70,6 +70,12 @@ const MARKS: Record<string, Mark> = {
   play: { d: 'M5.2 3.4 12.6 8 5.2 12.6Z', solid: true },
   stop: { d: 'M4.6 4.6h6.8v6.8H4.6Z', solid: true },
   pencil: { d: 'M10.9 2.5 13.5 5.1 5.9 12.7 2.6 13.4 3.3 10.1Z' },
+  // Saying something about a specific line, not editing it: the diff pane's
+  // per-line affordance. A bubble rather than the pencil beside it, because the
+  // pencil means "change this text" and this means "ask for a change here".
+  comment: {
+    d: 'M5 3.2H11A2.2 2.2 0 0 1 13.2 5.4V8.6A2.2 2.2 0 0 1 11 10.8H7.2L5.2 13.2V10.8H5A2.2 2.2 0 0 1 2.8 8.6V5.4A2.2 2.2 0 0 1 5 3.2Z',
+  },
   plus: { d: 'M8 3.4v9.2M3.4 8h9.2' },
   minus: { d: 'M3.4 8h9.2' },
   trash: { d: 'M2.8 4.4h10.4M6.2 4.4V2.8h3.6v1.6M4.4 4.4l.7 8.8h5.8l.7-8.8' },

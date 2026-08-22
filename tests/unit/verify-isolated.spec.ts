@@ -43,9 +43,17 @@ vi.mock('@main/sessions/claude-executable', () => ({
   resolveClaudeExecutable: () => 'C:\\fake\\claude.exe',
 }))
 
-vi.mock('@main/sessions/docker-sandbox', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@main/sessions/docker-sandbox')>()
-  return { ...actual, ensureSandboxImage: () => Promise.resolve() }
+vi.mock('@main/sessions/wslc-sandbox', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@main/sessions/wslc-sandbox')>()
+  // Both pre-flights, not just the image one: a containerised start also
+  // creates its named volumes up front now (wslc is not documented to create
+  // them on first mount the way Docker did), and an unstubbed one would spawn
+  // a real wslc on whatever machine runs this suite.
+  return {
+    ...actual,
+    ensureSandboxImage: () => Promise.resolve(),
+    ensureSandboxVolumes: () => Promise.resolve(),
+  }
 })
 
 const { openDatabase } = await import('@main/store/db')

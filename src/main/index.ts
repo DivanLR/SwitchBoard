@@ -18,6 +18,7 @@ import { parseDeepLink, PROTOCOL_SCHEME } from './deep-link'
 import { registerProject } from './projects/discovery'
 import { computeCounters, registerIpcHandlers, RendererPush } from './ipc/handlers'
 import { readDiagramList } from './diagrams/list'
+import { reconcileSkills, stagingSkillsRoot } from './skills/install'
 import { initUpdater } from './updater'
 import { completeApiRun } from './evals/api-runner'
 
@@ -201,9 +202,16 @@ function registerAppProtocol(): void {
 }
 
 function applyContentSecurityPolicy(): void {
-  // The app needs no web permissions (camera/mic/geolocation/notifications are
-  // handled natively in the main process). Deny every renderer permission
-  // request and pre-check (Electron checklist A5).
+  // The app needs NO web permissions. Camera, microphone, geolocation and
+  // notifications are all handled natively in the main process, and copying text
+  // goes through the `clipboard.write` IPC endpoint rather than
+  // `navigator.clipboard`. Deny every renderer permission request and pre-check
+  // (Electron checklist A5).
+  //
+  // A carve-out for `clipboard-sanitized-write` lived here briefly, to unbreak
+  // code-block copying. It is gone because the copy no longer asks the browser:
+  // routing through main removed the dependency instead of widening the grant,
+  // which is the better trade and leaves this a clean deny-all again.
   session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false))
   session.defaultSession.setPermissionCheckHandler(() => false)
 
@@ -400,7 +408,15 @@ async function main(): Promise<void> {
     broker,
     getWindow: () => mainWindow,
     dbProjectId: dbProject.id,
+    skillsStagingRoot: stagingSkillsRoot(app.getPath('userData')),
   })
+  // The registry and the filesystem can drift while the app is not running: a
+  // developer can delete ~/.claude/skills/<name> by hand, or restore a machine
+  // from a backup carrying the database but not the directory. Putting them back
+  // in step here means the switch in Settings is always telling the truth about
+  // what a session will find. Not awaited: it is file copying, and nothing on
+  // screen is waiting for it.
+  void reconcileSkills(stagingSkillsRoot(app.getPath('userData')), repos.customSkills.list())
   // Retention deletes straight from the events table with its own raw SQL
   // (retention.ts), bypassing EventsRepo entirely, so it never inherits the
   // repo's own flush-before-read discipline. repositories.ts's EventsRepo.flush

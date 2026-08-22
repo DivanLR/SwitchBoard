@@ -250,7 +250,12 @@ function run(command: string): void {
   align-items: center;
   gap: 12px;
   padding: 10px 13px;
-  background: var(--bg-hover);
+  /* A CARD, so --bg-card. These rested on --bg-hover, a translucent wash built
+     for a hover state: over the light canvas it reads as a grey slab instead of
+     a white card floating on it, which is the surface's whole idea. The Skills
+     section next door already used --bg-card, and the two side by side is what
+     made it visible. */
+  background: var(--bg-card);
   box-shadow: var(--elev);
   border: 1px solid var(--border-card);
   border-radius: var(--rc);
@@ -298,7 +303,12 @@ function run(command: string): void {
   align-items: center;
   gap: 14px;
   padding: 13px 15px;
-  background: var(--bg-hover);
+  /* A CARD, so --bg-card. These rested on --bg-hover, a translucent wash built
+     for a hover state: over the light canvas it reads as a grey slab instead of
+     a white card floating on it, which is the surface's whole idea. The Skills
+     section next door already used --bg-card, and the two side by side is what
+     made it visible. */
+  background: var(--bg-card);
   box-shadow: var(--elev);
   border: 1px dashed var(--border-strong);
   border-radius: var(--rc);

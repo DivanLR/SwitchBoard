@@ -63,6 +63,18 @@ const store = reactive({
   composerInsert: null as string | null,
   /** Whether the combined Database MCP view is open (vs. the session view). */
   mcpOpen: false,
+  /**
+   * The section that has the whole window: sidebar, inbox, project header and
+   * tab strip all stood down so one section has every pixel.
+   *
+   * Here rather than in the section that asks for it, because the chrome it hides
+   * is owned by the shell (App.vue) and the section is three components deep. Null
+   * means the ordinary layout.
+   *
+   * Not persisted. A developer who left the app in a chromeless state and came
+   * back to it a day later would have no way to know why the sidebar was missing.
+   */
+  fullScreenSection: null as string | null,
 
   /**
    * Deliberately a plain getter, not a `computed()`.
@@ -228,6 +240,11 @@ const store = reactive({
   openMcp(open: boolean): void {
     this.mcpOpen = open
     if (open) this.selectedAgentId = null
+  },
+
+  /** Give one section the whole window, or hand the chrome back. */
+  setFullScreen(section: string | null): void {
+    this.fullScreenSection = section
   },
 
   /**

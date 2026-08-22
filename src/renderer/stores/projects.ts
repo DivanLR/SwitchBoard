@@ -118,6 +118,28 @@ const store = reactive({
     if (item) item.defaultSessionMode = mode
   },
 
+  /** Turn containers on or off for this project. Same rule as the mode above:
+   *  read at spawn, so a session already running keeps what it started in. */
+  async setUseContainers(projectId: string, on: boolean): Promise<void> {
+    // Written locally first so the checkbox answers the click rather than the
+    // round trip; the invoke is the source of truth and a failure re-reads.
+    const item = state.items.find((p) => p.id === projectId)
+    if (item) item.useContainers = on
+    try {
+      await invoke('projects.setUseContainers', { projectId, on })
+    } catch (e) {
+      await this.refresh()
+      throw e
+    }
+  },
+
+  /** Name a session. An empty string clears the name, and the one the app
+   *  derives from the work (Session.name) takes over again. */
+  async renameSession(sessionId: string, label: string): Promise<void> {
+    await invoke('sessions.rename', { sessionId, label })
+    await this.refresh()
+  },
+
   /** A project's available slash commands / skills (composer + settings). */
   async commands(projectId: string): Promise<ProjectCommand[]> {
     return invoke('projects.commands', { projectId })
@@ -201,7 +223,11 @@ const store = reactive({
     mode?: SessionMode,
     /** A previous session id whose transcript seeds the new session's context. */
     carryTranscriptFrom?: string,
-    /** Run this session in a container rather than on the developer's machine. */
+    /** Run this session in a container rather than on the developer's machine.
+     *  Omitted means the project's own container setting, which is what every
+     *  caller but the start controls wants: the checkbox in the header is the
+     *  one place that question is answered, so a second button that quietly
+     *  ignored it would make the checkbox a lie. */
     containerised?: boolean,
   ): Promise<Session> {
     state.starting = true
@@ -211,7 +237,8 @@ const store = reactive({
         resume,
         mode,
         carryTranscriptFrom,
-        containerised,
+        containerised:
+          containerised ?? state.items.find((p) => p.id === projectId)?.useContainers ?? false,
       })
       // Refresh is inside the wait: the session row is what the view renders,
       // so clearing the waiting state before it lands shows an empty stream.

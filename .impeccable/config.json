@@ -1,0 +1,14 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "design-system-color",
+        "value": "#000",
+        "createdAt": "2026-08-21T08:32:40.770Z",
+        "reason": "mask-image stencil: a mask reads the alpha channel only, so the hue never reaches the screen and a palette token would be misleading. Reasoning already documented at the use site."
+      }
+    ]
+  }
+}

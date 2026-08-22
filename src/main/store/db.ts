@@ -548,6 +548,64 @@ const MIGRATIONS: Migration[] = [
       db.exec(`ALTER TABLE diagram_requests ADD COLUMN plan TEXT;`)
     },
   },
+  {
+    // Two facts the developer now owns directly, one per table.
+    //
+    // projects.useContainers: whether this project's SECTION work (specs, tests,
+    // diff comments, cleanup, diagrams) runs in a Docker container. It used to be
+    // hard-coded true in reuseOrStartBackground. DEFAULT 0 — off — because the
+    // checkbox exists to be answerable, and "no" is the honest default: containers
+    // need Docker Desktop up, cost a cold start, and only two may run at once
+    // machine-wide (MAX_CONTAINERS). That cap is the reason this matters now:
+    // every section kind takes a session of its own, and five of them cannot all
+    // hold a container. Bypass still forces one regardless — it approves every
+    // tool call, so the container is the only boundary left.
+    //
+    // sessions.label: the developer's own name for a session. Separate from the
+    // derived Session.name (sessionName in domain.ts), which states what the app
+    // started the session FOR; a typed name overrides it and nothing derives one.
+    name: '026-project-containers-and-session-label',
+    up: (db) => {
+      db.exec(`ALTER TABLE projects ADD COLUMN useContainers INTEGER NOT NULL DEFAULT 0;`)
+      db.exec(`ALTER TABLE sessions ADD COLUMN label TEXT;`)
+    },
+  },
+  {
+    /*
+     * Skills the developer imported from a Git host, and whether each is switched
+     * on.
+     *
+     * The ROW is the registry; the FILES are the skill. Both exist because they
+     * answer different questions: the files under the staging directory are what
+     * a skill IS, and this table is what the app knows about it (where it came
+     * from, what it calls itself, whether it is switched on). Keeping the files
+     * out of the database is deliberate — a skill is a directory of markdown and
+     * scripts, sometimes megabytes of it, and a BLOB column would make every
+     * listing read the payload it does not need.
+     *
+     * `name` is the primary key rather than a generated id, because the name IS
+     * the identity everywhere else: it is the directory under ~/.claude/skills,
+     * it is what the CLI calls the skill, and it is what `/name` dispatches. Two
+     * skills of the same name from two repositories are the same slash command
+     * and cannot both be installed, so the database should refuse the second
+     * rather than let a silent overwrite decide.
+     */
+    name: '027-custom-skills',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE custom_skills (
+          name TEXT PRIMARY KEY,
+          description TEXT NOT NULL,
+          sourceUrl TEXT NOT NULL,
+          sourcePath TEXT NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          fileCount INTEGER NOT NULL DEFAULT 0,
+          importedAt TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_custom_skills_source ON custom_skills (sourceUrl);
+      `)
+    },
+  },
 ]
 
 /**

@@ -124,3 +124,67 @@ test('a Markdown response cannot inject HTML', async ({ page }) => {
   await expect(page.getByTestId('stream-event-assistant_text')).toContainText('<img')
   expect(await page.evaluate(() => (window as unknown as { __pwned?: number }).__pwned)).toBeUndefined()
 })
+
+// Copying a code block, and SAYING SO. The label is the whole feature: the
+// clipboard write itself has always worked, and the confirmation is what tells
+// the developer their click landed.
+//
+// Both outcomes are pinned, because the failure path is the one that was broken.
+// It used to return silently on the sound reasoning that the label must never
+// claim a copy that did not happen — but a click producing no label at all is
+// indistinguishable from a click the app never received, so a denied clipboard
+// read as a dead feature.
+async function emitBlock(page: import('@playwright/test').Page): Promise<void> {
+  await page.evaluate(() => {
+    window.__mock.emitEvent('s-alpha', 'assistant_text', {
+      text: ['```ts', 'const timeout = input.timeout ?? 5_000', '```'].join('\n'),
+      partial: false,
+    })
+  })
+}
+
+/** The label's own computed text, which is a ::after content string. */
+async function label(page: import('@playwright/test').Page): Promise<string> {
+  return page
+    .locator('pre.md-pre')
+    .first()
+    .evaluate((el) => getComputedStyle(el, '::after').content)
+}
+
+test('a copied code block says copied, in the neutral ink rather than the accent', async ({
+  page,
+}) => {
+  await emitBlock(page)
+  const pre = page.locator('pre.md-pre').first()
+  await expect(pre).toBeVisible()
+
+  expect(await label(page)).toContain('copy')
+
+  await pre.click()
+  await expect.poll(() => label(page)).toContain('copied')
+  // Grey, not green: colour in this world is spent on a reading outside
+  // tolerance, and a copy that worked is not one. It still has to read as a
+  // change, which is what the emphasis weight buys.
+  const state = await pre.evaluate((el) => {
+    const cs = getComputedStyle(el, '::after')
+    return { color: cs.color, weight: cs.fontWeight }
+  })
+  expect(state.weight).toBe('500')
+  expect(state.color).not.toBe('rgb(63, 191, 180)') // trace-green, dark
+  expect(state.color).not.toBe('rgb(18, 118, 110)') // trace-green, light
+})
+
+test('a copy that fails says so, instead of saying nothing at all', async ({ page }) => {
+  // Forced through the mock host rather than by clearing browser permissions.
+  // The copy no longer goes through `navigator.clipboard` at all — it is an IPC
+  // call to the main process — so a browser permission has nothing to do with
+  // whether it succeeds, and a test that revoked one would be proving nothing.
+  await page.evaluate(() => window.__mock.setClipboardFails(true))
+  await emitBlock(page)
+  const pre = page.locator('pre.md-pre').first()
+  await expect(pre).toBeVisible()
+
+  await pre.click()
+  // Never claims success, and never stays silent either.
+  await expect.poll(() => label(page)).toContain('could not copy')
+})

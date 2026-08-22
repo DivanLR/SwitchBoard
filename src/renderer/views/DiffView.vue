@@ -324,9 +324,8 @@ const keyedLines = computed(() =>
           <!-- A line is a button because it does something: it selects a region to
                comment on. Shift-click extends, which is why the title says so —
                nothing else on screen could tell you that. -->
+          <template v-for="row in keyedLines" :key="row.key">
           <button
-            v-for="row in keyedLines"
-            :key="row.key"
             type="button"
             class="diff-line"
             :class="[row.line.type, { picked: isSelected(row.i) }]"
@@ -335,17 +334,41 @@ const keyedLines = computed(() =>
             title="Click to comment on this line, shift-click to extend the selection"
             @click="pickLine(row.i, $event.shiftKey)"
           >
+            <!-- The affordance. The line has always been clickable and nothing on
+                 screen said so, which left the whole feature resting on a tooltip
+                 nobody hovers long enough to see. Its space is reserved at every
+                 line so revealing it cannot shift the code sideways, and it is
+                 aria-hidden because the button's own title already says what a
+                 click does; announcing a decorative mark as well would say it
+                 twice. -->
+            <span class="dl-comment" aria-hidden="true">
+              <Icon name="comment" :size="11" />
+            </span>
             <span class="dl-marker" aria-hidden="true">{{
               row.line.type === 'add' ? '+' : row.line.type === 'del' ? '-' : ' '
             }}</span>
             <span class="dl-text">{{ row.line.text }}</span>
           </button>
-        </div>
 
-        <!-- Anchored to the pane rather than to the line, deliberately: a panel
-             wedged between two lines pushes the code around as it grows, and the
-             region it refers to is already marked. -->
-        <div v-if="range" class="dl-composer" data-testid="diff-comment">
+          <!-- Attached to the last line of the selection, in the flow rather than
+               floating over it.
+               It used to sit at the foot of the pane, on the reasoning that a panel
+               between two lines pushes the code around. That reasoning was right
+               about the cost, and the obvious fix for it — take the panel out of
+               flow and float it under the clicked line — is wrong for a reason only
+               a real interaction shows: a floating box covers the lines below it,
+               and those are exactly the lines shift-click extends onto. Selecting
+               1 then shift-clicking 3 became impossible, because the box was over
+               line 3.
+               In the flow, nothing is ever covered and every line stays reachable.
+               The code shifts once when the box opens, which is what GitHub and
+               Azure both do; the box is a fixed height (see .dlc-input) so typing
+               into it never moves anything again. -->
+          <div
+            v-if="range && row.i === range[1]"
+            class="dl-composer"
+            data-testid="diff-comment"
+          >
           <div class="dlc-head mono">
             <span data-testid="diff-comment-count">
               {{ selectedLines.length }} line{{ selectedLines.length === 1 ? '' : 's' }} selected
@@ -387,6 +410,8 @@ const keyedLines = computed(() =>
               {{ diff.applying ? 'Sending…' : 'Apply' }}
             </button>
           </div>
+          </div>
+          </template>
         </div>
       </div>
     </div>
@@ -586,26 +611,74 @@ const keyedLines = computed(() =>
   cursor: text;
 }
 
+/* 1px, not the 2px these two carried. DESIGN.md's sidecar records the thicker
+   inset rule as a carry-over defect from the previous world rather than a system
+   pattern, and this world holds selection marks to a hairline; these are the
+   rules that were being edited anyway, so they stop repeating it here. */
 .diff-line:hover {
-  box-shadow: inset 2px 0 0 var(--border-strong);
+  box-shadow: inset 1px 0 0 var(--border-strong);
+}
+
+.diff-line:hover .dl-comment {
+  opacity: 1;
 }
 
 /* The selected region. A left bar rather than a wash, so the add/del tint that
    says what KIND of line it is survives underneath. */
 .diff-line.picked {
   background: color-mix(in srgb, var(--teal) 14%, transparent);
-  box-shadow: inset 2px 0 0 var(--teal);
+  box-shadow: inset 1px 0 0 var(--teal);
 }
 
+/* Space is held at every line, always. Reserving it is what lets the mark fade
+   in without moving a single character of code sideways. */
+.dl-comment {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  width: 15px;
+  margin-left: -4px;
+  color: var(--text-meta);
+  opacity: 0;
+  transition: opacity 90ms var(--ease);
+}
+
+/* Once the popup is open the mark stops being an invitation and starts being the
+   marker for the line it is attached to, so it takes the picked bar's own colour. */
+.diff-line.picked .dl-comment {
+  color: var(--teal);
+  opacity: 1;
+}
+
+/* Keyboard parity: tabbing to a line has to show the same affordance a pointer
+   does, or the feature is mouse-only. */
+.diff-line:focus-visible .dl-comment {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dl-comment {
+    transition: none;
+  }
+}
+
+/* Sits in the flow, attached to the last selected line. Inset from the left edge
+   so it reads as hanging off the region rather than as another line of code, and
+   held to a sentence's width because an instruction is prose and prose set across
+   the full pane is unreadable. */
 .dl-composer {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin: 8px 14px 14px;
+  width: min(520px, calc(100% - 28px));
+  margin: 4px 14px 10px;
   padding: 8px 10px;
   background: var(--bg-card);
   border: 1px solid var(--border-strong);
   border-radius: var(--rc);
+  /* Overlay tier is the one place this world allows real depth, and this box has
+     to separate from the code it is sitting inside. */
+  box-shadow: var(--shadow-dd);
 }
 
 .dlc-head {

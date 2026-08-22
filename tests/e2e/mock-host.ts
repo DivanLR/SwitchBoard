@@ -5,7 +5,13 @@
 // cannot reference imports at runtime. Anything from the real contract instead
 // arrives as scenario DATA (e.g. settings below), keeping it tied to the app's
 // real defaults instead of a hand-copied duplicate that can drift.
-import { DEFAULT_SETTINGS, type DiagramEntry, type Settings } from '../../src/shared/domain'
+import {
+  DEFAULT_SETTINGS,
+  type CustomSkill,
+  type DiagramEntry,
+  type SectionKind,
+  type Settings,
+} from '../../src/shared/domain'
 import { detectStacks, type AvailableSuites } from '../../src/shared/test-catalog'
 // Type-only, so nothing is referenced at runtime inside the serialised function.
 // This is what keeps the mock's method table honest: see invokeHandlers below.
@@ -39,6 +45,9 @@ export interface MockProjectSeed {
   /** The project's session mode. Omit for 'auto', which is what migration 022
    *  backfilled onto every project that predates the setting. */
   defaultSessionMode?: string
+  /** Whether the project runs its work in Docker. Omit for false, which is
+   *  what migration 026 gave every project that predates the switch. */
+  useContainers?: boolean
   /** Diff tab (specs/003-diff-tab) seed data — set at scenario construction so
    *  it is in place before the app's own initial load, rather than racing it
    *  the way a later __mock.setDiff() call would for a project already
@@ -48,6 +57,8 @@ export interface MockProjectSeed {
 
 export interface MockScenario {
   projects: MockProjectSeed[]
+  /** Skills already imported when the app opens. */
+  skills?: CustomSkill[]
   /** Starting settings. Pass DEFAULT_SETTINGS so the mock cannot drift from the
    *  real defaults; override individual fields for a specific test. */
   settings: Settings
@@ -127,6 +138,11 @@ export interface MockDriver {
   ) => void
   startFlood: (intervalMs: number, perTick: number) => void
   stopFlood: () => void
+  /** What the NEXT skills.import call finds in the repository, so a scenario can
+   *  decide what a URL 'contains' without this file inventing one. */
+  setSkillImport: (skills: CustomSkill[]) => void
+  /** Make `clipboard.write` refuse, so the failure label can be tested. */
+  setClipboardFails: (fails: boolean) => void
   state: () => {
     sends: { sessionId: string; text: string }[]
     interrupts: string[]
@@ -186,6 +202,11 @@ export function installMockHost(scenario: MockScenario): void {
     startedAt: string
     endedAt: string | null
     endReason: string | null
+    /** The developer's own name for this session; null until they type one. */
+    label: string | null
+    /** What the real host derives from the work when nothing was typed. The mock
+     *  derives nothing, so here it is simply the label the rename handler set. */
+    name?: string | null
   }
 
   interface MockRequest extends AnyRecord {
@@ -299,6 +320,7 @@ export function installMockHost(scenario: MockScenario): void {
         startedAt: p.session.startedAt ?? now(),
         endedAt: null,
         endReason: null,
+        label: null,
       }
       sessions.set(session.id, session)
     }
@@ -314,6 +336,8 @@ export function installMockHost(scenario: MockScenario): void {
       // NOT NULL with a DEFAULT of 'auto' in the real schema (migration 022), so a
       // scenario that says nothing gets what an existing project got.
       defaultSessionMode: p.defaultSessionMode ?? 'auto',
+      // Same rule, migration 026: off unless the scenario says otherwise.
+      useContainers: p.useContainers ?? false,
       session,
       // A project runs as many sessions as it is asked to. "session" stays the most
       // recently started one, which is what the real host's activeForProject returns
@@ -611,26 +635,36 @@ export function installMockHost(scenario: MockScenario): void {
    * fixture to spell out fields no assertion reads, for no extra safety.
    */
   /**
-   * The Tests section's own session, mirroring SessionManager.backgroundSessionFor:
-   * reuse whatever session the newest verify or API run recorded while it is
-   * still alive, otherwise start a NEW one. Deliberately never the chat session
-   * — the whole point of the production change is that a run does not queue
-   * behind the developer's conversation, and a mock that quietly reused it would
-   * leave the e2e suite exercising the behaviour that was removed.
+   * One session per SECTION, mirroring SessionManager.backgroundSessionFor:
+   * reuse this project's live session for that kind, otherwise start a new one.
+   * A drawing never reuses, exactly as in the real manager.
+   *
+   * Deliberately never the chat session — the whole point of the production
+   * change is that a section's work does not queue behind the developer's
+   * conversation, and a mock that quietly reused it would leave the e2e suite
+   * exercising the behaviour that was removed. Keyed by kind for the same
+   * reason: one shared background session is also behaviour that was removed,
+   * and a mock that kept it would hide a cleanup command landing in the middle
+   * of a test report.
    *
    * A plain function rather than an invoke handler: it is not an IPC endpoint,
    * and invokeHandlers is keyed to InvokeMap so it cannot hold one that is not.
    */
-  async function testsSession(projectId: string): Promise<MockSession> {
-    const ids = [
-      verifyByProject.get(projectId)?.[0]?.sessionId,
-      apiRunsByProject.get(projectId)?.[0]?.sessionId,
-    ]
-    for (const id of ids) {
-      const existing = id ? sessions.get(String(id)) : undefined
-      if (existing && !existing.endedAt) return existing
-    }
-    return (await invokeHandlers['sessions.start']({ projectId })) as MockSession
+  /** Imported skills, and what the next import will "find" in the repository. */
+  const customSkills: CustomSkill[] = [...(scenario.skills ?? [])]
+  let nextSkillImport: CustomSkill[] | null = null
+
+  /** Forces `clipboard.write` to refuse, for the failure-label test. */
+  let clipboardFails = false
+
+  const sectionSessions = new Map<string, MockSession>()
+  async function sectionSession(projectId: string, kind: SectionKind): Promise<MockSession> {
+    const key = `${projectId}|${kind}`
+    const live = kind === 'diagram' ? undefined : sectionSessions.get(key)
+    if (live && !live.endedAt) return live
+    const started = (await invokeHandlers['sessions.start']({ projectId })) as MockSession
+    sectionSessions.set(key, started)
+    return started
   }
 
   const invokeHandlers: Record<InvokeMethod, (req: AnyRecord) => unknown> = {
@@ -682,6 +716,8 @@ export function installMockHost(scenario: MockScenario): void {
         reserved: false,
         // NOT NULL with a DEFAULT of 'auto' in the real schema (migration 022).
         defaultSessionMode: String(req.defaultSessionMode ?? 'auto'),
+        // NOT NULL with a DEFAULT of 0 in the real schema (migration 026).
+        useContainers: false,
         session: null as MockSession | null,
         sessions: [] as MockSession[],
       }
@@ -692,6 +728,77 @@ export function installMockHost(scenario: MockScenario): void {
       const project = projects.find((p) => p.id === req.projectId)
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
       project.defaultSessionMode = String(req.mode)
+    },
+    /*
+     * Custom skills. The mock keeps a list and mirrors the host's RULES rather
+     * than its mechanism: no network, no files, but the same refusals — a
+     * disabled skill cannot be run, an unknown one is NOT_FOUND — so a test
+     * cannot pass here against behaviour the real host would reject.
+     *
+     * `__mock.setSkillImport` decides what the next import "finds", because what
+     * a repository contains is the scenario's business, not this file's.
+     */
+    'skills.list': () => [...customSkills],
+    'skills.import': (req) => {
+      const url = String(req.url)
+      if (!/^https:\/\/(www\.)?github\.com\//.test(url)) {
+        throw { code: 'INVALID_PATH', message: 'Only https://github.com URLs can be imported.' }
+      }
+      const found = nextSkillImport ?? []
+      nextSkillImport = null
+      const imported = found.filter((s) => !customSkills.some((c) => c.name === s.name))
+      const skipped = found
+        .filter((s) => customSkills.some((c) => c.name === s.name))
+        .map((s) => ({ name: s.name, reason: 'A skill of that name is already imported.' }))
+      if (imported.length === 0 && skipped.length === 0) {
+        throw { code: 'NOT_FOUND', message: 'No SKILL.md found there. Link the folder that holds the skills.' }
+      }
+      customSkills.push(...imported.map((s) => ({ ...s, sourceUrl: url, enabled: true })))
+      return { imported: customSkills.filter((c) => imported.some((i) => i.name === c.name)), skipped }
+    },
+    'skills.setEnabled': (req) => {
+      const skill = customSkills.find((s) => s.name === String(req.name))
+      if (!skill) throw { code: 'NOT_FOUND', message: 'No such skill.' }
+      skill.enabled = req.enabled === true
+      return [...customSkills]
+    },
+    'skills.remove': (req) => {
+      const at = customSkills.findIndex((s) => s.name === String(req.name))
+      if (at >= 0) customSkills.splice(at, 1)
+      return [...customSkills]
+    },
+    'skills.run': async (req) => {
+      const skill = customSkills.find((s) => s.name === String(req.name))
+      if (!skill) throw { code: 'NOT_FOUND', message: 'No such skill.' }
+      if (!skill.enabled) {
+        throw {
+          code: 'RULE_NOT_ALLOWED',
+          message: 'That skill is switched off. Turn it on in Settings, then run it.',
+        }
+      }
+      const projectId = String(req.projectId)
+      const session = await sectionSession(projectId, 'skills')
+      const argument = typeof req.argument === 'string' ? req.argument.trim() : ''
+      const text = argument ? `/${skill.name} ${argument}` : `/${skill.name}`
+      sends.push({ sessionId: session.id, text })
+      appendEvent(session.id, 'prompt', { text, pending: false })
+      return { sessionId: session.id }
+    },
+    'projects.setUseContainers': (req) => {
+      const project = projects.find((p) => p.id === req.projectId)
+      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
+      project.useContainers = req.on === true
+    },
+    // Trimmed, and an empty one clears the name, which is the rule the real
+    // manager applies too — a test must not pass against a kinder mock. `name`
+    // moves with it because the real host prefers a typed name over the one it
+    // derives, and the sidebar renders `name`.
+    'sessions.rename': (req) => {
+      const session = sessions.get(String(req.sessionId))
+      if (!session) throw { code: 'NOT_FOUND', message: 'Session not found' }
+      const typed = String(req.label).trim()
+      session.label = typed === '' ? null : typed.slice(0, 60)
+      session.name = session.label
     },
     'projects.rename': (req) => {
       const project = projects.find((p) => p.id === req.projectId)
@@ -820,8 +927,8 @@ export function installMockHost(scenario: MockScenario): void {
       const file = pickDiagramFileName(description, taken)
       requested.add(file)
       diagramRequestedFiles.set(projectId, requested)
-      // A BACKGROUND session, never the chat one — see testsSession above.
-      const session = await testsSession(projectId)
+      // A BACKGROUND session, never the chat one — see sectionSession above.
+      const session = await sectionSession(projectId, 'diagram')
       const text = diagramPromptText(description, file)
       sends.push({ sessionId: session.id, text })
       appendEvent(session.id, 'prompt', { text, pending: false })
@@ -909,7 +1016,7 @@ export function installMockHost(scenario: MockScenario): void {
       // which happened.
       const projectId = String(req.projectId)
       let session = req.background
-        ? await testsSession(projectId)
+        ? await sectionSession(projectId, (req.kind as SectionKind) ?? 'spec')
         : [...sessions.values()].find((s) => s.projectId === projectId && !s.endedAt)
       // sessions.start is async (it simulates spawn latency), so this must await
       // it — the un-awaited Promise used to be cast straight to a session.
@@ -971,6 +1078,7 @@ export function installMockHost(scenario: MockScenario): void {
         startedAt: now(),
         endedAt: null,
         endReason: null,
+        label: null,
       }
       sessions.set(session.id, session)
       project.sessions.push(session)
@@ -1070,6 +1178,23 @@ export function installMockHost(scenario: MockScenario): void {
     // directory, continuously and on demand. Here the file is only ever named,
     // never written — the app's contract is the summary it gets back and the list
     // it can offer, and a test that touched the real temp directory would leak.
+    /*
+     * The renderer's copy path. In the real app this is Electron's own clipboard
+     * in the main process; here it is the browser API, which is the closest a
+     * plain page can get. `setClipboardFails` forces the refusal so the failure
+     * label can be tested without depending on Chromium's permission model,
+     * which Playwright grants or denies for its own reasons.
+     */
+    'clipboard.write': async (req) => {
+      if (clipboardFails) throw { code: 'INTERNAL', message: 'Clipboard unavailable.' }
+      try {
+        await navigator.clipboard.writeText(String(req.text))
+      } catch {
+        // A plain browser may still refuse. The real host cannot, so a refusal
+        // here is the environment's and not the contract's; swallow it so a
+        // passing test means what it says.
+      }
+    },
     'transcripts.save': (req) => {
       const sessionId = String(req.sessionId)
       const session = sessions.get(sessionId)
@@ -1167,7 +1292,7 @@ export function installMockHost(scenario: MockScenario): void {
             : `Judge the current diff against this acceptance line: "${row.acceptance}"\nEVAL_JUDGE`
       if (req.kind === 'check') row.checkStatus = 'not_run'
       if (req.kind === 'judge') row.judge = null
-      const session = await testsSession(projectId)
+      const session = await sectionSession(projectId, 'tests')
       sends.push({ sessionId: session.id, text })
       appendEvent(session.id, 'prompt', { text, pending: false })
       return { sessionId: session.id, runs: [...list] }
@@ -1188,7 +1313,7 @@ export function installMockHost(scenario: MockScenario): void {
       const text = `Verify the working tree of this project.\n${suiteIds.join('\n')}\nSWB_VERIFY`
       // The Tests section's own session, not whichever one is open. Awaited
       // because starting one is async here exactly as it is in the real host.
-      const session = await testsSession(projectId)
+      const session = await sectionSession(projectId, 'tests')
       const result = { sessionId: session.id }
       sends.push({ sessionId: session.id, text })
       appendEvent(session.id, 'prompt', { text, pending: false })
@@ -1217,7 +1342,7 @@ export function installMockHost(scenario: MockScenario): void {
       // real handler; otherwise a fresh tests session.
       const ran = list[0]?.sessionId ? sessions.get(String(list[0].sessionId)) : undefined
       const session =
-        ran && !ran.endedAt ? ran : (await testsSession(projectId))
+        ran && !ran.endedAt ? ran : (await sectionSession(projectId, 'tests'))
       const text = 'Capture evidence that the change in this working tree actually works.\nSWB_VERIFY'
       sends.push({ sessionId: session.id, text })
       appendEvent(session.id, 'prompt', { text, pending: false })
@@ -1306,7 +1431,7 @@ export function installMockHost(scenario: MockScenario): void {
         throw { code: 'INVALID_PATH', message: 'Choose at least one endpoint to test.' }
       }
       // The Tests section's own session, shared with verification runs.
-      const session = await testsSession(projectId)
+      const session = await sectionSession(projectId, 'tests')
       const result = { sessionId: session.id }
       const text = `Produce the request data for an automated API test.\n${endpoints
         .map((e) => `- ${e.method} ${e.template}`)
@@ -1791,6 +1916,14 @@ export function installMockHost(scenario: MockScenario): void {
     stopFlood: () => {
       if (floodTimer !== null) window.clearInterval(floodTimer)
       floodTimer = null
+    },
+    /** What the NEXT skills.import call finds in the repository. The scenario
+     *  decides, because repository contents are not this file's business. */
+    setSkillImport: (skills: CustomSkill[]) => {
+      nextSkillImport = skills
+    },
+    setClipboardFails: (fails: boolean) => {
+      clipboardFails = fails
     },
     state: () => ({
       sends: [...sends],

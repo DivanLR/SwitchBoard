@@ -8,6 +8,7 @@ colors:
   card: "#1A1D22"
   card-alt: "#171A1F"
   code-surface: "#0E1013"
+  code-surface-light: "#DFE3EA"
   graticule: "rgba(221, 225, 230, 0.12)"
   graticule-strong: "rgba(221, 225, 230, 0.3)"
   text-bright: "#F2F5F8"
@@ -20,7 +21,7 @@ colors:
   tolerance-red: "#E0685E"
   identity-teal: "#6FA8DC"
   identity-purple: "#A98BD6"
-  ground-light: "#F7F8FA"
+  ground-light: "#EFF1F5"
   card-light: "#FFFFFF"
   text-light-body: "#23272D"
   trace-green-light: "#12766E"
@@ -90,6 +91,39 @@ components:
 
 # Design System: Switchboard
 
+## The world changed on 2026-08-21
+
+**LIGHT IS NOW HOME GROUND.** The owner asked for a more modern surface against a
+named reference (design.dev/tools: white cards on a pale grey canvas, generous
+whitespace, soft low-alpha depth, restrained accent), chose the full departure
+over a refinement of the dark world, and light became the default theme.
+
+What that means for anything read below:
+
+- **The default theme is light.** The dark sheet is still built, still complete,
+  and still one click away; it is no longer what a new install opens on. Every
+  passage below that calls the dark ground "home" is describing the theme that is
+  now second, not the one a reader will see first.
+- **The light world is cards on a canvas, not a sheet.** The canvas is `#EFF1F5`
+  and cards are pure white, and the gap between them is deliberate: at the old
+  `#F7F8FA` the step to a white card measured 1.5% and the whole card idea died
+  at that distance. Chrome (sidebar, inbox, header) is white; the CONTENT pane is
+  the canvas. That inversion is the reference's shape.
+- **Corners are 10px and depth is a soft drop, in light only.** The dark world
+  keeps its 3px cut and its inset lip. A fold is a cut on carbon; a card sits on
+  a canvas. The two worlds disagree here on purpose.
+- **Hairlines got lighter.** A white card on a near-white canvas is separated by
+  its shadow first. Control boundaries keep their 3:1 floor; only lines that
+  merely separate two surfaces were softened, which is the letter of WCAG 1.4.11
+  rather than a relaxation of it.
+- **The spacing scale widened by roughly a quarter.** The old scale was sized for
+  an instrument panel where fitting more on screen was the point.
+
+What did NOT change, and must not be quietly re-litigated: the accent is still
+green, colour is still spent only on a reading outside tolerance, the type is
+still system-face with monospace reserved for code and measurement, and the dark
+world's own rules are untouched.
+
 ## Overview
 
 **Creative North Star: "The Trace"**
@@ -122,7 +156,7 @@ The palette is neutral-charcoal-and-hairline at rest, with colour spent only whe
 - **Identity Teal** (`#6FA8DC`) and **Identity Purple** (`#A98BD6`): identity-only accents (e.g. the Database MCP surface), kept clear of the trace-green hue so an identity marker is never mistaken for a running session.
 
 ### Neutral
-- **Ground** (`#14161A` dark / `#F7F8FA` light): the base charcoal/near-white field.
+- **Ground** (`#14161A` dark / `#EFF1F5` light): the base charcoal field, and on the light bench the grey CANVAS that white cards sit on.
 - **Panel** (`#101216` dark / `#EEF0F3` light) and **Card** (`#1A1D22` dark / `#FFFFFF` light): the two surface tiers, stepped darker/lighter than the ground.
 - **Graticule border** (`rgba(221,225,230,0.12)` dark / `rgba(20,22,26,0.14)` light): the hairline rule that draws every division. Never the loudest thing on screen.
 - **Text tiers**: bright (`#F2F5F8`), body (`#DDE1E6`), mid (`#9AA2AC`), meta (`#868F9A`) dark; mirrored tighter on light. Each tier is measured against the ground it lands on, floor 4.5:1.
@@ -178,6 +212,27 @@ The system is flat with a hairline lip, not a shadow-driven or bevelled material
 ## Shapes
 
 Corners are barely radiused, not hard-square and not softly rounded: cards and controls use a 3px radius (`--rc`), small chips and switches use 2px (`--rp`), and a few deliberately-flat elements (the composer input, machine-text blocks) use 0px (`--sq`). This is a middle position: the direction contract calls the interface "crisp," but a hard 0px radius on every card was judged too severe for a modern, readable instrument panel. Borders throughout are 1px hairlines drawn from the graticule tokens; there is no bevel, no stamped/embossed edge, and no cut-corner clip-path outside the dialog surface, which alone carries an 8-10px notch cut via `clip-path` on its background pseudo-element.
+
+### The overlay tier's own radii (added 2026-08-21)
+
+Dialogs, the command palette, dropdown panels and toasts do NOT take `--rc`. They
+were given their own scale against five named design.dev component references,
+and the scale is the same in both themes:
+
+- `--r-overlay: 16px` — a dialog. It is not folded out of the surface, it is
+  lifted off it, and it is the only tier this world grants a real shadow.
+- `--r-panel: 12px` — a palette, a dropdown panel, a toast, and the dropdown
+  trigger that opens one (trigger and panel agree rather than differing by 2px).
+- `--r-row: 6px` — a row inside one of those panels.
+
+The accompanying depths are `--shadow-overlay` and `--shadow-toast`, and the
+entry curve is `--ease-overlay` (`cubic-bezier(0.16, 1, 0.3, 1)`), shared by all
+four so nothing in this tier arrives on a different clock.
+
+**The references' accent was not taken.** All five are written dark and cyan-keyed;
+this world's action colour is green by the owner's own earlier direction, and
+colour here is spent on a reading outside tolerance. What was taken is geometry,
+depth, motion and behaviour.
 
 ## Components
 

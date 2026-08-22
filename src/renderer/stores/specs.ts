@@ -1,7 +1,7 @@
 // Spec Kit state per project: installed flag, spec summaries, and the selected
 // spec's detail. The store owns all specs transport (view/transport separation).
 import { reactive } from 'vue'
-import type { SpecDetail, SpecKitState } from '@shared/domain'
+import type { SectionKind, SpecDetail, SpecKitState } from '@shared/domain'
 import { invoke } from '@renderer/ipc'
 import { useProjectsStore } from '@renderer/stores/projects'
 
@@ -83,12 +83,16 @@ const store = reactive({
     /** This dispatch may draw a diagram: have the main process announce the
      *  folder when the turn ends, so the section updates without polling. */
     watchDiagrams = false,
+    /** Which section this belongs to, and so which of the project's own
+     *  sessions it lands in. Only read when `background` is set. */
+    kind: SectionKind = 'spec',
   ): Promise<string> {
     const { sessionId } = await invoke('specs.runInSession', {
       projectId,
       text,
       background,
       watchDiagrams,
+      kind,
     })
     if (background) await useProjectsStore().refresh()
     return sessionId

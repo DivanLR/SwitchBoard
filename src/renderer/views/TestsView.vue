@@ -27,6 +27,7 @@ import { useApiStore } from '@renderer/stores/api'
 import { useProjectsStore } from '@renderer/stores/projects'
 import MiniTerminal from '@renderer/components/MiniTerminal.vue'
 import { useSettingsStore } from '@renderer/stores/settings'
+import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useApiEvalSet } from '@renderer/composables/useApiEvalSet'
 import { pct, round, sourceOf, unmeasured, useVerifyGates } from '@renderer/composables/useVerifyGates'
 import EvalsView from '@renderer/views/EvalsView.vue'
@@ -95,7 +96,7 @@ const latest = computed(() => verify.latestFor(props.projectId))
 const running = computed(() => latest.value?.status === 'running')
 
 /** A bypass session runs in the sandbox container: node, plus the .NET SDK when
- *  this project detects as .NET (docker-sandbox picks the image from the very
+ *  this project detects as .NET (wslc-sandbox picks the image from the very
  *  same detection). Never Python, never a browser — which suites that rules out
  *  is shown before the run, not reported as a failure afterwards. */
 const sandboxed = computed<SandboxEnv>(() =>
@@ -315,7 +316,57 @@ function chooseStack(id: string): void {
 // The six tiles, and the two rules that decide what each one may claim: an
 // unmeasured figure reads "—" with its reason, and a skipped suite is a warning
 // rather than a pass (see the composable).
-const { gates, score } = useVerifyGates(latest)
+// Gates the developer has excused on this project, and the click that toggles
+// one. A tile nothing measured is a question only they can answer — this stack
+// has no mutation tool, that quality service is never getting connected — and
+// until now the only way to clear it was to leave it grey forever.
+const acceptedGates = computed(
+  () => new Set(settingsStore.settings?.projectAcceptedGates?.[props.projectId] ?? []),
+)
+
+function toggleAccepted(gateId: string): void {
+  const next = new Set(acceptedGates.value)
+  if (!next.delete(gateId)) next.add(gateId)
+  void settingsStore.save({
+    projectAcceptedGates: {
+      ...(settingsStore.settings?.projectAcceptedGates ?? {}),
+      [props.projectId]: [...next],
+    },
+  })
+}
+
+const { gates, score } = useVerifyGates(latest, acceptedGates)
+
+// --- The whole window ---------------------------------------------------------
+// The shell owns the sidebar, the inbox, the project header and the tab strip, so
+// the flag lives in the store both ends can see. This section only ever claims it
+// under its own name, so another section entering full screen cannot make this one
+// think it is in it.
+const activeSession = useActiveSessionStore()
+const FULL_SCREEN_KEY = 'tests'
+const isFullScreen = computed(() => activeSession.fullScreenSection === FULL_SCREEN_KEY)
+
+function toggleFullScreen(): void {
+  activeSession.setFullScreen(isFullScreen.value ? null : FULL_SCREEN_KEY)
+}
+
+/** Escape leaves, which is what every other full-screen surface has taught. */
+function onFullScreenKey(event: KeyboardEvent): void {
+  if (event.key === 'Escape' && isFullScreen.value) {
+    event.preventDefault()
+    activeSession.setFullScreen(null)
+  }
+}
+
+onMounted(() => window.addEventListener('keydown', onFullScreenKey))
+onUnmounted(() => {
+  window.removeEventListener('keydown', onFullScreenKey)
+  // Hand the chrome back on the way out. Without this, anything that unmounts the
+  // section while it is full screen — switching project, opening the MCP view —
+  // leaves an app with no sidebar and no tab strip and no control that would
+  // bring either back.
+  if (isFullScreen.value) activeSession.setFullScreen(null)
+})
 
 const SUB_TABS: { id: SubTab; label: string; built: boolean }[] = [
   { id: 'api', label: 'API', built: true },
@@ -340,30 +391,6 @@ const subTabs = computed(() =>
 async function runVerify(): Promise<void> {
   if (!stack.value || (selected.value ?? []).length === 0) return
   if (await verify.start(props.projectId, stack.value.id, selected.value ?? [], isolated.value)) {
-    subTab.value = 'evidence'
-  }
-}
-
-/**
- * Run ONE suite again, leaving the selection exactly as it was.
- *
- * The mark on a chip answers "did it pass". Nothing answered "try that again":
- * the single Run verification button runs everything ticked, so re-running one
- * failed suite meant unticking the other six, running, and ticking them all
- * back — and in between, the ticks no longer described what a full run covers,
- * which is the one thing they are for. Those are two different statements, so
- * this is a separate control and it does not touch `selected`.
- *
- * Guarded on the same conditions as the Run button, because it is the same
- * dispatch: a run already holding the session cannot be joined, and a suite
- * this environment cannot run never gets offered the control (blockedReason).
- *
- * Lands on the same panel a full run does, for the same reason — the result of
- * pressing a run control should always appear in the same place.
- */
-async function runOne(suite: TestSuite): Promise<void> {
-  if (!stack.value || running.value || verify.starting || blockedReason(suite)) return
-  if (await verify.start(props.projectId, stack.value.id, [suite.id])) {
     subTab.value = 'evidence'
   }
 }
@@ -601,6 +628,24 @@ function statusWord(run: VerifyRun): string {
             {{ (selected ?? []).length }} of {{ suites.length }} suites
           </span>
           <span class="spacer"></span>
+          <!-- The whole window. This section is the widest thing in the app — six
+               gate tiles, a suite row and result tables — and it was sharing the
+               pane with two rails it does not need while reading a run. The exit
+               lives here rather than in the shell because the shell's own controls
+               are what got stood down. -->
+          <button
+            class="link"
+            data-testid="tests-full-screen"
+            :aria-pressed="isFullScreen ? 'true' : 'false'"
+            :title="
+              isFullScreen
+                ? 'Give the sidebar and inbox back (or press Escape)'
+                : 'Hide the sidebar, inbox and header, and give this section the whole window'
+            "
+            @click="toggleFullScreen"
+          >
+            {{ isFullScreen ? 'exit full screen' : 'full screen' }}
+          </button>
           <button class="link" data-testid="tests-change-stack" @click="chooseStack('')">change stack</button>
         </div>
         <div class="prof-meta mono">
@@ -690,23 +735,11 @@ function statusWord(run: VerifyRun): string {
               <span v-else-if="row.suite.heavy" class="heavy-tag mono">slow</span>
               <span v-if="commandOverrides[row.suite.id]" class="heavy-tag mono">edited</span>
             </button>
-            <!-- Try that one again. Rides beside the chip for the same reason the
-                 edit affordance below does — the chip itself is the on/off target,
-                 and a control nested in it would swallow that click. Only once
-                 there is a result to re-run: on a suite that has never run it
-                 would be a second, quieter Run button meaning something subtly
-                 different, which is how a panel stops being readable. -->
-            <button
-              v-if="row.result && !blockedReason(row.suite)"
-              class="chip suite-rerun mono"
-              :disabled="running || verify.starting"
-              :data-testid="`tests-suite-rerun-${row.suite.id}`"
-              :title="`Run ${row.suite.label} again on its own — the ticks stay as they are`"
-              :aria-label="`Run ${row.suite.label} again`"
-              @click="runOne(row.suite)"
-            >
-              <Icon name="refresh" :size="12" />
-            </button>
+            <!-- No per-suite retry control. It sat beside every chip that had a
+                 result, and it was a third thing to aim at in a row whose own
+                 chip is already the target: tick the suites you want and press
+                 Run. Removed at the owner's request, along with runOne, which
+                 nothing else called. -->
             <!-- The catalogue's command is a guess about a conventional layout; this
                  is how it gets corrected without editing the app's source. -->
             <button
@@ -817,28 +850,48 @@ function statusWord(run: VerifyRun): string {
         </span>
       </div>
 
-      <div class="gates">
-        <button
-          v-for="g in gates"
-          :key="g.id"
-          class="gate"
-          :class="g.status"
-          :data-testid="`tests-gate-${g.id}`"
-          :title="`Target: ${g.target}`"
-          @click="subTab = g.panel"
-        >
-          <span class="gate-name mono">{{ g.name }}</span>
-          <span
-            v-if="g.verified"
-            class="gate-verified mono"
-            :data-testid="`tests-gate-verified-${g.id}`"
-            title="Read from the test runner's own report file, not from what the session said"
-            >checked</span
+      <div class="gates" data-testid="tests-gates">
+<!-- A cell rather than a bare tile, because the tile is already a button that
+             opens its panel and the accept control needs its own hit area. Nesting
+             one button inside another is invalid, so they are siblings. -->
+        <div v-for="g in gates" :key="g.id" class="gate-cell">
+          <button
+            class="gate"
+            :class="[g.status, { accepted: g.accepted }]"
+            :data-testid="`tests-gate-${g.id}`"
+            :title="`Target: ${g.target}`"
+            @click="subTab = g.panel"
           >
-          <span class="gate-value">{{ g.value }}</span>
-          <span class="gate-sub">{{ g.sub }}</span>
-          <span class="gate-target mono">{{ g.target }}</span>
-        </button>
+            <span class="gate-name mono">{{ g.name }}</span>
+            <span
+              v-if="g.verified"
+              class="gate-verified mono"
+              :data-testid="`tests-gate-verified-${g.id}`"
+              title="Read from the test runner's own report file, not from what the session said"
+              >checked</span
+            >
+            <span class="gate-value">{{ g.value }}</span>
+            <span class="gate-sub">{{ g.sub }}</span>
+            <span class="gate-target mono">{{ g.target }}</span>
+          </button>
+          <!-- Offered only where there is no measurement to argue with. A figure
+               that came back under target has no accept control, by design. -->
+          <button
+            v-if="g.acceptable"
+            class="gate-accept mono"
+            :class="{ on: g.accepted }"
+            :data-testid="`tests-gate-accept-${g.id}`"
+            :aria-pressed="g.accepted ? 'true' : 'false'"
+            :title="
+              g.accepted
+                ? `${g.name} is accepted. Click to withdraw that and leave it unmeasured.`
+                : `Nothing measured ${g.name}. Accept it if you know why — the tile goes green and says you decided, and it stays out of the counted score.`
+            "
+            @click="toggleAccepted(g.id)"
+          >
+            {{ g.accepted ? 'accepted' : 'accept' }}
+          </button>
+        </div>
       </div>
 
       <div class="sub-tabs mono">
@@ -1325,6 +1378,15 @@ function statusWord(run: VerifyRun): string {
   color: var(--text-faint);
 }
 
+/* FULL WIDTH -------------------------------------------------------------------
+   The section used to sit in an 840px column whatever the window was, so a wide
+   monitor showed a narrow strip of tests beside a field of empty canvas — the six
+   gate tiles wrapped onto three rows they had room to lay out in one, and the
+   result tables, which are the widest thing here, were the worst starved.
+
+   The cap is gone from the STRUCTURAL blocks only. Prose keeps its measure
+   (.intro, .empty, .dev-panel, .dev-body): a paragraph set to 2000px is
+   unreadable, and "use the whole window" was never a request to widen sentences. */
 .stack-row {
   display: flex;
   /* Top, not centre: the offerings wrap to a second line now, and centring
@@ -1332,11 +1394,15 @@ function statusWord(run: VerifyRun): string {
   align-items: flex-start;
   gap: 12px;
   width: 100%;
-  max-width: 840px;
   padding: 10px 13px;
   margin-bottom: 6px;
   text-align: left;
-  background: var(--bg-hover);
+  /* A CARD, so --bg-card. These rested on --bg-hover, a translucent wash built
+     for a hover state: over the light canvas it reads as a grey slab instead of
+     a white card floating on it, which is the surface's whole idea. The Skills
+     section next door already used --bg-card, and the two side by side is what
+     made it visible. */
+  background: var(--bg-card);
   box-shadow: var(--elev);
   border: 1px solid var(--border-card);
   border-radius: var(--rc);
@@ -1377,7 +1443,6 @@ function statusWord(run: VerifyRun): string {
 }
 
 .prof {
-  max-width: 840px;
   margin-bottom: 14px;
 }
 
@@ -1522,6 +1587,41 @@ function statusWord(run: VerifyRun): string {
   background: transparent;
 }
 
+/* TICKED FOR THE NEXT RUN --------------------------------------------------
+   A ring, and it exists because selection was invisible on exactly the chips
+   where it mattered most.
+
+   `.chip.on` carries the selection tint, but every outcome rule above is three
+   classes to its two AND declared later, so an outcome overwrote the tint. On a
+   pass or a failure that is intended: after a run, what happened outranks what
+   was picked. On the colourless three it was a bug — `background: transparent`
+   erased the only cue there was, so a grey "not run" suite looked identical
+   ticked and unticked. An API suite that answered `not_run` is the common case,
+   which is why this was reported against one.
+
+   Fixed with a channel no outcome rule touches, rather than by reordering them:
+   `box-shadow` is set nowhere else on these chips, so the ring survives every
+   state instead of racing it.
+
+   Two shadows, not one. The first is a 2px halo in the panel's own colour, which
+   opens a gap between the chip's border and the ring — without it the ring reads
+   as a slightly thicker border, which is not a signal anyone notices. The second
+   is the ring itself, in the NEUTRAL ink rather than `currentColor`: currentColor
+   was the first attempt and it failed on the exact chip this was reported
+   against, because a grey ring around grey text on a light panel is the same
+   invisibility all over again. Neutral ink is legible against every outcome
+   colour and against both themes, and it spends no new hue on a state that is
+   not a reading.
+
+   Weight rides along for anyone who cannot separate a ring from a border: it is
+   the one cue that survives a colourless chip and a monochrome display alike. */
+.chip.suite.on {
+  box-shadow:
+    0 0 0 2px var(--bg-panel),
+    0 0 0 4px color-mix(in srgb, var(--text-body) 55%, transparent);
+  font-weight: var(--w-em);
+}
+
 .heavy-tag {
   font-size: var(--fs-micro);
   color: var(--text-ghost);
@@ -1533,25 +1633,6 @@ function statusWord(run: VerifyRun): string {
   padding: 4px 7px;
   margin-left: -4px;
   color: var(--text-ghost);
-}
-
-/* Same rider position as .cmd-edit, and quiet for the same reason: it is a
-   per-suite action, not a second Run button. It takes the action colour on
-   hover because unlike editing a command it actually starts work. */
-.suite-rerun {
-  padding: 4px 7px;
-  margin-left: -4px;
-  color: var(--text-ghost);
-}
-
-.suite-rerun:hover:not(:disabled) {
-  color: var(--green);
-  border-color: var(--green);
-}
-
-.suite-rerun:disabled {
-  opacity: 0.4;
-  cursor: default;
 }
 
 .cmd-row {
@@ -1607,19 +1688,37 @@ function statusWord(run: VerifyRun): string {
 
 .gates {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  /* auto-FIT, not auto-fill. With the 840px cap gone, auto-fill kept creating
+     168px tracks for tiles that do not exist, so on a wide window the six tiles
+     sat at their minimum with a field of empty tracks to their right. auto-fit
+     collapses the empty ones, and the 1fr then divides the real width between the
+     six that are actually there. */
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
   gap: 7px;
-  max-width: 840px;
   margin-bottom: 16px;
 }
 
+/* The tile and its accept control. The tile stays the full size of the cell so
+   the grid is unchanged; the control floats in the corner it leaves free. */
+.gate-cell {
+  position: relative;
+  display: flex;
+}
+
 .gate {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
   padding: 9px 11px;
   text-align: left;
-  background: var(--bg-hover);
+  /* A CARD, so --bg-card. These rested on --bg-hover, a translucent wash built
+     for a hover state: over the light canvas it reads as a grey slab instead of
+     a white card floating on it, which is the surface's whole idea. The Skills
+     section next door already used --bg-card, and the two side by side is what
+     made it visible. */
+  background: var(--bg-card);
   box-shadow: var(--elev);
   border: 1px solid var(--border-card);
   border-radius: var(--rc);
@@ -1670,6 +1769,55 @@ function statusWord(run: VerifyRun): string {
   color: var(--green);
 }
 
+/* An accepted tile deliberately carries NO hue of its own: its status is 'pass',
+   so it inherits the same green a measured pass gets, which is the point of the
+   control. The distinction is carried by the word in the value slot — "accepted"
+   rather than "passed" — and by the sub-line naming who decided. Text at a glance,
+   rather than a fourth hue nobody has been taught. */
+
+.gate-accept {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 1px 5px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+  background: var(--bg-hover);
+  border: 1px solid var(--border-card);
+  border-radius: var(--r-row);
+  /* Quiet, but never invisible. This was opacity 0 until hover, on the argument
+     that six of them shouting would compete with the figures they annotate. A
+     screenshot of the section settled it the other way: a control nobody can see
+     is a control nobody finds, which is the same complaint that produced the
+     selection ring above. Quiet enough to stay subordinate to the figure, present
+     enough to be discovered without hunting. */
+  opacity: 0.55;
+  transition: opacity 120ms var(--ease-overlay);
+}
+
+.gate-cell:hover .gate-accept,
+.gate-accept:focus-visible,
+.gate-accept.on {
+  opacity: 1;
+}
+
+.gate-accept:hover {
+  color: var(--text-bright);
+  border-color: var(--blue);
+}
+
+.gate-accept.on {
+  color: var(--blue);
+  border-color: var(--blue);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gate-accept {
+    transition: none;
+  }
+}
+
 .gate.fail .gate-value {
   color: var(--red);
 }
@@ -1693,7 +1841,6 @@ function statusWord(run: VerifyRun): string {
 .sub-tabs {
   display: flex;
   gap: 2px;
-  max-width: 840px;
   border-bottom: 1px solid var(--border);
   margin-bottom: 14px;
 }
@@ -1738,7 +1885,6 @@ function statusWord(run: VerifyRun): string {
 }
 
 .panel {
-  max-width: 840px;
 }
 
 .panel-head {
@@ -1936,7 +2082,12 @@ function statusWord(run: VerifyRun): string {
   flex-direction: column;
   gap: 2px;
   padding: 9px 11px;
-  background: var(--bg-hover);
+  /* A CARD, so --bg-card. These rested on --bg-hover, a translucent wash built
+     for a hover state: over the light canvas it reads as a grey slab instead of
+     a white card floating on it, which is the surface's whole idea. The Skills
+     section next door already used --bg-card, and the two side by side is what
+     made it visible. */
+  background: var(--bg-card);
   border: 1px solid var(--border-card);
   border-radius: var(--rc);
 }
@@ -1965,7 +2116,12 @@ function statusWord(run: VerifyRun): string {
   gap: 10px;
   padding: 8px 10px;
   margin-bottom: 5px;
-  background: var(--bg-hover);
+  /* A CARD, so --bg-card. These rested on --bg-hover, a translucent wash built
+     for a hover state: over the light canvas it reads as a grey slab instead of
+     a white card floating on it, which is the surface's whole idea. The Skills
+     section next door already used --bg-card, and the two side by side is what
+     made it visible. */
+  background: var(--bg-card);
   border: 1px solid var(--border-card);
   border-radius: var(--rc);
 }
@@ -2007,7 +2163,12 @@ function statusWord(run: VerifyRun): string {
 .ep {
   padding: 8px 10px;
   margin-bottom: 5px;
-  background: var(--bg-hover);
+  /* A CARD, so --bg-card. These rested on --bg-hover, a translucent wash built
+     for a hover state: over the light canvas it reads as a grey slab instead of
+     a white card floating on it, which is the surface's whole idea. The Skills
+     section next door already used --bg-card, and the two side by side is what
+     made it visible. */
+  background: var(--bg-card);
   border: 1px solid var(--border-card);
   border-radius: var(--rc);
 }

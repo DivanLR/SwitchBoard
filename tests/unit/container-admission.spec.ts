@@ -4,15 +4,15 @@
 // oversubscribe MAX_CONTAINERS — the exact crash the cap exists to prevent (see
 // session-manager.ts's startSession doc and reservedContainerIds). This pins the
 // fix: the first start's reservation must make a second concurrent one refuse
-// before either of them ever touches Docker.
+// before either of them ever touches the container runtime.
 import { describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-// Held open until the test releases it, so a real "docker build" can never
+// Held open until the test releases it, so a real image build can never
 // finish inside this test's window — reproducing the slow first-build gap the
-// real bug lived in without actually spawning Docker.
+// real bug lived in without actually spawning a container runtime.
 const buildGate = vi.hoisted(() => {
   let release: (() => void) | undefined
   const promise = new Promise<void>((resolve) => {
@@ -39,14 +39,18 @@ vi.mock('@main/sessions/claude-executable', () => ({
   resolveClaudeExecutable: () => 'C:\\fake\\claude.exe',
 }))
 
-vi.mock('@main/sessions/docker-sandbox', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@main/sessions/docker-sandbox')>()
+vi.mock('@main/sessions/wslc-sandbox', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@main/sessions/wslc-sandbox')>()
   return {
     ...actual,
-    // The one call in startSession that actually reaches Docker. Held open so
-    // the test can land a second concurrent start in the exact window the real
-    // bug lived in.
+    // The call in startSession that actually reaches the container runtime. Held
+    // open so the test can land a second concurrent start in the exact window the
+    // real bug lived in.
     ensureSandboxImage: () => buildGate.promise,
+    // The other pre-flight, stubbed rather than gated: it runs AFTER the image
+    // one, so it is never the thing holding the window open, and left real it
+    // would spawn wslc on whatever machine runs this suite.
+    ensureSandboxVolumes: () => Promise.resolve(),
   }
 })
 

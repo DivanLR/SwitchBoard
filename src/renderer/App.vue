@@ -18,6 +18,7 @@ import InboxView from '@renderer/views/InboxView.vue'
 import ProjectRegistration from '@renderer/components/ProjectRegistration.vue'
 import SettingsPanel from '@renderer/components/SettingsPanel.vue'
 import GlobalSpinner from '@renderer/components/GlobalSpinner.vue'
+import ToastHost from '@renderer/components/ToastHost.vue'
 import SessionWaitOverlay from '@renderer/components/SessionWaitOverlay.vue'
 import Icon from '@renderer/components/Icon.vue'
 
@@ -31,9 +32,9 @@ const updates = useUpdatesStore()
 
 const showRegistration = ref(false)
 const showSettings = ref(false)
-const settingsTab = ref<'models' | 'proj' | 'allowed' | 'term' | 'gen'>('models')
+const settingsTab = ref<'models' | 'proj' | 'allowed' | 'skills' | 'term' | 'gen'>('models')
 
-function openSettings(tab: 'models' | 'proj' | 'allowed' | 'term' | 'gen' = 'models'): void {
+function openSettings(tab: 'models' | 'proj' | 'allowed' | 'skills' | 'term' | 'gen' = 'models'): void {
   settingsTab.value = tab
   showSettings.value = true
 }
@@ -212,7 +213,11 @@ const dbProject = computed(() => projects.dbProject)
       </button>
     </div>
     <div class="panes" :style="{ '--inbox-w': `${inboxWidth}px` }">
+      <!-- Both rails stand down when a section has been given the whole window.
+           The section keeps its own way back (see TestsView's exit control), so
+           there is no state with no exit. -->
       <Sidebar
+        v-if="!active.fullScreenSection"
         @add-project="showRegistration = true"
         @open-settings="openSettings()"
       />
@@ -222,7 +227,11 @@ const dbProject = computed(() => projects.dbProject)
           v-if="dbProject && active.mcpOpen"
           :project="dbProject"
         />
-        <SessionView v-else-if="selectedProject" :project="selectedProject" />
+        <SessionView
+          v-else-if="selectedProject"
+          :project="selectedProject"
+          @open-settings="openSettings"
+        />
         <div v-else class="no-project">
           <div class="mono faint" style="font-size: var(--fs-ui)">no project selected</div>
           <button class="btn-solid" data-testid="add-project-empty" @click="showRegistration = true">
@@ -231,7 +240,7 @@ const dbProject = computed(() => projects.dbProject)
         </div>
       </main>
 
-      <template v-if="!inboxCollapsed">
+      <template v-if="!inboxCollapsed && !active.fullScreenSection">
         <div
           class="inbox-resize"
           data-testid="inbox-resize"
@@ -243,7 +252,11 @@ const dbProject = computed(() => projects.dbProject)
 
       <!-- Collapsed: a thin right rail. The glowing count at its top reopens the
            inbox and makes pending items impossible to miss. -->
-      <div v-if="inboxCollapsed" class="inbox-rail" data-testid="inbox-rail">
+      <div
+        v-if="inboxCollapsed && !active.fullScreenSection"
+        class="inbox-rail"
+        data-testid="inbox-rail"
+      >
         <button
           class="inbox-peek"
           :class="{ glow: inbox.pendingCount > 0 }"
@@ -277,6 +290,10 @@ const dbProject = computed(() => projects.dbProject)
       sub="First bypass start builds its container — this can take a few minutes."
     />
   </div>
+
+  <!-- Transient outcomes, top right. Outside .shell so a toast is not clipped
+       by the panes and does not move when the inbox is resized. -->
+  <ToastHost />
 
   <!-- Global loading spinner — shows while any IPC call is in flight. -->
   <GlobalSpinner />

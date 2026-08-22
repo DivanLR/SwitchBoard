@@ -171,7 +171,7 @@ test('Run verification crosses the real boundary without the clone error', async
   // Docker, the login or the executable it finds missing first. Pinning the
   // message to one of those made this test an assertion about the order of two
   // preflight checks rather than about the boundary it is named for.
-  expect(message).toMatch(/Claude Code was not found|login not found|Docker Desktop is not running/i)
+  expect(message).toMatch(/Claude Code was not found|login not found|WSL container \(wslc\) was not found/i)
 })
 
 // Last in the file on purpose: creating groups changes the sidebar's shape, and
@@ -272,4 +272,96 @@ test('the content security policy is live on that origin', async () => {
     return (window as unknown as { __cspEscaped?: boolean }).__cspEscaped === true
   })
   expect(escaped).toBe(false)
+})
+
+// Copying, in the only suite that can see it. The mock-host suite renders the
+// same renderer in a plain browser under Chromium's own permission model, so it
+// could never have caught the real failure: renderer permissions are denied by
+// default here (checklist A5), which made `navigator.clipboard.writeText` reject
+// and every code-block copy report "could not copy" on every machine.
+//
+// The fix was to stop asking the browser. These two pin both halves of that: the
+// deny-all is intact, AND copying works anyway.
+test('renderer web permissions are still denied, clipboard included', async () => {
+  const states = await page.evaluate(async () => {
+    const query = async (name: string): Promise<string> => {
+      try {
+        const status = await navigator.permissions.query({ name } as unknown as PermissionDescriptor)
+        return status.state
+      } catch {
+        return 'unsupported'
+      }
+    }
+    return { write: await query('clipboard-write'), read: await query('clipboard-read') }
+  })
+
+  // Neither direction is granted to the renderer. The carve-out that briefly
+  // lived here is gone: routing through main removed the dependency instead of
+  // widening the grant.
+  expect(states.write).not.toBe('granted')
+  expect(states.read).not.toBe('granted')
+})
+
+test('copying goes through the main process, so it works despite that', async () => {
+  // The renderer writes through the endpoint it really uses, from a renderer
+  // holding no clipboard permission at all. A resolved `ok` means the main
+  // process ran `clipboard.writeText` without throwing.
+  //
+  // What this deliberately does NOT do is read the system clipboard back. It did,
+  // and the readback is not assertable from here: a test-launched Electron gets no
+  // usable clipboard on this platform — main writes its own probe and
+  // `availableFormats()` comes back empty, with nothing of ours involved. Asserting
+  // it would fail on the harness rather than on the app. The OS boundary is where
+  // this suite stops; everything up to it is covered.
+  //
+  // Resolving IS the success signal, and it is the same one the store reads:
+  // `invoke` unwraps the envelope and throws on any non-ok result, so a void
+  // handler that resolves means the write ran. Reading a truthy value off the
+  // return would be reading the handler's `null`.
+  const failure = await page.evaluate(async () => {
+    try {
+      await window.switchboard.invoke('clipboard.write', { text: 'switchboard clipboard probe' })
+      return null
+    } catch (error) {
+      return String(error)
+    }
+  })
+  expect(failure).toBeNull()
+})
+
+// THE ONE THAT PROVES IT. Everything above tests the mechanism; this clicks a
+// real code block in the real application and reads the label back.
+//
+// It exists because two releases shipped with copying broken, and the second fix
+// was reported as still broken. Both times the mechanism was argued from, not
+// observed: the renderer's copy path is only fully assembled in the real app, so
+// the mock-host suite could assert everything about it and still be blind to a
+// main-process permission handler refusing the write.
+//
+// The label is the whole assertion, and it is enough: the view renders
+// `could not copy` whenever the IPC resolves false, so reading `copied` means the
+// main process took the block's text and wrote it without throwing.
+test('clicking a code block in the real app says copied', async () => {
+  // Select the project first: opening the session is what loads its events.
+  await page.getByTestId('sidebar-project-sample-api').click()
+  await page.getByTestId('tab-session').click()
+  const pre = page.locator('pre.md-pre').first()
+  await expect(pre).toBeVisible()
+
+  const label = (): Promise<string> =>
+    pre.evaluate((el) => getComputedStyle(el, '::after').content)
+
+  // Resting first, so a label stuck on "copied" cannot pass this by accident.
+  expect(await label()).toContain('copy')
+  expect(await label()).not.toContain('copied')
+
+  await pre.click()
+
+  // The developer-visible outcome.
+  await expect.poll(label).toContain('copied')
+
+  // Not the failure label, which is the exact symptom that was reported twice.
+  // These two are not redundant: `copied` is a substring of `could not copy`, so
+  // the first assertion alone would pass on the failure it exists to catch.
+  expect(await label()).not.toContain('could not copy')
 })

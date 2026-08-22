@@ -5,6 +5,8 @@
 //
 // The individual handlers have their own specs (permission-broker, task-queue,
 // folder-access, ...). What is tested here is the wrapper they all share.
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { IpcError, WireResult } from '@shared/ipc-types'
 import { INVOKE_CHANNEL, isIpcErrorCode } from '@shared/ipc-types'
@@ -75,6 +77,9 @@ function setup() {
     broker,
     getWindow: () => window as never,
     dbProjectId: 'db-project',
+    // A temp path: these suites never import a skill, and the handlers only
+    // read this when one is imported.
+    skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),
   })
 
   const listener = registered.get(INVOKE_CHANNEL)
@@ -248,6 +253,9 @@ describe('the sender-trust check', () => {
       broker,
       getWindow: () => null,
       dbProjectId: 'db-project',
+      // A temp path: these suites never import a skill, and the handlers only
+      // read this when one is imported.
+      skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),
     })
     const listener = registered.get(INVOKE_CHANNEL)!
     const result = (await listener(

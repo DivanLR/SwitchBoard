@@ -1,8 +1,33 @@
-// Bypass-permission sessions run the Claude CLI inside a disposable Linux
-// container (docker run --rm) instead of natively. Claude Code's own OS
-// sandbox does not exist on native Windows, so the container is the isolation
-// boundary: full autonomy inside, while the host only exposes the project
-// folder (rw) and referenced folders (ro).
+// Containerised sessions run the Claude CLI inside a disposable Linux container
+// instead of natively. Claude Code's own OS sandbox does not exist on native
+// Windows, so the container is the isolation boundary: full autonomy inside,
+// while the host only exposes the project folder (rw) and referenced folders (ro).
+//
+// The runtime is WSL container (`wslc.exe`), which ships inside WSL itself, NOT
+// Docker. Docker Desktop was the runtime until 2026-08-19; the owner asked for
+// wslc everywhere, and this module is the whole of that boundary, so the swap is
+// a rewrite of the six functions here that ever spawned a binary.
+//
+// WHAT THE SWAP COST, recorded where it applies rather than only here:
+//   1. `--cap-drop ALL` and `--security-opt no-new-privileges`. wslc does not
+//      implement them (nor `--privileged`), so a container-escape bug now has
+//      the default capability set to work with instead of none. What stands in
+//      their place is the per-session utility VM wslc builds, which is a
+//      stronger boundary than Docker Desktop's single shared VM; that is a
+//      reasonable trade and it is not the same trade.
+// ONE more was lost and then recovered by another route, and one turned out not
+// to matter; both are recorded where they apply rather than only here:
+//   2. `--pids-limit` has no wslc equivalent, but `--ulimit nproc` does the same
+//      job per UID instead of per cgroup, and this image runs as exactly one
+//      unprivileged user. See the argv in sandboxSpawn.
+//   3. `--memory-swap` does not exist either, and on this kernel it would be
+//      inert if it did: a real run reports "Memory limited without swap", so
+//      there is no swap allowance to pin. See sandboxMemoryArg.
+//
+// wslc is DAEMONLESS. There is no dockerd, no socket and no HTTP API, so there
+// is nothing to probe for readiness the way `docker version` probed the daemon,
+// and nothing a Docker Engine API client could attach to. `wslc version` answers
+// for the CLI's own presence, which is the only readiness question left.
 //
 // Auth: the host's OAuth credentials file is mounted read-only and copied into
 // the container home by the image's entrypoint, so no login step is needed
@@ -10,8 +35,8 @@
 // between runs (transcripts, so bypass→bypass resume works).
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
-import { cpus, homedir } from 'node:os'
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { cpus, homedir, tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 import type { SpawnOptions as SdkSpawnOptions, SpawnedProcess } from '@anthropic-ai/claude-agent-sdk'
@@ -25,6 +50,26 @@ import {
 } from '@shared/test-catalog'
 
 const execFileAsync = promisify(execFile)
+
+/**
+ * The container runtime. `wslc.exe` is on PATH as soon as WSL is updated, so it
+ * is spawned by bare name exactly as `docker` was.
+ *
+ * No `--session` flag anywhere. wslc groups containers into sessions and takes a
+ * global `--session <name>` to pick one, which looked like the right way to keep
+ * every Switchboard container together. It is not used, because Microsoft's own
+ * tutorial runs `wslc run` and then finds the container with `wslc container
+ * list` in a separate invocation and no session flag at all, so the default
+ * session already persists across calls; naming one would be this app inventing
+ * a requirement out of a flag it has never seen behave.
+ *
+ * ponytail: a wslc session's storage is reported to default to ephemeral tmpfs,
+ * wiped when its VM restarts, unless a StoragePath is configured. If a resumed
+ * session is ever found with an empty ~/.claude after a reboot, that is this,
+ * and the fix is `wslc settings` with a persistent storage path rather than
+ * anything in this file.
+ */
+const WSLC = 'wslc'
 
 const IMAGE = 'switchboard-sandbox'
 const DOTNET_IMAGE = 'switchboard-sandbox-dotnet'
@@ -112,7 +157,7 @@ const NPM_CACHE_VOLUME = 'switchboard-npm-cache'
 const HOME_VOLUME_PREFIX = 'switchboard-claude-home-'
 
 /**
- * Which Docker volume backs a containerised session's CLI home (~/.claude).
+ * Which named volume backs a containerised session's CLI home (~/.claude).
  *
  * Defaults to a volume keyed to the session's own id, so it can never collide
  * with a sibling session's — see HOME_VOLUME_PREFIX for why that matters now.
@@ -133,42 +178,91 @@ export function homeVolumeFor(sessionId: string, resumeFromSessionId?: string): 
   return `${HOME_VOLUME_PREFIX}${safeName(resumeFromSessionId ?? sessionId)}`
 }
 
-/** Docker volume/container names must be [a-zA-Z0-9_.-]. */
+/** Volume and container names must be [a-zA-Z0-9_.-]. Docker's rule, kept for
+ *  wslc: it is at least as strict, the names it produces are already valid
+ *  there, and loosening it could only ever break one of the two. */
 function safeName(value: string): string {
   return value.replace(/[^a-zA-Z0-9_.-]/g, '')
+}
+
+/**
+ * A size string in the form wslc insists on: digits with an UPPERCASE unit.
+ *
+ * Found by running one: `wslc run -m 6g` is refused outright with "Invalid memory
+ * argument value: '6g'. Expected a memory size (e.g. 256M, 1G)". Docker accepted
+ * either case for years, this app has always stored the setting lowercase, and
+ * the 12g in SWITCHBOARD_SANDBOX_MEMORY on at least one machine is lowercase too,
+ * so every containerised session would have died at spawn on an argument the
+ * developer had no reason to think was wrong.
+ *
+ * Normalising rather than validating, deliberately: the stored settings and the
+ * environment variable already say "6g" and "12g", and a runtime swap is no
+ * reason to make somebody retype them. `--shm-size` takes the same form and goes
+ * through here too.
+ *
+ * Anything this pattern does not recognise passes through untouched, so a value
+ * wslc genuinely cannot read reaches wslc and is reported in its own words
+ * through lastStderr, rather than being silently rewritten into something else.
+ */
+export function normalizeSize(value: string): string {
+  const match = /^(\d+(?:\.\d+)?)\s*([kmgt])(i?b)?$/i.exec(value.trim())
+  return match ? `${match[1]}${match[2].toUpperCase()}` : value.trim()
 }
 
 /**
  * The most memory one bypass container may take, and the reason sessions
  * stopped dying in pairs.
  *
- * Docker Desktop runs every container in ONE shared WSL virtual machine with a
- * fixed allowance. Without a limit, one greedy run (a .NET restore, a test
- * pass, a browser) can exhaust it, and the kernel then kills whichever
- * container it likes — often someone else's session, with exit 137 and no
- * stderr, read as a code bug that never was (see explainExit). A cap decides
- * WHO pays when memory runs out: the greedy run stops, the VM and every other
- * session keep going — the same reasoning as --pids-limit below.
+ * Containers share a virtual machine with a fixed allowance. Without a limit,
+ * one greedy run (a .NET restore, a test pass, a browser) can exhaust it, and
+ * the kernel then kills whichever container it likes, often someone else's
+ * session, with exit 137 and no stderr, read as a code bug that never was (see
+ * explainExit). A cap decides WHO pays when memory runs out: the greedy run
+ * stops, the VM and every other session keep going.
  *
  * 6 GiB because `dotnet restore` + `dotnet test` on a real solution fits
  * comfortably inside it while leaving room for a second session.
  *
- * `--memory-swap` is pinned to the SAME figure, which is what makes the cap a
- * cap. Passing `--memory` alone lets Docker allow swap up to the same figure
- * again, so a "12g" container could reach ~24 GiB — larger than the whole WSL
- * VM on a 32 GB machine, at which point the VM's own kernel kills whichever
- * container it likes and the containment promised above never happens. The
- * cushion that doubling bought was worth less than the containment it cost: a
- * run that genuinely needs more now stops as itself, which is the entire point
- * of having a limit.
+ * `--memory-swap` USED TO BE PINNED to the same figure, because under Docker
+ * `--memory` alone allowed swap up to the same figure again and a "12g"
+ * container could reach roughly 24 GiB. `wslc run --help` on 2.9.4.0 has no
+ * `--memory-swap`, so the pairing is gone.
  *
- * The knob is Settings → Sandbox memory (e.g. "12g", or "0" to remove the
- * cap) — an env var is nowhere a desktop-app user can reach.
+ * That turns out to matter less than expected, and the reason came from the
+ * runtime rather than the documentation. A real containerised run prints:
+ *   wsl: Your kernel does not support swap limit capabilities or the cgroup is
+ *   not mounted. Memory limited without swap.
+ * So the WSL kernel has no swap accounting at all. `--memory` limits RAM, and
+ * there is no memsw ceiling for a flag to raise or pin. Whether a container can
+ * exceed the figure now depends on whether the WSL VM has swap to spill into,
+ * not on a flag this runtime lacks. Do not describe this as "a soft cap" without
+ * that detail, and do not go looking for `--memory-swap` again: on this kernel
+ * it would be inert even if wslc offered it.
+ *
+ * The knob is Settings, Sandbox memory (e.g. "12g", or "0" to remove the cap).
+ * An env var is nowhere a desktop-app user can reach.
  * SWITCHBOARD_SANDBOX_MEMORY still wins when set, for pre-Settings setups.
  */
 export function sandboxMemoryArg(setting?: string): string[] {
   const value = process.env.SWITCHBOARD_SANDBOX_MEMORY?.trim() || setting?.trim() || '6g'
-  return value === '0' ? [] : ['--memory', value, '--memory-swap', value]
+  // ponytail: --memory only, because wslc has no --memory-swap. Pin the pair
+  // again the moment it does; the reasoning is above and has not changed.
+  return value === '0' ? [] : ['--memory', normalizeSize(value)]
+}
+
+/**
+ * A host path as wslc's `-v` parser wants to read it: forward slashes.
+ *
+ * Windows accepts either separator, and so did Docker. wslc's own parser is a
+ * lighter right-to-left one that diverges from Docker's, and the clearest report
+ * of it says a backslash is read as an escape character, which would silently
+ * mangle `C:\Users\name\project` into something that resolves nowhere. One
+ * secondary source disagrees and says backslashes work. Forward slashes satisfy
+ * both readings and every Windows API, so there is nothing to gain by finding
+ * out which is right.
+ */
+function mountPath(hostPath: string): string {
+  return hostPath.replace(/\\/g, '/')
 }
 
 /**
@@ -184,10 +278,14 @@ export function cpuShare(): string {
   return String(Math.max(2, Math.floor(cpus().length / 2)))
 }
 
-// Built via stdin (`docker build -`): no build context, nothing to package.
+// Written to a Containerfile in a throwaway context directory, because `wslc
+// build` takes a context path and has no stdin form the way `docker build -` did
+// (Microsoft's tutorial shows `wslc build -t <name> .` only). The recipe is still
+// self-contained; the directory holds nothing but the Containerfile.
+//
 // ponytail: the CLI version is whatever npm had at image-build time; to pick
-// up a newer CLI, `docker rmi switchboard-sandbox` and the next bypass session
-// rebuilds.
+// up a newer CLI, `wslc rmi switchboard-sandbox` and the next containerised
+// session rebuilds.
 //
 // Images are picked per project from what it actually needs: node always, the
 // .NET SDK when stack detection says .NET, and browser libraries when the
@@ -209,7 +307,7 @@ export function cpuShare(): string {
 // on the mount existing, so a developer with no plugins installed still boots.
 const SHARED_SETUP = `git ripgrep ca-certificates && rm -rf /var/lib/apt/lists/* \\
  && npm install -g @anthropic-ai/claude-code \\
- && printf '#!/bin/sh\\nmkdir -p "$HOME/.claude"\\n[ -f /creds/.credentials.json ] && cp /creds/.credentials.json "$HOME/.claude/.credentials.json"\\n[ -d /creds/plugins ] && mkdir -p "$HOME/.claude/plugins" && cp -r /creds/plugins/. "$HOME/.claude/plugins/"\\nexec "$@"\\n' > /entrypoint.sh \\
+ && printf '#!/bin/sh\\nmkdir -p "$HOME/.claude"\\n[ -f /creds/.credentials.json ] && cp /creds/.credentials.json "$HOME/.claude/.credentials.json"\\n[ -d /creds/plugins ] && mkdir -p "$HOME/.claude/plugins" && cp -r /creds/plugins/. "$HOME/.claude/plugins/"\\n[ -d /creds/skills ] && mkdir -p "$HOME/.claude/skills" && cp -r /creds/skills/. "$HOME/.claude/skills/"\\nexec "$@"\\n' > /entrypoint.sh \\
  && chmod +x /entrypoint.sh`
 
 /* Chromium needs a set of shared libraries that node:22-slim does not carry. This
@@ -242,7 +340,7 @@ function browserEnv(browser: boolean): string {
   return browser ? `ENV PLAYWRIGHT_BROWSERS_PATH=${BROWSER_CACHE_PATH}\n` : ''
 }
 
-const dockerfile = (browser: boolean): string => `FROM node:22-slim
+const containerfile = (browser: boolean): string => `FROM node:22-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ${SHARED_SETUP} \\
  && mkdir -p /home/node/.claude && chown -R node:node /home/node/.claude${browserLayer(browser)}
 USER node
@@ -266,7 +364,7 @@ ENTRYPOINT ["/entrypoint.sh"]
 // already parks its own `ubuntu` user there. The uid is what matters, not the
 // name — a project that gains a .sln flips to this image and must still write the
 // ~/.claude volume the node-only image created as uid 1000.
-const dotnetDockerfile = (browser: boolean): string => `FROM mcr.microsoft.com/dotnet/sdk:10.0
+const dotnetContainerfile = (browser: boolean): string => `FROM mcr.microsoft.com/dotnet/sdk:10.0
 COPY --from=node:22-slim /usr/local/bin/node /usr/local/bin/node
 COPY --from=node:22-slim /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \\
@@ -353,13 +451,13 @@ function imageFor(projectPath: string): {
 }
 
 /**
- * A tag derived from the Dockerfile that produces the image.
+ * A tag derived from the recipe that produces the image.
  *
- * `ensureSandboxImage` builds only when `docker image inspect` misses, which is
+ * `ensureSandboxImage` builds only when `wslc image inspect` misses, which is
  * the right rule — a rebuild on every session start would be unusable. It was
  * paired with a FIXED tag, so once an image existed under that name it was never
- * built again no matter how the recipe changed. Editing the Dockerfile did
- * nothing on any machine that had already run one session.
+ * built again no matter how the recipe changed. Editing the recipe did nothing
+ * on any machine that had already run one session.
  *
  * That is not hypothetical. The mutation suite runs `dotnet stryker`, the .NET
  * image gained a `dotnet tool install --global dotnet-stryker` line to support
@@ -368,13 +466,13 @@ function imageFor(projectPath: string): {
  * file was not found", which reads as the developer's project being broken.
  *
  * Content-addressed, so a changed recipe is a different tag, misses the inspect,
- * and builds — reusing Docker's layer cache for everything that did not change.
- * The old image is left behind rather than removed: it may still back a running
- * container, and reclaiming disk is `docker image prune`'s job, not a session
- * start's.
+ * and builds, reusing the runtime's layer cache for everything that did not
+ * change. The old image is left behind rather than removed: it may still back a
+ * running container, and reclaiming disk is `wslc image prune`'s job, not a
+ * session start's.
  */
 export function recipeTag(dotnet: boolean, browser: boolean): string {
-  const recipe = dotnet ? dotnetDockerfile(browser) : dockerfile(browser)
+  const recipe = dotnet ? dotnetContainerfile(browser) : containerfile(browser)
   return createHash('sha256').update(recipe).digest('hex').slice(0, 12)
 }
 
@@ -527,11 +625,30 @@ function pluginsPath(): string {
 }
 
 /**
+ * The developer's own skills, mounted read-only for the same reason the plugins
+ * beside them are.
+ *
+ * Added when custom skills arrived: a skill imported from a Git host lands in
+ * ~/.claude/skills, which is a DIFFERENT directory from ~/.claude/plugins, so the
+ * plugins mount did not carry it. Without this a custom skill worked in a native
+ * session and answered "Unknown command" in a containerised one, which is the
+ * worst shape a bug can take — it works where the developer tests it and fails
+ * where the section actually runs.
+ *
+ * READ-ONLY, and copied into the container's own ~/.claude by the entrypoint, for
+ * the reason pluginsPath gives: the CLI writes into that tree, and a read-only
+ * mount at the destination fails the first time it tries.
+ */
+function skillsPath(): string {
+  return join(homedir(), '.claude', 'skills')
+}
+
+/**
  * In-flight image builds, keyed by the content-addressed tag (recipeTag), so
- * two sessions that both need an image nobody has built yet share ONE `docker
+ * two sessions that both need an image nobody has built yet share ONE `wslc
  * build` instead of racing two. session-manager.ts already solved the same
- * shape of problem for probeAvailableModels (see its `probingModels` field) —
- * this is that pattern again, at module scope because docker-sandbox.ts has no
+ * shape of problem for probeAvailableModels (see its `probingModels` field);
+ * this is that pattern again, at module scope because this module has no
  * instance to hang a field off. Cleared once the build settles, success or
  * failure alike: a failed build must not poison every later retry with a
  * promise that can only ever reject again.
@@ -539,9 +656,41 @@ function pluginsPath(): string {
 const buildingImages = new Map<string, Promise<void>>()
 
 /**
- * Fail-closed readiness check before a bypass session starts: Docker daemon up,
- * host login present, image built (first build downloads ~200 MB, minutes).
- * Throws with a message the session-start error path shows verbatim.
+ * An empty directory to hand `wslc build` as its context.
+ *
+ * `wslc build` requires a context PATH even when the recipe needs none, so one
+ * has to exist; the recipe itself goes in on stdin via `-f -` (verified against
+ * `wslc build --help` on 2.9.4.0), exactly as `docker build -` used to take it.
+ * That is why this directory stays EMPTY: nothing is packaged from it, and no
+ * file in it can go stale or be picked up by accident.
+ *
+ * Writing the recipe to a `Containerfile` here was the first attempt, and it
+ * carried a bug worth remembering: `wslc build --help` documents `-f` as "Path
+ * to the Dockerfile" and never states the default file name, so a directory
+ * holding only `Containerfile` may well not be found at all. Passing the recipe
+ * on stdin removes the question rather than betting on the answer.
+ *
+ * STABLE, and reused rather than created fresh and deleted, because
+ * microsoft/WSL #41287 reports `wslc build` reusing a stale context after a
+ * Windows directory is deleted and recreated. A path that is only ever created
+ * once never enters that state.
+ */
+function buildContextDir(): string {
+  const dir = join(tmpdir(), 'switchboard-build')
+  mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+/**
+ * Fail-closed readiness check before a containerised session starts: wslc
+ * present, host login present, image built (first build downloads ~200 MB,
+ * minutes). Throws with a message the session-start error path shows verbatim.
+ *
+ * There is no daemon to check. `docker version` used to prove Docker Desktop was
+ * actually up, which was the common failure; wslc is daemonless, so the only
+ * thing that can be missing is the CLI itself, and that means WSL is absent or
+ * too old. The error therefore names the update command rather than an
+ * application to start.
  */
 export async function ensureSandboxImage(projectPath: string): Promise<void> {
   const { image, dotnet, browser } = imageFor(projectPath)
@@ -551,32 +700,36 @@ export async function ensureSandboxImage(projectPath: string): Promise<void> {
     )
   }
   try {
-    await execFileAsync('docker', ['version', '--format', '{{.Server.Version}}'], {
-      windowsHide: true,
-      timeout: 15_000,
-    })
+    await execFileAsync(WSLC, ['version'], { windowsHide: true, timeout: 15_000 })
   } catch {
     throw new Error(
-      'Docker Desktop is not running. Bypass sessions run inside a container — start Docker Desktop, then retry.',
+      // Two causes, one message, because the developer cannot tell them apart and
+      // the second one bit during this feature's own bring-up: wslc.exe lands in
+      // C:\Program Files\WSL and the installer adds that to the MACHINE Path, which
+      // a process started before the install does not see. Saying only "run
+      // wsl --update" sends somebody who has already done it round the same loop.
+      'WSL container (wslc) was not found. Containerised sessions run on it, and it needs WSL 2.9.3 or newer: run `wsl --update --pre-release` in PowerShell. If you have already done that, restart Switchboard: wslc is added to PATH by the installer and this process cannot see it until it restarts.',
     )
   }
   try {
-    await execFileAsync('docker', ['image', 'inspect', image], { windowsHide: true, timeout: 15_000 })
+    await execFileAsync(WSLC, ['image', 'inspect', image], { windowsHide: true, timeout: 15_000 })
     return
   } catch {
-    // Image missing — build it (cached after the first time).
+    // Image missing, so build it (cached after the first time).
   }
   // A second session that needs this SAME never-built image joins the build
   // already in flight rather than starting its own: without this, two sessions
-  // on their very first run each spawned `docker build`, doubling the wait and
-  // racing two builds against one tag.
+  // on their very first run each spawned a build, doubling the wait and racing
+  // two builds against one tag.
   const existing = buildingImages.get(image)
   if (existing) {
     await existing
     return
   }
   const build = new Promise<void>((resolve, reject) => {
-    const proc = spawn('docker', ['build', '-t', image, '-'], {
+    // `-f -` reads the recipe from stdin; the trailing path is the mandatory
+    // context, which is empty on purpose (see buildContextDir).
+    const proc = spawn(WSLC, ['build', '-t', image, '-f', '-', buildContextDir()], {
       windowsHide: true,
       stdio: ['pipe', 'ignore', 'pipe'],
       // The .NET SDK layer is ~1 GB to pull; 10 minutes is not enough on a slow
@@ -592,37 +745,84 @@ export async function ensureSandboxImage(projectPath: string): Promise<void> {
       if (code === 0) resolve()
       else reject(new Error(`Sandbox image build failed: ${stderr.slice(-400)}`))
     })
-    proc.stdin.end(dotnet ? dotnetDockerfile(browser) : dockerfile(browser))
+    proc.stdin.end(dotnet ? dotnetContainerfile(browser) : containerfile(browser))
   })
   buildingImages.set(image, build)
   try {
     await build
   } finally {
     // Only the caller that created the entry clears it, once it settles either
-    // way — a later caller sharing `build` via the `existing` branch above never
+    // way. A later caller sharing `build` via the `existing` branch above never
     // reaches this finally, so there is no race over who deletes it.
     buildingImages.delete(image)
   }
 }
 
 /**
+ * Create the named volumes a containerised session is about to mount.
+ *
+ * Docker created a named volume implicitly on first `-v name:/path`. Whether
+ * wslc does is not documented, and a session that finds out the hard way fails
+ * at spawn with a mount error, so they are created up front instead. Idempotent
+ * by swallowing every failure: the second session to want the shared NuGet cache
+ * gets "already exists", which is the desired state and not a problem.
+ *
+ * No `--driver`. wslc's default is `guest`, which its own source describes as a
+ * passthrough to Docker's built-in `local` driver, so it is the closest thing to
+ * the volume Docker used to create implicitly here and needs no size decided for
+ * it. The alternative, `vhd`, backs the volume with a fixed virtual disk, which
+ * is a choice this app has no basis for making on the developer's behalf.
+ *
+ * ponytail: delete this entirely if wslc turns out to auto-create on first mount
+ * like Docker did. It is one round trip per volume per session start, which is
+ * small but is not nothing.
+ */
+export async function ensureSandboxVolumes(names: readonly string[]): Promise<void> {
+  await Promise.all(
+    names.map((name) =>
+      execFileAsync(WSLC, ['volume', 'create', name], {
+        windowsHide: true,
+        timeout: 30_000,
+      }).catch(() => undefined),
+    ),
+  )
+}
+
+/**
  * Remove containers a previous run left behind. The in-process teardown can
  * never run when the app is killed hard (crash, Task Manager, power loss), so
- * without this sweep an orphaned bypass container keeps running — with the
- * project bind-mounted read-write — and nothing would ever reap it.
- * Fire-and-forget: silent when Docker is absent, and never blocks startup.
+ * without this sweep an orphaned container keeps running, with the project
+ * bind-mounted read-write, and nothing would ever reap it.
+ *
+ * Takes the session ids rather than discovering containers itself. It used to
+ * ask the runtime, with `docker ps -aq --filter name=^swb-`, and that is no
+ * longer the cheapest correct thing: server-side name filtering on `wslc
+ * container list` is unverified, and the alternative of listing everything and
+ * parsing names out of CLI output would make a security sweep depend on an
+ * output format nobody has promised to keep. The app already knows which
+ * sessions it left open, because that is what the sessions table says at launch
+ * before reconciliation clears it, so the caller passes them in.
+ *
+ * The cost is honest and narrow: a container whose session row was deleted
+ * outright is no longer reaped here, and waits for the developer or for
+ * `wslc container prune`. Every container this app has ever started is named
+ * from a session id (see NAME_PREFIX), so that is the only gap.
+ *
+ * Fire-and-forget: silent when wslc is absent, and never blocks startup.
  */
-export function sweepOrphanedContainers(): void {
-  execFile(
-    'docker',
-    ['ps', '-aq', '--filter', `name=^${NAME_PREFIX}`],
-    { windowsHide: true },
-    (error, stdout) => {
-      if (error) return
-      const ids = stdout.split('\n').map((line) => line.trim()).filter(Boolean)
-      if (ids.length > 0) execFile('docker', ['rm', '-f', ...ids], { windowsHide: true }, () => {})
-    },
-  )
+export function sweepOrphanedContainers(sessionIds: readonly string[]): void {
+  // ONE call per container, not one call listing them all. `wslc container
+  // remove --help` takes a single <container-id>, where `docker rm -f` took any
+  // number, so the batched form would have failed on the second argument and
+  // reaped nothing. Verified against 2.9.4.0.
+  for (const id of sessionIds) {
+    execFile(
+      WSLC,
+      ['container', 'remove', '--force', `${NAME_PREFIX}${safeName(id)}`],
+      { windowsHide: true },
+      () => {},
+    )
+  }
 }
 
 /**
@@ -640,8 +840,8 @@ export function sweepOrphanedContainers(): void {
  */
 export function removeNodeModulesVolume(sessionId: string): void {
   execFile(
-    'docker',
-    ['volume', 'rm', `${NODE_MODULES_VOLUME_PREFIX}${safeName(sessionId)}`],
+    WSLC,
+    ['volume', 'remove', '--force', `${NODE_MODULES_VOLUME_PREFIX}${safeName(sessionId)}`],
     { windowsHide: true },
     () => {},
   )
@@ -662,8 +862,8 @@ const STALE_VOLUME_AGE_MS = 7 * 24 * 60 * 60 * 1000
  * — or gone from the sessions table entirely — that nothing can still want
  * them.
  *
- * Age comes from the sessions TABLE (via `sessionById`), not from Docker's own
- * volume metadata: a volume carries no timestamp Docker itself keeps current
+ * Age comes from the sessions TABLE (via `sessionById`), not from the runtime's
+ * own volume metadata: a volume carries no timestamp the runtime keeps current
  * with "when did the session that owns this end", so the app's own record is
  * the only source that can answer that. Three answers `sessionById` can give,
  * each handled differently:
@@ -675,12 +875,13 @@ const STALE_VOLUME_AGE_MS = 7 * 24 * 60 * 60 * 1000
  *     this sweep exists to fix.
  *   - a row with `endedAt` older than STALE_VOLUME_AGE_MS — removed.
  *
- * Listed with a plain `docker volume ls -q` rather than a `--filter name=`
- * regex (the way sweepOrphanedContainers filters containers): the shared
- * caches (NUGET_VOLUME, NPM_CACHE_VOLUME, BROWSER_VOLUME) are NOT session-keyed
- * and must never be swept, and matching them out by two exact prefixes
- * client-side is simpler to get right than trusting a server-side filter to
- * anchor the same way for volumes as it does for containers.
+ * Listed with a plain `wslc volume list --quiet` rather than a server-side
+ * `--filter`: the shared caches (NUGET_VOLUME, NPM_CACHE_VOLUME, BROWSER_VOLUME)
+ * are NOT session-keyed and must never be swept, and matching them out by two
+ * exact prefixes client-side is simpler to get right than trusting a filter to
+ * anchor the way this needs. `--quiet` is one of the flags wslc's own tests
+ * exercise on `volume list`, so unlike the container sweep beside it this one
+ * keeps asking the runtime.
  *
  * Fire-and-forget and silent on failure, the same as sweepOrphanedContainers:
  * a best-effort startup tidy, never something a session start should wait on.
@@ -688,7 +889,7 @@ const STALE_VOLUME_AGE_MS = 7 * 24 * 60 * 60 * 1000
 export function sweepStaleVolumes(
   sessionById: (sessionId: string) => { endedAt: string | null } | undefined,
 ): void {
-  execFile('docker', ['volume', 'ls', '-q'], { windowsHide: true }, (error, stdout) => {
+  execFile(WSLC, ['volume', 'list', '--quiet'], { windowsHide: true }, (error, stdout) => {
     if (error) return
     const stale: string[] = []
     for (const name of stdout.split('\n').map((line) => line.trim()).filter(Boolean)) {
@@ -706,13 +907,49 @@ export function sweepStaleVolumes(
       if (session.endedAt === null) continue // still live — never touched
       if (Date.now() - Date.parse(session.endedAt) > STALE_VOLUME_AGE_MS) stale.push(name)
     }
-    if (stale.length > 0) execFile('docker', ['volume', 'rm', ...stale], { windowsHide: true }, () => {})
+    // One call each, for the same reason sweepOrphanedContainers loops: `wslc
+    // volume remove` takes a single <volume-name>. `--force` is its "do not error
+    // if the volume does not exist" flag, which is what a best-effort sweep wants
+    // when a sibling process may have removed the same volume already.
+    for (const name of stale) {
+      execFile(WSLC, ['volume', 'remove', '--force', name], { windowsHide: true }, () => {})
+    }
   })
 }
 
 export interface Mount {
   host: string
   container: string
+}
+
+/**
+ * Every named volume a containerised session will mount, for the pre-flight that
+ * creates them (ensureSandboxVolumes).
+ *
+ * Exists because wslc is not documented to auto-create a named volume on first
+ * mount the way Docker did, so something has to create them before the run, and
+ * that something needs the same list `sandboxSpawn` is about to use. Derived from
+ * the same `imageFor` detection rather than restated, so a project that gains a
+ * browser gains its cache volume in both places at once or in neither.
+ */
+export function sandboxVolumeNames(config: {
+  projectPath: string
+  sessionId: string
+  resumeFromSessionId: string | undefined
+  nodeModulesVolumeKey?: string
+}): string[] {
+  const { dotnet, browser, node } = imageFor(config.projectPath)
+  return [
+    homeVolumeFor(config.sessionId, config.resumeFromSessionId),
+    ...(dotnet ? [NUGET_VOLUME] : []),
+    ...(node
+      ? [
+          `${NODE_MODULES_VOLUME_PREFIX}${safeName(config.nodeModulesVolumeKey ?? config.sessionId)}`,
+          NPM_CACHE_VOLUME,
+        ]
+      : []),
+    ...(browser ? [BROWSER_VOLUME] : []),
+  ]
 }
 
 export interface SandboxPlan {
@@ -725,8 +962,8 @@ export interface SandboxPlan {
   /** Drop-in for the SDK's spawnClaudeCodeProcess option. */
   spawn: (options: SdkSpawnOptions) => SpawnedProcess
   /**
-   * The docker CLIENT's own stderr tail from the most recent spawn (empty
-   * string until spawn() has actually run). A hard `docker run` failure — a
+   * The wslc CLIENT's own stderr tail from the most recent spawn (empty
+   * string until spawn() has actually run). A hard `wslc run` failure, a
    * bad mount, a name conflict, an invalid --memory value — dies before
    * anything inside the container ever starts, so the SDK never sees a
    * message shaped for explainExit to read; this is the only trace left of
@@ -822,7 +1059,7 @@ export function sandboxSpawn(config: {
   const homeVolume = homeVolumeFor(config.sessionId, config.resumeFromSessionId)
   const { image, dotnet, browser, node } = imageFor(config.projectPath)
   // Declared here, not inside `spawn`, so it survives past one call and
-  // `lastStderr()` can still answer once the docker process has already
+  // `lastStderr()` can still answer once the wslc process has already
   // exited — session.ts's run() reads it from its catch block, after the
   // container is gone.
   let stderrTail = ''
@@ -833,58 +1070,88 @@ export function sandboxSpawn(config: {
     spawn: (options) => {
       const args = [
         'run',
+        // Long flag names wherever the short one was not seen in wslc's own
+        // tutorial or its end-to-end tests. `-i`, `--rm` and `--name` are in the
+        // tutorial verbatim; `--volume` and `--workdir` are the spellings its
+        // tests exercise, and `-v`/`-w` may well work too, but there is nothing
+        // to gain from finding out inside a session start.
         '-i',
         '--rm',
-        '--init',
+        // NO `--init`. Docker's injected an init as PID 1 to reap the zombies a
+        // forking child process leaves behind, and the CLI in here forks plenty.
+        // wslc does not document the flag and it appears nowhere in its own tests,
+        // and an unknown flag fails the whole `run`, which would break every
+        // containerised session rather than degrade one. The cost is that zombies
+        // accumulate for the life of one container instead of being reaped;
+        // containers are --rm and per-session, so that life is bounded.
+        //
+        // ponytail: add `--init` back the moment `wslc run --help` shows it.
         '--name',
         containerName,
-        '-v',
-        `${config.projectPath}:/workspace`,
-        '-v',
+        '--volume',
+        `${mountPath(config.projectPath)}:/workspace`,
+        '--volume',
         `${homeVolume}:/home/node/.claude`,
-        '-v',
-        `${credsPath()}:/creds/.credentials.json:ro`,
+        '--volume',
+        `${mountPath(credsPath())}:/creds/.credentials.json:ro`,
         // The developer's own plugins and skills, read-only. Only when the
-        // directory exists: Docker CREATES a missing bind source as an empty
-        // directory owned by root, which would leave a stray ~/.claude/plugins
-        // on the host of a developer who has none.
-        ...(existsSync(pluginsPath()) ? ['-v', `${pluginsPath()}:/creds/plugins:ro`] : []),
+        // directory exists: a runtime that CREATES a missing bind source as an
+        // empty directory owned by root would leave a stray ~/.claude/plugins on
+        // the host of a developer who has none. Docker did that; whether wslc
+        // does is untested, and the guard costs one existsSync either way.
+        ...(existsSync(pluginsPath()) ? ['--volume', `${mountPath(pluginsPath())}:/creds/plugins:ro`] : []),
+        // The same for skills, which live in their own directory next door. Guarded
+        // identically: a developer with no skills installed still boots.
+        ...(existsSync(skillsPath()) ? ['--volume', `${mountPath(skillsPath())}:/creds/skills:ro`] : []),
         // Shared across projects on purpose: NuGet packages are immutable per
         // version, so one cache serves every .NET sandbox.
-        ...(dotnet ? ['-v', `${NUGET_VOLUME}:/home/node/.nuget/packages`] : []),
+        ...(dotnet ? ['--volume', `${NUGET_VOLUME}:/home/node/.nuget/packages`] : []),
         // Mounted OVER the project's own node_modules (see
         // NODE_MODULES_VOLUME_PREFIX): the container must never touch the host's.
         ...(node
           ? [
-              '-v',
+              '--volume',
               // Defaults to the session id — see nodeModulesVolumeKey's own
               // comment above for the one caller that passes something else,
               // and why that is safe only there.
               `${NODE_MODULES_VOLUME_PREFIX}${safeName(config.nodeModulesVolumeKey ?? config.sessionId)}:/workspace/node_modules`,
-              '-v',
+              '--volume',
               `${NPM_CACHE_VOLUME}:/home/node/.npm`,
             ]
           : []),
         // Chromium is immutable per version, so one volume serves every project, the
         // same reasoning as the NuGet cache above. Not mounted at all for a project
         // with no browser tests, which is most of them.
-        ...(browser ? ['-v', `${BROWSER_VOLUME}:${BROWSER_CACHE_PATH}`] : []),
-        ...refs.flatMap((r) => ['-v', `${r.host}:${r.container}:ro`]),
-        '-w',
+        ...(browser ? ['--volume', `${BROWSER_VOLUME}:${BROWSER_CACHE_PATH}`] : []),
+        ...refs.flatMap((r) => ['--volume', `${mountPath(r.host)}:${r.container}:ro`]),
+        '--workdir',
         '/workspace',
-        // The image already runs as the unprivileged `node` user, so dropping
-        // every capability and barring privilege escalation costs nothing
-        // functionally while shrinking what a container-escape bug could reach.
-        // Deliberately NOT --network none: the CLI needs outbound HTTPS to reach
-        // the Anthropic API, which is the whole point of the session.
-        '--cap-drop',
-        'ALL',
-        '--security-opt',
-        'no-new-privileges',
-        // A runaway build inside the sandbox should not exhaust the host's
-        // process table. Generous enough for a .NET restore plus a test run.
-        '--pids-limit',
-        '1024',
+        // A runaway build inside the sandbox should not exhaust the process table.
+        // This is `--pids-limit` recovered by another route: wslc has no such
+        // flag, but `wslc run --ulimit` is real (verified against 2.9.4.0) and
+        // RLIMIT_NPROC bounds a fork bomb by the uid that runs it, which in this
+        // image is the unprivileged `node` user and nothing else. Weaker than the
+        // cgroup pids controller Docker used, because it counts per UID rather
+        // than per container, and far better than the nothing it replaces.
+        '--ulimit',
+        'nproc=1024:1024',
+        // NO --cap-drop and no --security-opt, and their absence is the real
+        // regression in moving off Docker: `wslc run --help` on 2.9.4.0 offers
+        // neither (nor --privileged). Where this used to drop every capability and
+        // bar privilege escalation, it now relies on two things it still has: the
+        // image runs as the unprivileged `node` user, and wslc puts the container
+        // in its own utility VM rather than the single shared VM Docker Desktop
+        // used. The VM boundary is the stronger of those two mechanisms and it is
+        // not a replacement for the capability set, so this is a trade and not a
+        // wash. See the file header.
+        //
+        // ponytail: restore both the moment wslc implements them. Nothing else in
+        // this argv depends on their absence.
+        //
+        // Deliberately NOT --network none, unchanged: the CLI needs outbound
+        // HTTPS to reach the Anthropic API, which is the whole point of the
+        // session.
+        //
         // Half the host's cores, because a container without one sees ALL of
         // them and every test runner sizes itself from that count. Playwright
         // and vitest both default their worker count to the reported CPUs, so
@@ -893,11 +1160,13 @@ export function sandboxSpawn(config: {
         // cores is the honest description of what is actually happening.
         '--cpus',
         cpuShare(),
-        // Chromium writes shared memory here, and Docker's 64 MB default is a
-        // well-known cause of renderer crashes under load. Only for a project
-        // that actually drives a browser; it is carved out of the memory cap
-        // above rather than added to it, so it is not free.
-        ...(browser ? ['--shm-size', '512m'] : []),
+        // Chromium writes shared memory here, and a small /dev/shm is a
+        // well-known cause of renderer crashes under load: Docker defaulted it to
+        // 64 MB, and wslc documents no default at all, which is a reason to keep
+        // stating it rather than to stop. Only for a project that actually drives
+        // a browser; it is carved out of the memory cap above rather than added to
+        // it, so it is not free.
+        ...(browser ? ['--shm-size', normalizeSize('512m')] : []),
         // The same argument for memory: one session's appetite must not take the
         // shared virtual machine down with it (see sandboxMemoryArg). '0' removes
         // the cap, which is what a developer setting it to 0 is asking for.
@@ -919,7 +1188,7 @@ export function sandboxSpawn(config: {
         'claude',
         ...options.args,
       ]
-      const child: ChildProcess = spawn('docker', args, {
+      const child: ChildProcess = spawn(WSLC, args, {
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],
         signal: options.signal,
@@ -927,20 +1196,22 @@ export function sandboxSpawn(config: {
       // The SDK drains stderr only on its own spawn path (SpawnedProcess doesn't
       // even declare it), so a custom spawn MUST drain it here: an unread pipe
       // fills at ~64 KB and blocks the container mid-session. The tail is kept so
-      // a failed `docker run` (mount denied, name conflict) isn't silent — it used
-      // to only ever reach console.error below; now lastStderr() on the SandboxPlan
-      // (declared above, outside this closure) lets session.ts surface it too.
+      // a failed `wslc run` (mount denied, name conflict, and now also a volume
+      // string wslc's own parser reads differently from Docker's) isn't silent. It
+      // used to only ever reach console.error below; lastStderr() on the
+      // SandboxPlan (declared above, outside this closure) lets session.ts
+      // surface it too.
       child.stderr?.setEncoding('utf8')
       child.stderr?.on('data', (chunk: string) => {
         stderrTail = (stderrTail + chunk).slice(-2000)
       })
       child.on('exit', (code) => {
-        if (code) console.error(`[sandbox ${containerName}] docker exited ${code}: ${stderrTail.trim()}`)
+        if (code) console.error(`[sandbox ${containerName}] wslc exited ${code}: ${stderrTail.trim()}`)
       })
-      // Killing the docker CLIENT does not kill the container — do both, on
-      // both kill paths (explicit kill() and the SDK's abort signal).
+      // Killing the wslc CLIENT does not kill the container, so do both, on both
+      // kill paths (explicit kill() and the SDK's abort signal).
       const killContainer = (): void => {
-        execFile('docker', ['kill', containerName], { windowsHide: true }, () => {})
+        execFile(WSLC, ['kill', containerName], { windowsHide: true }, () => {})
       }
       options.signal?.addEventListener('abort', killContainer, { once: true })
       const clientKill = child.kill.bind(child)

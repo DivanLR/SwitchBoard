@@ -3,26 +3,99 @@
 // (Models / This project / Terminals / General) with a Plan/Build footer,
 // card + toggle + segmented controls, and a "Changes apply immediately · Done"
 // footer. State and transport live in the settings store.
-import { useTemplateRef, computed, onMounted, ref, watch } from 'vue'
+import { useTemplateRef, computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useModal } from '@renderer/composables/useModal'
 import { MATCHER_KIND_LABEL, useAllowedRules } from '@renderer/composables/useAllowedRules'
-import type { ModelChoice, SessionMode, Settings } from '@shared/domain'
+import type { CustomSkill, ModelChoice, SessionMode, Settings } from '@shared/domain'
 import { modelLabel, modelPrice, SESSION_MODES } from '@shared/domain'
+import { readSkillSource, skillSourceLabel } from '@shared/skill-source'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { useUpdatesStore } from '@renderer/stores/updates'
+import { useSkillsStore } from '@renderer/stores/skills'
 import Icon from '@renderer/components/Icon.vue'
 
 // The prop deliberately omits 'mcp' even though the Tab union below includes it:
 // the MCP tab is reachable by clicking, but no caller opens the panel straight
 // onto it, so accepting the value would be a promise nothing keeps.
-const props = defineProps<{ initialTab?: 'models' | 'proj' | 'allowed' | 'term' | 'gen' }>()
+const props = defineProps<{ initialTab?: 'models' | 'proj' | 'allowed' | 'skills' | 'term' | 'gen' }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 // Escape closes, Tab stays inside, focus returns to the opener on close.
 const dialogEl = useTemplateRef<HTMLElement>('dialog')
 useModal(dialogEl, () => emit('close'))
 const store = useSettingsStore()
+const skills = useSkillsStore()
+
+// The URL being typed into the Skills tab. Local to the panel: an unsubmitted
+// input is not application state, and keeping it in the store would make it
+// survive closing the panel, which is not what a half-typed URL should do.
+const skillUrl = ref('')
+
+/**
+ * What the typed URL actually names, read by the SAME parser the importer uses
+ * (`@shared/skill-source`).
+ *
+ * The field used to be opaque: paste anything, press Import, and wait for a
+ * network round trip to find out whether it was even a repository. Now the URL
+ * reports itself — owner, repository, branch, folder — or says exactly why it
+ * will be refused, before anything is requested. Null while the field is empty,
+ * because a blank field is not an error.
+ */
+const skillSource = computed(() => (skillUrl.value.trim() === '' ? null : readSkillSource(skillUrl.value)))
+
+/** The parts of a valid source, as a row of readable facts. */
+const skillSourceParts = computed(() => {
+  const parsed = skillSource.value
+  if (!parsed?.ok) return null
+  const { owner, repo, ref: gitRef, path } = parsed.source
+  return [
+    { label: 'repository', value: `${owner}/${repo}` },
+    // A null ref is not "unknown" — it means the repository's own default branch,
+    // which is what the importer will resolve. Saying "default branch" is the
+    // honest version of that; showing "main" would be a guess.
+    { label: 'branch', value: gitRef ?? 'default branch' },
+    { label: 'folder', value: path === '' ? 'whole repository' : path },
+  ]
+})
+
+/** Import, and clear the field only when something actually landed, so a mistyped
+ *  URL stays put to be corrected rather than vanishing with the error. */
+async function importSkills(): Promise<void> {
+  const url = skillUrl.value.trim()
+  if (!url || skills.importing || skillSource.value?.ok !== true) return
+  if (await skills.import(url)) skillUrl.value = ''
+}
+
+/**
+ * The imported skills, grouped by the repository each came from.
+ *
+ * Twenty skills from one repository used to be twenty rows each repeating their
+ * own folder and file count with nothing tying them together, so "what did I
+ * import from where" could only be answered by reading all twenty. The Skills
+ * section next door already groups by source; this is the same grouping in the
+ * place where they are managed.
+ */
+const skillsBySource = computed<{ url: string; label: string; items: CustomSkill[] }[]>(() => {
+  const groups = new Map<string, CustomSkill[]>()
+  for (const skill of skills.items) {
+    const list = groups.get(skill.sourceUrl)
+    if (list) list.push(skill)
+    else groups.set(skill.sourceUrl, [skill])
+  }
+  return [...groups].map(([url, items]) => {
+    const parsed = readSkillSource(url)
+    return { url, label: parsed.ok ? skillSourceLabel(parsed.source) : url, items }
+  })
+})
+
+/** Switch a whole repository's skills on or off. With a repository of a dozen,
+ *  the alternative is a dozen clicks to answer one question about one source. */
+async function setGroupEnabled(items: CustomSkill[], on: boolean): Promise<void> {
+  for (const skill of items) {
+    if (skill.enabled !== on) await skills.setEnabled(skill.name, on)
+  }
+}
 const projects = useProjectsStore()
 const updates = useUpdatesStore()
 const settings = computed(() => store.settings)
@@ -30,7 +103,7 @@ const settings = computed(() => store.settings)
 // No 'rules' tab. The risk and noise engines still run on every tool call and
 // every streamed event; what is gone is the editor for overriding them, which
 // nobody used and which cost a whole tab in a rail of seven.
-type Tab = 'models' | 'proj' | 'mcp' | 'allowed' | 'term' | 'gen'
+type Tab = 'models' | 'proj' | 'mcp' | 'allowed' | 'skills' | 'term' | 'gen'
 const tab = ref<Tab>(props.initialTab ?? 'models')
 // One family, one weight. These were drawn from four unrelated Unicode blocks —
 // a four-pointed star, a filled square, a database cylinder, a tick, a chevron
@@ -42,6 +115,7 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'proj', label: 'This project', icon: 'folder' },
   { id: 'mcp', label: 'MCP', icon: 'database' },
   { id: 'allowed', label: 'Allowed list', icon: 'square-check' },
+  { id: 'skills', label: 'Skills', icon: 'spark' },
   { id: 'term', label: 'Terminals', icon: 'terminal' },
   { id: 'gen', label: 'General', icon: 'settings' },
 ]
@@ -49,6 +123,71 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 // "This project": which project the tab configures (defaults to the selected one).
 const projId = ref<string | null>(null)
 const projDd = ref(false)
+/**
+ * The project picker's search, added 2026-08-21 against the pinned searchable
+ * dropdown reference. It earns its place on the numbers: this dropdown lists
+ * every registered project, and a developer with a dozen of them was scanning a
+ * list rather than picking from one.
+ *
+ * DOM focus stays on the input while `projActive` walks the list, which is the
+ * WAI combobox active-descendant pattern the reference calls for: moving real
+ * focus onto each option would take it off the field being typed into.
+ */
+const projFilter = ref('')
+const projActive = ref(0)
+const projFilterEl = useTemplateRef<HTMLInputElement>('projFilterEl')
+
+const projMatches = computed(() => {
+  const q = projFilter.value.trim().toLowerCase()
+  const all = projects.items.filter((p) => !p.reserved)
+  return q === '' ? all : all.filter((p) => p.name.toLowerCase().includes(q))
+})
+
+function openProjDd(): void {
+  projDd.value = !projDd.value
+  if (!projDd.value) return
+  projFilter.value = ''
+  projActive.value = Math.max(
+    0,
+    projMatches.value.findIndex((p) => p.id === proj.value?.id),
+  )
+  void nextTick(() => projFilterEl.value?.focus())
+}
+
+function chooseProj(id: string): void {
+  projId.value = id
+  projDd.value = false
+}
+
+/** Arrows move the active row, Enter takes it, Escape closes. Clamped rather
+ *  than wrapping: a list that jumps from the end back to the top loses the
+ *  developer's place, and this one is short. */
+function onProjKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    projDd.value = false
+    return
+  }
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault()
+    const step = event.key === 'ArrowDown' ? 1 : -1
+    projActive.value = Math.min(
+      Math.max(projActive.value + step, 0),
+      Math.max(projMatches.value.length - 1, 0),
+    )
+    return
+  }
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    const pick = projMatches.value[projActive.value]
+    if (pick) chooseProj(pick.id)
+  }
+}
+
+// Typing narrows the list, so an active index pointing past the end would leave
+// Enter doing nothing. Reset to the top on every change of the match set.
+watch(projMatches, () => {
+  projActive.value = 0
+})
 const proj = computed(
   () => projects.items.find((p) => p.id === projId.value) ?? projects.items[0] ?? null,
 )
@@ -64,6 +203,7 @@ onMounted(() => {
   void store.load()
   projId.value = projects.selectedProjectId
   void store.loadAvailableModels()
+  void skills.load()
 })
 
 function save(patch: Partial<Settings>): void {
@@ -85,38 +225,6 @@ function saveSandboxMemory(): void {
   const value = sandboxMemVal.value.trim()
   if (!value || value === settings.value?.sandboxMemory) return
   save({ sandboxMemory: value })
-}
-
-// Per-project model overrides ('global' follows the Models tab). Data-driven so
-// the intelligent + worker pickers share one loop (mirrors MODEL_SECTIONS above).
-type ProjModelField = 'projectModels' | 'projectWorkerModels'
-const PROJ_MODEL_SECTIONS = [
-  {
-    field: 'projectModels',
-    globalKey: 'intelligentModel',
-    testid: 'proj-model',
-    label: 'INTELLIGENT MODEL',
-    desc: 'Overrides the global default for this project only — plans, answers, orchestrates broad work, and advises the worker.',
-  },
-  {
-    field: 'projectWorkerModels',
-    globalKey: 'workerModel',
-    testid: 'proj-worker',
-    label: 'WORKER MODEL',
-    desc: 'Overrides the global worker for this project only — the cheaper model that runs Advisor-mode turns and Orchestrator worker subagents here.',
-  },
-] as const
-
-/** This project's override for a section, or 'global' when unset. */
-function projModelFor(field: ProjModelField): string {
-  const id = proj.value?.id
-  return (id && settings.value?.[field]?.[id]) || 'global'
-}
-
-function saveProjModelFor(field: ProjModelField, modelId: string): void {
-  if (!proj.value || !settings.value) return
-  const map = { ...settings.value[field], [proj.value.id]: modelId }
-  save(field === 'projectModels' ? { projectModels: map } : { projectWorkerModels: map })
 }
 
 // Hoisted like TABS / MODE_CHOICES / MODEL_SECTIONS: an array literal written
@@ -394,25 +502,62 @@ const updateLine = computed(() => {
               <div class="proj-card">
                 <div class="group-label mono">PROJECT</div>
                 <div class="dd-wrap">
-                  <button class="dd" data-testid="proj-settings-picker" @click="projDd = !projDd">
+                  <button
+                    class="dd"
+                    :class="{ open: projDd }"
+                    data-testid="proj-settings-picker"
+                    :aria-expanded="projDd"
+                    aria-haspopup="listbox"
+                    @click="openProjDd"
+                  >
                     <span class="dd-dot"></span>
                     <span class="dd-name mono">{{ proj.name }}</span>
-                    <Icon :name="projDd ? 'chevron-up' : 'chevron-down'" class="dd-arrow" :size="11" />
+                    <Icon name="chevron-down" class="dd-arrow" :class="{ open: projDd }" :size="11" />
                   </button>
                   <div v-if="projDd" class="dd-list">
-                    <button
-                      v-for="p in projects.items"
-                      :key="p.id"
-                      class="dd-item"
-                      :class="{ sel: p.id === proj.id }"
-                      :data-testid="`proj-settings-option-${p.id}`"
-                      @click="((projId = p.id), (projDd = false))"
-                    >
-                      <span class="dd-check">
-                        <Icon v-if="p.id === proj.id" name="check" :size="11" />
-                      </span>
-                      <span class="mono">{{ p.name }}</span>
-                    </button>
+                    <!-- The field keeps DOM focus while the list moves under it. -->
+                    <input
+                      ref="projFilterEl"
+                      v-model="projFilter"
+                      class="dd-search mono"
+                      data-testid="proj-settings-search"
+                      placeholder="Filter projects…"
+                      role="combobox"
+                      aria-controls="proj-dd-list"
+                      :aria-expanded="projDd"
+                      :aria-activedescendant="
+                        projMatches[projActive] ? `proj-dd-${projMatches[projActive].id}` : undefined
+                      "
+                      @keydown="onProjKeydown"
+                    />
+                    <div id="proj-dd-list" class="dd-scroll" role="listbox" aria-label="Projects">
+                      <button
+                        v-for="(p, i) in projMatches"
+                        :id="`proj-dd-${p.id}`"
+                        :key="p.id"
+                        class="dd-item"
+                        :class="{ sel: p.id === proj.id, active: i === projActive }"
+                        role="option"
+                        :aria-selected="p.id === proj.id"
+                        :data-testid="`proj-settings-option-${p.id}`"
+                        @click="chooseProj(p.id)"
+                        @mouseenter="projActive = i"
+                      >
+                        <span class="dd-check">
+                          <Icon v-if="p.id === proj.id" name="check" :size="11" />
+                        </span>
+                        <span class="mono">{{ p.name }}</span>
+                      </button>
+                      <!-- Named, not blank: a filter that matches nothing should say
+                           what it matched nothing against. -->
+                      <div
+                        v-if="projMatches.length === 0"
+                        class="dd-empty mono"
+                        data-testid="proj-settings-empty"
+                      >
+                        No project matches “{{ projFilter }}”.
+                      </div>
+                    </div>
                   </div>
                 </div>
                 <div class="proj-note">
@@ -447,41 +592,6 @@ const updateLine = computed(() => {
                       <Icon v-if="m.value === 'bypass'" name="warning" :size="12" />
                       <template v-else>—</template>
                     </span>
-                  </button>
-                </div>
-              </div>
-
-              <div v-for="section in PROJ_MODEL_SECTIONS" :key="section.field" class="group">
-                <div class="group-label mono">{{ section.label }}</div>
-                <div class="group-desc">{{ section.desc }}</div>
-                <div class="cards">
-                  <button
-                    class="card-opt"
-                    :class="{ sel: projModelFor(section.field) === 'global' }"
-                    :data-testid="`${section.testid}-global`"
-                    @click="saveProjModelFor(section.field, 'global')"
-                  >
-                    <span class="opt-dot" :class="{ on: projModelFor(section.field) === 'global' }"></span>
-                    <div class="opt-body">
-                      <div class="opt-name mono">Use global default</div>
-                      <div class="opt-sub">Follows the Models tab ({{ modelLabel(settings[section.globalKey]) }})</div>
-                    </div>
-                    <span class="opt-price mono">—</span>
-                  </button>
-                  <button
-                    v-for="m in modelChoices"
-                    :key="m.id"
-                    class="card-opt"
-                    :class="{ sel: projModelFor(section.field) === m.id }"
-                    :data-testid="`${section.testid}-${m.id}`"
-                    @click="saveProjModelFor(section.field, m.id)"
-                  >
-                    <span class="opt-dot" :class="{ on: projModelFor(section.field) === m.id }"></span>
-                    <div class="opt-body">
-                      <div class="opt-name mono">{{ m.label }}</div>
-                      <div class="opt-sub">{{ m.desc }}</div>
-                    </div>
-                    <span class="opt-price mono">{{ m.price }}</span>
                   </button>
                 </div>
               </div>
@@ -630,6 +740,165 @@ const updateLine = computed(() => {
               <button class="add-cmd-btn mono" data-testid="allowed-add-btn" @click="addAllowedCommand">
                 Allow
               </button>
+            </div>
+          </template>
+
+          <!-- SKILLS -->
+          <template v-else-if="tab === 'skills'">
+            <div class="group-label mono">IMPORT FROM GITHUB</div>
+            <div class="group-desc">
+              Paste a repository, or a folder inside one, and every skill under it is imported.
+              Skills are user-level: switching one on makes it available to every project and
+              every session, in the Skills tab and to the conversation alike.
+            </div>
+
+            <div class="add-cmd-row">
+              <input
+                v-model="skillUrl"
+                class="add-cmd-input mono"
+                :class="{ bad: skillSource?.ok === false }"
+                data-testid="skills-url-input"
+                placeholder="https://github.com/owner/repo/tree/main/skills"
+                :disabled="skills.importing"
+                :aria-invalid="skillSource?.ok === false ? 'true' : 'false'"
+                :aria-describedby="skillSource ? 'skills-url-reading' : undefined"
+                @keydown.enter="importSkills"
+              />
+              <button
+                class="add-cmd-btn mono"
+                data-testid="skills-import-btn"
+                :disabled="skills.importing || skillSource?.ok !== true"
+                @click="importSkills"
+              >
+                {{ skills.importing ? 'Importing…' : 'Import' }}
+              </button>
+            </div>
+
+            <!-- What the URL says, read by the importer's own parser before a
+                 single request is made. The field was opaque until now: the only
+                 way to learn that a URL was not even a repository was to press
+                 Import and wait for the round trip to fail. -->
+            <div v-if="skillSource" id="skills-url-reading" class="skill-reading" aria-live="polite">
+              <div
+                v-if="skillSourceParts"
+                class="skill-reading-parts"
+                data-testid="skills-url-reading"
+              >
+                <span v-for="part in skillSourceParts" :key="part.label" class="skill-part">
+                  <span class="skill-part-label mono">{{ part.label }}</span>
+                  <span class="skill-part-value mono">{{ part.value }}</span>
+                </span>
+              </div>
+              <div v-else class="skill-reading-bad" data-testid="skills-url-problem">
+                <Icon name="warning" :size="11" />
+                {{ skillSource.ok === false ? skillSource.message : '' }}
+              </div>
+            </div>
+
+            <!-- Said plainly, once, where the developer is about to paste a URL.
+                 The import itself never executes anything from the repository, but
+                 a skill IS instructions a session will follow, and that is the part
+                 no mechanism can check for them. -->
+            <div class="group-desc skills-caution">
+              <Icon name="warning" :size="11" /> A skill is a set of instructions a session will
+              follow. Import from repositories you trust, and read a skill before switching it on.
+            </div>
+
+            <div v-if="skills.error" class="skills-err" data-testid="skills-settings-error">
+              {{ skills.error }}
+            </div>
+            <div
+              v-if="skills.lastImport && skills.lastImport.skipped.length > 0"
+              class="skills-skipped"
+              data-testid="skills-skipped"
+            >
+              <!-- One per line with the name apart from the reason. These ran
+                   together as a single wrapped sentence, which is unreadable at
+                   the point it matters most: eight of ten imported, and the two
+                   that did not are the whole message. -->
+              <div class="skipped-head mono">
+                Skipped {{ skills.lastImport.skipped.length }} of
+                {{ skills.lastImport.skipped.length + skills.lastImport.imported.length }}
+              </div>
+              <div v-for="s in skills.lastImport.skipped" :key="s.name" class="skipped-one">
+                <span class="skipped-name mono">{{ s.name }}</span>
+                <span class="skipped-why">{{ s.reason }}</span>
+              </div>
+            </div>
+
+            <div class="group-label mono" style="margin-top: 12px">IMPORTED SKILLS</div>
+            <div v-if="skills.items.length === 0" class="group-desc" data-testid="skills-none">
+              None yet.
+            </div>
+
+            <!-- Grouped by the repository each skill came from, so the source is
+                 stated once for a dozen skills instead of a dozen times, and so
+                 the whole of one source can be switched off in one click. -->
+            <div
+              v-for="group in skillsBySource"
+              :key="group.url"
+              class="skill-group"
+              :data-testid="`skill-group-${group.label}`"
+            >
+              <div class="skill-group-head">
+                <span class="skill-group-name mono">{{ group.label }}</span>
+                <span class="skill-group-count mono">
+                  {{ group.items.filter((s) => s.enabled).length }}/{{ group.items.length }} on
+                </span>
+                <button
+                  v-if="group.items.length > 1"
+                  class="skill-group-all mono"
+                  :data-testid="`skill-group-all-${group.label}`"
+                  :title="`Switch every skill from ${group.label} on or off`"
+                  @click="setGroupEnabled(group.items, !group.items.every((s) => s.enabled))"
+                >
+                  {{ group.items.every((s) => s.enabled) ? 'all off' : 'all on' }}
+                </button>
+              </div>
+
+              <div
+                v-for="skill in group.items"
+                :key="skill.name"
+                class="setting-row"
+                :data-testid="`skill-row-${skill.name}`"
+              >
+                <div class="sr-text">
+                  <div class="sr-label mono">/{{ skill.name }}</div>
+                  <div class="sr-desc">
+                    {{ skill.description || 'No description in its SKILL.md.' }}
+                  </div>
+                  <div class="sr-desc skills-origin mono">
+                    {{ skill.sourcePath || 'repository root' }} · {{ skill.fileCount }} file{{
+                      skill.fileCount === 1 ? '' : 's'
+                    }}
+                  </div>
+                </div>
+                <div class="skills-actions">
+                  <button
+                    class="switch"
+                    :class="{ on: skill.enabled }"
+                    role="switch"
+                    :aria-checked="skill.enabled"
+                    :data-testid="`skill-toggle-${skill.name}`"
+                    :title="
+                      skill.enabled
+                        ? 'On: every session can use this skill. Turning it off removes it from ~/.claude/skills.'
+                        : 'Off: no session can see this skill. Turning it on copies it into ~/.claude/skills.'
+                    "
+                    @click="skills.setEnabled(skill.name, !skill.enabled)"
+                  >
+                    <span class="knob"></span>
+                  </button>
+                  <button
+                    class="skills-remove"
+                    :data-testid="`skill-remove-${skill.name}`"
+                    title="Remove this skill and delete its files"
+                    @click="skills.remove(skill.name)"
+                  >
+                    <Icon name="trash" :size="12" />
+                  </button>
+                </div>
+              </div>
             </div>
           </template>
 
@@ -807,9 +1076,9 @@ const updateLine = computed(() => {
 
             <div class="group-label mono" style="margin-top: 8px">BYPASS SANDBOX</div>
             <div class="group-desc">
-              Bypass sessions run in a Docker container capped at this much memory, so one
-              hungry build stops alone instead of killing every session (exit 137). Any Docker
-              size — <span class="mono">6g</span>, <span class="mono">12g</span> — or
+              Bypass sessions run in a WSL container capped at this much memory, so one
+              hungry build stops alone instead of killing every session (exit 137). A size
+              such as <span class="mono">6g</span> or <span class="mono">12g</span>, or
               <span class="mono">0</span> for no cap. Applies from the next bypass session.
             </div>
             <div class="setting-row">
@@ -1261,17 +1530,47 @@ html.sb-light .overlay {
   position: relative;
 }
 
+/* THE SEARCHABLE DROPDOWN. Trigger geometry and open state from the pinned
+   reference (design.dev searchable dropdown), rendered in this world's accent
+   rather than its cyan. */
 .dd {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
+  min-height: 42px;
   padding: 9px 13px;
   background: color-mix(in srgb, var(--green) 10%, transparent);
   border: 1px solid var(--border-strong);
-  border-radius: var(--rc);
   cursor: pointer;
   text-align: left;
+  /* The trigger takes the panel's own radius, so the closed control and the open
+     list read as one object. The reference says 10px for the trigger and 12px
+     for the panel; agreeing on one is better than being faithful to two. */
+  border-radius: var(--r-panel);
+  transition: border-color 120ms var(--ease), box-shadow 120ms var(--ease);
+}
+
+/* Open takes the accent border and a soft ring, so the trigger and the panel
+   below it read as one object rather than two stacked ones. */
+.dd.open {
+  border-color: var(--green);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--green) 16%, transparent);
+}
+
+.dd-arrow {
+  transition: transform 160ms var(--ease-overlay);
+}
+
+.dd-arrow.open {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dd,
+  .dd-arrow {
+    transition: none;
+  }
 }
 
 .dd:hover {
@@ -1299,16 +1598,59 @@ html.sb-light .overlay {
 
 .dd-list {
   position: absolute;
-  top: calc(100% + 5px);
+  top: calc(100% + 6px);
   left: 0;
   right: 0;
-  background: var(--bg-hover);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--rc);
+  /* Opaque, like every other floating panel here: --bg-hover is a translucent
+     wash and let the settings behind it show through the options. */
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-card);
+  border-radius: var(--r-panel);
   overflow: hidden;
   z-index: 10;
-  box-shadow: var(--shadow-dd);
-  animation: sbIn 0.15s var(--ease);
+  box-shadow: var(--shadow-overlay);
+  animation: ddIn 160ms var(--ease-overlay);
+}
+
+@keyframes ddIn {
+  from {
+    opacity: 0;
+    transform: scale(0.98) translateY(-4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dd-list {
+    animation: none;
+  }
+}
+
+.dd-search {
+  width: 100%;
+  padding: 9px 12px;
+  font-size: var(--fs-ui);
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.dd-search:focus {
+  outline: none;
+}
+
+/* The list scrolls; the field above it does not, so typing never chases the
+   input off the top of the panel. */
+.dd-scroll {
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.dd-empty {
+  padding: 12px;
+  font-size: var(--fs-meta);
+  color: var(--text-faint);
 }
 
 .dd-item {
@@ -1316,7 +1658,8 @@ html.sb-light .overlay {
   align-items: center;
   gap: 9px;
   width: 100%;
-  padding: 9px 13px;
+  padding: 8px 10px;
+  border-radius: var(--r-row);
   cursor: pointer;
   font-size: var(--fs-ui);
   color: var(--text-mid);
@@ -1465,5 +1808,165 @@ html.sb-light .overlay {
 
 .switch .knob {
   border-radius: var(--rc);
+}
+/* Skills tab. The caution line is amber because it is attention owed, not an
+   error; the world reserves red for something that has actually gone wrong. */
+.skills-caution {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--amber);
+}
+
+.skills-err {
+  margin-top: 8px;
+  font-size: var(--fs-meta);
+  color: var(--red);
+}
+
+.skills-skipped {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+}
+
+.skipped-head {
+  color: var(--text-mid);
+}
+
+.skipped-one {
+  display: flex;
+  gap: 6px;
+  /* The name is the identity and the reason is the explanation. Indented as a
+     pair so a list of four reads as four entries rather than as prose. */
+  padding-left: 8px;
+}
+
+.skipped-name {
+  color: var(--text-mid);
+  flex-shrink: 0;
+}
+
+.skipped-why {
+  min-width: 0;
+  color: var(--text-faint);
+}
+
+/* --- What the pasted URL says, before anything is requested --- */
+
+.skill-reading {
+  margin-top: 6px;
+  font-size: var(--fs-micro);
+}
+
+.skill-reading-parts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+.skill-part {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+}
+
+.skill-part-label {
+  letter-spacing: 0.05em;
+  color: var(--text-ghost);
+}
+
+.skill-part-value {
+  color: var(--text-name);
+  overflow-wrap: anywhere;
+}
+
+.skill-reading-bad {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--amber);
+}
+
+/* A malformed URL is amber on the field, not red: nothing has failed yet, and it
+   is usually a URL half-typed rather than a URL wrong. Red is kept for an import
+   that actually came back with an error (.skills-err above). */
+.add-cmd-input.bad {
+  color: var(--amber-ink);
+}
+
+/* --- Imported skills, grouped by the repository they came from --- */
+
+.skill-group {
+  margin-bottom: 14px;
+}
+
+.skill-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 2px;
+  font-size: var(--fs-micro);
+}
+
+.skill-group-name {
+  color: var(--text-name);
+  overflow-wrap: anywhere;
+}
+
+.skill-group-count {
+  color: var(--text-ghost);
+}
+
+.skill-group-all {
+  margin-left: auto;
+  padding: 1px 6px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+  background: var(--bg-hover);
+  border: 1px solid var(--border-card);
+  border-radius: var(--r-row);
+}
+
+.skill-group-all:hover {
+  color: var(--text-bright);
+  border-color: var(--blue);
+}
+
+.skills-origin {
+  font-size: var(--fs-micro);
+  color: var(--text-ghost);
+}
+
+.skills-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.skills-remove {
+  display: inline-flex;
+  padding: 3px;
+  color: var(--text-faint);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.skills-remove:hover {
+  color: var(--red);
+}
+/* The row Enter would take. Distinct from :hover on purpose — the pointer and
+   the keyboard can be on two different rows, and the one that acts is this. */
+.dd-item.active {
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+  color: var(--text-strong);
 }
 </style>

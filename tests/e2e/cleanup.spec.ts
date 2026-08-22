@@ -26,14 +26,17 @@ test('the Cleanup tab lists grouped commands and runs one in the session', async
     .poll(() => page.evaluate(() => window.__mock.state().sends.map((x) => x.text)))
     .toContain('/de-sloppify')
 
-  // It goes to the LIVE session, and this assertion is the reverse of what it
-  // used to be. These are plugin commands, and the background session is
-  // containerised: its ~/.claude is a fresh Docker volume with no plugins in it,
-  // so seven of the nine commands here could never resolve there however healthy
-  // the "Installed" badge looked. Same fix, and the same trade, as Diagrams.
+  // It goes to the Cleanup section's OWN session, and this assertion has now been
+  // reversed twice. It went to the live session for a while because a background
+  // session was containerised and a container's ~/.claude was a fresh Docker
+  // volume with no plugins in it, so seven of the nine commands here could never
+  // resolve there however healthy the "Installed" badge looked. The sandbox mounts
+  // the host's plugins read-only since 0.20.0 and a section session is native
+  // unless the project asks for Docker, so the constraint is gone — and a cleanup
+  // pass is long work whose output nobody wants spliced into their conversation.
   const sends = await page.evaluate(() => window.__mock.state().sends)
   const run = sends.find((s) => s.text === '/de-sloppify')
-  expect(run?.sessionId).toBe('s-alpha')
+  expect(run?.sessionId).not.toBe('s-alpha')
 })
 
 test('a stack-specific plugin is not advertised to a project that has not installed it', async ({

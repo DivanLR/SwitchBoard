@@ -138,6 +138,51 @@ function phaseDone(phase: SpecPhase): boolean {
   return phase.tasks.length > 0 && phase.tasks.every((t) => t.done)
 }
 
+/**
+ * The stepper's model, added 2026-08-21 against the pinned multi-step wizard
+ * reference.
+ *
+ * The phases were already a sequence and already carried every state a stepper
+ * needs; what they lacked was a place to SEE the sequence. A list of collapsed
+ * headers answers "what is in phase 3" and never answers "how far along am I",
+ * which is the question a developer watching an implement run actually has.
+ *
+ * Derived, never stored: every value here comes from the same `detail.phases`
+ * the list below renders, so the stepper cannot disagree with the tasks under it.
+ */
+type StepState = 'done' | 'active' | 'pending'
+
+function phaseState(phase: SpecPhase): StepState {
+  if (phaseDone(phase)) return 'done'
+  if (phaseRunning(phase)) return 'active'
+  // The first phase with open tasks is where the work is, running or not: a
+  // stepper that shows nothing as current until a run starts is a stepper that
+  // is blank exactly when it is being read.
+  const next = detail.value?.phases.find((p) => p.tasks.some((t) => !t.done))
+  return next && next.label === phase.label ? 'active' : 'pending'
+}
+
+/** Overall completion, 0-100, for the bar across the top of the stepper. */
+const specProgress = computed<number>(() => {
+  const phases = detail.value?.phases ?? []
+  const tasks = phases.flatMap((p) => p.tasks)
+  if (tasks.length === 0) return 0
+  return Math.round((tasks.filter((t) => t.done).length / tasks.length) * 100)
+})
+
+/**
+ * Jump to a phase's tasks.
+ *
+ * Scrolling rather than switching panes, because the phases are one scrolling
+ * column and hiding the others would cost the context the stepper exists to
+ * give. The reference makes completed steps clickable for backwards navigation;
+ * here every step is clickable, since a developer may equally want to read ahead.
+ */
+function goToPhase(label: string): void {
+  const el = document.querySelector(`[data-phase="${CSS.escape(label)}"]`)
+  el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
 function phaseCount(phase: SpecPhase): string {
   return `${phase.tasks.filter((t) => t.done).length}/${phase.tasks.length}`
 }
@@ -502,7 +547,47 @@ const partTabs: { id: Part; label: string }[] = [
             No tasks.md yet. Run <span class="mono">/speckit.tasks</span> to generate the task
             list.
           </div>
-          <div v-for="phase in detail.phases" :key="phase.label" class="phase">
+          <!-- THE STEPPER. One node per phase, with the run's overall progress
+               across the top. It replaces reading five collapsed headers to work
+               out where the implementation had got to. -->
+          <div v-if="detail.phases.length > 1" class="stepper" data-testid="spec-stepper">
+            <div class="step-track" role="progressbar" :aria-valuenow="specProgress" aria-valuemin="0" aria-valuemax="100">
+              <span class="step-fill" :style="{ width: `${specProgress}%` }"></span>
+            </div>
+            <ol class="step-list">
+              <li
+                v-for="(phase, i) in detail.phases"
+                :key="phase.label"
+                class="step"
+                :class="phaseState(phase)"
+                :data-testid="`spec-step-${phaseState(phase)}`"
+              >
+                <button
+                  type="button"
+                  class="step-btn"
+                  :aria-current="phaseState(phase) === 'active' ? 'step' : undefined"
+                  :title="`${phase.label} — ${phaseCount(phase)} tasks done`"
+                  @click="goToPhase(phase.label)"
+                >
+                  <span class="step-dot" aria-hidden="true">
+                    <Icon v-if="phaseState(phase) === 'done'" name="check" :size="11" />
+                    <template v-else>{{ i + 1 }}</template>
+                  </span>
+                  <span class="step-text">
+                    <span class="step-label">{{ phase.label }}</span>
+                    <span class="step-count mono">{{ phaseCount(phase) }}</span>
+                  </span>
+                </button>
+              </li>
+            </ol>
+          </div>
+
+          <div
+            v-for="phase in detail.phases"
+            :key="phase.label"
+            class="phase"
+            :data-phase="phase.label"
+          >
             <div class="phase-header">
               <span class="phase-label mono">{{ phase.label }}</span>
               <span class="phase-count mono">{{ phaseCount(phase) }}</span>
@@ -1305,5 +1390,143 @@ const partTabs: { id: Part; label: string }[] = [
   color: var(--text-faint);
   padding: 4px 2px 14px;
   line-height: 1.6;
+}
+/* THE STEPPER. Node states and the progress bar come from the pinned wizard
+   reference; the colours are this world's, where the accent means work in
+   progress and a finished step is simply filled. */
+.stepper {
+  margin: 0 0 18px;
+  padding: 14px 14px 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: var(--rc);
+  box-shadow: var(--elev);
+}
+
+/* 2px, across the top, the whole run's progress in one line. */
+.step-track {
+  height: 2px;
+  margin-bottom: 14px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.step-fill {
+  display: block;
+  height: 100%;
+  background: var(--green);
+  transition: width 300ms var(--ease-overlay);
+}
+
+.step-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The connector. Drawn on the step rather than between them so it cannot fall
+   out of step with wrapping, and suppressed on the first of each row by the
+   flex gap doing the separating instead. */
+.step {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.step + .step::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 13px;
+  width: 100%;
+  height: 1px;
+  background: var(--border);
+  z-index: 0;
+}
+
+/* A completed step's incoming connector is filled: the line reads as the path
+   already walked. */
+.step.done::before,
+.step.active::before {
+  background: var(--green);
+}
+
+.step-btn {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 0 10px 0 0;
+  background: none;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.step-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  border-radius: var(--rp);
+  /* The dot sits ON the connector, so it needs the card's own ground behind it. */
+  background: var(--bg-card);
+  border: 1px solid var(--border-strong);
+  color: var(--text-meta);
+}
+
+/* Pending is an outline and nothing else. Active takes the accent and a ring, so
+   the eye lands on it before it reads a word. Done is filled, because a finished
+   step should stop asking for attention. */
+.step.active .step-dot {
+  color: var(--green);
+  border-color: var(--green);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--green) 16%, transparent);
+}
+
+.step.done .step-dot {
+  background: var(--green);
+  border-color: var(--green);
+  color: var(--green-ink);
+}
+
+.step-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.step-label {
+  font-size: var(--fs-meta);
+  color: var(--text-meta);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.step.active .step-label {
+  color: var(--text-strong);
+  font-weight: var(--w-em);
+}
+
+.step-count {
+  font-size: var(--fs-micro);
+  color: var(--text-ghost);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .step-fill {
+    transition: none;
+  }
 }
 </style>

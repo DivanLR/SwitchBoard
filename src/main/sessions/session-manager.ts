@@ -21,6 +21,7 @@ import type {
   Project,
   ProjectCommand,
   QueuedTask,
+  SectionKind,
   Session,
   SessionEvent,
   SessionMode,
@@ -67,14 +68,16 @@ import { mainLoopModel } from './model-routing'
 import { resolveClaudeExecutable } from './claude-executable'
 import {
   ensureSandboxImage,
+  ensureSandboxVolumes,
   gitNotice,
   gitRoot,
   hasNodeModulesVolume,
   refMounts,
   removeNodeModulesVolume,
+  sandboxVolumeNames,
   sweepOrphanedContainers,
   sweepStaleVolumes,
-} from './docker-sandbox'
+} from './wslc-sandbox'
 
 /** Classifier hook installed by the swallow rule engine (FR-015a); null until then. */
 type NoiseClassifier = (event: SessionEvent) => string | null
@@ -134,6 +137,9 @@ export interface HostedEntry {
   /** Started by a section rather than by the developer, so nobody is sitting in
    *  it and it can close itself when its work is done (see endIfIdleBackground). */
   background: boolean
+  /** Which section opened it, when a section did. The reuse key for
+   *  backgroundSessionFor, and what names the row in the sidebar. */
+  sectionKind?: SectionKind
   /** Whether a turn has ever completed here. A new session reads as idle before
    *  the section that asked for it has sent anything. */
   ranATurn: boolean
@@ -573,7 +579,19 @@ export class SessionManager {
 
   /** Startup reconciliation (FR-022): nothing from a previous run stays live. */
   reconcileOnStartup(): void {
-    this.repos.sessions.reconcileAllEnded('app_exit')
+    // Read BEFORE reconcileAllEnded, which is what makes this list non-empty:
+    // these are the sessions the previous run left open, and therefore exactly
+    // the containers that may have outlived it. sweepOrphanedContainers needs
+    // them because wslc is not asked to discover containers by name any more
+    // (see that function).
+    const leftOpen = this.repos.sessions.listUnended().map((s) => s.id)
+    // The note matters more here than anywhere else: every row this closes was a
+    // session that was still ALIVE when the last run of the application ended
+    // without closing it, and there are more of those than of any other kind.
+    this.repos.sessions.reconcileAllEnded(
+      'app_exit',
+      'Switchboard stopped without closing this session, so it was closed on the next launch. The conversation can be resumed.',
+    )
     for (const request of this.repos.requests.pending()) {
       this.repos.requests.resolve(request.id, 'expired')
     }
@@ -585,16 +603,16 @@ export class SessionManager {
       'The application closed before this run reported a result, so nothing it measured is known.'
     this.repos.verifyRuns.reconcileRunning(note)
     this.repos.apiRuns.reconcileRunning(note)
-    // Sessions are not only DB rows now: a bypass session owns a container that
-    // outlives a hard kill, so reconciling the rows without reaping those would
-    // leave an autonomous agent running against the project folder.
-    sweepOrphanedContainers()
+    // Sessions are not only DB rows now: a containerised session owns a container
+    // that outlives a hard kill, so reconciling the rows without reaping those
+    // would leave an autonomous agent running against the project folder.
+    sweepOrphanedContainers(leftOpen)
     // The container-per-session volumes accumulate credentials and disk (see
-    // HOME_VOLUME_PREFIX in docker-sandbox.ts) — this bounds both, ageing a
-    // volume out 7 days after ITS session ended (never a live one). Age comes
-    // from this table, which is why the sweep lives here and not in
-    // docker-sandbox.ts alone: Docker's own volume metadata has no timestamp
-    // that answers "when did the session that owns this end".
+    // HOME_VOLUME_PREFIX in wslc-sandbox.ts). This bounds both, ageing a volume
+    // out 7 days after ITS session ended (never a live one). Age comes from this
+    // table, which is why the sweep lives here and not in wslc-sandbox.ts alone:
+    // the runtime's own volume metadata has no timestamp that answers "when did
+    // the session that owns this end".
     sweepStaleVolumes((id) => this.repos.sessions.byId(id))
   }
 
@@ -636,29 +654,35 @@ export class SessionManager {
   }
 
   /**
-   * The model routing a project's session should use RIGHT NOW: the INTELLIGENT
-   * model (plans, questions, orchestrator loops, the advisor) and the WORKER
-   * model (advisor-mode executor + orchestrator workers), each taking the
-   * "This project" override when set, else the global Models tab.
+   * The model routing a session should use RIGHT NOW: the INTELLIGENT model
+   * (plans, questions, orchestrator loops, the advisor) and the WORKER model
+   * (advisor-mode executor + orchestrator workers), both from the global Models
+   * tab.
+   *
+   * Takes no project, and that is the whole point: each of these used to accept a
+   * "This project" override, and the owner removed that scope on 2026-08-21. The
+   * signature says so, so a future caller cannot pass a project id and quietly
+   * expect it to matter.
    *
    * Read at session start AND again before every turn (see HostedSession's
    * resolveModels), so changing a model in Settings reaches a running session on
    * its next turn instead of only the next session.
    */
-  private resolveModelRouting(projectId: string): {
+  private resolveModelRouting(): {
     intelligentModel: string
     workerModel: string
     modelMode: ModelMode
     autoModelRouting: boolean
   } {
+    // ONE answer for every project. There used to be a per-project override for
+    // each of these two, and the owner asked for the scope to be global only on
+    // 2026-08-21: a model choice that differed per project meant the Models tab
+    // could say one thing while a session ran on another, and the only way to
+    // find out which was to open a second tab and check.
     const settings = this.repos.settings.get()
-    const override = settings.projectModels?.[projectId]
-    const workerOverride = settings.projectWorkerModels?.[projectId]
     return {
-      intelligentModel:
-        override && override !== 'global' ? override : settings.intelligentModel,
-      workerModel:
-        workerOverride && workerOverride !== 'global' ? workerOverride : settings.workerModel,
+      intelligentModel: settings.intelligentModel,
+      workerModel: settings.workerModel,
       modelMode: settings.modelMode ?? 'auto',
       autoModelRouting: settings.autoModelRouting,
     }
@@ -766,13 +790,27 @@ export class SessionManager {
     const projectId = project.id
     // No "already active" refusal (see startSession's doc). `resume` still means
     // "the last session that ended here", not "the only one".
-    // A containerised session needs the image (docker-sandbox): fail here, before a
-    // row exists, when Docker is down or not logged in. First call builds the
-    // image for this project's stack, which can take minutes (tens of them for
-    // the .NET one) — the renderer awaits with its busy state.
-    // Before the image, because a queue behind a slow image build is a queue
-    // whose wait nobody can account for.
-    if (containerised) await ensureSandboxImage(project.path)
+    // A containerised session needs the image (wslc-sandbox): fail here, before a
+    // row exists, when wslc is missing or the host is not logged in. First call
+    // builds the image for this project's stack, which can take minutes (tens of
+    // them for the .NET one), and the renderer awaits with its busy state.
+    // The readiness failure gets the half of the answer only this caller knows:
+    // WHY a container was wanted. `ensureSandboxImage` reports that wslc is
+    // missing and how to install it, which is one of two ways out and not always
+    // the one the developer wants. A container asked for by the project's own
+    // switch can simply be turned off; a container forced by bypass cannot,
+    // because bypass approves every tool call and the container is the only
+    // boundary left. Saying which case this is turns a dead end into a choice.
+    if (containerised) {
+      try {
+        await ensureSandboxImage(project.path)
+      } catch (error) {
+        const escape = bypassPermissions
+          ? 'Bypass always runs in a container, so this cannot be turned off for a bypass session; start it in another mode to run on this machine.'
+          : `This is on because ${project.name} has its WSL box ticked in the project header. Untick it to run on this machine instead.`
+        throw new Error(`${(error as Error).message} ${escape}`, { cause: error })
+      }
+    }
     // The app drives the user's own Claude Code CLI and no longer bundles a copy
     // (that binary is ~245 MB). Every Switchboard user has Claude Code, so this
     // is normally present; if not, fail with a clear message rather than letting
@@ -793,6 +831,23 @@ export class SessionManager {
       const previous = this.repos.sessions.latestEndedForProject(projectId)
       resumeSdkSessionId = previous?.sdkSessionId ?? undefined
       resumeFromSessionId = previous?.id
+    }
+
+    // The named volumes this session is about to mount, created before anything
+    // tries to mount them. Docker created a named volume implicitly on first use;
+    // wslc is not documented to, and a spawn that finds out otherwise fails with
+    // a mount error nobody can act on. HERE rather than beside ensureSandboxImage
+    // above, because the home volume's name depends on `resumeFromSessionId`,
+    // which is only resolved on the lines directly above this.
+    if (containerised) {
+      await ensureSandboxVolumes(
+        sandboxVolumeNames({
+          projectPath: project.path,
+          sessionId,
+          resumeFromSessionId,
+          nodeModulesVolumeKey: opts?.nodeModulesVolumeKey,
+        }),
+      )
     }
 
     const row: Session = {
@@ -842,7 +897,7 @@ export class SessionManager {
     }
 
     const settings = this.repos.settings.get()
-    const { intelligentModel, workerModel } = this.resolveModelRouting(projectId)
+    const { intelligentModel, workerModel } = this.resolveModelRouting()
     // Any project that has previously run an MCP scan gets its schema map
     // injected as context on every session start (no-op when never scanned).
     // Scans are per-combination now: prefer the ACTIVE combination's doc and
@@ -928,7 +983,7 @@ export class SessionManager {
         modelMode: settings.modelMode,
         // Re-read before each turn so a Settings change lands on a RUNNING session
         // (the note in Settings promises exactly that).
-        resolveModels: () => this.resolveModelRouting(projectId),
+        resolveModels: () => this.resolveModelRouting(),
         // Pairing mode per work turn — in-memory only, shown as a header chip.
         onTurnMode: (mode) => {
           if (entry.row.currentMode === mode) return
@@ -1157,82 +1212,127 @@ export class SessionManager {
   }
 
   /**
-   * The session a verification run should talk to: this project's own verify
-   * session, started if it is not already alive.
+   * The session a section's work should talk to: that project's session for THAT
+   * KIND of work, started if it is not already alive.
    *
-   * Dispatches used to resolve their target with `sessions.activeForProject` —
+   * Dispatches used to resolve their target with `sessions.activeForProject` -
    * whichever session is open, ordinarily the one the developer is chatting in.
    * A verification pass is a long turn (runs suites, reads artefacts, writes a
    * report), and queuing it into the chat session blocked the conversation and
    * interleaved build output with the developer's own work.
    *
-   * Reuse is keyed off the sessionId already persisted on the newest verify or
-   * API run — no new table, and no second registry that could disagree with the
-   * work itself — so a verify run and an API set in the same project share one
-   * session.
+   * Then every section shared ONE background session instead, which moved the
+   * blocking rather than removing it: a cleanup command queued behind a spec's
+   * implement phase, and a diff comment landed in the middle of a test report.
+   * Diagrams were split out first, one section at a time; `kind` is that split
+   * generalised, at the developer's direction on 2026-08-19 - specs, tests, diff
+   * comments, cleanup and diagrams each get their own and none waits on another.
    *
-   * Diagrams no longer do. They had joined this pool on the reasoning that a
-   * drawing is the same KIND of work — a long turn whose output you look at
-   * afterwards — which is true and turned out not to be the point. Sharing meant
-   * a diagram queued behind a verification pass, and its section sat saying
-   * "drawing…" for however long the suites took. Isolation is what the developer
-   * asked for, and diagramSessionFor below is where it lives.
+   * Reuse is keyed off the live entries this manager already holds, not off a
+   * run row: the kinds that leave no run row behind (a spec action, a diff
+   * comment, a cleanup command) had nothing to key on, and a second registry
+   * that outlived the sessions it named could only disagree with them.
    *
    * Deliberately never falls back to `activeForProject`: that IS the removed
    * behaviour, and a fallback would restore the bug on the first run after a
-   * tests session ends.
+   * section's session ends.
    */
-  async backgroundSessionFor(projectId: string): Promise<Session> {
-    const candidates = [
-      this.repos.verifyRuns.listForProject(projectId)[0]?.sessionId,
-      this.repos.apiRuns.listForProject(projectId)[0]?.sessionId,
-    ]
-    return this.reuseOrStartBackground(projectId, candidates)
+  async backgroundSessionFor(projectId: string, kind: SectionKind): Promise<Session> {
+    // A drawing is the one kind that never reuses, and the rule lives here rather
+    // than only in diagramSessionFor because both routes to a drawing come
+    // through this method: the Generate button, and a plugin's own diagram
+    // command from the Diagrams tab. Split across two places they would drift,
+    // and one of the two would quietly queue.
+    if (kind !== 'diagram') {
+      for (const entry of this.hosted.values()) {
+        if (entry.row.projectId !== projectId) continue
+        if (entry.sectionKind !== kind || entry.row.endedAt) continue
+        return { ...entry.row }
+      }
+    }
+    return this.startBackground(projectId, kind)
   }
 
   /**
-   * A drawing gets a container of its own. Every time, with no reuse.
+   * A drawing gets a session of its own. Every time, with no reuse.
    *
-   * Separate from the Tests pool so a drawing never waits behind a verification
-   * pass, and — the developer's explicit direction on 2026-08-17 — separate from
-   * the PREVIOUS drawing too. Reusing a live drawing session was the obvious
-   * economy and it is not what was asked for: two diagrams sharing one session
-   * means the second queues behind the first, which is the same blocking this
-   * separation exists to remove, just moved one place along.
+   * Separate from the other sections so a drawing never waits behind a
+   * verification pass, and - the developer's explicit direction on 2026-08-17 -
+   * separate from the PREVIOUS drawing too. Reusing a live drawing session was
+   * the obvious economy and it is not what was asked for: two diagrams sharing
+   * one session means the second queues behind the first, which is the same
+   * blocking this separation exists to remove, just moved one place along.
    *
-   * The costs are real and neither is hidden. A containerised session holds one
+   * The costs are real and neither is hidden. A CONTAINERISED drawing holds one
    * of MAX_CONTAINERS, which is 2 for the whole machine because they share one
    * virtual machine, so two drawings at once consume it entirely and the next
-   * background dispatch anywhere is refused with SANDBOX_FULL until one ends.
-   * And a fresh container means a cold node_modules volume rather than a warm
-   * one. What makes that affordable is diagramWatch: the session closes itself
-   * on the turn that finishes the drawing, so a slot is held for the length of
-   * one drawing rather than for the rest of the day.
+   * containerised dispatch anywhere is refused with SANDBOX_FULL until one ends.
+   * That ceiling is why the project's own Docker switch (Project.useContainers)
+   * defaults off: five section kinds cannot all hold one of two slots. What makes
+   * a containerised drawing affordable at all is diagramWatch - the session
+   * closes itself on the turn that finishes the drawing, so a slot is held for
+   * the length of one drawing rather than for the rest of the day.
    */
   async diagramSessionFor(projectId: string): Promise<Session> {
-    return this.reuseOrStartBackground(projectId, [])
+    return this.backgroundSessionFor(projectId, 'diagram')
   }
 
-  /** Shared tail of the two resolvers above: take the first candidate that is
-   *  still alive, else start a background session. */
-  private async reuseOrStartBackground(
-    projectId: string,
-    candidates: readonly (string | null | undefined)[],
-  ): Promise<Session> {
-    for (const id of candidates) {
-      if (!id) continue
-      const existing = this.repos.sessions.byId(id)
-      if (existing && !existing.endedAt) return existing
-    }
-    // Containerised, keeping the project's own permission mode. A section runs
-    // builds, test suites and cleanup passes; those should not be able to touch
-    // the developer's checkout, and they should still ask before doing something
-    // that needs asking. Until now only bypass could give the first, and it gave
-    // the second away to get it.
-    return this.startSession(projectId, false, undefined, undefined, {
-      containerised: true,
+  /**
+   * Start a section's own session.
+   *
+   * Containerised only when the project asks for it. It used to be unconditional,
+   * on the reasoning that a section runs builds, test suites and cleanup passes
+   * and those should not be able to touch the developer's checkout - still true,
+   * and still what ticking the box gives. What made it a choice is the ceiling
+   * above it: MAX_CONTAINERS is 2 and there are five section kinds, so forcing a
+   * container turned "each kind gets its own session" into SANDBOX_FULL on the
+   * third dispatch. The developer decides which of the two they want, per project.
+   * A bypass project still gets a container regardless - startSession forces it.
+   */
+  private async startBackground(projectId: string, kind: SectionKind): Promise<Session> {
+    const containerised = this.repos.projects.byId(projectId)?.useContainers === true
+    const session = await this.startSession(projectId, false, undefined, undefined, {
+      containerised,
       background: true,
     })
+    const entry = this.hosted.get(session.id)
+    if (entry) entry.sectionKind = kind
+    return session
+  }
+
+  /** What each live section session was opened for, for the sidebar's row names.
+   *  Live entries only: an ended session's kind is not a fact anyone can act on. */
+  sectionKinds(projectId: string): Record<string, SectionKind> {
+    const kinds: Record<string, SectionKind> = {}
+    for (const entry of this.hosted.values()) {
+      if (entry.row.projectId === projectId && entry.sectionKind) {
+        kinds[entry.row.id] = entry.sectionKind
+      }
+    }
+    return kinds
+  }
+
+  /**
+   * Name a session, in the developer's own words.
+   *
+   * Written to the row AND to the live entry: the project list reads live
+   * sessions from `hosted` and only an ended one from the database, so a rename
+   * that touched only the column would not show until the session ended.
+   * Trimmed to nothing clears it, which is how a developer undoes a name without
+   * needing a second control for it.
+   */
+  renameSession(sessionId: string, label: string): void {
+    const trimmed = label.trim()
+    const value = trimmed === '' ? null : trimmed.slice(0, 60)
+    if (!this.repos.sessions.byId(sessionId)) {
+      throw { code: 'NOT_FOUND', message: 'Session not found' } satisfies IpcError
+    }
+    this.repos.sessions.update(sessionId, { label: value })
+    const entry = this.hosted.get(sessionId)
+    if (entry) {
+      entry.row.label = value
+      this.pushStatus(entry)
+    }
   }
 
   /**
@@ -1282,8 +1382,26 @@ export class SessionManager {
     this.callbacks.onApiChanged(run.projectId)
   }
 
-  async stopSession(sessionId: string): Promise<void> {
+  /**
+   * End a session, recording WHY it ended.
+   *
+   * `note` is the whole point of this signature. Every deliberate end used to
+   * write `endReason: 'stopped'` and leave `statusDetail` at whatever the row
+   * happened to hold, which for a settled session is null. The row then simply
+   * stopped existing, and the developer's own report of the symptom was that
+   * "sessions just close with no message" — which was exactly true, for three
+   * different reasons that were indistinguishable afterwards: an End they
+   * pressed, a stray click on a row's own close control, and a section session
+   * closing itself the moment its work finished (endIfIdleBackground).
+   *
+   * Written BEFORE `stop()`, because finaliseRow persists `entry.row.statusDetail`
+   * as it finds it, and stop() is what leads there. Optional rather than
+   * required only so an existing caller cannot be silently wrong; every caller
+   * in this repository passes one.
+   */
+  async stopSession(sessionId: string, note?: string): Promise<void> {
     const entry = this.requireLive(sessionId)
+    if (note) entry.row.statusDetail = note
     // Same as app exit (FR-022): undelivered composer sends survive as drafts.
     for (const queued of entry.session.takeQueuedSends()) {
       this.repos.drafts.insert(entry.row.projectId, queued.text)
@@ -1301,6 +1419,11 @@ export class SessionManager {
     }
     await Promise.allSettled(entries.map((entry) => entry.session.stop()))
     for (const entry of entries) {
+      // Says so on the row, for the same reason stopSession takes a note: on the
+      // next launch these are simply gone, and "gone" and "gone because you quit"
+      // look identical without this. Only when nothing better is already there —
+      // a session that crashed on the way out keeps its own diagnosis.
+      entry.row.statusDetail ??= 'Switchboard closed, so this session ended. Its conversation can be resumed.'
       this.finaliseRow(entry, 'app_exit') // no-op for any the run loop already ended
     }
     this.hosted.clear()
@@ -1793,7 +1916,7 @@ export class SessionManager {
     } finally {
       this.isolatedRuns.delete(runId)
       // The run's own node_modules volume (see nodeModulesVolumeKey on
-      // HostedEntry and in docker-sandbox.ts) — nothing after this run reads it
+      // HostedEntry and in wslc-sandbox.ts) — nothing after this run reads it
       // again, unlike a session's OWN volume which finaliseRow already leaves
       // alone mid-run for exactly the opposite reason (a sibling suite still
       // needs it). A no-op docker call when the run never touched a Node
@@ -1844,7 +1967,7 @@ export class SessionManager {
         containerised: true,
         background: true,
         // Sequential by construction — see this key's own comment in
-        // docker-sandbox.ts for why sharing one node_modules volume across the
+        // wslc-sandbox.ts for why sharing one node_modules volume across the
         // whole run is safe here and nowhere else.
         nodeModulesVolumeKey: runId,
       })
@@ -1874,7 +1997,7 @@ export class SessionManager {
       control.sessionId = null
       // Awaited: the caller's loop must never start the next suite's container
       // while this one is still shutting down.
-      await this.stopSession(session.id).catch(() => {
+      await this.stopSession(session.id, 'This suite ran in its own container, which closed when the suite finished.').catch(() => {
         // Already gone (its own turn-end path — endIfIdleBackground — may have
         // raced this and won; both are safe, stop() is idempotent and a second
         // requireLive miss here is exactly "already stopped").
@@ -2043,7 +2166,14 @@ export class SessionManager {
     // Re-checked after the await inside stopSession's own path: a section can
     // dispatch again between the turn ending and this running.
     if (!this.hosted.has(id)) return
-    await this.stopSession(id)
+    // Named, because this is the close nobody asked for and therefore the one
+    // most likely to be read as a fault. A section session exists for one piece
+    // of work and goes away when that work is done, which is the design; a row
+    // vanishing with nothing said is not.
+    await this.stopSession(
+      id,
+      'This session was opened for one piece of section work, and closed itself when that work finished.',
+    )
   }
 
   /** Read the git branch asynchronously; push only when it actually changed. */

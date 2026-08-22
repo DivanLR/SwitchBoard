@@ -203,7 +203,7 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Mutation testing (Stryker)',
         acceptance: 'the tests fail when the code is broken on purpose',
         // Stryker is a dotnet TOOL, not part of the SDK, so `needs: 'dotnet'` is
-        // only true because docker-sandbox.ts's .NET image installs it. It did
+        // only true because wslc-sandbox.ts's .NET image installs it. It did
         // not, once, and the suite then reported the developer's code as failing
         // when nothing had ever been installed — the exact confusion FR-057
         // exists to prevent. If that RUN line ever leaves the image, this entry
@@ -384,7 +384,7 @@ export const TEST_STACKS: readonly TestStack[] = [
 
 /**
  * A .NET repo gets a sandbox image with the .NET SDK in it; everything else gets
- * the small node-only one (docker-sandbox.ts builds both from this same answer).
+ * the small node-only one (wslc-sandbox.ts builds both from this same answer).
  * Baking .NET into every image would cost ~1 GB for projects that never call it.
  */
 export function sandboxNeedsDotnet(stacks: readonly AvailableSuites[]): boolean {
@@ -393,7 +393,7 @@ export function sandboxNeedsDotnet(stacks: readonly AvailableSuites[]): boolean 
 
 /**
  * What the bypass sandbox image actually ships: node:22-slim plus git and
- * ripgrep, and — for a .NET project — the .NET SDK on top (docker-sandbox.ts).
+ * ripgrep, and — for a .NET project — the .NET SDK on top (wslc-sandbox.ts).
  * Never Python, never a browser, so those suites cannot run in a bypass session.
  * Saying so BEFORE the run is the point: an environment limit must never be
  * reported as a failure of the developer's code (FR-057).

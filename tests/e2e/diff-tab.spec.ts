@@ -224,3 +224,50 @@ test('changing file drops a selection made in the previous one', async ({ page }
   await page.getByTestId('diff-file-other.ts').click()
   await expect(page.getByTestId('diff-comment')).toHaveCount(0)
 })
+
+// The line has always been clickable and nothing on screen said so: the whole
+// commenting feature rested on a title attribute nobody hovers long enough to
+// read. A mark that appears under the pointer is what makes it discoverable.
+test('a comment mark appears on the line under the pointer, and is out of the way otherwise', async ({
+  page,
+}) => {
+  await openDiffWithLines(page)
+
+  const mark = page.getByTestId('diff-line-1').locator('.dl-comment')
+  const opacity = async () => mark.evaluate((el) => getComputedStyle(el).opacity)
+
+  // Present on every line, so its space is reserved and revealing it cannot
+  // shift the code sideways; invisible until the line is pointed at.
+  await expect(mark).toHaveCount(1)
+  expect(await opacity()).toBe('0')
+
+  await page.getByTestId('diff-line-1').hover()
+  await expect.poll(opacity).toBe('1')
+})
+
+// The composer sits IN the line list, attached to the last selected line. This is
+// the property that keeps shift-click working: a box floating over the code would
+// cover the lines below it, which are exactly the ones an extend targets.
+test('the comment box is attached to the selection and never covers a line', async ({ page }) => {
+  await openDiffWithLines(page)
+
+  await page.getByTestId('diff-line-1').click()
+  const box = page.getByTestId('diff-comment')
+  await expect(box).toBeVisible()
+
+  // In flow: it takes its own space rather than being lifted out of the list.
+  expect(await box.evaluate((el) => getComputedStyle(el).position)).toBe('static')
+  // Directly after the line it belongs to, and inside the list itself.
+  expect(
+    await box.evaluate((el) => el.previousElementSibling?.getAttribute('data-testid')),
+  ).toBe('diff-line-1')
+  expect(await box.evaluate((el) => el.parentElement?.getAttribute('data-testid'))).toBe(
+    'diff-pane-lines',
+  )
+
+  // And it follows the selection as the region grows.
+  await page.getByTestId('diff-line-3').click({ modifiers: ['Shift'] })
+  expect(
+    await box.evaluate((el) => el.previousElementSibling?.getAttribute('data-testid')),
+  ).toBe('diff-line-3')
+})

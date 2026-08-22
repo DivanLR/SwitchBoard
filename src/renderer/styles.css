@@ -43,23 +43,45 @@ html.sb-light {
      neutral near-white ground, the same graticule discipline, and the same rule
      that colour is spent only outside tolerance. Every accent is re-measured
      against the light ground rather than transposed. */
-  --bg: #F7F8FA;
-  --bg-panel: #EEF0F3;
-  --bg-sticky: #E7EAEE;
+  /* The canvas is a hair cooler and lighter than it was, and the panels step
+     down from it rather than up: on the pinned reference the chrome recedes and
+     the CARDS are what the eye lands on, which is the reverse of an instrument
+     panel where the chrome is the instrument. */
+  --bg: #EFF1F5;
+  --bg-panel: #FFFFFF;
+  --bg-sticky: #FFFFFF;
   --bg-card: #FFFFFF;
   --bg-card-alt: #FAFBFC;
-  --bg-code: #F0F2F5;
+  --bg-code: #F4F6F8;
+  /* THE CODE CARD'S OWN SURFACE, and deliberately not --bg-code.
+     A code block is a sunken surface, so it sits BELOW the ground rather than
+     above it, and it took two goes to get there: --bg-code is a 2% step above
+     the canvas and read as one flat field, and white read as a card but not as
+     code. This is a real grey step down, dark enough to be unmistakably a code
+     surface on the owner's direction and still 9:1 against --text-body.
+     Its own token rather than a darker --bg-code, because that token also
+     dresses inputs (the composer, the dropdown filter, argument fields) and they
+     are not code. */
+  --surface-code: #DFE3EA;
+  /* Deep enough that a white card reads as sitting ON it. #F6F7F9 against
+     #FFFFFF is a 1.5% step, which measures as a canvas and looks like one flat
+     white surface; the whole card idea dies at that distance. */
 
   --bg-hover: rgba(20, 22, 26, 0.05);
   --bg-active: rgba(20, 22, 26, 0.1);
   --bg-seg: rgba(20, 22, 26, 0.09);
   --bg-chip: rgba(20, 22, 26, 0.05);
 
-  --border: rgba(20, 22, 26, 0.14);
-  --border-card: rgba(20, 22, 26, 0.18);
-  --border-card-alt: rgba(20, 22, 26, 0.14);
-  --border-soft: rgba(20, 22, 26, 0.1);
-  --border-code: rgba(20, 22, 26, 0.12);
+  /* Hairlines are lighter than they were. A white card on a near-white canvas
+     is separated by its shadow first and its border second; at the old alpha the
+     border did both jobs and the result read as a wireframe. Controls keep their
+     3:1 boundary below (--border-strong, --border-seg): this softening applies
+     only to lines that separate two surfaces, which WCAG 1.4.11 does not reach. */
+  --border: rgba(20, 22, 26, 0.09);
+  --border-card: rgba(20, 22, 26, 0.1);
+  --border-card-alt: rgba(20, 22, 26, 0.08);
+  --border-soft: rgba(20, 22, 26, 0.06);
+  --border-code: rgba(20, 22, 26, 0.08);
   --border-strong: rgba(20, 22, 26, 0.55);
   --border-seg: rgba(20, 22, 26, 0.35);
   --border-hist: rgba(20, 22, 26, 0.1);
@@ -112,17 +134,30 @@ html.sb-light {
 
   --sans: system-ui, -apple-system, 'Segoe UI', 'Inter', sans-serif;
   --w-em: 500;
-  --elev: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 1px 2px rgba(20, 22, 26, 0.06);
+  /* Depth is a soft low-alpha drop, not an inset lip. The lip was the sheet's
+     way of saying "this is a folded material"; a card is a card, and it sits on
+     the canvas rather than being pressed out of it. Two-stop, so the edge stays
+     crisp while the body of the shadow spreads. */
+  --elev: 0 1px 2px rgba(20, 22, 26, 0.04), 0 2px 8px rgba(20, 22, 26, 0.05);
   --gloss: none;
-  --hairline-shine: inset 0 1px 0 rgba(255, 255, 255, 0.8);
-  --rc: 3px;
-  --rp: 2px;
+  --hairline-shine: none;
+  /* 10px HERE ONLY. On the dark sheet a fold is a cut and stays at 3px; the
+     light world's corner is the reference's, and it is the single loudest signal
+     that this is a card surface rather than an instrument panel. */
+  --rc: 10px;
+  --rp: 6px;
   --sq: 0px;
   --track-label: 0.08em;
-  --scrim: rgba(20, 22, 26, 0.45);
-  --shadow-dlg: 0 24px 60px rgba(20, 22, 26, 0.14), 0 0 0 1px rgba(20, 22, 26, 0.06);
-  --shadow-dd: 0 12px 32px rgba(20, 22, 26, 0.12);
-  --shadow-menu: 0 12px 32px rgba(20, 22, 26, 0.12);
+  --scrim: rgba(20, 22, 26, 0.35);
+  --shadow-dlg: 0 24px 64px rgba(20, 22, 26, 0.12), 0 0 0 1px rgba(20, 22, 26, 0.04);
+  --shadow-dd: 0 8px 24px rgba(20, 22, 26, 0.09);
+  --shadow-menu: 0 8px 24px rgba(20, 22, 26, 0.09);
+  /* Overlay tier, light. The same depths re-measured: a 0.55-alpha black under
+     a white dialog is a bruise, not a shadow. */
+  --scrim-blur: 4px;
+  --surface-overlay: #FFFFFF;
+  --shadow-overlay: 0 24px 70px rgba(20, 22, 26, 0.16), 0 4px 16px rgba(20, 22, 26, 0.07);
+  --shadow-toast: 0 8px 32px rgba(20, 22, 26, 0.12), 0 2px 8px rgba(20, 22, 26, 0.06);
 }
 
 
@@ -156,6 +191,9 @@ html.sb-light {
   --bg-card: #1A1D22;
   --bg-card-alt: #171A1F;
   --bg-code: #0E1013;
+  /* See the light theme's note. On carbon the code surface and --bg-code agree,
+     because there the token was already the darkest ground in the set. */
+  --surface-code: #0E1013;
   --diagram-page: #FFFFFF;
   --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
 
@@ -255,6 +293,47 @@ html.sb-light {
   --sq: 0px;
   --track-label: 0.08em;
 
+  /* ---- THE OVERLAY TIER ------------------------------------------------
+     Dialogs, the command palette, dropdown panels and toasts. Added
+     2026-08-21 on the owner's direction, against five named design.dev
+     component references. Every value below is common to those five specs, so
+     it is a token rather than five near-copies.
+
+     THE ACCENT IS NOT THEIRS. Each reference is written in a dark, cyan-keyed
+     palette; this world's action colour is green, set by the owner's own
+     earlier direction, and colour here is spent on a reading outside
+     tolerance. What is taken is the geometry, the depth, the motion and the
+     behaviour. Taking the cyan as well would be overturning a decision nobody
+     asked to revisit.
+
+     RADIUS IS THE ONE PLACE THE OVERLAY TIER LEAVES THE WORLD'S RULE. Cards
+     stay at --rc (3px on carbon, 10px on the light bench) because a fold is a
+     cut. An overlay is not a fold: it is a thing lifted off the surface
+     entirely, it is the only tier here that carries a real shadow, and the
+     references are unanimous at 16px. So it gets its own radius in BOTH
+     themes, which is what the owner asked for. */
+  --r-overlay: 16px;
+  /* The panel radius one step in from a dialog: palette, dropdown, toast. */
+  --r-panel: 12px;
+  /* A row inside one of those panels. */
+  --r-row: 6px;
+
+  /* The curve every one of the five references names for entry. */
+  --ease-overlay: cubic-bezier(0.16, 1, 0.3, 1);
+  /* A toast arrives with a little overshoot and leaves without one. */
+  --ease-toast-in: cubic-bezier(0.21, 1.02, 0.73, 1);
+  --ease-toast-out: cubic-bezier(0.33, 0, 0.67, 0);
+
+  --dur-overlay-in: 200ms;
+  --dur-scrim-in: 160ms;
+  --dur-panel-in: 160ms;
+  --dur-toast-in: 350ms;
+  --dur-toast-out: 300ms;
+
+  /* Padding inside a dialog. 24px in the reference, and it is the value that
+     makes a dialog read as a room rather than a box. */
+  --pad-dialog: 24px;
+
   /* ---- TYPE SCALE ------------------------------------------------------
      Back to dense. This is the fault that killed the previous world, so it is
      the first thing restored: a system face is legible at 11px, so the board
@@ -283,13 +362,17 @@ html.sb-light {
      outgoing bitmap face had exactly one. */
   --w-em: 500;
 
+  /* Widened on 2026-08-21 with the light world. The old scale was sized for an
+     instrument panel where fitting more on screen was the point; the reference
+     spends space instead, and every card, row and section reads off this scale,
+     so one step here is the cheapest way to buy that everywhere. */
   --sp-1: 4px;
-  --sp-2: 6px;
-  --sp-3: 8px;
-  --sp-4: 10px;
-  --sp-5: 13px;
-  --sp-6: 16px;
-  --sp-7: 22px;
+  --sp-2: 7px;
+  --sp-3: 10px;
+  --sp-4: 13px;
+  --sp-5: 16px;
+  --sp-6: 20px;
+  --sp-7: 28px;
   --pad-card: var(--sp-4) var(--sp-5);
 
   --scrim: rgba(10, 12, 15, 0.7);
@@ -299,6 +382,11 @@ html.sb-light {
   --shadow-dlg: 0 24px 60px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(221, 225, 230, 0.1);
   --shadow-dd: 0 12px 32px rgba(0, 0, 0, 0.45);
   --shadow-menu: 0 12px 32px rgba(0, 0, 0, 0.45);
+  /* Overlay tier, dark. The references' own depth, in this world's ink. */
+  --scrim-blur: 4px;
+  --surface-overlay: #191C21;
+  --shadow-overlay: 0 24px 70px rgba(0, 0, 0, 0.55), 0 4px 16px rgba(0, 0, 0, 0.3);
+  --shadow-toast: 0 8px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.2);
   --crease: transparent;
 }
 
@@ -985,12 +1073,22 @@ html.sb-light .btn-solid {
   position: fixed;
   inset: 0;
   background: var(--scrim);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(var(--scrim-blur));
+  -webkit-backdrop-filter: blur(var(--scrim-blur));
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 40;
+  /* The scrim fades; the dialog above it scales. Two durations, because a scrim
+     that scales with its dialog reads as one sheet of glass moving rather than a
+     room dimming behind a thing arriving. */
+  animation: overlayIn var(--dur-scrim-in) ease-out;
+}
+
+@keyframes overlayIn {
+  from {
+    opacity: 0;
+  }
 }
 
 /* clip-path clips the element's shadow along with its corner, so every dialogue in
@@ -1001,12 +1099,34 @@ html.sb-light .btn-solid {
    element unclipped and free to cast. */
 .dialog {
   position: relative;
-  border-radius: var(--rc);
-  padding: 16px;
-  box-shadow: var(--shadow-dlg);
+  /* THE OVERLAY TIER'S OWN RADIUS, in both themes. Cards keep --rc because a
+     fold is a cut; a dialog is not folded out of the surface, it is lifted off
+     it, and the pinned reference is unambiguous at 16px. See --r-overlay. */
+  border-radius: var(--r-overlay);
+  padding: var(--pad-dialog);
+  box-shadow: var(--shadow-overlay);
   /* isolation, because the ::before below is painted beneath the dialogue's own
      content and must not be lifted out of this element's stacking context. */
   isolation: isolate;
+  /* Arrives from slightly small and slightly low, on the reference's curve. The
+     translate is what stops it reading as a zoom. */
+  animation: dialogIn var(--dur-overlay-in) var(--ease-overlay);
+}
+
+@keyframes dialogIn {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(8px);
+  }
+}
+
+/* Motion is the decoration here, not the information: without it the dialog is
+   simply present, which is the correct reduced-motion answer. */
+@media (prefers-reduced-motion: reduce) {
+  .overlay,
+  .dialog {
+    animation: none;
+  }
 }
 
 .dialog::before {
@@ -1014,9 +1134,9 @@ html.sb-light .btn-solid {
   position: absolute;
   inset: 0;
   z-index: -1;
-  background: var(--bg-panel);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--rc);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-card);
+  border-radius: var(--r-overlay);
   /* A sheet laid on the sheet. Nothing inside a dialog takes focus through this
      pseudo-element, so the cut corner is safe here. */
   clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
@@ -1163,26 +1283,69 @@ html.sb-light .btn-solid {
 }
 
 /* Suggestion dropdown, opening upward like a terminal completion menu. */
+/* THE COMMAND PALETTE. Geometry, depth and motion from the pinned reference
+   (design.dev command palette); the accent is this world's green, because the
+   reference's cyan is a palette decision nobody asked to revisit. */
 .suggest-list {
   position: absolute;
   bottom: calc(100% + 6px);
   left: 0;
   right: 0;
-  max-height: 190px;
+  /* 400px, not 190px. The old height showed four commands out of fifty and made
+     the list feel like a hint rather than a palette you can work in. */
+  max-height: 400px;
   overflow-y: auto;
   /* Opaque — a translucent dropdown lets the stream bleed through the rows. */
-  background: var(--bg-panel-2);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--rc);
-  padding: 4px;
-  z-index: 5;
-  box-shadow: var(--shadow-dd);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-card);
+  border-radius: var(--r-panel);
+  padding: 8px;
+  /* Above the composer's own chrome, not merely above the stream. At the old
+     190px the panel ended before the REFS row and the status line, so a z-index
+     of 5 was never tested against them; at 400px it covers both, and they were
+     painting straight through it. */
+  z-index: 45;
+  box-shadow: var(--shadow-overlay);
+  animation: paletteIn var(--dur-panel-in) var(--ease-overlay);
+}
+
+@keyframes paletteIn {
+  from {
+    opacity: 0;
+    transform: scale(0.98) translateY(4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .suggest-list {
+    animation: none;
+  }
+}
+
+/* One group per plugin. The label names the source without competing with the
+   commands under it, which is what small, tracked and quiet buys. */
+.suggest-label {
+  padding: 6px 8px 3px;
+  font-family: var(--sans);
+  font-size: var(--fs-micro);
+  font-weight: var(--w-em);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--text-ghost);
+}
+
+.suggest-group + .suggest-group {
+  margin-top: 2px;
 }
 
 .suggest-item {
   font-size: var(--fs-ui);
-  padding: 5px 8px;
-  border-radius: var(--rc);
+  padding: 6px 8px;
+  border-radius: var(--r-row);
+  /* Stated, not inherited. The panel used to be dark in both themes, so the
+     inherited colour happened to work; on a white panel it inherited the
+     composer's muted ink and the commands read as disabled. */
+  color: var(--text-body);
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
@@ -1192,12 +1355,22 @@ html.sb-light .btn-solid {
 /* Light theme: an opaque sheet, so the list does not read as see-through. Pure
    #fff was the one cold surface in a warm-paper world; the card tier is the
    same sheet the dropdown is laid on. */
-html.sb-light .suggest-list {
-  background: var(--bg-card);
+/* Both themes now take --surface-overlay, which is already the right surface in
+   each; the light override that existed to stop the panel reading as
+   see-through is no longer doing anything the token does not. */
+
+/* The active row takes a wash of the ACTION colour rather than a neutral grey:
+   it is the row Enter will run, which is an action about to happen and the one
+   thing on this panel that earns colour. */
+.suggest-item.active {
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+  color: var(--text-strong);
 }
 
-.suggest-item.active {
-  background: var(--bg-active);
+/* Why this row is in the list. */
+.suggest-hit {
+  color: var(--green);
+  font-weight: 600;
 }
 
 .suggest-typed {
