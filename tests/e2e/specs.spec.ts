@@ -269,3 +269,62 @@ test('a phase finished by another session shows as done without leaving the tab'
   await expect(page.getByTestId('start-phase-Phase 1: Core')).toHaveCount(0)
   await expect(page.getByTestId('specs-view')).toContainText('Done')
 })
+
+// The panel used to light up whichever phase still had open tasks whenever an
+// implement run was live, so the moment one phase finished the NEXT one
+// announced itself as running before anything had touched it.
+test('a finished phase does not hand "Running" to the next one', async ({ page }) => {
+  await page.evaluate(() =>
+    window.__mock.setSpecKit('p-alpha', {
+      installed: true,
+      specs: [{ id: '001-x', title: 'X', status: 'in_progress', tasksTotal: 2, tasksDone: 0 }],
+      details: {
+        '001-x': {
+          id: '001-x', title: 'X', status: 'in_progress', tasksTotal: 2, tasksDone: 0,
+          description: 'desc', path: 'specs/001-x', sections: [],
+          phases: [
+            { label: 'Phase 1: Core', tasks: [{ id: 'T001', label: 'first', done: false }] },
+            { label: 'Phase 2: Next', tasks: [{ id: 'T002', label: 'second', done: false }] },
+          ],
+          clarifications: [], resolvedClarifications: [],
+        },
+      },
+    }),
+  )
+  await page.getByTestId('sidebar-project-beta').click()
+  await page.getByTestId('sidebar-project-alpha').click()
+  await page.getByTestId('tab-specs').click()
+  await page.getByTestId('part-tasks').click()
+
+  // A whole-spec run: nothing here names a phase, so nothing may claim one.
+  await page.getByTestId('start-implementation').click()
+  await expect(page.getByTestId('specs-view')).toContainText('Implementing')
+
+  // Phase 1 finishes while the run is still live.
+  await page.evaluate(() =>
+    window.__mock.setSpecKit('p-alpha', {
+      installed: true,
+      specs: [{ id: '001-x', title: 'X', status: 'in_progress', tasksTotal: 2, tasksDone: 1 }],
+      details: {
+        '001-x': {
+          id: '001-x', title: 'X', status: 'in_progress', tasksTotal: 2, tasksDone: 1,
+          description: 'desc', path: 'specs/001-x', sections: [],
+          phases: [
+            { label: 'Phase 1: Core', tasks: [{ id: 'T001', label: 'first', done: true }] },
+            { label: 'Phase 2: Next', tasks: [{ id: 'T002', label: 'second', done: false }] },
+          ],
+          clarifications: [], resolvedClarifications: [],
+        },
+      },
+    }),
+  )
+  await expect
+    .poll(async () => (await page.getByTestId('specs-view').textContent())?.includes('1/2 tasks'))
+    .toBe(true)
+
+  // Phase 1 reads as finished; phase 2 says nothing about running, because
+  // nothing knows whether it has been started.
+  const phase2 = page.locator('[data-phase="Phase 2: Next"]')
+  await expect(phase2).not.toContainText('Running')
+  await expect(page.locator('[data-phase="Phase 1: Core"]')).toContainText('Done')
+})

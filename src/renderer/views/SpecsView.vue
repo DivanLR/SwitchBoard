@@ -153,8 +153,7 @@ function runCommand(command: string): void {
   )
 }
 
-// The phase whose "Start phase" launched the current run (design: ● Running…).
-const runningPhase = ref<string | null>(null)
+
 
 /**
  * Start implementing a whole spec with live updates. Uses the
@@ -162,7 +161,6 @@ const runningPhase = ref<string | null>(null)
  */
 function startImplementation(): void {
   if (!detail.value) return
-  runningPhase.value = null
   emit('ran') // the shell scrolls its stream; the state stays on this control
   reportDispatch(
     specs.startPhase(
@@ -177,7 +175,6 @@ function startImplementation(): void {
 /** Start implementing one phase, scoped by its label. */
 function startPhase(phase: SpecPhase): void {
   if (!detail.value) return
-  runningPhase.value = phase.label
   emit('ran') // the shell scrolls its stream; the state stays on this control
   const ids = phase.tasks
     .filter((t) => !t.done)
@@ -249,12 +246,23 @@ function phaseCount(phase: SpecPhase): string {
   return `${phase.tasks.filter((t) => t.done).length}/${phase.tasks.length}`
 }
 
+/**
+ * Only a phase whose OWN control started a run is claimed to be running.
+ *
+ * A whole-spec run used to light up whichever phase still had open tasks, which
+ * meant that the moment one phase finished the NEXT one announced itself as
+ * running before anything had touched it. That was a guess dressed as a
+ * reading: the app knows which control it started a session for, and it does
+ * not know which phase an implement run is inside. The stepper still marks the
+ * first unfinished phase as the current step, which says where the work is
+ * without claiming it is under way, and the card's own "Implementing…" carries
+ * the running claim for the spec as a whole.
+ *
+ * The done guard is the other half: a phase whose tasks are all ticked reads
+ * Done even while its session is still open writing its summary.
+ */
 function phaseRunning(phase: SpecPhase): boolean {
-  if (!running.value) return false
-  if (runningPhase.value) return runningPhase.value === phase.label
-  // Whole-spec run: the first phase that still has open tasks is the live one.
-  const current = detail.value?.phases.find((p) => p.tasks.some((t) => !t.done))
-  return current?.label === phase.label
+  return controlPhase(phaseKey(phase.label)) === 'running' && !phaseDone(phase)
 }
 
 // Opening the Specs view (mount) or switching project jumps to the LATEST spec
@@ -311,9 +319,6 @@ const working = computed(
 )
 watch(working, (now, before) => {
   if (before !== undefined && now < before) void specs.reloadSpec(props.projectId)
-})
-watch(running, (r) => {
-  if (!r) runningPhase.value = null
 })
 
 const statusLabel: Record<SpecStatus, string> = {
