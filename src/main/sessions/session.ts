@@ -15,7 +15,13 @@ import { DEFAULT_SESSION_MODE, modelLabel, type AvailableModel, type McpServer, 
 import { sandboxSpawn, toContainerPaths, type SandboxPlan } from './wslc-sandbox'
 import { MessageMapper, type EventSink } from './message-mapper'
 import { toAvailableModels } from './model-catalog'
-import { classifyWorkload, effortForRole, mainLoopModel, nextStrongestModel } from './model-routing'
+import {
+  classifyWorkload,
+  effortForRole,
+  mainLoopModel,
+  modelDeviation,
+  nextStrongestModel,
+} from './model-routing'
 import { modeAgents } from './session-shaping'
 
 /**
@@ -603,6 +609,37 @@ export class HostedSession {
     // case the routing paths cannot classify (they only see 'default').
     this.applyEffortForModel(model)
     this.options.onModel?.(model)
+    this.reconcileModel(model)
+  }
+
+  /**
+   * The turn ran on a different model from the configured one. Say so, and put
+   * the next turn back.
+   *
+   * Claude Code honours a skill's own `model:` frontmatter, and one of the
+   * commands this app dispatches carries it: /speckit-implement-scaffold asks
+   * for Fable 5. So a session configured for Opus genuinely runs a turn on
+   * Fable, which is the skill working as written — and then stayed there,
+   * because appliedModel still recorded what the APP last asked for, so the
+   * next turn matched the cache and no setModel was sent. Settings said one
+   * thing and every later turn ran on another, with nothing on screen
+   * connecting the two.
+   *
+   * Clearing appliedModel re-asserts the configured model on the next turn,
+   * which is what makes Settings authoritative without fighting the skill for
+   * the turn it asked for.
+   */
+  private reconcileModel(reported: string): void {
+    const wanted = this.options.mainModel
+    if (!modelDeviation(reported, wanted)) return
+    this.appliedModel = null
+    this.options.sink.append('assistant_text', {
+      text:
+        `⚙ This turn ran on ${modelLabel(reported)}, not the ${modelLabel(wanted ?? 'default')} ` +
+        'in Settings. A skill can name its own model and this one did; the next turn goes back ' +
+        `to ${modelLabel(wanted ?? 'default')}.`,
+      partial: false,
+    })
   }
 
   private captureUsage(message: SDKMessage): void {

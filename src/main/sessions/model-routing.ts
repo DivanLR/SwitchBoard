@@ -122,3 +122,27 @@ export function classifyWorkload(text: string): Workload {
   if (broad) return 'orchestrator'
   return classifyIntent(text) === 'plan' ? 'plan' : 'advisor'
 }
+
+/**
+ * Whether the model the SDK actually ran differs in FAMILY from the one this
+ * app asked for.
+ *
+ * Something inside a turn can move the main loop off the configured model, and
+ * the common case is a skill: Claude Code honours a skill's own `model:`
+ * frontmatter, so /speckit-implement-scaffold (`model: claude-fable-5`) runs on
+ * Fable however the Models tab is set. That is the skill working as written; it
+ * is a fault only when it goes unsaid and unwound, because from the developer's
+ * chair the app looks like it ignored its own setting.
+ *
+ * Compared by family, never by id: the SDK reports a dated id
+ * (claude-opus-5-20260101) against a configured alias (claude-opus-5[1m]), and
+ * calling that a deviation would fire on every single turn.
+ */
+export function modelDeviation(reported: string | undefined, wanted: string | undefined): boolean {
+  if (!reported || !wanted || wanted === 'default') return false
+  const a = modelFamily(reported)
+  const b = modelFamily(wanted)
+  // An unrecognised family on either side is not evidence of anything.
+  if (!a || !b) return false
+  return a !== b
+}
