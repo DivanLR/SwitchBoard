@@ -1482,7 +1482,7 @@ const {
           :aria-selected="active.view === 'raw'"
           @click="switchView('raw')"
         >
-          Raw
+          Terminal
         </button>
       </div>
     </div>
@@ -1854,11 +1854,17 @@ const {
         v-for="line in rawLines"
         :key="line.key"
         class="raw-line mono"
-        :class="{ stamped: outputPrefs.timestamps }"
+        :class="[`t-${line.tone}`, { stamped: outputPrefs.timestamps }]"
         data-testid="raw-line"
       >
         <span v-if="outputPrefs.timestamps" class="raw-stamp" data-testid="raw-stamp">{{ line.stamp }}</span>
         <span>{{ line.text }}</span>
+      </div>
+      <!-- The one thing a transcript of past lines cannot say: it is still being
+           written. A blinking block on its own line is how a terminal says it,
+           and it costs nothing once the turn ends. -->
+      <div v-if="liveSession?.status === 'working'" class="raw-line mono term-caret" data-testid="term-caret">
+        <span class="blink">█</span>
       </div>
     </div>
 
@@ -1870,7 +1876,7 @@ const {
         <footer
           v-if="mainTab === 'session' || editTarget"
           class="composer"
-          :class="{ dead: composerDead }"
+          :class="{ dead: composerDead, term: mainTab === 'session' && active.view === 'raw' }"
           :data-testid="composerDead ? 'composer-dead' : 'composer-live'"
         >
       <!-- Jump to the newest line. Anchored to the composer rather than to the
@@ -2995,20 +3001,64 @@ html.sb-light .bypass-warn {
   color: var(--amber);
 }
 
+ /* TERMINAL VIEW ---------------------------------------------------------------
+   Not a debug dump any more: this is the session AS A TERMINAL, so it takes the
+   whole pane as one console surface and the composer below it drops its own
+   panel colour to join in (.composer.term). The lines already carried a
+   terminal's glyphs (❯, ⏺, ⎿, ✦) from stream-lines.ts; what was missing was the
+   thing that makes a terminal readable at a glance, which is colour per role.
+   Tones come from the EVENT KIND in shared/, not from sniffing the glyph here. */
 .raw-view {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 22px 52px;
-  background: color-mix(in srgb, var(--bg-code) 50%, transparent);
+  padding: 14px 18px 52px;
+  background: var(--bg-code);
 }
 
 .raw-line {
   font-family: var(--mono);
   font-size: var(--fs-meta);
-  line-height: 1.75;
+  line-height: 1.65;
   color: var(--text-mid);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* One rule per tone. Reusing the app's semantic colours rather than inventing a
+   palette keeps the terminal in whichever theme is on, which a hard-coded black
+   box would not. */
+.raw-line.t-prompt {
+  color: var(--text-bright);
+  font-weight: var(--w-em);
+}
+
+.raw-line.t-text {
+  color: var(--text-body);
+}
+
+.raw-line.t-tool {
+  color: var(--teal);
+}
+
+.raw-line.t-result {
+  color: var(--text-ghost);
+}
+
+.raw-line.t-ok {
+  color: var(--green);
+}
+
+.raw-line.t-warn {
+  color: var(--amber);
+}
+
+.raw-line.t-err {
+  color: var(--red);
+}
+
+/* The turn is still writing. Sits where the next line will appear. */
+.term-caret {
+  color: var(--green);
 }
 
 /* Timestamps setting: dim HH:MM gutter to the left of each raw line. */
@@ -3028,6 +3078,14 @@ html.sb-light .bypass-warn {
 .composer {
   position: relative;
   box-shadow: var(--hairline-shine);
+}
+
+/* Terminal view: the prompt line is part of the console, not a panel bolted
+   under it. Same surface, same seam colour, so the screen reads as one terminal
+   from the first line of output to the caret you type at. */
+.composer.term {
+  background: var(--bg-code);
+  border-top-color: var(--border-code);
 }
 
 /* ENDED. Nothing typed here can go anywhere, and until now the box did not say

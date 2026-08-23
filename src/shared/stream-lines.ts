@@ -55,6 +55,41 @@ export function rawLinesOf(event: SessionEvent): string[] {
   }
 }
 
+/**
+ * What colour a terminal would have printed the line in.
+ *
+ * Derived from the EVENT KIND, not by re-reading the prefix glyph out of the
+ * formatted string: the glyph is presentation and the kind is the fact. Line
+ * index is passed because two kinds print a continuation line that reads
+ * differently from their first — a tool's `⎿` result, a summary's body.
+ */
+export type LineTone = 'prompt' | 'text' | 'tool' | 'result' | 'ok' | 'warn' | 'err'
+
+function toneOf(event: SessionEvent, i: number): LineTone {
+  switch (event.kind) {
+    case 'prompt':
+      return 'prompt'
+    case 'tool_activity':
+      return i === 0 ? 'tool' : 'result'
+    case 'summary':
+      return i === 0 ? 'tool' : 'text'
+    case 'permission_marker':
+    case 'plan_marker': {
+      const status = String((event.payload as { status?: string }).status)
+      if (status === 'pending') return 'warn'
+      return status === 'approved' || status === 'rule_approved' ? 'ok' : 'err'
+    }
+    case 'question':
+      return 'warn'
+    case 'error':
+      return 'err'
+    case 'result':
+      return 'ok'
+    default:
+      return 'text'
+  }
+}
+
 const pad = (n: number): string => String(n).padStart(2, '0')
 
 /** The HH:MM gutter stamp for an event's timestamp. */
@@ -67,6 +102,7 @@ export interface RawLine {
   key: string
   text: string
   stamp: string
+  tone: LineTone
 }
 
 /**
@@ -85,6 +121,7 @@ export function toRawLines(events: readonly SessionEvent[], stamps: boolean): Ra
       key: `${event.id}:${i}`,
       text,
       stamp: i === 0 ? (stamp ?? '') : '',
+      tone: toneOf(event, i),
     }))
   })
 }

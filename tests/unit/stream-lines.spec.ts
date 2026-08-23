@@ -97,4 +97,16 @@ describe('toRawLines', () => {
     expect(on[0].stamp).toMatch(/^\d{2}:\d{2}$/)
     expect(on[1].stamp).toBe('')
   })
+
+  it('tones a line by its event kind, and a tool result apart from its call', () => {
+    const lines = toRawLines(
+      [
+        event('prompt', { text: 'hi' }, 'a'),
+        event('tool_activity', { toolName: 'Read', inputPreview: 'x.ts', resultPreview: 'ok' }, 'b'),
+        event('error', { text: 'boom' }, 'c'),
+      ],
+      false,
+    )
+    expect(lines.map((l) => l.tone)).toEqual(['prompt', 'tool', 'result', 'err'])
+  })
 })
