@@ -91,7 +91,7 @@ function setup() {
   const call = (method: string, req?: unknown, event: unknown = trustedEvent) =>
     listener(event, method, req) as Promise<WireResult<unknown>>
 
-  return { repos, call, window, trustedEvent }
+  return { repos, manager, call, window, trustedEvent }
 }
 
 describe('the invoke channel', () => {
@@ -266,5 +266,84 @@ describe('the sender-trust check', () => {
     expect(result.ok).toBe(false)
     if (result.ok) return
     expect(untrusted(result.error)).toBe(true)
+  })
+})
+
+/**
+ * Which engine `diagrams.generate` actually asks for.
+ *
+ * The choice is one ternary in the handler, and until this existed nothing
+ * exercised it: the unit tests call archifyPrompt directly, and the e2e mock
+ * host cannot import the shared module (it is serialised into the page), so it
+ * hand-duplicates the prompt and its assertions test that copy. This is the only
+ * place the real pairing of request field to real prompt builder is checked.
+ */
+describe('diagrams.generate chooses its engine from the request', () => {
+  let harness: ReturnType<typeof setup>
+  let sent: string[]
+
+  beforeEach(() => {
+    harness = setup()
+    sent = []
+    // Stubbed at the manager boundary rather than the session's: starting a real
+    // one would spawn the Agent SDK. What is under test is which text goes out.
+    vi.spyOn(harness.manager, 'diagramSessionFor').mockResolvedValue({
+      id: 's-diagram',
+    } as never)
+    vi.spyOn(harness.manager, 'watchDiagram').mockImplementation(() => {})
+    vi.spyOn(harness.manager, 'sendMessage').mockImplementation((_id, text) => {
+      sent.push(text)
+      return { eventId: 'e-1', queued: false }
+    })
+  })
+
+  const project = () =>
+    harness.repos.projects.insert({ name: 'a', path: join(tmpdir(), 'swb-diagrams'), source: 'manual' })
+
+  it('asks the diagram-design plugin when no archify options ride along', async () => {
+    const result = await harness.call('diagrams.generate', {
+      projectId: project().id,
+      description: 'the auth flow',
+    })
+    expect(result.ok).toBe(true)
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toContain('Use the default editorial skin')
+    expect(sent[0]).not.toContain('archify')
+  })
+
+  it('asks archify, with the chosen type and quality, when they do', async () => {
+    const result = await harness.call('diagrams.generate', {
+      projectId: project().id,
+      description: 'the auth flow',
+      archify: { type: 'sequence', quality: 'standard', motion: true },
+    })
+    expect(result.ok).toBe(true)
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toContain('archify skill')
+    expect(sent[0]).toContain('Use the sequence type')
+    expect(sent[0]).toContain('--quality standard')
+    expect(sent[0]).toContain('meta.animation to "trace"')
+    // The rule that cannot be recovered from in a background session.
+    expect(sent[0]).toContain('NEVER run `archify preview`')
+    expect(sent[0]).not.toContain('Use the default editorial skin')
+  })
+
+  it('records the request against the file either engine will write', async () => {
+    const id = project().id
+    const result = await harness.call('diagrams.generate', {
+      projectId: id,
+      description: 'the auth flow',
+      archify: { type: 'architecture', quality: 'showcase', motion: false },
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const { file } = result.value as { file: string }
+    // The app names the file, not the model — that is what lets a finished
+    // drawing be attributed back to the sentence that asked for it, whichever
+    // engine drew it.
+    expect(file).toBe('the-auth-flow.html')
+    // forProject answers a Map keyed by file name — the shape readDiagramList
+    // wants when it joins the folder listing to the requests behind it.
+    expect([...harness.repos.diagramRequests.forProject(id).keys()]).toContain(file)
   })
 })

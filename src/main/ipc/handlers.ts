@@ -5,7 +5,13 @@
 import { clipboard, dialog, ipcMain, shell, type BrowserWindow } from 'electron'
 import type { Session, SessionEvent } from '@shared/domain'
 import { canPassEval, isDangerousCommand, sessionName } from '@shared/domain'
-import { DIAGRAM_PLUGIN, DIAGRAMS_DIR, diagramFileName, diagramPrompt } from '@shared/diagram'
+import {
+  DIAGRAM_PLUGIN,
+  DIAGRAMS_DIR,
+  archifyPrompt,
+  diagramFileName,
+  diagramPrompt,
+} from '@shared/diagram'
 import { CLEANUP_GROUPS } from '@shared/command-catalog'
 import { applyToRegionPrompt } from '@shared/diff-apply'
 import type {
@@ -622,7 +628,16 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       // outstanding gets closed as idle. Three real drawings were stopped four
       // seconds in because nothing said one was under way. See watchDiagram.
       manager.watchDiagram(session.id, file)
-      manager.sendMessage(session.id, diagramPrompt(req.description, file))
+      // Which engine, decided by the caller rather than read from Settings here.
+      // The section can be switched to archify while a request for the other one
+      // is still in flight, and a handler that looked the preference up would
+      // then send the wrong prompt for the file name it already recorded.
+      manager.sendMessage(
+        session.id,
+        req.archify
+          ? archifyPrompt(req.description, file, req.archify)
+          : diagramPrompt(req.description, file),
+      )
       return { sessionId: session.id, file }
     },
     // Trust boundary: `file` arrives from the renderer, so it is proven to sit

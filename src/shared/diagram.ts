@@ -236,3 +236,331 @@ export function diagramPrompt(description: string, file: string): string {
     `When it is written, reply with the one line: wrote ${DIAGRAMS_DIR}/${file}`,
   ].join('\n')
 }
+
+// ── The second engine: archify ──────────────────────────────────────────────
+//
+// github.com/tt-a1i/archify is a SKILL, not a plugin, and that distinction is
+// the whole reason it is worth having beside diagram-design. The agent authors a
+// small typed JSON IR; archify's own Node CLI validates that IR against a schema
+// and compiles it deterministically into standalone HTML. The drawing is
+// therefore checked by a program rather than trusted to a model, and the same
+// specification re-renders identically.
+//
+// It arrives through the app's OWN Skills importer (two HTTPS GETs, no shell, no
+// archive extractor — see main/skills/import.ts) rather than through
+// `plugins.install`, because `claude plugin` installs plugins and this is not
+// one. Its skill folder is 190 files and 7.4 MB, inside that importer's caps.
+export const ARCHIFY = {
+  /** Its SKILL.md `name`, which is how a session addresses it and how this app
+   *  recognises it in the imported-skills list. */
+  skill: 'archify',
+  /**
+   * The folder inside the repository that holds the SKILL.md, not the repository
+   * root. The root also carries docs/, benchmarks/ and experiments/, none of
+   * which the skill needs and all of which the importer would download.
+   */
+  source: 'https://github.com/tt-a1i/archify/tree/main/archify',
+  /** Where its CLI lands once the importer has written the skill. */
+  bin: '~/.claude/skills/archify/bin/archify.mjs',
+} as const
+
+/**
+ * archify's own type router, taken from its SKILL.md rather than paraphrased.
+ *
+ * This is what makes the archify path INTERACTIVE where the diagram-design path
+ * is one sentence: archify commits to a type before it draws, the five types
+ * produce genuinely different pictures, and a developer who already knows they
+ * want a sequence diagram should not have to talk a model into one.
+ */
+export const ARCHIFY_TYPES = [
+  {
+    type: 'auto',
+    label: 'Choose for me',
+    hint: 'Runs archify guide first and takes the type it routes to',
+  },
+  {
+    type: 'architecture',
+    label: 'Architecture',
+    hint: 'Components, services, cloud/security boundaries, infrastructure',
+  },
+  {
+    type: 'workflow',
+    label: 'Workflow',
+    hint: 'Processes, approval gates, tool calls, runbooks, CI/CD',
+  },
+  {
+    type: 'sequence',
+    label: 'Sequence',
+    hint: 'API call chains, request lifecycles, async traces, returns',
+  },
+  {
+    type: 'dataflow',
+    label: 'Data flow',
+    hint: 'Pipelines, ETL/ELT, lineage, governance, consumers',
+  },
+  {
+    type: 'lifecycle',
+    label: 'Lifecycle',
+    hint: 'State/status transitions, retries, waiting and terminal states',
+  },
+] as const
+
+export type ArchifyType = (typeof ARCHIFY_TYPES)[number]['type']
+
+/** What the interactive bar collects before it asks for a drawing. */
+export interface ArchifyOptions {
+  type: ArchifyType
+  /** archify's `--quality`. `showcase` is the profile its own authoring path
+   *  defaults to; `standard` is for a deliberately dense map. */
+  quality: 'showcase' | 'standard'
+  /**
+   * The viewer extras: `meta.animation: "trace"` plus a few curated `meta.views`
+   * chapters, so the delivered page can be stepped through rather than only read.
+   * Off by default, which is the skill's own rule — it enables motion only when
+   * the user asks for a demo or a presentation.
+   */
+  motion: boolean
+}
+
+export const DEFAULT_ARCHIFY: ArchifyOptions = {
+  type: 'auto',
+  quality: 'showcase',
+  motion: false,
+}
+
+/**
+ * archify's CLI, as its own `usage()` prints it.
+ *
+ * Every subcommand is here rather than the three this section would itself use,
+ * because the menu's job is to say what the tool can do. `sendable: false` marks
+ * the one that must never be dispatched to a background session: `preview`
+ * starts a file watcher on a loopback port and returns only on Ctrl-C, so a
+ * session sent it would sit there until something killed it. It is listed
+ * anyway, with its own note, because pretending it does not exist is worse than
+ * saying why it is not offered.
+ */
+export const ARCHIFY_COMMANDS = [
+  {
+    command: 'doctor',
+    description: 'Check the archify install answers before anything depends on it',
+    argumentHint: '',
+    sendable: true,
+  },
+  {
+    command: 'guide',
+    description: 'Ask which diagram type fits a scenario, and why',
+    argumentHint: '[scenario or question] [--json] [--lang en|zh]',
+    sendable: true,
+  },
+  {
+    command: 'validate',
+    description: 'Check one specification against its schema and the composition rules',
+    argumentHint:
+      '<type> <input.json> [--json] [--layout-json] [--quality …] [--repo-root path (architecture only)]',
+    sendable: true,
+  },
+  {
+    command: 'deliver',
+    description: 'Final acceptance: freeze the specification, render it, commit the HTML',
+    argumentHint: '<type> <input.json> [output.html] [--json] [--open] [--quality …]',
+    sendable: true,
+  },
+  {
+    command: 'render',
+    description: 'Compile a specification straight to HTML, without the delivery receipt',
+    argumentHint:
+      '<type> <input.json> [output.html] [--quality …] [--repo-root path (architecture only)]',
+    sendable: true,
+  },
+  {
+    command: 'visual-check',
+    description: 'Measure containment at four desktop sizes, capture light and dark shots',
+    argumentHint: '<output.html> [--json]',
+    sendable: true,
+  },
+  {
+    command: 'check',
+    description: 'Verify one delivered HTML file is intact',
+    argumentHint: '<output.html>',
+    sendable: true,
+  },
+  {
+    command: 'compare',
+    description: 'Draw the delta between two architecture specifications',
+    argumentHint:
+      'architecture <base.json> <head.json> [output.html] [--receipt path] [--json] [--quality …] [--repo-root path]',
+    sendable: true,
+  },
+  {
+    command: 'inspect',
+    description: 'Print what the compiler reads out of a specification',
+    argumentHint: '<type> <input.json>',
+    sendable: true,
+  },
+  {
+    command: 'migrate',
+    description: 'Move a workflow specification onto schema v2',
+    argumentHint: 'workflow <old.json> <new.json> --to-schema 2 [--json]',
+    sendable: true,
+  },
+  {
+    command: 'brands',
+    description: 'Look up a real product mark, or capture one from its official URL',
+    argumentHint: '[name|alias|domain|category] [--json] · capture <url> [--json]',
+    sendable: true,
+  },
+  {
+    // It renders, it does not list. commandExamples() shells straight out to
+    // scripts/render-examples.mjs, which re-renders the five bundled
+    // specifications over the checked-in *-rendered.html files in the skill's
+    // own examples/ folder. Naming it "list" would invite someone to run it
+    // expecting a read-only menu of names.
+    command: 'examples',
+    description: 'Re-render the bundled example specifications, in the skill’s own folder',
+    argumentHint: '',
+    sendable: true,
+  },
+  {
+    // One file, one type: commandDemo() renders examples/web-app.architecture.json
+    // to a single archify-demo.html. Not a set, and not a choice of type.
+    command: 'demo',
+    description: 'Write one rendered architecture example (archify-demo.html) into a directory',
+    argumentHint: '[output-directory]',
+    sendable: true,
+  },
+  {
+    command: 'preview',
+    description: 'Watch one specification and re-render it live — runs until Ctrl-C',
+    argumentHint: '<type> <input.json> [output.html] [--no-open] [--quality …]',
+    sendable: false,
+  },
+] as const
+
+/** The prefix that makes the section's one field an archify command rather than
+ *  a description, the way a leading `/` marks a plugin command. */
+export const ARCHIFY_PREFIX = 'archify '
+
+/**
+ * An archify CLI command, told where this section looks and how to reach the bin.
+ *
+ * Same reasoning as diagramCommandText: what the developer typed is theirs, so
+ * this appends rather than rewrites. It adds the two facts the session cannot
+ * know — that the CLI lives inside the imported skill, and that only
+ * `docs/diagrams` is listed — and asks for the exit status, because archify's own
+ * contract is that a non-zero exit can never be reported as success.
+ */
+export function archifyCommandText(typed: string): string {
+  const argv = typed.trim().replace(/^archify\s+/i, '')
+  return [
+    'Run this archify command and report exactly what it prints, including a',
+    'non-zero exit status. Do not describe a failed command as a success.',
+    '',
+    `    node ${ARCHIFY.bin} ${argv}`,
+    '',
+    `If that path does not exist, find the archify skill's own bin/archify.mjs and`,
+    'use it instead; the skill ships the CLI alongside its schemas.',
+    '',
+    `Write any diagram file it produces into ${DIAGRAMS_DIR}/, creating that folder`,
+    'if it does not exist. It is the only folder this application lists diagrams',
+    'from, so a file written anywhere else will not appear.',
+  ].join('\n')
+}
+
+/** The specification that sits beside a delivered diagram, named the way
+ *  archify's own examples are: `<base>.<type>.json`. */
+export function archifySpecFile(file: string, type: ArchifyType): string {
+  const base = file.replace(/\.html$/, '')
+  return type === 'auto' ? `${base}.<type>.json` : `${base}.${type}.json`
+}
+
+/**
+ * What an archify drawing session is actually asked.
+ *
+ * Deliberately not diagramPrompt with a different skill name in it. archify's
+ * value is its pipeline — author typed JSON, validate it against a schema,
+ * deliver — and a prompt that only said "use archify" would return a model's
+ * idea of a diagram with an archify label on it. So the three steps are named,
+ * the receipt is asked for, and the failure rule is stated.
+ *
+ * Four things it must say that are not obvious:
+ * - NEVER `preview`. It watches a file on a loopback port and returns only on
+ *   Ctrl-C. This runs in a BACKGROUND session with nobody at the keyboard, so a
+ *   preview would hold that session open until it was killed, and the section
+ *   would show "drawing…" for twenty minutes and then blame its own deadline.
+ * - The exact output path, for the reason diagramPrompt gives it: this section
+ *   reads one folder and nothing else.
+ * - The failure rule. A failed delivery deliberately LEAVES THE PREVIOUS OUTPUT
+ *   in place, so a session that ignored the exit status would report a stale
+ *   file as the new drawing, and the app cannot tell the difference from a file
+ *   listing.
+ * - The same SWB_DIAGRAM plan line the other engine prints, mapped onto
+ *   archify's vocabulary, so the section's plan strip reads either engine.
+ */
+export function archifyPrompt(description: string, file: string, options: ArchifyOptions): string {
+  const spec = `${DIAGRAMS_DIR}/${archifySpecFile(file, options.type)}`
+  const out = `${DIAGRAMS_DIR}/${file}`
+  // Quotes are swapped rather than escaped: this lands inside a shell example in
+  // the prompt, and a description holding a double quote would end the argument.
+  const quoted = description.replace(/"/g, "'")
+  const type = options.type === 'auto' ? '<type>' : options.type
+
+  return [
+    `Create a diagram: ${description}`,
+    '',
+    `Use the ${ARCHIFY.skill} skill for this, and follow its own fast authoring path:`,
+    'read the one matching schema and the one matching example, author fresh typed',
+    'JSON with your own stable IDs and wording, then validate and deliver it.',
+    '',
+    ...(options.type === 'auto'
+      ? [
+          'Choose the type yourself from architecture, workflow, sequence, dataflow or',
+          'lifecycle. If the request is genuinely ambiguous, ask archify first:',
+          `    node ${ARCHIFY.bin} guide "${quoted}" --json`,
+          'and take the type it routes to.',
+        ]
+      : [`Use the ${options.type} type. Do not substitute another one.`]),
+    '',
+    `1. Write the specification to ${spec}, creating the folder if it does not exist.`,
+    `   Set meta.quality_profile to "${options.quality}".`,
+    ...(options.motion
+      ? [
+          '   Turn the viewer extras on: set meta.animation to "trace", and add at most',
+          '   five curated meta.views chapters so it can be stepped through.',
+        ]
+      : ['   Leave motion off: no meta.animation and no meta.views. Static is the default.']),
+    '',
+    '2. Validate, and repair only what the receipt actually diagnoses:',
+    `       node ${ARCHIFY.bin} validate ${type} ${spec} --quality ${options.quality} --json`,
+    ...(options.quality === 'showcase'
+      ? [
+          '   A showcase pass reports all 9 artifact checks with 0 composition errors and',
+          '   0 warnings. A receipt with only 4 checks is basic validation, not a pass.',
+        ]
+      : ['   Fix every composition error the receipt names before going on.']),
+    '',
+    '3. Deliver only once it validates clean:',
+    `       node ${ARCHIFY.bin} deliver ${type} ${spec} ${out} --quality ${options.quality} --json`,
+    '',
+    `If ${ARCHIFY.bin} does not exist, find the archify skill's own bin/archify.mjs`,
+    'and use that instead.',
+    '',
+    'NEVER run `archify preview`. It watches the file on a loopback port and returns',
+    'only on Ctrl-C, and nobody is at this keyboard: it would hold this session open',
+    'until something killed it. Use validate and deliver.',
+    '',
+    'A non-zero exit is a failure and must never be reported as success. A failed',
+    'delivery leaves the previous output in place, so do not describe an older file',
+    'as the new drawing.',
+    '',
+    // Same sentinel, same reader (parseDiagramPlan), archify's vocabulary in the
+    // fields. Printed BEFORE the work, so a run that dies mid-render still leaves
+    // what it intended to draw.
+    'Before you draw, print one line on its own starting with',
+    `${DIAGRAM_PLAN_MARKER}: followed by JSON (one line, no code fence):`,
+    '{"type": "<the archify type you used>", "pattern": "<the visual preset, or null>",',
+    `"size": "${options.quality}", "cuts": ["<anything you left out to keep it readable>"]}`,
+    'Then draw it.',
+    '',
+    `When it is delivered, reply with the one line: wrote ${out}`,
+  ].join('\n')
+}

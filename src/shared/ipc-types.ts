@@ -36,6 +36,7 @@ import type {
 } from './domain'
 import type { AvailableSuites } from './test-catalog'
 import type { ApiEvalRun, ApiTarget, DiscoveredEndpoint } from './api-endpoints'
+import type { ArchifyOptions } from './diagram'
 
 // --- Rules editor ---
 
@@ -402,7 +403,14 @@ export interface InvokeMap {
    * asked for it. Returns the name it chose, which nothing else can predict.
    */
   'diagrams.generate': {
-    req: { projectId: string; description: string }
+    /**
+     * `archify` picks the second engine and carries what its interactive bar
+     * collected. Optional, and its absence means the diagram-design plugin:
+     * the two engines are asked for a drawing in genuinely different words
+     * (see archifyPrompt), so which one is wanted has to travel with the
+     * request rather than be inferred here.
+     */
+    req: { projectId: string; description: string; archify?: ArchifyOptions }
     res: { sessionId: string; file: string }
   }
   /**

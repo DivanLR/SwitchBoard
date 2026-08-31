@@ -279,6 +279,40 @@ export function installMockHost(scenario: MockScenario): void {
     }
     return `${slug}-${Date.now()}.html`
   }
+  /**
+   * The archify engine's prompt, in the shape the real archifyPrompt produces.
+   *
+   * Not the whole of it — this host cannot import the shared module (see above),
+   * and duplicating three hundred words of prompt here would only guarantee the
+   * copy drifts. What a spec needs to assert is which engine ran and what it was
+   * told: the skill name, the chosen type, the quality profile and the output
+   * path. Those are here verbatim.
+   */
+  function archifyPromptText(
+    description: string,
+    file: string,
+    options: { type: string; quality: string; motion: boolean },
+  ): string {
+    const base = file.replace(/\.html$/, '')
+    const spec = `${DIAGRAMS_DIR}/${options.type === 'auto' ? `${base}.<type>.json` : `${base}.${options.type}.json`}`
+    return [
+      `Create a diagram: ${description}`,
+      '',
+      'Use the archify skill for this, and follow its own fast authoring path:',
+      options.type === 'auto'
+        ? 'Choose the type yourself from architecture, workflow, sequence, dataflow or'
+        : `Use the ${options.type} type. Do not substitute another one.`,
+      `1. Write the specification to ${spec}, creating the folder if it does not exist.`,
+      `   Set meta.quality_profile to "${options.quality}".`,
+      options.motion
+        ? '   Turn the viewer extras on: set meta.animation to "trace", and add at most'
+        : '   Leave motion off: no meta.animation and no meta.views. Static is the default.',
+      `       node ~/.claude/skills/archify/bin/archify.mjs deliver ${options.type === 'auto' ? '<type>' : options.type} ${spec} ${DIAGRAMS_DIR}/${file} --quality ${options.quality} --json`,
+      'NEVER run `archify preview`. It watches the file on a loopback port and returns',
+      `When it is delivered, reply with the one line: wrote ${DIAGRAMS_DIR}/${file}`,
+    ].join('\n')
+  }
+
   function diagramPromptText(description: string, file: string): string {
     return [
       `Create a diagram: ${description}`,
@@ -941,7 +975,15 @@ export function installMockHost(scenario: MockScenario): void {
       diagramRequestedFiles.set(projectId, requested)
       // A BACKGROUND session, never the chat one — see sectionSession above.
       const session = await sectionSession(projectId, 'diagram')
-      const text = diagramPromptText(description, file)
+      // Which engine, from the request rather than from settings, exactly as the
+      // real handler decides it. A spec asserts on the text that went out, so
+      // the two prompts have to be distinguishable here too.
+      const archify = req.archify as
+        | { type: string; quality: string; motion: boolean }
+        | undefined
+      const text = archify
+        ? archifyPromptText(description, file, archify)
+        : diagramPromptText(description, file)
       sends.push({ sessionId: session.id, text })
       appendEvent(session.id, 'prompt', { text, pending: false })
       return { sessionId: session.id, file }

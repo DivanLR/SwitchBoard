@@ -5,10 +5,25 @@
 // activates on an ordinary request — but the plugin does ship commands for
 // exporting and importing, and those are offered in the Commands menu.
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { DIAGRAM_COMMANDS, DIAGRAM_PLUGIN, DIAGRAMS_DIR, diagramCommandText } from '@shared/diagram'
+import {
+  ARCHIFY,
+  ARCHIFY_COMMANDS,
+  ARCHIFY_PREFIX,
+  ARCHIFY_TYPES,
+  DEFAULT_ARCHIFY,
+  DIAGRAM_COMMANDS,
+  DIAGRAM_PLUGIN,
+  DIAGRAMS_DIR,
+  archifyCommandText,
+  diagramCommandText,
+  type ArchifyOptions,
+  type ArchifyType,
+} from '@shared/diagram'
 import { relativeTime } from '@renderer/relative-time'
 import { normalizeForMatch } from '@renderer/composables/useCommandSuggestions'
 import { useDiagramsStore } from '@renderer/stores/diagrams'
+import { useSettingsStore } from '@renderer/stores/settings'
+import { useSkillsStore } from '@renderer/stores/skills'
 import MiniTerminal from '@renderer/components/MiniTerminal.vue'
 import Icon from '@renderer/components/Icon.vue'
 
@@ -26,13 +41,67 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: 'install'): void; (e: 'run', command: string): void }>()
 
 const diagrams = useDiagramsStore()
+const settings = useSettingsStore()
+const skills = useSkillsStore()
 
-onMounted(() => void diagrams.load(props.projectId))
+onMounted(() => {
+  void diagrams.load(props.projectId)
+  // The archify engine is a SKILL, so whether it is available is a question
+  // about the imported-skills list rather than about the session's command list
+  // this view is handed. Loaded here for the same reason SkillsView loads it:
+  // the store is shared, and nothing else guarantees it has been fetched.
+  void skills.load()
+  // Guarded, as Sidebar.vue does it: App.vue already loads settings at startup,
+  // and a second load would replace the store wholesale mid-edit.
+  if (!settings.settings) void settings.load()
+})
 watch(() => props.projectId, (id) => void diagrams.load(id))
 
 const description = ref('')
 /** The command/description field, so picking a command can put the caret after it. */
 const input = ref<HTMLInputElement | null>(null)
+
+// ── WHICH ENGINE ────────────────────────────────────────────────────────────
+//
+// Two ways to draw, and they are not variations on one prompt. diagram-design is
+// a plugin that activates on an ordinary request; archify is a skill wrapping a
+// CLI that validates a typed specification against a schema and only then
+// compiles it. So the choice changes the prompt, the commands in the menu, what
+// counts as installed, and how it is installed.
+//
+// Kept in Settings rather than in this component: it is a preference about how
+// the developer likes diagrams made, and it should survive leaving the tab.
+const engine = computed(() => settings.settings?.diagramEngine ?? 'diagram-design')
+const onArchify = computed(() => engine.value === 'archify')
+
+function setEngine(next: 'diagram-design' | 'archify'): void {
+  if (next === engine.value) return
+  menuOpen.value = false
+  void settings.save({ diagramEngine: next })
+}
+
+/**
+ * What archify is told before it draws — the interactive part of the archify
+ * path.
+ *
+ * Not persisted, and deliberately so. The type is a fact about the ONE diagram
+ * being asked for, not a standing preference: a developer who drew a sequence
+ * diagram this morning is no more likely to want another one now, and a sticky
+ * type would quietly mis-draw the next request.
+ */
+const archify = ref<ArchifyOptions>({ ...DEFAULT_ARCHIFY })
+
+const archifyInstalled = computed(() => skills.enabled.some((s) => s.name === ARCHIFY.skill))
+
+/** Its own install path, because it is a skill and not a plugin: the Skills
+ *  importer reads it over HTTPS, where `plugins.install` would shell out to
+ *  `claude plugin` for a marketplace that does not carry it. */
+const importingArchify = computed(() => skills.importing)
+
+async function installArchify(): Promise<void> {
+  menuOpen.value = false
+  await skills.import(ARCHIFY.source)
+}
 
 /**
  * A field holding a slash command is a command, not a description of a drawing.
@@ -40,28 +109,73 @@ const input = ref<HTMLInputElement | null>(null)
  * The one field does both because the alternative is a second input that is empty
  * and meaningless most of the time. The leading slash is the whole test, and it is
  * the same test the session's own composer applies.
+ *
+ * archify adds the second form. Its subcommands are a CLI, not slash commands,
+ * so there is no leading slash to test for and `archify ` is the marker instead
+ * — which is also exactly what the developer would type by hand.
  */
-const isCommand = computed(() => description.value.trimStart().startsWith('/'))
+const isPluginCommand = computed(() => description.value.trimStart().startsWith('/'))
+const isArchifyCommand = computed(() =>
+  description.value.trimStart().toLowerCase().startsWith(ARCHIFY_PREFIX),
+)
+const isCommand = computed(() => isPluginCommand.value || isArchifyCommand.value)
 
 /**
- * The command currently in the box, when it is one this plugin ships.
+ * The command currently in the box, when it is one of the two catalogues.
  *
- * Drives the hint under the bar. Every command here takes a FILE — none of them
- * draws anything — and the developer who has just picked one from a menu headed
- * "Commands" has no way to know that. The first real use of this menu was
- * `/export-diagram Generate a diagram of all my endpoints`, which is a drawing
- * request handed to the exporter.
+ * Drives the hint under the bar. Every diagram-design command takes a FILE —
+ * none of them draws anything — and the developer who has just picked one from a
+ * menu headed "Commands" has no way to know that. The first real use of this
+ * menu was `/export-diagram Generate a diagram of all my endpoints`, which is a
+ * drawing request handed to the exporter.
  */
-const pickedCommand = computed(() => {
-  const first = description.value.trim().split(/\s+/)[0] ?? ''
+const pickedCommand = computed<{ description: string; argumentHint: string } | null>(() => {
+  const words = description.value.trim().split(/\s+/)
+  if (isArchifyCommand.value) {
+    const sub = (words[1] ?? '').toLowerCase()
+    return ARCHIFY_COMMANDS.find((c) => c.command === sub) ?? null
+  }
+  const first = words[0] ?? ''
   const name = first.slice(first.lastIndexOf(':') + 1).replace(/^\//, '')
   return DIAGRAM_COMMANDS.find((c) => c.command === name) ?? null
+})
+
+/** Only the plugin's commands take a file and draw nothing; archify's `deliver`
+ *  and `render` very much do produce a diagram, so the warning would be wrong. */
+const commandTakesFileOnly = computed(() => pickedCommand.value !== null && !isArchifyCommand.value)
+
+/**
+ * An archify command that must not be dispatched, currently in the box.
+ *
+ * The `sendable` flag used to be consulted in exactly one place — the Commands
+ * menu's disabled button — which stopped it being PICKED and did nothing at all
+ * about it being TYPED. `archify preview …` typed by hand went straight to a
+ * background session, which is precisely the thing the flag exists to prevent:
+ * preview watches a file on a loopback port and returns only on Ctrl-C, and
+ * there is nobody at that session's keyboard to press it. The guard belongs on
+ * the dispatch path, so it is here as well.
+ */
+const refusedCommand = computed(() => {
+  if (!isArchifyCommand.value) return null
+  const sub = (description.value.trim().split(/\s+/)[1] ?? '').toLowerCase()
+  const entry = ARCHIFY_COMMANDS.find((c) => c.command === sub)
+  return entry && !entry.sendable ? entry : null
 })
 
 async function generate(): Promise<void> {
   const text = description.value.trim()
   if (!text) return
-  if (isCommand.value) {
+  // Refused rather than silently dropped: the box keeps what was typed and the
+  // hint under it says why. See refusedCommand.
+  if (refusedCommand.value) return
+  if (isArchifyCommand.value) {
+    // Same rule as the plugin path below: what was typed is theirs, and this
+    // only appends where the CLI lives and which folder is listed.
+    emit('run', archifyCommandText(text))
+    description.value = ''
+    return
+  }
+  if (isPluginCommand.value) {
     // What the developer typed, plus one sentence naming this section's own
     // folder. It used to be sent truly verbatim, and the plugin then wrote to
     // its own default of docs/ — one directory above the only folder the list
@@ -73,7 +187,8 @@ async function generate(): Promise<void> {
   }
   // The drawing happens in a background session and the finished file turns up
   // in the list below, so there is nothing to switch to and nothing to watch.
-  if (await diagrams.generate(props.projectId, text)) description.value = ''
+  const options = onArchify.value ? { ...archify.value } : undefined
+  if (await diagrams.generate(props.projectId, text, options)) description.value = ''
 }
 
 /** Shown only while it belongs to the project on screen. */
@@ -100,6 +215,11 @@ const list = computed(() =>
 // download card that appears for one frame and then leaves is worse than one
 // that arrives a moment late.
 const installed = computed(() => {
+  // archify answers this question from a different place entirely. It is an
+  // imported SKILL, so the app installed it itself and knows for certain
+  // whether it is there — no probe, no "not known yet", and no evidence-first
+  // guessing. The list below may well be full of diagrams the OTHER engine drew.
+  if (onArchify.value) return archifyInstalled.value || skills.loading
   if (diagrams.byProject[props.projectId] === undefined) return true
   if (list.value.length > 0 || pending.value) return true
   if (props.available.length === 0) return true
@@ -136,16 +256,33 @@ const selectedEntry = computed(() => list.value.find((d) => d.file === selected.
 // command list means "not known yet", not "missing".
 const menuOpen = ref(false)
 
-const commands = computed(() =>
-  DIAGRAM_COMMANDS.map((c) => ({
+interface MenuCommand {
+  command: string
+  description: string
+  argumentHint: string
+  available: boolean
+  /** False for `preview`, which never returns. See ARCHIFY_COMMANDS. */
+  sendable: boolean
+}
+
+const commands = computed<MenuCommand[]>(() => {
+  // archify's availability is the skill's, once, for the whole catalogue: they
+  // are subcommands of one binary, so either all of them can run or none can.
+  // There is no per-command probe to do, and pretending otherwise would show
+  // fourteen identical "missing" badges.
+  if (onArchify.value) {
+    return ARCHIFY_COMMANDS.map((c) => ({ ...c, available: archifyInstalled.value }))
+  }
+  return DIAGRAM_COMMANDS.map((c) => ({
     ...c,
+    sendable: true,
     available:
       props.available.length === 0 ||
       props.available.some(
         (name) => normalizeForMatch(name.slice(name.lastIndexOf(':') + 1)) === normalizeForMatch(c.command),
       ),
-  })),
-)
+  }))
+})
 
 /**
  * Writes the command into the box, in front of whatever is being typed, and sends
@@ -162,11 +299,22 @@ const commands = computed(() =>
  * nothing. Everything after the command survives, so a half-typed message is not
  * lost by opening the menu.
  */
-function pickCommand(entry: (typeof commands.value)[number]): void {
+function pickCommand(entry: MenuCommand): void {
   menuOpen.value = false
-  const rest = description.value.replace(/^\s*\/\S*\s*/, '').trim()
-  const argument = entry.takesDiagram && selected.value ? ` ${DIAGRAMS_DIR}/${selected.value}` : ''
-  description.value = `/${DIAGRAM_PLUGIN.namespace}:${entry.command}${argument} ${rest}`.trimEnd() + ' '
+  if (onArchify.value) {
+    // Its subcommands are argv, not slash commands, so the whole `archify …`
+    // line is rewritten rather than a leading token replaced. The selected
+    // diagram is offered to the two that take a delivered HTML file, on the
+    // same rule as the plugin path: the section already knows that argument.
+    const wantsHtml = entry.command === 'check' || entry.command === 'visual-check'
+    const argument = wantsHtml && selected.value ? ` ${DIAGRAMS_DIR}/${selected.value}` : ''
+    description.value = `${ARCHIFY_PREFIX}${entry.command}${argument} `
+  } else {
+    const rest = description.value.replace(/^\s*\/\S*\s*/, '').trim()
+    const takesDiagram = DIAGRAM_COMMANDS.find((c) => c.command === entry.command)?.takesDiagram
+    const argument = takesDiagram && selected.value ? ` ${DIAGRAMS_DIR}/${selected.value}` : ''
+    description.value = `/${DIAGRAM_PLUGIN.namespace}:${entry.command}${argument} ${rest}`.trimEnd() + ' '
+  }
   // Focus with the caret at the END, after the render that carries the new value.
   // Without this the field keeps the caret at 0 and the next keystroke lands in
   // FRONT of the command, which turns the whole line back into a description and
@@ -179,11 +327,22 @@ function pickCommand(entry: (typeof commands.value)[number]): void {
   })
 }
 
-/** Install from the command menu, for the case where the install card is not shown. */
+/** Install from the command menu, for the case where the install card is not
+ *  shown. Each engine has its own installer: a plugin marketplace for one, the
+ *  app's Skills importer for the other. */
 function installFromMenu(): void {
+  if (onArchify.value) {
+    void installArchify()
+    return
+  }
   menuOpen.value = false
   emit('install')
 }
+
+/** True while whichever installer this engine uses is running. */
+const installBusy = computed(() =>
+  onArchify.value ? importingArchify.value : props.installing === true,
+)
 
 
 // Opening the tab on a project that already has diagrams shows one rather than an
@@ -200,23 +359,80 @@ watch(
 
 <template>
   <div class="dgm" data-testid="diagrams-view">
+    <!-- Which engine draws. Two genuinely different tools, not two skins on one:
+         diagram-design activates on a sentence, archify validates a typed
+         specification against a schema and only then compiles it. The choice
+         changes the prompt, the commands below, and what "installed" means. -->
+    <div class="engine" data-testid="diagram-engine">
+      <button
+        type="button"
+        class="eng"
+        :class="{ on: !onArchify }"
+        data-testid="diagram-engine-diagram-design"
+        :aria-pressed="!onArchify"
+        title="The diagram-design plugin: describe a drawing and it draws it."
+        @click="setEngine('diagram-design')"
+      >
+        diagram-design
+      </button>
+      <button
+        type="button"
+        class="eng"
+        :class="{ on: onArchify }"
+        data-testid="diagram-engine-archify"
+        :aria-pressed="onArchify"
+        title="The archify skill: author typed JSON, validate it against a schema, then deliver."
+        @click="setEngine('archify')"
+      >
+        archify
+      </button>
+    </div>
+
     <div class="intro">
-      Describe a diagram and the project's session will draw it with the diagram-design plugin, as a
-      standalone HTML file in <span class="mono">{{ DIAGRAMS_DIR }}</span>.
+      <template v-if="onArchify">
+        Pick a type, describe the diagram, and the project's session authors a typed
+        specification, validates it with archify, then delivers a standalone HTML file into
+        <span class="mono">{{ DIAGRAMS_DIR }}</span>.
+      </template>
+      <template v-else>
+        Describe a diagram and the project's session will draw it with the diagram-design plugin, as
+        a standalone HTML file in <span class="mono">{{ DIAGRAMS_DIR }}</span>.
+      </template>
     </div>
 
     <div v-if="!installed" class="install-card">
       <div class="install-text">
         <div class="install-title">
-          diagram-design is not installed in this project — add it to generate diagrams
+          <template v-if="onArchify">
+            archify is not imported yet — add the skill to generate diagrams with it
+          </template>
+          <template v-else>
+            diagram-design is not installed in this project — add it to generate diagrams
+          </template>
         </div>
-        <div class="install-cmds mono">{{ DIAGRAM_PLUGIN.marketplace }} · {{ DIAGRAM_PLUGIN.pkg }}</div>
-        <div v-if="installError" class="install-error" data-testid="diagrams-install-error">
-          {{ props.installError }}
+        <div class="install-cmds mono">
+          <template v-if="onArchify">{{ ARCHIFY.source }}</template>
+          <template v-else>{{ DIAGRAM_PLUGIN.marketplace }} · {{ DIAGRAM_PLUGIN.pkg }}</template>
+        </div>
+        <!-- Two different installers, so two different error sources. The plugin's
+             comes back from the host CLI through the parent; archify's is the
+             Skills importer's own, which the store already holds. -->
+        <div
+          v-if="onArchify ? skills.error : installError"
+          class="install-error"
+          data-testid="diagrams-install-error"
+        >
+          {{ onArchify ? skills.error : props.installError }}
         </div>
       </div>
-      <button class="install-btn" data-testid="diagrams-install" :disabled="props.installing" @click="emit('install')">
-        <template v-if="props.installing">Installing…</template>
+      <button
+        class="install-btn"
+        data-testid="diagrams-install"
+        :disabled="installBusy"
+        @click="onArchify ? installArchify() : emit('install')"
+      >
+        <template v-if="installBusy">{{ onArchify ? 'Importing…' : 'Installing…' }}</template>
+        <template v-else-if="onArchify"><Icon name="download" :size="12" /> Import the skill</template>
         <template v-else><Icon name="download" :size="12" /> Download to project</template>
       </button>
     </div>
@@ -233,7 +449,12 @@ watch(
       />
       <!-- One button, two jobs, and it says which: a field holding a slash command
            sends that command, and anything else describes a drawing. -->
-      <button class="add-btn" data-testid="diagram-generate" :disabled="diagrams.generating || !description.trim()" @click="generate()">
+      <button
+        class="add-btn"
+        data-testid="diagram-generate"
+        :disabled="diagrams.generating || !description.trim() || refusedCommand !== null"
+        @click="generate()"
+      >
         <template v-if="diagrams.generating">Asking…</template>
         <template v-else-if="isCommand"><Icon name="chevron-right" :size="12" /> Send</template>
         <template v-else><Icon name="pencil" :size="12" /> Generate</template>
@@ -243,43 +464,127 @@ watch(
           Commands <Icon name="chevron-down" :size="11" />
         </button>
         <div v-if="menuOpen" class="cmd-menu" data-testid="diagram-command-menu">
-          <!-- A missing command installs the plugin instead of doing nothing. The
+          <!-- A missing command installs the engine instead of doing nothing. The
                big install card is deliberately suppressed once this project has
                diagrams (see `installed`), which left this menu as a dead end: it
                named three commands, said each was absent, and offered no way to
-               fix that. Same action the card's button emits. -->
+               fix that. Same action the card's button takes. -->
           <button
             v-for="c in commands"
             :key="c.command"
             class="cmd-item"
-            :class="{ missing: !c.available }"
+            :class="{ missing: !c.available, inert: c.available && !c.sendable }"
             :data-testid="`diagram-command-${c.command}`"
-            :disabled="props.installing"
+            :disabled="installBusy || (c.available && !c.sendable)"
             @click="c.available ? pickCommand(c) : installFromMenu()"
           >
-            <span class="cmd-name mono">/{{ c.command }}</span>
+            <span class="cmd-name mono">{{ onArchify ? 'archify ' : '/' }}{{ c.command }}</span>
             <span class="cmd-desc">{{ c.description }}</span>
             <span class="cmd-args mono">{{ c.argumentHint }}</span>
+            <!-- `preview` is listed and refused rather than hidden. It watches a
+                 file on a loopback port and returns only on Ctrl-C, and these
+                 commands run in a background session with nobody at the keyboard:
+                 sending it would hold that session open until it was killed. -->
             <span
-              v-if="!c.available"
+              v-if="c.available && !c.sendable"
+              class="cmd-missing"
+              :data-testid="`diagram-command-inert-${c.command}`"
+            >
+              runs until Ctrl-C — not from here
+            </span>
+            <span
+              v-else-if="!c.available"
               class="cmd-missing"
               :data-testid="`diagram-install-hint-${c.command}`"
             >
               <Icon name="download" :size="11" />
-              {{ props.installing ? 'installing…' : 'install diagram-design' }}
+              <template v-if="installBusy">{{ onArchify ? 'importing…' : 'installing…' }}</template>
+              <template v-else>{{ onArchify ? 'import archify' : 'install diagram-design' }}</template>
             </span>
           </button>
         </div>
       </div>
     </div>
+    <!-- THE INTERACTIVE BAR. archify commits to one of five types before it
+         draws, and the five draw genuinely different pictures, so the type is
+         asked for rather than inferred from a sentence. Hidden while a command
+         is in the box: a command carries its own arguments and none of this
+         applies to it. -->
+    <div v-if="onArchify && !isCommand" class="archify-bar" data-testid="archify-options">
+      <div class="ab-row">
+        <span class="ab-label">type</span>
+        <button
+          v-for="t in ARCHIFY_TYPES"
+          :key="t.type"
+          type="button"
+          class="ab-chip"
+          :class="{ on: archify.type === t.type }"
+          :data-testid="`archify-type-${t.type}`"
+          :aria-pressed="archify.type === t.type"
+          :title="t.hint"
+          @click="archify.type = t.type as ArchifyType"
+        >
+          {{ t.label }}
+        </button>
+      </div>
+      <div class="ab-row">
+        <span class="ab-label">quality</span>
+        <button
+          type="button"
+          class="ab-chip"
+          :class="{ on: archify.quality === 'showcase' }"
+          data-testid="archify-quality-showcase"
+          :aria-pressed="archify.quality === 'showcase'"
+          title="archify's own authoring default: all nine artifact checks, no warnings."
+          @click="archify.quality = 'showcase'"
+        >
+          showcase
+        </button>
+        <button
+          type="button"
+          class="ab-chip"
+          :class="{ on: archify.quality === 'standard' }"
+          data-testid="archify-quality-standard"
+          :aria-pressed="archify.quality === 'standard'"
+          title="For a deliberately dense map, where the showcase budget would cut too much."
+          @click="archify.quality = 'standard'"
+        >
+          standard
+        </button>
+        <span class="ab-gap"></span>
+        <button
+          type="button"
+          class="ab-chip"
+          :class="{ on: archify.motion }"
+          data-testid="archify-motion"
+          role="switch"
+          :aria-checked="archify.motion"
+          title="Turn on the viewer extras: traced motion and a few guided chapters. Off by default, which is the skill's own rule."
+          @click="archify.motion = !archify.motion"
+        >
+          <Icon name="play" :size="11" /> interactive viewer
+        </button>
+      </div>
+      <div class="ab-hint">
+        {{ ARCHIFY_TYPES.find((t) => t.type === archify.type)?.hint }}
+      </div>
+    </div>
+
     <!-- What the command in the box actually takes. Sits under the bar rather than
          in the placeholder, because by the time a command is in the field the
          placeholder is gone. -->
     <div v-if="pickedCommand" class="cmd-hint mono" data-testid="diagram-command-hint">
       <span class="ch-args">{{ pickedCommand.argumentHint }}</span>
       <span class="ch-desc">{{ pickedCommand.description }}</span>
-      <span class="ch-note">
+      <span v-if="commandTakesFileOnly" class="ch-note">
         Takes a file. To draw something new, clear this and describe it instead.
+      </span>
+      <!-- Says why the button will not go, rather than leaving a dead control.
+           Typed by hand this is the only warning there is: the menu's disabled
+           row never appeared. -->
+      <span v-if="refusedCommand" class="ch-refuse" data-testid="diagram-command-refused">
+        Runs until Ctrl-C, and nothing can press it in a background session. Use
+        <span class="mono">archify validate</span> or <span class="mono">archify deliver</span>.
       </span>
     </div>
     <div v-if="menuOpen" class="cmd-scrim" @click="menuOpen = false"></div>
@@ -588,6 +893,114 @@ watch(
   text-wrap: pretty;
 }
 
+/* Two engines, one segmented control. A segmented control rather than a dropdown
+   because there are exactly two and both names matter: which one drew a diagram
+   is the first thing you want to know when it comes out wrong. */
+.engine {
+  flex: none;
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg-seg);
+  border: 1px solid var(--border-seg);
+  border-radius: var(--rp);
+}
+
+.eng {
+  padding: 3px 11px;
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  color: var(--text-tab);
+  background: none;
+  border: none;
+  border-radius: var(--rp);
+  cursor: pointer;
+}
+
+.eng:hover {
+  color: var(--text-strong);
+}
+
+.eng.on {
+  color: var(--text-strong);
+  background: var(--bg-card);
+  box-shadow: var(--elev);
+}
+
+/* The interactive bar. Chips rather than a <select>, because the hint under them
+   changes with the choice and a native select cannot show that while it is open —
+   and the whole reason the type is asked for is that the developer may not know
+   which of the five they want. */
+.archify-bar {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 840px;
+  padding: 9px 11px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: var(--rc);
+}
+
+.ab-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.ab-label {
+  min-width: 46px;
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+}
+
+.ab-gap {
+  flex: 1;
+}
+
+.ab-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  font-size: var(--fs-micro);
+  color: var(--text-meta);
+  background: transparent;
+  border: 1px solid var(--border-seg);
+  border-radius: var(--rp);
+  cursor: pointer;
+}
+
+.ab-chip:hover {
+  color: var(--text-strong);
+  border-color: var(--border-strong);
+}
+
+/* --green, not --green-ink. The ink token is the colour that sits ON a solid
+   green fill (#FFFFFF light, #0E1013 dark); over --bg-chip, which is a 5% wash
+   and therefore essentially the page, it is white-on-white in the light theme.
+   A wash background takes the foreground colour, not its ink. */
+.ab-chip.on {
+  color: var(--green);
+  background: var(--bg-chip);
+  border-color: var(--green);
+}
+
+/* archify's own words for the chosen type, from its type router. It is the one
+   line that stops the choice being six names with no meaning.
+
+   No hanging indent to line it up under the chips: .ab-row wraps, and the moment
+   it does there is no single column to align to — the indent was only ever right
+   for the unwrapped case. Flush left is right in both. */
+.ab-hint {
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+}
+
 .install-card {
   display: flex;
   align-items: center;
@@ -775,6 +1188,12 @@ watch(
   color: var(--amber);
 }
 
+/* A refusal, not a caution: the button is disabled and this says why. Amber is
+   earned here — the reading is "this command cannot run from here". */
+.ch-refuse {
+  color: var(--amber);
+}
+
 /* The plan strip: facts about the drawing, set as data rather than prose. */
 .plan {
   display: flex;
@@ -817,6 +1236,18 @@ watch(
 .cmd-item.missing .cmd-name,
 .cmd-item.missing .cmd-desc {
   color: var(--text-meta);
+}
+
+/* `preview` IS installed and does work — just not from a background session with
+   nobody to press Ctrl-C. Dimmed rather than hidden, so the menu still says what
+   the tool can do, and its note says why this is the one row that will not go. */
+.cmd-item.inert .cmd-name,
+.cmd-item.inert .cmd-desc {
+  color: var(--text-faint);
+}
+
+.cmd-item.inert .cmd-missing {
+  color: var(--text-faint);
 }
 
 .cmd-scrim {

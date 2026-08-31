@@ -3,6 +3,7 @@
 // transport separation), mirroring stores/specs.ts and stores/diff.ts.
 import { reactive } from 'vue'
 import type { DiagramEntry } from '@shared/domain'
+import type { ArchifyOptions } from '@shared/diagram'
 import { errorMessage, invoke } from '@renderer/ipc'
 
 // Guards a keyed write in byProject against a stale response landing after a
@@ -62,11 +63,22 @@ const store = reactive({
    * the app already chose, so the list can show the row as on its way instead of
    * showing nothing at all for a minute.
    */
-  async generate(projectId: string, description: string): Promise<boolean> {
+  async generate(
+    projectId: string,
+    description: string,
+    archify?: ArchifyOptions,
+  ): Promise<boolean> {
     this.generating = true
     this.error = null
     try {
-      const { file, sessionId } = await invoke('diagrams.generate', { projectId, description })
+      // Spread rather than passed as `archify` unconditionally: the request
+      // crosses structuredClone at the bridge, and `archify: undefined` is a
+      // key the main process would then have to distinguish from an absent one.
+      const { file, sessionId } = await invoke('diagrams.generate', {
+        projectId,
+        description,
+        ...(archify ? { archify } : {}),
+      })
       this.pending = { projectId, file, description, sessionId }
       void this.awaitFile(projectId, file)
       return true

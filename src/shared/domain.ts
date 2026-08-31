@@ -756,6 +756,27 @@ export interface Settings {
    */
   databaseMcpServers: string[]
   /**
+   * Which engine the Diagrams section draws with: the diagram-design plugin, or
+   * the archify skill's validate-then-deliver pipeline. Global rather than
+   * per-project, because it is a preference about how the developer likes
+   * diagrams made, not a fact about any one repository. See @shared/diagram.
+   */
+  diagramEngine: 'diagram-design' | 'archify'
+  /**
+   * Imported skills pinned to the top of the Skills section, in the order the
+   * developer starred them.
+   *
+   * An array rather than a set because the ORDER is the point: these are the
+   * ones reached for most, and a stable arrangement is what makes a list of
+   * twenty usable. Names, because a skill's name is its primary key
+   * (custom_skills.name) and what a session addresses it by.
+   *
+   * A name here for a skill that has since been removed is simply ignored, not
+   * cleaned up: a skill removed and re-imported keeps its place, which is what
+   * a developer who starred it would expect.
+   */
+  favouriteSkills: string[]
+  /**
    * The subset of the roster currently ACTIVE in the MCP chat — the working
    * combination. Each distinct combination gets its own scan doc + history row.
    */
@@ -826,6 +847,8 @@ export const DEFAULT_SETTINGS: Settings = {
   databaseMcpServers: [],
   mcpActiveServers: [],
   sandboxMemory: '6g',
+  diagramEngine: 'diagram-design',
+  favouriteSkills: [],
 }
 
 /**

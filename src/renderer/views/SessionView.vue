@@ -1114,8 +1114,18 @@ const {
 </script>
 
 <template>
+  <!-- `is-ended` greys the TRANSCRIPT the moment the session is over, so a dead
+       session is legible at a glance rather than only from the small "Ended"
+       pill. Bound on the root because the header, the stream and the composer
+       are siblings under it with no nearer common ancestor; the rules themselves
+       reach only the stream and the raw log, so the section tabs (Diagrams,
+       Skills, Tests…) stay live — they each start a background session of their
+       own and work fine without this one. See the style block for what is
+       exempt and why. -->
   <div
     class="session-view"
+    :class="{ 'is-ended': !!endedSession }"
+    :data-session-ended="endedSession ? 'true' : 'false'"
     @dragover="onPaneDragOver"
     @dragleave="onPaneDragLeave"
     @drop="onPaneDrop"
@@ -2143,6 +2153,74 @@ const {
   min-width: 0;
   position: relative; /* anchors the drop-overlay */
 }
+
+/* ── AN ENDED SESSION READS AS ENDED ───────────────────────────────────────
+   The only thing that used to say a session was over was a small "Ended" pill in
+   the header, above a transcript that still rendered at full strength. A dead
+   session and a live idle one looked identical from a metre away, which is the
+   distance most of this is read from.
+
+   ONE RULE GOVERNS THE WHOLE TREATMENT: nothing that still works is dimmed. A
+   faded control that is nonetheless clickable is a lie — it reads as unavailable
+   and is not — so every exemption below is an element that outlives the session.
+
+   That rule is also why the transcript is dimmed CHILD BY CHILD
+   (`.stream-inner > *`) rather than by fading `.stream` as a whole. `opacity` on
+   an ancestor composites the entire subtree as one group, so an `opacity: 1` on
+   the ended banner inside a faded stream would do exactly nothing; the same goes
+   for `filter`. Selecting the siblings is the only version that works.
+
+   WHAT IS EXEMPT, AND WHY:
+   - The ended banner. It carries the mode picker, the resume switch and Start.
+     Greying the exit along with the room is how a dead end gets built.
+   - `.load-earlier`, which still fetches earlier events.
+   - The whole header. Three of its controls outlive the session — the WSL
+     container toggle, "+ Session", and the rename button, whose own v-if takes
+     `liveSession || endedSession` — and per the ancestor-opacity trap above, a
+     faded header cannot exempt them. Dimming it correctly would mean naming
+     every non-interactive element in the header and keeping that list in step
+     with it for ever, and it buys nothing: the header already states the fact
+     outright in its `.pill.ended` badge.
+   - The section views (Diagrams, Skills, Tests…), siblings under this root that
+     work perfectly well with no live session — each starts a background session
+     of its own. Hence rules that name `.stream-inner` and `.raw-view` rather
+     than fading everything inside `.session-view`.
+   - The composer, which already carries `.composer.dead`.
+
+   Nothing here sets `pointer-events`. An ended transcript is still readable,
+   scrollable, selectable and copyable: this says "over", not "gone". */
+
+/* The raw log takes `filter: saturate()` because it is ONE element and holds no
+   controls, only `.raw-line`s. The clean stream cannot: there the property would
+   land on every event row, and a filter forces a containing block per element,
+   so a long transcript would pay for it on every scroll. */
+.session-view.is-ended .raw-view {
+  opacity: 0.7;
+  filter: saturate(0.4);
+}
+
+/* 0.7, and not the 0.55 this started at. --text-meta is already the design
+   system's dimmest body tier at roughly 5:1 against --bg, and fading it to 0.55
+   took the transcript to about 2.5:1 — under every readable floor, for content
+   the developer still has to read. An ended session is precisely the one gone
+   back to in order to find out what happened. 0.7 is plainly greyer than a live
+   pane and still legible; the hover rule removes even that cost while reading. */
+.session-view.is-ended .stream-inner > *:not(.ended):not(.load-earlier) {
+  opacity: 0.7;
+}
+
+/* Reading it should cost nothing. focus-within carries the same for the keyboard. */
+.session-view.is-ended .stream-inner:hover > *:not(.ended),
+.session-view.is-ended .stream-inner:focus-within > *:not(.ended) {
+  opacity: 1;
+}
+
+/* Standing at full strength inside a faded field, the banner is the one thing
+   left to look at — which is the point. The border does the rest. */
+.session-view.is-ended .stream-inner > .ended {
+  border-color: var(--border-strong);
+}
+
 
 .head {
   padding: 14px 22px 12px;
