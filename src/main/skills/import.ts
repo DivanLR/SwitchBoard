@@ -25,6 +25,7 @@
 // silently trusted for ever.
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, posix } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import type { CustomSkill, SkillImportResult } from '@shared/domain'
 import type { IpcError } from '@shared/ipc-types'
 import { isSafeRepoPath, isSafeSegment, readSkillSource, type SkillSource } from '@shared/skill-source'
@@ -38,6 +39,12 @@ const MAX_TOTAL_BYTES = 20 * 1024 * 1024
  *  is something else wearing the name. */
 const MAX_FILE_BYTES = 2 * 1024 * 1024
 const FETCH_TIMEOUT_MS = 30_000
+/** A skill is one request per file, and archify's is 190 of them. raw.github
+ *  refused exactly one of those with a 400 — the same URL answers 200 from a
+ *  shell a second later — and that single blip threw away an import that had
+ *  already landed 85 files. Three tries, briefly spaced. */
+const DOWNLOAD_ATTEMPTS = 3
+const RETRY_PAUSE_MS = 400
 
 /**
  * Read a GitHub URL into its parts, or throw the IpcError the endpoint answers with.
@@ -146,18 +153,37 @@ async function download(source: SkillSource, ref: string, path: string): Promise
     .split('/')
     .map(encodeURIComponent)
     .join('/')}`
-  const response = await fetch(url, {
-    headers: { 'User-Agent': 'switchboard' },
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-  })
-  if (!response.ok) {
-    throw { code: 'NOT_FOUND', message: `Could not read ${path} (${response.status}).` } satisfies IpcError
+  // `last` carries what the final attempt saw, so the message still names a
+  // status rather than a generic failure. 0 means the request never answered.
+  let last = 0
+  for (let attempt = 1; attempt <= DOWNLOAD_ATTEMPTS; attempt += 1) {
+    if (attempt > 1) await delay(RETRY_PAUSE_MS * (attempt - 1))
+    let response: Response
+    try {
+      response = await fetch(url, {
+        headers: { 'User-Agent': 'switchboard' },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      })
+    } catch {
+      last = 0
+      continue
+    }
+    if (response.ok) {
+      const buffer = Buffer.from(await response.arrayBuffer())
+      if (buffer.byteLength > MAX_FILE_BYTES) {
+        throw { code: 'INVALID_PATH', message: `${path} is larger than this imports.` } satisfies IpcError
+      }
+      return buffer
+    }
+    last = response.status
+    // A 404 is an answer, not a blip: the tree named a file that is not there,
+    // and asking twice more only makes the failure slower.
+    if (response.status === 404) break
   }
-  const buffer = Buffer.from(await response.arrayBuffer())
-  if (buffer.byteLength > MAX_FILE_BYTES) {
-    throw { code: 'INVALID_PATH', message: `${path} is larger than this imports.` } satisfies IpcError
-  }
-  return buffer
+  throw {
+    code: 'NOT_FOUND',
+    message: `Could not read ${path} (${last === 0 ? 'no response' : last}).`,
+  } satisfies IpcError
 }
 
 /**

@@ -2,11 +2,16 @@
 //
 // These are the parts that decide what a URL is allowed to mean and what a
 // remote repository is allowed to write, so they are tested directly rather than
-// through a network call. The download path itself is not mocked out and
-// re-tested here: it is fetch plus writeFile, and a test of that shape only
-// asserts that Node works.
-import { describe, expect, it } from 'vitest'
+// through a network call. Fetching a file is still not re-tested here — it is
+// fetch plus writeFile, and a test of that shape only asserts that Node works —
+// but WHICH failures end an import is a policy, not plumbing, and that is
+// tested against a stubbed fetch at the bottom of this file.
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
+  importSkills,
   isUsableSkillName,
   parseSkillFrontmatter,
   parseSkillSource,
@@ -163,6 +168,67 @@ describe('readSkillSource', () => {
         threw = true
       }
       expect(threw, input).toBe(!shared.ok)
+    }
+  })
+})
+
+// A skill is one HTTP request per file, and archify's is 190 of them. One of
+// those came back 400 — the same URL answered 200 from a shell moments later —
+// and the import threw away 85 files that had already landed. So a blip is
+// retried and a 404 is not.
+describe('importSkills download policy', () => {
+  const SOURCE = 'https://github.com/tt-a1i/archify/tree/main/archify'
+  const TREE = {
+    tree: [
+      { path: 'archify/SKILL.md', type: 'blob' },
+      { path: 'archify/bin/archify.mjs', type: 'blob' },
+    ],
+  }
+  const MANIFEST = '---\nname: archify\ndescription: Draws architecture.\n---\n'
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  /** Answers the tree and the SKILL.md, and hands `bin/archify.mjs` to `bin`. */
+  function stubGitHub(bin: (attempt: number) => Response): string[] {
+    const calls: string[] = []
+    let attempt = 0
+    vi.stubGlobal('fetch', async (url: string) => {
+      calls.push(url)
+      if (url.startsWith('https://api.github.com/')) return new Response(JSON.stringify(TREE))
+      if (url.endsWith('SKILL.md')) return new Response(MANIFEST)
+      attempt += 1
+      return bin(attempt)
+    })
+    return calls
+  }
+
+  it('retries a blip rather than losing an import that had almost landed', async () => {
+    const calls = stubGitHub((attempt) =>
+      attempt === 1 ? new Response('', { status: 400 }) : new Response('export const x = 1\n'),
+    )
+    const root = await mkdtemp(join(tmpdir(), 'sb-skills-'))
+    try {
+      const result = await importSkills(SOURCE, root, new Set())
+      expect(result.imported).toMatchObject([{ name: 'archify', fileCount: 2 }])
+      expect(await readFile(join(root, 'archify', 'bin', 'archify.mjs'), 'utf8')).toContain('export const x')
+      expect(calls.filter((url) => url.endsWith('archify.mjs'))).toHaveLength(2)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('asks once for a 404, which is an answer and not a blip', async () => {
+    const calls = stubGitHub(() => new Response('', { status: 404 }))
+    const root = await mkdtemp(join(tmpdir(), 'sb-skills-'))
+    try {
+      await expect(importSkills(SOURCE, root, new Set())).rejects.toMatchObject({
+        message: 'Could not read archify/bin/archify.mjs (404).',
+      })
+      expect(calls.filter((url) => url.endsWith('archify.mjs'))).toHaveLength(1)
+    } finally {
+      await rm(root, { recursive: true, force: true })
     }
   })
 })

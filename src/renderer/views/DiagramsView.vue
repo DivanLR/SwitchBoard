@@ -1123,6 +1123,12 @@ watch(
   right: 0;
   z-index: 30;
   min-width: 360px;
+  /* archify lists fourteen commands, each three lines tall. Unbounded, the menu
+     ran past the bottom of the window and the tail was unreachable — the bar
+     sits near the top of the view, so opening upwards would be worse. Cap and
+     scroll. */
+  max-height: 60vh;
+  overflow-y: auto;
   padding: 4px;
   background: var(--bg-panel-2);
   border: 1px solid var(--border-card);
