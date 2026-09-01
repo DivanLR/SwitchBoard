@@ -1656,7 +1656,7 @@ const {
               </div>
             </div>
 
-            <span class="bypass-inline mono">
+            <span class="bypass-inline">
               <button
                 class="switch"
                 :class="{ on: resumeSession }"
@@ -1684,7 +1684,7 @@ const {
                  decides where this project's specs, tests, diff comments, cleanup
                  and diagrams run from now on. The label has to say so, or the
                  control lies about its own blast radius. -->
-            <span class="bypass-inline mono">
+            <span class="bypass-inline">
               <button
                 class="switch"
                 :class="{ on: containerOn }"
@@ -2823,25 +2823,120 @@ const {
   margin-bottom: 13px;
 }
 
+/* Three parts, not one flat queue. Row 1 is the frame — how it runs, and the
+   button that runs it. Rows 2 and 3 are the choices that shape the frame, and
+   they sit together in a well of their own. This replaced a single flex row in
+   which a dropdown, two switch-and-label pairs and a button shared 476px of
+   content box with no wrapping allowed, so every item shrank toward its label
+   and the two choices read as debris between the two things that looked like
+   controls. */
 .ended-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0 12px;
   align-items: center;
-  gap: 8px;
   margin-top: 10px;
 }
 
-.bypass-inline {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: var(--fs-meta);
-  color: var(--text-faint);
+.ended-actions .mode-pick {
+  grid-column: 1;
+  grid-row: 1;
 }
 
-/* Start is the commit; it sits at the far right of the row, after the two
-   choices that shape it. */
+/* Start is the commit; it sits at the far right of the frame row, after the
+   mode that shapes it and above the two choices that qualify it. Placed by the
+   grid rather than by `margin-left: auto`, which is what held it right when this
+   row was flex. */
 .ended-actions .btn-solid {
-  margin-left: auto;
+  grid-column: 2;
+  grid-row: 1;
+}
+
+/* THE TWO SWITCHES ARE ONE ORGAN. An inset well, one hairline around both rows,
+   label left and switch right on each — so a choice is a row you read across,
+   not a pair you find in a queue.
+
+   There is no wrapper element to draw the well with, and adding one would mean
+   re-authoring markup for something CSS can do: the rows draw it between
+   themselves instead. The first rounds its top, the second drops its top border
+   and rounds its bottom, and the seam between them is the shared hairline.
+   `nth-of-type` is safe here because these are the only two spans in the row.
+
+   The label also drops its `mono` class and the caption tier. It sat at 11px
+   --text-faint beside a 17px --text-bright heading, which made two live choices
+   read as footnotes; DESIGN.md reserves the monospace face for code, paths, ids,
+   diffs and ticking figures, and "Resume session" is none of those. */
+.bypass-inline {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: row-reverse;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg-code);
+  border: 1px solid var(--border-code);
+  font-size: var(--fs-ui);
+  color: var(--text-body);
+}
+
+.ended-actions .bypass-inline:nth-of-type(1) {
+  grid-row: 2;
+  margin-top: 14px;
+  border-radius: var(--rc) var(--rc) 0 0;
+}
+
+.ended-actions .bypass-inline:nth-of-type(2) {
+  grid-row: 3;
+  border-top: none;
+  border-radius: 0 0 var(--rc) var(--rc);
+}
+
+/* The switch carried no border, so an off track read as a dark patch rather than
+   an empty well with a handle in it. It needs the track lighter than its ground
+   now that the ground is the well's own --bg-code, or an off switch would be
+   --bg-code on --bg-code and show nothing but its hairline.
+
+   Scoped to .bypass-inline deliberately. The same three gaps exist on every
+   other .switch in the app (SettingsPanel, TestsView), but those are not what
+   was reviewed here, and the global rule lives in styles.css. */
+.bypass-inline .switch {
+  background: var(--bg-seg);
+  border: 1px solid var(--border-strong);
+}
+
+/* 15px inside a 38x21 border-box with a 1px border: 2 + 15 + 2 clears the 19px
+   content box exactly, so adding the border does not push the knob off-centre. */
+.bypass-inline .switch .knob {
+  top: 2px;
+  left: 2px;
+  width: 15px;
+  height: 15px;
+  background: var(--text-mid);
+}
+
+.bypass-inline .switch.on {
+  background: var(--green);
+  border-color: var(--green);
+}
+
+.bypass-inline .switch.on .knob {
+  left: auto;
+  right: 2px;
+  background: var(--green-ink);
+}
+
+/* 0.45 and a default cursor is what DESIGN.md already grants every other
+   disabled control; the switch was simply never told, so one that cannot be
+   operated looked exactly like one that can. */
+.bypass-inline .switch:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.bypass-inline .switch:focus-visible {
+  outline: 1px solid var(--green);
+  outline-offset: 2px;
 }
 
 /* --- Session mode picker (ended banner) --- */

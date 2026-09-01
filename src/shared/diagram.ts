@@ -162,6 +162,88 @@ export const DIAGRAM_COMMANDS = [
 ] as const
 
 /**
+ * What Browse opens on, per command.
+ *
+ * `takesDiagram` above marks the commands whose file the section already knows —
+ * it is the drawing in the pane, and `pickCommand` fills it in. These are the
+ * other case: the file lives somewhere on the developer's machine and the only
+ * way to name it was to type the whole path into the box. A native picker is the
+ * answer, and it should open on the files the command can actually read rather
+ * than on everything.
+ *
+ * Keyed by command, and lives in shared rather than in the view, so the main
+ * process can validate a pick request against a closed set instead of taking
+ * dialogue configuration from the renderer.
+ *
+ * Only the diagram-design commands are here. archify's subcommands are argv with
+ * several positional slots (`deliver <type> <input.json> [output.html]`), and a
+ * picker that guesses which slot a path belongs in would put it in the wrong one.
+ */
+export const DIAGRAM_FILE_PICKS = {
+  'import-mermaid': {
+    title: 'Choose a Mermaid file',
+    name: 'Mermaid',
+    extensions: ['mmd', 'mermaid', 'md', 'txt'],
+  },
+  'import-drawio': {
+    title: 'Choose a draw.io file',
+    name: 'draw.io',
+    extensions: ['drawio', 'xml', 'svg', 'png'],
+  },
+  'export-diagram': {
+    title: 'Choose a diagram HTML file',
+    name: 'Diagram HTML',
+    extensions: ['html', 'htm'],
+  },
+  /* The one the section's own Browse button opens: every source any of the three
+     can read, in one dialogue, because at the point of clicking Browse the
+     developer has a file in mind and not a command. `diagramCommandForFile`
+     picks the command back out of what they chose.
+
+     `png` and `svg` are in the list for `.drawio.png` and `.drawio.svg`, which a
+     dialogue filter cannot express — a filter matches the last extension only.
+     A bare image therefore passes the filter and is caught afterwards. */
+  import: {
+    title: 'Choose a diagram file to import',
+    name: 'Diagram sources',
+    extensions: ['mmd', 'mermaid', 'drawio', 'xml', 'html', 'htm', 'md', 'txt', 'png', 'svg'],
+  },
+} as const
+
+export type DiagramFilePick = keyof typeof DIAGRAM_FILE_PICKS
+
+export function isDiagramFilePick(value: string): value is DiagramFilePick {
+  return Object.prototype.hasOwnProperty.call(DIAGRAM_FILE_PICKS, value)
+}
+
+/**
+ * Which command reads this file, from its name alone.
+ *
+ * Browse asks for a file, not for a command, so something has to choose the
+ * command — and the extension is the only evidence there is at that moment. Null
+ * means nothing here can read it, which the caller reports rather than swallows:
+ * a Browse that quietly does nothing is worse than no Browse.
+ *
+ * `.drawio.png` and `.drawio.svg` are draw.io's own export formats and carry the
+ * source inside them, so they import; a plain `.png` or `.svg` is an image and
+ * does not. The two are told apart by the compound extension, which is why this
+ * tests the whole name rather than the last dot.
+ */
+export function diagramCommandForFile(path: string): DiagramFilePick | null {
+  const name = path.toLowerCase().replace(/^.*[\\/]/, '')
+  if (/\.drawio(\.(png|svg|xml))?$/.test(name)) return 'import-drawio'
+  if (/\.(mmd|mermaid)$/.test(name)) return 'import-mermaid'
+  // draw.io's raw save format, and the one it offers as "Export as XML".
+  if (/\.xml$/.test(name)) return 'import-drawio'
+  // A Markdown or text file reaching here holds a fenced mermaid block; that is
+  // the only diagram source either of those carries.
+  if (/\.(md|txt)$/.test(name)) return 'import-mermaid'
+  // Already a drawn diagram: the thing to do with it is export it to SVG or PNG.
+  if (/\.(html|htm)$/.test(name)) return 'export-diagram'
+  return null
+}
+
+/**
  * A filename the app chooses, rather than one the model invents.
  *
  * The app has to know the name in advance: it is what lets a finished file be

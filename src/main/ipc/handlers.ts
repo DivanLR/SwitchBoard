@@ -6,11 +6,13 @@ import { clipboard, dialog, ipcMain, shell, type BrowserWindow } from 'electron'
 import type { Session, SessionEvent } from '@shared/domain'
 import { canPassEval, isDangerousCommand, sessionName } from '@shared/domain'
 import {
+  DIAGRAM_FILE_PICKS,
   DIAGRAM_PLUGIN,
   DIAGRAMS_DIR,
   archifyPrompt,
   diagramFileName,
   diagramPrompt,
+  isDiagramFilePick,
 } from '@shared/diagram'
 import { CLEANUP_GROUPS } from '@shared/command-catalog'
 import { applyToRegionPrompt } from '@shared/diff-apply'
@@ -340,6 +342,32 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       const opts = { title: 'Choose a project folder', properties: ['openDirectory' as const] }
       const parent = deps.getWindow()
       // Unparented overload is the fallback if the window is gone.
+      const picked = parent
+        ? await dialog.showOpenDialog(parent, opts)
+        : await dialog.showOpenDialog(opts)
+      const path = picked.canceled ? undefined : picked.filePaths[0]
+      return { path: path ?? null }
+    },
+    // Same shape as pickFolder, and cancelling is the same ordinary outcome. The
+    // command names the filters rather than the renderer supplying them, so the
+    // set of dialogues this can open is closed and reviewable in one table.
+    'dialog.pickFile': async (req) => {
+      if (!isDiagramFilePick(req.command)) {
+        throw {
+          code: 'INVALID_PATH',
+          message: `No file picker for ${req.command}`,
+        } satisfies IpcError
+      }
+      const pick = DIAGRAM_FILE_PICKS[req.command]
+      const opts = {
+        title: pick.title,
+        properties: ['openFile' as const],
+        filters: [
+          { name: pick.name, extensions: [...pick.extensions] },
+          { name: 'All files', extensions: ['*'] },
+        ],
+      }
+      const parent = deps.getWindow()
       const picked = parent
         ? await dialog.showOpenDialog(parent, opts)
         : await dialog.showOpenDialog(opts)

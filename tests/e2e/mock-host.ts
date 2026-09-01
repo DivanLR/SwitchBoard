@@ -77,6 +77,7 @@ export interface MockDriver {
   setDrafts: (projectId: string, texts: string[]) => void
   /** What the next native folder pick answers; null is the cancel case. */
   setNextFolderPick: (path: string | null) => void
+  setNextFilePick: (path: string | null) => void
   emitEvent: (sessionId: string, kind: string, payload: Record<string, unknown>) => string
   /** Rewrites an event in place, as a streamed token does to a partial message.
    *  The real host does this on every delta (UPDATABLE_KINDS), and it is the
@@ -738,6 +739,7 @@ export function installMockHost(scenario: MockScenario): void {
     // The real picker is an OS dialogue Playwright cannot drive, so the test
     // says in advance what it returns. null is the cancel case.
     'dialog.pickFolder': () => ({ path: nextFolderPick }),
+    'dialog.pickFile': () => ({ path: nextFilePick }),
     'projects.register': (req) => {
       const path = String(req.path)
       if (path.includes('missing')) throw { code: 'INVALID_PATH', message: 'The folder does not exist' }
@@ -1787,6 +1789,7 @@ export function installMockHost(scenario: MockScenario): void {
 
   let floodTimer: number | null = null
   let nextFolderPick: string | null = null
+  let nextFilePick: string | null = null
   // Unsent composer text a previous run left behind, per project. Seeded by a
   // test; the app restores it into the composer on open.
   const draftsByProject = new Map<string, string[]>(
@@ -1799,6 +1802,9 @@ export function installMockHost(scenario: MockScenario): void {
     },
     setNextFolderPick: (path) => {
       nextFolderPick = path
+    },
+    setNextFilePick: (path) => {
+      nextFilePick = path
     },
     emitEvent: (sessionId, kind, payload) => String(appendEvent(sessionId, kind, payload).id),
     updateEvent: (sessionId, eventId, payload) => updateEvent(sessionId, eventId, payload),

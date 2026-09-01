@@ -16,8 +16,10 @@ import {
   DIAGRAMS_DIR,
   archifyCommandText,
   diagramCommandText,
+  isDiagramFilePick,
   type ArchifyOptions,
   type ArchifyType,
+  type DiagramFilePick,
 } from '@shared/diagram'
 import { relativeTime } from '@renderer/relative-time'
 import { normalizeForMatch } from '@renderer/composables/useCommandSuggestions'
@@ -145,6 +147,90 @@ const pickedCommand = computed<{ description: string; argumentHint: string } | n
 const commandTakesFileOnly = computed(() => pickedCommand.value !== null && !isArchifyCommand.value)
 
 /**
+ * The command in the box, when a native picker can name its file for it.
+ *
+ * `takesDiagram` covers the file the section already knows — the drawing in the
+ * pane. This covers the other one: `import-mermaid` and `import-drawio` read a
+ * file from somewhere on the machine, and until now the only way to give them
+ * one was to type the whole path by hand, correctly, with no completion. Export
+ * is offered too, for the case of exporting a diagram that is not the one open.
+ */
+const browsableCommand = computed<DiagramFilePick | null>(() => {
+  if (isArchifyCommand.value) return null
+  const first = description.value.trim().split(/\s+/)[0] ?? ''
+  const name = first.slice(first.lastIndexOf(':') + 1).replace(/^\//, '')
+  return isDiagramFilePick(name) ? name : null
+})
+
+/** A token already standing in the file slot: has a separator or an extension and
+ *  is not a flag. Distinguishing this is what stops a second Browse producing
+ *  `/import-drawio new.drawio old.drawio`.
+ *
+ *  Quotes come off first. Browse puts them there itself whenever the path has a
+ *  space in it, so a splitter that does not understand them fails on the second
+ *  browse of the pair it just wrote — it reads `"C:\my` and `diagrams\file.mmd"`
+ *  as two tokens, drops the first and leaves the tail behind in the line. */
+function looksLikePath(token: string | undefined): boolean {
+  const bare = token?.replace(/^"|"$/g, '')
+  if (!bare || bare.startsWith('-')) return false
+  return /[\\/]/.test(bare) || /\.[A-Za-z0-9]+$/.test(bare)
+}
+
+/**
+ * Browse with nothing in the box: pick the file first, and let the file say
+ * which command reads it.
+ *
+ * The other Browse only appears once a command is already in the field, which
+ * means finding it requires knowing that `import-mermaid` exists and opening a
+ * menu headed "Commands" to reach it. Someone with a .drawio on their desktop
+ * does not have a command in mind, they have a file — so this one sits in the
+ * bar, always, and works from the file backwards.
+ */
+async function browseImport(): Promise<void> {
+  // Cancelled, or nothing here reads it — the store says which, and says so on
+  // screen in the second case.
+  const picked = await diagrams.pickImport()
+  if (!picked) return
+  const argument = /\s/.test(picked.path) ? `"${picked.path}"` : picked.path
+  description.value = `/${DIAGRAM_PLUGIN.namespace}:${picked.command} ${argument} `
+  void nextTick(() => {
+    const field = input.value
+    if (!field) return
+    field.focus()
+    field.setSelectionRange(field.value.length, field.value.length)
+  })
+}
+
+/** Native picker for the file slot, writing the path and sending nothing — the
+ *  same division of labour as the Commands menu. */
+async function browse(): Promise<void> {
+  const command = browsableCommand.value
+  if (!command) return
+  const path = await diagrams.pickFile(command)
+  // Cancelled. An ordinary outcome, and the box is left exactly as it was.
+  if (!path) return
+  // Quoted only when it needs to be: these lines are read as a command line, and
+  // a Windows path with a space in it is otherwise two arguments.
+  const argument = /\s/.test(path) ? `"${path}"` : path
+  const text = description.value.trim()
+  const head = text.split(/\s+/)[0] ?? ''
+  let rest = text.slice(head.length).trimStart()
+  // A quoted argument is ONE token; matching bare-word-first would split the
+  // very paths this function writes. Everything after the file slot survives, so
+  // flags typed against the command are not lost by browsing again.
+  const existing = /^("[^"]*"|\S+)/.exec(rest)?.[0]
+  if (looksLikePath(existing)) rest = rest.slice(existing!.length).trimStart()
+  description.value = `${head} ${argument} ${rest}`.trimEnd() + ' '
+  // Caret at the end, for the same reason pickCommand does it.
+  void nextTick(() => {
+    const field = input.value
+    if (!field) return
+    field.focus()
+    field.setSelectionRange(field.value.length, field.value.length)
+  })
+}
+
+/**
  * An archify command that must not be dispatched, currently in the box.
  *
  * The `sendable` flag used to be consulted in exactly one place — the Commands
@@ -255,6 +341,61 @@ const selectedEntry = computed(() => list.value.find((d) => d.file === selected.
 // being installed, on the same rule the rest of the view follows: an empty
 // command list means "not known yet", not "missing".
 const menuOpen = ref(false)
+
+/**
+ * THE MENU HAS TO ESCAPE THE RAIL, or it is cut off however tall it is allowed
+ * to be.
+ *
+ * It used to be `position: absolute` under a `position: relative` wrapper, with
+ * `max-height: 60vh` and its own scroll to keep it inside the window. That cap
+ * was measuring the wrong box. The rail sets `overflow-y: auto` so it can scroll
+ * a long install card without pushing the file list out of reach, and a scroll
+ * container clips absolutely-positioned descendants — on BOTH axes, because a
+ * computed `overflow-y` other than `visible` forces `overflow-x: visible` to
+ * `auto` as well. So the menu was cut at the rail's bottom edge whatever 60vh
+ * came to, and cut again on the left, since it is 360px wide inside a 300px rail
+ * and anchors to the rail's right edge.
+ *
+ * Fixed positioning is how the rest of the app already solves this (`.ctx-menu`
+ * in Sidebar): the menu leaves the rail's coordinate space entirely and is
+ * placed from the button's own rect. The scrim behind it is fixed too, so the
+ * rail cannot scroll out from under an open menu and the coordinates cannot go
+ * stale while it is up.
+ */
+const cmdBtn = ref<HTMLElement | null>(null)
+const menuPos = ref<{ left: number; top: string; bottom: string; maxHeight: number } | null>(null)
+
+/** Matches `.cmd-menu`'s own width, the gap it used to get from `calc(100% + 5px)`,
+ *  and the margin it keeps off the window edge. */
+const MENU_W = 360
+const MENU_GAP = 5
+const MENU_EDGE = 8
+
+function toggleMenu(): void {
+  if (menuOpen.value) {
+    menuOpen.value = false
+    return
+  }
+  const r = cmdBtn.value?.getBoundingClientRect()
+  if (r) {
+    const below = window.innerHeight - r.bottom - MENU_GAP - MENU_EDGE
+    const above = r.top - MENU_GAP - MENU_EDGE
+    // The bar sits near the top of the view, so down is nearly always right and
+    // opening upwards would be worse. Nearly: a short window can leave no room
+    // at all below, and a menu with 40px of itself showing is the bug again.
+    const up = below < 220 && above > below
+    menuPos.value = {
+      left: Math.max(
+        MENU_EDGE,
+        Math.min(r.right - MENU_W, window.innerWidth - MENU_W - MENU_EDGE),
+      ),
+      top: up ? 'auto' : `${r.bottom + MENU_GAP}px`,
+      bottom: up ? `${window.innerHeight - r.top + MENU_GAP}px` : 'auto',
+      maxHeight: up ? above : below,
+    }
+  }
+  menuOpen.value = true
+}
 
 interface MenuCommand {
   command: string
@@ -461,10 +602,51 @@ watch(
           <template v-else><Icon name="pencil" :size="12" /> Generate</template>
         </button>
         <div class="cmds">
-          <button class="cmd-btn" data-testid="diagram-commands" :aria-expanded="menuOpen" @click="menuOpen = !menuOpen">
+          <!-- Browse is a peer of Commands, not something inside it. Importing a
+               file is one of the two things this section does, and until now it
+               was reachable only by knowing `import-drawio` existed and opening a
+               menu to find it. The file names the command; see browseImport.
+
+               Gone on the archify engine, and not merely disabled. archify's
+               catalogue has no import at all, so the only thing Browse could
+               write there is a diagram-design command — which would silently
+               switch engines for that one action, and fail outright if the
+               plugin this project never installed is the one being addressed. -->
+          <button
+            v-if="!onArchify"
+            type="button"
+            class="cmd-btn"
+            data-testid="diagram-import-file"
+            :disabled="diagrams.generating"
+            title="Pick a .drawio, .mmd or .xml file from this machine and import it as a diagram. Also takes an .html diagram to export."
+            @click="browseImport()"
+          >
+            <Icon name="folder" :size="11" /> Browse…
+          </button>
+          <button
+            ref="cmdBtn"
+            class="cmd-btn"
+            data-testid="diagram-commands"
+            :aria-expanded="menuOpen"
+            @click="toggleMenu()"
+          >
             Commands <Icon name="chevron-down" :size="11" />
           </button>
-          <div v-if="menuOpen" class="cmd-menu" data-testid="diagram-command-menu">
+          <div
+            v-if="menuOpen"
+            class="cmd-menu"
+            data-testid="diagram-command-menu"
+            :style="
+              menuPos
+                ? {
+                    left: `${menuPos.left}px`,
+                    top: menuPos.top,
+                    bottom: menuPos.bottom,
+                    maxHeight: `${menuPos.maxHeight}px`,
+                  }
+                : undefined
+            "
+          >
             <!-- A missing command installs the engine instead of doing nothing. The
                  big install card is deliberately suppressed once this project has
                  diagrams (see `installed`), which left this menu as a dead end: it
@@ -581,6 +763,20 @@ watch(
         <span v-if="commandTakesFileOnly" class="ch-note">
           Takes a file. To draw something new, clear this and describe it instead.
         </span>
+        <!-- Says "takes a file" and then gives you one, rather than leaving the
+             developer to type an absolute path by hand into a single-line box
+             with no completion. Writes the path and sends nothing, the same
+             division of labour the Commands menu follows. -->
+        <button
+          v-if="browsableCommand"
+          type="button"
+          class="ch-browse"
+          data-testid="diagram-browse-file"
+          :disabled="diagrams.generating"
+          @click="browse()"
+        >
+          <Icon name="folder" :size="11" /> Browse…
+        </button>
         <!-- Says why the button will not go, rather than leaving a dead control.
              Typed by hand this is the only warning there is: the menu's disabled
              row never appeared. -->
@@ -1140,12 +1336,20 @@ watch(
   box-shadow: none;
 }
 
+/* Browse and Commands are one cluster, so a narrow rail wraps them together
+   rather than stranding one of them on a line of its own. */
 .cmds {
   position: relative;
+  display: flex;
+  gap: 6px;
   flex-shrink: 0;
 }
 
+
 .cmd-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   padding: 8px 13px;
   font-size: var(--fs-meta);
   color: var(--text-body);
@@ -1156,23 +1360,33 @@ watch(
   white-space: nowrap;
 }
 
-.cmd-btn:hover {
+.cmd-btn:hover:not(:disabled) {
   border-color: var(--border-strong);
+}
+
+/* The disabled convention the rest of the system uses. Browse can be disabled
+   while a drawing is in flight; Commands never is, so this arrived with it. */
+.cmd-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 /* Brings its own ground, like every other menu in the app (.ctx-menu): it
    floats over the list rather than sitting in it. */
 .cmd-menu {
-  position: absolute;
-  top: calc(100% + 5px);
-  right: 0;
+  /* Fixed, not absolute, and placed by `toggleMenu` from the button's rect. The
+     rail scrolls, and a scroll container clips an absolutely-positioned child on
+     both axes; see the comment on `cmdBtn`. `left`, `top`/`bottom` and the real
+     `max-height` all arrive inline — the space actually left in the window, not
+     a fraction of it. */
+  position: fixed;
   z-index: 30;
-  min-width: 360px;
-  /* archify lists fourteen commands, each three lines tall. Unbounded, the menu
-     ran past the bottom of the window and the tail was unreachable — the bar
-     sits near the top of the view, so opening upwards would be worse. Cap and
-     scroll. */
-  max-height: 60vh;
+  /* Explicit, because a fixed box shrinks to fit and the placement arithmetic
+     needs to know the width. Narrower than 360 only when the window is. */
+  width: 360px;
+  max-width: calc(100vw - 16px);
+  /* archify lists fourteen commands, each three lines tall, so the menu still
+     scrolls its own tail; what changed is that the cap is now the room it has. */
   overflow-y: auto;
   padding: 4px;
   background: var(--bg-panel-2);
@@ -1237,6 +1451,34 @@ watch(
 
 .ch-note {
   color: var(--amber);
+}
+
+/* .btn-quiet's idiom at the hint row's scale: transparent, one hairline, and a
+   hover that greens toward an affirmative action. Its own rule rather than the
+   shared class because the shared one is sized for a control row (12.5px type,
+   6px 14px padding) and this sits inline in a micro-type line. */
+.ch-browse {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  font-family: var(--sans);
+  font-size: var(--fs-micro);
+  color: var(--text-mid);
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--rc);
+  cursor: pointer;
+}
+
+.ch-browse:hover:not(:disabled) {
+  border-color: var(--green);
+  color: var(--text-strong);
+}
+
+.ch-browse:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 /* A refusal, not a caution: the button is disabled and this says why. Amber is

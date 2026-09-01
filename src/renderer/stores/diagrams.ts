@@ -3,7 +3,8 @@
 // transport separation), mirroring stores/specs.ts and stores/diff.ts.
 import { reactive } from 'vue'
 import type { DiagramEntry } from '@shared/domain'
-import type { ArchifyOptions } from '@shared/diagram'
+import type { ArchifyOptions, DiagramFilePick } from '@shared/diagram'
+import { diagramCommandForFile } from '@shared/diagram'
 import { errorMessage, invoke } from '@renderer/ipc'
 
 // Guards a keyed write in byProject against a stale response landing after a
@@ -206,6 +207,46 @@ const store = reactive({
     } catch (e) {
       this.error = errorMessage(e)
     }
+  },
+
+  /**
+   * Native file picker for a command's file argument; null when the developer
+   * cancelled, which is not an error and leaves the box alone.
+   *
+   * `command` is the bare command name, not the namespaced slash form: main maps
+   * it to a title and filters through DIAGRAM_FILE_PICKS and refuses anything
+   * that is not in that table.
+   */
+  async pickFile(command: string): Promise<string | null> {
+    try {
+      return (await invoke('dialog.pickFile', { command })).path
+    } catch (e) {
+      this.error = errorMessage(e)
+      return null
+    }
+  },
+
+  /**
+   * Picks a file to import and says which command reads it.
+   *
+   * Null covers both "cancelled" and "nothing here reads that", and only the
+   * second sets `error`. The picker has to allow bare `.png` and `.svg` so that
+   * `.drawio.png` can be chosen at all, so the second case is reachable by
+   * ordinary use and has to be said out loud rather than swallowed.
+   */
+  async pickImport(): Promise<{ path: string; command: DiagramFilePick } | null> {
+    const path = await this.pickFile('import')
+    if (!path) return null
+    const command = diagramCommandForFile(path)
+    if (!command) {
+      const name = path.replace(/^.*[\\/]/, '')
+      this.error =
+        `Nothing here reads ${name}. Import a .drawio, .mmd or .xml file, ` +
+        'or an .html diagram to export.'
+      return null
+    }
+    this.error = null
+    return { path, command }
   },
 
   /**

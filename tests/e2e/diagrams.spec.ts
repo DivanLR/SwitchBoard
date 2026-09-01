@@ -646,3 +646,184 @@ test('a question from the drawing session can be answered in the section', async
     .toMatchObject({ sessionId, text: 'A' })
   expect(await page.evaluate(() => window.__mock.state().sends.length)).toBe(before + 1)
 })
+
+// The menu is 360px wide and lives in a 300px rail that sets `overflow-y: auto`.
+// A scroll container clips absolutely-positioned descendants on both axes, so the
+// menu used to be cut off at the rail's edges however tall it was allowed to be —
+// its own `max-height: 60vh` was capping against the window, which was never the
+// box doing the clipping. A hit test is the assertion, not a bounding box:
+// `boundingBox()` reports the element's own geometry whether or not an ancestor
+// is painting it, so it would have passed while the menu was invisible.
+test('the commands menu is not clipped by the rail it opens from', async ({ page }) => {
+  await page.evaluate(() =>
+    window.__mock.setCommands('p-alpha', [
+      'diagram-design:export-diagram',
+      'diagram-design:import-mermaid',
+      'diagram-design:import-drawio',
+    ]),
+  )
+  await page.getByTestId('tab-session').click()
+  await page.getByTestId('tab-diagrams').click()
+  await page.getByTestId('diagram-commands').click()
+
+  const menu = page.getByTestId('diagram-command-menu')
+  await expect(menu).toBeVisible()
+
+  const box = await menu.boundingBox()
+  expect(box).not.toBeNull()
+  const viewport = page.viewportSize()
+  expect(viewport).not.toBeNull()
+  // Inside the window on every side. The old menu ran off the left, because it
+  // anchored its right edge to a rail 60px narrower than the menu itself.
+  expect(box!.x).toBeGreaterThanOrEqual(0)
+  expect(box!.y).toBeGreaterThanOrEqual(0)
+  expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width)
+  expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height)
+
+  // And actually on top at its own corners: whatever the window hands back at
+  // those points has to be the menu, not the pane that was clipping it.
+  for (const row of ['export-diagram', 'import-mermaid', 'import-drawio']) {
+    const hit = await page
+      .getByTestId(`diagram-command-${row}`)
+      .evaluate((el) => {
+        const r = el.getBoundingClientRect()
+        const at = document.elementFromPoint(r.left + 4, r.top + r.height / 2)
+        return at instanceof Element && el.contains(at)
+      })
+    expect(hit, `row ${row} is covered or clipped`).toBe(true)
+  }
+})
+
+// import-mermaid and import-drawio read a file from somewhere on the machine,
+// and the section knew no way to name one but typing the whole path by hand.
+test('Browse fills the file argument from a native picker, and cancelling changes nothing', async ({
+  page,
+}) => {
+  await page.evaluate(() =>
+    window.__mock.setCommands('p-alpha', [
+      'diagram-design:export-diagram',
+      'diagram-design:import-mermaid',
+      'diagram-design:import-drawio',
+    ]),
+  )
+  await page.getByTestId('tab-session').click()
+  await page.getByTestId('tab-diagrams').click()
+
+  const input = page.getByTestId('diagram-input')
+  const browse = page.getByTestId('diagram-browse-file')
+
+  // Nothing in the box is not a file argument, so there is nothing to browse for.
+  await expect(browse).toHaveCount(0)
+
+  await page.getByTestId('diagram-commands').click()
+  await page.getByTestId('diagram-command-import-mermaid').click()
+  await expect(browse).toBeVisible()
+
+  // Cancelled: an ordinary outcome that leaves the box exactly as it was.
+  const beforeCancel = await input.inputValue()
+  await page.evaluate(() => window.__mock.setNextFilePick(null))
+  await browse.click()
+  await expect(input).toHaveValue(beforeCancel)
+
+  await page.evaluate(() => window.__mock.setNextFilePick('C:\\work\\flow.mmd'))
+  await browse.click()
+  await expect(input).toHaveValue(`/${DIAGRAM_PLUGIN.namespace}:import-mermaid C:\\work\\flow.mmd `)
+
+  // Browsing again REPLACES the path. Appending would hand the command two files
+  // and it would read the wrong one.
+  await page.evaluate(() => window.__mock.setNextFilePick('C:\\my diagrams\\other.mmd'))
+  await browse.click()
+  // Quoted, because the line is read as a command line and the path has a space.
+  await expect(input).toHaveValue(
+    `/${DIAGRAM_PLUGIN.namespace}:import-mermaid "C:\\my diagrams\\other.mmd" `,
+  )
+
+  // Flags typed after the file survive a browse; only the file slot is rewritten.
+  await input.pressSequentially('--detail=high')
+  await page.evaluate(() => window.__mock.setNextFilePick('C:\\work\\third.mmd'))
+  await browse.click()
+  await expect(input).toHaveValue(
+    `/${DIAGRAM_PLUGIN.namespace}:import-mermaid C:\\work\\third.mmd --detail=high `,
+  )
+})
+
+// The other Browse only appears once a command is already in the box, so finding
+// it means knowing `import-drawio` exists and opening a menu headed "Commands"
+// to reach it. Someone with a .drawio on their desktop has a file in mind, not a
+// command — this one is in the bar from the start and works from the file back.
+test('Browse in the bar imports a file straight from the machine, choosing the command from it', async ({
+  page,
+}) => {
+  const input = page.getByTestId('diagram-input')
+  const browse = page.getByTestId('diagram-import-file')
+
+  // Present with an empty box, which is the whole difference from the other one.
+  await expect(browse).toBeVisible()
+  await expect(page.getByTestId('diagram-browse-file')).toHaveCount(0)
+
+  // Cancelled leaves an empty box empty.
+  await page.evaluate(() => window.__mock.setNextFilePick(null))
+  await browse.click()
+  await expect(input).toHaveValue('')
+
+  // A draw.io file picks the draw.io importer without being told.
+  await page.evaluate(() => window.__mock.setNextFilePick('C:\\Users\\d\\Desktop\\arch.drawio'))
+  await browse.click()
+  await expect(input).toHaveValue(
+    `/${DIAGRAM_PLUGIN.namespace}:import-drawio C:\\Users\\d\\Desktop\\arch.drawio `,
+  )
+
+  // A Mermaid file picks the other importer, over the top of the first.
+  await page.evaluate(() => window.__mock.setNextFilePick('C:\\Users\\d\\Desktop\\flow.mmd'))
+  await browse.click()
+  await expect(input).toHaveValue(
+    `/${DIAGRAM_PLUGIN.namespace}:import-mermaid C:\\Users\\d\\Desktop\\flow.mmd `,
+  )
+
+  // Written, not sent: the developer still presses the button.
+  expect(await page.evaluate(() => window.__mock.state().sends.length)).toBe(0)
+})
+
+// archify's catalogue has no import at all, so the only thing Browse could write
+// on that engine is a diagram-design command — which would silently switch
+// engines for the one action, and address a plugin the project may never have
+// installed. Gone, therefore, rather than disabled or quietly wrong.
+test('Browse is absent on the archify engine, which has nothing to import with', async ({
+  page,
+}) => {
+  await expect(page.getByTestId('diagram-import-file')).toBeVisible()
+
+  await page.getByTestId('diagram-engine-archify').click()
+  await expect(page.getByTestId('diagram-engine-archify')).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByTestId('diagram-import-file')).toHaveCount(0)
+
+  // And back, so the engine switch is what governs it rather than a one-way trip.
+  await page.getByTestId('diagram-engine-diagram-design').click()
+  await expect(page.getByTestId('diagram-import-file')).toBeVisible()
+})
+
+// The dialogue has to allow bare .png and .svg so `.drawio.png` can be selected
+// at all, so a plain screenshot is reachable by ordinary use. Refusing silently
+// would read as a broken button.
+test('Browse says so when it cannot read the file, instead of doing nothing', async ({ page }) => {
+  const input = page.getByTestId('diagram-input')
+  const browse = page.getByTestId('diagram-import-file')
+
+  await page.evaluate(() => window.__mock.setNextFilePick('C:\\Users\\d\\Desktop\\screenshot.png'))
+  await browse.click()
+
+  const error = page.getByTestId('diagram-error')
+  await expect(error).toBeVisible()
+  await expect(error).toContainText('screenshot.png')
+  // The box is untouched, so nothing has to be undone before trying again.
+  await expect(input).toHaveValue('')
+
+  // draw.io's own PNG export carries the source, and is accepted — the refusal
+  // above is about the extension in context, not about PNG.
+  await page.evaluate(() => window.__mock.setNextFilePick('C:\\Users\\d\\Desktop\\arch.drawio.png'))
+  await browse.click()
+  await expect(input).toHaveValue(
+    `/${DIAGRAM_PLUGIN.namespace}:import-drawio C:\\Users\\d\\Desktop\\arch.drawio.png `,
+  )
+  await expect(page.getByTestId('diagram-error')).toHaveCount(0)
+})

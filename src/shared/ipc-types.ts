@@ -223,6 +223,11 @@ export interface InvokeMap {
   /** Native folder picker. `path` is null when the dialogue was cancelled, which
    *  is an ordinary outcome and not an error, so it carries no IpcErrorCode. */
   'dialog.pickFolder': { req: void; res: { path: string | null } }
+  /** Native file picker for a diagram command's file argument. `command` selects
+   *  the title and filters from DIAGRAM_FILE_PICKS; an unknown one is rejected
+   *  rather than opening an unfiltered dialogue. `path` is null when the
+   *  dialogue was cancelled, which is an ordinary outcome, not an error. */
+  'dialog.pickFile': { req: { command: string }; res: { path: string | null } }
   'projects.register': {
     req: { path: string; name?: string; defaultSessionMode?: SessionMode }
     res: Project
