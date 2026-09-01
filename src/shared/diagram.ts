@@ -208,6 +208,19 @@ export const DIAGRAM_FILE_PICKS = {
     name: 'Diagram sources',
     extensions: ['mmd', 'mermaid', 'drawio', 'xml', 'html', 'htm', 'md', 'txt', 'png', 'svg'],
   },
+  /* Deliberately the widest list here, and the only one that does not have to
+     route to a command. archify READS this file rather than compiling it, so a
+     whiteboard photograph, a README or an OpenAPI document are all legitimate
+     source material, and narrowing the dialogue would refuse things the skill
+     can plainly use. */
+  'archify-reference': {
+    title: 'Choose a file for archify to draw from',
+    name: 'Reference material',
+    extensions: [
+      'drawio', 'mmd', 'mermaid', 'xml', 'json', 'yaml', 'yml',
+      'md', 'txt', 'html', 'htm', 'pdf', 'png', 'jpg', 'jpeg', 'svg', 'webp',
+    ],
+  },
 } as const
 
 export type DiagramFilePick = keyof typeof DIAGRAM_FILE_PICKS
@@ -402,6 +415,17 @@ export interface ArchifyOptions {
    * the user asks for a demo or a presentation.
    */
   motion: boolean
+  /**
+   * A file on the developer's machine for the skill to draw FROM: an existing
+   * `.drawio` or `.mmd`, a screenshot of a whiteboard, a spec, a README.
+   *
+   * The drawing flow had no way to say "like this one". Everything archify knew
+   * came from one line of prose, so redrawing something that already existed
+   * meant describing it from memory. Absent for an ordinary described diagram,
+   * and per-drawing rather than a standing preference, for the same reason
+   * `type` is: it is a fact about the ONE request being made.
+   */
+  reference?: string
 }
 
 export const DEFAULT_ARCHIFY: ArchifyOptions = {
@@ -589,6 +613,22 @@ export function archifyPrompt(description: string, file: string, options: Archif
   return [
     `Create a diagram: ${description}`,
     '',
+    // Before the skill instructions, not after: the reference changes what is
+    // being drawn, so it has to be read before any of the authoring starts. The
+    // path is quoted because it comes from a native picker and Windows paths
+    // carry spaces.
+    ...(options.reference
+      ? [
+          `Draw it FROM this file, which the developer chose as the reference:`,
+          `    "${options.reference}"`,
+          'Read it first. Carry over its actual nodes, edges, labels and grouping',
+          'rather than inventing a fresh diagram that merely matches the sentence',
+          'above; that sentence says what to make of the file, not what to invent.',
+          'If it is an image, read what it depicts. If the file cannot be read, say',
+          'so and stop rather than drawing from the sentence alone.',
+          '',
+        ]
+      : []),
     `Use the ${ARCHIFY.skill} skill for this, and follow its own fast authoring path:`,
     'read the one matching schema and the one matching example, author fresh typed',
     'JSON with your own stable IDs and wording, then validate and deliver it.',

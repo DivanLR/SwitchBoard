@@ -771,10 +771,22 @@ html.sb-light .btn-solid {
   border: 1px solid color-mix(in srgb, var(--red) 35%, transparent);
 }
 
+/* Sized to `.ctl` in SessionView, which is the `+ Session` button standing right
+   beside it in the header: same 12.5px face and the same 3px/9px box, so the two
+   read as one pair rather than as a badge with a button bolted on. The metrics
+   are repeated rather than shared because there is no control-size token to share;
+   if `.ctl` moves, move these with it.
+
+   The outline is red at the owner's direction. Recording the tension rather than
+   burying it: DESIGN.md reserves red for a reading outside tolerance, and both the
+   comment above and the Tolerance Rule argue an ended session is packed flat, not
+   an error. The text stays `--text-tab`, so only the outline carries the hue. */
 .pill.ended {
+  font-size: var(--fs-ui);
+  padding: 3px 9px;
   color: var(--text-tab);
   background: transparent;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--red);
 }
 
 /* The shared .dot block that lived here is gone. State is drawn as fold marks now

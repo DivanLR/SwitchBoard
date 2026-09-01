@@ -201,6 +201,13 @@ async function browseImport(): Promise<void> {
   })
 }
 
+/** The reference file archify draws from. Cancelling leaves whatever was already
+ *  chosen, so a mis-click does not silently drop the reference. */
+async function pickReference(): Promise<void> {
+  const path = await diagrams.pickFile('archify-reference')
+  if (path) archify.value.reference = path
+}
+
 /** Native picker for the file slot, writing the path and sending nothing — the
  *  same division of labour as the Commands menu. */
 async function browse(): Promise<void> {
@@ -749,8 +756,44 @@ watch(
             <Icon name="play" :size="11" /> interactive viewer
           </button>
         </div>
+        <!-- A file for the skill to draw FROM. Everything else on this bar shapes
+             HOW it draws; this is the only control that changes WHAT it draws, so
+             it takes its own row and says which file it holds rather than turning
+             a button green. -->
+        <div class="ab-row">
+          <span class="ab-label">reference</span>
+          <button
+            v-if="!archify.reference"
+            type="button"
+            class="ab-chip"
+            data-testid="archify-reference-pick"
+            :disabled="diagrams.generating"
+            title="Pick a file for archify to draw from: an existing .drawio or .mmd, a photograph of a whiteboard, a spec, a README. It reads the file and carries over what is actually in it."
+            @click="pickReference()"
+          >
+            <Icon name="folder" :size="11" /> Browse…
+          </button>
+          <template v-else>
+            <span class="ab-ref mono" data-testid="archify-reference-name">{{
+              archify.reference.replace(/^.*[\\/]/, '')
+            }}</span>
+            <button
+              type="button"
+              class="ab-chip"
+              data-testid="archify-reference-clear"
+              :title="`Drawing from ${archify.reference}. Clear it to describe a diagram from scratch instead.`"
+              @click="archify.reference = undefined"
+            >
+              <Icon name="close" :size="11" /> clear
+            </button>
+          </template>
+        </div>
         <div class="ab-hint">
-          {{ ARCHIFY_TYPES.find((t) => t.type === archify.type)?.hint }}
+          {{
+            archify.reference
+              ? 'archify reads that file first and carries over what is in it. The box above says what to make of it.'
+              : ARCHIFY_TYPES.find((t) => t.type === archify.type)?.hint
+          }}
         </div>
       </div>
 
@@ -1225,6 +1268,28 @@ watch(
   background: transparent;
   border-color: var(--green);
   font-weight: var(--w-em);
+}
+
+.ab-chip:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* The file name only: an absolute path is mostly folders the developer already
+   knows, and at 300px it would push the clear button off the row. The full path
+   is on the clear button's title, which is where someone checking WHICH file
+   would hover. `direction: rtl` keeps the extension visible when even the bare
+   name is too long, since the extension is what says what kind of source it is. */
+.ab-ref {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  font-size: var(--fs-micro);
+  color: var(--text-body);
 }
 
 /* archify's own words for the chosen type, from its type router. It is the one

@@ -140,6 +140,87 @@ test('the quality and viewer switches reach the session', async ({ page }) => {
   expect(sent).toContain('meta.animation to "trace"')
 })
 
+// Everything else on the archify bar shapes HOW it draws. The reference is the
+// one control that changes WHAT it draws: the drawing flow could only ever work
+// from one line of prose, so redrawing something that already existed meant
+// describing it from memory.
+test('a reference file reaches the session, and says which file it is on screen', async ({
+  page,
+}) => {
+  await page.addInitScript(installMockHost, scenario([ARCHIFY_SKILL]))
+  await openDiagrams(page)
+  await page.getByTestId('diagram-engine-archify').click()
+
+  const pick = page.getByTestId('archify-reference-pick')
+  await expect(pick).toBeVisible()
+  await expect(page.getByTestId('archify-reference-name')).toHaveCount(0)
+
+  // Cancelled leaves the bar exactly as it was.
+  await page.evaluate(() => window.__mock.setNextFilePick(null))
+  await pick.click()
+  await expect(pick).toBeVisible()
+  await expect(page.getByTestId('archify-reference-name')).toHaveCount(0)
+
+  await page.evaluate(() => window.__mock.setNextFilePick('C:\\Users\\d\\Desktop\\arch.drawio'))
+  await pick.click()
+  // The bare name on screen; the full path belongs on the clear button's title,
+  // because a 300px rail cannot show a path and a control at once.
+  await expect(page.getByTestId('archify-reference-name')).toHaveText('arch.drawio')
+  await expect(page.getByTestId('archify-reference-clear')).toHaveAttribute(
+    'title',
+    /C:\\Users\\d\\Desktop\\arch\.drawio/,
+  )
+
+  await page.getByTestId('diagram-input').fill('the auth flow')
+  await page.getByTestId('diagram-generate').click()
+  await expect(page.getByTestId('diagram-pending')).toBeVisible()
+
+  const sent = await lastSend(page)
+  expect(sent).toContain('"C:\\Users\\d\\Desktop\\arch.drawio"')
+  // Read before authoring, or the skill draws the sentence and reconciles later.
+  expect(sent.indexOf('arch.drawio')).toBeLessThan(sent.indexOf('fast authoring path'))
+  // The rest of the bar is unaffected by carrying a file.
+  expect(sent).toContain('--quality showcase')
+})
+
+test('clearing the reference goes back to drawing from the sentence alone', async ({ page }) => {
+  await page.addInitScript(installMockHost, scenario([ARCHIFY_SKILL]))
+  await openDiagrams(page)
+  await page.getByTestId('diagram-engine-archify').click()
+
+  await page.evaluate(() => window.__mock.setNextFilePick('C:\\Users\\d\\Desktop\\arch.drawio'))
+  await page.getByTestId('archify-reference-pick').click()
+  await expect(page.getByTestId('archify-reference-name')).toBeVisible()
+
+  await page.getByTestId('archify-reference-clear').click()
+  await expect(page.getByTestId('archify-reference-name')).toHaveCount(0)
+  await expect(page.getByTestId('archify-reference-pick')).toBeVisible()
+
+  await page.getByTestId('diagram-input').fill('the auth flow')
+  await page.getByTestId('diagram-generate').click()
+  await expect(page.getByTestId('diagram-pending')).toBeVisible()
+
+  const sent = await lastSend(page)
+  expect(sent).not.toContain('arch.drawio')
+  expect(sent).not.toMatch(/read it first/i)
+})
+
+// The reference belongs to the drawing flow. A command line carries its own
+// arguments, and the archify bar is hidden for one, so the control goes with it.
+test('the reference control is absent on the diagram-design engine and for a command', async ({
+  page,
+}) => {
+  await page.addInitScript(installMockHost, scenario([ARCHIFY_SKILL]))
+  await openDiagrams(page)
+  await expect(page.getByTestId('archify-reference-pick')).toHaveCount(0)
+
+  await page.getByTestId('diagram-engine-archify').click()
+  await expect(page.getByTestId('archify-reference-pick')).toBeVisible()
+
+  await page.getByTestId('diagram-input').fill('archify doctor')
+  await expect(page.getByTestId('archify-reference-pick')).toHaveCount(0)
+})
+
 test('the other engine is untouched by any of it', async ({ page }) => {
   await page.addInitScript(installMockHost, scenario([ARCHIFY_SKILL]))
   await openDiagrams(page)

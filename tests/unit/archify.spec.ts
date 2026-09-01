@@ -188,4 +188,59 @@ describe('ARCHIFY_TYPES', () => {
   it('starts on auto, showcase and still, which are the skill’s own defaults', () => {
     expect(DEFAULT_ARCHIFY).toEqual({ type: 'auto', quality: 'showcase', motion: false })
   })
+
+  // Absent, not empty-string: the field crosses structuredClone at the bridge and
+  // then decides a branch in the prompt, so "no reference" has to be one value.
+  it('starts with no reference file, because most diagrams are described', () => {
+    expect(DEFAULT_ARCHIFY.reference).toBeUndefined()
+  })
+})
+
+// The reference is the only archify control that changes WHAT is drawn rather
+// than how, so its guarantees are about the file reaching the skill at all.
+describe('archifyPrompt with a reference file', () => {
+  const options = { ...DEFAULT_ARCHIFY, reference: 'C:\\Users\\d\\Desktop\\arch.drawio' }
+
+  it('carries the path, quoted, so a folder with a space survives', () => {
+    const prompt = archifyPrompt('the auth flow', 'auth-flow.html', {
+      ...options,
+      reference: 'C:\\my diagrams\\arch.drawio',
+    })
+    expect(prompt).toContain('"C:\\my diagrams\\arch.drawio"')
+  })
+
+  // Ordering is the guarantee, not the wording. Authoring instructions that
+  // arrived before the reference would have the skill draw from the sentence and
+  // then try to reconcile a file it had already ignored.
+  it('names the reference before any authoring instruction', () => {
+    const prompt = archifyPrompt('the auth flow', 'auth-flow.html', options)
+    expect(prompt.indexOf('arch.drawio')).toBeLessThan(prompt.indexOf('fast authoring path'))
+  })
+
+  it('tells the skill to carry the file over rather than invent from the sentence', () => {
+    const prompt = archifyPrompt('the auth flow', 'auth-flow.html', options)
+    expect(prompt).toMatch(/read it first/i)
+    // A background session has nobody to ask, so an unreadable file has to stop
+    // rather than quietly produce a diagram of the sentence.
+    expect(prompt).toMatch(/cannot be read/i)
+  })
+
+  it('says nothing about a reference when there is none', () => {
+    const prompt = archifyPrompt('the auth flow', 'auth-flow.html', DEFAULT_ARCHIFY)
+    expect(prompt).not.toMatch(/reference/i)
+    expect(prompt).not.toMatch(/read it first/i)
+  })
+
+  // Everything the bar already governed has to keep working with a file attached.
+  it('still honours the type, quality and motion switches', () => {
+    const prompt = archifyPrompt('the auth flow', 'auth-flow.html', {
+      ...options,
+      type: 'sequence',
+      quality: 'standard',
+      motion: true,
+    })
+    expect(prompt).toContain('sequence')
+    expect(prompt).toContain('standard')
+    expect(prompt).toContain('arch.drawio')
+  })
 })

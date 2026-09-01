@@ -292,13 +292,25 @@ export function installMockHost(scenario: MockScenario): void {
   function archifyPromptText(
     description: string,
     file: string,
-    options: { type: string; quality: string; motion: boolean },
+    options: { type: string; quality: string; motion: boolean; reference?: string },
   ): string {
     const base = file.replace(/\.html$/, '')
     const spec = `${DIAGRAMS_DIR}/${options.type === 'auto' ? `${base}.<type>.json` : `${base}.${options.type}.json`}`
     return [
       `Create a diagram: ${description}`,
       '',
+      // Kept verbatim from the real prompt, and kept BEFORE the authoring line,
+      // because both are what a spec asserts: that the picked file crossed the
+      // bridge at all, and that it is named before the skill is told how to draw.
+      ...(options.reference
+        ? [
+            'Draw it FROM this file, which the developer chose as the reference:',
+            `    "${options.reference}"`,
+            'Read it first. Carry over its actual nodes, edges, labels and grouping',
+            'so and stop rather than drawing from the sentence alone.',
+            '',
+          ]
+        : []),
       'Use the archify skill for this, and follow its own fast authoring path:',
       options.type === 'auto'
         ? 'Choose the type yourself from architecture, workflow, sequence, dataflow or'
@@ -981,7 +993,7 @@ export function installMockHost(scenario: MockScenario): void {
       // real handler decides it. A spec asserts on the text that went out, so
       // the two prompts have to be distinguishable here too.
       const archify = req.archify as
-        | { type: string; quality: string; motion: boolean }
+        | { type: string; quality: string; motion: boolean; reference?: string }
         | undefined
       const text = archify
         ? archifyPromptText(description, file, archify)
