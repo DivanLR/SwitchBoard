@@ -1135,9 +1135,15 @@ const {
          back, which is why the section renders an exit control of its own. -->
     <header v-if="!active.fullScreenSection" class="head">
       <div class="head-row">
-        <span class="h-dot" :style="{ background: headerColor }"></span>
-        <span class="h-name mono" data-testid="session-project-name">{{ project.name }}</span>
-        <span class="h-path code" data-testid="session-project-path">{{ project.path }}</span>
+        <!-- The project's identity as ONE block rather than three loose spans
+             on a row that also carries five controls. The dot, the name and
+             the path all answer a single question — which lane is this — so
+             they are grouped, and can then be laid out as a unit. -->
+        <div class="ident">
+          <span class="h-dot" :style="{ background: headerColor }"></span>
+          <span class="h-name mono" data-testid="session-project-name">{{ project.name }}</span>
+          <span class="h-path code" data-testid="session-project-path">{{ project.path }}</span>
+        </div>
         <span class="spacer"></span>
         <span
           v-if="liveSession?.bypassPermissions"
@@ -1212,29 +1218,7 @@ const {
           {{ pillLabel(liveSession.status) }}
         </span>
         <span v-else-if="endedSession" class="pill ended">Ended</span>
-        <!-- One question, asked once, for the whole project: does its work run in
-             a container? It governs every section's session (specs, tests, diff
-             comments, cleanup, diagrams) AND what the start controls below offer
-             a chat session, because it is the same question each time. Read at
-             spawn, so it applies from the next session.
 
-             Labelled WSL, not Docker: the runtime is wslc, which ships inside WSL
-             (see wslc-sandbox.ts). Naming it is not pedantry, because it is what
-             the developer has to have installed for the box to do anything. -->
-        <label class="wsl-check mono" data-testid="project-containers">
-          <input
-            type="checkbox"
-            data-testid="project-containers-input"
-            :checked="project.useContainers"
-            :title="
-              project.useContainers
-                ? 'This project runs its work inside WSL containers: the project folder is mounted, nothing else is. Slower to start, and only two containers may run at once machine-wide.'
-                : 'This project runs its work on this machine. Tick to run it inside WSL containers instead: isolated from the rest of your drive, slower to start, two at a time. Needs WSL 2.9.3 or newer.'
-            "
-            @change="onContainersToggle"
-          />
-          WSL
-        </label>
         <button
           class="ctl mono"
           data-testid="new-session"
@@ -1299,27 +1283,67 @@ const {
              project apart — every one of them runs against the same checkout,
              so the branch beside it is identical on all of them. Untyped, it
              shows whatever the app derived from the work. -->
-        <input
-          v-if="nameDraft !== null"
-          ref="nameInputEl"
-          v-model="nameDraft"
-          class="name-input mono"
-          data-testid="session-name-input"
-          maxlength="60"
-          placeholder="Name this session"
-          @keydown.enter="saveName()"
-          @keydown.esc="nameDraft = null"
-          @blur="saveName()"
-        />
-        <button
-          v-else-if="liveSession || endedSession"
-          class="name-btn"
-          data-testid="session-name"
-          title="Name this session"
-          @click="openNameEdit()"
-        >
-          {{ (liveSession ?? endedSession)?.name ?? 'Name this session' }}
-        </button>
+        <div class="name-block">
+          <span class="name-cap" aria-hidden="true">session</span>
+          <input
+            v-if="nameDraft !== null"
+            ref="nameInputEl"
+            v-model="nameDraft"
+            class="name-input mono"
+            data-testid="session-name-input"
+            maxlength="60"
+            placeholder="Name this session"
+            @keydown.enter="saveName()"
+            @keydown.esc="nameDraft = null"
+            @blur="saveName()"
+          />
+          <button
+            v-else-if="liveSession || endedSession"
+            class="name-btn"
+            data-testid="session-name"
+            title="Name this session"
+            @click="openNameEdit()"
+          >
+            {{ (liveSession ?? endedSession)?.name ?? 'Name this session' }}
+          </button>
+        </div>
+        <!-- The same labelled-block idiom as the session name beside it: a
+             caption saying which fact it is, and an enclosure saying it can
+             be changed. Moved off the control row for visibility. -->
+        <div class="run-block">
+          <span class="run-cap" aria-hidden="true">run</span>
+          <!-- One question, asked once, for the whole project: does its work run in
+               a container? It governs every section's session (specs, tests, diff
+               comments, cleanup, diagrams) AND what the start controls below offer
+               a chat session, because it is the same question each time. Read at
+               spawn, so it applies from the next session.
+
+               LABELLED "Run in Container", at the owner's direction. It read
+               "WSL" before, on the reasoning that the runtime is wslc, which
+               ships inside WSL (see wslc-sandbox.ts), and that naming it was
+               not pedantry because WSL is what the developer must have
+               installed for the box to do anything at all.
+
+               That reasoning is recorded rather than deleted, because the cost
+               of the new label is exactly what the old one bought: "Run in
+               Container" says what the switch DOES and no longer says what it
+               needs. The prerequisite now lives only in the checkbox's own
+               title, which names WSL and the 2.9.3 floor in both states. -->
+          <label class="wsl-check mono" data-testid="project-containers">
+            <input
+              type="checkbox"
+              data-testid="project-containers-input"
+              :checked="project.useContainers"
+              :title="
+                project.useContainers
+                  ? 'This project runs its work inside WSL containers: the project folder is mounted, nothing else is. Slower to start, and only two containers may run at once machine-wide.'
+                  : 'This project runs its work on this machine. Tick to run it inside WSL containers instead: isolated from the rest of your drive, slower to start, two at a time. Needs WSL 2.9.3 or newer.'
+              "
+              @change="onContainersToggle"
+            />
+            Run in Container
+          </label>
+        </div>
         <span style="white-space: nowrap"><Icon name="branch" :size="12" /> {{ liveSession?.branch ?? endedSession?.branch ?? '—' }}</span>
         <span
           v-if="currentModelLabel"
@@ -1553,6 +1577,7 @@ const {
       :style="{ zoom: streamZoom }"
       @scroll.passive="onStreamScroll"
     >
+
       <div class="stream-inner">
         <div v-if="selectedAgent" class="agent-banner mono" data-testid="agent-banner">
           <button
@@ -1857,6 +1882,7 @@ const {
           </div>
         </div>
       </div>
+
     </div>
 
     <div v-else ref="streamEl" class="raw-view" data-testid="stream" :style="{ zoom: streamZoom }" @scroll.passive="onStreamScroll">
@@ -2216,9 +2242,64 @@ const {
 }
 
 /* Standing at full strength inside a faded field, the banner is the one thing
-   left to look at — which is the point. The border does the rest. */
+   left to look at — which is the point. The border does the rest.
+
+   AND IT STICKS. This is the fix for the complaint that an ended session was not
+   visible enough, and the fault was not the banner's weight but its position: the
+   stream is bottom-anchored, so a long ended transcript opens scrolled to its
+   end, and the one element on screen that says the session is over was sitting
+   off the top of the scrollport. Weight cannot help a thing that is not in view.
+
+   It needs its own opaque ground because transcript now scrolls underneath it,
+   and `--bg-card` is already what it had. No shadow: DESIGN.md grants a real
+   blurred shadow to the overlay tier only, and a sticky header inside a pane is
+   not that tier — the strong border and the opaque ground do the separating. */
 .session-view.is-ended .stream-inner > .ended {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   border-color: var(--border-strong);
+}
+
+/* THE DEAD TRANSCRIPT LOSES ITS COLOUR, by re-pointing the status tokens on each
+   faded row rather than by filtering them.
+
+   `filter: grayscale()` is the obvious way and is ruled out here for the reason
+   the comment above `.raw-view` already gives: on the clean stream it would land
+   on every event row, and a filter forces a containing block per element, so a
+   long transcript would pay for it on every scroll. Custom properties cost
+   nothing — they inherit, and each row's own rules resolve against the neutral
+   values instead of the live ones.
+
+   It also keeps the Tolerance Rule intact. An ended session is not a reading
+   outside tolerance and must not earn amber or red to announce itself; what
+   happens instead is that it stops earning any hue at all, which is what The
+   Fine Gets No Hue Rule asks for. A green "approved" marker and an amber
+   "pending" one both go to ink, so the only coloured thing left in the pane is
+   the banner's own Start button — the one control that still does something.
+
+   Stated as "while not being read" rather than as a drain plus a restore. The
+   restore would have to name the live colours to put them back, which means
+   either duplicating six literals this file is not allowed to hold or inventing
+   an alias token for each; withholding the override instead lets them resolve
+   from `:root` exactly as they do in a live pane. Hovering to read therefore
+   brings the colour back along with the opacity, so the transcript is quietened
+   rather than rewritten. */
+.session-view.is-ended
+  .stream-inner:not(:hover):not(:focus-within)
+  > *:not(.ended):not(.load-earlier) {
+  --green: var(--text-mid);
+  --green-hover: var(--text-strong);
+  --green2: var(--text-mid);
+  --running: var(--text-mid);
+  --amber: var(--text-meta);
+  --amber-hover: var(--text-mid);
+  --idle: var(--text-meta);
+  --blue: var(--text-meta);
+  --red: var(--text-mid);
+  --red-hover: var(--text-strong);
+  --teal: var(--text-meta);
+  --purple: var(--text-meta);
 }
 
 
@@ -2278,10 +2359,16 @@ const {
    and the CLEAN/RAW segments. At the window's 1080px minimum that group overran
    the pane by 15px, and eight gaps at 2px less than before is more than enough to
    pay for it without removing a control or narrowing the label voice. */
+/* WRAPS. Every control on this row is `flex-shrink: 0`, so its min-content width
+   is a floor the pane cannot go under, and measured in a browser it broke that
+   floor: 14px of horizontal page overflow at 1280x800 and 194px at 1100x700.
+   Wrapping lets the trailing controls drop to a second line instead of dragging
+   the whole window wider than itself. */
 .head-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 6px 8px;
 }
 
 .h-dot {
@@ -2390,25 +2477,31 @@ const {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
+  padding: 3px 9px;
   font-size: var(--fs-ui);
   color: var(--text-tab);
+  border: 1px solid var(--border-seg);
+  border-radius: var(--rp);
   cursor: pointer;
   user-select: none;
 }
 
 .wsl-check:hover {
   color: var(--text-strong);
+  border-color: var(--border-strong);
 }
 
 .wsl-check input {
-  accent-color: var(--blue);
+  accent-color: var(--green);
   cursor: pointer;
   margin: 0;
 }
 
 .wsl-check:has(input:checked) {
-  color: var(--blue);
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 8%, transparent);
+  border-color: color-mix(in srgb, var(--green) 45%, transparent);
 }
 
 /* The session's own name, on the meta row. Reads as text until hovered: it is a
@@ -3274,5 +3367,85 @@ html.sb-light .bypass-warn {
 .target-x:hover {
   color: var(--red);
 }
+
+
+/* The project's identity as ONE enclosed block. The header carries fifteen items
+   across two rows and nothing said which of them belonged together; the dot, the
+   name and the path all answer a single question — which lane is this — so they
+   are boxed as a unit and read as the header's subject rather than as its first
+   three items. */
+.ident {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 9px;
+  min-width: 0;
+  padding: 4px 10px;
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border-card-alt);
+  border-radius: var(--rc);
+}
+
+/* Baseline-aligned text with a centred mark beside it: the dot has no baseline
+   of its own, so it takes the row's middle instead. */
+.ident .h-dot {
+  align-self: center;
+  border-radius: var(--rp);
+}
+
+/* The session's name as a labelled block. It is the only CONTROL on a row of
+   figures — branch, model, mode, diff, timer, cache, usage, stamp — and it read
+   as one more of them. The caption says which of the two it is, and the
+   enclosure says it can be clicked. */
+.name-block,
+.run-block {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  padding: 3px 10px;
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border-card-alt);
+  border-radius: var(--rc);
+}
+
+/* AT THE END OF THE ROW, baked from the accepted `place` parameter. The meta row
+   reads left to right as what this session IS — its name, branch, model, mode,
+   diff, timer, cost — and this is the one item on it that is a setting rather
+   than a reading, so it sits apart from them rather than among them.
+
+   It is here at all, and not on the control row above, because the developer
+   asked for it to be easier to see: whether this project's work runs in a
+   container governs every session it starts, and inline among five other
+   controls it was the easiest thing on the header to miss. */
+.run-block {
+  order: 9;
+  margin-left: auto;
+}
+
+/* Two nested boxes on one control is one box too many, so the label gives up its
+   own enclosure to the block around it. */
+.run-block .wsl-check {
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+
+.run-block .wsl-check:hover {
+  border-color: transparent;
+}
+
+/* aria-hidden in the markup: the control it labels already carries its own
+   accessible name through `title`, and "session Name this session" read twice
+   over is worse for a screen reader than the caption not being there. */
+.name-cap,
+.run-cap {
+  flex: none;
+  margin-right: 7px;
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--text-ghost);
+}
+
 
 </style>

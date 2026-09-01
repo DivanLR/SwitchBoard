@@ -1569,9 +1569,17 @@ const partTabs: { id: Part; label: string }[] = [
 /* THE STEPPER. Node states and the progress bar come from the pinned wizard
    reference; the colours are this world's, where the accent means work in
    progress and a finished step is simply filled. */
+/* ONE OBJECT, NOT TWO. This carried a progress bar across the top AND a row of
+   dots joined by 16px stubs, which stated the same fact twice. The dot's own rule
+   below already said "the dot sits ON the connector"; the bar IS that connector
+   now — a single line running through every dot, green as far as the work has
+   got — and the stubs are gone. Chosen in live mode over a hierarchy treatment
+   that promoted the current phase, and over a colour treatment that took the hue
+   off finished phases. */
 .stepper {
+  position: relative;
   margin: 0 0 18px;
-  padding: 14px 14px 6px;
+  padding: 14px;
   background: var(--bg-card);
   border: 1px solid var(--border-card);
   border-radius: var(--rc);
@@ -1580,8 +1588,12 @@ const partTabs: { id: Part; label: string }[] = [
 
 /* 2px, across the top, the whole run's progress in one line. */
 .step-track {
+  position: absolute;
+  top: 23px;
+  left: 24px;
+  right: 14px;
   height: 2px;
-  margin-bottom: 14px;
+  margin: 0;
   background: var(--border);
   border-radius: 2px;
   overflow: hidden;
@@ -1658,9 +1670,11 @@ const partTabs: { id: Part; label: string }[] = [
   transition: transform 300ms var(--ease-overlay);
 }
 
+/* NOWRAP, because the line above spans the row: a wrapped second row would
+   leave it hanging across nothing. The labels already know how to ellipsis. */
 .step-list {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 10px 0;
   margin: 0;
   padding: 0;
@@ -1677,36 +1691,18 @@ const partTabs: { id: Part; label: string }[] = [
   min-width: 0;
 }
 
-.step + .step {
-  padding-left: 18px;
-}
-
-.step + .step::before {
-  content: '';
-  position: absolute;
-  left: 1px;
-  top: 13px;
-  width: 16px;
-  height: 1px;
-  background: var(--border);
-  z-index: 0;
-}
-
-/* A completed step's incoming connector is filled: the line reads as the path
-   already walked. */
-.step.done::before,
-.step.active::before {
-  background: var(--green);
-}
-
+/* A COLUMN, and top-aligned. The label sits under its dot, which puts every
+   dot's centre a fixed 23px from the card's top edge — and that fixed distance is
+   what lets the connector line above be positioned against them at all. */
 .step-btn {
   position: relative;
   z-index: 1;
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
   width: 100%;
-  padding: 2px 10px 2px 0;
+  padding: 0 12px 0 0;
   background: none;
   border: 0;
   border-radius: var(--rp);
@@ -1731,8 +1727,11 @@ const partTabs: { id: Part; label: string }[] = [
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 26px;
-  height: 26px;
+  /* 20px, baked from the accepted variant's dot parameter. The connector's own
+     `top` and `left` are derived from it: 14px of card padding plus half the
+     dot. Change one and the other two follow. */
+  width: 20px;
+  height: 20px;
   font-family: var(--mono);
   font-size: var(--fs-micro);
   border-radius: var(--rp);
@@ -1748,7 +1747,6 @@ const partTabs: { id: Part; label: string }[] = [
 .step.active .step-dot {
   color: var(--green);
   border-color: var(--green);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--green) 16%, transparent);
 }
 
 .step.done .step-dot {
@@ -1772,9 +1770,12 @@ const partTabs: { id: Part; label: string }[] = [
   white-space: nowrap;
 }
 
+/* The current phase is marked on its label instead of by a halo round its dot,
+   at the same 1px inset weight the selected tab uses elsewhere in this world. */
 .step.active .step-label {
   color: var(--text-strong);
   font-weight: var(--w-em);
+  box-shadow: inset 0 -1px 0 var(--green);
 }
 
 .step-count {
@@ -1787,4 +1788,5 @@ const partTabs: { id: Part; label: string }[] = [
     transition: none;
   }
 }
+
 </style>

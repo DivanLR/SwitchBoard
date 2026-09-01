@@ -125,6 +125,50 @@
         },
       )
 
+      // Imported skills, from two sources, so the Skills section shows its real
+      // shape instead of its empty state: a favourites block hoisted to the top,
+      // source groups under it, and a star on every row. Without these the
+      // section renders "No skills imported yet" and the starring control — which
+      // is what the section is mostly about — cannot be seen or designed against.
+      scenario.skills = [
+        {
+          name: 'archify',
+          description: 'Author a typed diagram specification, validate it against the schema, then deliver.',
+          sourceUrl: 'https://github.com/tt-a1i/archify/tree/main/archify',
+          sourcePath: 'archify',
+          enabled: true,
+          fileCount: 12,
+          importedAt: '2026-08-28T09:14:00.000Z',
+        },
+        {
+          name: 'ponytail',
+          description: 'Force the laziest solution that actually works: stdlib before custom code, one line before fifty.',
+          sourceUrl: 'https://github.com/example/ponytail',
+          sourcePath: 'skills/ponytail',
+          enabled: true,
+          fileCount: 4,
+          importedAt: '2026-08-30T16:02:00.000Z',
+        },
+        {
+          name: 'grilling',
+          description: 'Stress-test a plan by questioning it relentlessly before any of it is built.',
+          sourceUrl: 'https://github.com/example/ponytail',
+          sourcePath: 'skills/grilling',
+          enabled: true,
+          fileCount: 3,
+          importedAt: '2026-08-30T16:02:00.000Z',
+        },
+        {
+          name: 'speckit',
+          description: 'Specification pipeline: specify, clarify, plan, tasks, implement.',
+          sourceUrl: 'https://github.com/example/spec-kit',
+          sourcePath: 'speckit',
+          enabled: false,
+          fileCount: 21,
+          importedAt: '2026-07-19T11:40:00.000Z',
+        },
+      ]
+
       scenario.settings = {
         ...scenario.settings,
         // Designates which servers combine into the one Database MCP surface. Without
@@ -132,6 +176,9 @@
         databaseMcpServers: ['postgres — production', 'mssql — reporting'],
         // Skips the stack picker so the Tests section opens on its six gates.
         projectTestStacks: { 'p-alpha': 'node' },
+        // Two starred, in starring order rather than alphabetically, so the hoist
+        // is visible as a reordering and not mistaken for the natural sort.
+        favouriteSkills: ['ponytail', 'archify'],
       }
 
       installMockHost(scenario)
