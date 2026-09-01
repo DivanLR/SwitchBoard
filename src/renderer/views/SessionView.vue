@@ -1603,7 +1603,7 @@ const {
         </div>
 
         <div v-if="endedSession" class="ended" data-testid="ended-banner">
-          <div class="mono" style="font-size: var(--fs-ui); color: var(--text-mid)">
+          <div class="ended-line mono">
             Session ended <span class="faint">({{ endedSession.endReason ?? 'unknown' }})</span>
             <span v-if="endedSession.statusDetail" class="faint"> — {{ endedSession.statusDetail }}</span>
           </div>
@@ -3448,4 +3448,89 @@ html.sb-light .bypass-warn {
 }
 
 
+/* AN ENDED SESSION HIDES ITS CHAT AND BECOMES AN END CARD.
+
+   Asked for three times, in rising clarity, ending at "my chat should not be
+   visible when a session has ended". It overrides the reasoning immediately
+   above, which argues for keeping an ended transcript readable because it is the
+   one you came back to read. That reasoning is left in place rather than deleted,
+   because it is still true about the RECORD — what changed is which view shows
+   it.
+
+   What makes this recoverable rather than destructive: the Clean/Raw toggle is
+   gated on `mainTab === 'session'` alone, not on a live session, so the raw log
+   is still one click away on an ended session and holds every line. Nothing is
+   deleted, nothing stops being recorded, and the noise rules are untouched. The
+   agent banner is exempt, because it carries the only way back out of a subagent
+   chat.
+
+   `.load-earlier` IS EXEMPT TOO, and it is not decoration. It is the only control
+   that raises `deriveWindow`, and `rawLines` derives from that same window — so
+   hiding it does not just remove a button from a hidden column, it caps the RAW
+   view at the last DERIVE_WINDOW events with nothing left anywhere to extend it.
+   On a session past that ceiling the earlier transcript would be unreachable in
+   both views, which is the one outcome this change must not cause, since the raw
+   log being complete is exactly what makes hiding the clean one safe. The dimming
+   rule above already exempts it for the same reason, and says so. */
+.session-view.is-ended
+  .stream-inner
+  > *:not(.ended):not(.agent-banner):not(.load-earlier) {
+  display: none;
+}
+
+/* Centred rather than left at the top of a column it no longer shares. Both
+   margins are auto so the card sits in the middle of the pane; this deliberately
+   overrides `.stream-inner:has(> .ended) { margin-top: 0 }` in styles.css, which
+   exists to top-anchor a transcript that began with a banner — and there is no
+   transcript here any more. */
+.session-view.is-ended .stream-inner {
+  margin-top: auto;
+  margin-bottom: auto;
+}
+
+/* 520px is baked from the accepted variant's width parameter. Held in one place
+   because two elements answer to it now: the card, and the one control exempted
+   from the hide rule above. */
+.session-view.is-ended {
+  --end-card-w: 520px;
+}
+
+.session-view.is-ended .ended {
+  width: 100%;
+  max-width: var(--end-card-w);
+  margin-inline: auto;
+  padding: 20px 22px;
+  background: var(--bg-panel);
+  box-shadow: var(--elev);
+}
+
+.session-view.is-ended .ended-actions {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-soft);
+}
+
+/* The one control the hide rule spares has to be the same width as the card, or
+   it reads as a full-bleed strip slung under it: its own rule is `display: block`
+   at `width: 100%` with no cap, and it appears on any session past the 300-event
+   page size, which is most of them. Capped here rather than there, because it is
+   only in this state that it stands alone. */
+.session-view.is-ended .load-earlier {
+  max-width: var(--end-card-w);
+  margin-inline: auto;
+}
+
+/* The status line is the card's heading now, so it takes a heading tier. It
+   could only be reached at all once its inline `style` came off in the markup —
+   an inline declaration outranks every selector, and the alternative was
+   `!important`, which this file otherwise never needs. */
+.ended-line {
+  font-size: var(--fs-title);
+  color: var(--text-bright);
+}
+
+.session-view.is-ended .ended-line .faint {
+  font-size: var(--fs-meta);
+  color: var(--text-meta);
+}
 </style>
