@@ -1336,7 +1336,7 @@ const {
               :checked="project.useContainers"
               :title="
                 project.useContainers
-                  ? 'This project runs its work inside WSL containers: the project folder is mounted, nothing else is. Slower to start, and only two containers may run at once machine-wide.'
+                  ? 'This project runs its work inside WSL containers: the project folder is mounted read-write, and your Claude credentials, plugins and skills read-only. Nothing else of yours is. Slower to start, and only two containers may run at once machine-wide.'
                   : 'This project runs its work on this machine. Tick to run it inside WSL containers instead: isolated from the rest of your drive, slower to start, two at a time. Needs WSL 2.9.3 or newer.'
               "
               @change="onContainersToggle"
@@ -1695,7 +1695,7 @@ const {
                 :title="
                   containerForced
                     ? 'Bypass always runs in a container: it approves every tool call, so the container is the only thing left standing between it and your files.'
-                    : 'The same setting as the WSL box in the header, for the whole project: every session and every section run goes into a WSL container. Your project folder is mounted, nothing else is. Slower to start, only two containers at once, and it needs WSL 2.9.3 or newer.'
+                    : 'The same setting as the WSL box in the header, for the whole project: every session and every section run goes into a WSL container. Your project folder is mounted read-write, and your Claude credentials, plugins and skills read-only. Nothing else of yours is. Slower to start, only two containers at once, and it needs WSL 2.9.3 or newer.'
                 "
                 @click="containerForced || (runInContainer = !runInContainer)"
               >

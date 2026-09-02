@@ -5,7 +5,32 @@
 //
 // In shared/ rather than renderer/ for the same reason markdown.ts is: the node
 // tsconfig and Vitest can reach it without pulling in the Vue-dependent renderer.
-import type { SessionEvent } from './domain'
+import type { ResultPayload, SessionEvent } from './domain'
+
+/**
+ * What a finished turn cost, as one line: `turn complete · 1.2s · $0.42 · 140 tok`.
+ *
+ * Shared rather than defined in the view that renders it, because BOTH views
+ * state this and they must not be able to disagree. The raw view used to print
+ * the bare string `✓ turn complete` and throw the figures away, so the one place
+ * a developer would look for what a turn actually cost was the only place that
+ * did not say. Every part is conditional: a turn with no cost recorded says
+ * nothing about cost rather than claiming `$0.00`.
+ */
+export function resultLabel(payload: ResultPayload): string {
+  const parts: string[] = ['turn complete']
+  if (payload.durationMs > 0) parts.push(`${(payload.durationMs / 1000).toFixed(1)}s`)
+  if (payload.totalCostUsd > 0) parts.push(`$${payload.totalCostUsd.toFixed(2)}`)
+  // Every field read defensively, `usage` included. As a view-only helper this
+  // only ever saw a complete payload from the SDK; the raw view calls it on
+  // whatever is in the event log, and its own contract is that no event renders
+  // as nothing whatever its shape. A stored row from an older schema, or a
+  // truncated one, must degrade to `turn complete` rather than throw and take
+  // the whole transcript down with it.
+  const tokens = (payload.usage?.inputTokens ?? 0) + (payload.usage?.outputTokens ?? 0)
+  if (tokens > 0) parts.push(`${tokens} tok`)
+  return parts.join(' · ')
+}
 
 /**
  * The raw lines for one event.
@@ -48,8 +73,12 @@ export function rawLinesOf(event: SessionEvent): string[] {
       return [`? ${p.text}`]
     case 'error':
       return [`✗ ${p.text}`]
+    // The figures, not a stand-in for them. This printed the literal string
+    // `✓ turn complete` and dropped the duration, the cost and the token count
+    // that the payload was already carrying — in the one view whose whole promise
+    // is that it shows what the session actually reported.
     case 'result':
-      return ['✓ turn complete']
+      return [`✓ ${resultLabel(event.payload as ResultPayload)}`]
     default:
       return String(p.text ?? '').split('\n')
   }

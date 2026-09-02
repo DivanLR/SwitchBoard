@@ -606,6 +606,30 @@ const MIGRATIONS: Migration[] = [
       `)
     },
   },
+  {
+    /*
+     * What section a session was opened for, kept on the ROW so it survives the
+     * session ending.
+     *
+     * It already existed, but only in memory: SessionManager held `sectionKind`
+     * on its hosted entry and `sectionKinds()` read it back by walking the live
+     * map. That answered correctly right up until the session closed, and then
+     * the fact evaporated — so `sessionName` fell through to the branch, and a
+     * finished drawing that had been listed as "Diagram" in the sidebar became
+     * indistinguishable from the conversation running beside it on the same
+     * checkout. A section session closes itself the moment its work is done
+     * (endIfIdleBackground), so the window in which the old answer was right was
+     * the one window nobody was looking at it in.
+     *
+     * Nullable with no default: an ordinary conversation belongs to no section,
+     * and every row written before this migration is honestly unknown rather
+     * than retroactively assigned one.
+     */
+    name: '028-session-section-kind',
+    up: (db) => {
+      db.exec(`ALTER TABLE sessions ADD COLUMN sectionKind TEXT;`)
+    },
+  },
 ]
 
 /**

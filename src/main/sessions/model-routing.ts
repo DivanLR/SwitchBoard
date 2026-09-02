@@ -91,7 +91,13 @@ export function mainLoopModel(
   mode: ModelMode | undefined,
   models: { intelligentModel?: string; workerModel?: string },
 ): string | undefined {
-  return mode === 'advisor'
+  // `basic` runs the cheap model and nothing else: it exists to cut cost, and
+  // the strong model is the cost. It shares the advisor branch's model choice
+  // and nothing else about advisor — no second model is registered at all (see
+  // modeAgents) and no delegation protocol is appended (see
+  // modesSystemPromptAppend), so there is nothing for a strong tier to be
+  // reached through.
+  return mode === 'advisor' || mode === 'basic'
     ? (models.workerModel ?? models.intelligentModel)
     : models.intelligentModel
 }

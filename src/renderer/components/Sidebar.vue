@@ -921,7 +921,7 @@ async function confirmRemoveNow(): Promise<void> {
               v-for="(s, i) in item.sessions"
               :key="s.id"
               class="sub-row"
-              :class="{ sel: isFocusedSub(item, s.id) }"
+              :class="[`st-${sessionStatus(s)}`, { sel: isFocusedSub(item, s.id) }]"
             >
             <button
               type="button"
@@ -944,6 +944,15 @@ async function confirmRemoveNow(): Promise<void> {
                    identical on all of them and the rows read as one repeated
                    row. A section's session knows what it was started for. -->
               <span class="sub-name code">{{ s.name ?? s.branch ?? s.id.slice(0, 8) }}</span>
+              <!-- WHICH MODEL THIS ROW IS ACTUALLY ON. Read from the session's
+                   own reported model, not from Settings: a skill's frontmatter can
+                   move a turn, and a usage limit can downgrade one, so what
+                   Settings asked for and what is running are two different facts.
+                   Only while live — an ended row's model is history, and the row
+                   is already carrying its outcome. -->
+              <span v-if="!s.endedAt && s.currentModel" class="sub-model mono">{{
+                modelLabel(s.currentModel)
+              }}</span>
               <span v-if="!s.endedAt && showTimer" class="timer mono">{{
                 timerOf(s.startedAt)
               }}</span>
@@ -2055,9 +2064,35 @@ async function confirmRemoveNow(): Promise<void> {
 /* The row: the session button takes the width, the close control sits at its end
    and appears on hover or focus. Always-visible would put a small X on every row
    of a busy sidebar, which reads as clutter and invites a mis-click. */
+/* A PROJECT RUNNING SEVERAL SESSIONS IS READ BY SCANNING, not by hovering each
+   row in turn, so each one states its own condition as a line down its edge:
+   trace-green running, amber waiting on a decision from you, red errored.
+
+   The RIGHT edge, and not the left. The left carries `.sub-line.sel`'s green
+   rule, so a green status line there would mean both "this is running" and "this
+   is the one you are looking at", and the two are independent facts about the
+   same row. Right leaves them separable at a glance.
+
+   A finished session gets no line at all. The Tolerance Rule spends colour on a
+   reading outside tolerance; "done" is not one, and giving every completed row a
+   colour is how a board stops being scannable. The glyph in `.sub-mark` still
+   carries the state for anyone reading one row closely, so nothing depends on
+   colour alone. */
 .sub-row {
   display: flex;
   align-items: center;
+}
+
+.sub-row.st-working {
+  box-shadow: inset -2px 0 0 var(--running);
+}
+
+.sub-row.st-needs_you {
+  box-shadow: inset -2px 0 0 var(--amber);
+}
+
+.sub-row.st-error {
+  box-shadow: inset -2px 0 0 var(--red);
 }
 
 .sub-row .sub-line {
@@ -2123,6 +2158,14 @@ async function confirmRemoveNow(): Promise<void> {
 
 .sub-mark {
   padding: 0;
+}
+
+/* Quieter than the name and the same weight as the timer beside it: the model is
+   a condition of the row, not its identity. */
+.sub-model {
+  flex-shrink: 0;
+  font-size: var(--fs-micro);
+  color: var(--text-meta);
 }
 
 /* The session's number in the project, dimmer than its branch: it is how you

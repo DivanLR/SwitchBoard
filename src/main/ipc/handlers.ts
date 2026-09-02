@@ -4,6 +4,7 @@
 // stream events at >= 30 Hz flushes (SC-007).
 import { clipboard, dialog, ipcMain, shell, type BrowserWindow } from 'electron'
 import type { Session, SessionEvent } from '@shared/domain'
+import type { SectionKind } from '@shared/domain'
 import { canPassEval, isDangerousCommand, sessionName } from '@shared/domain'
 import {
   DIAGRAM_FILE_PICKS,
@@ -304,13 +305,20 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
           .map((r) => r.sessionId)
           .filter((id): id is string => !!id),
         diagrams: [...repos.diagramRequests.forProject(project.id).values()],
-        kinds: manager.sectionKinds(project.id),
+        // Live kinds from the manager, overlaid on what each row persisted, so an
+        // ENDED section session still knows what it was opened for (migration 028).
+        kinds: {
+          ...Object.fromEntries(
+            rows.filter((s) => s.sectionKind).map((s) => [s.id, s.sectionKind as SectionKind]),
+          ),
+          ...manager.sectionKinds(project.id),
+        },
       }
       // A typed name wins over the derived one: `label` is a fact only the
       // developer knows, and nothing the app works out may overwrite it.
       const sessions = rows.map((s) => ({
         ...s,
-        name: s.label ?? sessionName(s.id, work, s.branch),
+        name: s.label ?? sessionName(s.id, work, s.branch, s.endReason),
       }))
       return {
         ...project,
@@ -637,7 +645,15 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
       const dir = join(project.path, DIAGRAMS_DIR)
       const taken = existsSync(dir) ? readdirSync(dir) : []
-      const file = diagramFileName(req.description, taken)
+      // A typed name wins over the sentence, and goes through the same slugifier:
+      // the result can only ever be [a-z0-9-] plus `.html`, so a name carrying a
+      // separator, a dot-dot or an extension cannot reach the filesystem as one.
+      // Still uniquified, so naming a second diagram the same thing is a revision
+      // rather than an overwrite of the first.
+      const typed = req.name?.trim()
+      const file = typed
+        ? diagramFileName(typed, taken, 12)
+        : diagramFileName(req.description, taken)
       // Never the chat session. Drawing a diagram is a long turn whose output the
       // developer wants to LOOK at, not watch arrive, and queued into the
       // conversation it would block whatever they were actually doing.

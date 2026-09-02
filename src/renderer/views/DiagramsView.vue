@@ -60,6 +60,20 @@ onMounted(() => {
 watch(() => props.projectId, (id) => void diagrams.load(id))
 
 const description = ref('')
+/**
+ * The file name the developer chose, when they chose one.
+ *
+ * Blank is the default and means "derive it", which is what the app did for
+ * every diagram before this field existed: diagramFileName slugifies the
+ * sentence. A typed name goes through that same slugifier in the main process,
+ * so it cannot carry a separator or an extension, and it is still uniquified
+ * against the folder — naming two diagrams the same thing produces a revision
+ * rather than an overwrite.
+ *
+ * Cleared with the description on a successful send: it names ONE drawing, and
+ * a name left behind would silently attach itself to the next one.
+ */
+const fileName = ref('')
 /** The command/description field, so picking a command can put the caret after it. */
 const input = ref<HTMLInputElement | null>(null)
 
@@ -281,7 +295,10 @@ async function generate(): Promise<void> {
   // The drawing happens in a background session and the finished file turns up
   // in the list below, so there is nothing to switch to and nothing to watch.
   const options = onArchify.value ? { ...archify.value } : undefined
-  if (await diagrams.generate(props.projectId, text, options)) description.value = ''
+  if (await diagrams.generate(props.projectId, text, options, fileName.value)) {
+    description.value = ''
+    fileName.value = ''
+  }
 }
 
 /** Shown only while it belongs to the project on screen. */
@@ -593,6 +610,22 @@ watch(
           class="in"
           data-testid="diagram-input"
           placeholder="What should the diagram show — e.g. the auth flow from login to session refresh"
+          :disabled="diagrams.generating"
+          @keydown.enter="generate()"
+        />
+        <!-- The file name, when the developer wants to choose it. Left blank the
+             app derives one from the sentence above, which is what it has always
+             done; typed, this wins. Hidden while a COMMAND is in the box: a
+             command names its own output and this field would not reach it.
+
+             Its own row rather than beside the sentence, because the rail is
+             300px and two fields sharing a line would leave neither readable. -->
+        <input
+          v-if="!isCommand"
+          v-model="fileName"
+          class="in name-in"
+          data-testid="diagram-name"
+          placeholder="File name (optional) — otherwise named from the sentence above"
           :disabled="diagrams.generating"
           @keydown.enter="generate()"
         />
@@ -1001,6 +1034,14 @@ watch(
 .bar .in {
   flex: 1 1 100%;
   min-width: 0;
+}
+
+/* The optional name reads as secondary to the sentence above it: same field, one
+   step quieter, because most drawings never need it and a second full-strength
+   input would read as a second required answer. */
+.bar .name-in {
+  font-size: var(--fs-meta);
+  color: var(--text-body);
 }
 
 .table {

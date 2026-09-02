@@ -415,7 +415,10 @@ export interface InvokeMap {
      * (see archifyPrompt), so which one is wanted has to travel with the
      * request rather than be inferred here.
      */
-    req: { projectId: string; description: string; archify?: ArchifyOptions }
+    /** `name`, when the developer typed one, decides the file rather than the
+     *  description doing it. Slugified by diagramFileName exactly as a derived
+     *  name is, so it cannot carry a separator or an extension of its own. */
+    req: { projectId: string; description: string; name?: string; archify?: ArchifyOptions }
     res: { sessionId: string; file: string }
   }
   /**

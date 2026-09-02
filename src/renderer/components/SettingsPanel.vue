@@ -272,6 +272,11 @@ const MODE_CHOICES: { id: Settings['modelMode']; label: string; desc: string }[]
     label: 'Orchestrator',
     desc: 'Intelligent model runs the whole session, plans and reviews; well-scoped chunks go to cheap parallel workers.',
   },
+  {
+    id: 'basic',
+    label: 'Basic (cheapest)',
+    desc: 'Worker model alone. No advisor, no workers, no delegation protocol — one model answering directly. Turns heavy subagents and per-message routing off for the session, whatever they are set to.',
+  },
 ]
 
 // The Intelligent and Worker model pickers are the same card list bound to

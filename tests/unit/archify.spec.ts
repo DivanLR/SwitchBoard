@@ -31,8 +31,13 @@ describe('archifySpecFile', () => {
     expect(archifySpecFile('auth-flow.html', 'sequence')).toBe('auth-flow.sequence.json')
   })
 
-  it('leaves the type as a placeholder when the session is choosing it', () => {
-    expect(archifySpecFile('auth-flow.html', 'auto')).toBe('auth-flow.<type>.json')
+  // Every type is concrete now that "Choose for me" is gone, so the specification
+  // name is always a real one. It used to emit `<base>.<type>.json` verbatim for
+  // the auto case, leaving the session to substitute the type it had picked.
+  it('names every type concretely, with no placeholder left to substitute', () => {
+    for (const t of ARCHIFY_TYPES) {
+      expect(archifySpecFile('auth-flow.html', t.type)).toBe(`auth-flow.${t.type}.json`)
+    }
   })
 })
 
@@ -54,21 +59,18 @@ describe('archifyPrompt', () => {
     expect(prompt).not.toContain('guide "')
   })
 
-  it('asks archify itself which type fits when the developer did not choose', () => {
-    const prompt = archifyPrompt('something vague', 'vague.html', options({ type: 'auto' }))
-    expect(prompt).toContain('guide "something vague" --json')
-    expect(prompt).toContain('Choose the type yourself')
-  })
-
-  it('never lets a quoted description break out of the guide command', () => {
-    // The description lands inside a double-quoted shell argument in the prompt.
-    // One unescaped quote in it would end that argument and change the command.
-    const prompt = archifyPrompt('the "auth" flow', 'auth.html', options({ type: 'auto' }))
-    const line = prompt.split('\n').find((l) => l.includes('guide '))
-    expect(line).toBeDefined()
-    // Exactly two quotes on that line: the ones this code put there.
-    expect(line!.split('"')).toHaveLength(3)
-    expect(line).toContain("guide \"the 'auth' flow\" --json")
+  // `guide` was consulted only for the removed "Choose for me" type, so no prompt
+  // shells out to it now and no description reaches a shell argument at all. The
+  // quote-escaping this file used to guard went with it: there is no command left
+  // for an unescaped quote in a description to break out of, which is why that
+  // test is gone rather than rewritten.
+  it('never asks archify which type to use, because the developer always has', () => {
+    for (const t of ARCHIFY_TYPES) {
+      const prompt = archifyPrompt('the "auth" flow', 'auth.html', options({ type: t.type }))
+      expect(prompt).not.toContain('guide ')
+      expect(prompt).not.toContain('Choose the type yourself')
+      expect(prompt).toContain(`Use the ${t.type} type`)
+    }
   })
 
   it('carries the quality profile into both the file and the flags', () => {
@@ -174,9 +176,11 @@ describe('ARCHIFY_COMMANDS', () => {
 })
 
 describe('ARCHIFY_TYPES', () => {
-  it('offers archify’s five types plus letting it choose', () => {
+  // Five concrete types and nothing else. "Choose for me" was removed: it routed
+  // through `archify guide`, so the drawing depended on a second round trip and on
+  // whichever type that router happened to return.
+  it('offers archify’s five types, all concrete', () => {
     expect(ARCHIFY_TYPES.map((t) => t.type)).toEqual([
-      'auto',
       'architecture',
       'workflow',
       'sequence',
@@ -185,8 +189,14 @@ describe('ARCHIFY_TYPES', () => {
     ])
   })
 
-  it('starts on auto, showcase and still, which are the skill’s own defaults', () => {
-    expect(DEFAULT_ARCHIFY).toEqual({ type: 'auto', quality: 'showcase', motion: false })
+  it('starts on architecture, showcase and still', () => {
+    expect(DEFAULT_ARCHIFY).toEqual({ type: 'architecture', quality: 'showcase', motion: false })
+  })
+
+  // The default has to be a type the bar can show as selected, or the row opens
+  // with no chip pressed and nothing saying what is about to be drawn.
+  it('defaults to a type that is in the offered list', () => {
+    expect(ARCHIFY_TYPES.map((t) => t.type)).toContain(DEFAULT_ARCHIFY.type)
   })
 
   // Absent, not empty-string: the field crosses structuredClone at the bridge and

@@ -826,4 +826,42 @@ test('Browse says so when it cannot read the file, instead of doing nothing', as
     `/${DIAGRAM_PLUGIN.namespace}:import-drawio C:\\Users\\d\\Desktop\\arch.drawio.png `,
   )
   await expect(page.getByTestId('diagram-error')).toHaveCount(0)
+})
+
+// The app always named the file from the sentence. That is a good default and
+// stays the default, but a developer who knows what the drawing is called should
+// not have to phrase the request around the file name they want.
+test('a typed name decides the file, and blank still derives one from the sentence', async ({
+  page,
+}) => {
+  const name = page.getByTestId('diagram-name')
+  await expect(name).toBeVisible()
+
+  // Blank: unchanged behaviour, derived from the description.
+  await page.getByTestId('diagram-input').fill('Auth flow for login')
+  await page.getByTestId('diagram-generate').click()
+  await expect
+    .poll(async () => (await page.evaluate(() => window.__mock.state().sends)).at(-1)?.text)
+    .toContain(`${DIAGRAMS_DIR}/auth-flow-for-login.html`)
+
+  // Typed: the name wins over the sentence entirely.
+  await page.getByTestId('diagram-input').fill('something else entirely')
+  await name.fill('Payment ledger')
+  await page.getByTestId('diagram-generate').click()
+  await expect
+    .poll(async () => (await page.evaluate(() => window.__mock.state().sends)).at(-1)?.text)
+    .toContain(`${DIAGRAMS_DIR}/payment-ledger.html`)
+
+  // Both fields name ONE drawing, so both clear; a name left behind would
+  // silently attach itself to the next diagram.
+  await expect(name).toHaveValue('')
+  await expect(page.getByTestId('diagram-input')).toHaveValue('')
+})
+
+// The field is for the drawing flow. A command names its own output and this
+// field could not reach it, so offering one would be a control that does nothing.
+test('the name field is absent while a command is in the box', async ({ page }) => {
+  await expect(page.getByTestId('diagram-name')).toBeVisible()
+  await page.getByTestId('diagram-input').fill('/diagram-design:export-diagram')
+  await expect(page.getByTestId('diagram-name')).toHaveCount(0)
 })

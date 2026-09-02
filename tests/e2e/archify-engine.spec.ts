@@ -71,16 +71,29 @@ test('switching to archify offers its five types, and says what each is for', as
   await page.getByTestId('diagram-engine-archify').click()
 
   await expect(page.getByTestId('archify-options')).toBeVisible()
-  for (const type of ['auto', 'architecture', 'workflow', 'sequence', 'dataflow', 'lifecycle']) {
+  for (const type of ['architecture', 'workflow', 'sequence', 'dataflow', 'lifecycle']) {
     await expect(page.getByTestId(`archify-type-${type}`)).toBeVisible()
   }
-  // It starts on auto, which is the skill's own default, and the hint under the
-  // chips is archify's own sentence for whichever is chosen — the one thing that
-  // stops the five being names with no meaning.
-  await expect(page.getByTestId('archify-type-auto')).toHaveAttribute('aria-pressed', 'true')
+  // Five, and no sixth. "Choose for me" was removed: it routed through `archify
+  // guide`, so the drawing depended on a second round trip and on whichever type
+  // that router returned, which is a decision the developer is standing right
+  // there to make.
+  await expect(page.getByTestId('archify-type-auto')).toHaveCount(0)
+
+  // It opens on architecture, and the hint under the chips is archify's own
+  // sentence for whichever is chosen — the one thing that stops the five being
+  // names with no meaning. A default outside the list would leave no chip
+  // pressed and nothing saying what is about to be drawn.
+  await expect(page.getByTestId('archify-type-architecture')).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
   await page.getByTestId('archify-type-sequence').click()
   await expect(page.getByTestId('archify-type-sequence')).toHaveAttribute('aria-pressed', 'true')
-  await expect(page.getByTestId('archify-type-auto')).toHaveAttribute('aria-pressed', 'false')
+  await expect(page.getByTestId('archify-type-architecture')).toHaveAttribute(
+    'aria-pressed',
+    'false',
+  )
   await expect(page.getByTestId('archify-options')).toContainText('API call chains')
 })
 

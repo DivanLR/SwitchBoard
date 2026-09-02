@@ -22,6 +22,7 @@ import type {
   ProjectRef,
   ProjectSource,
   QueuedTask,
+  SectionKind,
   Session,
   SuiteResult,
   SessionEndReason,
@@ -88,6 +89,9 @@ interface SessionRow {
   planMode: number | null
   /** The developer's own name for this session; null until they type one. */
   label: string | null
+  /** Which section opened this session, kept so the fact survives it ending
+   *  (migration 028). Null for an ordinary conversation. */
+  sectionKind: SectionKind | null
 }
 
 /** SessionRow is the raw shape; Session wants real booleans for the flags. */
@@ -315,6 +319,7 @@ export class SessionsRepo {
         | 'endedAt'
         | 'endReason'
         | 'label'
+        | 'sectionKind'
       >
     >,
   ): void {

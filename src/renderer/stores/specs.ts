@@ -149,7 +149,20 @@ const store = reactive({
       watchDiagrams,
       kind,
     })
-    if (background) await useProjectsStore().refresh()
+    if (background) {
+      const projects = useProjectsStore()
+      await projects.refresh()
+      // FOCUS WHAT WAS JUST STARTED. A section dispatch opens a session of its
+      // own, and until now nothing selected it: the sidebar grew a row the
+      // developer had not asked for and the Session tab still showed the
+      // conversation the dispatch was fired from, so "what is my Tests run
+      // doing" meant finding the new row and clicking it.
+      //
+      // After the refresh, never before: applyFocus looks the id up in the
+      // project's own session list and drops the request when it is not there
+      // yet, so focusing against a stale list would silently do nothing.
+      projects.focusSession(projectId, sessionId)
+    }
     return sessionId
   },
 

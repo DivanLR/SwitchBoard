@@ -352,6 +352,9 @@ export class HostedSession {
         agents: modeAgents({
           strongModel: this.options.strongModel ?? this.options.mainModel,
           cheapModel: this.options.workerModel,
+          // basic registers none of them, so the loop cannot reach a second
+          // model even if something in the prompt asked it to.
+          mode: this.options.modelMode,
         }),
         canUseTool: (toolName, input, canUseToolOptions) =>
           this.options.gate({
@@ -485,10 +488,13 @@ export class HostedSession {
   private applyModelForTurn(text: string): void {
     if (!this.options.autoModelRouting) return
     const auto = classifyWorkload(text)
-    const workload =
-      this.options.modelMode && this.options.modelMode !== 'auto' && auto !== 'plan'
-        ? this.options.modelMode
-        : auto
+    // `basic` is excluded rather than assumed unreachable. It forces
+    // autoModelRouting off, so this method already returned above — but the chip
+    // it would otherwise set names a pairing protocol that basic does not run,
+    // and a future change to that guard must not quietly start claiming one.
+    const forced = this.options.modelMode
+    const pinned = forced === 'advisor' || forced === 'orchestrator' ? forced : null
+    const workload = pinned && auto !== 'plan' ? pinned : auto
     this.options.onTurnMode?.(workload === 'plan' ? null : workload)
 
     const model = this.options.mainModel

@@ -111,3 +111,31 @@ describe('sandboxSystemPromptAppend prose', () => {
   })
 })
 
+describe('basic mode shaping', () => {
+  // Nothing at all, not even the header. The header announces two subagents
+  // that basic does not register, and a loop told they exist would spend turns
+  // trying to delegate to agents that are not there.
+  it('appends no protocol, because there is no second tier to describe', () => {
+    expect(modesSystemPromptAppend('basic')).toBe('')
+    for (const mode of ['auto', 'advisor', 'orchestrator'] as const) {
+      expect(modesSystemPromptAppend(mode)).not.toBe('')
+    }
+  })
+
+  // The prompt going quiet is not enough on its own: a registered agent can be
+  // reached whatever the prompt says, and the advisor definition carries the
+  // strong model. Basic must register neither.
+  it('registers no subagents, so the expensive tier cannot be reached at all', () => {
+    const agents = modeAgents({ strongModel: 'opus', cheapModel: 'haiku', mode: 'basic' })
+    expect(Object.keys(agents)).toEqual([])
+  })
+
+  it('still registers both for every paired mode', () => {
+    for (const mode of ['auto', 'advisor', 'orchestrator'] as const) {
+      const agents = modeAgents({ strongModel: 'opus', cheapModel: 'haiku', mode })
+      expect(Object.keys(agents).sort()).toEqual(['advisor', 'worker'])
+      expect(agents.advisor.model).toBe('opus')
+      expect(agents.worker.model).toBe('haiku')
+    }
+  })
+})

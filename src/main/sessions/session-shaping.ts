@@ -162,7 +162,12 @@ export function modeAgents(options: {
   strongModel?: string
   /** The cheap model (Settings worker model); default = inherit the main model. */
   cheapModel?: string
+  /** The pairing mode. `basic` registers NOTHING: a mode whose whole purpose is
+   *  one model must not ship two agent definitions carrying a second one, or the
+   *  loop can still reach the expensive tier whatever the prompt says. */
+  mode?: ModelMode
 }): Record<string, AgentDefinition> {
+  if (options.mode === 'basic') return {}
   return {
     advisor: {
       description:
@@ -225,6 +230,10 @@ export function modesSystemPromptAppend(mode: ModelMode): string {
     'Token hygiene: prefer `worker` delegation for templated or repetitive work; keep ' +
     'delegation specs short and precise; a worker that reports ambiguity gets a tighter spec, ' +
     'not a retry of the same one.'
+  // Nothing at all for `basic`. The header alone would announce two subagents
+  // that this mode does not register, which is worse than silence: the loop
+  // would spend turns trying to delegate to agents that are not there.
+  if (mode === 'basic') return ''
   if (mode === 'advisor') return header + advisor + hygiene
   if (mode === 'orchestrator') return header + orchestrator + hygiene
   return header + advisor + orchestrator + hygiene

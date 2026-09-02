@@ -101,4 +101,27 @@ describe('sessionName', () => {
   it("leaves another session's kind alone", () => {
     expect(sessionName('mine', { kinds: { theirs: 'tests' } })).toBeNull()
   })
+
+  // A FINISHED section session says so, rather than carrying a branch. Once the
+  // work is over the useful fact is that it succeeded; the branch is shared with
+  // every other session on the same checkout and tells the rows apart least.
+  it('reads "<Section> - Complete" once its work finished successfully', () => {
+    expect(sessionName('s1', { kinds: { s1: 'diagram' } }, 'main', 'completed')).toBe(
+      'Diagram - Complete',
+    )
+    expect(sessionName('s1', { kinds: { s1: 'tests' } }, 'main', 'completed')).toBe(
+      'Tests - Complete',
+    )
+  })
+
+  // Only 'completed' earns it. A session someone stopped, or one that crashed,
+  // did not finish its work, and saying "Complete" over either would be a lie
+  // told in the one place the developer looks to find out what happened.
+  it('keeps the branch for any ending that is not a success', () => {
+    for (const reason of ['stopped', 'crashed', 'app_exit'] as const) {
+      expect(sessionName('s1', { kinds: { s1: 'diagram' } }, 'main', reason)).toBe('Diagram - main')
+    }
+    // Still running: no ending to report at all.
+    expect(sessionName('s1', { kinds: { s1: 'diagram' } }, 'main', null)).toBe('Diagram - main')
+  })
 })

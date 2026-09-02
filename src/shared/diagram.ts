@@ -264,7 +264,17 @@ export function diagramCommandForFile(path: string): DiagramFilePick | null {
  * skill, the name is "inferred from diagram type and variant", which is neither
  * predictable nor unique.
  */
-export function diagramFileName(description: string, taken: readonly string[] = []): string {
+export function diagramFileName(
+  description: string,
+  taken: readonly string[] = [],
+  /**
+   * Words to keep. Six is right for a name DERIVED from a sentence, where the
+   * tail is prose rather than identity. A name the developer typed is already
+   * the short version, so that path passes a higher cap rather than editing
+   * their words down for them.
+   */
+  words = 6,
+): string {
   const slug =
     description
       .toLowerCase()
@@ -272,7 +282,7 @@ export function diagramFileName(description: string, taken: readonly string[] = 
       .replace(/^-+|-+$/g, '')
       .split('-')
       .filter(Boolean)
-      .slice(0, 6)
+      .slice(0, words)
       .join('-') || 'diagram'
   const used = new Set(taken)
   if (!used.has(`${slug}.html`)) return `${slug}.html`
@@ -369,11 +379,6 @@ export const ARCHIFY = {
  */
 export const ARCHIFY_TYPES = [
   {
-    type: 'auto',
-    label: 'Choose for me',
-    hint: 'Runs archify guide first and takes the type it routes to',
-  },
-  {
     type: 'architecture',
     label: 'Architecture',
     hint: 'Components, services, cloud/security boundaries, infrastructure',
@@ -429,7 +434,7 @@ export interface ArchifyOptions {
 }
 
 export const DEFAULT_ARCHIFY: ArchifyOptions = {
-  type: 'auto',
+  type: 'architecture',
   quality: 'showcase',
   motion: false,
 }
@@ -576,7 +581,7 @@ export function archifyCommandText(typed: string): string {
  *  archify's own examples are: `<base>.<type>.json`. */
 export function archifySpecFile(file: string, type: ArchifyType): string {
   const base = file.replace(/\.html$/, '')
-  return type === 'auto' ? `${base}.<type>.json` : `${base}.${type}.json`
+  return `${base}.${type}.json`
 }
 
 /**
@@ -605,10 +610,7 @@ export function archifySpecFile(file: string, type: ArchifyType): string {
 export function archifyPrompt(description: string, file: string, options: ArchifyOptions): string {
   const spec = `${DIAGRAMS_DIR}/${archifySpecFile(file, options.type)}`
   const out = `${DIAGRAMS_DIR}/${file}`
-  // Quotes are swapped rather than escaped: this lands inside a shell example in
-  // the prompt, and a description holding a double quote would end the argument.
-  const quoted = description.replace(/"/g, "'")
-  const type = options.type === 'auto' ? '<type>' : options.type
+  const type = options.type
 
   return [
     `Create a diagram: ${description}`,
@@ -633,14 +635,7 @@ export function archifyPrompt(description: string, file: string, options: Archif
     'read the one matching schema and the one matching example, author fresh typed',
     'JSON with your own stable IDs and wording, then validate and deliver it.',
     '',
-    ...(options.type === 'auto'
-      ? [
-          'Choose the type yourself from architecture, workflow, sequence, dataflow or',
-          'lifecycle. If the request is genuinely ambiguous, ask archify first:',
-          `    node ${ARCHIFY.bin} guide "${quoted}" --json`,
-          'and take the type it routes to.',
-        ]
-      : [`Use the ${options.type} type. Do not substitute another one.`]),
+    `Use the ${options.type} type. Do not substitute another one.`,
     '',
     `1. Write the specification to ${spec}, creating the folder if it does not exist.`,
     `   Set meta.quality_profile to "${options.quality}".`,

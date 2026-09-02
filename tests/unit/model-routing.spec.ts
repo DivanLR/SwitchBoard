@@ -113,3 +113,25 @@ describe('mainLoopModel (one model per session, never switched)', () => {
     expect(mainLoopModel('advisor', { intelligentModel: 'claude-opus-5' })).toBe('claude-opus-5')
   })
 })
+
+// BASIC MODE EXISTS TO COST LESS, so its guarantees are about what does NOT
+// happen: no strong model, no second model registered, no delegation protocol.
+// Each of those is a separate mechanism, and any one of them left on would let
+// the expensive tier back in while the setting still said "basic".
+describe('basic mode', () => {
+  const models = { intelligentModel: 'opus', workerModel: 'haiku' }
+
+  it('runs the cheap model, like advisor and unlike the rest', () => {
+    expect(mainLoopModel('basic', models)).toBe('haiku')
+    expect(mainLoopModel('advisor', models)).toBe('haiku')
+    expect(mainLoopModel('orchestrator', models)).toBe('opus')
+    expect(mainLoopModel('auto', models)).toBe('opus')
+  })
+
+  // With no worker configured there is still only one model to run, and it is
+  // the account's. Falling back to the strong one is right: a mode that cannot
+  // find its cheap model must still produce a working session.
+  it('falls back to the intelligent model when no worker is set', () => {
+    expect(mainLoopModel('basic', { intelligentModel: 'opus' })).toBe('opus')
+  })
+})

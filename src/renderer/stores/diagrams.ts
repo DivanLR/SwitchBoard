@@ -6,6 +6,7 @@ import type { DiagramEntry } from '@shared/domain'
 import type { ArchifyOptions, DiagramFilePick } from '@shared/diagram'
 import { diagramCommandForFile } from '@shared/diagram'
 import { errorMessage, invoke } from '@renderer/ipc'
+import { useProjectsStore } from '@renderer/stores/projects'
 
 // Guards a keyed write in byProject against a stale response landing after a
 // newer load superseded it. Not scoped to the project id, the same way
@@ -68,6 +69,9 @@ const store = reactive({
     projectId: string,
     description: string,
     archify?: ArchifyOptions,
+    /** The developer's own file name, when they typed one. Blank means derive
+     *  it from the description, which is what the app has always done. */
+    name?: string,
   ): Promise<boolean> {
     this.generating = true
     this.error = null
@@ -78,9 +82,21 @@ const store = reactive({
       const { file, sessionId } = await invoke('diagrams.generate', {
         projectId,
         description,
+        // Omitted rather than sent empty, for the same reason `archify` is: the
+        // request crosses structuredClone and a blank string is a value the main
+        // process would then have to tell apart from an absent one.
+        ...(name?.trim() ? { name: name.trim() } : {}),
         ...(archify ? { archify } : {}),
       })
       this.pending = { projectId, file, description, sessionId }
+      // Generate does not go through specs.runInSession, so it focuses its own
+      // drawing session for the same reason that one does: the row appears in
+      // the sidebar either way, and the developer should not have to hunt for it
+      // to see what the drawing is doing. Refresh first — applyFocus drops an id
+      // the project's session list does not carry yet.
+      const projects = useProjectsStore()
+      await projects.refresh()
+      projects.focusSession(projectId, sessionId)
       void this.awaitFile(projectId, file)
       return true
     } catch (e) {

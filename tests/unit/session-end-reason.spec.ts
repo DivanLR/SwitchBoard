@@ -131,8 +131,18 @@ describe('a session that ends says why', () => {
 
     await vi.waitFor(() => expect(repos.sessions.byId(session.id)?.endedAt).toBeTruthy())
     const row = repos.sessions.byId(session.id)
-    expect(row?.endReason).toBe('stopped')
+    // COMPLETED, not 'stopped'. This asserted 'stopped' for as long as the reason
+    // was whatever the SDK reported, and the SDK cannot tell a session that
+    // finished its work apart from one somebody pressed End on: both arrive as a
+    // stop. The banner then told a developer whose drawing had just succeeded
+    // "Session ended (stopped)", which is the wording for a session that was
+    // killed. endIfIdleBackground records the intent before stopping so the two
+    // outcomes stay distinguishable in the one place that has to tell them apart.
+    expect(row?.endReason).toBe('completed')
     expect(row?.statusDetail).toMatch(/closed itself when that work finished/)
+    // And the section it was opened for outlives it, so the finished row can be
+    // named for its work rather than falling back to a shared branch.
+    expect(row?.sectionKind).toBe('cleanup')
   })
 
   // The path that produced more silent rows than every other one put together.

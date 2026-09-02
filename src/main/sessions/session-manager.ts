@@ -937,7 +937,14 @@ export class SessionManager {
     // row as well: the header pill is the only way to tell, from a session that is
     // already running, whether it started under this setting — the toggle applies
     // at spawn and cannot reach a live session's system prompt.
-    const heavySubagents = settings.heavySubagents === true
+    // BASIC MODE OVERRIDES BOTH SWITCHES, rather than trusting them to be off.
+    // Its whole promise is one model and no fan-out, and heavy subagents is an
+    // instruction to decompose and delegate as widely as the task graph allows —
+    // the exact opposite. Leaving it to the developer to remember to turn that
+    // off as well would make basic silently expensive, which is the one thing it
+    // must never be.
+    const basic = settings.modelMode === 'basic'
+    const heavySubagents = !basic && settings.heavySubagents === true
     row.heavySubagents = heavySubagents
     const heavyAppend = heavySubagentSystemPromptAppend(heavySubagents)
     // Advisor/Orchestrator protocol (static text — prompt-cache friendly). Pinned
@@ -1001,7 +1008,10 @@ export class SessionManager {
         mainModel: mainLoopModel(settings.modelMode, { intelligentModel, workerModel }),
         strongModel: intelligentModel,
         workerModel,
-        autoModelRouting: settings.autoModelRouting,
+        // Off in basic: per-turn routing exists to move between two tiers, and
+        // basic has one. Leaving it on would let a turn switch the main-loop
+        // model and throw away the whole prompt cache for no benefit.
+        autoModelRouting: !basic && settings.autoModelRouting,
         modelMode: settings.modelMode,
         // Re-read before each turn so a Settings change lands on a RUNNING session
         // (the note in Settings promises exactly that).
@@ -1317,6 +1327,12 @@ export class SessionManager {
     })
     const entry = this.hosted.get(session.id)
     if (entry) entry.sectionKind = kind
+    // Written to the ROW as well as the live entry, so the fact outlives the
+    // session. See migration 028: this used to be memory-only, and a section
+    // session closes itself the moment its work is done, so the name was lost
+    // exactly when the finished row was the thing being looked at.
+    this.repos.sessions.update(session.id, { sectionKind: kind })
+    session.sectionKind = kind
     return session
   }
 
@@ -1331,6 +1347,17 @@ export class SessionManager {
     }
     return kinds
   }
+
+  /**
+   * Mark a background session's stop as the successful end of its work.
+   *
+   * `stop()` reaches the SDK the same way whoever clicked End does, so the exit
+   * arrives as 'stopped' either way and a finished drawing read "Session ended
+   * (stopped)" — the wording the app uses for a session someone killed. The two
+   * are different outcomes and the banner is the one place that has to tell them
+   * apart, so the intent is recorded before the stop and read on the way out.
+   */
+  private completing = new Set<string>()
 
   /**
    * Name a session, in the developer's own words.
@@ -2190,6 +2217,7 @@ export class SessionManager {
     // most likely to be read as a fault. A section session exists for one piece
     // of work and goes away when that work is done, which is the design; a row
     // vanishing with nothing said is not.
+    this.completing.add(id)
     await this.stopSession(
       id,
       'This session was opened for one piece of section work, and closed itself when that work finished.',
@@ -2221,6 +2249,9 @@ export class SessionManager {
   }
 
   private handleExit(entry: HostedEntry, reason: 'completed' | 'stopped' | 'crashed', detail?: string): void {
+    // A section session that finished its work stopped itself; the SDK cannot
+    // tell that apart from someone pressing End, so endIfIdleBackground says so.
+    if (reason === 'stopped' && this.completing.delete(entry.row.id)) reason = 'completed'
     // Same guard, same reason as handleStatusChange: a loop that outlived the
     // app-quit grace period must not write to a closed database. Safe on the
     // normal path because this method is what removes the entry, below.

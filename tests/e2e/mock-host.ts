@@ -261,7 +261,11 @@ export function installMockHost(scenario: MockScenario): void {
    * inbox.alwaysAllow's dangerous-command regex works around below.
    */
   const DIAGRAMS_DIR = 'docs/diagrams'
-  function pickDiagramFileName(description: string, taken: readonly string[]): string {
+  function pickDiagramFileName(
+    description: string,
+    taken: readonly string[],
+    words = 6,
+  ): string {
     const slug =
       description
         .toLowerCase()
@@ -269,7 +273,7 @@ export function installMockHost(scenario: MockScenario): void {
         .replace(/^-+|-+$/g, '')
         .split('-')
         .filter(Boolean)
-        .slice(0, 6)
+        .slice(0, words)
         .join('-') || 'diagram'
     const used = new Set(taken)
     if (!used.has(`${slug}.html`)) return `${slug}.html`
@@ -295,7 +299,9 @@ export function installMockHost(scenario: MockScenario): void {
     options: { type: string; quality: string; motion: boolean; reference?: string },
   ): string {
     const base = file.replace(/\.html$/, '')
-    const spec = `${DIAGRAMS_DIR}/${options.type === 'auto' ? `${base}.<type>.json` : `${base}.${options.type}.json`}`
+    // Every type is concrete since "Choose for me" was removed, so there is no
+    // `<type>` placeholder branch to mirror any more.
+    const spec = `${DIAGRAMS_DIR}/${base}.${options.type}.json`
     return [
       `Create a diagram: ${description}`,
       '',
@@ -312,15 +318,13 @@ export function installMockHost(scenario: MockScenario): void {
           ]
         : []),
       'Use the archify skill for this, and follow its own fast authoring path:',
-      options.type === 'auto'
-        ? 'Choose the type yourself from architecture, workflow, sequence, dataflow or'
-        : `Use the ${options.type} type. Do not substitute another one.`,
+      `Use the ${options.type} type. Do not substitute another one.`,
       `1. Write the specification to ${spec}, creating the folder if it does not exist.`,
       `   Set meta.quality_profile to "${options.quality}".`,
       options.motion
         ? '   Turn the viewer extras on: set meta.animation to "trace", and add at most'
         : '   Leave motion off: no meta.animation and no meta.views. Static is the default.',
-      `       node ~/.claude/skills/archify/bin/archify.mjs deliver ${options.type === 'auto' ? '<type>' : options.type} ${spec} ${DIAGRAMS_DIR}/${file} --quality ${options.quality} --json`,
+      `       node ~/.claude/skills/archify/bin/archify.mjs deliver ${options.type} ${spec} ${DIAGRAMS_DIR}/${file} --quality ${options.quality} --json`,
       'NEVER run `archify preview`. It watches the file on a loopback port and returns',
       `When it is delivered, reply with the one line: wrote ${DIAGRAMS_DIR}/${file}`,
     ].join('\n')
@@ -984,7 +988,12 @@ export function installMockHost(scenario: MockScenario): void {
       await new Promise((resolve) => setTimeout(resolve, startDelayMs))
       const requested = diagramRequestedFiles.get(projectId) ?? new Set<string>()
       const taken = [...(diagramsByProject.get(projectId) ?? []).map((d) => d.file), ...requested]
-      const file = pickDiagramFileName(description, taken)
+      // A typed name decides the file, through the same slugifier, exactly as
+      // the real handler does it.
+      const typed = (req.name as string | undefined)?.trim()
+      const file = typed
+        ? pickDiagramFileName(typed, taken, 12)
+        : pickDiagramFileName(description, taken)
       requested.add(file)
       diagramRequestedFiles.set(projectId, requested)
       // A BACKGROUND session, never the chat one — see sectionSession above.

@@ -771,19 +771,20 @@ html.sb-light .btn-solid {
   border: 1px solid color-mix(in srgb, var(--red) 35%, transparent);
 }
 
-/* Sized to `.ctl` in SessionView, which is the `+ Session` button standing right
-   beside it in the header: same 12.5px face and the same 3px/9px box, so the two
-   read as one pair rather than as a badge with a button bolted on. The metrics
-   are repeated rather than shared because there is no control-size token to share;
-   if `.ctl` moves, move these with it.
+/* Takes its size from the base `.pill` above and overrides nothing, because its
+   peers are the other badges in that header row: plan, nogit, fanout, agents,
+   background and the live status pill, all 11px in a 2px/10px box.
+
+   An earlier pass sized it to `.ctl` instead, the `+ Session` BUTTON standing
+   beside it, on the reasoning that two adjacent controls should agree. They are
+   not two controls. One badge grown to 12.5px among six at 11px reads as oversized
+   rather than as paired, which is what it looked like in the app.
 
    The outline is red at the owner's direction. Recording the tension rather than
    burying it: DESIGN.md reserves red for a reading outside tolerance, and both the
    comment above and the Tolerance Rule argue an ended session is packed flat, not
    an error. The text stays `--text-tab`, so only the outline carries the hue. */
 .pill.ended {
-  font-size: var(--fs-ui);
-  padding: 3px 9px;
   color: var(--text-tab);
   background: transparent;
   border: 1px solid var(--red);

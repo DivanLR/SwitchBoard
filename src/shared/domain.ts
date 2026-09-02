@@ -224,6 +224,17 @@ export interface Session {
    */
   label?: string | null
   /**
+   * Which section opened this session, persisted (migration 028) rather than
+   * held only while it runs.
+   *
+   * It lived in SessionManager's live map alone, so the answer was correct until
+   * the session closed and then gone — and a section session closes ITSELF the
+   * moment its work finishes. `sessionName` therefore lost the label exactly
+   * when the developer went looking at the finished row. Null for an ordinary
+   * conversation, which belongs to no section.
+   */
+  sectionKind?: SectionKind | null
+  /**
    * Started with --dangerously-skip-permissions (header "⚠ Bypass" pill), which
    * also means the session ran inside the WSL container sandbox. Persisted,
    * because such a transcript lives in a container volume rather than the
@@ -587,7 +598,20 @@ export function modelPrice(id: string): string {
 }
 
 /** Advisor/Orchestrator pairing mode; 'auto' picks per message by workload. */
-export type ModelMode = 'auto' | 'advisor' | 'orchestrator'
+export type ModelMode = 'auto' | 'advisor' | 'orchestrator' | 'basic'
+
+/**
+ * Modes that pair two models. `basic` is the one that does not: one model, no
+ * subagents, no delegation protocol in the prompt. Asked for to cut cost, and
+ * cost is exactly what the pairing modes spend — a second model, a second
+ * context, and a prompt that encourages fanning out.
+ */
+export const PAIRED_MODEL_MODES: readonly ModelMode[] = ['auto', 'advisor', 'orchestrator']
+
+/** True when the mode runs a single model with no orchestration of any kind. */
+export function isBasicMode(mode: ModelMode | undefined): boolean {
+  return mode === 'basic'
+}
 
 export interface Settings {
   defaultView: 'clean' | 'raw'
@@ -1378,6 +1402,14 @@ export function sessionName(
     kinds?: Readonly<Record<string, SectionKind>>
   },
   branch?: string | null,
+  /**
+   * How this session finished, when it has. A section session that completed
+   * successfully reads "<Section> - Complete" rather than carrying a branch it
+   * shares with every other session on the same checkout: once it is over, the
+   * useful fact is that its work is done, not which checkout it ran against.
+   * Anything else — still running, stopped, crashed — keeps the branch.
+   */
+  endReason?: SessionEndReason | null,
 ): string | null {
   const diagram = work.diagrams?.find((d) => d.sessionId === sessionId)
   if (diagram) {
@@ -1391,7 +1423,8 @@ export function sessionName(
   // is for and the branch says which checkout it is answering for, which is the
   // pair the developer needs when the same harness is running on two branches at
   // once. Sessions carry their own branch, so a worktree names itself correctly.
-  const on = branch ? ` - ${branch}` : ''
+  const done = endReason === 'completed'
+  const on = done ? ' - Complete' : branch ? ` - ${branch}` : ''
   const kind = work.kinds?.[sessionId]
   if (kind) return `${SECTION_LABELS[kind]}${on}`
   if (work.verifyRunSessionIds?.includes(sessionId)) return `Tests${on}`

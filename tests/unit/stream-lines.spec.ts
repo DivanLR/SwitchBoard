@@ -21,7 +21,40 @@ describe('rawLinesOf', () => {
     expect(rawLinesOf(event('prompt', { text: 'do the thing' }))).toEqual(['❯ do the thing'])
     expect(rawLinesOf(event('error', { text: 'it broke' }))).toEqual(['✗ it broke'])
     expect(rawLinesOf(event('question', { text: 'which one?' }))).toEqual(['? which one?'])
+    // An empty payload still renders, and says only what it knows.
     expect(rawLinesOf(event('result', {}))).toEqual(['✓ turn complete'])
+  })
+
+  // THE FIGURES, NOT A STAND-IN FOR THEM. This case printed the bare string
+  // `✓ turn complete` and discarded the duration, cost and token count the
+  // payload was already carrying — in the one view whose promise is that it
+  // shows what the session actually reported.
+  it('states what the turn cost, in the view that promises the whole output', () => {
+    const lines = rawLinesOf(
+      event('result', {
+        durationMs: 1200,
+        totalCostUsd: 0.42,
+        usage: { inputTokens: 100, outputTokens: 40 },
+      }),
+    )
+    expect(lines).toEqual(['✓ turn complete · 1.2s · $0.42 · 140 tok'])
+  })
+
+  // A partial payload degrades a part at a time rather than all at once, and a
+  // missing `usage` must not throw: the raw view calls this on whatever is in
+  // the event log, including rows written by an older schema.
+  it('drops only the parts it has no figure for', () => {
+    expect(rawLinesOf(event('result', { durationMs: 900 }))).toEqual([
+      '✓ turn complete · 0.9s',
+    ])
+    expect(rawLinesOf(event('result', { totalCostUsd: 0.5, usage: {} }))).toEqual([
+      '✓ turn complete · $0.50',
+    ])
+    // Zero is not a reading worth a column: a free turn says nothing about cost
+    // rather than claiming $0.00.
+    expect(rawLinesOf(event('result', { durationMs: 0, totalCostUsd: 0 }))).toEqual([
+      '✓ turn complete',
+    ])
   })
 
   it('marks only the first line of a summary, leaving the body alone', () => {
