@@ -60,3 +60,33 @@ describe('toAvailableModels (SDK report → selectable list)', () => {
     expect(models).toEqual([{ id: 'claude-sonnet-5', label: 'claude-sonnet-5', description: '' }])
   })
 })
+
+// A model released after this code was written must need no code change. Fable
+// 5.1 is the live example: the CLI did not report it yet, and the question was
+// whether the app would show it once the CLI did.
+describe('a model the app has never seen', () => {
+  it('gets a label, a family, a price and a downgrade rung from its id alone', () => {
+    expect(modelLabel('claude-fable-5-1')).toBe('Fable 5.1')
+    expect(modelLabel('claude-fable-5-1[1m]')).toBe('Fable 5.1 (1M)')
+    expect(modelFamily('claude-fable-5-1')).toBe('fable')
+    expect(modelPrice('claude-fable-5-1')).toBe('$$$')
+  })
+
+  // An entirely unknown family still renders rather than breaking the picker.
+  it('still renders an unrecognised family, without claiming a price it cannot know', () => {
+    expect(modelLabel('claude-quartz-2')).toBe('Quartz 2')
+    expect(modelFamily('claude-quartz-2')).toBeNull()
+    expect(modelPrice('claude-quartz-2')).toBe('—')
+  })
+
+  // The alias and the resolved id collapse to one row, which is what stops a new
+  // release appearing twice in the picker.
+  it('collapses an alias onto the id it resolves to', () => {
+    const models = toAvailableModels([
+      { value: 'default', resolvedModel: 'claude-fable-5-1' },
+      { value: 'fable[1m]', resolvedModel: 'claude-fable-5-1', displayName: 'Fable' },
+      { value: 'claude-fable-5-1', displayName: 'Fable 5.1' },
+    ])
+    expect(models.map((m) => m.id)).toEqual(['claude-fable-5-1'])
+  })
+})

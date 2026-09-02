@@ -212,6 +212,9 @@ const CANCEL_NOTE = 'You stopped this run before it reported, so nothing it meas
  * The other kinds keep reuse deliberately: a diff comment, a cleanup command
  * and a test run are each short or already serialised by their own section.
  */
+/** How long a model list read from the CLI is trusted. See SessionManager.models(). */
+const MODELS_TTL_MS = 10 * 60_000
+
 const NEVER_REUSED: ReadonlySet<SectionKind> = new Set(['diagram', 'spec'])
 
 const UPDATABLE_KINDS: ReadonlySet<EventKind> = new Set([
@@ -568,6 +571,8 @@ export class SessionManager {
    *  in-memory: the account's model list is whatever the CLI reports today. */
   availableModels: AvailableModel[] = []
   private probingModels: Promise<AvailableModel[]> | null = null
+  /** When the list was last read from the CLI. See models() for why it expires. */
+  private modelsProbedAt = 0
 
   constructor(
     private repos: Repositories,
@@ -580,7 +585,18 @@ export class SessionManager {
    * or too old to answer, in which case the picker offers the account default.
    */
   async models(): Promise<AvailableModel[]> {
-    if (this.availableModels.length > 0) return this.availableModels
+    // THE LIST GOES STALE, so the cache expires. It used to be kept for the life
+    // of the process: once anything had populated it, the CLI was never asked
+    // again, and a model released after the app started could not appear until
+    // the app was restarted. Nothing said so, which reads as the app simply not
+    // knowing about a model everyone else can see.
+    //
+    // A session start still refreshes it for free (onModels), so this only bites
+    // the case that stayed open without starting one. Ten minutes is short enough
+    // that a CLI upgrade shows up in the same sitting, and long enough that
+    // opening Settings repeatedly does not re-probe a 250 MB binary each time.
+    const fresh = Date.now() - this.modelsProbedAt < MODELS_TTL_MS
+    if (this.availableModels.length > 0 && fresh) return this.availableModels
     // ponytail: concurrent callers share one in-flight probe; a failure simply
     // re-probes on the next ask (no backoff, no cached negative result).
     this.probingModels ??= probeAvailableModels(
@@ -588,7 +604,12 @@ export class SessionManager {
     )
     try {
       const models = await this.probingModels
-      if (models.length > 0) this.availableModels = models
+      // A failed probe keeps the previous list rather than emptying the picker;
+      // only a real answer refreshes the stamp, so a failure re-probes next time.
+      if (models.length > 0) {
+        this.availableModels = models
+        this.modelsProbedAt = Date.now()
+      }
     } finally {
       this.probingModels = null
     }
