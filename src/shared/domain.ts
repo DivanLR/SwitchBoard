@@ -1400,6 +1400,10 @@ export function sessionName(
      *  diff comment, a cleanup command — which would otherwise all read as the
      *  bare branch and be indistinguishable in the sidebar. */
     kinds?: Readonly<Record<string, SectionKind>>
+    /** Which suite an isolated test session is running. An isolated run is a
+     *  queue of one-suite sessions, and "Tests" on every row does not say which
+     *  of them is the busy one. */
+    suites?: Readonly<Record<string, string>>
   },
   branch?: string | null,
   /**
@@ -1426,6 +1430,10 @@ export function sessionName(
   const done = endReason === 'completed'
   const on = done ? ' - Complete' : branch ? ` - ${branch}` : ''
   const kind = work.kinds?.[sessionId]
+  // The suite outranks the branch: on an isolated run every session is "Tests"
+  // on the same checkout, so the suite is the only thing telling the rows apart.
+  const suite = work.suites?.[sessionId]
+  if (kind && suite) return `${SECTION_LABELS[kind]}: ${suite}${done ? ' - Complete' : ''}`
   if (kind) return `${SECTION_LABELS[kind]}${on}`
   if (work.verifyRunSessionIds?.includes(sessionId)) return `Tests${on}`
   if (work.apiRunSessionIds?.includes(sessionId)) return `API${on}`

@@ -124,4 +124,28 @@ describe('sessionName', () => {
     // Still running: no ending to report at all.
     expect(sessionName('s1', { kinds: { s1: 'diagram' } }, 'main', null)).toBe('Diagram - main')
   })
+
+
+  // AN ISOLATED RUN IS A QUEUE OF ONE-SUITE SESSIONS. Every one of them is
+  // "Tests" against the same checkout, so the branch tells them apart least and
+  // the suite tells them apart completely.
+  it('names an isolated test session by its suite, not by the shared branch', () => {
+    expect(
+      sessionName('s1', { kinds: { s1: 'tests' }, suites: { s1: 'Unit' } }, 'main'),
+    ).toBe('Tests: Unit')
+    expect(
+      sessionName('s2', { kinds: { s2: 'tests' }, suites: { s2: 'HTTP smoke' } }, 'main'),
+    ).toBe('Tests: HTTP smoke')
+  })
+
+  it('still says Complete when that suite finished', () => {
+    expect(
+      sessionName('s1', { kinds: { s1: 'tests' }, suites: { s1: 'Unit' } }, 'main', 'completed'),
+    ).toBe('Tests: Unit - Complete')
+  })
+
+  // A shared-container run has no per-suite session, so nothing changes there.
+  it('falls back to the branch when no suite is named', () => {
+    expect(sessionName('s1', { kinds: { s1: 'tests' } }, 'main')).toBe('Tests - main')
+  })
 })

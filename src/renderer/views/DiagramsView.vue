@@ -9,15 +9,18 @@ import {
   ARCHIFY,
   ARCHIFY_COMMANDS,
   ARCHIFY_PREFIX,
+  ARCHIFY_STAGES,
   ARCHIFY_TYPES,
   DEFAULT_ARCHIFY,
   DIAGRAM_COMMANDS,
   DIAGRAM_PLUGIN,
   DIAGRAMS_DIR,
   archifyCommandText,
+  archifySpecFile,
   diagramCommandText,
   isDiagramFilePick,
   type ArchifyOptions,
+  type ArchifyStage,
   type ArchifyType,
   type DiagramFilePick,
 } from '@shared/diagram'
@@ -26,6 +29,7 @@ import { normalizeForMatch } from '@renderer/composables/useCommandSuggestions'
 import { useDiagramsStore } from '@renderer/stores/diagrams'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { useSkillsStore } from '@renderer/stores/skills'
+import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import MiniTerminal from '@renderer/components/MiniTerminal.vue'
 import Icon from '@renderer/components/Icon.vue'
 
@@ -45,6 +49,7 @@ const emit = defineEmits<{ (e: 'install'): void; (e: 'run', command: string): vo
 const diagrams = useDiagramsStore()
 const settings = useSettingsStore()
 const skills = useSkillsStore()
+const active = useActiveSessionStore()
 
 onMounted(() => {
   void diagrams.load(props.projectId)
@@ -214,6 +219,69 @@ async function browseImport(): Promise<void> {
     field.setSelectionRange(field.value.length, field.value.length)
   })
 }
+
+// ── THE ARCHIFY PIPELINE, AS A STEPPER ──────────────────────────────────────
+//
+// archify does not draw straight to HTML. It authors a typed JSON specification,
+// validates that against a schema, and only then compiles it — and each of those
+// can fail on its own. A drawing that stops has stopped at one of them, and the
+// section used to say only "drawing…" for however long it took, which is the
+// same thing it says when everything is fine.
+//
+// Read from what the SESSION actually did, never from elapsed time: only
+// tool_activity and raw_output are scanned. The prompt and the model's own
+// narration are excluded deliberately — the prompt contains the words "validate"
+// and "deliver" as instructions, so matching those would mark every stage done
+// the instant the request went out.
+const ARCHIFY_STEPS = [
+  { key: 'type', label: '1. Type chosen' },
+  { key: 'schema', label: '2. Schema and example read' },
+  { key: 'spec', label: '3. Candidate written' },
+  { key: 'validate', label: '4. Validated (freezes the candidate)' },
+  { key: 'deliver', label: '5. Delivered' },
+  { key: 'done', label: 'In docs/diagrams' },
+] as const
+
+/** Only what the session DID: tool calls and their output. See above. */
+const runOutput = computed(() => {
+  // The DRAWING session, which is the one the pending row tails. props.sessionId
+  // is the section session a command was dispatched into, and on the Generate
+  // path that is a different session entirely.
+  const id = pending.value?.sessionId ?? props.sessionId
+  if (!id) return ''
+  return (active.tails[id] ?? [])
+    .filter((e) => e.kind === 'tool_activity' || e.kind === 'raw_output')
+    .map((e) => {
+      const p = e.payload as Partial<{ text: string; inputPreview: string; resultPreview: string }>
+      return `${p.inputPreview ?? ''} ${p.resultPreview ?? ''} ${p.text ?? ''}`
+    })
+    .join(' ')
+})
+
+/**
+ * How far the current drawing has got, as an index into ARCHIFY_STEPS.
+ *
+ * Monotonic by construction — each stage is only reached through the one before
+ * it — so a receipt scrolling past cannot walk the stepper backwards.
+ */
+const archifyStep = computed(() => {
+  if (!pending.value) return list.value.length > 0 ? ARCHIFY_STEPS.length : 0
+  const text = runOutput.value
+  // The spec is named by the app, so its exact filename is the signal rather
+  // than a guess at what "wrote a spec" looks like in prose.
+  const spec = archifySpecFile(pending.value.file, archify.value.type)
+  let reached = 1
+  // Step 2 is archify's own: read ONE matching schema and ONE matching example,
+  // and only those. A Read of either directory is the signal.
+  if (/schemas\/|examples\//.test(text)) reached = 2
+  if (text.includes(spec)) reached = 3
+  // The CLI invocation, not the bare word: "validate" and "deliver" appear in
+  // ordinary prose too, and a receipt scrolling past must not advance a stage
+  // that has not actually run.
+  if (/archify\S*\s+validate\b/.test(text)) reached = 4
+  if (/archify\S*\s+deliver\b/.test(text)) reached = 5
+  return reached
+})
 
 /** The reference file archify draws from. Cancelling leaves whatever was already
  *  chosen, so a mis-click does not silently drop the reference. */
@@ -428,7 +496,25 @@ interface MenuCommand {
   available: boolean
   /** False for `preview`, which never returns. See ARCHIFY_COMMANDS. */
   sendable: boolean
+  /** Where this command sits in archify's pipeline. Absent on the plugin path,
+   *  whose three commands are peers rather than a sequence. */
+  stage?: ArchifyStage
 }
+
+/**
+ * archify's commands grouped by pipeline stage, in order.
+ *
+ * The menu used to be fourteen equal-looking rows, which is a list of what the
+ * tool can do and not a description of how it is used. Most of them only make
+ * sense at one point: validate before deliver, check only on something already
+ * delivered. Empty groups are dropped so the headings never outnumber the rows.
+ */
+const archifyGroups = computed(() =>
+  ARCHIFY_STAGES.map((s) => ({
+    ...s,
+    items: commands.value.filter((c) => c.stage === s.stage),
+  })).filter((g) => g.items.length > 0),
+)
 
 const commands = computed<MenuCommand[]>(() => {
   // archify's availability is the skill's, once, for the whole catalogue: they
@@ -692,8 +778,45 @@ watch(
                  diagrams (see `installed`), which left this menu as a dead end: it
                  named three commands, said each was absent, and offered no way to
                  fix that. Same action the card's button takes. -->
+            <!-- Grouped on the archify path so the list says which command comes
+                 before which; flat on the plugin path, whose three commands are
+                 peers rather than a sequence. -->
+            <template v-if="onArchify">
+              <div v-for="g in archifyGroups" :key="g.stage" class="cmd-group">
+                <div class="cmd-group-label">{{ g.label }}</div>
+                <button
+                  v-for="c in g.items"
+                  :key="c.command"
+                  class="cmd-item"
+                  :class="{ missing: !c.available, inert: c.available && !c.sendable }"
+                  :data-testid="`diagram-command-${c.command}`"
+                  :disabled="installBusy || (c.available && !c.sendable)"
+                  @click="c.available ? pickCommand(c) : installFromMenu()"
+                >
+                  <span class="cmd-name mono">archify {{ c.command }}</span>
+                  <span class="cmd-desc">{{ c.description }}</span>
+                  <span class="cmd-args mono">{{ c.argumentHint }}</span>
+                  <span
+                    v-if="c.available && !c.sendable"
+                    class="cmd-missing"
+                    :data-testid="`diagram-command-inert-${c.command}`"
+                  >
+                    runs until Ctrl-C — not from here
+                  </span>
+                  <span
+                    v-else-if="!c.available"
+                    class="cmd-missing"
+                    :data-testid="`diagram-install-hint-${c.command}`"
+                  >
+                    <Icon name="download" :size="11" />
+                    <template v-if="installBusy">importing…</template>
+                    <template v-else>import archify</template>
+                  </span>
+                </button>
+              </div>
+            </template>
             <button
-              v-for="c in commands"
+              v-for="c in onArchify ? [] : commands"
               :key="c.command"
               class="cmd-item"
               :class="{ missing: !c.available, inert: c.available && !c.sendable }"
@@ -890,6 +1013,21 @@ watch(
           <span class="when mono">drawing…</span>
         </div>
         <div class="desc">{{ pending.description }}</div>
+        <!-- archify authors a spec, validates it, then compiles it, and each of
+             those fails on its own. Without this the section said "drawing…" for
+             however long it took, which is what it also says when all is well. -->
+        <ol v-if="onArchify" class="steps" data-testid="archify-steps">
+          <li
+            v-for="(step, i) in ARCHIFY_STEPS"
+            :key="step.key"
+            class="step"
+            :class="{ done: i < archifyStep, now: i === archifyStep }"
+            :data-testid="`archify-step-${step.key}`"
+          >
+            <span class="step-mark" aria-hidden="true">{{ i < archifyStep ? '✓' : '·' }}</span>
+            <span class="step-label">{{ step.label }}</span>
+          </li>
+        </ol>
         <MiniTerminal :session-id="pending.sessionId" label="drawing" />
       </div>
 
@@ -1339,6 +1477,39 @@ watch(
    No hanging indent to line it up under the chips: .ab-row wraps, and the moment
    it does there is no single column to align to — the indent was only ever right
    for the unwrapped case. Flush left is right in both. */
+/* The pipeline, one line per stage. Done is ticked and quiet; the stage in
+   flight is the only coloured thing here, because "where is it now" is the
+   single question this list exists to answer. */
+.steps {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.step {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+}
+
+.step.done {
+  color: var(--text-meta);
+}
+
+.step.now {
+  color: var(--green);
+}
+
+.step-mark {
+  flex-shrink: 0;
+  width: 9px;
+  font-family: var(--mono);
+}
+
 .ab-hint {
   font-size: var(--fs-micro);
   line-height: 1.45;
@@ -1499,6 +1670,21 @@ watch(
   border: 1px solid var(--border-card);
   border-radius: var(--rc);
   box-shadow: var(--elev);
+}
+
+/* The stage heading. Quiet and uppercase: it orders the rows below it, it is not
+   one of them. */
+.cmd-group + .cmd-group {
+  margin-top: 6px;
+}
+
+.cmd-group-label {
+  padding: 5px 9px 3px;
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--text-faint);
 }
 
 .cmd-item {

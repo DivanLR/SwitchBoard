@@ -2815,7 +2815,11 @@ const {
 }
 
 
-.ended {
+/* The card. Scoped to a direct child of the stream for the same reason the
+   is-ended rule below is: the header's `<span class="pill ended">` shares this
+   class name, and a bare `.ended` handed it the card's padding and bottom
+   margin. */
+.stream-inner > .ended {
   background: var(--bg-card);
   border: 1px solid var(--border-soft);
   border-radius: var(--rc);
@@ -3590,7 +3594,17 @@ html.sb-light .bypass-warn {
   --end-card-w: 520px;
 }
 
-.session-view.is-ended .ended {
+/* THE CARD, and not the header pill that shares its class name.
+   `<span class="pill ended">Ended</span>` in the header also carries `.ended`, so
+   the descendant form of this selector matched it too and handed a badge the
+   card's 520px block layout: width 100%, 20px/22px padding and the panel ground,
+   in a row of 11px pills. Two attempts to size `.pill.ended` had no effect at
+   all, because (0,2,0) loses to this rule's (0,3,0) — the badge was never being
+   sized by its own rule.
+
+   Scoped to a direct child of the stream, which is what the card is and what the
+   pill can never be. The sticky rule below already uses exactly this form. */
+.session-view.is-ended .stream-inner > .ended {
   width: 100%;
   max-width: var(--end-card-w);
   margin-inline: auto;

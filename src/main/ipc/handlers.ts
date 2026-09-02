@@ -307,6 +307,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         diagrams: [...repos.diagramRequests.forProject(project.id).values()],
         // Live kinds from the manager, overlaid on what each row persisted, so an
         // ENDED section session still knows what it was opened for (migration 028).
+        suites: manager.isolatedSuiteNamesFor(project.id),
         kinds: {
           ...Object.fromEntries(
             rows.filter((s) => s.sectionKind).map((s) => [s.id, s.sectionKind as SectionKind]),

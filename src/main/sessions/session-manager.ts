@@ -1348,6 +1348,16 @@ export class SessionManager {
     return kinds
   }
 
+  /** Which suite each live isolated session is running, by session id. */
+  isolatedSuiteNamesFor(projectId: string): Record<string, string> {
+    const names: Record<string, string> = {}
+    for (const entry of this.hosted.values()) {
+      const suite = this.isolatedSuiteNames.get(entry.row.id)
+      if (suite && entry.row.projectId === projectId) names[entry.row.id] = suite
+    }
+    return names
+  }
+
   /**
    * Mark a background session's stop as the successful end of its work.
    *
@@ -1827,6 +1837,11 @@ export class SessionManager {
   // isolated session gets IS an ordinary verifyPrompt over a one-entry plan, so
   // its answer is an ordinary VerifyReport whose `suites` array happens to
   // have one element.
+  /** Which suite each isolated session is running, so its sidebar row says so
+   *  rather than repeating the branch every other session shares. Kept beside
+   *  the watch and cleared with it. */
+  private isolatedSuiteNames = new Map<string, string>()
+
   private isolatedSuiteWatch = new Map<string, { suite: TestSuite; settle: (result: SuiteResult) => void }>()
 
   private scanIsolatedSuiteReport(entry: HostedEntry, kind: EventKind, payload: unknown): void {
@@ -2027,6 +2042,15 @@ export class SessionManager {
       }
     }
     control.sessionId = session.id
+    // NAME THE SUITE'S OWN SESSION. This path calls startSession directly
+    // rather than startBackground, so nothing set a section kind and the row
+    // fell through to the branch — which every session on this checkout
+    // shares. An isolated run is a queue of these, one at a time, and the
+    // developer watching it needs to know which suite is the busy one.
+    const suiteEntry = this.hosted.get(session.id)
+    if (suiteEntry) suiteEntry.sectionKind = 'tests'
+    this.repos.sessions.update(session.id, { sectionKind: 'tests' })
+    this.isolatedSuiteNames.set(session.id, planned.suite.label)
     try {
       // A cancel landing while this suite's container was still starting: stop
       // it unused rather than sending a suite the developer already told the

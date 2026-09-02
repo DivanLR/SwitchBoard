@@ -140,3 +140,27 @@ test('starting a session again clears the mark', async ({ page }) => {
   await expect(page.getByTestId('ended-banner')).toHaveCount(0)
   await expect(root(page)).toHaveAttribute('data-session-ended', 'false')
 })
+
+// The header pill and the end card BOTH carry `.ended`. A descendant selector
+// for the card matched the pill too and handed a badge the card's 520px block
+// layout, in a row of 11px pills. Two attempts to size `.pill.ended` did nothing,
+// because that rule's specificity loses to the card's. Asserted on the computed
+// box rather than on a class, because a class assertion would have passed
+// throughout the whole time it was broken.
+test('the Ended pill is a badge, not the end card that shares its class', async ({ page }) => {
+  await page.evaluate(() => window.__mock.endSession('s-alpha'))
+  await expect(page.getByTestId('ended-banner')).toBeVisible()
+
+  const pill = page.locator('.pill.ended')
+  await expect(pill).toBeVisible()
+  const box = await pill.evaluate((el) => {
+    const s = getComputedStyle(el)
+    return { display: s.display, padding: s.padding, width: el.getBoundingClientRect().width }
+  })
+  // Padding and width, not display: the pill is a flex child, so `inline`
+  // blockifies to `block` even when it is styled correctly. The card's box is
+  // what distinguishes them — 20px/22px, or the card's own 11px/13px, over 520px.
+  expect(box.padding).not.toBe('20px 22px')
+  expect(box.padding).not.toBe('11px 13px')
+  expect(box.width).toBeLessThan(200)
+})

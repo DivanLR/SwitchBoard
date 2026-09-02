@@ -450,21 +450,42 @@ export const DEFAULT_ARCHIFY: ArchifyOptions = {
  * anyway, with its own note, because pretending it does not exist is worse than
  * saying why it is not offered.
  */
+/**
+ * archify's CLI in PIPELINE ORDER, which is the order the menu shows.
+ *
+ * Its own `usage()` prints the subcommands in no particular sequence, so the
+ * menu read as fourteen equal choices when in practice most of them only make
+ * sense at one point: `validate` before `deliver`, `check` only on something
+ * already delivered. Grouping states which comes before which, so the list
+ * teaches the flow rather than listing capabilities.
+ */
+export const ARCHIFY_STAGES = [
+  { stage: 'before', label: 'Before you draw' },
+  { stage: 'author', label: 'Author and check the specification' },
+  { stage: 'deliver', label: 'Deliver' },
+  { stage: 'verify', label: 'Verify what was delivered' },
+] as const
+
+export type ArchifyStage = (typeof ARCHIFY_STAGES)[number]['stage']
+
 export const ARCHIFY_COMMANDS = [
   {
     command: 'doctor',
+    stage: 'before',
     description: 'Check the archify install answers before anything depends on it',
     argumentHint: '',
     sendable: true,
   },
   {
     command: 'guide',
+    stage: 'before',
     description: 'Ask which diagram type fits a scenario, and why',
     argumentHint: '[scenario or question] [--json] [--lang en|zh]',
     sendable: true,
   },
   {
     command: 'validate',
+    stage: 'author',
     description: 'Check one specification against its schema and the composition rules',
     argumentHint:
       '<type> <input.json> [--json] [--layout-json] [--quality …] [--repo-root path (architecture only)]',
@@ -472,12 +493,14 @@ export const ARCHIFY_COMMANDS = [
   },
   {
     command: 'deliver',
+    stage: 'deliver',
     description: 'Final acceptance: freeze the specification, render it, commit the HTML',
     argumentHint: '<type> <input.json> [output.html] [--json] [--open] [--quality …]',
     sendable: true,
   },
   {
     command: 'render',
+    stage: 'deliver',
     description: 'Compile a specification straight to HTML, without the delivery receipt',
     argumentHint:
       '<type> <input.json> [output.html] [--quality …] [--repo-root path (architecture only)]',
@@ -485,18 +508,21 @@ export const ARCHIFY_COMMANDS = [
   },
   {
     command: 'visual-check',
+    stage: 'verify',
     description: 'Measure containment at four desktop sizes, capture light and dark shots',
     argumentHint: '<output.html> [--json]',
     sendable: true,
   },
   {
     command: 'check',
+    stage: 'verify',
     description: 'Verify one delivered HTML file is intact',
     argumentHint: '<output.html>',
     sendable: true,
   },
   {
     command: 'compare',
+    stage: 'verify',
     description: 'Draw the delta between two architecture specifications',
     argumentHint:
       'architecture <base.json> <head.json> [output.html] [--receipt path] [--json] [--quality …] [--repo-root path]',
@@ -504,18 +530,21 @@ export const ARCHIFY_COMMANDS = [
   },
   {
     command: 'inspect',
+    stage: 'author',
     description: 'Print what the compiler reads out of a specification',
     argumentHint: '<type> <input.json>',
     sendable: true,
   },
   {
     command: 'migrate',
+    stage: 'author',
     description: 'Move a workflow specification onto schema v2',
     argumentHint: 'workflow <old.json> <new.json> --to-schema 2 [--json]',
     sendable: true,
   },
   {
     command: 'brands',
+    stage: 'before',
     description: 'Look up a real product mark, or capture one from its official URL',
     argumentHint: '[name|alias|domain|category] [--json] · capture <url> [--json]',
     sendable: true,
@@ -527,6 +556,7 @@ export const ARCHIFY_COMMANDS = [
     // own examples/ folder. Naming it "list" would invite someone to run it
     // expecting a read-only menu of names.
     command: 'examples',
+    stage: 'before',
     description: 'Re-render the bundled example specifications, in the skill’s own folder',
     argumentHint: '',
     sendable: true,
@@ -535,12 +565,14 @@ export const ARCHIFY_COMMANDS = [
     // One file, one type: commandDemo() renders examples/web-app.architecture.json
     // to a single archify-demo.html. Not a set, and not a choice of type.
     command: 'demo',
+    stage: 'before',
     description: 'Write one rendered architecture example (archify-demo.html) into a directory',
     argumentHint: '[output-directory]',
     sendable: true,
   },
   {
     command: 'preview',
+    stage: 'deliver',
     description: 'Watch one specification and re-render it live — runs until Ctrl-C',
     argumentHint: '<type> <input.json> [output.html] [--no-open] [--quality …]',
     sendable: false,

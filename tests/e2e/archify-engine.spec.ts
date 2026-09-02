@@ -359,3 +359,100 @@ test('switching back to diagram-design does not inherit archify’s missing-skil
   // alpha's mock command list carries the plugin, so the card goes entirely.
   await expect(page.getByTestId('diagrams-install')).toHaveCount(0)
 })
+
+// archify authors a spec, validates it, then compiles it, and each stage fails on
+// its own. The section used to say "drawing..." throughout, which is also what it
+// says when everything is fine, so a run that stopped looked like a slow one.
+test('the pipeline is shown as stages, and advances on what the session actually ran', async ({
+  page,
+}) => {
+  await page.addInitScript(installMockHost, scenario([ARCHIFY_SKILL]))
+  await openDiagrams(page)
+  await page.getByTestId('diagram-engine-archify').click()
+  await page.getByTestId('archify-type-sequence').click()
+  await page.getByTestId('diagram-input').fill('the auth flow')
+  await page.getByTestId('diagram-generate').click()
+
+  const steps = page.getByTestId('archify-steps')
+  await expect(steps).toBeVisible();
+  // archify's own numbered flow, all six rows: choose the type, read one schema
+  // and one example, write the candidate, validate, deliver, and the file landing.
+  await expect(page.getByTestId(/^archify-step-/)).toHaveCount(6)
+  await expect(page.getByTestId('archify-step-schema')).toBeVisible()
+
+  // A request that has only gone out has committed a type and nothing more.
+  await expect(page.getByTestId('archify-step-type')).toHaveClass(/now|done/)
+  await expect(page.getByTestId('archify-step-validate')).not.toHaveClass(/done/)
+
+  const sessionId = await page.evaluate(
+    () => window.__mock.state().sends.at(-1)?.sessionId as string,
+  )
+
+  // The words alone must NOT advance it: the prompt itself contains "validate"
+  // and "deliver" as instructions, and the model narrating its plan is not the
+  // command having run.
+  await page.evaluate(
+    (id) => window.__mock.emitEvent(id, 'assistant_text', { text: 'Now I will validate and deliver.' }),
+    sessionId,
+  )
+  await expect(page.getByTestId('archify-step-validate')).not.toHaveClass(/done/)
+
+  // The CLI actually running is what advances it.
+  await page.evaluate(
+    (id) =>
+      window.__mock.emitEvent(id, 'tool_activity', {
+        toolName: 'Bash',
+        inputPreview: '{"command":"node ~/.claude/skills/archify/bin/archify.mjs validate sequence docs/diagrams/the-auth-flow.sequence.json --json"}',
+      }),
+    sessionId,
+  )
+  await expect(page.getByTestId('archify-step-validate')).toHaveClass(/done|now/)
+})
+
+// Fourteen equal-looking rows is a list of what the tool can do, not a
+// description of how it is used. Most commands only make sense at one point:
+// validate before deliver, check only on something already delivered.
+test('the commands menu groups archify by pipeline stage, in order', async ({ page }) => {
+  await page.addInitScript(installMockHost, scenario([ARCHIFY_SKILL]))
+  await openDiagrams(page)
+  await page.getByTestId('diagram-engine-archify').click()
+  await page.getByTestId('diagram-commands').click()
+
+  const menu = page.getByTestId('diagram-command-menu')
+  await expect(menu).toBeVisible()
+  await expect(menu.locator('.cmd-group-label')).toHaveText([
+    'Before you draw',
+    'Author and check the specification',
+    'Deliver',
+    'Verify what was delivered',
+  ])
+
+  // Buttons only. `diagram-command-inert-preview` is a hint SPAN inside one of
+  // them and shares the prefix, so a testid regex counts fifteen.
+  const rows = menu.locator('button[data-testid^="diagram-command-"]')
+  // Every command still present: grouping orders the menu, it does not prune it.
+  await expect(rows).toHaveCount(14)
+
+  // And the order is the pipeline: validate appears above deliver, deliver above
+  // check, which is the whole point of grouping them.
+  const names = await rows.evaluateAll((els) =>
+    els.map((e) => e.getAttribute('data-testid') ?? ''),
+  )
+  expect(names.indexOf('diagram-command-validate')).toBeLessThan(
+    names.indexOf('diagram-command-deliver'),
+  )
+  expect(names.indexOf('diagram-command-deliver')).toBeLessThan(
+    names.indexOf('diagram-command-check'),
+  )
+})
+
+// The plugin path's three commands are peers, not a sequence, so no headings.
+test('the diagram-design menu stays flat, because its commands are not a pipeline', async ({
+  page,
+}) => {
+  await page.addInitScript(installMockHost, scenario([ARCHIFY_SKILL]))
+  await openDiagrams(page)
+  await page.getByTestId('diagram-commands').click()
+  await expect(page.getByTestId('diagram-command-menu')).toBeVisible()
+  await expect(page.getByTestId('diagram-command-menu').locator('.cmd-group-label')).toHaveCount(0)
+})
