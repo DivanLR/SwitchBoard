@@ -206,14 +206,27 @@ export interface Session {
   endedAt: string | null
   endReason: SessionEndReason | null
   /**
-   * What this session is about, in a few words. DERIVED and never stored: the
-   * main process fills it when it builds the project list (see sessionName), and
-   * a row read straight from the database has it absent. Null for a plain
-   * conversation, which has no such fact to state.
+   * What this session is about, in a few words. Derived by the main process when
+   * it builds the project list (see sessionName), so a row read straight from the
+   * database has it absent. Null for a plain conversation, which has no such fact
+   * to state.
    *
-   * `label` below wins over it when the developer has typed one.
+   * `label` below wins over it when the developer has typed one, and
+   * `derivedName` holds whatever the derivation settled on the first time it had
+   * a complete answer — after which the derivation is not consulted again.
    */
   name?: string | null
+  /**
+   * The derived name, frozen (migration 029).
+   *
+   * `name` used to be re-derived from live facts on every list, which meant it
+   * changed under the developer: a branch switch renamed every session on that
+   * checkout, an ending traded the branch for "- Complete", and a conversation
+   * that happened to start a verification run was renamed after the fact. Stored
+   * on the first list that can derive a complete answer, then reused, so a
+   * session keeps the name it was learnt by.
+   */
+  derivedName?: string | null
   /**
    * The name the DEVELOPER typed for this session, persisted (migration 026).
    *

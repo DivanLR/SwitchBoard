@@ -35,6 +35,7 @@ import type { IpcError, SessionStatusPush } from '@shared/ipc-types'
 import { newId, nowIso, type Repositories } from '@main/store/repositories'
 import { readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
 import { HostedSession, type PermissionGate } from './session'
+import { switchboardMcp } from './inter-session'
 import { probeAvailableModels } from './model-catalog'
 import { foldModelTotals, type EventSink } from './message-mapper'
 import {
@@ -187,6 +188,13 @@ const MAX_CONTAINERS = 2
  */
 const RUN_DEADLINE_MS = 45 * 60 * 1000
 const SWEEP_INTERVAL_MS = 60 * 1000
+
+/** How long after restarting a crashed session another restart is refused for
+ *  the same project (see reviveCrashed). A session that dies on the same thing
+ *  every time must not be restarted forever: each attempt spends a fresh context
+ *  window, and after the first failure the honest answer is that a developer
+ *  needs to look at it. */
+const REVIVE_COOLDOWN_MS = 10 * 60_000
 
 /** Why a cancelled run proved nothing — distinct from a session that gave up on
  *  its own, which reads the same on the row without this. */
@@ -564,6 +572,12 @@ export class SessionManager {
    */
   private reservedContainerIds = new Set<string>()
   private classifier: NoiseClassifier | null = null
+  /** When a crashed session was last restarted for a project (reviveCrashed). */
+  private revivedAt = new Map<string, number>()
+  /** Set once the app is on its way out. A container killed during shutdown
+   *  reports a crash like any other, and restarting a session while the window
+   *  is closing would start a process nothing is left to stop. */
+  private quitting = false
   /** Pending debounced transcript writes, keyed by session id. */
   private transcriptTimers = new Map<string, ReturnType<typeof setTimeout>>()
   /** Models this subscription can select, captured from the SDK's supportedModels()
@@ -1058,6 +1072,18 @@ export class SessionManager {
           this.pushStatus(entry)
         },
         summaries: settings.summaries,
+        // The cross-project handover tool. Given to every session, including the
+        // sections': branching on which kinds "need" it would be a rule to
+        // maintain in exchange for hiding one tool, and a verify pass that finds
+        // a fault belonging to another project has exactly as much reason to say
+        // so as a conversation does.
+        mcpServers: {
+          switchboard: switchboardMcp({
+            from: project.name,
+            projects: () => this.repos.projects.listActive(),
+            enqueue: (targetId, text) => this.enqueueTask(targetId, text),
+          }),
+        },
         sink: this.makeSink(entry),
         gate: this.callbacks.gate,
         onStatusChange: (status, detail) => this.handleStatusChange(entry, status, detail),
@@ -1399,6 +1425,25 @@ export class SessionManager {
    * Trimmed to nothing clears it, which is how a developer undoes a name without
    * needing a second control for it.
    */
+  /**
+   * Keep the name the app worked out for a session (migration 029).
+   *
+   * Written to the live row as well as the table, and that is the whole reason
+   * this is a method rather than a repository call at the call site: a live
+   * session's row is held in memory and never re-read, so a database-only write
+   * would leave the running session deriving a fresh name on every list — the
+   * exact behaviour this exists to stop.
+   *
+   * Never overwrites: the first complete answer is the one that sticks, and a
+   * second caller finding a value already there is the normal case, not a race.
+   */
+  freezeDerivedName(sessionId: string, derivedName: string): void {
+    const entry = this.hosted.get(sessionId)
+    if (entry?.row.derivedName) return
+    if (entry) entry.row.derivedName = derivedName
+    this.repos.sessions.update(sessionId, { derivedName })
+  }
+
   renameSession(sessionId: string, label: string): void {
     const trimmed = label.trim()
     const value = trimmed === '' ? null : trimmed.slice(0, 60)
@@ -1489,6 +1534,7 @@ export class SessionManager {
 
   /** Graceful shutdown for application exit (FR-022): queued sends become drafts. */
   async endAllForAppExit(): Promise<void> {
+    this.quitting = true
     const entries = [...this.hosted.values()]
     for (const entry of entries) {
       for (const queued of entry.session.takeQueuedSends()) {
@@ -2320,6 +2366,67 @@ export class SessionManager {
     this.hosted.delete(entry.row.id)
     this.callbacks.onSessionExit(entry.row.id)
     this.callbacks.onCountersChanged()
+    // Last, and only now: revive resumes "the last session that ended here", so
+    // the row above has to be finalised before it can find this one.
+    if (reason === 'crashed') this.reviveCrashed(entry, detail)
+  }
+
+  /**
+   * Start a crashed session again, once, and tell it to pick the work back up.
+   *
+   * This is the app doing what a paired agent is often asked to do — watch
+   * another agent and restart it when it dies — and the app is the better place
+   * for it. A peer session cannot notice a crash it was not looking at, cannot
+   * act on one that took its own process down with it, and costs a whole context
+   * window to keep on standby. This manager already holds the exit reason and
+   * the start path, so the supervision is four lines and cannot itself fail in
+   * the way it exists to catch.
+   *
+   * Only a crash. `stopped` is the developer pressing End and `completed` is a
+   * section finishing its work: restarting either would be the app overruling
+   * someone who was not asking, which is the one thing a run must never do.
+   *
+   * Only a conversation. A section session is started FOR one piece of work by
+   * the code that wanted it, and that caller — a verify run, a drawing — owns
+   * what happens when it dies; a second session started behind its back would
+   * report into a run that has already been closed as unreported.
+   *
+   * Resumed in the PROJECT'S default mode, not the mode that crashed. Restarting
+   * a bypass session unattended would hand a fresh process blanket approval that
+   * nobody is watching, so the app restores no more than pressing Start would.
+   */
+  private reviveCrashed(entry: HostedEntry, detail?: string): void {
+    if (this.quitting || entry.background) return
+    const projectId = entry.row.projectId
+    // ponytail: a plain per-project cooldown, not a consecutive-failure count. A
+    // session that dies every eleven minutes gets restarted every eleven minutes
+    // for as long as the developer leaves it, which is bounded, visible in the
+    // sidebar, and cheap to reason about. Count consecutive revivals and give up
+    // after three the day one of these actually loops.
+    const since = Date.now() - (this.revivedAt.get(projectId) ?? 0)
+    if (since < REVIVE_COOLDOWN_MS) return
+    this.revivedAt.set(projectId, Date.now())
+    void (async () => {
+      try {
+        const revived = await this.startSession(projectId, true)
+        // The nudge is the point: a resumed session is live but idle, and an idle
+        // session supervises nothing. Said plainly, including what killed the last
+        // one, because the transcript it resumes ends mid-thought with no record of
+        // why — and an agent told to continue without that will assume its last
+        // action succeeded.
+        this.sendMessage(
+          revived.id,
+          'Switchboard restarted this session: the previous process ended unexpectedly ' +
+            `(${detail ?? 'no reason reported'}), so this conversation was resumed from its ` +
+            'transcript. Whatever you were part-way through may have half-finished — check ' +
+            'the state on disk before continuing, then carry on with the work.',
+        )
+      } catch {
+        // Docker down, Claude Code gone, containers full: the crashed session is
+        // already on screen with its own diagnosis, and a failed rescue attempt
+        // adds nothing the developer can act on that the session does not say.
+      }
+    })()
   }
 
   /**

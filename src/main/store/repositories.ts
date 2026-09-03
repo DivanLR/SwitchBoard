@@ -92,6 +92,10 @@ interface SessionRow {
   /** Which section opened this session, kept so the fact survives it ending
    *  (migration 028). Null for an ordinary conversation. */
   sectionKind: SectionKind | null
+  /** The derived name, frozen on first resolution (migration 029). Null for a
+   *  session whose name has never resolved — a plain conversation, or one whose
+   *  branch has not been read yet. */
+  derivedName: string | null
 }
 
 /** SessionRow is the raw shape; Session wants real booleans for the flags. */
@@ -320,6 +324,7 @@ export class SessionsRepo {
         | 'endReason'
         | 'label'
         | 'sectionKind'
+        | 'derivedName'
       >
     >,
   ): void {

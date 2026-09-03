@@ -28,6 +28,12 @@ const buildGate = vi.hoisted(() => {
 // always wires onModels), and an async-iterable that never yields — nothing here
 // ever awaits the run loop draining.
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
+  // Every session is now handed an in-process MCP server built at start-up
+  // (inter-session.ts, the cross-project handover tool), so a mock of this
+  // module without these two exports makes startSession throw before it
+  // reaches anything these tests measure.
+  createSdkMcpServer: () => ({ type: 'sdk', name: 'switchboard', instance: {} }),
+  tool: () => ({}),
   query: () => ({
     [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
     supportedCommands: () => Promise.resolve([]),

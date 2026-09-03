@@ -310,25 +310,34 @@ const SHARED_SETUP = `git ripgrep ca-certificates && rm -rf /var/lib/apt/lists/*
  && printf '#!/bin/sh\\nmkdir -p "$HOME/.claude"\\n[ -f /creds/.credentials.json ] && cp /creds/.credentials.json "$HOME/.claude/.credentials.json"\\n[ -d /creds/plugins ] && mkdir -p "$HOME/.claude/plugins" && cp -r /creds/plugins/. "$HOME/.claude/plugins/"\\n[ -d /creds/skills ] && mkdir -p "$HOME/.claude/skills" && cp -r /creds/skills/. "$HOME/.claude/skills/"\\nexec "$@"\\n' > /entrypoint.sh \\
  && chmod +x /entrypoint.sh`
 
-/* Chromium needs a set of shared libraries that node:22-slim does not carry. This
-   installs those libraries ONLY; the browser binary itself is fetched by the
-   project's own Playwright into the shared cache volume, so the version always
-   matches the project rather than whatever the image was built against. */
-const BROWSER_LIBS = `libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 \\
- libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \\
- libgbm1 libpango-1.0-0 libcairo2 libasound2 libatspi2.0-0 fonts-liberation`
-
 /**
  * The browser layer, or nothing at all.
  *
  * Only a project with real browser test infrastructure gets this; every other
  * project's image is built without it and is several hundred megabytes smaller.
  * Runs as root, before USER node, because installing shared libraries needs it.
+ *
+ * Chromium needs shared libraries neither base image carries, and the list is
+ * PLAYWRIGHT'S to maintain, not this file's. It used to be spelled out here as
+ * seventeen package names, which was right for exactly one of the two images:
+ * `node:22-slim` is Debian 12, where those names are correct, and
+ * `mcr.microsoft.com/dotnet/sdk:10.0` is Ubuntu 24.04, where the 64-bit time_t
+ * transition renamed five of them (libatk1.0-0, libatk-bridge2.0-0, libcups2,
+ * libasound2 and libatspi2.0-0 all gained a `t64` suffix). apt then exited 100
+ * on "unable to locate package", which the app reported as a sandbox image build
+ * failure — and no correct single list exists, because the two images are
+ * different distributions. `install-deps` reads the distribution and installs
+ * whatever that one calls them, so a base image moving to a new release is
+ * upstream's problem rather than the next silent build failure here.
+ *
+ * The browser BINARY is still fetched by the project's own Playwright into the
+ * shared cache volume, so the version always matches the project rather than
+ * whatever the image was built against; only the system libraries come from here.
  */
 function browserLayer(browser: boolean): string {
   if (!browser) return ''
   return (
-    ` \\\n && apt-get update && apt-get install -y --no-install-recommends ${BROWSER_LIBS}` +
+    ` \\\n && npx --yes playwright@1 install-deps chromium` +
     ` \\\n && rm -rf /var/lib/apt/lists/*` +
     ` \\\n && mkdir -p ${BROWSER_CACHE_PATH} && chown -R node:node ${BROWSER_CACHE_PATH}`
   )

@@ -279,6 +279,30 @@ const ALLOWED_PLUGINS: ReadonlySet<string> = new Set([
 export function registerIpcHandlers(deps: HandlerDeps): void {
   const { repos, manager, broker, dbProjectId, skillsStagingRoot } = deps
 
+  /**
+   * The session's derived name, worked out once and then kept (migration 029).
+   *
+   * Nothing here is new arithmetic: `sessionName` still decides what a session is
+   * called. What changed is how often it is asked. It reads the branch, the end
+   * reason and which runs point at this session, all of which move while the
+   * session is open, so asking on every list meant the name a developer had
+   * learnt kept being replaced by another true one.
+   *
+   * Frozen only once there is a complete answer to freeze. The branch is read
+   * asynchronously just after start, so the first list can arrive before it
+   * exists, and freezing then would keep a bare "Diff" for ever and lose the
+   * checkout it was answering for. An ended session is frozen regardless: it has
+   * no more facts coming.
+   */
+  const frozenName = (session: Session, work: Parameters<typeof sessionName>[1]): string | null => {
+    if (session.derivedName) return session.derivedName
+    const derived = sessionName(session.id, work, session.branch, session.endReason)
+    if (!derived) return null
+    if (!session.branch && !session.endReason) return derived
+    manager.freezeDerivedName(session.id, derived)
+    return derived
+  }
+
   const projectList = (): ProjectListItem[] =>
     repos.projects.listActive().map((project) => {
       // Live rows come from the manager rather than the database because only it
@@ -307,7 +331,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         diagrams: [...repos.diagramRequests.forProject(project.id).values()],
         // Live kinds from the manager, overlaid on what each row persisted, so an
         // ENDED section session still knows what it was opened for (migration 028).
-        suites: manager.isolatedSuiteNamesFor(project.id),
+        suites: manager.isolatedSuiteNamesFor(project.id),
         kinds: {
           ...Object.fromEntries(
             rows.filter((s) => s.sectionKind).map((s) => [s.id, s.sectionKind as SectionKind]),
@@ -317,10 +341,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       }
       // A typed name wins over the derived one: `label` is a fact only the
       // developer knows, and nothing the app works out may overwrite it.
-      const sessions = rows.map((s) => ({
-        ...s,
-        name: s.label ?? sessionName(s.id, work, s.branch, s.endReason),
-      }))
+      const sessions = rows.map((s) => ({ ...s, name: s.label ?? frozenName(s, work) }))
       return {
         ...project,
         session: sessions[0] ?? null,

@@ -630,6 +630,35 @@ const MIGRATIONS: Migration[] = [
       db.exec(`ALTER TABLE sessions ADD COLUMN sectionKind TEXT;`)
     },
   },
+  {
+    /*
+     * The derived name, frozen the first time it resolved.
+     *
+     * "My sessions keep renaming themselves." They did, and it was not a bug in
+     * any one place: Session.name was re-derived on every project list from
+     * facts that keep moving. The branch is re-read after every turn, so a
+     * checkout renamed every session on it; a finished session traded its branch
+     * for "- Complete"; and a conversation that started a verification run or
+     * drew a diagram was renamed after the fact, because the run row and the
+     * diagram record point back at its id. Each of those was right on its own
+     * and together they meant a developer could not learn a session by its name.
+     *
+     * So the name is derived once and then kept. Not written at session start,
+     * because the facts it needs do not all exist yet — the branch is read
+     * asynchronously just after start, and a drawing's description arrives when
+     * the session reports it — which is why this is filled by the list that
+     * first sees a complete answer rather than by the insert.
+     *
+     * Distinct from `label` (026), which is the developer's own name and still
+     * outranks this, and from the branch fallback the sidebar uses for a session
+     * that has no name at all: a branch is a live fact, not a name, and it goes
+     * on tracking the checkout.
+     */
+    name: '029-session-derived-name',
+    up: (db) => {
+      db.exec(`ALTER TABLE sessions ADD COLUMN derivedName TEXT;`)
+    },
+  },
 ]
 
 /**

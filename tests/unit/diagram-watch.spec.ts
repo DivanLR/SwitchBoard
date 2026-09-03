@@ -18,6 +18,12 @@ import { join } from 'node:path'
 // awaiting, and an async-iterable that never yields stands in for a session that
 // is up and doing nothing on its own.
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
+  // Every session is now handed an in-process MCP server built at start-up
+  // (inter-session.ts, the cross-project handover tool), so a mock of this
+  // module without these two exports makes startSession throw before it
+  // reaches anything these tests measure.
+  createSdkMcpServer: () => ({ type: 'sdk', name: 'switchboard', instance: {} }),
+  tool: () => ({}),
   query: () => ({
     [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
     supportedCommands: () => Promise.resolve([]),

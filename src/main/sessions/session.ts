@@ -5,6 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import {
   query,
   type CanUseTool,
+  type McpServerConfig,
   type PermissionMode,
   type PermissionResult,
   type Query,
@@ -172,6 +173,10 @@ interface HostedSessionOptions {
   onBackgroundTasks?: (tasks: { taskId: string; description: string }[]) => void
   /** MCP servers reported in the init message (sidebar MCP section). */
   onMcpServers?: (servers: McpServer[]) => void
+  /** MCP servers this app supplies to the CLI, on top of whatever the
+   *  developer's own settings register. Today that is one in-process server
+   *  (see inter-session.ts) carrying the cross-project handover tool. */
+  mcpServers?: Record<string, McpServerConfig>
   /** Model the SDK reports for each main-loop turn (header display). */
   onModel?: (model: string) => void
   /** Models this subscription can actually select (from the SDK's supportedModels),
@@ -338,6 +343,10 @@ export class HostedSession {
           this.options.mainModel && this.options.mainModel !== 'default'
             ? this.options.mainModel
             : undefined,
+        // Added to the developer's own MCP configuration rather than replacing
+        // it: the SDK merges this with what settingSources loaded, so a project
+        // keeps its database servers and gains the handover tool.
+        mcpServers: this.options.mcpServers,
         permissionMode: resolvePermissionMode(this.options.mode),
         allowDangerouslySkipPermissions: this.bypassing ? true : undefined,
         // Append-only: keeps Claude Code's own system prompt and adds this app's

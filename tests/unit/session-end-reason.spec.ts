@@ -26,6 +26,12 @@ function drainLoops(): void {
 }
 
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
+  // Every session is now handed an in-process MCP server built at start-up
+  // (inter-session.ts, the cross-project handover tool), so a mock of this
+  // module without these two exports makes startSession throw before it
+  // reaches anything these tests measure.
+  createSdkMcpServer: () => ({ type: 'sdk', name: 'switchboard', instance: {} }),
+  tool: () => ({}),
   query: () => ({
     [Symbol.asyncIterator]: () => ({
       next: () => new Promise((resolve) => pending.push(resolve as never)),
