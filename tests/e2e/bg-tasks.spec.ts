@@ -23,6 +23,24 @@ test('background tasks show as a card + header pill', async ({ page }) => {
   await expect(page.getByTestId('bg-task-row')).toHaveCount(2)
 })
 
+// A task the CLI never reported as finished holds the session out of 'done' for
+// ever, and the app cannot tell that apart from work still running — the set is a
+// level signal the SDK forbids correlating with the per-task edges. So the
+// developer gets to say so, and the card goes with it.
+test('a task that never reported can be cleared, and the session settles', async ({ page }) => {
+  await page.evaluate(() =>
+    window.__mock.setBackgroundTasks('s-alpha', [
+      { taskId: 't1', description: 'Locate archify.mjs referenced by the README' },
+    ]),
+  )
+  await expect(page.getByTestId('bg-task-list')).toBeVisible()
+
+  await page.getByTestId('bg-task-clear').click()
+
+  await expect(page.getByTestId('bg-task-list')).toHaveCount(0)
+  await expect(page.getByTestId('bg-pill')).toHaveCount(0)
+})
+
 test('a large background fan-out is capped with a show-all toggle', async ({ page }) => {
   const many = Array.from({ length: 11 }, (_, i) => ({ taskId: `t${i}`, description: `task ${i}` }))
   await page.evaluate((tasks) => window.__mock.setBackgroundTasks('s-alpha', tasks), many)

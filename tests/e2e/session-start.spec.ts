@@ -203,7 +203,14 @@ test('heavy subagent mode is on by default and can be turned off', async ({ page
   await toggle.click()
   await expect(toggle).toHaveAttribute('aria-checked', 'false')
 
+  // Off also drops the mode to Basic in the same click: every other mode still
+  // registers the advisor/worker agents, so off on its own left the loop with
+  // agents to reach for and the toggle read as ignored.
+  await page.getByTestId('settings-tab-models').click()
+  await expect(page.getByTestId('mode-basic')).toHaveClass(/sel/)
+
   // It survives closing the panel, because it shapes every session that starts after.
+  await page.getByTestId('settings-tab-term').click()
   await page.getByTestId('settings-done').click()
   await page.getByTestId('open-settings').click()
   await page.getByTestId('settings-tab-term').click()

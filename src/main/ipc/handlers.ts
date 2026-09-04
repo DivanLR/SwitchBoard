@@ -490,6 +490,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       }
     },
     'sessions.interrupt': (req) => manager.interruptSession(req.sessionId),
+    'sessions.clearBackgroundTasks': (req) => manager.clearBackgroundTasks(req.sessionId),
     'sessions.send': (req) => {
       const result = manager.sendMessage(req.sessionId, req.text, req.agentId)
       // Drafts offered in the composer are consumed by the first send (FR-019 edge case).

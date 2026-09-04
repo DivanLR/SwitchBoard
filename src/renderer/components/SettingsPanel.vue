@@ -210,6 +210,17 @@ function save(patch: Partial<Settings>): void {
   void store.save(patch)
 }
 
+// Switching heavy subagents OFF drops the mode to Basic in the same click.
+// Every other mode registers the advisor/worker agents and appends a delegation
+// protocol, so off on its own removed the fan-out directive and left the licence
+// — which is why the toggle read as ignored. Basic registers nothing.
+// A default, not a lock: the mode cards are still free afterwards, and turning
+// the toggle back on does not undo a mode the developer has since chosen.
+function toggleHeavySubagents(): void {
+  const on = settings.value?.heavySubagents === true
+  save(on ? { heavySubagents: false, modelMode: 'basic' } : { heavySubagents: true })
+}
+
 // Sandbox memory: edited locally, saved on Enter/blur — saving per keystroke
 // would persist half-typed sizes like "1" on the way to "12g".
 const sandboxMemVal = ref('')
@@ -1061,6 +1072,10 @@ const updateLine = computed(() => {
                   Orchestrator protocol, because Advisor's own instruction is to do scoped work
                   yourself and the two cannot both be in force.
                   <strong class="sr-warn">
+                    Switching it OFF sets the mode to Basic, which is the only mode that registers
+                    no subagents at all. Pick another mode afterwards if you want the advisor back.
+                  </strong>
+                  <strong class="sr-warn">
                     It is read when a session starts, so this applies from the next session, not to
                     one already running. A session shaped by it carries a
                     <Icon name="fork" :size="11" /> Fan-out pill in its header.
@@ -1073,7 +1088,7 @@ const updateLine = computed(() => {
                 data-testid="setting-heavy-subagents"
                 role="switch"
                 :aria-checked="settings.heavySubagents"
-                @click="save({ heavySubagents: !settings.heavySubagents })"
+                @click="toggleHeavySubagents()"
               >
                 <span class="knob"></span>
               </button>

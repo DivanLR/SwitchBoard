@@ -978,6 +978,37 @@ export class HostedSession {
     this.recomputeStatus()
   }
 
+  /**
+   * Forget the background tasks this session believes are running, because the
+   * developer says they are not.
+   *
+   * Only the developer can say so, and that is not a design preference. The list
+   * comes from `background_tasks_changed`, a LEVEL signal with replace semantics,
+   * and the SDK is explicit that a consumer must not pair it with the
+   * task_started/task_notification edges: "the payload carries ids only, so do
+   * not correlate it with the edge stream". So when the CLI never sends the
+   * membership change that would empty the set, nothing in this process can work
+   * out that it is stale. One was seen open for hours after its own turn had long
+   * finished, with no closing bookend either.
+   *
+   * That is worse than a card that will not go away. recomputeStatus treats any
+   * background task as keeping the session busy, so a stale entry holds the
+   * session out of 'done' for ever: its project's planned queue only drains on
+   * 'done', and a section session only closes itself there.
+   *
+   * Not destructive, which is what makes it safe to offer. The set is replaced by
+   * every membership change, so work that really is running reappears the moment
+   * the CLI next reports. The ceiling is the gap: until that report, a session
+   * cleared while work genuinely runs under-reports, which is the trade for being
+   * able to unwedge one where it does not.
+   */
+  clearBackgroundTasks(): void {
+    if (this.backgroundTasks.length === 0) return
+    this.backgroundTasks = []
+    this.options.onBackgroundTasks?.(this.backgroundTasks)
+    this.recomputeStatus()
+  }
+
   private recomputeStatus(): void {
     if (this.fatal) return
     if (this.attentionCount > 0) return this.setStatus('needs_you')

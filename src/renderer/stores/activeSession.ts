@@ -274,6 +274,14 @@ const store = reactive({
     return invoke('sessions.interrupt', { sessionId: this.sessionId })
   },
 
+  /** Forget background tasks the session still lists but the developer knows are
+   *  gone. The next real membership change from the CLI repopulates the set, so
+   *  this cannot hide work that is actually running. */
+  async clearBackgroundTasks(): Promise<void> {
+    if (!this.sessionId) return
+    await invoke('sessions.clearBackgroundTasks', { sessionId: this.sessionId })
+  },
+
   /** Move the live session into or out of plan mode. The header reads the mode
    *  the CLI reports back, not this request, so it can never over-claim. */
   async setPlanMode(enabled: boolean): Promise<void> {

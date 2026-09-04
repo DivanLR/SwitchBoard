@@ -1082,6 +1082,22 @@ export class SessionManager {
             from: project.name,
             projects: () => this.repos.projects.listActive(),
             enqueue: (targetId, text) => this.enqueueTask(targetId, text),
+            isRunning: (targetId) => this.liveEntryForProject(targetId) !== undefined,
+            // The project's own default mode and no resume: a handover is new
+            // work, and picking a mode for another project from inside this
+            // conversation would be this session deciding another one's
+            // permissions.
+            start: (targetId) => this.startSession(targetId),
+            overview: () =>
+              this.repos.projects.listActive().map((p) => {
+                const live = this.liveEntryForProject(p.id)
+                return {
+                  name: p.name,
+                  running: live !== undefined,
+                  status: live?.session.currentStatus,
+                  queued: this.listQueue(p.id).length,
+                }
+              }),
           }),
         },
         sink: this.makeSink(entry),
@@ -1248,6 +1264,22 @@ export class SessionManager {
     this.repos.commandHistory.add(entry.row.projectId, text)
     send.deliver(event.id)
     return { eventId: event.id, queued: send.queued }
+  }
+
+  /**
+   * Drop a session's stale background task set (see HostedSession's method of
+   * the same name for why only the developer can know it is stale).
+   *
+   * Drains the queue afterwards, and that is half the point of offering this at
+   * all: the session was held out of 'done' by the stale entry, so anything
+   * planned for that project has been waiting behind work that already finished.
+   * Clearing it without releasing the queue would fix the card and leave the
+   * actual consequence in place until the next turn happened to end.
+   */
+  clearBackgroundTasks(sessionId: string): void {
+    const entry = this.requireLive(sessionId)
+    entry.session.clearBackgroundTasks()
+    this.maybeDrainQueue(entry.row.projectId)
   }
 
   async interruptSession(sessionId: string): Promise<{ stillQueued: number }> {

@@ -38,9 +38,20 @@ describe('heavySubagentSystemPromptAppend', () => {
 })
 
 describe('heavySubagentModelMode', () => {
-  it('leaves the chosen mode alone when the setting is off', () => {
+  it('leaves an explicitly chosen mode alone when the setting is off', () => {
     expect(heavySubagentModelMode(false, 'advisor')).toBe('advisor')
-    expect(heavySubagentModelMode(false, 'auto')).toBe('auto')
+    expect(heavySubagentModelMode(false, 'orchestrator')).toBe('orchestrator')
+    expect(heavySubagentModelMode(false, 'basic')).toBe('basic')
+  })
+
+  it('drops auto to advisor when off, so nothing still tells the loop to delegate', () => {
+    // Auto teaches BOTH paragraphs, and the orchestrator one says to delegate
+    // every chunk to `worker` subagents. Off has to remove the licence as well as
+    // the directive, or it reads as ignored.
+    expect(heavySubagentModelMode(false, 'auto')).toBe('advisor')
+    expect(modesSystemPromptAppend(heavySubagentModelMode(false, 'auto'))).not.toContain(
+      'delegate each chunk',
+    )
   })
 
   it('pins to orchestrator when on, so the two appends cannot contradict', () => {

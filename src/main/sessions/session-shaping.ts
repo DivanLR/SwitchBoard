@@ -71,11 +71,18 @@ export function heavySubagentSystemPromptAppend(enabled: boolean): string | null
  * same system prompt. Leaving both in was most of why the setting read as doing
  * nothing: the model had licence either way and took the cheaper one.
  *
+ * OFF plus `auto` is the mirror of that bug, and was reported the same way ("I
+ * switched it off and it still uses subagents"). Auto ships BOTH paragraphs, and
+ * the orchestrator one says to delegate every chunk to `worker` subagents — so
+ * off removed the hard directive and left the licence. Off now teaches Advisor
+ * only, which is the same claim in the opposite direction.
+ *
  * The Models tab still decides which MODEL runs the loop; this only decides which
  * protocol the loop is taught. Those are separate levers (see mainLoopModel).
  */
 export function heavySubagentModelMode(enabled: boolean, chosen: ModelMode): ModelMode {
-  return enabled ? 'orchestrator' : chosen
+  if (enabled) return 'orchestrator'
+  return chosen === 'auto' ? 'advisor' : chosen
 }
 
 // --- Container layout (bypass sessions) ---

@@ -1860,6 +1860,17 @@ const {
             >
               {{ tasksExpanded ? 'show fewer' : `show all ${backgroundTasks.length}` }}
             </button>
+            <!-- For work that finished without the CLI saying so. The session is
+                 held out of 'done' while this list has anything in it, so a task
+                 that never reported keeps the project's queue waiting. -->
+            <button
+              class="agents-toggle"
+              data-testid="bg-task-clear"
+              title="Forget these tasks. Use it when the work has clearly finished but the session still lists it: the session can then finish, and its planned queue can run. Work that is genuinely running reappears the moment the CLI next reports."
+              @click="active.clearBackgroundTasks()"
+            >
+              clear
+            </button>
           </div>
           <div class="agents-rows">
             <div

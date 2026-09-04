@@ -303,6 +303,16 @@ export interface InvokeMap {
     res: { endedAt: string | null; endReason: string | null; statusDetail: string | null } | null
   }
   'sessions.interrupt': { req: { sessionId: string }; res: { stillQueued: number } }
+  /**
+   * Forget the background tasks a live session believes are running.
+   *
+   * For the case the app cannot detect: the CLI never sent the membership change
+   * that would have emptied the set, so the session is held out of 'done' by work
+   * that finished long ago. The developer is the only one who can know that, and
+   * the set is replaced by the next real membership change, so this cannot lose
+   * work that is genuinely running.
+   */
+  'sessions.clearBackgroundTasks': { req: { sessionId: string }; res: void }
   'sessions.send': {
     req: { sessionId: string; text: string; agentId?: string }
     res: { eventId: string; queued: boolean }

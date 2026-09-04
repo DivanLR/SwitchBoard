@@ -1187,6 +1187,14 @@ export function installMockHost(scenario: MockScenario): void {
       setStatus(String(req.sessionId), 'done')
       return { stillQueued: (queuedBySession.get(String(req.sessionId)) ?? []).length }
     },
+    'sessions.clearBackgroundTasks': (req) => {
+      const session = sessions.get(String(req.sessionId))
+      if (!session) throw { code: 'SESSION_ENDED', message: 'Session has ended' }
+      ;(session as unknown as AnyRecord).backgroundTasks = []
+      // The real manager's clear releases the status the stale set was holding,
+      // which is the half a developer actually feels.
+      setStatus(session.id, 'done')
+    },
     'sessions.setPlanMode': (req) => {
       const session = sessions.get(String(req.sessionId))
       if (!session) throw { code: 'SESSION_ENDED', message: 'Session has ended' }
