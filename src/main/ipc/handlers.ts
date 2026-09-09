@@ -364,7 +364,12 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
   }
 
   const handlers: Handlers = {
-    'projects.list': () => ({ projects: projectList(), counters: computeCounters(repos) }),
+    'projects.list': () => ({
+      projects: projectList(),
+      // The reserved Database row is never archived, so no filter is needed here.
+      archived: repos.projects.listArchived(),
+      counters: computeCounters(repos),
+    }),
     // Modal on the main window, so it cannot be lost behind it. Cancelling
     // returns null rather than throwing: the developer changed their mind, which
     // the caller handles by leaving the folder field alone.
@@ -449,6 +454,12 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
       }
       repos.projects.archive(req.projectId)
+    },
+    'projects.unarchive': (req) => {
+      if (!repos.projects.byId(req.projectId)) {
+        throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
+      }
+      repos.projects.unarchive(req.projectId)
     },
     // Read at spawn like the mode is, so a live session keeps whatever it
     // started in and this applies from the next one.

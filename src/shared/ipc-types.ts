@@ -215,6 +215,9 @@ export interface Counters {
 /** projects.list returns projects with live status plus the aggregate counters (FR-005). */
 export interface ProjectsSnapshot {
   projects: ProjectListItem[]
+  /** Archived projects, bare rows: no sessions or drafts, since they are hidden
+   *  until restored and nothing but the sidebar's Archived section reads them. */
+  archived: Project[]
   counters: Counters
 }
 
@@ -250,6 +253,7 @@ export interface InvokeMap {
   }
   'projects.refs.remove': { req: { projectId: string; path: string }; res: ProjectRef[] }
   'projects.archive': { req: { projectId: string }; res: void }
+  'projects.unarchive': { req: { projectId: string }; res: void }
   'sessions.start': {
     req: {
       projectId: string

@@ -18,7 +18,7 @@ describe('a fresh install', () => {
   const fresh = (): ReturnType<typeof createRepositories>['settings'] =>
     createRepositories(openDatabase(':memory:')).settings
 
-  it('arrives with the strong model, the worker, heavy subagents and summaries on', () => {
+  it('arrives with the strong model, the worker, xhigh effort and summaries on', () => {
     const settings = fresh().get()
 
     // Named models, not the account default: 'default' means "whatever the
@@ -27,7 +27,10 @@ describe('a fresh install', () => {
     expect(settings.workerModel).not.toBe('default')
     expect(settings.intelligentModel).not.toBe(settings.workerModel)
 
-    expect(settings.heavySubagents).toBe(true)
+    // One rung below max, so a fresh install creates no subagents until asked:
+    // fan-out is what empties a small subscription's usage meter.
+    expect(settings.effort).toBe('xhigh')
+    expect(settings.subagentEffort).toBe('low')
     expect(settings.summaries).toBe(true)
   })
 
@@ -45,9 +48,9 @@ describe('a fresh install', () => {
     // survive being merged over DEFAULT_SETTINGS, or switching off would appear
     // to work and silently revert on the next read.
     const settings = fresh()
-    settings.set({ heavySubagents: false, summaries: false })
+    settings.set({ effort: 'low', summaries: false })
 
-    expect(settings.get().heavySubagents).toBe(false)
+    expect(settings.get().effort).toBe('low')
     expect(settings.get().summaries).toBe(false)
   })
 })

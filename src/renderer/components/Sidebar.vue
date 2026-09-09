@@ -493,7 +493,9 @@ const {
   onDragEnd,
 } = useProjectDragDrop({ groupOf, assignGroup })
 
-// --- Remove (archive) a project, via a confirmation popup ---
+// --- Archive a project, via a confirmation popup. The testids still say
+// "remove": archiving IS what remove always did underneath (archivedAt), the
+// change is that the row now stays reachable in the Archived section below. ---
 const confirmRemoveId = ref<string | null>(null)
 const removeError = ref<string | null>(null)
 const busy = ref(false)
@@ -609,12 +611,20 @@ async function confirmRemoveNow(): Promise<void> {
   } catch (e) {
     removeError.value = isIpcError(e)
       ? e.code === 'ALREADY_ACTIVE'
-        ? 'Stop the session before removing this project.'
+        ? 'Stop the session before archiving this project.'
         : e.message
       : String(e)
   } finally {
     busy.value = false
   }
+}
+
+// --- Archived section: folded by default, because putting a project away is
+// the point. Fold state is per launch; nothing about it is worth a setting. ---
+const archivedFolded = ref(true)
+
+function restore(projectId: string): void {
+  void projects.unarchive(projectId)
 }
 
 </script>
@@ -887,7 +897,7 @@ async function confirmRemoveNow(): Promise<void> {
               <button
                 class="remove mono"
                 :data-testid="`remove-project-${item.name}`"
-                title="Remove this project"
+                title="Archive this project"
                 @click.stop="askRemove(item.id)"
               >
                 <Icon name="close" :size="12" />
@@ -1010,6 +1020,46 @@ async function confirmRemoveNow(): Promise<void> {
       <div v-if="projects.loaded && projects.visibleItems.length === 0" class="empty">
         No projects yet — press + to add one.
       </div>
+
+      <!-- Archived projects: out of the list above and out of every picker, kept
+           here so a project put away can be found and brought back. Not on the
+           collapsed rail, where there is no room for a header. -->
+      <template v-if="!collapsed && projects.archived.length > 0">
+        <div
+          class="group-head archived-head"
+          :class="{ folded: archivedFolded }"
+          data-testid="group-head-archived"
+          :title="`Archived · ${projects.archived.length} ${projects.archived.length === 1 ? 'project' : 'projects'}`"
+          @click="archivedFolded = !archivedFolded"
+        >
+          <span class="group-caret mono"><Icon :name="archivedFolded ? 'chevron-right' : 'chevron-down'" :size="8" /></span>
+          <span class="group-name mono">Archived</span>
+          <span class="group-count mono" data-testid="group-count-archived">{{ projects.archived.length }}</span>
+        </div>
+        <template v-if="!archivedFolded">
+          <div
+            v-for="item in projects.archived"
+            :key="item.id"
+            class="project archived"
+            :data-testid="`archived-project-${item.name}`"
+            :title="item.path"
+          >
+            <div class="content">
+              <div class="row">
+                <span class="name mono">{{ item.name }}</span>
+                <button
+                  class="restore mono"
+                  :data-testid="`restore-project-${item.name}`"
+                  title="Restore this project"
+                  @click.stop="restore(item.id)"
+                >
+                  <Icon name="refresh" :size="12" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </template>
+      </template>
     </div>
 
     <!-- Global MCP (design): one project-less row per designated server. They
@@ -1146,8 +1196,8 @@ async function confirmRemoveNow(): Promise<void> {
           <span><Icon name="arrow-right" /></span>Move out of group
         </button>
         <div class="ctx-sep"></div>
-        <button class="ctx-item mono danger" data-testid="ctx-remove" @click="ctxDelete">
-          <span><Icon name="trash" /></span>Remove from list
+        <button class="ctx-item mono" data-testid="ctx-remove" @click="ctxDelete">
+          <span><Icon name="folder" /></span>Archive
         </button>
       </template>
       <button
@@ -1206,7 +1256,7 @@ async function confirmRemoveNow(): Promise<void> {
     </div>
   </div>
 
-  <!-- Remove-project confirmation popup -->
+  <!-- Archive-project confirmation popup -->
   <div v-if="confirmRemove" class="overlay" @click.self="cancelRemove">
     <div
       class="dialog remove-dialog"
@@ -1215,24 +1265,24 @@ async function confirmRemoveNow(): Promise<void> {
       aria-modal="true"
       aria-labelledby="remove-dialog-title"
     >
-      <div class="rd-icon" aria-hidden="true"><Icon name="trash" :size="18" /></div>
-      <div id="remove-dialog-title" class="rd-title mono">Remove {{ confirmRemove.name }}?</div>
+      <div class="rd-icon" aria-hidden="true"><Icon name="folder" :size="18" /></div>
+      <div id="remove-dialog-title" class="rd-title mono">Archive {{ confirmRemove.name }}?</div>
       <div class="rd-body">
         <div class="rd-path faint mono">{{ confirmRemove.path }}</div>
         <p class="rd-note dim">
-          The session and its pending permissions will be removed from switchboard. Your files and
-          git history are untouched.
+          It moves to the Archived section at the foot of the list, and can be restored from
+          there. Sessions, settings, files and git history are untouched.
         </p>
         <p v-if="removeError" class="rd-error mono" data-testid="remove-error">{{ removeError }}</p>
       </div>
       <div class="rd-actions">
         <button
-          class="btn-solid danger-solid"
+          class="btn-solid"
           data-testid="remove-confirm"
           :disabled="busy"
           @click="confirmRemoveNow"
         >
-          Delete
+          Archive
         </button>
         <button class="btn-outline" data-testid="remove-cancel" @click="cancelRemove">Keep it</button>
       </div>
@@ -1881,6 +1931,40 @@ async function confirmRemoveNow(): Promise<void> {
 
 .remove:hover {
   color: var(--red);
+}
+
+/* Archived rows: the name is present but put away, and the row itself does
+   nothing on click, so it does not invite one. The restore control is always
+   visible, faintly, because a row with no visible control reads as inert. */
+.project.archived {
+  cursor: default;
+}
+
+.project.archived .name {
+  color: var(--text-faint);
+  font-weight: normal;
+}
+
+.archived-head {
+  position: static;
+}
+
+.restore {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: var(--fs-ui);
+  line-height: 1;
+  color: var(--text-faint);
+  opacity: 0.7;
+  padding: 0;
+}
+
+.restore:hover {
+  color: var(--green);
+  opacity: 1;
 }
 
 /* Same box as .remove so adding it does not move the row, and revealed by the

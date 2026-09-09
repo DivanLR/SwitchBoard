@@ -149,4 +149,13 @@ describe('basic mode shaping', () => {
       expect(agents.worker.model).toBe('haiku')
     }
   })
+
+  it('gives both agents the subagent effort bar, and inherits when it is unset', () => {
+    const set = modeAgents({ mode: 'auto', effort: 'medium' })
+    expect(set.advisor.effort).toBe('medium')
+    expect(set.worker.effort).toBe('medium')
+    const unset = modeAgents({ mode: 'auto' })
+    expect(unset.advisor.effort).toBeUndefined()
+    expect(unset.worker.effort).toBeUndefined()
+  })
 })

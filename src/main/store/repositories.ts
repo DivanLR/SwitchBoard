@@ -218,6 +218,14 @@ export class ProjectsRepo {
     ).map(toProject)
   }
 
+  listArchived(): Project[] {
+    return (
+      this.db
+        .prepare('SELECT * FROM projects WHERE archivedAt IS NOT NULL ORDER BY archivedAt DESC')
+        .all() as ProjectRow[]
+    ).map(toProject)
+  }
+
   setRefs(id: string, refs: ProjectRef[]): void {
     this.db.prepare('UPDATE projects SET refs = ? WHERE id = ?').run(JSON.stringify(refs), id)
   }

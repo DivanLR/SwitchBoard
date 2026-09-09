@@ -14,6 +14,9 @@ import { invoke } from '@renderer/ipc'
 // store is unchanged (reactive unwraps refs and computeds on read).
 const state = reactive({
   items: [] as ProjectListItem[],
+  /** Archived projects: hidden from the list and the pickers, shown only in the
+   *  sidebar's Archived section until restored. */
+  archived: [] as Project[],
   selectedProjectId: null as string | null,
   counters: { running: 0, needsYou: 0, costTodayUsd: 0, tokensToday: 0 } as Counters,
   loaded: false,
@@ -76,6 +79,7 @@ const store = reactive({
   async refresh(): Promise<void> {
     const snapshot = await invoke('projects.list', undefined)
     state.items = snapshot.projects
+    state.archived = snapshot.archived
     state.counters = snapshot.counters
     state.loaded = true
     applyFocus()
@@ -184,6 +188,14 @@ const store = reactive({
     await invoke('projects.archive', { projectId })
     if (state.selectedProjectId === projectId) state.selectedProjectId = null
     await this.refresh()
+  },
+
+  /** Bring an archived project back into the list, and open it: the developer
+   *  restored it to work in it, not to look at it in a section. */
+  async unarchive(projectId: string): Promise<void> {
+    await invoke('projects.unarchive', { projectId })
+    await this.refresh()
+    this.select(projectId)
   },
 
   async rename(projectId: string, name: string): Promise<void> {

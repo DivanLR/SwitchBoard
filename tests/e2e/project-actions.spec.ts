@@ -72,6 +72,23 @@ test('a project can be removed via the confirmation popup', async ({ page }) => 
   await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
 })
 
+test('an archived project waits in the folded Archived section until restored', async ({ page }) => {
+  await page.evaluate(() => window.__mock.endSession('s-beta'))
+  await page.getByTestId('sidebar-project-beta').getByTestId('remove-project-beta').click({ force: true })
+  await page.getByTestId('remove-dialog').getByTestId('remove-confirm').click()
+  await expect(page.getByTestId('sidebar-project-beta')).toHaveCount(0)
+  // Folded by default: the header counts it, the row itself is not shown yet.
+  const head = page.getByTestId('group-head-archived')
+  await expect(head).toBeVisible()
+  await expect(page.getByTestId('group-count-archived')).toHaveText('1')
+  await expect(page.getByTestId('archived-project-beta')).toHaveCount(0)
+  await head.click()
+  await page.getByTestId('restore-project-beta').click()
+  // Restored AND opened: it comes back selected, and the section goes with it.
+  await expect(page.getByTestId('sidebar-project-beta')).toHaveAttribute('aria-selected', 'true')
+  await expect(head).toHaveCount(0)
+})
+
 test('cancel in the popup keeps the project', async ({ page }) => {
   await page.evaluate(() => window.__mock.endSession('s-beta'))
   await page.getByTestId('sidebar-project-beta').getByTestId('remove-project-beta').click({ force: true })

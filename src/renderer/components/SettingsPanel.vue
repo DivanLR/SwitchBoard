@@ -14,6 +14,7 @@ import { useProjectsStore } from '@renderer/stores/projects'
 import { useUpdatesStore } from '@renderer/stores/updates'
 import { useSkillsStore } from '@renderer/stores/skills'
 import Icon from '@renderer/components/Icon.vue'
+import EffortBar from '@renderer/components/EffortBar.vue'
 
 // The prop deliberately omits 'mcp' even though the Tab union below includes it:
 // the MCP tab is reachable by clicking, but no caller opens the panel straight
@@ -208,17 +209,6 @@ onMounted(() => {
 
 function save(patch: Partial<Settings>): void {
   void store.save(patch)
-}
-
-// Switching heavy subagents OFF drops the mode to Basic in the same click.
-// Every other mode registers the advisor/worker agents and appends a delegation
-// protocol, so off on its own removed the fan-out directive and left the licence
-// — which is why the toggle read as ignored. Basic registers nothing.
-// A default, not a lock: the mode cards are still free afterwards, and turning
-// the toggle back on does not undo a mode the developer has since chosen.
-function toggleHeavySubagents(): void {
-  const on = settings.value?.heavySubagents === true
-  save(on ? { heavySubagents: false, modelMode: 'basic' } : { heavySubagents: true })
 }
 
 // Sandbox memory: edited locally, saved on Enter/blur — saving per keystroke
@@ -1063,35 +1053,47 @@ const updateLine = computed(() => {
 
             <div class="setting-row">
               <div class="sr-text">
-                <div class="sr-label">Heavy subagents</div>
+                <div class="sr-label">Effort</div>
                 <div class="sr-desc">
-                  Divide and conquer. Every session is told to split work into independent parts
-                  and dispatch them to as many subagents as the work allows, in one batch, rather
-                  than working through a list on one thread. Faster on anything that decomposes,
-                  and cheaper when the workers run the cheap model. It also pins the session to the
-                  Orchestrator protocol, because Advisor's own instruction is to do scoped work
-                  yourself and the two cannot both be in force.
+                  How hard the main loop reasons on every turn, for every session. The same bar
+                  sits in the session header, and a move reaches a running session on its next
+                  message. Lower it on a small subscription: effort is what empties the usage
+                  meter.
                   <strong class="sr-warn">
-                    Switching it OFF sets the mode to Basic, which is the only mode that registers
-                    no subagents at all. Pick another mode afterwards if you want the advisor back.
-                  </strong>
-                  <strong class="sr-warn">
-                    It is read when a session starts, so this applies from the next session, not to
-                    one already running. A session shaped by it carries a
-                    <Icon name="fork" :size="11" /> Fan-out pill in its header.
+                    Subagents exist only at max. Below that, every session works in one thread and
+                    the Agent tool is refused, whatever the mode below says.
                   </strong>
                 </div>
               </div>
-              <button
-                class="switch"
-                :class="{ on: settings.heavySubagents }"
-                data-testid="setting-heavy-subagents"
-                role="switch"
-                :aria-checked="settings.heavySubagents"
-                @click="toggleHeavySubagents()"
-              >
-                <span class="knob"></span>
-              </button>
+              <EffortBar
+                :model-value="settings.effort"
+                label="Effort"
+                testid="setting-effort"
+                @update:model-value="(effort) => save({ effort })"
+              />
+            </div>
+
+            <div class="setting-row">
+              <div class="sr-text">
+                <div class="sr-label">Subagent effort</div>
+                <div class="sr-desc">
+                  How hard the advisor and worker subagents reason, once Effort is at max. At max
+                  it also switches on divide and conquer: the session is told to split work into
+                  independent parts and dispatch them to as many subagents as the work allows,
+                  in one batch, and is pinned to the Orchestrator protocol so the two
+                  instructions agree.
+                  <strong class="sr-warn">
+                    Read when a session starts, so it applies from the next session. A session
+                    started at max carries a <Icon name="fork" :size="11" /> Fan-out pill.
+                  </strong>
+                </div>
+              </div>
+              <EffortBar
+                :model-value="settings.subagentEffort"
+                label="Subagents"
+                testid="setting-subagent-effort"
+                @update:model-value="(subagentEffort) => save({ subagentEffort })"
+              />
             </div>
 
             <div class="group-label mono" style="margin-top: 8px">BYPASS SANDBOX</div>

@@ -43,7 +43,7 @@ vi.mock('@renderer/ipc', async () => {
         return { sessionId: `session-${sent.length}` }
       }
       // runInSession refreshes the sidebar after a background dispatch.
-      if (method === 'projects.list') return { projects: [], counters: {} }
+      if (method === 'projects.list') return { projects: [], archived: [], counters: {} }
       return undefined
     }),
     errorMessage: actual.errorMessage,

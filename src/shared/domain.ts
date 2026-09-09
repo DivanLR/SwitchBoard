@@ -626,6 +626,25 @@ export function isBasicMode(mode: ModelMode | undefined): boolean {
   return mode === 'basic'
 }
 
+/**
+ * Reasoning effort, the SDK's own ladder. `max` is the one rung that means more
+ * than depth: subagents exist only there (see subagentsAllowed).
+ */
+export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+/** Every level in order, which is what the effort bars step through. */
+export const EFFORT_LEVELS: readonly EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max']
+
+/**
+ * Subagents are a max-effort feature, full stop. Below max a session works in
+ * one thread: no advisor, no worker, and the Agent tool itself is refused. The
+ * rule exists for small subscriptions, where fan-out is what empties the usage
+ * meter, so a session at any lower rung cannot spend that way by accident.
+ */
+export function subagentsAllowed(effort: EffortLevel): boolean {
+  return effort === 'max'
+}
+
 export interface Settings {
   defaultView: 'clean' | 'raw'
   notificationsEnabled: boolean
@@ -653,13 +672,20 @@ export interface Settings {
    */
   modelMode: ModelMode
   /**
-   * Heavy subagent mode: instructs every hosted session to decompose work and
-   * fan it out across as many subagents as the task graph allows, rather than
-   * doing it in one thread. Faster wall-clock on anything parallel, and cheaper
-   * when the workers run the cheap model; it costs more total tokens than one
-   * thread would, which is the trade being made deliberately.
+   * Reasoning effort for the main loop of every session: the Effort bar in the
+   * session header and in Settings. Read before every turn, so moving the bar
+   * reaches a running session on its next message. Below `max` no subagents are
+   * created at all (subagentsAllowed).
    */
-  heavySubagents: boolean
+  effort: EffortLevel
+  /**
+   * Reasoning effort for the subagents a session creates, the second bar. It only
+   * matters once `effort` is max, since nothing below that spawns one. At `max` it
+   * also switches on the divide-and-conquer directive that the old Heavy
+   * subagents toggle used to carry (heavySubagentSystemPromptAppend); that toggle
+   * is gone and any stored `heavySubagents` value is ignored.
+   */
+  subagentEffort: EffortLevel
   /**
    * Relabel each turn's closing message as a ✦ SUMMARY. Off shows that message
    * as ordinary assistant text — the raw response (e.g. the full /usage report)
@@ -850,16 +876,13 @@ export const DEFAULT_SETTINGS: Settings = {
   workerModel: 'claude-sonnet-5',
   autoModelRouting: true,
   modelMode: 'auto',
-  // On by default. This was off, on the argument that fan-out is right for big
-  // work and wrong for a one-line fix, so the user should choose per task. That
-  // argument lost: the setting has to be re-found on every fresh install, and
-  // the cost of over-delegating a small change is smaller than the cost of a
-  // large one running single-threaded because nobody visited the Models tab.
-  //
-  // Note the coupling: heavy subagents force the ORCHESTRATOR protocol whatever
-  // modelMode says (heavySubagentModelMode), so shipping this on also means a
-  // new install runs Orchestrator rather than the 'auto' the card below claims.
-  heavySubagents: true,
+  // xhigh, not max: the level current guidance names for coding work, and one
+  // rung below the only rung that creates subagents. A fresh install therefore
+  // works single-threaded until the developer raises the bar, which is the
+  // cheap default a small subscription needs. Subagents at low: a mechanical
+  // executor with an explicit input and output does not need depth.
+  effort: 'xhigh',
+  subagentEffort: 'low',
   summaries: true,
   fontSize: 'md',
   // Clean view is narrative + approvals by default; tool rows live in Raw.

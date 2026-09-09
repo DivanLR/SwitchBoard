@@ -48,6 +48,7 @@ import StreamEvent from '@renderer/components/StreamEvent.vue'
 import SwallowedBlock from '@renderer/components/SwallowedBlock.vue'
 import QuestionEvent from '@renderer/components/QuestionEvent.vue'
 import Icon from '@renderer/components/Icon.vue'
+import EffortBar from '@renderer/components/EffortBar.vue'
 import SpecsView from '@renderer/views/SpecsView.vue'
 import CleanupView from '@renderer/views/CleanupView.vue'
 import TestsView from '@renderer/views/TestsView.vue'
@@ -1172,6 +1173,30 @@ const {
         >
           <Icon name="panel" :size="12" /> {{ liveSession.inPlanMode ? 'Planning' : 'Plan' }}
         </button>
+        <!-- The Effort bar: a global setting, shown here because this is where the
+             usage meter is watched. It reaches the live session on its next message
+             and every session after. The second bar only appears at max, which is
+             the one rung that creates subagents; below it there is nothing for a
+             subagent effort to apply to. -->
+        <template v-if="settingsStore.settings">
+          <EffortBar
+            :model-value="settingsStore.settings.effort"
+            label="Effort"
+            icon="spark"
+            testid="effort-bar"
+            title="Reasoning effort for the main loop. Applies from the next message, to every session. Subagents exist only at max."
+            @update:model-value="(effort) => settingsStore.save({ effort })"
+          />
+          <EffortBar
+            v-if="settingsStore.settings.effort === 'max'"
+            :model-value="settingsStore.settings.subagentEffort"
+            label="Subagents"
+            icon="fork"
+            testid="subagent-effort-bar"
+            title="Reasoning effort for the subagents a session creates. Max also switches on divide and conquer. Read at session start."
+            @update:model-value="(subagentEffort) => settingsStore.save({ subagentEffort })"
+          />
+        </template>
         <!-- Stated before the agent is asked for a diff, not discovered mid-task:
              the container mounts only this folder, so git works there exactly
              when .git sits at the project root. -->
@@ -1190,7 +1215,7 @@ const {
           v-if="liveSession?.heavySubagents"
           class="pill fanout-pill"
           data-testid="fanout-pill"
-          title="Started with Heavy subagents on: this session is told to split work across as many subagents as it can. Changing the setting applies from the next session."
+          title="Started with the subagent effort bar at max: this session is told to split work across as many subagents as it can. Moving the bar applies from the next session."
         >
           <Icon name="fork" :size="12" /> Fan-out
         </span>

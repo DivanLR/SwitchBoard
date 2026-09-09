@@ -190,31 +190,33 @@ test('a failed resume turns Resume back off, and says why in the message', async
   await expect(page.getByTestId('resume-session')).toHaveAttribute('aria-checked', 'false')
 })
 
-// On by default since a fresh install should not have to visit the Models tab to
-// get fan-out (see DEFAULT_SETTINGS). What still has to hold is the reverse trip:
-// a default the developer cannot switch off is a policy, not a default.
-test('heavy subagent mode is on by default and can be turned off', async ({ page }) => {
+// The Effort bar lives in the session header, where the usage meter is watched.
+// It starts one rung below max, so a fresh install creates no subagents until
+// asked; the subagent bar only appears at max, the one rung that creates them.
+test('the effort bar starts at xhigh and reveals the subagent bar only at max', async ({ page }) => {
+  const bar = page.getByTestId('effort-bar')
+  await expect(bar).toBeVisible()
+  await expect(page.getByTestId('effort-bar-value')).toHaveText('xhigh')
+  await expect(page.getByTestId('subagent-effort-bar')).toHaveCount(0)
+
+  // A range input: the last step is max.
+  await bar.fill('4')
+  await expect(page.getByTestId('effort-bar-value')).toHaveText('max')
+  await expect(page.getByTestId('subagent-effort-bar')).toBeVisible()
+  await expect(page.getByTestId('subagent-effort-bar-value')).toHaveText('low')
+
+  // The same setting, so Settings shows the move too, and keeps it.
   await page.getByTestId('open-settings').click()
   await page.getByTestId('settings-tab-term').click()
-  const toggle = page.getByTestId('setting-heavy-subagents')
-  await expect(toggle).toBeVisible()
-  await expect(toggle).toHaveAttribute('aria-checked', 'true')
-
-  await toggle.click()
-  await expect(toggle).toHaveAttribute('aria-checked', 'false')
-
-  // Off also drops the mode to Basic in the same click: every other mode still
-  // registers the advisor/worker agents, so off on its own left the loop with
-  // agents to reach for and the toggle read as ignored.
-  await page.getByTestId('settings-tab-models').click()
-  await expect(page.getByTestId('mode-basic')).toHaveClass(/sel/)
-
-  // It survives closing the panel, because it shapes every session that starts after.
-  await page.getByTestId('settings-tab-term').click()
+  await expect(page.getByTestId('setting-effort-value')).toHaveText('max')
+  await page.getByTestId('setting-subagent-effort').fill('4')
   await page.getByTestId('settings-done').click()
-  await page.getByTestId('open-settings').click()
-  await page.getByTestId('settings-tab-term').click()
-  await expect(page.getByTestId('setting-heavy-subagents')).toHaveAttribute('aria-checked', 'false')
+  await expect(page.getByTestId('subagent-effort-bar-value')).toHaveText('max')
+
+  // Back down, and the subagent bar goes with it.
+  await bar.fill('0')
+  await expect(page.getByTestId('effort-bar-value')).toHaveText('low')
+  await expect(page.getByTestId('subagent-effort-bar')).toHaveCount(0)
 })
 
 // WHERE a session runs used to be decided for you: bypass meant a container and

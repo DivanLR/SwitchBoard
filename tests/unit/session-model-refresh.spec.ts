@@ -6,7 +6,7 @@
 //      note promises it) — and a usage-limit downgrade survives that re-read.
 import { describe, expect, it } from 'vitest'
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
-import type { EventKind, EventPayloadMap, ModelMode, SessionEvent } from '@shared/domain'
+import type { EffortLevel, EventKind, EventPayloadMap, ModelMode, SessionEvent } from '@shared/domain'
 import { HostedSession } from '@main/sessions/session'
 import { mainLoopModel } from '@main/sessions/model-routing'
 
@@ -16,6 +16,7 @@ function makeSession(mode: ModelMode = 'auto') {
     workerModel: 'claude-sonnet-5',
     modelMode: mode,
     autoModelRouting: true,
+    effort: 'xhigh' as EffortLevel,
   }
   const setModelCalls: (string | undefined)[] = []
   const effortCalls: unknown[] = []
@@ -59,10 +60,13 @@ function makeSession(mode: ModelMode = 'auto') {
   const inner = session as unknown as {
     deliverNow(eventId: string, text: string): void
     handleMessage(m: SDKMessage): void
+    gateSubagents(): Promise<{ hookSpecificOutput?: { permissionDecision?: string } }>
   }
   const send = (text: string): void => inner.deliverNow('e1', text)
   const feed = (m: unknown): void => inner.handleMessage(m as SDKMessage)
-  return { routing, setModelCalls, effortCalls, send, feed }
+  const gate = (): Promise<string | undefined> =>
+    inner.gateSubagents().then((out) => out.hookSpecificOutput?.permissionDecision)
+  return { routing, setModelCalls, effortCalls, send, feed, gate }
 }
 
 const limitResult = (): unknown => ({
@@ -88,11 +92,38 @@ describe('the main-loop model is pinned for the session', () => {
     expect(setModelCalls).toEqual(['claude-sonnet-5'])
   })
 
-  it('sets the main loop to xhigh once, not per turn', () => {
+  it('sets the main loop to the Effort bar once, not per turn', () => {
     const { effortCalls, send } = makeSession('auto')
     send('Fix the typo in SessionView.vue')
     send('Audit every view in the app')
     expect(effortCalls).toEqual([{ effortLevel: 'xhigh' }])
+  })
+})
+
+describe('the Effort bar', () => {
+  it('reaches a running session on its next message', () => {
+    const { routing, effortCalls, send } = makeSession('auto')
+    send('Fix the typo in SessionView.vue')
+    routing.effort = 'low'
+    send('Fix the other typo')
+    expect(effortCalls).toEqual([{ effortLevel: 'xhigh' }, { effortLevel: 'low' }])
+  })
+
+  it('still moves after a usage-limit downgrade pinned the model', () => {
+    const { routing, effortCalls, send, feed } = makeSession('auto')
+    feed(limitResult())
+    routing.effort = 'medium'
+    send('Carry on')
+    expect(effortCalls.at(-1)).toEqual({ effortLevel: 'medium' })
+  })
+
+  it('refuses the Agent tool below max and allows it at max, read live', async () => {
+    const { routing, gate } = makeSession('auto')
+    expect(await gate()).toBe('deny')
+    routing.effort = 'max'
+    expect(await gate()).toBeUndefined()
+    routing.effort = 'high'
+    expect(await gate()).toBe('deny')
   })
 })
 

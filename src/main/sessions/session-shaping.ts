@@ -12,8 +12,7 @@
 // ADHD accessor was already inert, gated on a flag file created by a plugin that
 // is no longer installed.
 import type { AgentDefinition } from '@anthropic-ai/claude-agent-sdk'
-import type { ModelMode } from '@shared/domain'
-import { effortForRole, type ModelRole } from './model-routing'
+import type { EffortLevel, ModelMode } from '@shared/domain'
 
 // --- Heavy subagent mode ---
 // One thread is the wrong shape for work that decomposes: a five-file audit is
@@ -153,13 +152,6 @@ export function sandboxSystemPromptAppend(
 
 const norm = (m?: string): string | undefined => (m && m !== 'default' ? m : undefined)
 
-// Effort per agent ROLE: the advisor reasons ('xhigh'), the worker executes
-// ('low'). A mechanical executor given an explicit input and expected output
-// gains nothing from depth, and paying for it is what erases the saving the
-// cheap tier exists for. undefined = inherit the default.
-const effortFor = (role: ModelRole, model?: string): 'xhigh' | 'low' | undefined =>
-  effortForRole(role, norm(model)) ?? undefined
-
 /**
  * The two mode subagents, injected into every session so the protocol below
  * can reach for them regardless of which model runs a given turn.
@@ -173,6 +165,9 @@ export function modeAgents(options: {
    *  one model must not ship two agent definitions carrying a second one, or the
    *  loop can still reach the expensive tier whatever the prompt says. */
   mode?: ModelMode
+  /** The subagent effort bar (Settings.subagentEffort), applied to both agents.
+   *  undefined inherits the SDK default. */
+  effort?: EffortLevel
 }): Record<string, AgentDefinition> {
   if (options.mode === 'basic') return {}
   return {
@@ -188,7 +183,7 @@ export function modeAgents(options: {
         'Do NOT write full implementations — sketches and diffs of the tricky part only. ' +
         'If the question is under-specified, state the assumption you would proceed on.',
       model: norm(options.strongModel),
-      effort: effortFor('advisor', options.strongModel),
+      effort: options.effort,
     },
     worker: {
       description:
@@ -201,7 +196,7 @@ export function modeAgents(options: {
         'raw and complete, no commentary. If the input is ambiguous or does not match what the ' +
         'instructions assume, STOP and return one short clarifying question instead of guessing.',
       model: norm(options.cheapModel),
-      effort: effortFor('worker', options.cheapModel),
+      effort: options.effort,
     },
   }
 }

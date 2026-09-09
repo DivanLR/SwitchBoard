@@ -43,31 +43,10 @@ export function nextStrongestModel(current: string | undefined): string | null {
   return DOWNGRADE[family] ?? null
 }
 
-/** What a model is being asked to do, which is what its effort should follow. */
-export type ModelRole = 'main' | 'advisor' | 'worker'
-
-/**
- * Reasoning effort for a resolved model, scaled to its ROLE rather than pushed
- * to the ceiling everywhere:
- *
- *   main / advisor — 'xhigh', the level current guidance names for coding and
- *     agentic work. 'max' is deliberately not used: it shows diminishing
- *     returns for the extra tokens and is prone to overthinking.
- *   worker — 'low'. A mechanical executor with an explicit input and output
- *     does not need depth, and paying for it erases the point of a cheap tier.
- *
- * The Fable family keeps its own default (it already reasons at depth), as does
- * an unknown/'default' id whose family cannot be resolved yet — the SDK-reported
- * model reconciles that case. A model that does not support a level silently
- * downgrades.
- */
-export function effortForRole(
-  role: ModelRole,
-  modelId: string | undefined,
-): 'xhigh' | 'low' | null {
-  if (!modelId || modelId === 'default' || modelFamily(modelId) === 'fable') return null
-  return role === 'worker' ? 'low' : 'xhigh'
-}
+// Effort used to be derived here per ROLE (main/advisor at xhigh, worker at
+// low, Fable left alone). It is a developer choice now: Settings.effort and
+// Settings.subagentEffort, the two bars. A model that does not support a level
+// silently downgrades, so no per-family carve-out is needed.
 
 export type Workload = 'plan' | 'advisor' | 'orchestrator'
 

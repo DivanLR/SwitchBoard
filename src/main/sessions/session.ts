@@ -5,6 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import {
   query,
   type CanUseTool,
+  type HookJSONOutput,
   type McpServerConfig,
   type PermissionMode,
   type PermissionResult,
@@ -12,13 +13,24 @@ import {
   type SDKMessage,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
-import { DEFAULT_SESSION_MODE, modelLabel, type AvailableModel, type McpServer, type ModelMode, type ProjectCommand, type SessionMode, type SessionStatus } from '@shared/domain'
+import {
+  DEFAULT_SESSION_MODE,
+  DEFAULT_SETTINGS,
+  modelLabel,
+  subagentsAllowed,
+  type AvailableModel,
+  type EffortLevel,
+  type McpServer,
+  type ModelMode,
+  type ProjectCommand,
+  type SessionMode,
+  type SessionStatus,
+} from '@shared/domain'
 import { sandboxSpawn, toContainerPaths, type SandboxPlan } from './wslc-sandbox'
 import { MessageMapper, type EventSink } from './message-mapper'
 import { toAvailableModels } from './model-catalog'
 import {
   classifyWorkload,
-  effortForRole,
   mainLoopModel,
   modelDeviation,
   nextStrongestModel,
@@ -125,6 +137,15 @@ interface HostedSessionOptions {
   autoModelRouting?: boolean
   /** Advisor/Orchestrator pairing mode; 'auto' picks per message by workload. */
   modelMode?: ModelMode
+  /** The Effort bar at spawn: main-loop reasoning effort. Refreshed per turn
+   *  through resolveModels, so it is the starting value, not the pinned one. */
+  effort?: EffortLevel
+  /** Whether this session registers the advisor/worker subagents at all. False
+   *  below max effort and in basic mode; the PreToolUse gate below enforces the
+   *  effort half of that live, whatever was registered. */
+  subagents?: boolean
+  /** The subagent effort bar, given to both mode agents at spawn. */
+  subagentEffort?: EffortLevel
   /** The current model routing from Settings, re-read before every turn so a
    *  change in Settings reaches this running session (see refreshModelRouting). */
   resolveModels?: () => {
@@ -132,6 +153,7 @@ interface HostedSessionOptions {
     workerModel: string
     modelMode: ModelMode
     autoModelRouting: boolean
+    effort: EffortLevel
   }
   /** Pairing mode chosen for the latest work turn (header chip); null = plan turn. */
   onTurnMode?: (mode: 'advisor' | 'orchestrator' | null) => void
@@ -362,8 +384,10 @@ export class HostedSession {
           strongModel: this.options.strongModel ?? this.options.mainModel,
           cheapModel: this.options.workerModel,
           // basic registers none of them, so the loop cannot reach a second
-          // model even if something in the prompt asked it to.
-          mode: this.options.modelMode,
+          // model even if something in the prompt asked it to. Neither does a
+          // session below max effort (subagentsAllowed), for the same reason.
+          mode: this.options.subagents === false ? 'basic' : this.options.modelMode,
+          effort: this.options.subagentEffort,
         }),
         canUseTool: (toolName, input, canUseToolOptions) =>
           this.options.gate({
@@ -372,6 +396,13 @@ export class HostedSession {
             input,
             options: canUseToolOptions,
           }),
+        // The hard half of "subagents only at max effort". Registering no agents
+        // is a claim the prompt makes; the CLI's own Agent tool exists in every
+        // session regardless, and a hook is the one lever that fires in every
+        // permission mode, bypass included, and reads the bar as it is NOW.
+        hooks: {
+          PreToolUse: [{ matcher: 'Agent|Task', hooks: [() => this.gateSubagents()] }],
+        },
       },
     })
     // Kept rather than fire-and-forgotten: stop() has to await this, or app exit
@@ -473,9 +504,12 @@ export class HostedSession {
    */
   private downgraded = false
   private refreshModelRouting(): void {
-    if (this.downgraded) return
     const next = this.options.resolveModels?.()
     if (!next) return
+    // Ahead of the downgrade guard: a usage-limit downgrade pins the MODEL, and
+    // the Effort bar is precisely what a developer reaches for after one.
+    this.options.effort = next.effort
+    if (this.downgraded) return
     this.options.mainModel = mainLoopModel(next.modelMode, next)
     this.options.workerModel = next.workerModel
     this.options.modelMode = next.modelMode
@@ -514,27 +548,47 @@ export class HostedSession {
     void this.q?.setModel(wanted).catch(() => {
       // Best-effort: an older CLI may not support runtime model switching.
     })
-    this.applyEffortForModel(wanted)
+  }
+
+  /** The Effort bar as it stands right now: Settings first, the spawn value as
+   *  the fallback for a session started without a resolver (tests). */
+  private currentEffort(): EffortLevel {
+    return this.options.resolveModels?.().effort ?? this.options.effort ?? DEFAULT_SETTINGS.effort
   }
 
   /**
-   * Reasoning effort for the main-loop model — 'xhigh', the level current
-   * guidance names for coding and agentic work; Fable keeps its own default.
-   * (Subagents are set separately: the worker runs 'low'. See effortForRole.)
-   * Applied whenever the model changes: proactively from the routing path for an
-   * explicit model, and from the SDK-reported model below for the
-   * account-default case. Best-effort; an unsupported level silently downgrades.
+   * Main-loop reasoning effort, from the Effort bar. Applied before every turn
+   * and sent only when it changed, so an untouched bar costs nothing per turn.
+   * Independent of the model: an unsupported level silently downgrades, which is
+   * why no per-family carve-out is needed. Best-effort, like setModel.
    */
-  private appliedEffort: 'xhigh' | 'low' | null | undefined = undefined
-  private applyEffortForModel(modelId: string | undefined): void {
-    const wanted = effortForRole('main', modelId)
+  private appliedEffort: EffortLevel | undefined = undefined
+  private applyEffort(wanted: EffortLevel): void {
     if (this.appliedEffort === wanted) return
-    const nothingYet = this.appliedEffort === undefined
     this.appliedEffort = wanted
-    // Nothing set yet and no override wanted → nothing to clear.
-    if (nothingYet && wanted === null) return
     void this.q?.applyFlagSettings({ effortLevel: wanted }).catch(() => {
       // Older CLI without applyFlagSettings, or a model without effort support.
+    })
+  }
+
+  /**
+   * PreToolUse gate on the Agent tool: refused below max effort.
+   *
+   * Read live rather than fixed at spawn, so moving the bar mid-session (even
+   * mid-turn) changes what the very next Agent call is allowed to do. The reason
+   * is worded for the model: it tells it what to do instead, so a refusal turns
+   * into single-threaded work rather than a retry.
+   */
+  private gateSubagents(): Promise<HookJSONOutput> {
+    if (subagentsAllowed(this.currentEffort())) return Promise.resolve({})
+    return Promise.resolve({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason:
+          'Subagents are only used at max effort in this app, and the Effort bar is below ' +
+          'max. Do this work yourself, in this thread, without spawning agents.',
+      },
     })
   }
 
@@ -620,9 +674,6 @@ export class HostedSession {
     const model = msg.message?.model
     if (!model || model === this.lastModel) return
     this.lastModel = model
-    // Effort follows the ACTUAL resolved model — reconciles the account-default
-    // case the routing paths cannot classify (they only see 'default').
-    this.applyEffortForModel(model)
     this.options.onModel?.(model)
     this.reconcileModel(model)
   }
@@ -705,7 +756,6 @@ export class HostedSession {
     this.downgraded = true // hold this rung: a settings re-read must not undo it
     this.appliedModel = null // force the next turn to apply the new model
     void this.q?.setModel(next).catch(() => {})
-    this.applyEffortForModel(next)
     this.options.onModel?.(next)
     this.options.sink.append('assistant_text', {
       text: `⚙ Usage limit reached — switched this session to ${modelLabel(next)} to keep going. Send your message again.`,
@@ -851,6 +901,9 @@ export class HostedSession {
     // Route the model for this turn's intent before the message enters the
     // stream (best-effort setModel, not awaited — keeps this synchronous).
     this.refreshModelRouting()
+    // The bar, not the model, decides effort; and it applies whether or not
+    // routing is on, since a basic session still has an Effort bar.
+    this.applyEffort(this.options.effort ?? DEFAULT_SETTINGS.effort)
     this.applyModelForTurn(text)
     this.options.sink.update(eventId, { text, pending: false }, { persist: true })
     this.input.push({

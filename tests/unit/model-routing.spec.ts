@@ -1,9 +1,9 @@
 // Intent heuristic for automatic model routing.
 import { describe, expect, it } from 'vitest'
+import { subagentsAllowed, EFFORT_LEVELS } from '@shared/domain'
 import {
   classifyIntent,
   classifyWorkload,
-  effortForRole,
   mainLoopModel,
   nextStrongestModel,
 } from '@main/sessions/model-routing'
@@ -73,26 +73,11 @@ describe('nextStrongestModel (usage-limit fallback ladder)', () => {
   })
 })
 
-describe('effortForRole (effort follows the job, not the ceiling)', () => {
-  it('reasons on the main loop and the advisor', () => {
-    expect(effortForRole('main', 'claude-opus-5')).toBe('xhigh')
-    expect(effortForRole('advisor', 'claude-opus-5')).toBe('xhigh')
-    expect(effortForRole('main', 'some-future-model')).toBe('xhigh')
-  })
-
-  it('keeps the worker cheap — depth there erases the point of the tier', () => {
-    expect(effortForRole('worker', 'claude-sonnet-5')).toBe('low')
-    expect(effortForRole('worker', 'claude-haiku-4-5-20251001')).toBe('low')
-  })
-
-  it('leaves the Fable family and the account default at their own default', () => {
-    for (const role of ['main', 'advisor', 'worker'] as const) {
-      expect(effortForRole(role, 'claude-fable-5')).toBeNull()
-      expect(effortForRole(role, 'claude-fable-5[1m]')).toBeNull()
-      expect(effortForRole(role, 'default')).toBeNull()
-      expect(effortForRole(role, undefined)).toBeNull()
-      expect(effortForRole(role, '')).toBeNull()
-    }
+// Effort is the developer's own bar now (Settings.effort), not a per-role
+// derivation. The one rule left to hold is the rung at which subagents exist.
+describe('subagentsAllowed (subagents are a max-effort feature)', () => {
+  it('is true at max and nowhere else', () => {
+    expect(EFFORT_LEVELS.filter(subagentsAllowed)).toEqual(['max'])
   })
 })
 

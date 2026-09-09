@@ -111,6 +111,19 @@ describe('the invoke channel', () => {
     expect(result.value).toMatchObject({ projects: [], counters: expect.any(Object) })
   })
 
+  it('lists an archived project under archived until it is restored', async () => {
+    const project = harness.repos.projects.insert({ name: 'a', path: 'C:\\a', source: 'manual' })
+    await harness.call('projects.archive', { projectId: project.id })
+    let listed = await harness.call('projects.list', undefined)
+    if (!listed.ok) throw new Error(listed.error.message)
+    expect(listed.value).toMatchObject({ projects: [], archived: [{ id: project.id }] })
+
+    await harness.call('projects.unarchive', { projectId: project.id })
+    listed = await harness.call('projects.list', undefined)
+    if (!listed.ok) throw new Error(listed.error.message)
+    expect(listed.value).toMatchObject({ projects: [{ id: project.id }], archived: [] })
+  })
+
   it('returns null rather than undefined for a void handler', async () => {
     const project = harness.repos.projects.insert({
       name: 'a',

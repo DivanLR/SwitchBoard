@@ -750,6 +750,7 @@ export function installMockHost(scenario: MockScenario): void {
           })(),
           drafts: (draftsByProject.get(p.id) ?? []).map((text, i) => ({ id: String(i), projectId: p.id, text })),
         })),
+      archived: projects.filter((p) => p.archivedAt).map((p) => ({ ...p, session: undefined })),
       counters: counters(),
     }),
     // The real picker is an OS dialogue Playwright cannot drive, so the test
@@ -924,6 +925,10 @@ export function installMockHost(scenario: MockScenario): void {
         throw { code: 'ALREADY_ACTIVE', message: 'Stop the session before archiving the project' }
       }
       if (project) project.archivedAt = now()
+    },
+    'projects.unarchive': (req) => {
+      const project = projects.find((p) => p.id === req.projectId)
+      if (project) project.archivedAt = null
     },
     'projects.commands': (req) => projectCommands.get(String(req.projectId)) ?? [],
     'specs.state': (req) =>

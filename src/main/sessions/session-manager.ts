@@ -15,6 +15,7 @@ import type {
   DiffFileStatus,
   DiffListResult,
   EventKind,
+  EffortLevel,
   EventPayloadMap,
   FileDiffContent,
   ModelMode,
@@ -30,7 +31,7 @@ import type {
   TranscriptSummary,
   VerifyReport,
 } from '@shared/domain'
-import { SWALLOWABLE_KINDS, emptyVerifyReport, verifyVerdict } from '@shared/domain'
+import { SWALLOWABLE_KINDS, emptyVerifyReport, subagentsAllowed, verifyVerdict } from '@shared/domain'
 import type { IpcError, SessionStatusPush } from '@shared/ipc-types'
 import { newId, nowIso, type Repositories } from '@main/store/repositories'
 import { readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
@@ -730,6 +731,7 @@ export class SessionManager {
     workerModel: string
     modelMode: ModelMode
     autoModelRouting: boolean
+    effort: EffortLevel
   } {
     // ONE answer for every project. There used to be a per-project override for
     // each of these two, and the owner asked for the scope to be global only on
@@ -742,6 +744,9 @@ export class SessionManager {
       workerModel: settings.workerModel,
       modelMode: settings.modelMode ?? 'auto',
       autoModelRouting: settings.autoModelRouting,
+      // The Effort bar. Re-read with the models so a move reaches a running
+      // session on its next turn, and mid-turn for the subagent gate.
+      effort: settings.effort,
     }
   }
 
@@ -979,14 +984,20 @@ export class SessionManager {
     // off as well would make basic silently expensive, which is the one thing it
     // must never be.
     const basic = settings.modelMode === 'basic'
-    const heavySubagents = !basic && settings.heavySubagents === true
+    // SUBAGENTS ONLY AT MAX EFFORT. Below that rung the session is shaped like
+    // basic — no advisor, no worker, no protocol text — and the session's own
+    // PreToolUse gate refuses the Agent tool as well (HostedSession), so the rule
+    // holds live rather than only at spawn. The fan-out directive is the
+    // subagent bar's own top rung.
+    const subagents = !basic && subagentsAllowed(settings.effort)
+    const heavySubagents = subagents && settings.subagentEffort === 'max'
     row.heavySubagents = heavySubagents
     const heavyAppend = heavySubagentSystemPromptAppend(heavySubagents)
     // Advisor/Orchestrator protocol (static text — prompt-cache friendly). Pinned
     // to Orchestrator under heavy subagents, or the two appends contradict:
     // Advisor's text says to implement scoped work yourself.
     const modesAppend = modesSystemPromptAppend(
-      heavySubagentModelMode(heavySubagents, settings.modelMode ?? 'auto'),
+      subagents ? heavySubagentModelMode(heavySubagents, settings.modelMode ?? 'auto') : 'basic',
     )
     // A carried-over transcript: the digest inline, the full file named. Expired
     // transcripts resolve to null, so a stale carry request is simply ignored
@@ -1048,6 +1059,9 @@ export class SessionManager {
         // model and throw away the whole prompt cache for no benefit.
         autoModelRouting: !basic && settings.autoModelRouting,
         modelMode: settings.modelMode,
+        effort: settings.effort,
+        subagents,
+        subagentEffort: settings.subagentEffort,
         // Re-read before each turn so a Settings change lands on a RUNNING session
         // (the note in Settings promises exactly that).
         resolveModels: () => this.resolveModelRouting(),
