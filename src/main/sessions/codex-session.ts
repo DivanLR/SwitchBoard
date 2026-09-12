@@ -1,20 +1,3 @@
-// A session driven by the OpenAI Codex CLI, presenting the same SessionHost
-// surface as the Claude one (session.ts) so the manager, the stream and the
-// views need no branch beyond which class is constructed.
-//
-// SHAPE OF THE INTEGRATION: `codex exec --json` runs ONE turn and exits, so a
-// session here is a sequence of short-lived processes rather than one long-lived
-// one. The first turn starts a thread; every turn after it is
-// `codex exec resume <thread id>`, which is how the CLI itself continues a
-// conversation. A turn in flight therefore has a real process to kill, which is
-// what makes interrupt honest.
-//
-// WHAT A CODEX SESSION DOES NOT HAVE, and why nothing here pretends otherwise:
-// the permission inbox, containers, plan mode, subagent pairing and background
-// tasks are all Claude Agent SDK features. `codex exec` is non-interactive and
-// decides for itself inside the sandbox it was given, so there is no approval to
-// route to the inbox. The session mode is translated to the closest Codex
-// sandbox policy and the session header says which engine is running.
 import { spawn, type ChildProcessByStdio } from 'node:child_process'
 import type { Readable } from 'node:stream'
 import type { AvailableModel, SessionMode, SessionStatus } from '@shared/domain'
@@ -26,17 +9,12 @@ import type { QueuedSend, SessionHost } from './session'
 export interface CodexSessionOptions {
   sessionId: string
   projectPath: string
-  /** Codex model id (from probeCodexModels); omitted uses the CLI's own default. */
   model?: string
-  /** Main-loop reasoning effort, passed through as Codex's model_reasoning_effort. */
   effort?: string
-  /** The Switchboard mode, translated to a Codex sandbox policy (sandboxArgs). */
   mode: SessionMode
-  /** Codex thread id of a prior conversation to resume. */
   resumeThreadId?: string
   sink: EventSink
   onStatusChange: (status: SessionStatus, detail?: string | null) => void
-  /** The Codex thread id, stored as the session's resume handle. */
   onSdkSessionId: (threadId: string) => void
   onModel?: (model: string) => void
   onModels?: (models: AvailableModel[]) => void
@@ -45,15 +23,6 @@ export interface CodexSessionOptions {
   onExit: (reason: 'completed' | 'stopped' | 'crashed', detail?: string) => void
 }
 
-/**
- * The Codex sandbox policy for a Switchboard session mode.
- *
- * `bypass` is the only mode that disables the sandbox, and it does so
- * explicitly: everything else keeps Codex's own sandbox in force. `plan` maps to
- * read-only, which is the nearest true equivalent — Codex has no plan mode, and
- * a read-only sandbox is the honest version of "look but do not touch" rather
- * than a promise this app cannot keep.
- */
 export function sandboxArgs(mode: SessionMode): string[] {
   switch (mode) {
     case 'bypass':
@@ -65,7 +34,6 @@ export function sandboxArgs(mode: SessionMode): string[] {
   }
 }
 
-/** The argv for one turn: a fresh thread, or a resume of the one in progress. */
 export function turnArgs(options: {
   prompt: string
   projectPath: string
@@ -88,26 +56,15 @@ export function turnArgs(options: {
     : ['exec', ...shared, options.prompt]
 }
 
-/** One `codex exec` process and the state that belongs to it alone. */
 interface ActiveTurn {
   child: ChildProcessByStdio<null, Readable, Readable>
-  /** Partial stdout between chunk boundaries; JSONL is only valid per line. */
   stdout: string
-  /** Set once this turn is accounted for, by whichever event reached it first. */
   settled: boolean
 }
 
 export class CodexSession implements SessionHost {
   private readonly options: CodexSessionOptions
   private readonly mapper: CodexMapper
-  // The turn in flight, or null between turns.
-  //
-  // A whole object rather than a bare child handle, because every handler has to
-  // be able to ask "is this still MY turn?". `kill()` is asynchronous, so a
-  // killed child's `close` can arrive after a replacement turn has started;
-  // without ownership that late event flushed the shared buffer, cleared the
-  // replacement's handle and drained the queue a second time. `settled` closes
-  // the same race between `error` and the `close` that follows it.
   private turn: ActiveTurn | null = null
   private threadId: string | undefined
   private status: SessionStatus = 'done'
@@ -131,14 +88,6 @@ export class CodexSession implements SessionHost {
     })
   }
 
-  /**
-   * There is no process to start until there is something to say.
-   *
-   * A Claude session boots a CLI that then waits; `codex exec` runs a turn and
-   * exits, so starting one with no prompt would spend a turn on nothing. The
-   * session reports itself idle and ready, and the first message starts the
-   * first process.
-   */
   start(): void {
     if (!codexInstalled()) {
       this.options.sink.append('error', { text: CODEX_MISSING_MESSAGE, fatal: true })
@@ -226,13 +175,10 @@ export class CodexSession implements SessionHost {
     this.setStatus(this.status, this.statusDetail)
   }
 
-  /** Codex reports no background tasks, so there is never a stale set to clear. */
   clearBackgroundTasks(): void {}
 
-  /** Codex has no plan mode; the mode is fixed at spawn as a sandbox policy. */
   setPlanMode(): void {}
 
-  /** Plugins are a Claude Code concept; nothing to reload here. */
   async reloadPlugins(): Promise<void> {}
 
   private runTurn(prompt: string): void {
@@ -251,9 +197,6 @@ export class CodexSession implements SessionHost {
       effort: this.options.effort,
       mode: this.options.mode,
     })
-    // stdin is closed: `codex exec` reads a piped stdin as extra prompt material,
-    // and the prompt is already an argument. No `shell`, ever — codex-executable.ts
-    // explains why the launch spec exists instead of a bare path.
     const child = spawn(launch.command, [...launch.prefixArgs, ...args], {
       cwd: this.options.projectPath,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -264,8 +207,6 @@ export class CodexSession implements SessionHost {
     this.setStatus('working', null)
 
     child.stdout.on('data', (chunk: Buffer) => this.consumeStdout(turn, chunk.toString()))
-    // Codex writes progress notices to stderr; they are part of what the session
-    // produced, so they belong in the stream rather than in a log nobody reads.
     child.stderr.on('data', (chunk: Buffer) => {
       const text = chunk.toString().trim()
       if (text) this.options.sink.append('raw_output', { text })
@@ -276,11 +217,7 @@ export class CodexSession implements SessionHost {
       this.settle(turn, 'crashed', error.message)
     })
     child.on('close', (code) => {
-      // A spawn failure emits `error` and THEN `close`, and a killed turn's
-      // `close` can arrive after its replacement has started. Either way this
-      // turn is already spoken for, and acting twice drains the queue twice.
       if (turn.settled) return
-      // Flush a last line with no trailing newline before deciding the outcome.
       if (turn.stdout.trim()) {
         this.mapper.line(turn.stdout)
         turn.stdout = ''
@@ -292,7 +229,6 @@ export class CodexSession implements SessionHost {
       if (code === 0) {
         this.settle(turn, 'completed')
       } else if (code === null) {
-        // Killed: interrupt() has already reported the status.
         this.settle(turn, 'killed')
       } else {
         const detail = `Codex exited with code ${code}`
@@ -313,17 +249,6 @@ export class CodexSession implements SessionHost {
     }
   }
 
-  /**
-   * A turn reached its end, exactly once.
-   *
-   * Unlike the Claude host, a crashed turn does NOT end the session: the process
-   * was always going to exit, so a failed one leaves the conversation intact and
-   * the developer can send another message.
-   *
-   * The ownership check is the point. A turn that is no longer the current one
-   * has already been replaced — by `interrupt()` followed by a new send, say —
-   * and must not touch the status, the turn counter or the queue on its way out.
-   */
   private settle(
     turn: ActiveTurn,
     reason: 'completed' | 'crashed' | 'killed',
@@ -347,7 +272,6 @@ export class CodexSession implements SessionHost {
     this.runTurn(next.text)
   }
 
-  /** Ends the turn in flight and disowns it, so its late `close` changes nothing. */
   private killChild(): void {
     const turn = this.turn
     this.turn = null
@@ -357,8 +281,6 @@ export class CodexSession implements SessionHost {
   }
 
   private setStatus(status: SessionStatus, detail: string | null): void {
-    // Attention is the developer's own flag and outranks a working process, the
-    // same way it does on a Claude session.
     const effective = this.attention && status !== 'error' ? 'needs_you' : status
     this.status = effective
     this.statusDetail = detail

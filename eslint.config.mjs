@@ -30,6 +30,10 @@ export default tseslint.config(
     rules: {
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       'vue/multi-word-component-names': 'off',
+      // Deliberately-ignored errors used to carry a comment saying so, which was
+      // what kept `no-empty` satisfied. With comments stripped from src/ and
+      // tests/, `catch {}` is the only remaining way to write one.
+      'no-empty': ['error', { allowEmptyCatch: true }],
     },
   },
   {

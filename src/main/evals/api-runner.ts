@@ -1,9 +1,3 @@
-// The automated part of an API run: the app starts the API if it is not already
-// up, sends every planned request itself, and judges each answer in code.
-//
-// Nothing here asks a model anything. The status is the one the socket returned,
-// the timing is measured, and the verdict comes from checkCall() — so a green
-// eval set means the endpoints answered, not that something reported they did.
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import { setTimeout as delay } from 'node:timers/promises'
 import {
@@ -15,29 +9,17 @@ import {
 import type { Repositories } from '@main/store/repositories'
 import { resolveApiHost, type ApiHost } from './api-scan'
 
-/** How long a server gets to start listening before the run gives up. */
 const READY_TIMEOUT_MS = 90_000
 const READY_POLL_MS = 1_000
-/** Per-call ceiling: a hung endpoint fails its own call, never the whole run. */
 const CALL_TIMEOUT_MS = 20_000
-/** Response bodies are evidence, not archives. */
 const BODY_LIMIT = 2_000
 
 export interface ApiRunOutcome {
   calls: ApiCall[]
-  /** True when this run started the server and stopped it again. */
   launched: boolean
-  /** Set when the run could not do what it was asked, in one sentence. */
   note: string | null
 }
 
-/**
- * Send every request and judge every answer.
- *
- * An API that is already running is used as it is and left running: reclaiming a
- * port the developer is using themselves would be the app breaking their session
- * to test it. Only a server this function started is a server this function kills.
- */
 export async function runApiCalls(
   host: ApiHost,
   requests: readonly ApiRequestPlan[],
@@ -56,8 +38,6 @@ export async function runApiCalls(
 
   if (!alreadyUp) {
     if (!host.startCmd) {
-      // A deployed environment that does not answer is news about the environment,
-      // not a missing setting, so it is not reported as one.
       const reason =
         host.target === 'qa'
           ? `${host.baseUrl} did not answer, so nothing was called`
@@ -75,8 +55,6 @@ export async function runApiCalls(
       cwd: host.cwd,
       shell: true,
       windowsHide: true,
-      // The resolved URL is forced on the server so the port it binds is the port
-      // this run calls, rather than whichever profile the tooling picks.
       env: { ...process.env, ASPNETCORE_URLS: host.baseUrl, DOTNET_ENVIRONMENT: 'Development' },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
@@ -123,32 +101,15 @@ export async function runApiCalls(
 const WRITE_BLOCKED =
   'not sent: a write against a shared QA environment is blocked, so the eval set exercises reads only'
 
-/** A call that was never made. Three separate places built this same six-field
- *  literal: the write the QA guard refused, the call whose socket never
- *  completed, and a whole set skipped before it started. They agree by
- *  construction now, which matters because 'not_run' is what keeps an unasked
- *  endpoint from being reported as a failure. */
 function notRunCall(request: ApiRequestPlan, detail: string): ApiCall {
   return { request, status: null, ms: null, body: null, outcome: 'not_run', detail }
 }
 
-/**
- * A write the run refuses to send against a deployed environment.
- *
- * The prompt asks the session to plan reads only for QA, but a promise about what
- * this app does to someone else's environment has to be kept by the code that
- * opens the socket, not by the model that proposed the plan — one mis-planned
- * DELETE against a shared environment is an incident, not a test result.
- *
- * Reported as 'not_run' rather than 'fail': the endpoint was never asked, so
- * nothing here says anything about whether that write works.
- */
 function blockedWrite(host: ApiHost, request: ApiRequestPlan): ApiCall | null {
   if (host.target !== 'qa' || request.method === 'GET' || request.method === 'HEAD') return null
   return notRunCall(request, WRITE_BLOCKED)
 }
 
-/** One request: sent, timed, and judged. */
 async function sendOne(host: ApiHost, request: ApiRequestPlan): Promise<ApiCall> {
   const url = `${host.baseUrl.replace(/\/+$/, '')}${request.path.startsWith('/') ? '' : '/'}${request.path}`
   const started = Date.now()
@@ -157,10 +118,6 @@ async function sendOne(host: ApiHost, request: ApiRequestPlan): Promise<ApiCall>
       method: request.method,
       headers: {
         ...(request.body ? { 'content-type': 'application/json' } : {}),
-        // The environment's own headers first, the request's second, so a request
-        // can still drop or blank the API key on purpose — the "absent auth should
-        // be 401" case is one the eval set is asked for, and a project header that
-        // always won would make it impossible to write.
         ...(host.headers ?? {}),
         ...(request.headers ?? {}),
       },
@@ -169,10 +126,6 @@ async function sendOne(host: ApiHost, request: ApiRequestPlan): Promise<ApiCall>
       redirect: 'manual',
     })
     const ms = Date.now() - started
-    // Judged on the WHOLE body, stored truncated. Checking the truncated copy made
-    // the verdict depend on the response's length: a correct JSON array longer than
-    // BODY_LIMIT no longer parsed, so checkCall reported "the body is not an array"
-    // and a working endpoint failed for having a lot to say.
     const full = await response.text().catch(() => '')
     const { outcome, detail } = checkCall(request.expect, response.status, full)
     return {
@@ -184,8 +137,6 @@ async function sendOne(host: ApiHost, request: ApiRequestPlan): Promise<ApiCall>
       detail,
     }
   } catch (error) {
-    // A call that never completed is 'not_run', never 'fail': a socket that
-    // refused or timed out says nothing about whether the endpoint is correct.
     return notRunCall(request, `the call did not complete: ${message(error)}`)
   }
 }
@@ -194,7 +145,6 @@ function notRun(requests: readonly ApiRequestPlan[], reason: string): ApiCall[] 
   return requests.map((request) => notRunCall(request, reason))
 }
 
-/** Any HTTP answer at all proves a server is listening — a 404 counts. */
 async function reachable(baseUrl: string): Promise<boolean> {
   try {
     await fetch(baseUrl, { signal: AbortSignal.timeout(2_000), redirect: 'manual' })
@@ -204,7 +154,6 @@ async function reachable(baseUrl: string): Promise<boolean> {
   }
 }
 
-/** Poll until the server answers, the process dies, or the timeout expires. */
 async function waitForServer(baseUrl: string, child: ChildProcess): Promise<boolean> {
   const deadline = Date.now() + READY_TIMEOUT_MS
   let dead = false
@@ -219,13 +168,6 @@ async function waitForServer(baseUrl: string, child: ChildProcess): Promise<bool
   return false
 }
 
-/**
- * Kill the server and everything it started.
- *
- * `dotnet run` is a launcher: killing it alone leaves the actual web host holding
- * the port, so the next run finds something listening that is not the code under
- * test. taskkill /T is what reaches the whole tree on Windows.
- */
 function stop(child: ChildProcess): void {
   if (child.pid === undefined) return
   if (process.platform === 'win32') {
@@ -235,7 +177,6 @@ function stop(child: ChildProcess): void {
   try {
     child.kill('SIGTERM')
   } catch {
-    // Already gone.
   }
 }
 
@@ -252,15 +193,6 @@ function message(error: unknown): string {
   return String(error)
 }
 
-/**
- * The second half of an API run: the session has produced the request data, so
- * now the app sends it and records what came back.
- *
- * Called from the session-manager callback rather than the IPC handler, because
- * the request data arrives asynchronously in the session's own output. A run is
- * always finished, including when this throws: a row left as running would show
- * a spinner forever with nothing behind it.
- */
 export async function completeApiRun(deps: {
   repos: Repositories
   projectId: string
@@ -276,9 +208,6 @@ export async function completeApiRun(deps: {
     if (!project) throw new Error('the project is no longer registered')
     const settings = repos.settings.get()
     const host = await resolveApiHost(project.path, {
-      // The run's own base URL and target win: they are what the developer was
-      // told the calls would go to when they started it, and re-deciding the
-      // environment now would let an edited setting move a run mid-flight.
       target: run.target,
       baseUrl: run.baseUrl,
       qaBaseUrl: run.baseUrl,

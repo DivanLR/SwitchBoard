@@ -1,5 +1,3 @@
-// Typed repositories over the SQLite schema (data-model.md). All JSON columns
-// are serialised here so the rest of the main process works with domain types.
 import { randomUUID } from 'node:crypto'
 import { transaction, type AppDatabase } from './db'
 import type { DiagramPlan } from '@shared/diagram'
@@ -60,9 +58,7 @@ interface ProjectRow {
   createdAt: string
   archivedAt: string | null
   refs: string | null
-  /** NOT NULL with a DEFAULT since migration 022, so this is never null. */
   defaultSessionMode: SessionMode
-  /** SQLite has no boolean type: 0/1, NOT NULL since migration 026. */
   useContainers: number
 }
 
@@ -77,8 +73,6 @@ function toProject(row: ProjectRow): Project {
 interface SessionRow {
   id: string
   projectId: string
-  /** Which CLI ran it (migration 030). Null only on a row written before the
-   *  column existed, which was necessarily a Claude session. */
   engine: SessionEngine | null
   sdkSessionId: string | null
   status: SessionStatus
@@ -92,27 +86,17 @@ interface SessionRow {
   startedAt: string
   endedAt: string | null
   endReason: SessionEndReason | null
-  /** SQLite has no boolean type, so this arrives as 0/1 (or null pre-migration). */
   bypassPermissions: number | null
-  /** How the session STARTED, never where it is now — see Session.planMode. */
   planMode: number | null
-  /** The developer's own name for this session; null until they type one. */
   label: string | null
-  /** Which section opened this session, kept so the fact survives it ending
-   *  (migration 028). Null for an ordinary conversation. */
   sectionKind: SectionKind | null
-  /** The derived name, frozen on first resolution (migration 029). Null for a
-   *  session whose name has never resolved — a plain conversation, or one whose
-   *  branch has not been read yet. */
   derivedName: string | null
 }
 
-/** SessionRow is the raw shape; Session wants real booleans for the flags. */
 function toSession(row: SessionRow): Session
 function toSession(row: SessionRow | undefined): Session | undefined
 function toSession(row: SessionRow | undefined): Session | undefined {
   if (!row) return undefined
-  // inPlanMode is deliberately absent: it is the live mode, which no row holds.
   return {
     ...row,
     engine: row.engine ?? DEFAULT_SESSION_ENGINE,
@@ -173,8 +157,6 @@ export class ProjectsRepo {
       archivedAt: null,
       refs: [],
       defaultSessionMode: input.defaultSessionMode ?? DEFAULT_SESSION_MODE,
-      // Not a column in the INSERT below: migration 026's DEFAULT 0 supplies it,
-      // and one source for the default beats two that can disagree.
       useContainers: false,
     }
     this.db
@@ -195,13 +177,10 @@ export class ProjectsRepo {
     return project
   }
 
-  /** Takes effect on the project's next session; the SDK mode is fixed at spawn. */
   setSessionMode(id: string, mode: SessionMode): void {
     this.db.prepare('UPDATE projects SET defaultSessionMode = ? WHERE id = ?').run(mode, id)
   }
 
-  /** Same rule as the mode above: read at spawn, so a live session keeps whatever
-   *  it started in and this applies from the next one. */
   setUseContainers(id: string, on: boolean): void {
     this.db.prepare('UPDATE projects SET useContainers = ? WHERE id = ?').run(on ? 1 : 0, id)
   }
@@ -240,14 +219,10 @@ export class ProjectsRepo {
     this.db.prepare('UPDATE projects SET refs = ? WHERE id = ?').run(JSON.stringify(refs), id)
   }
 
-  /** Clears every project's references. Called once at startup so references are
-   *  ephemeral — a fresh app launch always starts with no refs (they survive
-   *  project switches within a run, but never across a restart). */
   clearAllRefs(): void {
     this.db.prepare('UPDATE projects SET refs = NULL').run()
   }
 
-  /** Reorders an active project to `toIndex` in the sidebar (drag / move up-down). */
   move(id: string, toIndex: number): void {
     transaction(this.db, () => {
       const ids = (
@@ -268,13 +243,10 @@ export class ProjectsRepo {
     this.db.prepare('UPDATE projects SET archivedAt = ? WHERE id = ?').run(nowIso(), id)
   }
 
-  /** Restore a previously removed project (re-adding the same folder). */
   unarchive(id: string): void {
     this.db.prepare('UPDATE projects SET archivedAt = NULL WHERE id = ?').run(id)
   }
 
-  /** Repoints a project at another folder (discovery.repointProject, which does
-   *  the validating: path is UNIQUE, so a clashing folder throws here). */
   setPath(id: string, path: string): void {
     this.db.prepare('UPDATE projects SET path = ? WHERE id = ?').run(path, id)
   }
@@ -293,9 +265,6 @@ export class SessionsRepo {
         `INSERT INTO sessions (id, projectId, engine, sdkSessionId, status, statusDetail, branch, diffAdds, diffDels, usageUtilization, usageResetsAt, usageLimitType, startedAt, endedAt, endReason, bypassPermissions, planMode)
          VALUES (@id, @projectId, @engine, @sdkSessionId, @status, @statusDetail, @branch, @diffAdds, @diffDels, @usageUtilization, @usageResetsAt, @usageLimitType, @startedAt, @endedAt, @endReason, @bypassPermissions, @planMode)`,
       )
-      // SQLite takes no booleans, and the in-memory Session carries non-scalar
-      // extras (mcpServers, backgroundTasks) that are not columns — so bind the
-      // column set explicitly rather than handing over the whole object.
       .run({
         id: session.id,
         projectId: session.projectId,
@@ -313,8 +282,6 @@ export class SessionsRepo {
         endedAt: session.endedAt,
         endReason: session.endReason,
         bypassPermissions: session.bypassPermissions ? 1 : 0,
-        // The start value only. A mid-session switch changes inPlanMode, which is
-        // in-memory and never written, so this stays true of how it began.
         planMode: session.planMode ? 1 : 0,
       })
   }
@@ -369,16 +336,6 @@ export class SessionsRepo {
     )
   }
 
-  /**
-   * The project's most recent ended session, optionally restricted to one engine.
-   *
-   * The engine filter is what a RESUME must use. A resume hands the stored
-   * session id to the CLI it is starting, and the two engines' ids mean nothing
-   * to each other — a Claude SDK session id passed to `codex exec resume` names
-   * no Codex thread, and the reverse is equally wrong. Unfiltered, the last
-   * ended session of either engine would be offered to whichever engine was
-   * being started.
-   */
   latestEndedForProject(projectId: string, engine?: SessionEngine): Session | undefined {
     const row = engine
       ? this.db
@@ -400,21 +357,6 @@ export class SessionsRepo {
     )
   }
 
-  /** Startup reconciliation: any session left open by a previous run is marked ended (FR-022). */
-  /**
-   * Close every session a previous run left open (FR-022).
-   *
-   * `note` is written only where the row has none, and it exists because these
-   * rows were the single largest source of the developer's own complaint that
-   * "sessions just close with no message". Every row this touches belongs to a
-   * session that was ALIVE when the application went away without closing it: a
-   * crash, a kill, a power loss, or a graceful quit whose grace period expired.
-   * The session did not close; Switchboard did. Saying nothing made those
-   * indistinguishable from a session the developer had ended on purpose.
-   *
-   * Guarded with COALESCE rather than overwriting: a session that recorded its own
-   * diagnosis before dying has the more useful answer of the two.
-   */
   reconcileAllEnded(reason: SessionEndReason, note?: string): number {
     const result = this.db
       .prepare(
@@ -431,72 +373,19 @@ export class SessionsRepo {
 export class EventsRepo {
   constructor(private db: AppDatabase) {}
 
-  /**
-   * Events awaiting their next flush to disk. Buffered rather than written on
-   * the spot: at streaming rates (SessionManager's sink calls `insert` once per
-   * emitted chunk) an auto-committed INSERT is its own WAL frame plus its own
-   * WAL-index update, and db.ts's synchronous=NORMAL comment already names that
-   * per-event cost. Grouping one burst into a single transaction is the real,
-   * well-understood win at these rates.
-   *
-   * Never reordered — only pushed to and drained whole. Events are append-only
-   * and ordered by per-session `seq` alone (never by timestamp), so the order
-   * they land in this array IS the order they must reach the table in.
-   */
   private pending: SessionEvent[] = []
   private flushTimer: NodeJS.Timeout | null = null
 
-  // Comparable to the renderer's own ~33ms batch-repaint interval, not copied
-  // from it — short enough that "buffered" never reads as "delayed" to a human
-  // watching the stream, long enough to actually coalesce a burst of chunks.
   private static readonly FLUSH_INTERVAL_MS = 33
 
   insert(event: SessionEvent): void {
     this.pending.push(event)
     if (!this.flushTimer) {
       this.flushTimer = setTimeout(() => this.flush(), EventsRepo.FLUSH_INTERVAL_MS)
-      // A pending flush must never be a reason the process stays alive. The
-      // guaranteed delivery path on a clean quit is the explicit flush() call
-      // main/index.ts makes before db.close(), not this timer.
       this.flushTimer.unref()
     }
   }
 
-  /**
-   * Writes every buffered event in ONE transaction and empties the buffer.
-   *
-   * Called by the timer above, and — this is the part the whole design rests
-   * on — at the top of every OTHER method below that reads or mutates the
-   * events table. A buffered event a reader cannot yet see would be a
-   * correctness bug wearing a performance win's costume, so nothing on this
-   * repo may touch the table without flushing first. Idempotent: draining an
-   * empty buffer is a no-op, so paying for the call on every path costs
-   * nothing once a burst has already landed.
-   *
-   * What a crash between flushes costs: at most one FLUSH_INTERVAL_MS window
-   * of events for whichever session was mid-burst. db.ts already spends this
-   * exact budget once, calling this store's events "a transcript, not money"
-   * to justify synchronous=NORMAL; batching the insert on top does not open a
-   * second one.
-   *
-   * Public because retention.ts deletes from this table directly (raw SQL, own
-   * file — see the reasoning below) and main/index.ts's composition root calls
-   * this immediately before handing it the database, and again before
-   * db.close() in the before-quit handler, so neither a scheduled sweep nor a
-   * quit can observe or lose a buffered row.
-   *
-   * Retention safety, checked against store/retention.ts rather than assumed:
-   * its DELETE only ever targets sessions OUTSIDE the most recent
-   * SESSIONS_PER_PROJECT (2) per project — `sessionId NOT IN (... rn <= ?)`.
-   * A buffered event can only belong to the session currently emitting it,
-   * which is always that project's most recent (rn = 1) and therefore always
-   * inside the keep-set. So even a retention pass that ran on a table with
-   * unflushed rows could never delete one of them out from under this buffer —
-   * the rows it deletes were never candidates for buffering by the time it
-   * looks. The index.ts flush before each run exists anyway, because "could
-   * never" should not be the only thing standing between a sweep and a live
-   * buffer.
-   */
   flush(): void {
     if (this.flushTimer) {
       clearTimeout(this.flushTimer)
@@ -516,10 +405,6 @@ export class EventsRepo {
     })
   }
 
-  /**
-   * Contract-sanctioned in-place update (contracts/session-events.md): marker
-   * and question status changes, tool result pairing, and final partial text.
-   */
   updatePayload<K extends EventKind>(id: string, payload: EventPayloadMap[K], kind?: K): void {
     this.flush()
     if (kind !== undefined) {
@@ -544,7 +429,6 @@ export class EventsRepo {
     return row.maxSeq ?? 0
   }
 
-  /** Paged history, newest last (ipc-contract.md `sessions.events`). */
   page(sessionId: string, beforeSeq?: number, limit = 200): SessionEvent[] {
     this.flush()
     const rows = this.db
@@ -571,11 +455,6 @@ export class EventsRepo {
 
   tokensSince(sinceIso: string): number {
     this.flush()
-    // Total processed tokens = fresh input + output + BOTH cache tiers. On
-    // Claude Code turns the cache tiers dominate (inputTokens is only the
-    // uncached remainder), so omitting them made "Tokens today" undercount by
-    // orders of magnitude. Cache keys are snake_case (spread from the raw SDK
-    // usage), the input/output keys are the camelCase ones usageOf maps.
     const row = this.db
       .prepare(
         `SELECT COALESCE(SUM(
@@ -612,7 +491,6 @@ export class RequestsRepo {
     return row ? toRequest(row) : undefined
   }
 
-  /** Oldest first within each project group (spec clarification: FIFO). */
   pending(): PermissionRequest[] {
     const rows = this.db
       .prepare("SELECT * FROM permission_requests WHERE status = 'pending' ORDER BY projectId, createdAt")
@@ -633,12 +511,10 @@ export class RequestsRepo {
       .run(status, nowIso(), deliveryFailed ? 1 : 0, id)
   }
 
-  /** Removes one decided entry from history; pending rows are never touched. */
   deleteHistory(id: string): void {
     this.db.prepare("DELETE FROM permission_requests WHERE id = ? AND status != 'pending'").run(id)
   }
 
-  /** Clears all decided history across projects; pending rows stay. */
   clearHistory(): void {
     this.db.prepare("DELETE FROM permission_requests WHERE status != 'pending'").run()
   }
@@ -696,27 +572,14 @@ export class StandingRulesRepo {
     this.db.prepare('UPDATE permission_rules SET revokedAt = ? WHERE id = ?').run(nowIso(), ruleId)
   }
 
-  /** Re-activates a revoked rule (Allowed list tab: Ask → Auto). */
   restore(ruleId: string): void {
     this.db.prepare('UPDATE permission_rules SET revokedAt = NULL WHERE id = ?').run(ruleId)
   }
 }
 
-/**
- * What the developer changed about the risk and noise rules.
- *
- * Holds the DIFFERENCE from the shipped defaults, never a copy of them: an empty
- * table means shipped behaviour, and editing a default in code reaches every
- * install that has not overridden that exact rule. main/inbox/rule-prefs.ts
- * explains why the obvious alternative failed here.
- */
 export class RulePrefsRepo {
   constructor(private db: AppDatabase) {}
 
-  /**
-   * Columns listed rather than `SELECT *`: `createdAt` is kept for diagnostics but
-   * is not part of a rule's meaning, and this list crosses IPC to the editor.
-   */
   list(): RulePref[] {
     const rows = this.db
       .prepare('SELECT id, kind, disabled, risk, body, position FROM rule_prefs')
@@ -724,13 +587,6 @@ export class RulePrefsRepo {
     return rows.map((r) => ({ ...r, disabled: r.disabled === 1 }))
   }
 
-  /**
-   * Switches a rule off or back on.
-   *
-   * Upsert rather than insert-or-update at the call site: a shipped rule has no row
-   * until the moment it is first touched, which is what keeps "untouched" and
-   * "explicitly left alone" the same state.
-   */
   setDisabled(id: string, kind: RuleKind, disabled: boolean): void {
     this.db
       .prepare(
@@ -741,7 +597,6 @@ export class RulePrefsRepo {
       .run(id, kind, disabled ? 1 : 0, nowIso())
   }
 
-  /** The risk level chosen instead of the shipped one; null restores the default. */
   setRisk(id: string, risk: RiskLevel | null): void {
     this.db
       .prepare(
@@ -752,7 +607,6 @@ export class RulePrefsRepo {
       .run(id, risk, nowIso())
   }
 
-  /** A rule the developer wrote. `body` is the whole rule as JSON. */
   addCustom(kind: RuleKind, body: string): RulePref {
     const next =
       (
@@ -777,13 +631,6 @@ export class RulePrefsRepo {
     return pref
   }
 
-  /**
-   * Forgets a row.
-   *
-   * For a rule the developer wrote this deletes it. For a shipped rule it clears
-   * the override, which restores the default — the same operation, because a
-   * missing row IS the default.
-   */
   remove(id: string, kind: RuleKind): void {
     this.db.prepare('DELETE FROM rule_prefs WHERE id = ? AND kind = ?').run(id, kind)
   }
@@ -798,19 +645,13 @@ export class SettingsRepo {
       | undefined
     if (!row) return { ...DEFAULT_SETTINGS }
     const stored = JSON.parse(row.value) as Record<string, unknown>
-    // Migrate the legacy single-server designation to the multi-server list.
     if (typeof stored.databaseMcpServer === 'string' && !stored.databaseMcpServers) {
       stored.databaseMcpServers = [stored.databaseMcpServer]
     }
     delete stored.databaseMcpServer
-    // Migrate to the roster/active split: before mcpActiveServers existed, the
-    // roster WAS the active combination — seed it so an upgrade keeps working.
     if (!('mcpActiveServers' in stored) && Array.isArray(stored.databaseMcpServers)) {
       stored.mcpActiveServers = [...stored.databaseMcpServers]
     }
-    // Migrate plan/work models to the intelligent/worker split: the chosen
-    // implementation model (or failing that the planning model) becomes the
-    // intelligent model; the worker default comes from DEFAULT_SETTINGS.
     if (!('intelligentModel' in stored)) {
       const work = typeof stored.workModel === 'string' ? stored.workModel : 'default'
       const plan = typeof stored.planModel === 'string' ? stored.planModel : 'default'
@@ -818,7 +659,6 @@ export class SettingsRepo {
     }
     delete stored.planModel
     delete stored.workModel
-    // Dropped setting: a "limit" that only recoloured the spend readout.
     delete stored.dailySpendLimit
     return { ...DEFAULT_SETTINGS, ...stored }
   }
@@ -857,7 +697,6 @@ export class DraftsRepo {
   }
 }
 
-/** Per-project command history feeding terminal-style composer suggestions. */
 export class CommandHistoryRepo {
   constructor(private db: AppDatabase) {}
 
@@ -871,11 +710,6 @@ export class CommandHistoryRepo {
       .run({ id: newId(), projectId, text: trimmed, createdAt: nowIso() })
   }
 
-  /**
-   * Distinct commands for a project, most recent occurrence first. Ordered by
-   * the monotonic rowid rather than createdAt, which can collide within a
-   * millisecond and misorder a repeated command.
-   */
   recent(projectId: string, limit = 100): string[] {
     const rows = this.db
       .prepare(
@@ -887,7 +721,6 @@ export class CommandHistoryRepo {
   }
 }
 
-/** Planned task queue per project: prompts that auto-run in sequence (FR-023). */
 export class TaskQueueRepo {
   constructor(private db: AppDatabase) {}
 
@@ -917,10 +750,6 @@ export class TaskQueueRepo {
       .all(projectId) as QueuedTask[]
   }
 
-  /**
-   * Reword a task that has not run yet. Emptying it is a delete, because a queued
-   * task with nothing in it would be sent to the session as an empty prompt.
-   */
   update(id: string, text: string): void {
     const trimmed = text.trim()
     if (!trimmed) {
@@ -934,7 +763,6 @@ export class TaskQueueRepo {
     this.db.prepare('DELETE FROM task_queue WHERE id = ?').run(id)
   }
 
-  /** Removes and returns the front-of-queue task for a project, or null if empty. */
   takeNext(projectId: string): QueuedTask | null {
     return transaction(this.db, (): QueuedTask | null => {
       const row = this.db
@@ -947,7 +775,6 @@ export class TaskQueueRepo {
   }
 }
 
-/** Available slash commands / skills per project, for composer suggestions. */
 export class ProjectCommandsRepo {
   constructor(private db: AppDatabase) {}
 
@@ -965,7 +792,6 @@ export class ProjectCommandsRepo {
       .prepare('SELECT commands FROM project_commands WHERE projectId = ?')
       .get(projectId) as { commands: string } | undefined
     if (!row) return []
-    // Rows written before descriptions existed hold plain name strings.
     return (JSON.parse(row.commands) as (string | ProjectCommand)[]).map((c) =>
       typeof c === 'string' ? { name: c } : c,
     )
@@ -975,7 +801,6 @@ export class ProjectCommandsRepo {
 export class McpScansRepo {
   constructor(private db: AppDatabase) {}
 
-  /** All scanned combinations for a project, newest first. */
   listForProject(projectId: string): McpScan[] {
     const rows = this.db
       .prepare('SELECT * FROM mcp_scans WHERE projectId = ? ORDER BY scannedAt DESC')
@@ -983,9 +808,6 @@ export class McpScansRepo {
     return rows.map((r) => ({ ...r, servers: JSON.parse(r.servers) as string[] }))
   }
 
-  /** Record (or refresh) a completed scan for a combination. `scannedAt`
-   *  should be when the doc was actually written (its mtime), so a re-scan
-   *  that produced nothing does not pass itself off as fresh. */
   upsert(projectId: string, key: string, servers: string[], scannedAt = nowIso()): McpScan {
     this.db
       .prepare(
@@ -1001,16 +823,9 @@ export class McpScansRepo {
   }
 }
 
-/**
- * Acceptance lines for the eval loop (FR-086..FR-092). One row per small change:
- * the observable sentence, its check, and the developer's verdict + rating.
- */
 export class EvalsRepo {
   constructor(private db: AppDatabase) {}
 
-  /** A project's acceptance lines, newest first (FR-090). Ties on `createdAt`
-   *  (two lines added inside the same millisecond) break on insert order —
-   *  `id` is a random UUID, so ordering by it would be arbitrary. */
   listForProject(projectId: string): EvalRun[] {
     return this.db
       .prepare('SELECT * FROM eval_runs WHERE projectId = ? ORDER BY createdAt DESC, rowid DESC')
@@ -1045,8 +860,6 @@ export class EvalsRepo {
     return (this.db.prepare('SELECT * FROM eval_runs WHERE id = ?').get(id) as EvalRun) ?? null
   }
 
-  /** Record what the developer saw: check outcome, verdict, rating, note. Only
-   *  the keys present are written, so rating survives a later verdict change. */
   update(
     id: string,
     patch: Partial<
@@ -1069,17 +882,6 @@ export class EvalsRepo {
   }
 }
 
-/**
- * Keeps only the newest `keep` rows for one project, dropping the rest.
- *
- * Shared by verify_runs and api_runs, which held byte-identical copies of this
- * statement. `table` is a closed union rather than a string, so the interpolation
- * cannot become an injection point: only these two names type-check.
- *
- * Ties on `startedAt` (several runs inside the same millisecond) break on insert
- * order via `rowid` — `id` is a random UUID, so ordering by it would drop an
- * arbitrary run instead of the oldest.
- */
 function pruneToLast(
   db: AppDatabase,
   table: 'verify_runs' | 'api_runs',
@@ -1093,13 +895,6 @@ function pruneToLast(
   ).run(projectId, projectId, keep)
 }
 
-/**
- * Verification runs. History is bounded by count per project (FR-043): the last
- * VERIFY_HISTORY runs survive, older ones are dropped oldest-first on insert.
- *
- * ponytail: pruning on insert, not a scheduled job — a project gains a run only
- * by starting one, so there is no moment where the table grows unattended.
- */
 const VERIFY_HISTORY = 20
 
 export class VerifyRunsRepo {
@@ -1159,16 +954,6 @@ export class VerifyRunsRepo {
     return row ? hydrateVerifyRun(row) : null
   }
 
-  /**
-   * Close any run left mid-flight by a previous launch (FR-022).
-   *
-   * A run is closed by the session's turn ending. A container killed by SIGKILL,
-   * an app that was killed, or a machine that slept never produces that turn end,
-   * and the row then reads as a live run for ever: the Tests section shows Running
-   * and will not start another. Inconclusive rather than failed, because nothing is
-   * known about what the suites did, and this product never reports an unmeasured
-   * outcome as a result.
-   */
   reconcileRunning(note: string): number {
     const result = this.db
       .prepare(
@@ -1178,15 +963,6 @@ export class VerifyRunsRepo {
     return Number(result.changes ?? 0)
   }
 
-  /**
-   * The same repair, for a run that went stale while the app stayed up.
-   *
-   * `reconcileRunning` above only ever runs at launch, so the row it describes
-   * sat there reading Running — with the Run button disabled behind it — until
-   * the developer restarted the app. This is the sweep that closes it in place.
-   * Returns the projects affected so the caller can push; the launch-time version
-   * never needed that, because nothing is subscribed yet when it runs.
-   */
   reconcileStale(deadlineIso: string, note: string): string[] {
     const affected = this.db
       .prepare(
@@ -1202,8 +978,6 @@ export class VerifyRunsRepo {
     return affected.map((row) => row.projectId)
   }
 
-  /** The run a result belongs to when the session reports one: the newest still
-   *  running, so a late report can never overwrite a finished run's figures. */
   runningFor(projectId: string): VerifyRun | null {
     const row = this.db
       .prepare(
@@ -1213,24 +987,12 @@ export class VerifyRunsRepo {
     return row ? hydrateVerifyRun(row) : null
   }
 
-  /** Record what the session reported. `note` states why an inconclusive run
-   *  proved nothing (FR-047); the run is never left as running. */
   finish(id: string, status: VerifyRun['status'], report: VerifyReport | null, note: string | null): void {
     this.db
       .prepare('UPDATE verify_runs SET status = ?, report = ?, note = ?, finishedAt = ? WHERE id = ?')
       .run(status, report ? JSON.stringify(report) : null, note, nowIso(), id)
   }
 
-  /**
-   * One suite's outcome, recorded while the run is still going, so the picker can
-   * mark each suite as it lands instead of staying blank until the whole run ends.
-   *
-   * Guarded on `status = 'running'` for the same reason `finish` writes a verdict
-   * once: a progress line that arrives after the run settled must not reopen a
-   * finished report or contradict the settled figures. First writer wins per suite
-   * id — a suite states its result once, and a restatement later in the same turn
-   * is narration, not a second run.
-   */
   noteSuite(id: string, result: SuiteResult): void {
     const run = this.byId(id)
     if (!run || run.status !== 'running') return
@@ -1240,8 +1002,6 @@ export class VerifyRunsRepo {
     this.db.prepare('UPDATE verify_runs SET report = ? WHERE id = ?').run(JSON.stringify(report), id)
   }
 
-  /** Evidence is captured after the fact and attaches to the run it proves
-   *  (FR-059), without touching its verdict or its figures. */
   attachEvidence(id: string, evidence: EvidenceItem[]): void {
     const run = this.byId(id)
     if (!run) return
@@ -1281,18 +1041,11 @@ function parseJson<T>(raw: string): T | null {
   }
 }
 
-/**
- * API eval sets. Same count-bounded history as verification runs, and for the
- * same reason: a run exists only because the developer started one, so pruning
- * on insert needs no scheduled job.
- */
 const API_HISTORY = 20
 
 export class ApiRunsRepo {
   constructor(private db: AppDatabase) {}
 
-  /** Same orphan as verify_runs, same cause: 'error' is this table's terminal word
-   *  for a run that proved nothing, and it has no 'inconclusive'. */
   reconcileRunning(note: string): number {
     const result = this.db
       .prepare(
@@ -1302,8 +1055,6 @@ export class ApiRunsRepo {
     return Number(result.changes ?? 0)
   }
 
-  /** The in-flight sweep, matching VerifyRunsRepo.reconcileStale — see there for
-   *  why a launch-only repair was not enough. */
   reconcileStale(deadlineIso: string, note: string): string[] {
     const affected = this.db
       .prepare("SELECT DISTINCT projectId FROM api_runs WHERE status = 'running' AND startedAt < ?")
@@ -1362,7 +1113,6 @@ export class ApiRunsRepo {
     return row ? hydrateApiRun(row) : null
   }
 
-  /** Record what the app actually sent and received. A run is never left running. */
   finish(
     id: string,
     status: ApiEvalRun['status'],
@@ -1395,30 +1145,15 @@ interface ApiRunRow {
 function hydrateApiRun(row: ApiRunRow): ApiEvalRun {
   return {
     ...row,
-    // Anything but the QA word is a local run: a row written before the column
-    // existed went against the developer's own API, and an unreadable value must
-    // never grant a run the treatment a deployed environment gets.
     target: row.target === 'qa' ? 'qa' : 'local',
     launched: row.launched === 1,
     calls: parseJson<ApiCall[]>(row.calls) ?? [],
   }
 }
 
-/**
- * What a diagram file cannot say about itself: who asked, and in what words.
- *
- * Deliberately not a store of diagrams. The files in docs/diagrams ARE the
- * diagrams, and they are committed with the code, so a row here is metadata that
- * may outlive its file (deleted from the repo) or never have one (the session
- * failed). Both cases are ordinary and neither is cleaned up: the list is built
- * from the folder, and a row with no file simply never joins.
- */
 export class DiagramRequestsRepo {
   constructor(private db: AppDatabase) {}
 
-  /** Recorded BEFORE the session is asked, so a crash mid-generation still
-   *  leaves the reason the file appeared. Re-requesting the same name overwrites,
-   *  because that is a regeneration of the same diagram. */
   record(projectId: string, file: string, description: string, sessionId: string | null): void {
     this.db
       .prepare(
@@ -1432,8 +1167,6 @@ export class DiagramRequestsRepo {
       .run(projectId, file, sessionId, description, nowIso())
   }
 
-  /** The session the newest diagram was asked of, so a second request rejoins it
-   *  rather than starting another. Null when this project has asked for none. */
   latestSessionFor(projectId: string): string | null {
     const row = this.db
       .prepare(
@@ -1443,7 +1176,6 @@ export class DiagramRequestsRepo {
     return row?.sessionId ?? null
   }
 
-  /** Keyed by file name, for joining onto whatever the folder actually holds. */
   forProject(
     projectId: string,
   ): Map<string, { sessionId: string | null; description: string; plan: DiagramPlan | null }> {
@@ -1461,15 +1193,12 @@ export class DiagramRequestsRepo {
         {
           sessionId: r.sessionId,
           description: r.description,
-          // Stored JSON is only ever written by notePlan, but a row hand-edited or
-          // written by an older build must not take the section down with it.
           plan: r.plan ? ((JSON.parse(r.plan) as DiagramPlan) ?? null) : null,
         },
       ]),
     )
   }
 
-  /** The newest requested file for a project: the one currently being drawn. */
   latestFileFor(projectId: string): string | null {
     const row = this.db
       .prepare(
@@ -1479,14 +1208,6 @@ export class DiagramRequestsRepo {
     return row?.file ?? null
   }
 
-  /**
-   * The plan the session stated before drawing. Matched on the file name the app
-   * chose, which is the only handle the two sides share.
-   *
-   * Recorded against a row that already exists — `record` runs before the session
-   * is asked — so a plan for an unknown file is dropped rather than inserted: it
-   * would be a row with no request behind it.
-   */
   notePlan(projectId: string, file: string, plan: DiagramPlan): void {
     this.db
       .prepare('UPDATE diagram_requests SET plan = ? WHERE projectId = ? AND file = ?')
@@ -1494,10 +1215,6 @@ export class DiagramRequestsRepo {
   }
 }
 
-/**
- * The imported-skills registry. Rows only: the skill's files live on disk (see
- * main/skills/install.ts for why they are not in here).
- */
 export class CustomSkillsRepo {
   constructor(private db: AppDatabase) {}
 
@@ -1513,8 +1230,6 @@ export class CustomSkillsRepo {
     return new Set(this.list().map((skill) => skill.name))
   }
 
-  /** Insert the results of one import. A name that already exists is rejected by
-   *  the primary key rather than overwritten, which is the point of keying on it. */
   insertMany(skills: readonly CustomSkill[]): void {
     const insert = this.db.prepare(
       `INSERT INTO custom_skills (name, description, sourceUrl, sourcePath, enabled, fileCount, importedAt)

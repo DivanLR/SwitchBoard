@@ -1,10 +1,3 @@
-// GitHub Spec Kit (github/spec-kit) per-project integration. Detects whether a
-// project has Spec Kit initialised (a `.specify/` directory), parses the specs
-// under `specs/NNN-name/`, and installs Spec Kit into a project on demand.
-//
-// Installation runs the official CLI EPHEMERALLY via `uvx` (nothing is
-// installed globally): `uvx --from git+https://github.com/github/spec-kit.git
-// specify init --here ...` scaffolds `.specify/` inside the project directory.
 import { execFile } from 'node:child_process'
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { promisify } from 'node:util'
@@ -57,19 +50,16 @@ async function listSpecDirs(projectPath: string): Promise<string[]> {
   }
 }
 
-/** First markdown H1 or "Feature Specification: X" title, else the directory id. */
 function parseTitle(specMd: string | null, id: string): string {
   if (!specMd) return id
   const h1 = specMd.match(/^#\s+(?:Feature Specification:\s*)?(.+)$/m)
   return h1 ? h1[1].trim() : id
 }
 
-/** Short description: the first non-heading paragraph, or the Summary section. */
 function parseDescription(specMd: string | null): string {
   if (!specMd) return ''
   const summary = specMd.match(/^##\s+Summary\s*\n+([^\n#][^\n]*(?:\n[^\n#][^\n]*)*)/m)
   if (summary) return summary[1].replace(/\s+/g, ' ').trim().slice(0, 400)
-  // First paragraph that is not a heading or metadata line.
   const lines = specMd.split('\n')
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i].trim()
@@ -79,7 +69,6 @@ function parseDescription(specMd: string | null): string {
   return ''
 }
 
-/** Sections from spec.md: each `## Heading` becomes a section with its body. */
 function parseSections(specMd: string | null): SpecSection[] {
   if (!specMd) return []
   const sections: SpecSection[] = []
@@ -100,7 +89,6 @@ function parseSections(specMd: string | null): SpecSection[] {
 
 const TASK_LINE = /^\s*-\s*\[( |x|X)\]\s*(T\d+)?\s*(.*)$/
 
-/** Tasks grouped by phase from tasks.md; also returns totals. */
 function parseTasks(tasksMd: string | null): { phases: SpecPhase[]; total: number; done: number } {
   if (!tasksMd) return { phases: [], total: 0, done: 0 }
   const phases: SpecPhase[] = []
@@ -144,10 +132,6 @@ function parseClarifications(specMd: string | null): string[] {
   return out
 }
 
-/**
- * Already-answered clarifications from the `## Clarifications` section, which
- * Spec Kit records as `- Q: <question> → A: <answer>` lines.
- */
 function parseResolvedClarifications(specMd: string | null): ResolvedClarification[] {
   if (!specMd) return []
   const heading = specMd.match(/^##\s+Clarifications\s*$/m)
@@ -224,10 +208,6 @@ export async function readSpecDetail(projectPath: string, id: string): Promise<S
   }
 }
 
-/**
- * Install Spec Kit into a project via the ephemeral uvx CLI (no global install).
- * Scaffolds `.specify/` in the project directory. Resolves on success.
- */
 export async function installSpecKit(projectPath: string): Promise<void> {
   const script = process.platform === 'win32' ? 'ps' : 'sh'
   try {

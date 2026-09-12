@@ -1,18 +1,7 @@
-// The one question a model is asked in an API run: what data to send.
-//
-// Not "test the endpoints", not "report whether they work" — only which real
-// identifiers exist and what the response should therefore say. The app makes the
-// calls, reads the statuses, and decides pass or fail (api-runner.ts), because
-// those are facts a program can establish and a narrated result is not.
-//
-// The reason the model is in the loop at all: an endpoint called with an invented
-// id answers 200 with an empty body and looks healthy, so the inputs have to come
-// from rows that actually exist. Only the project's database knows which ones do.
 import type { ApiExpect, ApiRequestPlan, ApiTarget } from '@shared/api-endpoints'
 import { firstJsonObject, markerTail, str } from './parse'
 import { HONESTY } from './verify-dispatch'
 
-/** Sentinel the session emits once, on its own line. */
 export const API_DATA_MARKER = 'SWB_APIDATA'
 
 const SCHEMA = `{
@@ -33,15 +22,6 @@ const SCHEMA = `{
   }]
 }`
 
-/**
- * Which environment the calls are bound for.
- *
- * It changes the data, not just the URL. A QA environment has its own database,
- * so an id read from a local one is worthless there, and it is shared with other
- * people, so a write nobody sanctioned is not a test — it is an incident. Both
- * facts have to reach the session that chooses the identifiers, because by the
- * time the app is sending requests it is too late to choose different ones.
- */
 function environmentSection(environment: { target: ApiTarget; baseUrl: string }): string {
   if (environment.target !== 'qa') return ''
   return (
@@ -59,18 +39,9 @@ function environmentSection(environment: { target: ApiTarget; baseUrl: string })
   )
 }
 
-/**
- * Ask for request data for the chosen endpoints, and for nothing else.
- *
- * The prohibitions are the point of this prompt. Every previous version of this
- * feature asked the session to run the test and report the outcome, which is the
- * part being removed: a reported status is a claim, whereas a status the app
- * received is evidence.
- */
 export function apiDataPrompt(
   endpoints: readonly { method: string; template: string }[],
   dbServers: readonly string[],
-  /** Which environment the app will send these to, so the data matches it. */
   environment: { target: ApiTarget; baseUrl: string } = { target: 'local', baseUrl: '' },
 ): string {
   const named = dbServers.length > 0
@@ -94,10 +65,6 @@ export function apiDataPrompt(
         '- Set "expect" from the data you just read, so the check is real: if the row count for ' +
         'that customer is 3, set "minItems" to 3; if a name is on the row, put it in ' +
         '"mustContain". Record the query verbatim in "dataQuery".\n' +
-        // The strongest check this feature can make, and it only exists for the
-        // EF Core path: when the endpoint's own answer IS a query, that query can
-        // be run directly and the response checked against its rows. A stored
-        // procedure cannot be reproduced that way, so it is not pretended.
         '- If the endpoint is served by EF Core — a LINQ query over a DbContext rather than a ' +
         'stored procedure — open that query, reproduce it as SQL through the same server, and ' +
         'set "expect" from the rows it returns: the count as "minItems", a value off the first ' +
@@ -125,15 +92,6 @@ export function apiDataPrompt(
   )
 }
 
-/**
- * Read the request plans out of session text. Tolerant on the way in, strict on
- * the way out: a request missing a method or a path is dropped rather than
- * repaired, and an unparseable expectation becomes "any 2xx" rather than a
- * condition that silently passes.
- *
- * The LAST marker wins — the prompt above names the sentinel, and a turn may
- * restate it, so an early mention must never be read as the answer.
- */
 export function parseApiRequests(text: string): ApiRequestPlan[] | null {
   const tail = markerTail(text, API_DATA_MARKER)
   if (tail === null) return null
@@ -184,7 +142,6 @@ function toExpect(raw: unknown): ApiExpect {
   }
 }
 
-/** Only string headers survive; anything else would fail at the fetch boundary. */
 function toHeaders(raw: unknown): Record<string, string> | null {
   if (typeof raw !== 'object' || raw === null) return null
   const out: Record<string, string> = {}
