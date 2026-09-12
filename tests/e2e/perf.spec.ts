@@ -1,6 +1,3 @@
-// T049: responsiveness assertions — interaction acknowledged within 1 second
-// with 10 busy sessions (SC-007) and needs-you signalled within 5 seconds
-// (SC-006).
 import { expect, test } from '@playwright/test'
 import { installMockHost, type MockScenario } from './mock-host'
 import { DEFAULT_SETTINGS } from '../../src/shared/domain'
@@ -22,7 +19,6 @@ test('interactions acknowledge within 1s while 10 sessions stream (SC-007)', asy
   await page.goto('/')
   await expect(page.getByTestId('sidebar-project-project-0')).toBeVisible()
 
-  // All 10 sessions flood raw output continuously.
   await page.evaluate(() => window.__mock.startFlood(50, 2))
   await page.waitForTimeout(1500)
 

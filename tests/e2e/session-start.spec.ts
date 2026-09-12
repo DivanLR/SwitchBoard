@@ -1,11 +1,3 @@
-// Starting a session from the ended banner: one mode picker carrying every mode
-// the SDK has, one Resume switch, one Start button — and the heavy-subagent
-// setting that shapes how whatever starts does the work.
-//
-// This replaces the transcript suite. Saving a transcript by hand and carrying
-// its digest into the next session were both retired: the main process writes
-// every transcript continuously without being asked, and "carry the last one"
-// was a weaker approximation of the resume this banner now offers directly.
 import { expect, test } from '@playwright/test'
 import { installMockHost, twoProjectScenario } from './mock-host'
 
@@ -17,15 +9,11 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByTestId('ended-banner')).toBeVisible()
 })
 
-// The composer on an ended session. It used to look identical to a live one:
-// `.composer-input` sets its own `color`, which beats the browser's disabled
-// dimming, so the only cues were a changed placeholder and a greyed Send button.
 test('the composer greys out when the session has ended', async ({ page }) => {
   const composer = page.getByTestId('composer-dead')
   await expect(composer).toBeVisible()
   await expect(page.getByTestId('composer-live')).toHaveCount(0)
 
-  // Nothing can be typed, which is what the grey is reporting.
   await expect(page.getByTestId('composer-input')).toBeDisabled()
   await expect(page.getByTestId('composer-input')).toHaveAttribute('placeholder', 'Start a session first')
 
@@ -35,12 +23,8 @@ test('the composer greys out when the session has ended', async ({ page }) => {
     caret: getComputedStyle(el.querySelector('.composer-input')!).caretColor,
   }))
   expect(Number(dead.row)).toBeLessThan(1)
-  // The block caret is the composer's "ready" signal; a green cursor blinking in
-  // a box that cannot send is the wrong promise.
   expect(dead.caret).toBe('rgba(0, 0, 0, 0)')
 
-  // The contrast that matters: a project whose session is still live is not dimmed,
-  // so this is a state and not a new permanent look for the composer.
   await page.getByTestId('sidebar-project-beta').click()
   const live = page.getByTestId('composer-live')
   await expect(live).toBeVisible()
@@ -59,12 +43,10 @@ test('the mode picker offers every mode the SDK can spawn, each with its descrip
   const list = page.getByTestId('start-mode-list')
   await expect(list).toBeVisible()
 
-  // All six. A picker that offers four of six quietly decides for you.
   for (const mode of ['default', 'dontAsk', 'auto', 'acceptEdits', 'plan', 'bypass']) {
     await expect(list.getByTestId(`start-mode-${mode}`)).toBeVisible()
   }
 
-  // The description is on the row itself and repeated on hover.
   const bypass = list.getByTestId('start-mode-bypass')
   await expect(bypass).toContainText('disposable WSL container')
   await expect(bypass).toHaveAttribute('title', /disposable WSL container/)
@@ -78,8 +60,6 @@ test('choosing bypass states what it means, rather than only colouring the contr
   await page.getByTestId('start-mode-picker').click()
   await page.getByTestId('start-mode-bypass').click()
 
-  // The picker closes on selection, so a warning that lived only inside the list
-  // would vanish at the moment it started mattering.
   await expect(page.getByTestId('start-mode-list')).toHaveCount(0)
   await expect(page.getByTestId('bypass-warning')).toContainText('Nothing will ask for approval')
 
@@ -108,7 +88,6 @@ test('Resume asks for a real resume of the previous conversation', async ({ page
 
   await resume.click()
   await expect(resume).toHaveAttribute('aria-checked', 'true')
-  // The button says what it will do, so the choice is legible before the click.
   await expect(page.getByTestId('start-session')).toContainText('Resume')
 
   await page.getByTestId('start-session').click()
@@ -118,8 +97,6 @@ test('Resume asks for a real resume of the previous conversation', async ({ page
 })
 
 test('Resume is refused when there is no conversation to resume', async ({ page }) => {
-  // Start a fresh session and end it again before it ever reaches an SDK session
-  // id. Offering to resume that would be an offer to restore nothing.
   await page.getByTestId('start-session').click()
   await expect(page.getByTestId('ended-banner')).toHaveCount(0)
   await page.getByTestId('end-session').click()
@@ -137,8 +114,6 @@ test('resuming a native session never offers bypass, because its transcript is o
   await page.getByTestId('start-mode-picker').click()
   const list = page.getByTestId('start-mode-list')
   await expect(list.getByTestId('start-mode-default')).toBeVisible()
-  // Resuming a host session inside a container would look for a transcript that
-  // is not there and silently find nothing, so the pair is not offered at all.
   await expect(list.getByTestId('start-mode-bypass')).toHaveCount(0)
   await expect(list).toContainText('on this machine')
 })
@@ -147,10 +122,6 @@ test('a start that crashes immediately surfaces its reason as the start error', 
   await page.getByTestId('start-session').click()
   await expect(page.getByTestId('ended-banner')).toHaveCount(0)
 
-  // sessions.start already resolved "success" here — the run loop dies a beat
-  // later, exactly the race this fix closes. Read the live session id back off
-  // the project list rather than the mock's own counter, so the test does not
-  // depend on how ids happen to be minted.
   const sessionId = await page.evaluate(async () => {
     const { projects } = await window.switchboard.invoke('projects.list', undefined)
     return projects.find((p) => p.id === 'p-alpha')?.session?.id
@@ -163,13 +134,10 @@ test('a start that crashes immediately surfaces its reason as the start error', 
   )
 
   await expect(page.getByTestId('start-error')).toContainText('code 13')
-  // Ended, not still "working" behind a stale pill.
   await expect(page.getByTestId('ended-banner')).toBeVisible()
 })
 
 test('a failed resume turns Resume back off, and says why in the message', async ({ page }) => {
-  // The seeded ended session already has an sdkSessionId (see beforeEach), so
-  // Resume is available without another round-trip through start/end.
   await page.getByTestId('resume-session').click()
   await expect(page.getByTestId('resume-session')).toHaveAttribute('aria-checked', 'true')
   await page.getByTestId('start-session').click()
@@ -186,26 +154,20 @@ test('a failed resume turns Resume back off, and says why in the message', async
 
   await expect(page.getByTestId('start-error')).toContainText('Resume failed, starting fresh')
   await expect(page.getByTestId('start-error')).toContainText('could not be resumed')
-  // Off for the next click — a retry must not silently repeat the same resume.
   await expect(page.getByTestId('resume-session')).toHaveAttribute('aria-checked', 'false')
 })
 
-// The Effort bar lives in the session header, where the usage meter is watched.
-// It starts one rung below max, so a fresh install creates no subagents until
-// asked; the subagent bar only appears at max, the one rung that creates them.
 test('the effort bar starts at xhigh and reveals the subagent bar only at max', async ({ page }) => {
   const bar = page.getByTestId('effort-bar')
   await expect(bar).toBeVisible()
   await expect(page.getByTestId('effort-bar-value')).toHaveText('xhigh')
   await expect(page.getByTestId('subagent-effort-bar')).toHaveCount(0)
 
-  // A range input: the last step is max.
   await bar.fill('4')
   await expect(page.getByTestId('effort-bar-value')).toHaveText('max')
   await expect(page.getByTestId('subagent-effort-bar')).toBeVisible()
   await expect(page.getByTestId('subagent-effort-bar-value')).toHaveText('low')
 
-  // The same setting, so Settings shows the move too, and keeps it.
   await page.getByTestId('open-settings').click()
   await page.getByTestId('settings-tab-term').click()
   await expect(page.getByTestId('setting-effort-value')).toHaveText('max')
@@ -213,16 +175,11 @@ test('the effort bar starts at xhigh and reveals the subagent bar only at max', 
   await page.getByTestId('settings-done').click()
   await expect(page.getByTestId('subagent-effort-bar-value')).toHaveText('max')
 
-  // Back down, and the subagent bar goes with it.
   await bar.fill('0')
   await expect(page.getByTestId('effort-bar-value')).toHaveText('low')
   await expect(page.getByTestId('subagent-effort-bar')).toHaveCount(0)
 })
 
-// WHERE a session runs used to be decided for you: bypass meant a container and
-// everything else meant your own machine, with no way to ask for isolation
-// without also giving away every permission prompt. The switch separates the two
-// questions, and these hold it apart from the mode picker beside it.
 test('a session can be asked to run in a container without choosing bypass', async ({ page }) => {
   const toggle = page.getByTestId('run-in-container')
   await expect(toggle).toBeVisible()
@@ -232,11 +189,9 @@ test('a session can be asked to run in a container without choosing bypass', asy
   await expect(toggle).toHaveAttribute('aria-checked', 'true')
 
   await page.getByTestId('start-session').click()
-  // A start resolves after a simulated spawn delay, so poll rather than read once.
   await expect
     .poll(async () => (await page.evaluate(() => window.__mock.state().starts)).at(-1)?.containerised)
     .toBe(true)
-  // The point of the switch: isolation WITHOUT handing over the permission gate.
   const last = (await page.evaluate(() => window.__mock.state().starts)).at(-1)
   expect(last?.bypassPermissions).toBe(false)
 })
@@ -257,8 +212,6 @@ test('bypass shows the switch on and locked, because it has never had a choice',
   const toggle = page.getByTestId('run-in-container')
   await expect(toggle).toHaveAttribute('aria-checked', 'true')
   await expect(toggle).toBeDisabled()
-  // Clicking a locked switch must not silently turn the container OFF for a mode
-  // that has no other isolation boundary.
   await toggle.click({ force: true })
   await expect(toggle).toHaveAttribute('aria-checked', 'true')
 })

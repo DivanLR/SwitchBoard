@@ -1,9 +1,3 @@
-// Screenshot pass for the Specs section, opt-in like tests-shot.spec.ts. The
-// stepper is the reason it exists: whether a sequence of phases READS as a
-// sequence, and how the running/done/pending states sit against each other, are
-// visual claims no assertion settles.
-//
-// Run with: SHOTS=1 npx playwright test tests/e2e/specs-shot.spec.ts
 import { expect, test } from '@playwright/test'
 import { installMockHost, twoProjectScenario } from './mock-host'
 
@@ -73,8 +67,6 @@ test('a command running, on the control that started it', async ({ page }) => {
   )
   await page.getByTestId('tab-specs').click()
   await page.getByTestId('part-cmds').click()
-  // Held open so the waiting state can be photographed: a real start spends
-  // this window spawning the CLI, or bringing a container image up.
   await page.evaluate(() => window.__mock.setStartDelay(4000))
   await page.getByTestId('speckit-cmd-speckit-plan').click()
   await expect(page.getByTestId('speckit-cmd-speckit-plan')).toContainText('Starting')
