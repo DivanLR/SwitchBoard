@@ -20,6 +20,7 @@ function sessionRow(projectId: string, planMode: boolean): Session {
   return {
     id: newId(),
     projectId,
+    engine: 'claude',
     sdkSessionId: 'sdk-1',
     status: 'working',
     statusDetail: null,

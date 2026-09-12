@@ -365,3 +365,28 @@ test('clicking a code block in the real app says copied', async () => {
   // the first assertion alone would pass on the failure it exists to catch.
   expect(await label()).not.toContain('could not copy')
 })
+
+// The real terminal, in the only suite that can see one. The Terminal tab runs a
+// pseudo-terminal through a NATIVE addon (@lydell/node-pty) in the main process:
+// the mock-host suite stubs those four IPC methods and would pass whether or not
+// the addon loads under Electron at all, which is the failure this catches.
+//
+// HOME is pointed at the throwaway tree above, so the shell that opens is a bare
+// one in a temporary folder and no CLI is launched into it.
+test('the Terminal tab runs a real shell and shows its output', async () => {
+  await page.getByTestId('sidebar-project-sample-api').click()
+  await page.getByTestId('tab-terminal').click()
+
+  // The emulator mounts and paints: xterm renders its rows into the pane, so a
+  // pane with rows is a pane that received bytes from a live pseudo-terminal.
+  const pane = page.getByTestId('terminal-pane')
+  await expect(pane).toBeVisible()
+  await expect.poll(async () => (await pane.locator('.xterm-rows div').count()) > 0).toBe(true)
+
+  // Something the shell itself printed, rather than anything this app drew.
+  await expect
+    .poll(async () => (await pane.locator('.xterm-rows').innerText()).trim().length, {
+      timeout: 15_000,
+    })
+    .toBeGreaterThan(0)
+})

@@ -1,5 +1,8 @@
 import { createApp } from 'vue'
 import App from './App.vue'
+// The emulator's own stylesheet, bundled rather than fetched: the production CSP
+// allows no external stylesheet, and xterm draws nothing legible without it.
+import '@xterm/xterm/css/xterm.css'
 import './styles.css'
 
 /**

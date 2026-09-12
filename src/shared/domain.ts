@@ -20,6 +20,7 @@ export type EventKind =
   | 'error'
   | 'result'
   | 'raw_output'
+  | 'injection'
 
 export type RiskLevel = 'low' | 'medium' | 'high'
 
@@ -48,6 +49,19 @@ export type DecisionOutcome = Exclude<PermissionRequestStatus, 'pending'>
  * spells `bypassPermissions`.
  */
 export type SessionMode = 'default' | 'dontAsk' | 'auto' | 'acceptEdits' | 'plan' | 'bypass'
+
+/**
+ * Which CLI runs a session.
+ *
+ * `claude` is the Agent SDK host this app was built around, with the permission
+ * inbox, containers, subagent pairing and plan mode. `codex` drives the OpenAI
+ * Codex CLI (`codex exec --json`) and has none of those: it is a second engine,
+ * not a second skin on the first, and the UI says so rather than implying
+ * feature parity it does not have.
+ */
+export type SessionEngine = 'claude' | 'codex'
+
+export const DEFAULT_SESSION_ENGINE: SessionEngine = 'claude'
 
 /**
  * The mode a project takes when nothing else says otherwise, and the value the
@@ -191,6 +205,8 @@ export interface McpServer {
 export interface Session {
   id: string
   projectId: string
+  /** Which CLI is running it (migration 030). Fixed for the session's life. */
+  engine: SessionEngine
   sdkSessionId: string | null
   status: SessionStatus
   statusDetail: string | null
@@ -389,6 +405,28 @@ export interface RawOutputPayload extends AgentScopedPayload {
   text: string
 }
 
+/**
+ * Where a block of injected context came from. The SDK delivers all of them as
+ * ordinary `user` message text blocks, so the source is inferred from the text
+ * itself (see classifyInjection) rather than reported.
+ */
+export type InjectionSource = 'system_reminder' | 'command' | 'hook' | 'system' | 'context'
+
+/**
+ * Context injected into the conversation that the developer never typed:
+ * `<system-reminder>` blocks, expanded slash commands, hook `additionalContext`,
+ * and the SDK's own init frame.
+ *
+ * The raw view exists to show 100% of what a session saw (FR-018), and until this
+ * kind existed it could not: the mapper read only `tool_result` blocks out of a
+ * user message and dropped every other block on the floor, so the largest single
+ * category of what reaches the model was the one thing no view could show.
+ */
+export interface InjectionPayload extends AgentScopedPayload {
+  text: string
+  source: InjectionSource
+}
+
 export interface EventPayloadMap {
   prompt: PromptPayload
   assistant_text: AssistantTextPayload
@@ -400,6 +438,7 @@ export interface EventPayloadMap {
   error: ErrorPayload
   result: ResultPayload
   raw_output: RawOutputPayload
+  injection: InjectionPayload
 }
 
 export interface SessionEvent<K extends EventKind = EventKind> {
@@ -428,7 +467,27 @@ export function agentIdOf(event: SessionEvent): string | undefined {
 }
 
 /** Event kinds the swallow classifier may tag; all others are categorically exempt (FR-015a, FR-017). */
-export const SWALLOWABLE_KINDS: readonly EventKind[] = ['tool_activity', 'raw_output', 'assistant_text']
+export const SWALLOWABLE_KINDS: readonly EventKind[] = [
+  'tool_activity',
+  'raw_output',
+  'assistant_text',
+  'injection',
+]
+
+/**
+ * Which injected block this text is, read from the text itself.
+ *
+ * The SDK hands every one of them over as a plain user text block with no label,
+ * so the source has to be inferred. Ordered most specific first; `context` is the
+ * honest answer when nothing identifies it, rather than a guess.
+ */
+export function classifyInjection(text: string): InjectionSource {
+  if (/<system-reminder>/i.test(text)) return 'system_reminder'
+  if (/<command-name>|<command-message>|<command-args>/i.test(text)) return 'command'
+  if (/<(?:user-prompt-submit-)?hook[-_ ]?(?:output|feedback)>|hook success|hook blocked/i.test(text))
+    return 'hook'
+  return 'context'
+}
 
 // --- Permissions ---
 
@@ -564,6 +623,14 @@ export interface AvailableModel {
   id: string
   label: string
   description: string
+  /** Which CLI offers it. Absent on rows stored before engines existed, which
+   *  were all Claude's — `engineOf` reads it that way rather than guessing. */
+  engine?: SessionEngine
+}
+
+/** The engine a listed model belongs to; Claude for a row that predates the field. */
+export function engineOf(model: AvailableModel): SessionEngine {
+  return model.engine ?? 'claude'
 }
 
 // Model families, strongest first. The only model knowledge the app keeps:
@@ -672,6 +739,18 @@ export interface Settings {
    */
   modelMode: ModelMode
   /**
+   * Which CLI a new session starts on unless the start control says otherwise.
+   * The engine picker writes this; it is a default, not a lock, because the two
+   * engines are not interchangeable (see SessionEngine).
+   */
+  defaultEngine: SessionEngine
+  /**
+   * The Codex model new Codex sessions run. Empty means the Codex CLI's own
+   * default, which is the honest state before the developer has picked one —
+   * there is no sensible id to invent here, and the list comes from the CLI.
+   */
+  codexModel: string
+  /**
    * Reasoning effort for the main loop of every session: the Effort bar in the
    * session header and in Settings. Read before every turn, so moving the bar
    * reaches a running session on its next message. Below `max` no subagents are
@@ -696,6 +775,13 @@ export interface Settings {
   fontSize: 'sm' | 'md' | 'lg'
   /** Clean view shows tool activity as collapsible rows instead of hiding it. */
   showToolRows: boolean
+  /**
+   * Clean view shows injected context — system reminders, expanded slash
+   * commands, hook output — instead of hiding it. Off by default because the
+   * clean view is the narrative one; the Raw view shows these unconditionally,
+   * since showing everything is the only thing it is for.
+   */
+  showInjections: boolean
   /** Show the time next to every event in the Clean view. */
   timestamps: boolean
   /** Keep the view pinned to the newest line while the session works. */
@@ -876,6 +962,8 @@ export const DEFAULT_SETTINGS: Settings = {
   workerModel: 'claude-sonnet-5',
   autoModelRouting: true,
   modelMode: 'auto',
+  defaultEngine: DEFAULT_SESSION_ENGINE,
+  codexModel: '',
   // xhigh, not max: the level current guidance names for coding work, and one
   // rung below the only rung that creates subagents. A fresh install therefore
   // works single-threaded until the developer raises the bar, which is the
@@ -887,6 +975,7 @@ export const DEFAULT_SETTINGS: Settings = {
   fontSize: 'md',
   // Clean view is narrative + approvals by default; tool rows live in Raw.
   showToolRows: false,
+  showInjections: false,
   timestamps: false,
   autoscroll: true,
   showSessionTimer: true,

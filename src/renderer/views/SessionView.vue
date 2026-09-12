@@ -54,6 +54,7 @@ import CleanupView from '@renderer/views/CleanupView.vue'
 import TestsView from '@renderer/views/TestsView.vue'
 import DiffView from '@renderer/views/DiffView.vue'
 import DiagramsView from '@renderer/views/DiagramsView.vue'
+import TerminalPane from '@renderer/components/TerminalPane.vue'
 import SkillsView from '@renderer/views/SkillsView.vue'
 import SessionWaitOverlay from '@renderer/components/SessionWaitOverlay.vue'
 
@@ -79,6 +80,7 @@ const headerColor = computed(() => accentFor(props.project.id))
 const outputPrefs = computed(() => ({
   fontSize: settingsStore.settings?.fontSize ?? 'md',
   showToolRows: settingsStore.settings?.showToolRows ?? false,
+  showInjections: settingsStore.settings?.showInjections ?? false,
   timestamps: settingsStore.settings?.timestamps ?? false,
   autoscroll: settingsStore.settings?.autoscroll ?? true,
 }))
@@ -100,7 +102,15 @@ function pillLabel(status: string): string {
 // Main-area tab: the live session stream, the project's Spec Kit specs, the
 // verification section, the working-tree diff, or the review/cleanup command
 // launcher.
-const mainTab = ref<'session' | 'specs' | 'tests' | 'diff' | 'cleanup' | 'diagrams' | 'skills'>(
+// A pseudo-terminal is a real shell process, so one is opened only once the
+// developer has actually asked for the tab — never on mount, which would spawn
+// a shell for every project the moment its view was rendered. After that the
+// pane stays mounted (see its v-show) so the session in it survives tab
+// switches.
+const terminalEverOpened = ref(false)
+const mainTab = ref<
+  'session' | 'terminal' | 'specs' | 'tests' | 'diff' | 'cleanup' | 'diagrams' | 'skills'
+>(
   'session',
 )
 const specCount = computed(() => specs.stateFor(props.project.id).specs.length)
@@ -518,6 +528,7 @@ sessionStart = useSessionStart({
 })
 const {
   startMode,
+  startEngine,
   modeOpen,
   resumeSession,
   runInContainer,
@@ -579,6 +590,9 @@ const items = computed<StreamItem[]>(() => {
       if (toolName === 'Task' || toolName === 'Agent') continue
       if (!outputPrefs.value.showToolRows) continue
     }
+    // Injected context is off by default here and unconditional in the Raw view:
+    // the clean view is the narrative, and a system reminder is not narrative.
+    if (event.kind === 'injection' && !outputPrefs.value.showInjections) continue
     // Interim summaries (posted while background work ran) stay hidden in the
     // clean view — only turn-complete lines show during a run, then the single
     // consolidated summary after it settles. The raw view keeps everything.
@@ -1465,6 +1479,16 @@ const {
       >
         Session
       </button>
+      <!-- A REAL terminal, not the stream drawn to look like one. Next to
+           Session because it is the other way of talking to the same folder. -->
+      <button
+        class="mt"
+        :class="{ sel: mainTab === 'terminal' }"
+        data-testid="tab-terminal"
+        @click="((mainTab = 'terminal'), (terminalEverOpened = true))"
+      >
+        Terminal
+      </button>
       <button class="mt" :class="{ sel: mainTab === 'specs' }" data-testid="tab-specs" @click="mainTab = 'specs'">
         Specs
         <span v-if="specCount > 0" class="mt-badge">{{ specCount }}</span>
@@ -1541,10 +1565,21 @@ const {
           :aria-selected="active.view === 'raw'"
           @click="switchView('raw')"
         >
-          Terminal
+          Raw
         </button>
       </div>
     </div>
+
+    <!-- Kept mounted with v-show rather than v-if: destroying the pane on every
+         tab switch would throw away the emulator and its scroll position, and
+         re-attaching redraws the buffer from the start each time. -->
+    <TerminalPane
+      v-if="terminalEverOpened"
+      v-show="mainTab === 'terminal'"
+      :id="project.id"
+      :cwd="project.path"
+      :engine="liveSession?.engine ?? startEngine"
+    />
 
     <SpecsView
       v-if="mainTab === 'specs'"
@@ -1637,6 +1672,43 @@ const {
                  reads as one sentence: run it LIKE THIS, PICKING UP where we left
                  off, GO. Every mode the SDK has is here, each carrying its own
                  description on the row and on hover. -->
+            <!-- WHICH CLI, before WHICH MODE: the engine decides which of the
+                 controls after it even apply, so asking it second would offer a
+                 container and a bypass mode that a Codex session then ignores. -->
+            <div
+              class="segments mono"
+              data-testid="start-engine"
+              role="radiogroup"
+              aria-label="Engine"
+            >
+              <button
+                type="button"
+                class="seg"
+                :class="{ on: startEngine === 'claude' }"
+                data-testid="start-engine-claude"
+                role="radio"
+                :aria-checked="startEngine === 'claude'"
+                :disabled="busy"
+                title="Claude Code: the permission inbox, plan mode, containers and subagent pairing."
+                @click="startEngine = 'claude'"
+              >
+                Claude
+              </button>
+              <button
+                type="button"
+                class="seg"
+                :class="{ on: startEngine === 'codex' }"
+                data-testid="start-engine-codex"
+                role="radio"
+                :aria-checked="startEngine === 'codex'"
+                :disabled="busy"
+                title="OpenAI Codex CLI. No permission inbox, no plan mode and no container — Codex decides inside its own sandbox, and the mode below chooses which sandbox."
+                @click="startEngine = 'codex'"
+              >
+                Codex
+              </button>
+            </div>
+
             <div class="mode-pick">
               <button
                 type="button"
@@ -1709,7 +1781,7 @@ const {
                  decides where this project's specs, tests, diff comments, cleanup
                  and diagrams run from now on. The label has to say so, or the
                  control lies about its own blast radius. -->
-            <span class="bypass-inline">
+            <span v-if="startEngine === 'claude'" class="bypass-inline">
               <button
                 class="switch"
                 :class="{ on: containerOn }"
@@ -2353,6 +2425,20 @@ const {
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
   box-shadow: var(--hairline-shine);
+  /* The strip scrolls rather than spilling over the pane beside it. Without
+     these it overflowed the main column and its right-hand controls sat on top
+     of the inbox's own buttons, swallowing clicks meant for Approve. */
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.main-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.mt {
+  flex: none;
 }
 
 /* Tabs name places, so they take the label idiom rather than reading as prose.
@@ -3360,6 +3446,17 @@ html.sb-light .bypass-warn {
 
 .raw-line.t-err {
   color: var(--red);
+}
+
+/* Injected context: present, readable, and clearly not part of the conversation.
+   Dimmer than the narrative so a long system reminder never competes with what
+   the session actually said, with a rule down its left edge marking the block as
+   one thing rather than a run of loose lines. */
+.raw-line.t-inject {
+  color: var(--text-noise);
+  border-left: 1px solid var(--border);
+  padding-left: 9px;
+  margin-left: 1px;
 }
 
 /* The turn is still writing. Sits where the next line will appear. */

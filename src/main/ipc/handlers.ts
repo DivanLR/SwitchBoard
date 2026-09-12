@@ -30,6 +30,7 @@ import type {
 } from '@shared/ipc-types'
 import { INVOKE_CHANNEL, isIpcError, isIpcErrorCode } from '@shared/ipc-types'
 import { rulesView } from '@main/inbox/rule-prefs'
+import type { PtyHost } from '@main/terminal/pty-host'
 import type { Repositories } from '@main/store/repositories'
 import type { SessionManager } from '@main/sessions/session-manager'
 import { installPlugin } from '@main/sessions/plugin-install'
@@ -84,6 +85,9 @@ export class RendererPush {
   private eventBuffer: SessionEvent[] = []
   private flushTimer: NodeJS.Timeout | null = null
   private counterTimer: NodeJS.Timeout | null = null
+  /** Terminal id -> output waiting for the next flush (see terminalData). */
+  private terminalBuffer = new Map<string, string>()
+  private terminalTimer: NodeJS.Timeout | null = null
 
   constructor(
     private getWindow: () => BrowserWindow | null,
@@ -133,6 +137,36 @@ export class RendererPush {
     }, COUNTER_DEBOUNCE_MS)
   }
 
+  /**
+   * Terminal output, coalesced per terminal on the same cadence as events.
+   *
+   * A pseudo-terminal emits a great many small writes — a build log arrives far
+   * faster than a frame — and one IPC message per write would spend more time
+   * crossing the bridge than drawing. Joined per id rather than per message
+   * because the bytes are a stream: concatenating them is lossless, which is not
+   * true of anything else pushed here.
+   */
+  terminalData(id: string, data: string): void {
+    this.terminalBuffer.set(id, (this.terminalBuffer.get(id) ?? '') + data)
+    if (!this.terminalTimer) {
+      this.terminalTimer = setTimeout(() => this.flushTerminal(), EVENT_FLUSH_INTERVAL_MS)
+    }
+  }
+
+  private flushTerminal(): void {
+    this.terminalTimer = null
+    if (this.terminalBuffer.size === 0) return
+    const window = this.getWindow()
+    // Same self-healing check as flushEvents: with no window, drop the bytes
+    // rather than rearm a timer forever with nowhere to deliver them.
+    if (!window || window.isDestroyed()) {
+      this.terminalBuffer.clear()
+      return
+    }
+    for (const [id, data] of this.terminalBuffer) this.send('push.terminalData', { id, data })
+    this.terminalBuffer.clear()
+  }
+
   /** Typed pass-through for every other push channel. */
   push<C extends PushChannel>(channel: C, payload: PushMap[C]): void {
     this.send(channel, payload)
@@ -157,6 +191,9 @@ interface HandlerDeps {
   /** Reserved project id backing the global Database MCP session; marked
    *  `reserved` in projectList so the sidebar never lists it as a real project. */
   dbProjectId: string
+  /** The real-terminal host. Owned by the composition root rather than created
+   *  here, because the quit sequence has to be able to kill every shell. */
+  ptyHost: PtyHost
 }
 
 function localMidnightIso(): string {
@@ -277,7 +314,7 @@ const ALLOWED_PLUGINS: ReadonlySet<string> = new Set([
 ])
 
 export function registerIpcHandlers(deps: HandlerDeps): void {
-  const { repos, manager, broker, dbProjectId, skillsStagingRoot } = deps
+  const { repos, manager, broker, dbProjectId, skillsStagingRoot, ptyHost } = deps
 
   /**
    * The session's derived name, worked out once and then kept (migration 029).
@@ -469,12 +506,22 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       }
       repos.projects.setUseContainers(req.projectId, req.on)
     },
+    // The real terminal. No validation of `data` beyond its type: these are
+    // keystrokes going to the developer's own shell on their own machine, and
+    // anything this app chose to filter would be a key their terminal swallows.
+    'terminal.open': (req) => ptyHost.open(req),
+    'terminal.write': (req) => ptyHost.write(req.id, req.data),
+    'terminal.resize': (req) => ptyHost.resize(req.id, req.cols, req.rows),
+    'terminal.close': (req) => ptyHost.close(req.id),
     'sessions.rename': (req) => manager.renameSession(req.sessionId, req.label),
     'sessions.start': (req) =>
       // No mode default here: undefined has to reach the manager as "unspecified"
       // so it can fall back to the project's own choice.
       manager.startSession(req.projectId, req.resume ?? false, req.mode, req.carryTranscriptFrom, {
         containerised: req.containerised === true,
+        // Undefined reaches the manager as "unspecified" too, so the developer's
+        // default engine applies rather than this handler picking one.
+        engine: req.engine,
       }),
     // Text out only. There is deliberately no clipboard READ endpoint: that is
     // the direction that could lift whatever the developer last copied from

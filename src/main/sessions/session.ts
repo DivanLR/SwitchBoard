@@ -209,9 +209,38 @@ interface HostedSessionOptions {
   onExit: (reason: 'completed' | 'stopped' | 'crashed', detail?: string) => void
 }
 
-interface QueuedSend {
+export interface QueuedSend {
   eventId: string
   text: string
+}
+
+/**
+ * What the session manager needs from a running session, whichever CLI is behind
+ * it.
+ *
+ * Extracted when the Codex engine arrived (see codex-session.ts). It is the
+ * surface the manager already used, not a new abstraction layer: there are two
+ * implementations, and neither engine's own options travel through it.
+ *
+ * Members that only one engine has — plan mode, plugin reloads, background tasks
+ * — stay on the interface rather than being branched on at every call site. The
+ * engine that has no such concept answers honestly by doing nothing, which is
+ * the truth about a Codex session, and the UI gates the controls separately.
+ */
+export interface SessionHost {
+  start(): void
+  send(text: string): { queued: boolean; deliver: (eventId: string) => void }
+  editQueuedSend(eventId: string, text: string): boolean
+  interrupt(): Promise<{ stillQueued: number }>
+  stop(): Promise<void>
+  takeQueuedSends(): QueuedSend[]
+  readonly isMidTask: boolean
+  readonly currentStatus: SessionStatus
+  attentionRaised(): void
+  attentionCleared(): void
+  clearBackgroundTasks(): void
+  setPlanMode(enabled: boolean): void
+  reloadPlugins(): Promise<void>
 }
 
 /**
@@ -275,7 +304,7 @@ export function resolvePermissionMode(mode: SessionMode): PermissionMode {
   return mode === 'bypass' ? 'bypassPermissions' : mode
 }
 
-export class HostedSession {
+export class HostedSession implements SessionHost {
   readonly sessionId: string
   private readonly options: HostedSessionOptions
   private readonly input = new AsyncPushQueue<SDKUserMessage>()
@@ -906,6 +935,9 @@ export class HostedSession {
     this.applyEffort(this.options.effort ?? DEFAULT_SETTINGS.effort)
     this.applyModelForTurn(text)
     this.options.sink.update(eventId, { text, pending: false }, { persist: true })
+    // The CLI echoes this turn back with whatever context it appends; telling the
+    // mapper now is what stops the echo being reported as injected context.
+    this.mapper.noteDelivered(text)
     this.input.push({
       type: 'user',
       message: { role: 'user', content: text },

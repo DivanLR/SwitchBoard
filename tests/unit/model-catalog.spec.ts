@@ -57,7 +57,11 @@ describe('toAvailableModels (SDK report → selectable list)', () => {
       { value: 'claude-sonnet-5' },
       { value: '' },
     ])
-    expect(models).toEqual([{ id: 'claude-sonnet-5', label: 'claude-sonnet-5', description: '' }])
+    // The engine is stamped here so the settings list can tell the two CLIs'
+    // models apart without re-deriving it from the id.
+    expect(models).toEqual([
+      { id: 'claude-sonnet-5', label: 'claude-sonnet-5', description: '', engine: 'claude' },
+    ])
   })
 })
 

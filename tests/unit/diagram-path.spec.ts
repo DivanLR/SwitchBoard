@@ -5,6 +5,7 @@
 // ipc-handlers.spec.ts builds (mocked 'electron' + '@main/updater', a real
 // in-memory DB) — the actual trust boundary, and the only way to reach a
 // function the module deliberately keeps unexported.
+import type { PtyHost } from '@main/terminal/pty-host'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -89,6 +90,7 @@ function setup() {
     // A temp path: these suites never import a skill, and the handlers only
     // read this when one is imported.
     skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),
+    ptyHost: { open: () => ({ scrollback: '', reused: false }), write: () => {}, resize: () => {}, close: () => {}, closeAll: () => {} } as unknown as PtyHost,
   })
 
   const listener = registered.get(INVOKE_CHANNEL)

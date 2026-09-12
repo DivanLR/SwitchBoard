@@ -25,19 +25,29 @@ import type {
   SectionKind,
   Session,
   SessionEvent,
+  SessionEngine,
   SessionMode,
   SessionStatus,
   SuiteResult,
   TranscriptSummary,
   VerifyReport,
 } from '@shared/domain'
-import { SWALLOWABLE_KINDS, emptyVerifyReport, subagentsAllowed, verifyVerdict } from '@shared/domain'
+import {
+  DEFAULT_SESSION_ENGINE,
+  SWALLOWABLE_KINDS,
+  emptyVerifyReport,
+  subagentsAllowed,
+  verifyVerdict,
+} from '@shared/domain'
 import type { IpcError, SessionStatusPush } from '@shared/ipc-types'
 import { newId, nowIso, type Repositories } from '@main/store/repositories'
 import { readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
-import { HostedSession, type PermissionGate } from './session'
+import { HostedSession, type PermissionGate, type SessionHost } from './session'
 import { switchboardMcp } from './inter-session'
 import { probeAvailableModels } from './model-catalog'
+import { CODEX_MISSING_MESSAGE, resolveCodexExecutable } from './codex-executable'
+import { probeCodexModels } from './codex-catalog'
+import { CodexSession } from './codex-session'
 import { foldModelTotals, type EventSink } from './message-mapper'
 import {
   heavySubagentSystemPromptAppend,
@@ -127,7 +137,8 @@ interface LiveEventEntry {
 }
 
 export interface HostedEntry {
-  session: HostedSession
+  /** Either engine's running session; the manager only ever uses this surface. */
+  session: SessionHost
   row: Session
   projectPath: string
   seq: number
@@ -588,6 +599,12 @@ export class SessionManager {
   private probingModels: Promise<AvailableModel[]> | null = null
   /** When the list was last read from the CLI. See models() for why it expires. */
   private modelsProbedAt = 0
+  /** The Codex CLI's own model list, cached separately so a Claude session's
+   *  onModels report (which replaces `availableModels` wholesale) cannot erase
+   *  it. Empty when Codex is not installed, which is how the picker knows. */
+  private codexModels: AvailableModel[] = []
+  private probingCodexModels: Promise<AvailableModel[]> | null = null
+  private codexModelsProbedAt = 0
 
   constructor(
     private repos: Repositories,
@@ -600,6 +617,33 @@ export class SessionManager {
    * or too old to answer, in which case the picker offers the account default.
    */
   async models(): Promise<AvailableModel[]> {
+    // Both engines, one list, each row saying which CLI offers it. Probed
+    // together so opening Settings asks each CLI once rather than in sequence.
+    const [claude, codex] = await Promise.all([this.claudeModels(), this.codexModelList()])
+    return [...claude, ...codex]
+  }
+
+  /**
+   * The Codex CLI's models. Cached on the same terms as the Claude list and for
+   * the same reason: a model released after the app started should appear without
+   * a restart, and a CLI that is not installed should cost one failed probe per
+   * ten minutes rather than one per settings open.
+   */
+  private async codexModelList(): Promise<AvailableModel[]> {
+    const fresh = Date.now() - this.codexModelsProbedAt < MODELS_TTL_MS
+    if (fresh) return this.codexModels
+    this.probingCodexModels ??= probeCodexModels()
+    try {
+      const models = await this.probingCodexModels
+      this.codexModels = models
+      this.codexModelsProbedAt = Date.now()
+    } finally {
+      this.probingCodexModels = null
+    }
+    return this.codexModels
+  }
+
+  private async claudeModels(): Promise<AvailableModel[]> {
     // THE LIST GOES STALE, so the cache expires. It used to be kept for the life
     // of the process: once anything had populated it, the CLI was never asked
     // again, and a model released after the app started could not appear until
@@ -791,10 +835,27 @@ export class SessionManager {
      *  is the isolated-verify path's own override — see sandboxSpawn and
      *  HostedEntry's field of the same name; every other caller omits it and
      *  gets today's per-session volume, unchanged. */
-    opts?: { containerised?: boolean; background?: boolean; nodeModulesVolumeKey?: string },
+    opts?: {
+      containerised?: boolean
+      background?: boolean
+      nodeModulesVolumeKey?: string
+      /** Which CLI runs this session; omitted uses the developer's default engine. */
+      engine?: SessionEngine
+    },
   ): Promise<Session> {
     const project = this.repos.projects.byId(projectId)
     if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
+    const engine = opts?.engine ?? this.repos.settings.get().defaultEngine ?? DEFAULT_SESSION_ENGINE
+    // A container is a Claude-session mechanism (wslc runs the Claude CLI inside
+    // it). Refusing here rather than silently running Codex on the host keeps the
+    // isolation promise the container was asked for from being quietly broken.
+    if (engine === 'codex' && (opts?.containerised === true || requestedMode === 'bypass')) {
+      throw {
+        code: 'UNSUPPORTED',
+        message:
+          'Codex sessions do not run in a container. Start this one on Claude, or choose a mode other than bypass.',
+      } satisfies IpcError
+    }
     // The project owns the mode; a request may override it for one session (the
     // restart controls do). Resolved once, here, so everything below reads one
     // value rather than re-deciding.
@@ -822,6 +883,7 @@ export class SessionManager {
         resume,
         carryTranscriptFrom,
         opts,
+        engine,
       )
     } finally {
       // Runs on every exit from startSessionBody — its own throws (Docker down,
@@ -847,7 +909,15 @@ export class SessionManager {
     containerised: boolean,
     resume: boolean,
     carryTranscriptFrom: string | undefined,
-    opts: { containerised?: boolean; background?: boolean; nodeModulesVolumeKey?: string } | undefined,
+    opts:
+      | {
+          containerised?: boolean
+          background?: boolean
+          nodeModulesVolumeKey?: string
+          engine?: SessionEngine
+        }
+      | undefined,
+    engine: SessionEngine,
   ): Promise<Session> {
     const projectId = project.id
     // No "already active" refusal (see startSession's doc). `resume` still means
@@ -878,8 +948,13 @@ export class SessionManager {
     // is normally present; if not, fail with a clear message rather than letting
     // the SDK spawn the wrong runtime and crash under Electron.
     const claudeExecutablePath = resolveClaudeExecutable()
-    if (!claudeExecutablePath) {
+    if (!claudeExecutablePath && engine === 'claude') {
       throw { code: 'NOT_FOUND', message: 'Claude Code was not found. Install it from https://claude.com/claude-code, then start a session.' } satisfies IpcError
+    }
+    // The other engine's CLI, checked here for the same reason: fail before a row
+    // exists rather than after one is on screen claiming to be working.
+    if (engine === 'codex' && !resolveCodexExecutable()) {
+      throw { code: 'NOT_FOUND', message: CODEX_MISSING_MESSAGE } satisfies IpcError
     }
 
     let resumeSdkSessionId: string | undefined
@@ -918,6 +993,7 @@ export class SessionManager {
       // the reservation would be tracking a session this row never becomes.
       id: sessionId,
       projectId,
+      engine,
       sdkSessionId: null,
       status: 'working',
       statusDetail: null,
@@ -954,7 +1030,7 @@ export class SessionManager {
       containerised,
       background: opts?.background === true,
       ranATurn: false,
-      session: null as unknown as HostedSession,
+      session: null as unknown as SessionHost,
       nodeModulesVolumeKey: opts?.nodeModulesVolumeKey,
     }
 
@@ -1023,7 +1099,39 @@ export class SessionManager {
     // fallback would present an orphaned "working" session forever — no ended
     // banner, so no Start button and no way to retry.
     try {
-      entry.session = new HostedSession({
+      entry.session =
+        engine === 'codex'
+          ? new CodexSession({
+              sessionId: row.id,
+              projectPath: project.path,
+              // Empty means "whatever the Codex CLI defaults to", which is the
+              // honest answer when the developer has not picked one.
+              model: settings.codexModel || undefined,
+              effort: settings.effort,
+              mode,
+              resumeThreadId: resumeSdkSessionId,
+              sink: this.makeSink(entry),
+              onStatusChange: (status, detail) => this.handleStatusChange(entry, status, detail),
+              onSdkSessionId: (sdkSessionId) => {
+                entry.row.sdkSessionId = sdkSessionId
+                this.repos.sessions.update(row.id, { sdkSessionId })
+              },
+              onModel: (model) => {
+                entry.row.currentModel = model
+                this.pushStatus(entry)
+              },
+              onModelUsage: (modelUsage) => {
+                entry.row.modelTotals = foldModelTotals(entry.row.modelTotals ?? {}, modelUsage)
+                this.pushStatus(entry)
+              },
+              onTurnComplete: () => {
+                entry.ranATurn = true
+                this.observeBranch(entry)
+                this.maybeDrainQueue(entry.row.projectId)
+              },
+              onExit: (reason, detail) => this.handleExit(entry, reason, detail),
+            })
+          : new HostedSession({
         sessionId: row.id,
         projectPath: project.path,
         // ponytail: refs added mid-session apply from the next session start.
@@ -1046,7 +1154,7 @@ export class SessionManager {
           ]
             .filter((s): s is string => Boolean(s))
             .join('\n\n') || undefined,
-        claudeExecutablePath,
+        claudeExecutablePath: claudeExecutablePath ?? undefined,
         // The hosted session's plan/work slots both take the intelligent model;
         // the pairing modes decide when the worker runs the loop instead.
         // One main-loop model for the session (Advisor runs the cheap one), so no
