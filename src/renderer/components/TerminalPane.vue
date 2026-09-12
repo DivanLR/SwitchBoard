@@ -28,6 +28,15 @@ const fit = shallowRef<FitAddon | null>(null)
 const exited = ref<number | null>(null)
 const unsubscribes: (() => void)[] = []
 let resizeObserver: ResizeObserver | null = null
+/**
+ * Which attach is the current one.
+ *
+ * `terminals.open()` is an await, and a project switch or an unmount can happen
+ * while it is in flight. Without this the older call resumed afterwards, wrote
+ * the PREVIOUS project's scrollback into the pane now showing another project,
+ * and registered a listener that nothing would ever remove.
+ */
+let attachToken = 0
 
 /**
  * The emulator's palette, taken from the app's own tokens rather than xterm's
@@ -60,20 +69,25 @@ async function pushSize(): Promise<void> {
 async function attach(): Promise<void> {
   const instance = term.value
   if (!instance) return
+  const token = ++attachToken
+  const id = props.id
   exited.value = null
   const { scrollback } = await terminals.open({
-    id: props.id,
+    id,
     cwd: props.cwd,
     cols: instance.cols,
     rows: instance.rows,
     engine: props.engine,
   })
+  // Superseded while the open was in flight, or the pane is gone. Writing or
+  // subscribing now would put one terminal's output into another's pane.
+  if (token !== attachToken || term.value !== instance) return
   // What was already on screen before this pane existed. Written before the live
   // subscription so the order on screen matches the order it was produced in.
   if (scrollback) instance.write(scrollback)
-  unsubscribes.push(terminals.onData(props.id, (data) => instance.write(data)))
+  unsubscribes.push(terminals.onData(id, (data) => instance.write(data)))
   unsubscribes.push(
-    terminals.onExit(props.id, (exitCode) => {
+    terminals.onExit(id, (exitCode) => {
       exited.value = exitCode
     }),
   )
@@ -118,6 +132,8 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  // Invalidates any attach still awaiting, so it cannot subscribe after this.
+  attachToken += 1
   for (const stop of unsubscribes.splice(0)) stop()
   resizeObserver?.disconnect()
   resizeObserver = null

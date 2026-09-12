@@ -120,6 +120,46 @@ describe('CodexMapper', () => {
     expect((sink.appended[0].payload as { text: string }).text).toBe('rate limited')
     expect(turns()).toBe(1)
   })
+
+  // A command that was running when the turn died has a started row and no
+  // completed half to answer it. Left alone it sits in the transcript looking
+  // like work still in progress, for ever.
+  it('fails the tool rows that were still open when the turn failed', () => {
+    const { mapper, sink } = makeMapper()
+    mapper.line(
+      '{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"npm test","status":"in_progress"}}',
+    )
+    mapper.line('{"type":"turn.failed","error":{"message":"rate limited"}}')
+    const update = sink.updates.at(-1)?.payload as { resultPreview: string; isError: boolean }
+    expect(update.isError).toBe(true)
+    expect(update.resultPreview).toBe('rate limited')
+  })
+
+  it('does the same when the process dies outright', () => {
+    const { mapper, sink } = makeMapper()
+    mapper.line(
+      '{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"npm test","status":"in_progress"}}',
+    )
+    mapper.fatalError('Codex exited with code 1')
+    expect((sink.updates.at(-1)?.payload as { isError: boolean }).isError).toBe(true)
+  })
+
+  // The map is keyed by an id the CLI restarts per turn, so an entry surviving a
+  // turn boundary would let the next turn update the previous turn's row.
+  it('keeps no open item across a turn boundary', () => {
+    const { mapper, sink } = makeMapper()
+    mapper.line(
+      '{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"npm test","status":"in_progress"}}',
+    )
+    mapper.line('{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}')
+    const before = sink.updates.length
+    mapper.line(
+      '{"type":"item.completed","item":{"id":"item_1","type":"command_execution","aggregated_output":"late","exit_code":0}}',
+    )
+    // The late half creates its own row rather than reopening the closed one.
+    expect(sink.updates.length).toBe(before)
+    expect(sink.appended.at(-1)?.kind).toBe('tool_activity')
+  })
 })
 
 describe('codex argv', () => {

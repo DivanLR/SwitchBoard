@@ -8,7 +8,7 @@
 // only way to ask the CLI itself instead of inventing an answer.
 import { spawn } from 'node:child_process'
 import type { AvailableModel } from '@shared/domain'
-import { resolveCodexExecutable } from './codex-executable'
+import { resolveCodexLaunch } from './codex-executable'
 
 /** The fields of a reported model this app reads. A subset, because the report
  *  crosses a process boundary as JSON and the protocol is still marked
@@ -53,10 +53,13 @@ const PROBE_TIMEOUT_MS = 30_000
  * the caller keeps whatever it already had, exactly as the Claude probe behaves.
  */
 export async function probeCodexModels(): Promise<AvailableModel[]> {
-  const executable = resolveCodexExecutable()
-  if (!executable) return []
+  const launch = resolveCodexLaunch()
+  if (!launch) return []
   return new Promise<AvailableModel[]>((resolve) => {
-    const child = spawn(executable, ['app-server'], { stdio: ['pipe', 'pipe', 'ignore'] })
+    const child = spawn(launch.command, [...launch.prefixArgs, 'app-server'], {
+      stdio: ['pipe', 'pipe', 'ignore'],
+      env: { ...process.env, ...launch.env },
+    })
     let buffer = ''
     let settled = false
     const finish = (models: AvailableModel[]): void => {

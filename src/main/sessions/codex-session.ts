@@ -20,7 +20,7 @@ import type { Readable } from 'node:stream'
 import type { AvailableModel, SessionMode, SessionStatus } from '@shared/domain'
 import type { EventSink, ModelTurnUsage } from './message-mapper'
 import { CodexMapper } from './codex-mapper'
-import { CODEX_MISSING_MESSAGE, resolveCodexExecutable } from './codex-executable'
+import { CODEX_MISSING_MESSAGE, codexInstalled, resolveCodexLaunch } from './codex-executable'
 import type { QueuedSend, SessionHost } from './session'
 
 export interface CodexSessionOptions {
@@ -88,13 +88,27 @@ export function turnArgs(options: {
     : ['exec', ...shared, options.prompt]
 }
 
+/** One `codex exec` process and the state that belongs to it alone. */
+interface ActiveTurn {
+  child: ChildProcessByStdio<null, Readable, Readable>
+  /** Partial stdout between chunk boundaries; JSONL is only valid per line. */
+  stdout: string
+  /** Set once this turn is accounted for, by whichever event reached it first. */
+  settled: boolean
+}
+
 export class CodexSession implements SessionHost {
   private readonly options: CodexSessionOptions
   private readonly mapper: CodexMapper
-  // stdin is 'ignore', so the process type has no writable stdin — which is the
-  // point: the prompt is an argument, and `codex exec` treats a piped stdin as
-  // extra prompt material.
-  private child: ChildProcessByStdio<null, Readable, Readable> | null = null
+  // The turn in flight, or null between turns.
+  //
+  // A whole object rather than a bare child handle, because every handler has to
+  // be able to ask "is this still MY turn?". `kill()` is asynchronous, so a
+  // killed child's `close` can arrive after a replacement turn has started;
+  // without ownership that late event flushed the shared buffer, cleared the
+  // replacement's handle and drained the queue a second time. `settled` closes
+  // the same race between `error` and the `close` that follows it.
+  private turn: ActiveTurn | null = null
   private threadId: string | undefined
   private status: SessionStatus = 'done'
   private statusDetail: string | null = null
@@ -102,8 +116,6 @@ export class CodexSession implements SessionHost {
   private stopping = false
   private started = false
   private attention = false
-  /** Partial stdout between chunk boundaries; JSONL is only valid per line. */
-  private stdoutBuffer = ''
 
   constructor(options: CodexSessionOptions) {
     this.options = options
@@ -128,7 +140,7 @@ export class CodexSession implements SessionHost {
    * first process.
    */
   start(): void {
-    if (!resolveCodexExecutable()) {
+    if (!codexInstalled()) {
       this.options.sink.append('error', { text: CODEX_MISSING_MESSAGE, fatal: true })
       this.options.onExit('crashed', CODEX_MISSING_MESSAGE)
       return
@@ -149,7 +161,7 @@ export class CodexSession implements SessionHost {
   }
 
   send(text: string): { queued: boolean; deliver: (eventId: string) => void } {
-    const queued = this.child !== null
+    const queued = this.turn !== null
     return {
       queued,
       deliver: (eventId: string) => {
@@ -197,7 +209,7 @@ export class CodexSession implements SessionHost {
   }
 
   get isMidTask(): boolean {
-    return this.child !== null
+    return this.turn !== null
   }
 
   get currentStatus(): SessionStatus {
@@ -224,8 +236,8 @@ export class CodexSession implements SessionHost {
   async reloadPlugins(): Promise<void> {}
 
   private runTurn(prompt: string): void {
-    const executable = resolveCodexExecutable()
-    if (!executable) {
+    const launch = resolveCodexLaunch()
+    if (!launch) {
       this.options.sink.append('error', { text: CODEX_MISSING_MESSAGE, fatal: true })
       this.options.onExit('crashed', CODEX_MISSING_MESSAGE)
       return
@@ -240,16 +252,18 @@ export class CodexSession implements SessionHost {
       mode: this.options.mode,
     })
     // stdin is closed: `codex exec` reads a piped stdin as extra prompt material,
-    // and the prompt is already an argument.
-    const child = spawn(executable, args, {
+    // and the prompt is already an argument. No `shell`, ever — codex-executable.ts
+    // explains why the launch spec exists instead of a bare path.
+    const child = spawn(launch.command, [...launch.prefixArgs, ...args], {
       cwd: this.options.projectPath,
       stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, ...launch.env },
     })
-    this.child = child
-    this.stdoutBuffer = ''
+    const turn: ActiveTurn = { child, stdout: '', settled: false }
+    this.turn = turn
     this.setStatus('working', null)
 
-    child.stdout.on('data', (chunk: Buffer) => this.consumeStdout(chunk.toString()))
+    child.stdout.on('data', (chunk: Buffer) => this.consumeStdout(turn, chunk.toString()))
     // Codex writes progress notices to stderr; they are part of what the session
     // produced, so they belong in the stream rather than in a log nobody reads.
     child.stderr.on('data', (chunk: Buffer) => {
@@ -257,49 +271,72 @@ export class CodexSession implements SessionHost {
       if (text) this.options.sink.append('raw_output', { text })
     })
     child.on('error', (error) => {
+      if (turn.settled) return
       this.mapper.fatalError(error.message)
-      this.finishTurn('crashed', error.message)
+      this.settle(turn, 'crashed', error.message)
     })
     child.on('close', (code) => {
+      // A spawn failure emits `error` and THEN `close`, and a killed turn's
+      // `close` can arrive after its replacement has started. Either way this
+      // turn is already spoken for, and acting twice drains the queue twice.
+      if (turn.settled) return
       // Flush a last line with no trailing newline before deciding the outcome.
-      if (this.stdoutBuffer.trim()) {
-        this.mapper.line(this.stdoutBuffer)
-        this.stdoutBuffer = ''
+      if (turn.stdout.trim()) {
+        this.mapper.line(turn.stdout)
+        turn.stdout = ''
       }
-      if (this.stopping) return
+      if (this.stopping) {
+        turn.settled = true
+        return
+      }
       if (code === 0) {
-        this.finishTurn('completed')
+        this.settle(turn, 'completed')
       } else if (code === null) {
-        // Killed: interrupt() has already said so.
-        this.child = null
-        this.drainQueue()
+        // Killed: interrupt() has already reported the status.
+        this.settle(turn, 'killed')
       } else {
         const detail = `Codex exited with code ${code}`
         this.mapper.fatalError(detail)
-        this.finishTurn('crashed', detail)
+        this.settle(turn, 'crashed', detail)
       }
     })
   }
 
-  private consumeStdout(chunk: string): void {
-    this.stdoutBuffer += chunk
+  private consumeStdout(turn: ActiveTurn, chunk: string): void {
+    if (turn.settled) return
+    turn.stdout += chunk
     let newline: number
-    while ((newline = this.stdoutBuffer.indexOf('\n')) >= 0) {
-      const line = this.stdoutBuffer.slice(0, newline)
-      this.stdoutBuffer = this.stdoutBuffer.slice(newline + 1)
+    while ((newline = turn.stdout.indexOf('\n')) >= 0) {
+      const line = turn.stdout.slice(0, newline)
+      turn.stdout = turn.stdout.slice(newline + 1)
       this.mapper.line(line)
     }
   }
 
   /**
-   * A turn ended. Unlike the Claude host, a crashed turn does NOT end the
-   * session: the process was always going to exit, so a failed one leaves the
-   * conversation intact and the developer can send another message.
+   * A turn reached its end, exactly once.
+   *
+   * Unlike the Claude host, a crashed turn does NOT end the session: the process
+   * was always going to exit, so a failed one leaves the conversation intact and
+   * the developer can send another message.
+   *
+   * The ownership check is the point. A turn that is no longer the current one
+   * has already been replaced — by `interrupt()` followed by a new send, say —
+   * and must not touch the status, the turn counter or the queue on its way out.
    */
-  private finishTurn(reason: 'completed' | 'crashed', detail?: string): void {
-    this.child = null
-    this.setStatus(reason === 'crashed' ? 'error' : 'done', detail ?? null)
-    this.options.onTurnComplete()
+  private settle(
+    turn: ActiveTurn,
+    reason: 'completed' | 'crashed' | 'killed',
+    detail?: string,
+  ): void {
+    if (turn.settled) return
+    turn.settled = true
+    if (this.turn !== turn) return
+    this.turn = null
+    if (reason !== 'killed') {
+      this.setStatus(reason === 'crashed' ? 'error' : 'done', detail ?? null)
+      this.options.onTurnComplete()
+    }
     this.drainQueue()
   }
 
@@ -310,11 +347,13 @@ export class CodexSession implements SessionHost {
     this.runTurn(next.text)
   }
 
+  /** Ends the turn in flight and disowns it, so its late `close` changes nothing. */
   private killChild(): void {
-    const child = this.child
-    this.child = null
-    if (!child) return
-    child.kill()
+    const turn = this.turn
+    this.turn = null
+    if (!turn) return
+    turn.settled = true
+    turn.child.kill()
   }
 
   private setStatus(status: SessionStatus, detail: string | null): void {

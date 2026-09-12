@@ -369,14 +369,29 @@ export class SessionsRepo {
     )
   }
 
-  latestEndedForProject(projectId: string): Session | undefined {
-    return toSession(
-      this.db
-        .prepare(
-          'SELECT * FROM sessions WHERE projectId = ? AND endedAt IS NOT NULL ORDER BY startedAt DESC LIMIT 1',
-        )
-        .get(projectId) as SessionRow | undefined,
-    )
+  /**
+   * The project's most recent ended session, optionally restricted to one engine.
+   *
+   * The engine filter is what a RESUME must use. A resume hands the stored
+   * session id to the CLI it is starting, and the two engines' ids mean nothing
+   * to each other — a Claude SDK session id passed to `codex exec resume` names
+   * no Codex thread, and the reverse is equally wrong. Unfiltered, the last
+   * ended session of either engine would be offered to whichever engine was
+   * being started.
+   */
+  latestEndedForProject(projectId: string, engine?: SessionEngine): Session | undefined {
+    const row = engine
+      ? this.db
+          .prepare(
+            'SELECT * FROM sessions WHERE projectId = ? AND endedAt IS NOT NULL AND COALESCE(engine, ?) = ? ORDER BY startedAt DESC LIMIT 1',
+          )
+          .get(projectId, DEFAULT_SESSION_ENGINE, engine)
+      : this.db
+          .prepare(
+            'SELECT * FROM sessions WHERE projectId = ? AND endedAt IS NOT NULL ORDER BY startedAt DESC LIMIT 1',
+          )
+          .get(projectId)
+    return toSession(row as SessionRow | undefined)
   }
 
   listUnended(): Session[] {

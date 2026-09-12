@@ -80,7 +80,19 @@ export function useSessionStart(opts: {
   /** Session-start failure (e.g. wslc missing for a bypass session), ended banner. */
   const startError = ref<string | null>(null)
 
-  const canResume = computed(() => Boolean(endedSession()?.sdkSessionId))
+  /**
+   * Whether the ended session can actually be carried on.
+   *
+   * The ENGINE has to match, not just the presence of an id. A resume hands that
+   * session's stored id to the CLI being started, and the two engines' ids mean
+   * nothing to each other — offering Resume after switching the engine would
+   * either resume nothing or, worse, look like it had.
+   */
+  const canResume = computed(() => {
+    const previous = endedSession()
+    if (!previous?.sdkSessionId) return false
+    return (previous.engine ?? DEFAULT_SESSION_ENGINE) === startEngine.value
+  })
 
   /**
    * The modes a start may pick right now. Everything, until Resume is on: a bypass
@@ -151,6 +163,12 @@ export function useSessionStart(opts: {
     { immediate: true },
   )
 
+  // Switching engine can make the armed Resume impossible. Disarm it rather than
+  // leave the button reading "Resume" while the start would begin a new session.
+  watch(canResume, (possible) => {
+    if (!possible) resumeSession.value = false
+  })
+
   /** Turning Resume on can rule out the mode already picked; move off it. */
   watch([resumeSession, modeChoices], () => {
     if (!modeChoices.value.some((m) => m.value === startMode.value)) {
@@ -220,7 +238,9 @@ export function useSessionStart(opts: {
         // default, so sending it explicitly changes nothing until it is changed.
         startMode.value,
         undefined,
-        runInContainer.value,
+        // containerOn, not runInContainer: the former is engine-gated, so a
+        // Codex start cannot ask for a container the manager would refuse.
+        containerOn.value,
         startEngine.value,
       )
       // sessions.start resolves once the CLI is spawned, not once it has proven

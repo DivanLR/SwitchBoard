@@ -45,7 +45,7 @@ import { readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
 import { HostedSession, type PermissionGate, type SessionHost } from './session'
 import { switchboardMcp } from './inter-session'
 import { probeAvailableModels } from './model-catalog'
-import { CODEX_MISSING_MESSAGE, resolveCodexExecutable } from './codex-executable'
+import { CODEX_MISSING_MESSAGE, codexInstalled } from './codex-executable'
 import { probeCodexModels } from './codex-catalog'
 import { CodexSession } from './codex-session'
 import { foldModelTotals, type EventSink } from './message-mapper'
@@ -953,7 +953,7 @@ export class SessionManager {
     }
     // The other engine's CLI, checked here for the same reason: fail before a row
     // exists rather than after one is on screen claiming to be working.
-    if (engine === 'codex' && !resolveCodexExecutable()) {
+    if (engine === 'codex' && !codexInstalled()) {
       throw { code: 'NOT_FOUND', message: CODEX_MISSING_MESSAGE } satisfies IpcError
     }
 
@@ -965,7 +965,8 @@ export class SessionManager {
     // is resumed in from pointing at two different sessions.
     let resumeFromSessionId: string | undefined
     if (resume) {
-      const previous = this.repos.sessions.latestEndedForProject(projectId)
+      // Same engine only: a resume id is meaningless to the other CLI.
+      const previous = this.repos.sessions.latestEndedForProject(projectId, engine)
       resumeSdkSessionId = previous?.sdkSessionId ?? undefined
       resumeFromSessionId = previous?.id
     }
@@ -1525,6 +1526,11 @@ export class SessionManager {
     const session = await this.startSession(projectId, false, undefined, undefined, {
       containerised,
       background: true,
+      // Sections are Claude-only work: they rely on containers, the permission
+      // gate and the section prompts, none of which a Codex session has. Pinned
+      // rather than inherited, or a developer whose DEFAULT engine is Codex
+      // would find every section refused by the container guard.
+      engine: 'claude',
     })
     const entry = this.hosted.get(session.id)
     if (entry) entry.sectionKind = kind
@@ -2249,6 +2255,8 @@ export class SessionManager {
       session = await this.startSession(projectId, false, undefined, undefined, {
         containerised: true,
         background: true,
+        // Claude-only, for the same reason as every other section start above.
+        engine: 'claude',
         // Sequential by construction — see this key's own comment in
         // wslc-sandbox.ts for why sharing one node_modules volume across the
         // whole run is safe here and nowhere else.
@@ -2562,7 +2570,11 @@ export class SessionManager {
     this.revivedAt.set(projectId, Date.now())
     void (async () => {
       try {
-        const revived = await this.startSession(projectId, true)
+        // The engine the crashed session was on, not the current default: a
+        // resume carries that session's own id, which only its own CLI can read.
+        const revived = await this.startSession(projectId, true, undefined, undefined, {
+          engine: entry.row.engine,
+        })
         // The nudge is the point: a resumed session is live but idle, and an idle
         // session supervises nothing. Said plainly, including what killed the last
         // one, because the transcript it resumes ends mid-thought with no record of

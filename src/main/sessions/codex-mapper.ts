@@ -132,7 +132,27 @@ export class CodexMapper {
 
   /** Emits a fatal error event; called by the session wrapper on process death. */
   fatalError(text: string): void {
+    this.closeOpenItems(text)
     this.sink.append('error', { text, fatal: true })
+  }
+
+  /**
+   * Mark every tool row still waiting for its completed half as failed.
+   *
+   * A command that was running when Codex died has an `item.started` row and no
+   * `item.completed` to answer it. Left alone the row sits in the transcript
+   * looking like work still in progress, for ever, and the map keeps the entry
+   * into the next turn where a reused id would update the wrong row.
+   */
+  private closeOpenItems(reason: string): void {
+    for (const [, open] of this.openItems) {
+      this.sink.update(
+        open.eventId,
+        { ...open.payload, resultPreview: previewOf(reason), isError: true },
+        { persist: true },
+      )
+    }
+    this.openItems.clear()
   }
 
   private itemStarted(item: CodexItem): void {
@@ -224,6 +244,10 @@ export class CodexMapper {
         },
       })
     }
+    // Anything still open at the end of a turn never got its completed half.
+    // Clearing here is what stops an id reused by the next turn from updating a
+    // row that belongs to the last one.
+    this.closeOpenItems('no result reported')
     this.sink.append('result', {
       totalCostUsd: 0,
       usage: { inputTokens: input, outputTokens: output },
@@ -233,7 +257,9 @@ export class CodexMapper {
   }
 
   private turnFailed(event: CodexEvent): void {
-    this.sink.append('error', { text: textOf(event.error) || 'Codex turn failed', fatal: false })
+    const text = textOf(event.error) || 'Codex turn failed'
+    this.closeOpenItems(text)
+    this.sink.append('error', { text, fatal: false })
     this.sink.append('result', { totalCostUsd: 0, usage: {}, durationMs: 0 })
     this.options.onTurnComplete?.()
   }

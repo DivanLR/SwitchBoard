@@ -15,7 +15,7 @@
 import { spawn, type IPty } from '@lydell/node-pty'
 import type { SessionEngine } from '@shared/domain'
 import { resolveClaudeExecutable } from '@main/sessions/claude-executable'
-import { resolveCodexExecutable } from '@main/sessions/codex-executable'
+import { codexInstalled } from '@main/sessions/codex-executable'
 
 export interface PtyCallbacks {
   onData: (id: string, data: string) => void
@@ -58,11 +58,18 @@ export function defaultShell(): string {
  */
 export function launchCommand(engine: SessionEngine | 'shell'): string | null {
   if (engine === 'shell') return null
-  if (engine === 'codex') return resolveCodexExecutable() ? 'codex' : null
-  // Quoted: the Claude executable lives under the user's home directory, which
-  // routinely contains a space.
+  // `codex` by name, not by resolved path: this goes to a SHELL, which finds it
+  // on the PATH and can run the `.cmd` shim that `spawn` cannot (see
+  // codex-executable.ts for why the spawn path needs more than a name).
+  if (engine === 'codex') return codexInstalled() ? 'codex' : null
   const claude = resolveClaudeExecutable()
-  return claude ? `& "${claude}"` : null
+  if (!claude) return null
+  // Quoted, because the Claude executable lives under the user's home directory
+  // and that routinely contains a space. No leading `&`: that is PowerShell's
+  // call operator, and defaultShell() returns cmd.exe on Windows and sh
+  // elsewhere, where a bare `&` is a syntax error that kills the launch. A
+  // quoted path on its own line is how both of those shells run a program.
+  return `"${claude}"`
 }
 
 export class PtyHost {
@@ -99,10 +106,19 @@ export class PtyHost {
     const terminal: LiveTerminal = { pty, scrollback: '', cwd: input.cwd }
     this.terminals.set(input.id, terminal)
     pty.onData((data) => {
+      // Same ownership rule as onExit below: a replaced pty's last bytes must not
+      // be pushed into the pane now showing its successor.
+      if (this.terminals.get(input.id) !== terminal) return
       terminal.scrollback = (terminal.scrollback + data).slice(-SCROLLBACK_LIMIT)
       this.callbacks.onData(input.id, data)
     })
     pty.onExit(({ exitCode }) => {
+      // Only if this pty is still the one mapped to that id. `kill()` is
+      // asynchronous and the Terminal tab's restart closes and immediately
+      // reopens the same id, so a dead pty's exit can land after its replacement
+      // is in the map — deleting it there would leave every later write, resize
+      // and close silently targeting nothing.
+      if (this.terminals.get(input.id) !== terminal) return
       this.terminals.delete(input.id)
       this.callbacks.onExit(input.id, exitCode)
     })

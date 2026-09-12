@@ -65,3 +65,9 @@ AGENTS.md
 # Design review screenshots, regenerated on demand by tests/e2e/shots.spec.ts.
 # Generated output, so the same rule as out/ and release/ applies.
 .impeccable/shots/
+
+# Agent tooling caches, not project source. Two commits have accidentally swept
+# these in via `git add -A`; ignoring them makes that impossible rather than
+# something to remember.
+.agents/
+skills-lock.json
