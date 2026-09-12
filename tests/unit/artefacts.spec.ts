@@ -1,6 +1,3 @@
-// Reading a run's real artefacts instead of trusting what the session said about
-// them. The whole point of these tests is the disagreement case: a report line is
-// schema-valid whether or not it is true, so the file has to be able to overrule it.
 import { describe, expect, it } from 'vitest'
 import { emptyVerifyReport, verifyVerdict, type VerifyReport } from '@shared/domain'
 import {
@@ -33,8 +30,6 @@ const STRYKER = JSON.stringify({
         { status: 'Killed' },
         { status: 'Timeout' },
         { status: 'Survived' },
-        // Excluded from the score: these are artefacts of mutating, not evidence
-        // about the tests.
         { status: 'CompileError' },
         { status: 'RuntimeError' },
       ],
@@ -53,8 +48,6 @@ describe('artefact parsing', () => {
   })
 
   it("computes Stryker's documented score: detected over valid", () => {
-    // detected = Killed(2) + Timeout(1) = 3; undetected = Survived(1) + NoCoverage(1) = 2;
-    // valid = 5, so 60%. CompileError and RuntimeError are excluded from both.
     expect(parseStryker(STRYKER)).toEqual({ score: 60, detected: 3, valid: 5 })
   })
 
@@ -62,7 +55,7 @@ describe('artefact parsing', () => {
     expect(parseTrx('<TestRun />')).toBeNull()
     expect(parseTrx('not xml at all')).toBeNull()
     expect(parseCobertura('<coverage branch-rate="0.5" />')).toBeNull()
-    expect(parseCobertura('<coverage line-rate="7" />')).toBeNull() // a rate is 0..1
+    expect(parseCobertura('<coverage line-rate="7" />')).toBeNull() 
     expect(parseStryker('{')).toBeNull()
     expect(parseStryker('{"files":{}}')).toBeNull()
     expect(parseStryker(JSON.stringify({ files: { a: { mutants: [{ status: 'CompileError' }] } } }))).toBeNull()
@@ -128,7 +121,6 @@ describe('settling a report against its artefacts', () => {
     expect(settled.report.suites[0].detail).toContain('2 failed')
     expect(settled.disagreements).toHaveLength(1)
     expect(settled.disagreements[0].about).toBe('dotnet-unit')
-    // ...and the run's verdict follows the artefact, not the claim.
     expect(verifyVerdict(settled.report)).toBe('fail')
   })
 
@@ -168,8 +160,6 @@ describe('settling a report against its artefacts', () => {
   })
 
   it('does not let a test-runner artefact speak for a suite it knows nothing about', () => {
-    // The endpoint pass and the browser suites are prose instructions; no TRX file
-    // is evidence about them, so a failing TRX must not silently fail them too.
     const settled = reconcile(
       reported({
         suites: [

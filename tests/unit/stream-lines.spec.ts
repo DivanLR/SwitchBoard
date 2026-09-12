@@ -1,5 +1,3 @@
-// The raw view's promise is "100% of the output" (FR-018), so what matters here
-// is that no event kind renders as nothing and that streaming keys stay stable.
 import { describe, expect, it } from 'vitest'
 import type { EventKind, SessionEvent } from '@shared/domain'
 import { rawLinesOf, toRawLines } from '@shared/stream-lines'
@@ -21,14 +19,9 @@ describe('rawLinesOf', () => {
     expect(rawLinesOf(event('prompt', { text: 'do the thing' }))).toEqual(['❯ do the thing'])
     expect(rawLinesOf(event('error', { text: 'it broke' }))).toEqual(['✗ it broke'])
     expect(rawLinesOf(event('question', { text: 'which one?' }))).toEqual(['? which one?'])
-    // An empty payload still renders, and says only what it knows.
     expect(rawLinesOf(event('result', {}))).toEqual(['✓ turn complete'])
   })
 
-  // THE FIGURES, NOT A STAND-IN FOR THEM. This case printed the bare string
-  // `✓ turn complete` and discarded the duration, cost and token count the
-  // payload was already carrying — in the one view whose promise is that it
-  // shows what the session actually reported.
   it('states what the turn cost, in the view that promises the whole output', () => {
     const lines = rawLinesOf(
       event('result', {
@@ -40,9 +33,6 @@ describe('rawLinesOf', () => {
     expect(lines).toEqual(['✓ turn complete · 1.2s · $0.42 · 140 tok'])
   })
 
-  // A partial payload degrades a part at a time rather than all at once, and a
-  // missing `usage` must not throw: the raw view calls this on whatever is in
-  // the event log, including rows written by an older schema.
   it('drops only the parts it has no figure for', () => {
     expect(rawLinesOf(event('result', { durationMs: 900 }))).toEqual([
       '✓ turn complete · 0.9s',
@@ -50,8 +40,6 @@ describe('rawLinesOf', () => {
     expect(rawLinesOf(event('result', { totalCostUsd: 0.5, usage: {} }))).toEqual([
       '✓ turn complete · $0.50',
     ])
-    // Zero is not a reading worth a column: a free turn says nothing about cost
-    // rather than claiming $0.00.
     expect(rawLinesOf(event('result', { durationMs: 0, totalCostUsd: 0 }))).toEqual([
       '✓ turn complete',
     ])
@@ -74,8 +62,6 @@ describe('rawLinesOf', () => {
     ])
   })
 
-  // The CLI shows `Read(src/main/index.ts)`. This view used to show the tool's
-  // whole input as escaped JSON, which is not what any terminal prints.
   it('names the tool by the argument that identifies the call, not its whole input', () => {
     expect(
       rawLinesOf(
@@ -93,7 +79,6 @@ describe('rawLinesOf', () => {
         }),
       ),
     ).toEqual(['⏺ Bash(npm run check)'])
-    // A tool with no known identifying field keeps the JSON: a blob beats nothing.
     expect(
       rawLinesOf(event('tool_activity', { toolName: 'Mystery', inputPreview: '{"a":1}' })),
     ).toEqual(['⏺ Mystery({"a":1})'])
@@ -130,15 +115,12 @@ describe('rawLinesOf', () => {
     expect(rawLinesOf(event('permission_marker', { status: 'denied', title: 'ls' }))).toEqual([
       '✗ denied · ls',
     ])
-    // Auto-approval by a standing rule is an approval, not a refusal.
     expect(rawLinesOf(event('permission_marker', { status: 'rule_approved', title: 'ls' }))).toEqual([
       '✓ rule_approved · ls',
     ])
   })
 
   it('never renders an event as nothing, whatever its kind', () => {
-    // The raw view keeps everything; a kind falling through the switch must still
-    // produce a line rather than disappearing from the transcript.
     const kinds: EventKind[] = [
       'prompt',
       'assistant_text',

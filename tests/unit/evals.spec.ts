@@ -1,5 +1,3 @@
-// Eval loop (spec 002 US7): the acceptance line, its check outcome, and the
-// developer's verdict + 1-5 rating are the whole record for a small change.
 import { describe, expect, it } from 'vitest'
 import { openDatabase } from '@main/store/db'
 import { createRepositories } from '@main/store/repositories'
@@ -50,7 +48,6 @@ describe('EvalsRepo', () => {
     repos.evals.update(run.id, { rating: 4, note: 'close' })
     const afterVerdict = repos.evals.update(run.id, { verdict: 'pass' })
     expect(afterVerdict).toMatchObject({ verdict: 'pass', rating: 4, note: 'close' })
-    // The check outcome is independent of the human verdict.
     expect(afterVerdict?.checkStatus).toBe('not_run')
     expect(repos.evals.update(run.id, { checkStatus: 'fail' })?.verdict).toBe('pass')
   })

@@ -1,5 +1,3 @@
-// T027: standing always-allow rules — matcher derivation, matching semantics,
-// revocation, and evaluation order (FR-009a/009b).
 import { describe, expect, it } from 'vitest'
 import type { PermissionRule } from '@shared/domain'
 import { deriveMatcher, evaluateStandingRules, matchesRule } from '@main/inbox/standing-rules'
@@ -65,13 +63,10 @@ describe('matchesRule', () => {
 
   it('rejects directory-traversal that resolves outside the glob base', () => {
     const rule = makeRule({ toolName: 'Read', matcher: { kind: 'path_glob', value: 'C:\\proj\\**' } })
-    // Resolves to C:\Users\victim\.ssh\id_rsa — outside C:\proj — must NOT match.
     expect(
       matchesRule(rule, 'Read', { file_path: 'C:\\proj\\..\\..\\Users\\victim\\.ssh\\id_rsa' }),
     ).toBe(false)
-    // A legitimate nested path still matches.
     expect(matchesRule(rule, 'Read', { file_path: 'C:\\proj\\src\\a.ts' })).toBe(true)
-    // A sibling folder with a shared prefix must not match (prefix confusion).
     expect(matchesRule(rule, 'Read', { file_path: 'C:\\proj-evil\\secret' })).toBe(false)
   })
 
@@ -100,12 +95,6 @@ describe('evaluateStandingRules', () => {
   })
 })
 
-// A prefix rule is a promise about ONE command. A shell runs several, and the
-// plain startsWith test approved every one of them: "always allow npm install"
-// silently approved a command that starts with those eleven characters and then
-// chains something else entirely. Nothing downstream caught it — a standing match
-// sets autoApproved ahead of the risk classifier, and the dangerous-command check
-// runs when a rule is CREATED, never when one is matched.
 describe('a command_prefix rule approves one command, not a chain', () => {
   const rule = (value: string): PermissionRule =>
     ({
@@ -135,8 +124,6 @@ describe('a command_prefix rule approves one command, not a chain', () => {
   })
 
   it('refuses even when the operator is quoted, because guessing wrong runs code', () => {
-    // A false positive costs one trip to the inbox. A false negative costs the
-    // machine, so this errs toward asking.
     expect(matchesRule(rule('echo'), 'Bash', { command: 'echo "a && b"' })).toBe(false)
   })
 

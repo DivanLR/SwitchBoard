@@ -1,8 +1,3 @@
-// Seeds a throwaway userData directory for the real-Electron test, using the
-// app's OWN schema, migrations and repositories rather than hand-written SQL —
-// a seed that drifts from the real schema would prove nothing about the real app.
-//
-// Runs in the Playwright Node context (not the renderer), before the app launches.
 import { execSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -13,26 +8,15 @@ import { parseVerifyReport, VERIFY_MARKER } from '../../src/main/evals/verify-di
 import { verifyVerdict, DEFAULT_SETTINGS } from '../../src/shared/domain'
 
 export interface SeededApp {
-  /** Passed to Electron as --user-data-dir, so the real database is never touched. */
   userDataDir: string
   projectId: string
   projectPath: string
 }
 
-/**
- * A project that detects as .NET, with an active session row already present.
- *
- * The session row matters: `verify.start` reuses an active session instead of
- * spawning one, so the test drives the real failing call without starting a real
- * Claude session or spending tokens.
- */
 export function seedRealApp(): SeededApp {
   const userDataDir = mkdtempSync(join(tmpdir(), 'switchboard-realapp-'))
   const projectPath = mkdtempSync(join(tmpdir(), 'switchboard-dotnet-'))
 
-  // A solution file marks the stack; the Controllers folder and the routed
-  // MapControllers call mark it as an API rather than a Blazor front end, so the
-  // Tests section offers the endpoint suites and none of the browser ones.
   mkdirSync(join(projectPath, 'Controllers'), { recursive: true })
   writeFileSync(join(projectPath, 'Sample.Api.sln'), '\n')
   writeFileSync(
@@ -59,8 +43,6 @@ export function seedRealApp(): SeededApp {
     projectId: project.id,
     engine: 'claude',
     sdkSessionId: null,
-    // 'done' is the schema's idle-but-alive state; the row has endedAt null, so
-    // activeForProject finds it and verify.start reuses it instead of spawning.
     status: 'done',
     statusDetail: null,
     branch: 'main',
@@ -75,15 +57,6 @@ export function seedRealApp(): SeededApp {
     bypassPermissions: false,
   })
 
-  // An assistant message carrying a fenced code block, so the real app has a
-  // real code card to click. Seeded here rather than pushed at runtime because
-  // the real app has no mock host: the only way to get a stream event into it
-  // without starting a paid Claude session is to put one in its database.
-  //
-  // This exists for the clipboard test. Copying was broken for two releases by a
-  // main-process permission handler, and the mock-host suite could not see it —
-  // it renders the same renderer in a plain browser, where Chromium's own
-  // permission model applies. The regression is only visible from here.
   repos.events.insert({
     id: 'seeded-code-event',
     sessionId: 'seeded-session',
@@ -93,9 +66,6 @@ export function seedRealApp(): SeededApp {
       text: ['Here is the resolver:', '', '```ts', 'const timeout = input.timeout ?? 5_000', '```'].join(
         '\n',
       ),
-      // Required, and not incidental: an event whose `partial` is undefined is
-      // treated as a message still arriving, and the clean view renders a
-      // settled one differently.
       partial: false,
     },
     noiseKind: null,
@@ -103,7 +73,6 @@ export function seedRealApp(): SeededApp {
   })
   repos.events.flush()
 
-  // Land straight on the .NET stack: the picker is not what is under test.
   repos.settings.set({ ...DEFAULT_SETTINGS, projectTestStacks: { [project.id]: 'dotnet' } })
 
   seedFinishedRun(repos, project.id)
@@ -112,16 +81,6 @@ export function seedRealApp(): SeededApp {
   return { userDataDir, projectId: project.id, projectPath }
 }
 
-/**
- * A finished run whose report is produced by the REAL parser from a marker line,
- * exactly as a session's output is.
- *
- * Hand-building a VerifyReport object would skip the parser and prove only that
- * the template renders a literal. Going through parseVerifyReport means the whole
- * path is exercised: marker line, parser, database, IPC, real renderer. The figures
- * are illustrative rather than measured, which is why this only ever runs against
- * a throwaway userData directory.
- */
 function seedFinishedRun(repos: ReturnType<typeof createRepositories>, projectId: string): void {
   const line = `${VERIFY_MARKER}: ${JSON.stringify({
     suites: [

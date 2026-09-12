@@ -1,7 +1,3 @@
-// The diagram-design skill states what it is about to draw — visual type, semantic
-// pattern, size preset, and what the complexity budget forced out — and then draws.
-// That sentence says what the picture was TRYING to be, which is what the Diagrams
-// section needs in order to be judged, and it used to scroll past in the transcript.
 import { describe, expect, it } from 'vitest'
 import { DIAGRAM_PLAN_MARKER, parseDiagramPlan } from '@shared/diagram'
 
@@ -29,8 +25,6 @@ describe('parseDiagramPlan', () => {
     })
   })
 
-  // A skill version that announces nothing must not leave an empty strip above
-  // every diagram: no facts is no plan.
   it('treats an empty plan as no plan', () => {
     expect(parseDiagramPlan(line('{"type":"","pattern":null,"cuts":[]}'))).toBeNull()
   })
@@ -45,8 +39,6 @@ describe('parseDiagramPlan', () => {
     expect(parseDiagramPlan(line('{"type": "flow"'))).toBeNull()
   })
 
-  // Prose after the object is normal: the model keeps talking. Brace matching has
-  // to stop at the object's own close rather than the last brace in the message.
   it('stops at the end of the object, not the end of the message', () => {
     const plan = parseDiagramPlan(
       `${line('{"type":"flow","cuts":["error branches"]}')}\nNow drawing it. {not json}`,

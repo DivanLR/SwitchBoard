@@ -1,10 +1,3 @@
-// The real terminal's transport half: the only place the Terminal tab talks to
-// the main process (stores are the sole callers of `invoke`).
-//
-// Deliberately thin. There is no state worth caching here — the bytes belong to
-// the xterm instance in the component, which is the thing that actually knows
-// how to interpret them — so this store owns the calls and the subscription, and
-// hands the data straight to whoever is listening.
 import { reactive } from 'vue'
 import type { SessionEngine } from '@shared/domain'
 import { invoke } from '@renderer/ipc'
@@ -15,15 +8,12 @@ type ExitListener = (exitCode: number) => void
 const dataListeners = new Map<string, Set<DataListener>>()
 const exitListeners = new Map<string, Set<ExitListener>>()
 const state = reactive({
-  /** Terminals this window has opened, so the tab knows whether it is resuming. */
   open: new Set<string>(),
 })
 
 const store = {
   state,
 
-  /** Output arriving from the main process, routed to whoever is showing that
-   *  terminal. Called by App.vue, which owns every push subscription. */
   applyData(push: { id: string; data: string }): void {
     for (const listener of dataListeners.get(push.id) ?? []) listener(push.data)
   },
@@ -33,7 +23,6 @@ const store = {
     for (const listener of exitListeners.get(push.id) ?? []) listener(push.exitCode)
   },
 
-  /** Subscribe to one terminal's output. Returns the unsubscribe. */
   onData(id: string, listener: DataListener): () => void {
     const set = dataListeners.get(id) ?? new Set<DataListener>()
     dataListeners.set(id, set)

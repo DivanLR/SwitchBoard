@@ -1,7 +1,3 @@
-// Finding a project's endpoints, and finding where to call them.
-//
-// Both answers come from the project's own files, so the API panel is populated
-// before anything is started and without asking a model what the routes are.
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
 import { scanEndpoints, type ApiTarget, type DiscoveredEndpoint } from '@shared/api-endpoints'
@@ -26,27 +22,12 @@ const SKIP = new Set([
   'wwwroot',
 ])
 
-/** Files worth reading: where routes are declared, and nothing else. */
 const EXTENSIONS = ['.cs', '.http', '.ts', '.js']
 
-/** Bounds, so a scan of a large monorepo stays a keystroke rather than a wait. */
 const MAX_FILES = 1500
 const MAX_DEPTH = 8
 const MAX_BYTES = 512 * 1024
 
-/**
- * Every route declared under `root`, with the file and line it came from.
- *
- * Deliberately bounded rather than exhaustive: past MAX_FILES the scan stops and
- * says how many files it read, because a truncated list the developer can search
- * is useful and a five-second scan of a monorepo is not.
- *
- * Asynchronous because it runs in the main process, on the thread that draws the
- * window. The bound above caps the work but not its cost: reading 1500 files
- * synchronously froze the whole app — every window, every other session's stream
- * — for as long as the disk took. Awaiting yields between files instead, so a
- * slow scan makes the API panel late rather than making the app stop.
- */
 export async function scanProjectEndpoints(root: string): Promise<{
   endpoints: DiscoveredEndpoint[]
   filesRead: number
@@ -88,7 +69,6 @@ export async function scanProjectEndpoints(root: string): Promise<{
           text: await readFile(full, 'utf8'),
         })
       } catch {
-        // Unreadable file: a scan is a convenience, never a blocker.
       }
     }
   }
@@ -97,33 +77,15 @@ export async function scanProjectEndpoints(root: string): Promise<{
   return { endpoints: scanEndpoints(files), filesRead: files.length, truncated }
 }
 
-/** Where the run sends its calls, and how to get the server up if it is not. */
 export interface ApiHost {
   baseUrl: string
-  /** Shell command that starts the API, or null when it must already be running. */
   startCmd: string | null
-  /** Working directory for `startCmd`. */
   cwd: string
-  /** Where these values came from, shown in the panel so nothing is magic. */
   from: string
-  /** Which environment this is, so the run knows what it may do to it. */
   target: ApiTarget
-  /**
-   * Headers every call carries, already resolved — the deployed environment's API
-   * key, typically. Null for a local run, which needs none.
-   */
   headers: Record<string, string> | null
 }
 
-/**
- * `Name: value` lines with `${VAR}` resolved from the environment.
- *
- * Unresolved is an ERROR, never a header sent as written. A literal `${QA_API_KEY}`
- * would reach the environment as an API key, be rejected, and the whole run would
- * read as "QA rejects every call" when the real fault is a variable that is not
- * set in this process. Naming the variable is the difference between a five-second
- * fix and an afternoon.
- */
 export function resolveHeaders(
   text: string | undefined,
   env: Record<string, string | undefined>,
@@ -160,38 +122,17 @@ export function resolveHeaders(
   return { headers: Object.keys(headers).length > 0 ? headers : null }
 }
 
-/**
- * Where to call this project's API, and what starts it.
- *
- * The project's own launchSettings.json is the authority: the port in it is the
- * port the API listens on, and ASPNETCORE_URLS is forced to that same URL when
- * the run launches the API, so the port is a fact rather than a guess. An
- * explicit setting always wins, and when neither exists the failure asks for a
- * base URL rather than guessing a port.
- *
- * Asynchronous for the same reason scanProjectEndpoints is: the local branch walks
- * the project tree looking for launchSettings.json, and doing that synchronously
- * blocks the thread that draws the window — every other session's stream with it.
- * The QA branch touches no disk and returns before any of that.
- */
 export async function resolveApiHost(
   root: string,
   override: {
     baseUrl?: string
     startCmd?: string
-    /** 'qa' resolves the deployed environment instead of the local one. */
     target?: ApiTarget
-    /** The QA base URL for this project, and the headers it needs. */
     qaBaseUrl?: string
     qaHeaders?: string
-    /** Process environment the `${VAR}` references resolve against. */
     env?: Record<string, string | undefined>
   },
 ): Promise<ApiHost | { error: string }> {
-  // A deployed environment is resolved on its own terms and nothing else's: no
-  // launchSettings fallback, no start command, so there is no path by which a run
-  // against QA can start a server. That is a safety property of this branch being
-  // separate, not a detail of it.
   if (override.target === 'qa') {
     const qaUrl = override.qaBaseUrl?.trim().replace(/\/+$/, '') || null
     if (!qaUrl) {
@@ -213,9 +154,6 @@ export async function resolveApiHost(
   }
   const chosenUrl = override.baseUrl?.trim().replace(/\/+$/, '') || null
   const chosenCmd = override.startCmd?.trim() || null
-  // Looked up even when a base URL is set: a developer who typed a URL still
-  // wants the API started for them, and launchSettings is where the command
-  // that starts it comes from.
   const launch = await findLaunchSettings(root)
   const baseUrl = chosenUrl ?? launch?.url ?? null
   if (!baseUrl) {
@@ -243,12 +181,6 @@ interface LaunchSettings {
   source: string
 }
 
-/**
- * The first launchSettings.json under the root holding an http:// applicationUrl.
- *
- * http rather than https on purpose: a dev HTTPS certificate the run does not
- * trust fails in a way that reads as the API being broken when it is not.
- */
 async function findLaunchSettings(root: string): Promise<LaunchSettings | null> {
   const depth = 4
   const queue: { dir: string; depth: number }[] = [{ dir: root, depth: 0 }]
@@ -278,7 +210,6 @@ async function findLaunchSettings(root: string): Promise<LaunchSettings | null> 
       try {
         if ((await stat(full)).isDirectory()) queue.push({ dir: full, depth: level + 1 })
       } catch {
-        // Not a directory, or gone since the listing.
       }
     }
   }

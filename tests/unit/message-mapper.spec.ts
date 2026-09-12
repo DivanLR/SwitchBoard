@@ -1,5 +1,3 @@
-// T016: every contracts/session-events.md mapping row, ordering, and in-place
-// update behaviour of the message mapper.
 import { describe, expect, it } from 'vitest'
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { EventKind, EventPayloadMap, SessionEvent } from '@shared/domain'
@@ -123,7 +121,6 @@ describe('MessageMapper (contracts/session-events.md)', () => {
     expect(sink.persisted.has(partialId)).toBe(false)
     expect(sink.updates.at(-1)?.payload).toEqual({ text: 'Hello', partial: true })
 
-    // The final assistant message replaces its partials by the same event id.
     mapper.handle(assistantText('Hello there'))
     expect(sink.appended).toHaveLength(1)
     const finalUpdate = sink.updates.at(-1)
@@ -188,10 +185,6 @@ describe('MessageMapper (contracts/session-events.md)', () => {
     expect((sink.updates.at(-1)?.payload as { isError: boolean }).isError).toBe(true)
   })
 
-  // Was "ignores plain user text". It did, and that was the defect: everything
-  // injected into the conversation arrives in exactly this shape, so dropping it
-  // meant the raw view could not show the largest category of what the model
-  // read. Only an echo of a message the wrapper just delivered is dropped now.
   it('surfaces plain user text as injected context', () => {
     const { sink, mapper } = makeMapper()
     mapper.handle(
@@ -301,8 +294,6 @@ describe('MessageMapper (contracts/session-events.md)', () => {
     expect(sink.appended.map((e) => e.seq)).toEqual([1, 2, 3])
   })
 
-  // The cap is a backstop against a pathological single field, not a display
-  // budget: an ordinary build log or file read has to survive it whole.
   it('truncates only past the storage ceiling', () => {
     expect(previewOf('x'.repeat(1000))).toHaveLength(1000)
     expect(previewOf('x'.repeat(200_000)).length).toBeLessThan(200_000)
@@ -354,8 +345,6 @@ describe('subagent attribution (parent_tool_use_id)', () => {
     mapper.handle(delta('done'))
     mapper.handle(resultSuccess({ result: 'Main done' }))
 
-    // The main partial finalised to 'Main done' and was upgraded to the turn
-    // summary; the subagent's partial finalised untouched with its agentId.
     const mainEvent = sink.appended.find((e) => e.kind === 'summary')
     const agentEvent = sink.appended.find(
       (e) => (e.payload as { agentId?: string }).agentId === 'tu-9',
@@ -366,12 +355,6 @@ describe('subagent attribution (parent_tool_use_id)', () => {
   })
 })
 
-// A sink that tags swallowable events with the real classifier, then carries
-// the tag through the mapper's assistant_text -> summary upgrade (as the old
-// code did) WITHOUT clearing it. This deliberately isolates the progress-rule
-// fix: if the rule regressed to matching assistant_text, the upgraded summary
-// would carry a noiseKind and this test would fail. A truthy noiseKind is what
-// the clean view swallows.
 class ClassifyingSink implements EventSink {
   seq = 0
   byId = new Map<string, SessionEvent>()
@@ -401,8 +384,6 @@ class ClassifyingSink implements EventSink {
 }
 
 describe('the /usage response is not hidden by the clean view (regression)', () => {
-  // The real response captured from a session: a summary event, dominated by
-  // percentages, that the old bare-percentage progress rule tagged as noise.
   const USAGE_RESPONSE = [
     'You are currently using your subscription to power your Claude Code usage',
     '',
@@ -415,14 +396,11 @@ describe('the /usage response is not hidden by the clean view (regression)', () 
   it('classifies the upgraded summary as visible (noiseKind null)', () => {
     const sink = new ClassifyingSink()
     const mapper = new MessageMapper({ sink })
-    // Same sequence the CLI emits for /usage: the text arrives as assistant
-    // output, then the success result (identical text) upgrades it to a summary.
     mapper.handle(assistantText(USAGE_RESPONSE))
     mapper.handle(resultSuccess({ result: USAGE_RESPONSE }))
 
     const summary = [...sink.byId.values()].find((e) => e.kind === 'summary')
     expect(summary).toBeDefined()
-    // A truthy noiseKind would collapse it into a swallowed block; null renders.
     expect(summary?.noiseKind).toBeNull()
   })
 
@@ -460,7 +438,6 @@ describe('the /usage response is not hidden by the clean view (regression)', () 
         costUSD: 0.02,
       },
     }
-    // Turn 2's snapshot is cumulative (includes turn 1), as the SDK sends it.
     const turn2 = {
       'claude-opus-4-8': {
         inputTokens: 180,
@@ -473,7 +450,6 @@ describe('the /usage response is not hidden by the clean view (regression)', () 
     let totals = foldModelTotals({}, turn1)
     expect(totals['claude-opus-4-8']).toEqual({ tokens: 1350, costUsd: 0.02 })
     totals = foldModelTotals(totals, turn2)
-    // Must equal the latest cumulative snapshot (2370), NOT 1350 + 2370.
     expect(totals['claude-opus-4-8']).toEqual({ tokens: 2370, costUsd: 0.035 })
   })
 
@@ -486,9 +462,6 @@ describe('the /usage response is not hidden by the clean view (regression)', () 
     expect(totals['claude-opus-4-8']).toEqual({ tokens: 15, costUsd: 0.001 })
   })
 
-  // The raw view's promise is 100% of what the session saw. Before these, the
-  // mapper read only the tool_result blocks out of a user message and dropped
-  // every injected block, and clipped every tool result at 400 characters.
   describe('injected context', () => {
     const userText = (...texts: string[]): SDKMessage =>
       asMessage({

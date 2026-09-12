@@ -1,5 +1,3 @@
-// Background tasks + subagents: visibility, capping, and the summary-suppression
-// gate while background work runs.
 import { expect, test } from '@playwright/test'
 import { installMockHost, twoProjectScenario } from './mock-host'
 
@@ -23,10 +21,6 @@ test('background tasks show as a card + header pill', async ({ page }) => {
   await expect(page.getByTestId('bg-task-row')).toHaveCount(2)
 })
 
-// A task the CLI never reported as finished holds the session out of 'done' for
-// ever, and the app cannot tell that apart from work still running — the set is a
-// level signal the SDK forbids correlating with the per-task edges. So the
-// developer gets to say so, and the card goes with it.
 test('a task that never reported can be cleared, and the session settles', async ({ page }) => {
   await page.evaluate(() =>
     window.__mock.setBackgroundTasks('s-alpha', [
@@ -44,7 +38,6 @@ test('a task that never reported can be cleared, and the session settles', async
 test('a large background fan-out is capped with a show-all toggle', async ({ page }) => {
   const many = Array.from({ length: 11 }, (_, i) => ({ taskId: `t${i}`, description: `task ${i}` }))
   await page.evaluate((tasks) => window.__mock.setBackgroundTasks('s-alpha', tasks), many)
-  // Only the first 6 show; a "+5 more" / toggle reveals the rest.
   await expect(page.getByTestId('bg-task-row')).toHaveCount(6)
   await expect(page.getByTestId('bg-task-more')).toContainText('5 more')
   await page.getByTestId('bg-task-toggle').click()
@@ -61,15 +54,9 @@ test('interim summaries are hidden while background work runs; turn-complete sta
     window.__mock.emitEvent('s-alpha', 'summary', { text: 'Slice 1 back. Five auditors running.' })
     window.__mock.emitEvent('s-alpha', 'result', { totalCostUsd: 3.26, durationMs: 8300, usage: {} })
   })
-  // The turn-complete line shows; the interim summary card does not.
   await expect(page.getByTestId('result-event')).toBeVisible()
   await expect(page.getByTestId('stream').getByTestId('stream-event-summary')).toHaveCount(0)
 
-  // Once background work settles, the suppression lifts and BOTH render. Hiding is
-  // about the moment, not the content: the interim summary was noise while five
-  // auditors were still reporting, and is history once they are done. Keeping it
-  // hidden for the rest of the session meant the developer could not scroll back to
-  // what the agent said during the fan-out, which is the bug this asserts against.
   await page.evaluate(() => {
     window.__mock.setBackgroundTasks('s-alpha', [])
     window.__mock.emitEvent('s-alpha', 'summary', { text: 'All done, consolidated report.' })
@@ -83,46 +70,34 @@ test('interim summaries are hidden while background work runs; turn-complete sta
 test('Ctrl+C only stops when the composer is focused, and confirms first', async ({ page }) => {
   const input = page.getByTestId('composer-input')
 
-  // Focus elsewhere → Ctrl+C does nothing to the session.
   await page.getByTestId('session-project-name').click()
   await page.keyboard.press('Control+c')
   await expect(page.getByTestId('stop-confirm')).toHaveCount(0)
 
-  // In the composer → first Ctrl+C shows the confirm, no interrupt yet.
   await input.focus()
   await page.keyboard.press('Control+c')
   await expect(page.getByTestId('stop-confirm')).toBeVisible()
   expect(await page.evaluate(() => window.__mock.state().interrupts.length)).toBe(0)
 
-  // Second Ctrl+C confirms → interrupt is sent.
   await page.keyboard.press('Control+c')
   await expect(page.getByTestId('stop-confirm')).toHaveCount(0)
   expect(await page.evaluate(() => window.__mock.state().interrupts.length)).toBe(1)
 })
 
-// A summary written BEFORE any background work started is not interim noise, and
-// hiding it made a summary the developer had been reading disappear. The watcher
-// re-scanned the whole event list on every tick, so the first background task to
-// start retro-marked every summary already in the session, permanently.
 test('background work hides only the summaries that arrive during it', async ({ page }) => {
   await page.evaluate(() => {
     window.__mock.emitEvent('s-alpha', 'summary', { text: 'Earlier summary, before any background work' })
   })
   await expect(page.getByTestId('stream')).toContainText('Earlier summary')
 
-  // Background work starts, and posts its own interim summary.
   await page.evaluate(() => {
     window.__mock.setBackgroundTasks('s-alpha', [{ taskId: 't1', description: 'deep research' }])
     window.__mock.emitEvent('s-alpha', 'summary', { text: 'Interim chatter while researching' })
   })
   await expect(page.getByTestId('stream')).not.toContainText('Interim chatter')
 
-  // The earlier one is still there. This is the regression: it used to vanish.
   await expect(page.getByTestId('stream')).toContainText('Earlier summary')
 
-  // Once the work drains, everything is history and everything reads back: the
-  // earlier summary, the closing one, and the interim chatter that was suppressed
-  // only for as long as the work it belonged to was still running.
   await page.evaluate(() => {
     window.__mock.setBackgroundTasks('s-alpha', [])
     window.__mock.emitEvent('s-alpha', 'summary', { text: 'Final consolidated summary' })

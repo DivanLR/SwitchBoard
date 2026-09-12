@@ -1,4 +1,3 @@
-// Safe Markdown renderer for assistant responses in the clean view.
 import { describe, expect, it } from 'vitest'
 import { renderMarkdown } from '@shared/markdown'
 
@@ -12,7 +11,6 @@ describe('renderMarkdown', () => {
   it('renders a fenced code block verbatim, without inline formatting inside', () => {
     const html = renderMarkdown('```\nyagni  fold `GetTokenAsync` **here**\n```')
     expect(html).toContain('<pre class="md-pre"><code>')
-    // Markers inside the fence stay literal (no <strong>/<code> injected).
     expect(html).toContain('`GetTokenAsync`')
     expect(html).toContain('**here**')
     expect(html).not.toContain('<strong>')
@@ -44,7 +42,6 @@ describe('renderMarkdown', () => {
   })
 
   it('cannot be tricked by a forged code-span sentinel', () => {
-    // A literal NUL in the input must be stripped, not used to fabricate a span.
     const html = renderMarkdown(`${String.fromCharCode(0)}0${String.fromCharCode(0)} plain`)
     expect(html).toContain('0 plain')
   })
@@ -64,7 +61,6 @@ describe('renderMarkdown tables', () => {
     expect(html).toContain('<thead><tr><th>ID</th><th>Category</th><th>Severity</th></tr></thead>')
     expect(html).toContain('<td>C1</td>')
     expect(html).toContain('<td>MEDIUM</td>')
-    // The separator row never renders as content.
     expect(html).not.toContain('----')
   })
 

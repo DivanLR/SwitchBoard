@@ -1,15 +1,6 @@
-// Custom skills: import a repository in Settings, switch skills on and off, and
-// run one from the Skills section.
-//
-// The split under test is the one the owner asked for: Settings MANAGES them and
-// the section USES them. So the two halves are exercised together, because the
-// thing that can break is the join between them — a skill switched off in
-// Settings has to disappear from the section immediately.
 import { expect, test } from '@playwright/test'
 import { installMockHost, twoProjectScenario, type MockScenario } from './mock-host'
 
-/** What the next import "finds". Shaped like the frontmatter a real SKILL.md
- *  carries, because that is what the importer reads. */
 const FOUND = [
   {
     name: 'code-review',
@@ -48,10 +39,6 @@ test('a GitHub folder becomes a list of skills, and only github.com is accepted'
   await panel.getByTestId('settings-tab-skills').click()
   await expect(panel.getByTestId('skills-none')).toBeVisible()
 
-  // Anything that is not a github.com URL is refused BEFORE a request is made —
-  // and now before the click, too: the field reads the URL as it is typed and the
-  // button will not arm for one that cannot work. This used to cost a round trip
-  // to learn.
   await panel.getByTestId('skills-url-input').fill('https://gitlab.com/owner/repo')
   await expect(panel.getByTestId('skills-url-problem')).toContainText('github.com')
   await expect(panel.getByTestId('skills-import-btn')).toBeDisabled()
@@ -62,15 +49,9 @@ test('a GitHub folder becomes a list of skills, and only github.com is accepted'
 
   await expect(panel.getByTestId('skill-row-code-review')).toBeVisible()
   await expect(panel.getByTestId('skill-row-write-tests')).toBeVisible()
-  // Imported switched on, so the repository the developer asked for is usable
-  // without ticking every skill by hand.
   await expect(panel.getByTestId('skill-toggle-code-review')).toHaveAttribute('aria-checked', 'true')
 })
 
-// The field used to be opaque: paste anything, press Import, wait for the network
-// to tell you whether it was even a repository. It now reads the URL with the
-// importer's OWN parser (@shared/skill-source), so what will be fetched is on
-// screen before anything is fetched.
 test('the pasted URL says what it names, before anything is requested', async ({ page }) => {
   await page.addInitScript(installMockHost, twoProjectScenario())
   await page.goto('/')
@@ -79,7 +60,6 @@ test('the pasted URL says what it names, before anything is requested', async ({
   const panel = page.getByTestId('settings-panel')
   await panel.getByTestId('settings-tab-skills').click()
 
-  // An empty field is not an error, so it says nothing at all.
   await expect(panel.getByTestId('skills-url-reading')).toHaveCount(0)
   await expect(panel.getByTestId('skills-url-problem')).toHaveCount(0)
 
@@ -92,12 +72,8 @@ test('the pasted URL says what it names, before anything is requested', async ({
   await expect(reading).toContainText('main')
   await expect(reading).toContainText('skills/engineering')
 
-  // A bare repository imports all of it, and says so rather than leaving the
-  // folder blank — blank would read as "nothing will be imported".
   await panel.getByTestId('skills-url-input').fill('https://github.com/owner/repo')
   await expect(reading).toContainText('whole repository')
-  // No ref in the URL means the repository's own default, which is a fact, not
-  // a guess at "main".
   await expect(reading).toContainText('default branch')
 })
 
@@ -117,8 +93,6 @@ test('a URL that names no repository says which part is wrong', async ({ page })
   await input.fill('https://github.com/owner')
   await expect(problem).toContainText('github.com/owner/repo')
 
-  // A deep link that is neither /tree/ nor /blob/ is something this cannot read,
-  // and saying so beats "import failed".
   await input.fill('https://github.com/owner/repo/issues/4')
   await expect(problem).toContainText('/tree/')
 
@@ -140,12 +114,10 @@ test('imported skills are grouped by repository, and a whole source switches at 
   const panel = page.getByTestId('settings-panel')
   await panel.getByTestId('settings-tab-skills').click()
 
-  // The source is stated once for the group rather than on every row.
   const group = panel.getByTestId('skill-group-mattpocock/skills')
   await expect(group).toBeVisible()
   await expect(group).toContainText('2/2 on')
 
-  // One click for the whole repository, instead of one per skill.
   await panel.getByTestId('skill-group-all-mattpocock/skills').click()
   await expect(panel.getByTestId('skill-toggle-code-review')).toHaveAttribute('aria-checked', 'false')
   await expect(panel.getByTestId('skill-toggle-write-tests')).toHaveAttribute('aria-checked', 'false')
@@ -170,7 +142,6 @@ test('a skill switched off in Settings leaves the section immediately', async ({
   await panel.getByTestId('skill-toggle-write-tests').click()
   await panel.getByTestId('settings-close').click()
 
-  // One store behind both surfaces, so the section is already right.
   await expect(page.getByTestId('skill-run-code-review')).toBeVisible()
   await expect(page.getByTestId('skill-run-write-tests')).toHaveCount(0)
 })
@@ -185,7 +156,6 @@ test('running a skill sends its slash command to the Skills section session', as
 
   const sends = async () => page.evaluate(() => window.__mock.state().sends)
   await expect.poll(async () => (await sends()).at(-1)?.text).toBe('/code-review')
-  // Its own session, not the conversation: a skill is section work like any other.
   expect((await sends()).at(-1)?.sessionId).not.toBe('s-alpha')
 })
 
@@ -205,8 +175,6 @@ test('a skill can be given an argument, the way a slash command takes one', asyn
 })
 
 test('the section says which of the two empty states it is in', async ({ page }) => {
-  // Nothing imported at all, and everything switched off, need different answers:
-  // one sends you to add a repository, the other to switch one on.
   await page.addInitScript(installMockHost, twoProjectScenario())
   await page.goto('/')
   await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()

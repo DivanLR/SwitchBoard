@@ -1,16 +1,8 @@
-// A crashed conversation is restarted by the APP, once, and told to pick the work
-// back up (reviveCrashed). This is the supervision an autonomous session needs,
-// and the two properties worth pinning are the two that make it safe: a resumed
-// session is actually nudged (a live but idle session supervises nothing), and a
-// second crash inside the cooldown is NOT restarted, so a session that dies on
-// the same thing every time cannot loop for ever.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-// One run loop per session, each resolvable OR rejectable: a rejection is how the
-// SDK reports the CLI process dying, which is the only path reviveCrashed acts on.
 const pending: { reject: (error: Error) => void }[] = []
 function crashLoops(): void {
   for (const loop of pending.splice(0)) {
@@ -28,8 +20,6 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
     supportedCommands: () => Promise.resolve([]),
     supportedModels: () => Promise.resolve([]),
     interrupt: () => Promise.resolve(),
-    // The deliver path applies the routed model/effort on every send, so the
-    // nudge prompt reaches nothing without these two.
     setModel: () => Promise.resolve(),
     applyFlagSettings: () => Promise.resolve(),
   }),
@@ -50,7 +40,6 @@ afterEach(() => {
     try {
       rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
     } catch {
-      // A temp directory the OS still holds open. The OS can have it.
     }
   }
 })
@@ -85,16 +74,12 @@ describe('a crashed session is restarted by the app', () => {
 
     crashLoops()
 
-    // A second session for the project, and the crashed one recorded as such.
     await vi.waitFor(() => expect(manager.liveSessionIds()).toHaveLength(1))
     const revived = manager.liveSessionIds()[0]
     expect(revived).not.toBe(crashed.id)
     expect(repos.sessions.byId(crashed.id)?.endReason).toBe('crashed')
-    // It resumes the conversation that died, rather than starting a blank one.
     expect(repos.sessions.byId(crashed.id)?.endedAt).toBeTruthy()
 
-    // The nudge. Without it the restart produces a session that is up and doing
-    // nothing, which is indistinguishable from the crash it was meant to undo.
     await vi.waitFor(() => {
       const prompts = repos.events
         .page(revived, undefined, 50)
@@ -112,7 +97,6 @@ describe('a crashed session is restarted by the app', () => {
     crashLoops()
     await vi.waitFor(() => expect(manager.liveSessionIds()).toHaveLength(1))
 
-    // The revived session dies the same way, immediately. Nothing should replace it.
     crashLoops()
     await vi.waitFor(() => expect(manager.liveSessionIds()).toHaveLength(0))
     await new Promise((resolve) => setTimeout(resolve, 50))

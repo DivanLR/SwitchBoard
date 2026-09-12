@@ -1,4 +1,3 @@
-// Combination keys + scan-doc paths for the per-combo MCP scans.
 import { describe, expect, it } from 'vitest'
 import { comboDocRelPath, comboKey, comboSlug } from '@shared/mcp-combo'
 

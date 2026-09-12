@@ -1,82 +1,19 @@
-/* Switchboard theme — THE DEPLOYABLE SHEET. The direction contract lives at the
-   top of App.vue and governs every value in this file. */
 @import './assets/fonts.css';
 
-/* No global filter. An earlier design lifted the whole document with
-   brightness+saturate; a sheet is a measured material and its tone is
-   authored per token, not boosted afterwards. Removing it also stops the filter
-   creating a containing block that broke fixed-position overlays. */
-
-/* LIGHT THEME — CORNFLOWER. The dark sheet is unchanged and remains this
-   world's home ground; light mode is no longer the same sheet on paper.
-   Replaced on the owner's direction against a named reference (the Cornflower
-   design system: "white cards floating on a cool light-gray canvas, a single
-   restrained cornflower-blue accent, soft low-alpha shadows, nothing shouts").
-
-   What that changes, and what it costs:
-
-   - The ground is cool grey-blue, not warm paper. Ink and ground now agree in
-     temperature instead of opposing it, which is the opposite of the dark
-     sheet's rule and deliberate: the warm-on-cool opposition is what made the
-     old light theme read as a printed material, and a material is what was
-     asked to go.
-   - The action colour was CORNFLOWER BLUE for one release and is GREEN again,
-     on the owner's direction. What survives from the reference is its neutrals:
-     the cool canvas, the white cards, the soft hairlines and the 6px corners.
-     Only the accent came back. The two themes agree on hue once more.
-   - Attention owed stays a dark amber, where it landed when the action colour
-     briefly took blue. It cannot be a bright gold: no saturated warm hue clears
-     4.5:1 on a near-white ground in sRGB, so "amber" here means the darkest
-     legible amber, the same wall GitHub's own light warning text sits against.
-   - Corners are 6px HERE ONLY. On carbon a fold is still a cut. See --rc.
-
-   Every value below was measured, not chosen by eye. The floors are 4.5:1 for
-   anything carrying text, and 3:1 for a border that IS a control's boundary.
-   A border that only separates two surfaces which already differ in tone is
-   held to no floor: WCAG 1.4.11 does not reach a divider that is not the sole
-   means of identifying a component, and forcing 3:1 onto every hairline is what
-   turns a calm light interface into a wireframe. That distinction is the one
-   real disagreement between the three palettes this was synthesised from, and
-   it is settled here on the letter of the rule rather than on taste. */
 html.sb-light {
-  /* THE TRACE on a light bench. The same instrument with its backlight up: a
-     neutral near-white ground, the same graticule discipline, and the same rule
-     that colour is spent only outside tolerance. Every accent is re-measured
-     against the light ground rather than transposed. */
-  /* The canvas is a hair cooler and lighter than it was, and the panels step
-     down from it rather than up: on the pinned reference the chrome recedes and
-     the CARDS are what the eye lands on, which is the reverse of an instrument
-     panel where the chrome is the instrument. */
   --bg: #EFF1F5;
   --bg-panel: #FFFFFF;
   --bg-sticky: #FFFFFF;
   --bg-card: #FFFFFF;
   --bg-card-alt: #FAFBFC;
   --bg-code: #F4F6F8;
-  /* THE CODE CARD'S OWN SURFACE, and deliberately not --bg-code.
-     A code block is a sunken surface, so it sits BELOW the ground rather than
-     above it, and it took two goes to get there: --bg-code is a 2% step above
-     the canvas and read as one flat field, and white read as a card but not as
-     code. This is a real grey step down, dark enough to be unmistakably a code
-     surface on the owner's direction and still 9:1 against --text-body.
-     Its own token rather than a darker --bg-code, because that token also
-     dresses inputs (the composer, the dropdown filter, argument fields) and they
-     are not code. */
   --surface-code: #DFE3EA;
-  /* Deep enough that a white card reads as sitting ON it. #F6F7F9 against
-     #FFFFFF is a 1.5% step, which measures as a canvas and looks like one flat
-     white surface; the whole card idea dies at that distance. */
 
   --bg-hover: rgba(20, 22, 26, 0.05);
   --bg-active: rgba(20, 22, 26, 0.1);
   --bg-seg: rgba(20, 22, 26, 0.09);
   --bg-chip: rgba(20, 22, 26, 0.05);
 
-  /* Hairlines are lighter than they were. A white card on a near-white canvas
-     is separated by its shadow first and its border second; at the old alpha the
-     border did both jobs and the result read as a wireframe. Controls keep their
-     3:1 boundary below (--border-strong, --border-seg): this softening applies
-     only to lines that separate two surfaces, which WCAG 1.4.11 does not reach. */
   --border: rgba(20, 22, 26, 0.09);
   --border-card: rgba(20, 22, 26, 0.1);
   --border-card-alt: rgba(20, 22, 26, 0.08);
@@ -86,8 +23,6 @@ html.sb-light {
   --border-seg: rgba(20, 22, 26, 0.35);
   --border-hist: rgba(20, 22, 26, 0.1);
 
-  /* Measured against --bg-panel, the darkest ground any tier lands on:
-     14.6:1 at the brightest down to 5.2:1 at the palest. */
   --text-bright: #14161A;
   --text-strong: #1D2126;
   --text: #23272D;
@@ -134,16 +69,9 @@ html.sb-light {
 
   --sans: system-ui, -apple-system, 'Segoe UI', 'Inter', sans-serif;
   --w-em: 500;
-  /* Depth is a soft low-alpha drop, not an inset lip. The lip was the sheet's
-     way of saying "this is a folded material"; a card is a card, and it sits on
-     the canvas rather than being pressed out of it. Two-stop, so the edge stays
-     crisp while the body of the shadow spreads. */
   --elev: 0 1px 2px rgba(20, 22, 26, 0.04), 0 2px 8px rgba(20, 22, 26, 0.05);
   --gloss: none;
   --hairline-shine: none;
-  /* 10px HERE ONLY. On the dark sheet a fold is a cut and stays at 3px; the
-     light world's corner is the reference's, and it is the single loudest signal
-     that this is a card surface rather than an instrument panel. */
   --rc: 10px;
   --rp: 6px;
   --sq: 0px;
@@ -152,47 +80,20 @@ html.sb-light {
   --shadow-dlg: 0 24px 64px rgba(20, 22, 26, 0.12), 0 0 0 1px rgba(20, 22, 26, 0.04);
   --shadow-dd: 0 8px 24px rgba(20, 22, 26, 0.09);
   --shadow-menu: 0 8px 24px rgba(20, 22, 26, 0.09);
-  /* Overlay tier, light. The same depths re-measured: a 0.55-alpha black under
-     a white dialog is a bruise, not a shadow. */
   --scrim-blur: 4px;
   --surface-overlay: #FFFFFF;
   --shadow-overlay: 0 24px 70px rgba(20, 22, 26, 0.16), 0 4px 16px rgba(20, 22, 26, 0.07);
   --shadow-toast: 0 8px 32px rgba(20, 22, 26, 0.12), 0 2px 8px rgba(20, 22, 26, 0.06);
 }
 
-
 :root {
-  /* THE TRACE — an instrument screen.
-     Direction contract: src/renderer/index.html, seed a2e3145d.
 
-     Chosen from the familiar register at the developer's request, which suspends
-     the roll and hands the pick to them. Its discipline is the one this board
-     needed: hairline traces on a measurement grid, monospace only where there
-     are actually numbers, and COLOUR SPENT SOLELY ON A MEASUREMENT OUTSIDE
-     TOLERANCE. The board is otherwise monochrome, which is what stops nine lanes
-     competing for the same attention.
-
-     It replaces THE SIXTEEN-COLOUR FIELD, which the developer rejected on the
-     populated board: its 16-dot face could not render below 12px, every type
-     tier rose a step, and the project name and path truncated on six lanes. That
-     is why the scale below returns to 11px and the face returns to a system
-     stack, which the craft floor sanctions for an Operate surface.
-
-     Token NAMES are unchanged so all 22 consuming components keep working; only
-     the values moved. Where a name says --green or --amber, read it as its ROLE.
-     Text tiers are measured against the ground they land on, floor 4.5:1. */
-
-  /* ---- GROUNDS ----------------------------------------------------------
-     Neutral charcoal. Not navy, which the developer ruled out, and not pure
-     black, which sits in the console rut this is leaving. */
   --bg: #14161A;
   --bg-panel: #101216;
   --bg-sticky: #0C0E11;
   --bg-card: #1A1D22;
   --bg-card-alt: #171A1F;
   --bg-code: #0E1013;
-  /* See the light theme's note. On carbon the code surface and --bg-code agree,
-     because there the token was already the darkest ground in the set. */
   --surface-code: #0E1013;
   --diagram-page: #FFFFFF;
   --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
@@ -202,9 +103,6 @@ html.sb-light {
   --bg-seg: rgba(221, 225, 230, 0.09);
   --bg-chip: rgba(221, 225, 230, 0.05);
 
-  /* ---- THE MEASUREMENT GRID --------------------------------------------
-     Every rule in this world is a graticule line: faint, even, and never the
-     loudest thing on screen. An instrument grid you notice is a badly made one. */
   --border: rgba(221, 225, 230, 0.12);
   --border-card: rgba(221, 225, 230, 0.16);
   --border-card-alt: rgba(221, 225, 230, 0.13);
@@ -214,9 +112,6 @@ html.sb-light {
   --border-seg: rgba(221, 225, 230, 0.16);
   --border-hist: rgba(221, 225, 230, 0.08);
 
-  /* ---- TYPE TIERS ------------------------------------------------------
-     Measured on #14161A and on the card at #1A1D22: 15.5:1 at the brightest,
-     12.7:1 for body, 6.4:1 mid, 5.1:1 at the palest tier. */
   --text-bright: #F2F5F8;
   --text-strong: #DDE1E6;
   --text-title: #DDE1E6;
@@ -233,31 +128,22 @@ html.sb-light {
   --text-ghost: #868F9A;
   --text-on-wash: #A8B0BA;
 
-  /* ---- THE ONE ACCENT, AND TOLERANCE -----------------------------------
-     The live trace is the only coloured thing on a board where nothing is
-     wrong. Everything else earns colour by being out of tolerance. */
   --green: #3FBFB4;
   --green-hover: #57D6CB;
   --green2: #2E9E95;
   --green-ink: #0E1013;
-  /* No glow. An instrument screen does not bloom, and the craft floor names a
-     zero-offset coloured halo as decoration rather than depth. */
   --green-glow: none;
   --running: #3FBFB4;
-  /* OUT OF TOLERANCE, soft: attention owed. */
   --idle: #E0A458;
   --blue: #E0A458;
   --amber: #E0A458;
   --amber-hover: #E9B872;
   --amber-ink: #14161A;
   --switch-off: rgba(221, 225, 230, 0.2);
-  /* OUT OF TOLERANCE, hard: error. Red stays red. */
   --red: #E0685E;
   --red-hover: #E9827A;
   --red-ink: #14161A;
   --detail: #868F9A;
-  /* IDENTITY, never state. Held clear of the trace accent so a database surface
-     is never mistaken for a running lane. */
   --teal: #6FA8DC;
   --purple: #A98BD6;
 
@@ -270,57 +156,23 @@ html.sb-light {
   --surface-sunken: #101216;
   --bg-panel-2: #131519;
 
-  /* ---- FACES -----------------------------------------------------------
-     A system stack, which the craft floor sanctions for Operate and Read
-     surfaces, and which has no legibility floor to fight at 11px. DotGothic16
-     is gone with the world that needed it. JetBrains Mono stays exactly where
-     the previous world put it: machine text only, where column alignment is a
-     correctness requirement rather than a costume. */
   --sans: system-ui, -apple-system, 'Segoe UI', 'Inter', sans-serif;
   --mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
   --serif: system-ui, -apple-system, 'Segoe UI', sans-serif;
 
-  /* ---- MATERIALS -------------------------------------------------------
-     A hairline lip, not a bevel: the previous world's stamped edges belonged to
-     its pixel grammar. */
   --elev: inset 0 1px 0 rgba(221, 225, 230, 0.06);
   --gloss: none;
   --hairline-shine: inset 0 1px 0 rgba(221, 225, 230, 0.06);
-  /* Barely radiused. An instrument is crisp, but the modern-clean half of this
-     brief is not served by hard 0 on every card. */
   --rc: 3px;
   --rp: 2px;
   --sq: 0px;
   --track-label: 0.08em;
 
-  /* ---- THE OVERLAY TIER ------------------------------------------------
-     Dialogs, the command palette, dropdown panels and toasts. Added
-     2026-08-21 on the owner's direction, against five named design.dev
-     component references. Every value below is common to those five specs, so
-     it is a token rather than five near-copies.
-
-     THE ACCENT IS NOT THEIRS. Each reference is written in a dark, cyan-keyed
-     palette; this world's action colour is green, set by the owner's own
-     earlier direction, and colour here is spent on a reading outside
-     tolerance. What is taken is the geometry, the depth, the motion and the
-     behaviour. Taking the cyan as well would be overturning a decision nobody
-     asked to revisit.
-
-     RADIUS IS THE ONE PLACE THE OVERLAY TIER LEAVES THE WORLD'S RULE. Cards
-     stay at --rc (3px on carbon, 10px on the light bench) because a fold is a
-     cut. An overlay is not a fold: it is a thing lifted off the surface
-     entirely, it is the only tier here that carries a real shadow, and the
-     references are unanimous at 16px. So it gets its own radius in BOTH
-     themes, which is what the owner asked for. */
   --r-overlay: 16px;
-  /* The panel radius one step in from a dialog: palette, dropdown, toast. */
   --r-panel: 12px;
-  /* A row inside one of those panels. */
   --r-row: 6px;
 
-  /* The curve every one of the five references names for entry. */
   --ease-overlay: cubic-bezier(0.16, 1, 0.3, 1);
-  /* A toast arrives with a little overshoot and leaves without one. */
   --ease-toast-in: cubic-bezier(0.21, 1.02, 0.73, 1);
   --ease-toast-out: cubic-bezier(0.33, 0, 0.67, 0);
 
@@ -330,42 +182,17 @@ html.sb-light {
   --dur-toast-in: 350ms;
   --dur-toast-out: 300ms;
 
-  /* Padding inside a dialog. 24px in the reference, and it is the value that
-     makes a dialog read as a room rather than a box. */
   --pad-dialog: 24px;
 
-  /* ---- TYPE SCALE ------------------------------------------------------
-     Back to dense. This is the fault that killed the previous world, so it is
-     the first thing restored: a system face is legible at 11px, so the board
-     holds six lanes, a branch, a path, a timer and a count on one row again. */
   --fs-micro: 11px;
   --fs-meta: 11px;
   --fs-ui: 12.5px;
   --fs-body: 13px;
   --fs-title: 17px;
   --fs-head: 20px;
-  /* The sidebar's status mark, and the one size that is NOT a step of the ramp
-     above. It sits in a fixed 14x12 box and has to hold five different
-     characters (! » × · —) at the same optical weight, which is a glyph-fitting
-     problem rather than a reading-size one.
-     It is a token rather than a literal in the component because a value that
-     escapes the design system is exactly the value that needs a name: as a
-     literal it was invisible to the system and to review, and it carried a
-     comment citing a DESIGN.md rule ("Glyph sizing is not type sizing") that
-     DESIGN.md does not contain. DESIGN.md's own Micro tier currently claims the
-     stop-control glyph at 11px, so the ramp and this value openly disagree.
-     OPEN: either DESIGN.md gains a documented glyph step and this stays, or the
-     mark moves to --fs-micro and this token goes. Not decided here, because it
-     changes how every lane in the sidebar reads and that is a design call. */
   --fs-glyph: 13.8px;
-  /* Weight is available again: a system face has real weights, where the
-     outgoing bitmap face had exactly one. */
   --w-em: 500;
 
-  /* Widened on 2026-08-21 with the light world. The old scale was sized for an
-     instrument panel where fitting more on screen was the point; the reference
-     spends space instead, and every card, row and section reads off this scale,
-     so one step here is the cheapest way to buy that everywhere. */
   --sp-1: 4px;
   --sp-2: 7px;
   --sp-3: 10px;
@@ -376,13 +203,9 @@ html.sb-light {
   --pad-card: var(--sp-4) var(--sp-5);
 
   --scrim: rgba(10, 12, 15, 0.7);
-  /* Offset and blur, as the craft floor requires of a shadow. The previous
-     world's hard block shadows were earned by its pixel grammar; this one has
-     no such licence. */
   --shadow-dlg: 0 24px 60px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(221, 225, 230, 0.1);
   --shadow-dd: 0 12px 32px rgba(0, 0, 0, 0.45);
   --shadow-menu: 0 12px 32px rgba(0, 0, 0, 0.45);
-  /* Overlay tier, dark. The references' own depth, in this world's ink. */
   --scrim-blur: 4px;
   --surface-overlay: #191C21;
   --shadow-overlay: 0 24px 70px rgba(0, 0, 0, 0.55), 0 4px 16px rgba(0, 0, 0, 0.3);
@@ -403,71 +226,33 @@ html,
   font-family: var(--sans);
   font-size: var(--fs-body);
   overflow: hidden;
-  /* Every figure in the interface is a reading that changes under you: timers,
-     costs, token counts, percentages, queue depths. Tabular figures hold their
-     column so a ticking number stops shuffling the text beside it, which is both
-     the terminal register and the reason to do it. */
   font-variant-numeric: tabular-nums;
 }
 
-/* The ground of THE TRACE: flat neutral charcoal, ruled by the measurement
-   grid the border tokens draw. No texture on the open field; an instrument
-   graticule belongs to the panels that measure something, not to empty space. */
 body {
   margin: 0;
   height: 100%;
   color: var(--text);
-  /* THE INTERFACE FACE, via --sans: a system stack, which the craft floor
-     sanctions for an Operate surface and which fights no legibility floor at
-     11px. This one declaration is the whole typeface change and it is the one
-     a retheme misses: the world before last set it to --mono on the rule that
-     "the product IS the terminal", so redefining --sans alone reached nothing.
-     .mono and .code below opt machine text back in, which is why the swap costs
-     one declaration rather than 406 edits. */
   font-family: var(--sans);
   font-size: var(--fs-body);
   overflow: hidden;
   background: var(--bg);
 }
 
-/* The crease lattice does not survive the move to Cornflower, and it should not:
-   it is the scored-sheet world's signature, and a scored sheet is what light
-   mode stopped being. The reference calls for a flat, calm canvas, and a 60
-   degree lattice under dense output is the opposite of calm.
-   The dark sheet keeps its lattice, declared on `body` above.
-
-   The ground is repeated here as a literal rather than var(--bg) because this
-   rule overrides a `background` SHORTHAND, and a shorthand cannot be half
-   declared: naming only the colour would drop the two gradient layers the dark
-   rule sets, which is precisely what has to happen. Keep it in step with --bg. */
 html.sb-light body {
   background: var(--bg);
 }
 
-/* .spec-label, .scored-rule and .chamfer were declared here and applied by nothing:
-   DESIGN.md recorded all three as available-but-unadopted through several releases,
-   and a repository-wide search found no template, no :class binding and no built
-   output using any of them. Deleted 2026-08-12 rather than carried further. The
-   ideas are in DESIGN.md if a surface ever wants them; a stylesheet is not the
-   place to keep a proposal. */
-
-/* Full-viewport click-away catcher behind a context menu. One rule, because the
-   sidebar's menu and the inbox's history menu had declared it separately and
-   identically. */
 .ctx-catcher {
   position: fixed;
   inset: 0;
   z-index: 70;
 }
 
-/* The flexible gap between a row's left group and its right group. Every use was
-   an inline style="flex: 1" span, twenty-four of them across eight files, which is
-   a shared class written out by hand twenty-four times. */
 .spacer {
   flex: 1;
 }
 
-/* The app shell is transparent so the body's crease lattice shows through. */
 #app {
   background: transparent;
 }
@@ -480,8 +265,6 @@ a:hover {
   color: var(--green-hover);
 }
 
-/* Selecting text marks the sheet in foil green. One rule serves both themes,
-   because --green is already theme-scoped. */
 ::selection {
   background: color-mix(in srgb, var(--green) 30%, transparent);
 }
@@ -497,10 +280,6 @@ a:hover {
   border-radius: var(--rp);
 }
 
-/* A wash has to be checked for DIRECTION per theme, not only for value: lightening
-   the thumb by 10% over paper moves it about one luminance unit, so the scrollbar
-   had no visible thumb on the light sheet at all. Ink, subtractive, like every other
-   light-theme wash in this file. */
 html.sb-light ::-webkit-scrollbar-thumb {
   background: rgba(20, 22, 26, 0.22);
 }
@@ -539,19 +318,6 @@ button {
   cursor: pointer;
 }
 
-/* Shared button idioms from the reference. The primary fill is the design's
-   135deg green gradient under a top gloss (transparent in dark); hover flips to
-   the flat brighter green.
-
-   NO GLOW. A coloured shadow is elevation, and elevation says "this is the one
-   thing to do here" — so it belongs to the composer's Send and nothing else. It
-   used to sit under every solid button, which put three glowing Approves in one
-   inbox rail and a fourth under every section's Generate. --green-glow is still
-   the token for it; only its reach changed. */
-/* Foil catches light along the fold it is pressed over, so the one action colour
-   carries a raking highlight of its own on top of the shared --gloss. Shallow on
-   purpose: any stronger and it reads as a glossy 2000s button, which is the opposite
-   of foil pressed into a sheet. */
 .btn-solid {
   background: var(--green);
   color: var(--green-ink);
@@ -564,11 +330,6 @@ button {
   user-select: none;
 }
 
-/* The raking highlight belongs to foil pressed into a sheet. On the Cornflower
-   ground the same 18% white sheen across a flat blue fill reads as a glossy
-   gradient button, which the reference rules out in as many words: nothing
-   shouts. The fill is left flat here and the gloss layer alone carries the top
-   light. */
 html.sb-light .btn-solid {
   background: var(--green);
 }
@@ -617,13 +378,6 @@ html.sb-light .btn-solid {
   color: var(--text-strong);
 }
 
-/* Disabled. Every one of these classes had a :disabled binding in the templates and
-   no rule to render it, so a button that could not be pressed looked identical to one
-   that could: Start session with an empty folder, Save with no change, the risk-level
-   segments of a switched-off rule. The value is not new — .send-btn:disabled already
-   settled the convention at 0.45 and a default cursor — it just never reached the
-   other four. :not(:disabled) on the hovers stops a dead control lighting up under
-   the pointer, which is the other half of the same defect. */
 .btn-solid:disabled,
 .btn-armed:disabled,
 .btn-outline:disabled,
@@ -646,9 +400,6 @@ html.sb-light .btn-solid {
   text-decoration: underline;
 }
 
-/* Stop control: a small square ■ button shown while a session is working, so a
-   run can be interrupted with one click (same action as Ctrl+C). Theme-aware —
-   fills red on hover in both light and dark. */
 .stop-btn {
   flex-shrink: 0;
   min-width: 26px;
@@ -656,8 +407,6 @@ html.sb-light .btn-solid {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  /* Auto width, because the control now names its binding beside the glyph. It
-     stays a 26px square wherever it is used without one. */
   gap: 6px;
   padding: 0 6px;
   font-size: var(--fs-micro);
@@ -668,51 +417,15 @@ html.sb-light .btn-solid {
 }
 
 .stop-btn:hover {
-  /* Was #fff, which measured 2.78:1 once --red became a lighter red-pencil red.
-     --red-ink is the token that exists for exactly this: 5.84:1. */
   color: var(--red-ink);
   background: var(--red);
   border-color: var(--red);
 }
 
-/* MONOSPACE IS EARNED, NOT DEFAULT.
- *
- * This class resolved to var(--mono) for one release, on the argument that the
- * whole "machine-read stratum" — labels, counters, timers, statuses, tab labels,
- * project names, buttons, pills — should be set in JetBrains Mono. Four hundred
- * and six call sites carry the class, so that argument set essentially the entire
- * interface in a code face, and the owner's verdict on the result was that the
- * text reads bulky, oversized and ugly.
- *
- * That verdict is a measurement, not a preference. A monospaced face has to fit a
- * capital W and a lowercase i into the same advance width, so at an identical
- * pixel size it runs roughly a tenth wider per character and carries a taller
- * x-height and heavier stems than a proportional UI face. Nothing here grew a
- * single px; every label simply got wider and heavier at once.
- *
- * So the remit narrows back to what monospace is actually for: text where the
- * character grid carries meaning — code, commands, filesystem paths, ids and
- * hashes, diffs, terminal output, and figures that must hold a column while they
- * tick. That is `.code`, below. Everything else — every label, name, status,
- * button and tab — is interface chrome, and chrome is set in the UI face.
- *
- * Flipping the declaration rather than editing 406 call sites is deliberate: the
- * class is applied at exactly the places that wanted "not body prose", which is
- * the same set either way. Only the answer to what that means has changed. */
-/* FLIPPED BACK, 2026-08-13, on a new direction: a minimal Mac terminal. The
-   note above is kept because its reasoning was sound for the direction it
-   served, and this is not a correction of it. Chrome set in a UI face is right
-   when the product is an app that shows terminals. It is wrong when the product
-   IS the terminal, which is the direction now being asked for: the character
-   grid stops being a material the code plate wears and becomes the material
-   everything is cut from. The switch the previous author built for this is the
-   reason it costs one declaration instead of 406 edits. */
 .mono {
   font-family: var(--mono);
 }
 
-/* Text where the character grid is the point. Apply it deliberately; if a
-   surface takes it because it feels technical, it does not take it. */
 .code {
   font-family: var(--mono);
 }
@@ -725,7 +438,6 @@ html.sb-light .btn-solid {
   color: var(--text-faint);
 }
 
-/* Status pills (session header) */
 .pill {
   flex-shrink: 0;
   white-space: nowrap;
@@ -734,12 +446,6 @@ html.sb-light .btn-solid {
   border-radius: var(--rp);
 }
 
-/* Foil green, not --blue. Working IS the action state and borrows the action colour
-   rather than a fourth one, which is what --blue's own comment and DESIGN.md both
-   say and what Sidebar.vue's .mark.working already does for the same status field.
-   Because --blue is currently byte-identical to --amber, this pill rendered "working"
-   in exactly the colour that means "attention owed", so the header's two most
-   important states were the same colour while the sidebar told the truth. */
 .pill.working {
   color: var(--green);
   background: color-mix(in srgb, var(--green) 10%, transparent);
@@ -752,52 +458,24 @@ html.sb-light .btn-solid {
   border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
 }
 
-/* The Fine Gets No Hue Rule: a finished lane draws no colour, so it cannot compete
-   with a lane that still needs the developer. This pill was foil green, which is now
-   the working state's colour — done and working would have been the same green.
-   Neutral ink, matching Sidebar.vue's .mark.done. */
 .pill.done {
   color: var(--text-mid);
   background: color-mix(in srgb, var(--text-mid) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--text-mid) 28%, transparent);
 }
 
-/* .pill.ended is deliberately NOT in this group: it has its own rule below at the
-   same specificity, which always won, so listing it here only ever looked like it
-   applied. An ended session is packed flat, not an error. */
 .pill.error {
   color: var(--red);
   background: color-mix(in srgb, var(--red) 9%, transparent);
   border: 1px solid color-mix(in srgb, var(--red) 35%, transparent);
 }
 
-/* Takes its size from the base `.pill` above and overrides nothing, because its
-   peers are the other badges in that header row: plan, nogit, fanout, agents,
-   background and the live status pill, all 11px in a 2px/10px box.
-
-   An earlier pass sized it to `.ctl` instead, the `+ Session` BUTTON standing
-   beside it, on the reasoning that two adjacent controls should agree. They are
-   not two controls. One badge grown to 12.5px among six at 11px reads as oversized
-   rather than as paired, which is what it looked like in the app.
-
-   The outline is red at the owner's direction. Recording the tension rather than
-   burying it: DESIGN.md reserves red for a reading outside tolerance, and both the
-   comment above and the Tolerance Rule argue an ended session is packed flat, not
-   an error. The text stays `--text-tab`, so only the outline carries the hue. */
 .pill.ended {
   color: var(--text-tab);
   background: transparent;
   border: 1px solid var(--red);
 }
 
-/* The shared .dot block that lived here is gone. State is drawn as fold marks now
-   (see Sidebar.vue's .mark), so nothing applied .dot any more, in any template,
-   including dynamic bindings. Its sbGlow keyframe went with it: a zero-offset
-   coloured halo is decoration rather than depth, and the DEPLOYING mark carries
-   "working" without it. Views that still need a small round indicator declare
-   their own with an explicit 99px radius. */
-
-/* Risk chips (inbox cards) */
 .chip-risk {
   font-size: var(--fs-micro);
   border-radius: var(--rc);
@@ -827,7 +505,6 @@ html.sb-light .btn-solid {
   border: 1px solid color-mix(in srgb, var(--blue) 40%, transparent);
 }
 
-/* Stream marker chips */
 .chip-marker {
   border-radius: var(--rc);
   padding: 1px 7px;
@@ -859,7 +536,6 @@ html.sb-light .btn-solid {
   border: 1px solid var(--border-strong);
 }
 
-/* Amber count badge (sidebar rows, inbox tab) */
 .badge-count {
   font-size: var(--fs-meta);
   color: var(--amber);
@@ -871,10 +547,6 @@ html.sb-light .btn-solid {
   white-space: nowrap;
 }
 
-/* Full-pane composer + stream chrome, shared by SessionView and McpView.
-   Class names are unique to those two views (except .blink, identical in
-   StreamEvent too). Per-view differences (.caret colour, .composer position,
-   .composer-input z-index) stay as small scoped overrides in each view. */
 .stream {
   flex: 1;
   overflow-y: auto;
@@ -884,16 +556,7 @@ html.sb-light .btn-solid {
 }
 
 .stream-inner {
-  /* Full-width session area: fill the pane rather than capping at 840px, which
-     left a wide right-hand gap on large/fullscreen windows. */
   max-width: none;
-  /* Bottom-anchored, like every terminal and every chat. A short session used to
-     sit at the top of a tall pane with the composer pinned far below it, so more
-     than half the centre pane was empty and the eye had to travel the whole
-     height from the last line to the box where the reply is typed.
-     `margin-top: auto` rather than `justify-content: flex-end` on the parent:
-     the two look identical while the content is short, but flex-end clips the
-     TOP of content taller than the box and puts it out of scroll reach. */
   margin-top: auto;
 }
 
@@ -918,9 +581,6 @@ html.sb-light .btn-solid {
   padding: 11px 18px;
 }
 
-/* Bottom-pinned like the design: the multi-line input grows upward while the
-   caret, to-label and buttons stay on the bottom line (center made them float
-   mid-height against the taller buttons). */
 .composer-row {
   display: flex;
   align-items: flex-end;
@@ -932,35 +592,16 @@ html.sb-light .btn-solid {
   min-width: 60px;
   background: transparent;
   border: none;
-  /* No radius: with overflow-y:auto and padding:0 the inherited base-reset
-     border-radius clips glyphs at the corners even though no border shows. */
   border-radius: 0;
   outline: none;
   color: var(--text);
-  /* Earned monospace: what gets typed here is slash commands, @paths and shell
-     lines, where a character grid tells you a hyphen from an underscore. */
   font-family: var(--mono);
   font-size: var(--fs-body);
-  /* Left padding so the block caret does not sit against the border on an empty
-     composer. The ghost mirror carries the identical figure; a mirror padded
-     differently from the field puts its ghost text off the real caret. */
   padding: 0 0 0 3px;
-  /* A terminal's cursor is a block, in the colour of its prompt. Chromium 139
-     and up honour caret-shape; anything older ignores it and keeps the bar,
-     which is a perfectly good fallback rather than a broken state. */
   caret-shape: block;
   caret-color: var(--green);
 }
 
-/* No :focus override here on purpose. This is the field every message to Claude
-   is typed into, and `outline: none` left it looking identical focused and
-   unfocused — the one control in the app that most needs to say where the caret
-   is. Deleting the override lets the shared input/textarea/select:focus rule
-   above give it the same 1px proof-cyan ring as every other field. */
-
-/* The send target sits on its own rule under the composer, indented to the
-   input's own left edge. The pane's 18px padding is already in force here, so
-   this is only what the caret costs: the 14px glyph plus the row's 10px gap. */
 .to-row {
   margin-top: 5px;
   padding-left: 24px;
@@ -972,17 +613,6 @@ html.sb-light .btn-solid {
   color: var(--text-faint);
 }
 
-/* One shared control height for the composer row -----------------------------
-   The row is `align-items: flex-end`, so every control's BOTTOM edge is the
-   alignment reference and its centre lands wherever its own box height puts it.
-   That was being managed per control by hand — .caret got a 20px box, .to-inline
-   an 8px padding-bottom, .send-btn 7px of vertical padding, and .queue-btn no
-   rule at all — so four controls sat at four different heights and none of them
-   agreed. Giving them one height makes the centres line up by construction,
-   which is the only version of this that survives someone changing the type
-   scale later. 27px is .send-btn's own natural height (11px meta text plus its
-   7px padding pair), so the row's tallest control keeps its size and the other
-   three grow to meet it. */
 .composer-row .caret,
 .composer-row .to-inline,
 .composer-row .queue-btn,
@@ -992,10 +622,6 @@ html.sb-light .btn-solid {
   align-items: center;
 }
 
-/* Add-to-queue, beside Send. It previously had NO rule anywhere: it was a bare
-   button carrying only .mono, which is why it sat lower than everything else
-   and why its label had no chip of its own. Quiet rather than solid, because
-   the row already has one affirmative action and two would compete. */
 .queue-btn {
   flex-shrink: 0;
   white-space: nowrap;
@@ -1041,9 +667,6 @@ html.sb-light .btn-solid {
   cursor: default;
 }
 
-/* Toggle switch (settings toggles + the project dialog's bypass switch).
-   Class is `.switch` (not `.toggle`) to avoid colliding with SwallowedBlock's
-   expander toggle. Add `.danger` for the red bypass variant. */
 .switch {
   width: 38px;
   min-width: 38px;
@@ -1080,8 +703,6 @@ html.sb-light .btn-solid {
   background: var(--bg);
 }
 
-/* Overlay dialogs (registration, rules, settings) — design scrim: themed
-   near-black (light: pale blue) at .66 with a 4px backdrop blur. */
 .overlay {
   position: fixed;
   inset: 0;
@@ -1092,9 +713,6 @@ html.sb-light .btn-solid {
   align-items: center;
   justify-content: center;
   z-index: 40;
-  /* The scrim fades; the dialog above it scales. Two durations, because a scrim
-     that scales with its dialog reads as one sheet of glass moving rather than a
-     room dimming behind a thing arriving. */
   animation: overlayIn var(--dur-scrim-in) ease-out;
 }
 
@@ -1104,25 +722,12 @@ html.sb-light .btn-solid {
   }
 }
 
-/* clip-path clips the element's shadow along with its corner, so every dialogue in
-   the app was painting box-shadow into nothing: not the base --elev here, and not the
-   --shadow-dlg each consumer overrode it with. The dialogue tier is the ONE tier the
-   Earned Shadow Rule grants a real shadow, and it was the only tier not getting one.
-   The cut now belongs to a pseudo-element that carries the surface, leaving the outer
-   element unclipped and free to cast. */
 .dialog {
   position: relative;
-  /* THE OVERLAY TIER'S OWN RADIUS, in both themes. Cards keep --rc because a
-     fold is a cut; a dialog is not folded out of the surface, it is lifted off
-     it, and the pinned reference is unambiguous at 16px. See --r-overlay. */
   border-radius: var(--r-overlay);
   padding: var(--pad-dialog);
   box-shadow: var(--shadow-overlay);
-  /* isolation, because the ::before below is painted beneath the dialogue's own
-     content and must not be lifted out of this element's stacking context. */
   isolation: isolate;
-  /* Arrives from slightly small and slightly low, on the reference's curve. The
-     translate is what stops it reading as a zoom. */
   animation: dialogIn var(--dur-overlay-in) var(--ease-overlay);
 }
 
@@ -1133,8 +738,6 @@ html.sb-light .btn-solid {
   }
 }
 
-/* Motion is the decoration here, not the information: without it the dialog is
-   simply present, which is the correct reduced-motion answer. */
 @media (prefers-reduced-motion: reduce) {
   .overlay,
   .dialog {
@@ -1150,8 +753,6 @@ html.sb-light .btn-solid {
   background: var(--surface-overlay);
   border: 1px solid var(--border-card);
   border-radius: var(--r-overlay);
-  /* A sheet laid on the sheet. Nothing inside a dialog takes focus through this
-     pseudo-element, so the cut corner is safe here. */
   clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
 }
 
@@ -1188,7 +789,6 @@ html.sb-light .btn-solid {
   }
 }
 
-/* Distinct pulsing halo for the busy dot. */
 @keyframes sbIn {
   from {
     opacity: 0;
@@ -1200,12 +800,6 @@ html.sb-light .btn-solid {
   }
 }
 
-/* Ghost mirror + suggestion dropdown, shared by SessionView and McpView.
-   This lived twice, near-verbatim, in both views and had drifted three ways:
-   a leftover backdrop-filter blur (DESIGN.md forbids glass on panels), two
-   different dropdown shadows, and a cmd/args split only one view had. The
-   dropdown uses --shadow-dd because it IS a dropdown; each view keeps only its
-   own accent as a scoped override. */
 .input-wrap {
   position: relative;
   flex: 1;
@@ -1213,10 +807,6 @@ html.sb-light .btn-solid {
   display: flex;
 }
 
-/* Sits above the ghost-text overlay; base composer-input chrome is global. */
-/* Auto-growing multi-line composer (base transparent/borderless chrome is
-   global). CSS field-sizing grows it with content up to max-height, then it
-   scrolls. */
 .composer-input {
   position: relative;
   z-index: 1;
@@ -1230,27 +820,14 @@ html.sb-light .btn-solid {
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
-  /* Symmetric, so the typed line sits in the middle of its own box. It was 6px
-     on the bottom alone, which dropped the line onto the buttons' text and left
-     it visibly high in the field — the row's flex-end alignment was doing that
-     job by hand. The ghost mirror below and the ❯ sigil keep the identical
-     figure; a mirror padded differently from the field puts its ghost text off
-     the real caret. */
   padding-top: 3px;
   padding-bottom: 3px;
 }
 
-/* The block caret occupies a whole character cell, so on an empty composer it
-   sits ON the placeholder's first letter and eats the S of "Send a message".
-   The placeholder has done its job by the time you are focused and about to
-   type, so it steps aside rather than being sat on. */
 .composer-input:focus::placeholder {
   color: transparent;
 }
 
-/* Typed text exactly matches a known /command — tint it so the match is clear. */
-/* First token is a command: hide the input's own text (keep the caret) and let
-   the ghost mirror colour the command green while the arguments stay normal. */
 .composer-input.is-command {
   color: transparent;
   caret-color: var(--text);
@@ -1264,13 +841,10 @@ html.sb-light .btn-solid {
   color: var(--text);
 }
 
-/* Extra bottom room so the live "working" line clears the floating REFS row. */
 .stream {
   padding-bottom: 46px;
 }
 
-/* Inline ghost text: mirrors the input box exactly, typed part transparent,
-   remainder greyed, sitting directly under the live caret. */
 .ghost {
   position: absolute;
   inset: 0;
@@ -1281,7 +855,6 @@ html.sb-light .btn-solid {
   word-break: break-word;
   overflow: hidden;
   pointer-events: none;
-  /* Mirrors .composer-input exactly — keep the paddings in lockstep. */
   padding-top: 3px;
   padding-bottom: 3px;
   padding-left: 3px;
@@ -1295,28 +868,17 @@ html.sb-light .btn-solid {
   color: var(--text-ghost);
 }
 
-/* Suggestion dropdown, opening upward like a terminal completion menu. */
-/* THE COMMAND PALETTE. Geometry, depth and motion from the pinned reference
-   (design.dev command palette); the accent is this world's green, because the
-   reference's cyan is a palette decision nobody asked to revisit. */
 .suggest-list {
   position: absolute;
   bottom: calc(100% + 6px);
   left: 0;
   right: 0;
-  /* 400px, not 190px. The old height showed four commands out of fifty and made
-     the list feel like a hint rather than a palette you can work in. */
   max-height: 400px;
   overflow-y: auto;
-  /* Opaque — a translucent dropdown lets the stream bleed through the rows. */
   background: var(--surface-overlay);
   border: 1px solid var(--border-card);
   border-radius: var(--r-panel);
   padding: 8px;
-  /* Above the composer's own chrome, not merely above the stream. At the old
-     190px the panel ended before the REFS row and the status line, so a z-index
-     of 5 was never tested against them; at 400px it covers both, and they were
-     painting straight through it. */
   z-index: 45;
   box-shadow: var(--shadow-overlay);
   animation: paletteIn var(--dur-panel-in) var(--ease-overlay);
@@ -1335,8 +897,6 @@ html.sb-light .btn-solid {
   }
 }
 
-/* One group per plugin. The label names the source without competing with the
-   commands under it, which is what small, tracked and quiet buys. */
 .suggest-label {
   padding: 6px 8px 3px;
   font-family: var(--sans);
@@ -1355,9 +915,6 @@ html.sb-light .btn-solid {
   font-size: var(--fs-ui);
   padding: 6px 8px;
   border-radius: var(--r-row);
-  /* Stated, not inherited. The panel used to be dark in both themes, so the
-     inherited colour happened to work; on a white panel it inherited the
-     composer's muted ink and the commands read as disabled. */
   color: var(--text-body);
   cursor: pointer;
   white-space: nowrap;
@@ -1365,22 +922,11 @@ html.sb-light .btn-solid {
   text-overflow: ellipsis;
 }
 
-/* Light theme: an opaque sheet, so the list does not read as see-through. Pure
-   #fff was the one cold surface in a warm-paper world; the card tier is the
-   same sheet the dropdown is laid on. */
-/* Both themes now take --surface-overlay, which is already the right surface in
-   each; the light override that existed to stop the panel reading as
-   see-through is no longer doing anything the token does not. */
-
-/* The active row takes a wash of the ACTION colour rather than a neutral grey:
-   it is the row Enter will run, which is an action about to happen and the one
-   thing on this panel that earns colour. */
 .suggest-item.active {
   background: color-mix(in srgb, var(--green) 12%, transparent);
   color: var(--text-strong);
 }
 
-/* Why this row is in the list. */
 .suggest-hit {
   color: var(--green);
   font-weight: 600;
@@ -1391,7 +937,6 @@ html.sb-light .btn-solid {
   font-weight: var(--w-em);
 }
 
-/* Small what-it-does explanation next to a suggested /command. */
 .suggest-desc {
   margin-left: 12px;
   float: right;
@@ -1403,13 +948,6 @@ html.sb-light .btn-solid {
   text-overflow: ellipsis;
 }
 
-/* Respect the OS "reduce motion" setting. Several looping animations run in this
-   app (the needs-you pulse, the caret blink, the agent fade, the inbox peek glow
-   and their siblings), and none of them carry
-   information that stillness would lose: every one duplicates a state the
-   colour and the mark already state. So they stop entirely rather than being
-   slowed. Entrances collapse to near-zero instead of 0s, because a genuinely
-   0s animation never fires animationend and can strand a listener. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

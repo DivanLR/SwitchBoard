@@ -1,5 +1,3 @@
-// switchboard:// deep links arrive from OS protocol activation (untrusted);
-// the parser must accept exactly the two verbs with a UUID and nothing else.
 import { describe, expect, it } from 'vitest'
 import { buildApprovalToastXml, parseDeepLink } from '@main/deep-link'
 
@@ -15,7 +13,6 @@ describe('parseDeepLink', () => {
       verb: 'inbox',
       requestId: UUID,
     })
-    // Case-insensitive, normalised to lower case.
     expect(parseDeepLink(`SWITCHBOARD://Approve/${UUID.toUpperCase()}`)?.requestId).toBe(UUID)
   })
 
@@ -40,7 +37,6 @@ describe('buildApprovalToastXml', () => {
     expect(xml).not.toContain('<script>')
     expect(xml).toContain('&lt;script&gt;')
     expect(xml).toContain('a&lt;b&gt;&amp;&quot;proj&quot;')
-    // Both actions target the strict protocol URLs.
     expect(xml).toContain(`arguments="switchboard://approve/${UUID}"`)
     expect(xml).toContain(`arguments="switchboard://inbox/${UUID}"`)
     expect(xml).toContain(`launch="switchboard://inbox/${UUID}"`)

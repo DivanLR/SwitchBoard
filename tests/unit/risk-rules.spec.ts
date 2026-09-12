@@ -1,5 +1,3 @@
-// T027: risk classification engine — ordering, matchers, fail-safe high, and
-// the seeded default set (FR-008a).
 import { describe, expect, it } from 'vitest'
 import type { RiskClassificationRule } from '@shared/domain'
 import { classifyRisk, defaultRiskRules } from '@main/inbox/risk-rules'
@@ -18,12 +16,6 @@ function rule(partial: Partial<RiskClassificationRule>): RiskClassificationRule 
 
 describe('classifyRisk', () => {
   it('applies rules in position order, first match wins', () => {
-    // classifyRisk no longer sorts (risk-rules.ts:31-39): RuleSet.reload() now
-    // does that once, off the permission-check hot path, so a caller building
-    // an ad-hoc array — this test included — is responsible for handing it
-    // rules in position order already. Sort here rather than rely on
-    // insertion order, so the test still exercises "first match wins" and
-    // does not silently start asserting insertion-order behaviour instead.
     const rules = [
       rule({ position: 1, toolMatcher: 'Bash', risk: 'medium' }),
       rule({

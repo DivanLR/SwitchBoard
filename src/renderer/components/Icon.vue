@@ -1,31 +1,9 @@
 <script setup lang="ts">
-// THE ICON SET.
-//
-// Every mark in this app used to be a Unicode character printed as text: ✓ → ✕
-// ▶ ✎ ● ⚠ ✦ ⚙ ⛁ ⎇ 🗑 and fifty more. Measured against the font actually
-// shipped, 58 of those 61 glyphs ARE NOT IN IT — src/renderer/assets/fonts
-// carries a 663-codepoint Latin subset of JetBrains Mono and nothing else. So
-// every icon fell back to whatever Windows offered: Segoe UI Symbol for most,
-// Segoe UI Emoji for 🗑 and 🔊, which render in fixed colour and ignore the
-// colour they are given.
-//
-// That is why the chrome never looked like one thing. A fallback glyph does not
-// share the surrounding text's stroke weight, does not sit on its baseline, does
-// not follow the variable weight axis (--w-em), and two marks from two Unicode
-// blocks can land in two different fallback faces side by side.
-//
-// These are drawn instead. One 16-unit grid, one 1.5 stroke, round caps and
-// joins, currentColor throughout — so a mark inherits its colour from the thing
-// it sits in, scales with the type ramp, and is identical on every machine.
-//
-// Adding one: give it a semantic name (what it MEANS, never what it looks like),
-// draw it on the same grid, and keep the stroke at 1.5 unless it is a solid.
 import { computed } from 'vue'
 
 const props = withDefaults(
   defineProps<{
     name: string
-    /** Edge length in px. Defaults to the body text size so a mark sits in a line. */
     size?: number | string
   }>(),
   { size: 14 },
@@ -33,26 +11,17 @@ const props = withDefaults(
 
 interface Mark {
   d: string
-  /** Solid marks (a status dot, a run triangle) carry no stroke. */
   solid?: boolean
 }
 
-// Ordered by what they mean, not alphabetically: outcomes, movement, actions,
-// objects, state.
 const MARKS: Record<string, Mark> = {
-  // Outcomes
   check: { d: 'M3 8.5 6.5 12 13 4' },
-  // One X for every negation. The app had two — U+2715 for "remove/close" and
-  // U+2717 for "failed" — sitting rows apart in the same list at different
-  // optical weights. The names stay separate so a call site still reads as what
-  // it means; the mark is deliberately identical.
   close: { d: 'M4 4 12 12M12 4 4 12' },
   cross: { d: 'M4 4 12 12M12 4 4 12' },
   warning: { d: 'M8 2.6 14.2 13H1.8ZM8 6.6V9.6M8 11.4v.1' },
   spark: { d: 'M8 1.8 9.4 6.6 14.2 8 9.4 9.4 8 14.2 6.6 9.4 1.8 8 6.6 6.6Z' },
   star: { d: 'M8 1.9 9.9 6.1 14.4 6.6 11 9.7 11.9 14.1 8 11.9 4.1 14.1 5 9.7 1.6 6.6 6.1 6.1Z' },
 
-  // Movement
   'arrow-right': { d: 'M2.8 8h10.4M9.2 4 13.2 8 9.2 12' },
   'arrow-left': { d: 'M13.2 8H2.8M6.8 4 2.8 8l4 4' },
   'arrow-up': { d: 'M8 13.2V2.8M4 6.8 8 2.8l4 4' },
@@ -66,13 +35,9 @@ const MARKS: Record<string, Mark> = {
   download: { d: 'M8 2.4v8.2M4.6 7.4 8 10.8l3.4-3.4M2.8 13.4h10.4' },
   refresh: { d: 'M12.8 8a4.8 4.8 0 1 1-1.5-3.5M13 2.6v2.6h-2.6' },
 
-  // Actions
   play: { d: 'M5.2 3.4 12.6 8 5.2 12.6Z', solid: true },
   stop: { d: 'M4.6 4.6h6.8v6.8H4.6Z', solid: true },
   pencil: { d: 'M10.9 2.5 13.5 5.1 5.9 12.7 2.6 13.4 3.3 10.1Z' },
-  // Saying something about a specific line, not editing it: the diff pane's
-  // per-line affordance. A bubble rather than the pencil beside it, because the
-  // pencil means "change this text" and this means "ask for a change here".
   comment: {
     d: 'M5 3.2H11A2.2 2.2 0 0 1 13.2 5.4V8.6A2.2 2.2 0 0 1 11 10.8H7.2L5.2 13.2V10.8H5A2.2 2.2 0 0 1 2.8 8.6V5.4A2.2 2.2 0 0 1 5 3.2Z',
   },
@@ -85,7 +50,6 @@ const MARKS: Record<string, Mark> = {
     d: 'M8 10.2a2.2 2.2 0 1 0 0-4.4 2.2 2.2 0 0 0 0 4.4ZM8 1.6v1.8M8 12.6v1.8M14.4 8h-1.8M3.4 8H1.6M12.5 3.5 11.3 4.7M4.7 11.3 3.5 12.5M12.5 12.5 11.3 11.3M4.7 4.7 3.5 3.5',
   },
 
-  // Objects
   database: {
     d: 'M13 4.2c0 1.2-2.2 2.2-5 2.2S3 5.4 3 4.2 5.2 2 8 2s5 1 5 2.2ZM3 4.2v7.6c0 1.2 2.2 2.2 5 2.2s5-1 5-2.2V4.2M13 8c0 1.2-2.2 2.2-5 2.2S3 9.2 3 8',
   },
@@ -108,7 +72,6 @@ const MARKS: Record<string, Mark> = {
     d: 'M8 11.1a3.1 3.1 0 1 0 0-6.2 3.1 3.1 0 0 0 0 6.2ZM8 1.4v1.5M8 13.1v1.5M14.6 8h-1.5M2.9 8H1.4M12.7 3.3l-1.1 1.1M4.4 11.6l-1.1 1.1M12.7 12.7l-1.1-1.1M4.4 4.4 3.3 3.3',
   },
 
-  // State
   dot: { d: 'M8 11.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z', solid: true },
   circle: { d: 'M8 12.2a4.2 4.2 0 1 0 0-8.4 4.2 4.2 0 0 0 0 8.4Z' },
   diamond: { d: 'M8 2 14 8 8 14 2 8Z' },
@@ -138,9 +101,6 @@ const px = computed(() => (typeof props.size === 'number' ? `${props.size}px` : 
 </template>
 
 <style scoped>
-/* Sits on the text baseline rather than the line box, so a mark beside a word
-   is centred on the word instead of riding high — the exact defect the fallback
-   glyphs had, and the reason several call sites carried hand-tuned margins. */
 .icon {
   display: inline-block;
   vertical-align: -0.15em;

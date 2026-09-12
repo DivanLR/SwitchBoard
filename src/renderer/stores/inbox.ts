@@ -1,5 +1,3 @@
-// Central permission inbox state (FR-007..013): pending items grouped by
-// project, decisions, history, and undeliverable-decision surfacing (SC-004).
 import { computed, reactive, toRefs } from 'vue'
 import type { DecisionRecord, PermissionRequest, PermissionRule } from '@shared/domain'
 import type { InboxChangedPush } from '@shared/ipc-types'
@@ -8,28 +6,19 @@ import { invoke } from '@renderer/ipc'
 const UNDELIVERABLE_DECISION =
   'The decision could not be delivered: the originating session has ended. The item was marked expired.'
 
-// Ticket per history load, so an older reply cannot replace a newer one.
 let historyLoad = 0
 
-// State/derivations split the same way as stores/projects.ts (see there for
-// why): `groups` rebuilds a Map and re-sorts, so it needs to be a real
-// `computed()` rather than a plain `get` re-running on every read.
 const state = reactive({
   pending: [] as PermissionRequest[],
   history: [] as DecisionRecord[],
   focusRequestId: null as string | null,
-  /** Banner shown when a decision could not reach its session (SC-004). */
   undeliverableNotice: null as string | null,
 })
 
-/** Grouped by project, oldest first within each group (clarified FIFO). */
 const groups = computed((): { projectId: string; items: PermissionRequest[] }[] => {
   const byProject = Object.groupBy(state.pending, (item) => item.projectId)
   return Object.entries(byProject).map(([projectId, items]) => ({
     projectId,
-    // Object.groupBy types every value as possibly absent, because the key type is
-    // wider than the keys it actually produced. A key only exists here because an
-    // item produced it, so no group is ever empty.
     items: [...(items ?? [])].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
   }))
 })
@@ -60,12 +49,9 @@ const store = reactive({
   },
 
   async alwaysAllow(requestId: string): Promise<void> {
-    // From a decided history entry; the matcher is derived server-side.
     await invoke('inbox.alwaysAllow', { requestId })
   },
 
-  /** From a pending item: server-side inserts the rule, then approves.
-   *  confirmHighRisk gates the broad MCP tool_only grant (high by fail-safe). */
   async approveAlways(requestId: string, confirmHighRisk = false): Promise<boolean> {
     const result = await invoke('inbox.approveAlways', {
       requestId,
@@ -75,8 +61,6 @@ const store = reactive({
     return result.delivered
   },
 
-  /** Active Bash command-prefix values already allowed for a project (so the
-   *  history menu can hide "Always allow" for commands a rule already covers). */
   async allowedCommandBases(projectId: string): Promise<string[]> {
     const rules = await this.listStandingRules(projectId, false)
     return rules
@@ -86,7 +70,6 @@ const store = reactive({
       .map((r) => r.matcher.value as string)
   },
 
-  /** Standing (always-allow) command rules for a project — Allowed-list tab. */
   async listStandingRules(projectId: string, includeRevoked = false): Promise<PermissionRule[]> {
     return invoke('rules.standing.list', { projectId, includeRevoked })
   },
@@ -120,8 +103,6 @@ const store = reactive({
     return invoke('inbox.approveAllForProject', { projectId, includeHighRisk })
   },
 
-  /** Ticketed so a reply for one filter cannot land after a newer one and leave
-   *  the list showing a project the view is no longer on. */
   async loadHistory(projectId?: string): Promise<void> {
     const ticket = (historyLoad += 1)
     const history = await invoke('inbox.history', { projectId })
@@ -149,7 +130,6 @@ const store = reactive({
     state.focusRequestId = requestId
   },
 
-  /** Clear the "scroll to this item" signal once the view has consumed it. */
   clearFocusRequest(): void {
     state.focusRequestId = null
   },

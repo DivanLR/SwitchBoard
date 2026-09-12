@@ -1,7 +1,4 @@
 <script setup lang="ts">
-// Swallowed block — 1:1 with the design reference:
-// "▸ swallowed N lines · kind" toggle, dark expansion box, and a cap that
-// defers to the raw view (FR-015/016).
 import { computed, ref } from 'vue'
 import Icon from '@renderer/components/Icon.vue'
 import type { SessionEvent } from '@shared/domain'

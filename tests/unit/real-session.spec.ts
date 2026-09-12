@@ -1,11 +1,3 @@
-// T051 (real-session smoke): drives the REAL Agent SDK through the production
-// SessionManager + PermissionBroker stack — session spawn, streaming events,
-// canUseTool interception, decision delivery, and turn completion with cost
-// figures. Opt-in because it spends real tokens and needs an authenticated
-// Claude Code installation:
-//
-//   $env:REAL_SESSION = '1'; npx vitest run tests/unit/real-session.spec.ts
-//
 import { describe, expect, it, vi } from 'vitest'
 import { execSync } from 'node:child_process'
 import { mkdtempSync } from 'node:fs'
@@ -19,10 +11,6 @@ import { PermissionBroker } from '@main/inbox/permission-broker'
 
 const enabled = process.env.REAL_SESSION === '1'
 
-// vi.waitFor replaces a hand-rolled polling loop. Its callbacks must ASSERT
-// rather than return a boolean: it retries only while the callback throws, and
-// resolves with whatever it returns, so a bare false predicate would pass
-// instantly and the test would never actually wait.
 const WAIT = { timeout: 150_000, interval: 500 }
 
 describe.runIf(enabled)('real Claude Code session (quickstart smoke)', () => {
@@ -60,7 +48,6 @@ describe.runIf(enabled)('real Claude Code session (quickstart smoke)', () => {
 
       const broker = new PermissionBroker(repos, manager, {
         onInboxChanged: (push) => {
-          // The smoke test plays the developer: approve whatever arrives.
           if (push.added) {
             approvedRequests.push(push.added.id)
             setTimeout(() => broker.decide(push.added!.id, 'approve', true), 100)
@@ -82,13 +69,11 @@ describe.runIf(enabled)('real Claude Code session (quickstart smoke)', () => {
       const kinds = new Set(events.map((e) => e.kind))
       expect(kinds.has('prompt')).toBe(true)
       expect(kinds.has('result')).toBe(true)
-      // The permission interception round-tripped through the broker.
       expect(approvedRequests.length).toBeGreaterThan(0)
       expect(kinds.has('permission_marker')).toBe(true)
       expect(kinds.has('tool_activity')).toBe(true)
       const decisions = repos.requests.history({})
       expect(decisions.some((d) => d.status === 'approved')).toBe(true)
-      // Cost figures come from the SDK result message (R11).
       const result = events.find((e) => e.kind === 'result')
       expect((result?.payload as { totalCostUsd: number }).totalCostUsd).toBeGreaterThanOrEqual(0)
 
@@ -154,7 +139,6 @@ describe.runIf(enabled)('real AskUserQuestion routing (T021 watch item)', () => 
       const question = events.find((e) => e.kind === 'question')
       const payload = question?.payload as { options: { label: string }[] }
       expect(payload.options.map((o) => o.label)).toContain('Blue')
-      // Questions never become inbox items (FR-020).
       expect(repos.requests.pending()).toHaveLength(0)
 
       broker.answerQuestion(session.id, question!.id, 'Blue')
@@ -162,7 +146,6 @@ describe.runIf(enabled)('real AskUserQuestion routing (T021 watch item)', () => 
 
       const answered = events.find((e) => e.id === question!.id)?.payload as { answered: boolean }
       expect(answered.answered).toBe(true)
-      // The model saw the chosen answer if its final text names the colour.
       const texts = events
         .filter((e) => e.kind === 'assistant_text' || e.kind === 'summary')
         .map((e) => (e.payload as { text: string }).text)

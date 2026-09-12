@@ -1,10 +1,3 @@
-// T017: mock session host for Playwright, injected via addInitScript before the
-// renderer loads. Implements the full `window.switchboard` surface plus a
-// `window.__mock` test-driver API for scripting sessions and permissions.
-// Must stay self-contained: it is serialised into the browser context, so it
-// cannot reference imports at runtime. Anything from the real contract instead
-// arrives as scenario DATA (e.g. settings below), keeping it tied to the app's
-// real defaults instead of a hand-copied duplicate that can drift.
 import {
   DEFAULT_SETTINGS,
   type CustomSkill,
@@ -13,8 +6,6 @@ import {
   type Settings,
 } from '../../src/shared/domain'
 import { detectStacks, type AvailableSuites } from '../../src/shared/test-catalog'
-// Type-only, so nothing is referenced at runtime inside the serialised function.
-// This is what keeps the mock's method table honest: see invokeHandlers below.
 import type { InvokeMethod } from '../../src/shared/ipc-types'
 
 export interface MockSessionSeed {
@@ -22,86 +13,45 @@ export interface MockSessionSeed {
   status: 'working' | 'needs_you' | 'done' | 'error'
   branch?: string
   startedAt?: string
-  // No usage fields here: every spec that exercises the usage meter sets it at
-  // runtime through __mock.setUsage(), so seed-time versions only ever resolved
-  // to null. The runtime MockSession below still carries them.
   mcpServers?: { name: string; status: string }[]
-  /** A bypass session runs inside the sandbox container, which ships node and
-   *  nothing else — the Tests section reads this to say what cannot run there. */
   bypassPermissions?: boolean
-  /** Started read-only, planning before acting. */
   planMode?: boolean
 }
 
 export interface MockProjectSeed {
-  /** Unsent composer text from a previous run, restored into the composer on open. */
   drafts?: string[]
   id: string
   name: string
   path: string
   session?: MockSessionSeed
-  /** The reserved, project-less row backing the global Database MCP session. */
   reserved?: boolean
-  /** The project's session mode. Omit for 'auto', which is what migration 022
-   *  backfilled onto every project that predates the setting. */
   defaultSessionMode?: string
-  /** Whether the project runs its work in Docker. Omit for false, which is
-   *  what migration 026 gave every project that predates the switch. */
   useContainers?: boolean
-  /** Diff tab (specs/003-diff-tab) seed data — set at scenario construction so
-   *  it is in place before the app's own initial load, rather than racing it
-   *  the way a later __mock.setDiff() call would for a project already
-   *  selected on page load. */
   diff?: { gitNotice: string | null; files: Record<string, unknown>[] }
 }
 
 export interface MockScenario {
   projects: MockProjectSeed[]
-  /** Skills already imported when the app opens. */
   skills?: CustomSkill[]
-  /** Starting settings. Pass DEFAULT_SETTINGS so the mock cannot drift from the
-   *  real defaults; override individual fields for a specific test. */
   settings: Settings
-  /**
-   * What `evals.suites` answers, built from the real catalog for the same reason
-   * `settings` is: a hand-written subset here would hide suites the real app
-   * offers, so tests would assert against the mock's imagination.
-   *
-   * Omit only in a scenario that never opens the Tests section.
-   */
   suites?: AvailableSuites[]
 }
 
 export interface MockDriver {
-  /** Unsent composer text from a previous run, restored on open. */
   setDrafts: (projectId: string, texts: string[]) => void
-  /** What the next native folder pick answers; null is the cancel case. */
   setNextFolderPick: (path: string | null) => void
   setNextFilePick: (path: string | null) => void
   emitEvent: (sessionId: string, kind: string, payload: Record<string, unknown>) => string
-  /** Rewrites an event in place, as a streamed token does to a partial message.
-   *  The real host does this on every delta (UPDATABLE_KINDS), and it is the
-   *  only way to exercise anything that has to survive a mid-stream re-render. */
   updateEvent: (sessionId: string, eventId: string, payload: Record<string, unknown>) => void
   setCommands: (
     projectId: string,
     commands: (string | { name: string; description?: string })[],
   ) => void
   endSession: (sessionId: string) => void
-  /** Simulates a start whose async run loop throws almost immediately: ends the
-   *  session with endReason 'crashed' and the given detail, exactly as the real
-   *  manager's handleExit / finaliseRow does — but *after* sessions.start already
-   *  resolved. */
   crashSession: (sessionId: string, detail: string) => void
   setSpecKit: (projectId: string, state: Record<string, unknown>) => void
-  /** How long 'sessions.start' takes to resolve, in ms (default 250). Raised by
-   *  a test that needs the window between a click and the session existing to
-   *  stay open long enough to assert on. */
   setStartDelay: (ms: number) => void
-  /** Diff tab (specs/003-diff-tab): seeds what 'diff.list' answers for a
-   *  project — there is no real git repo behind this in-browser mock. */
   setDiff: (projectId: string, result: { gitNotice: string | null; files: Record<string, unknown>[] }) => void
-  /** Seeds what 'diff.file' answers for one path within a project. */
   setFileDiff: (projectId: string, path: string, content: Record<string, unknown>) => void
   setMcpSchema: (projectId: string, content: string, servers?: string[]) => void
   setUsage: (sessionId: string, utilization: number, resetsInMinutes: number, limitType: string) => void
@@ -120,21 +70,13 @@ export interface MockDriver {
   askQuestion: (sessionId: string, text: string, options: string[]) => string
   completeTurn: (sessionId: string, costUsd?: number) => void
   setStatus: (sessionId: string, status: string) => void
-  /** Stand in for the main process reading a check/judge marker off the session:
-   *  writes the result onto the line and pushes it, like the real gate does. */
   reportEvalResult: (
     projectId: string,
     id: string,
     result: { checkStatus?: string; judge?: string },
   ) => void
-  /** Stand in for the main process reading a verification report off the session:
-   *  finishes the running run with that report and pushes it. */
   reportVerifyResult: (projectId: string, status: string, report: unknown) => void
-  /** Stand in for the session finishing a diagram: the file now exists in the
-   *  project's docs/diagrams folder, exactly as if the plugin had written it. */
   addDiagram: (projectId: string, entry: DiagramEntry) => void
-  /** Finish the running API eval set the way the main process does: the app has
-   *  made the calls, so the driver supplies the calls and the verdict. */
   reportApiResult: (
     projectId: string,
     status: string,
@@ -143,10 +85,7 @@ export interface MockDriver {
   ) => void
   startFlood: (intervalMs: number, perTick: number) => void
   stopFlood: () => void
-  /** What the NEXT skills.import call finds in the repository, so a scenario can
-   *  decide what a URL 'contains' without this file inventing one. */
   setSkillImport: (skills: CustomSkill[]) => void
-  /** Make `clipboard.write` refuse, so the failure label can be tested. */
   setClipboardFails: (fails: boolean) => void
   state: () => {
     sends: { sessionId: string; text: string }[]
@@ -156,24 +95,16 @@ export interface MockDriver {
     starts: {
       projectId: string
       deniedMcpServers?: string[]
-      /** The one resolved mode the start asked for (request override or project default). */
       mode?: string
       bypassPermissions?: boolean
       planMode?: boolean
-      /** Whether the start asked to resume the previous conversation. */
       resume?: boolean
-      /** The session id whose transcript was carried in as context, if any. */
       carryTranscriptFrom?: string
-      /** Whether the start asked to run in a container rather than on this machine. */
       containerised?: boolean
     }[]
-    /** Every live plan-mode switch asked for, in order. */
     planModeChanges: { sessionId: string; enabled: boolean }[]
-    /** Every 'diagrams.open' call, in order, so a spec can assert which file it named. */
     diagramOpens: { projectId: string; file: string }[]
-    /** Every host-side plugin install asked for, in order. */
     pluginInstalls: { marketplace: string; pkg: string }[]
-    /** Every diff region handed to a session to apply, in order. */
     diffApplies: { projectId: string; path: string; lines: string[]; instruction: string }[]
   }
 }
@@ -200,17 +131,13 @@ export function installMockHost(scenario: MockScenario): void {
     usageResetsAt: number | null
     usageLimitType: string | null
     bypassPermissions: boolean
-    /** How it started (persisted in the real host) vs where it is now (in-memory). */
     planMode: boolean
     inPlanMode: boolean
     mcpServers: { name: string; status: string }[]
     startedAt: string
     endedAt: string | null
     endReason: string | null
-    /** The developer's own name for this session; null until they type one. */
     label: string | null
-    /** What the real host derives from the work when nothing was typed. The mock
-     *  derives nothing, so here it is simply the label the rename handler set. */
     name?: string | null
   }
 
@@ -234,32 +161,17 @@ export function installMockHost(scenario: MockScenario): void {
   let idCounter = 0
   const nextId = (prefix: string): string => `${prefix}-${++idCounter}`
 
-  // Diff tab (specs/003-diff-tab) seed data; see setDiff/setFileDiff below for
-  // why there is no real git repo behind this in-browser mock.
   const diffByProject = new Map<string, AnyRecord>()
   const fileDiffByProject = new Map<string, AnyRecord>()
   for (const p of scenario.projects) {
     if (p.diff) diffByProject.set(p.id, p.diff)
   }
 
-  // Diagrams section: the FILE is the record (src/shared/diagram.ts's own framing),
-  // so unlike every other per-project map above this one is seeded empty and grows
-  // only when a test says a file now exists, via __mock.addDiagram.
   const diagramsByProject = new Map<string, DiagramEntry[]>()
-  // Names already handed out by 'diagrams.generate' this session, so a second
-  // request for the same subject does not collide with one whose file has not
-  // landed yet — diagramFileName's own taken-names guard, just fed from requests
-  // in flight rather than from disk.
   const diagramRequestedFiles = new Map<string, Set<string>>()
   const diagramOpens: { projectId: string; file: string }[] = []
   const pluginInstalls: { marketplace: string; pkg: string }[] = []
   const diffApplies: { projectId: string; path: string; lines: string[]; instruction: string }[] = []
-  /**
-   * Inlined from src/shared/diagram.ts (DIAGRAMS_DIR / diagramFileName /
-   * diagramPrompt): this host is serialised into the page (addInitScript), so it
-   * cannot import the shared module at runtime — the same constraint
-   * inbox.alwaysAllow's dangerous-command regex works around below.
-   */
   const DIAGRAMS_DIR = 'docs/diagrams'
   function pickDiagramFileName(
     description: string,
@@ -277,37 +189,22 @@ export function installMockHost(scenario: MockScenario): void {
         .join('-') || 'diagram'
     const used = new Set(taken)
     if (!used.has(`${slug}.html`)) return `${slug}.html`
-    // A second diagram of the same thing is a revision, not an overwrite.
     for (let n = 2; n < 1000; n++) {
       const candidate = `${slug}-${n}.html`
       if (!used.has(candidate)) return candidate
     }
     return `${slug}-${Date.now()}.html`
   }
-  /**
-   * The archify engine's prompt, in the shape the real archifyPrompt produces.
-   *
-   * Not the whole of it — this host cannot import the shared module (see above),
-   * and duplicating three hundred words of prompt here would only guarantee the
-   * copy drifts. What a spec needs to assert is which engine ran and what it was
-   * told: the skill name, the chosen type, the quality profile and the output
-   * path. Those are here verbatim.
-   */
   function archifyPromptText(
     description: string,
     file: string,
     options: { type: string; quality: string; motion: boolean; reference?: string },
   ): string {
     const base = file.replace(/\.html$/, '')
-    // Every type is concrete since "Choose for me" was removed, so there is no
-    // `<type>` placeholder branch to mirror any more.
     const spec = `${DIAGRAMS_DIR}/${base}.${options.type}.json`
     return [
       `Create a diagram: ${description}`,
       '',
-      // Kept verbatim from the real prompt, and kept BEFORE the authoring line,
-      // because both are what a spec asserts: that the picked file crossed the
-      // bridge at all, and that it is named before the skill is told how to draw.
       ...(options.reference
         ? [
             'Draw it FROM this file, which the developer chose as the reference:',
@@ -351,7 +248,6 @@ export function installMockHost(scenario: MockScenario): void {
   }
 
   const sessions = new Map<string, MockSession>()
-  /** Transcripts the mock has "written", newest first. Never touches disk. */
   let transcripts: AnyRecord[] = []
   const projects = scenario.projects.map((p) => {
     let session: MockSession | null = null
@@ -388,15 +284,9 @@ export function installMockHost(scenario: MockScenario): void {
       archivedAt: null as string | null,
       refs: [] as { path: string; label: string }[],
       reserved: !!p.reserved,
-      // NOT NULL with a DEFAULT of 'auto' in the real schema (migration 022), so a
-      // scenario that says nothing gets what an existing project got.
       defaultSessionMode: p.defaultSessionMode ?? 'auto',
-      // Same rule, migration 026: off unless the scenario says otherwise.
       useContainers: p.useContainers ?? false,
       session,
-      // A project runs as many sessions as it is asked to. "session" stays the most
-      // recently started one, which is what the real host's activeForProject returns
-      // and what this file's own internal checks read; "sessions" is the whole list.
       sessions: session ? [session] : [],
     }
   })
@@ -408,13 +298,8 @@ export function installMockHost(scenario: MockScenario): void {
   const markerByRequest = new Map<string, AnyRecord>()
   const projectCommands = new Map<string, { name: string; description?: string }[]>()
   const specKitByProject = new Map<string, AnyRecord>()
-  // Keyed by projectId (legacy single doc) or `projectId|comboKey` (per-combination).
   const mcpSchemaByProject = new Map<string, string>()
   const mcpScans: { id: string; projectId: string; comboKey: string; servers: string[]; scannedAt: string }[] = []
-  // Models the "subscription" can select, as the real host reports them (it reads
-  // them from the CLI). Drives the settings picker entirely — there is no
-  // hardcoded catalogue behind it. A test can replace the set via
-  // __mock.setAvailableModels to exercise a model release.
   let availableModels: { id: string; label: string; description: string }[] = [
     { id: 'claude-fable-5', label: 'Fable', description: 'Most capable for the hardest tasks' },
     { id: 'claude-opus-5[1m]', label: 'Opus (1M context)', description: 'Best for everyday, complex tasks' },
@@ -451,14 +336,6 @@ export function installMockHost(scenario: MockScenario): void {
       enabled: true,
     },
   ]
-  /**
-   * The rules editor's data: a small representative set, not the app's real
-   * shipped defaults. This is the one place this file breaks its own
-   * no-hand-copied-data rule, because the real defaults and merge logic live in
-   * src/main (out of reach per tsconfig.web.json) and are covered against the
-   * real code by rule-prefs.spec.ts / rule-prefs-repo.spec.ts. The e2e specs
-   * only need the editor to list, toggle, add and remove rows.
-   */
   const rules: { risk: AnyRecord[]; swallow: AnyRecord[] } = {
     risk: [
       {
@@ -507,13 +384,10 @@ export function installMockHost(scenario: MockScenario): void {
     swallow: rules.swallow.map((r) => ({ ...r })),
   })
 
-  /** Mirrors the real host: a shipped rule resets, a custom rule is deleted. */
   const findRule = (id: string, kind: string): AnyRecord | undefined =>
     (kind === 'risk' ? rules.risk : rules.swallow).find((r) => r.id === id)
 
-  // The real DEFAULT_SETTINGS, handed in as data by the scenario.
   let settings: AnyRecord = { ...(scenario.settings as unknown as AnyRecord) }
-  /** API eval sets per project, newest first (mirrors verifyByProject). */
   const apiRunsByProject = new Map<string, AnyRecord[]>()
 
   const listeners = new Map<string, Set<(payload: unknown) => void>>()
@@ -537,7 +411,6 @@ export function installMockHost(scenario: MockScenario): void {
       try {
         if (new RegExp(String(rule.pattern), 'im').test(text)) return String(rule.noiseKind)
       } catch {
-        // Invalid pattern never matches.
       }
     }
     return null
@@ -598,11 +471,9 @@ export function installMockHost(scenario: MockScenario): void {
   const starts: {
     projectId: string
     deniedMcpServers?: string[]
-    /** The one resolved mode the start asked for (request override or project default). */
     mode?: string
     bypassPermissions?: boolean
     planMode?: boolean
-    /** Whether the start asked to resume the previous conversation. */
     resume?: boolean
     carryTranscriptFrom?: string
     containerised?: boolean
@@ -621,8 +492,6 @@ export function installMockHost(scenario: MockScenario): void {
     setStatus(sessionId, 'working')
   }
 
-  // Runs the front-of-queue task when the project's session is live and idle
-  // (mirrors SessionManager.maybeDrainQueue in the real host).
   function maybeDrainQueue(projectId: string): void {
     const list = taskQueueByProject.get(projectId) ?? []
     const project = projects.find((p) => p.id === projectId)
@@ -663,9 +532,6 @@ export function installMockHost(scenario: MockScenario): void {
     }
     decisionLog.push({ requestId, decision })
     resolveRequest(request, decision === 'approve' ? 'approved' : 'denied')
-    // Approving an ExitPlanMode IS leaving plan mode, which is what the real
-    // broker does through SessionManager.planExited. Denying keeps it, so the
-    // model revises and proposes again.
     if (decision === 'approve' && request.type === 'plan_approval') {
       const session = sessions.get(String(request.sessionId))
       if (session?.inPlanMode) {
@@ -676,50 +542,14 @@ export function installMockHost(scenario: MockScenario): void {
     return { delivered: true }
   }
 
-  /**
-   * Every real IPC method, checked by the compiler.
-   *
-   * Keyed on `InvokeMethod` rather than `string`: as a loose Record this table
-   * could silently fall behind the real bridge, and it had — three methods the
-   * app ships were missing entirely, so those flows had no e2e coverage at all
-   * and nothing failed to say so. A method added to InvokeMap now breaks this
-   * build until the mock answers it too.
-   *
-   * Responses stay `unknown` on purpose. The specs assert on rendered UI, so
-   * pinning each mock's return shape to InvokeMap[M]['res'] would force every
-   * fixture to spell out fields no assertion reads, for no extra safety.
-   */
-  /**
-   * One session per SECTION, mirroring SessionManager.backgroundSessionFor:
-   * reuse this project's live session for that kind, otherwise start a new one.
-   * A drawing never reuses, exactly as in the real manager.
-   *
-   * Deliberately never the chat session — the whole point of the production
-   * change is that a section's work does not queue behind the developer's
-   * conversation, and a mock that quietly reused it would leave the e2e suite
-   * exercising the behaviour that was removed. Keyed by kind for the same
-   * reason: one shared background session is also behaviour that was removed,
-   * and a mock that kept it would hide a cleanup command landing in the middle
-   * of a test report.
-   *
-   * A plain function rather than an invoke handler: it is not an IPC endpoint,
-   * and invokeHandlers is keyed to InvokeMap so it cannot hold one that is not.
-   */
-  /** Imported skills, and what the next import will "find" in the repository. */
   const customSkills: CustomSkill[] = [...(scenario.skills ?? [])]
   let nextSkillImport: CustomSkill[] | null = null
 
-  /** Forces `clipboard.write` to refuse, for the failure-label test. */
   let clipboardFails = false
 
-  /** How long a start takes. A real one spawns the CLI, and on a containerised
-   *  project brings an image up first; 250ms stands in for that so a waiting
-   *  state is observable rather than resolving inside one frame. */
   let startDelayMs = 250
 
   const sectionSessions = new Map<string, MockSession>()
-  /** Mirrors SessionManager.NEVER_REUSED: a drawing and a Spec Kit command each
-   *  take a session of their own, every time. */
   const neverReused: ReadonlySet<SectionKind> = new Set(['diagram', 'spec'])
   async function sectionSession(projectId: string, kind: SectionKind): Promise<MockSession> {
     const key = `${projectId}|${kind}`
@@ -737,8 +567,6 @@ export function installMockHost(scenario: MockScenario): void {
         .map((p) => ({
           ...p,
           reserved: !!p.reserved,
-          // Mirrors handlers.ts's projectList exactly: every live session oldest
-          // first, or the most recent ended one when the project is running nothing.
           ...(() => {
             const live = p.sessions.filter((s) => !s.endedAt)
             const latest = p.sessions[p.sessions.length - 1]
@@ -753,8 +581,6 @@ export function installMockHost(scenario: MockScenario): void {
       archived: projects.filter((p) => p.archivedAt).map((p) => ({ ...p, session: undefined })),
       counters: counters(),
     }),
-    // The real picker is an OS dialogue Playwright cannot drive, so the test
-    // says in advance what it returns. null is the cancel case.
     'dialog.pickFolder': () => ({ path: nextFolderPick }),
     'dialog.pickFile': () => ({ path: nextFilePick }),
     'projects.register': (req) => {
@@ -762,11 +588,8 @@ export function installMockHost(scenario: MockScenario): void {
       if (path.includes('missing')) throw { code: 'INVALID_PATH', message: 'The folder does not exist' }
       const existing = projects.find((p) => p.path === path)
       if (existing) {
-        // Mirrors the real host: an archived row is restored, an active one is a duplicate.
         if (!existing.archivedAt) throw { code: 'DUPLICATE', message: 'The folder is already registered' }
         existing.archivedAt = null
-        // Mirrors discovery.ts: re-adding through the dialogue is a mode choice,
-        // so a mode in the request wins over the archived row's own.
         if (req.defaultSessionMode) existing.defaultSessionMode = String(req.defaultSessionMode)
         return { ...existing, session: undefined }
       }
@@ -779,9 +602,7 @@ export function installMockHost(scenario: MockScenario): void {
         archivedAt: null as string | null,
         refs: [] as { path: string; label: string }[],
         reserved: false,
-        // NOT NULL with a DEFAULT of 'auto' in the real schema (migration 022).
         defaultSessionMode: String(req.defaultSessionMode ?? 'auto'),
-        // NOT NULL with a DEFAULT of 0 in the real schema (migration 026).
         useContainers: false,
         session: null as MockSession | null,
         sessions: [] as MockSession[],
@@ -794,15 +615,6 @@ export function installMockHost(scenario: MockScenario): void {
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
       project.defaultSessionMode = String(req.mode)
     },
-    /*
-     * Custom skills. The mock keeps a list and mirrors the host's RULES rather
-     * than its mechanism: no network, no files, but the same refusals — a
-     * disabled skill cannot be run, an unknown one is NOT_FOUND — so a test
-     * cannot pass here against behaviour the real host would reject.
-     *
-     * `__mock.setSkillImport` decides what the next import "finds", because what
-     * a repository contains is the scenario's business, not this file's.
-     */
     'skills.list': () => [...customSkills],
     'skills.import': (req) => {
       const url = String(req.url)
@@ -854,10 +666,6 @@ export function installMockHost(scenario: MockScenario): void {
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
       project.useContainers = req.on === true
     },
-    // Trimmed, and an empty one clears the name, which is the rule the real
-    // manager applies too — a test must not pass against a kinder mock. `name`
-    // moves with it because the real host prefers a typed name over the one it
-    // derives, and the sidebar renders `name`.
     'sessions.rename': (req) => {
       const session = sessions.get(String(req.sessionId))
       if (!session) throw { code: 'NOT_FOUND', message: 'Session not found' }
@@ -869,8 +677,6 @@ export function installMockHost(scenario: MockScenario): void {
       const project = projects.find((p) => p.id === req.projectId)
       if (project) project.name = String(req.name).trim()
     },
-    // Same four refusals as the real host, in the same order (discovery.ts):
-    // live session, missing folder, no change, another project's folder.
     'projects.repoint': (req) => {
       const project = projects.find((p) => p.id === req.projectId)
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
@@ -955,10 +761,6 @@ export function installMockHost(scenario: MockScenario): void {
       }
       return fileDiffByProject.get(`${String(req.projectId)}|${String(req.path)}`) ?? null
     },
-    // Records the dispatch rather than pretending to edit anything: what a spec
-    // needs to assert is that the selected region and the words reached the
-    // background session, not that a file changed on a disk this host does not
-    // have. Same NOT_LIVE guard as the rest of the tab.
     'diff.apply': (req) => {
       const project = projects.find((p) => p.id === req.projectId)
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
@@ -973,39 +775,23 @@ export function installMockHost(scenario: MockScenario): void {
       })
       return { sessionId: project.session.id }
     },
-    // Reads the folder back off disk in the real host, so here it reads the
-    // closure map __mock.addDiagram writes to — newest file first, same as a
-    // directory listing sorted by mtime.
     'diagrams.list': (req) => {
       const list = diagramsByProject.get(String(req.projectId)) ?? []
       return [...list].sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt))
     },
-    // Chooses the name and dispatches the prompt; it does NOT create the file —
-    // in the real app the session's diagram-design plugin writes that, so a test
-    // supplies the finished file itself via __mock.addDiagram.
     'diagrams.generate': async (req) => {
       const projectId = String(req.projectId)
       const description = String(req.description)
-      // A real generate cannot answer until a session exists, and the session it
-      // uses is containerised — so on the first diagram of a run this is a Docker
-      // container starting. The delay keeps that waiting state observable instead
-      // of resolving inside a single frame. Same reason as sessions.start.
       await new Promise((resolve) => setTimeout(resolve, startDelayMs))
       const requested = diagramRequestedFiles.get(projectId) ?? new Set<string>()
       const taken = [...(diagramsByProject.get(projectId) ?? []).map((d) => d.file), ...requested]
-      // A typed name decides the file, through the same slugifier, exactly as
-      // the real handler does it.
       const typed = (req.name as string | undefined)?.trim()
       const file = typed
         ? pickDiagramFileName(typed, taken, 12)
         : pickDiagramFileName(description, taken)
       requested.add(file)
       diagramRequestedFiles.set(projectId, requested)
-      // A BACKGROUND session, never the chat one — see sectionSession above.
       const session = await sectionSession(projectId, 'diagram')
-      // Which engine, from the request rather than from settings, exactly as the
-      // real handler decides it. A spec asserts on the text that went out, so
-      // the two prompts have to be distinguishable here too.
       const archify = req.archify as
         | { type: string; quality: string; motion: boolean; reference?: string }
         | undefined
@@ -1019,18 +805,9 @@ export function installMockHost(scenario: MockScenario): void {
     'diagrams.open': (req) => {
       diagramOpens.push({ projectId: String(req.projectId), file: String(req.file) })
     },
-    // Host-side plugin install. Records the call rather than pretending to
-    // install anything: what a spec needs to assert is that the button reached
-    // the CLI with the right marketplace and package, which is exactly what the
-    // real handler forwards.
     'plugins.install': (req) => {
       const pkg = String(req.pkg)
       pluginInstalls.push({ marketplace: String(req.marketplace), pkg })
-      // Mirrors what the real handler does after a host install: it asks every
-      // live session to reload its plugins, and the refreshed command list is
-      // what makes the install card retire itself. Without this the mock would
-      // let a broken app pass — the card only ever disappears because the
-      // commands arrived, never because a button was clicked.
       const shipped: Record<string, string[]> = {
         'diagram-design@diagram-design': ['export-diagram'],
         'dotnet-claude-kit@dotnet-claude-kit': [
@@ -1049,7 +826,6 @@ export function installMockHost(scenario: MockScenario): void {
       }
       const added = shipped[pkg] ?? []
       if (added.length === 0) return
-      // User scope, so every project gains them, exactly as reloadPlugins does.
       for (const project of projects) {
         const existing = (projectCommands.get(project.id) ?? []).map((c) => c.name)
         const shaped = [...new Set([...existing, ...added])].map((name) => ({ name }))
@@ -1057,8 +833,6 @@ export function installMockHost(scenario: MockScenario): void {
         push('push.projectCommands', { projectId: project.id, commands: shaped })
       }
     },
-    // Enough of a document to prove the frame rendered THIS diagram and not
-    // another: the spec asserts on the file name inside the returned HTML.
     'diagrams.read': (req) => ({
       html: `<!doctype html><title>${String(req.file)}</title><body><svg role="img" aria-label="${String(req.file)}"><text x="4" y="16">${String(req.file)}</text></svg></body>`,
     }),
@@ -1081,7 +855,6 @@ export function installMockHost(scenario: MockScenario): void {
     'mcp.recordScan': (req) => {
       const servers = [...(req.servers as string[])].sort()
       const comboKey = servers.join(' + ')
-      // Mirror main: only record when the combination's doc exists.
       if (!mcpSchemaByProject.has(`${String(req.projectId)}|${comboKey}`)) return null
       let row = mcpScans.find((s) => s.projectId === String(req.projectId) && s.comboKey === comboKey)
       if (!row) {
@@ -1092,16 +865,10 @@ export function installMockHost(scenario: MockScenario): void {
       return row
     },
     'specs.runInSession': async (req) => {
-      // The `background` split is mirrored, not glossed over (see testsSession
-      // above): a section's work must land in the background session, a composer
-      // message in the conversation — so a test on `sends[].sessionId` can tell
-      // which happened.
       const projectId = String(req.projectId)
       let session = req.background
         ? await sectionSession(projectId, (req.kind as SectionKind) ?? 'spec')
         : [...sessions.values()].find((s) => s.projectId === projectId && !s.endedAt)
-      // sessions.start is async (it simulates spawn latency), so this must await
-      // it — the un-awaited Promise used to be cast straight to a session.
       if (!session) session = (await invokeHandlers['sessions.start']({ projectId })) as MockSession
       sends.push({ sessionId: session.id, text: String(req.text) })
       appendEvent(session.id, 'prompt', { text: String(req.text), pending: false })
@@ -1109,9 +876,6 @@ export function installMockHost(scenario: MockScenario): void {
     },
     'updates.check': () => ({ status: 'none' }),
     'updates.install': () => undefined,
-    // The real Terminal tab drives a pseudo-terminal in the main process, which
-    // the mock host has none of. Answered rather than omitted so opening the tab
-    // in an end-to-end run renders an empty terminal instead of throwing.
     'terminal.open': () => ({ scrollback: '', reused: false }),
     'terminal.write': () => undefined,
     'terminal.resize': () => undefined,
@@ -1119,33 +883,17 @@ export function installMockHost(scenario: MockScenario): void {
     'sessions.start': async (req) => {
       const project = projects.find((p) => p.id === req.projectId)
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
-      // No refusal here any more: starting a second session alongside a live one is
-      // the point, and the real manager dropped the same guard.
-      // A real start spawns the CLI (and builds a container for a bypass
-      // session); the delay keeps the full-window waiting state observable
-      // instead of resolving inside a single frame. Same reason as stop.
       await new Promise((resolve) => setTimeout(resolve, 250))
-      // One resolved mode, exactly as the real manager does it: the request may
-      // override for a single session, and otherwise the project's own setting
-      // applies. The two session booleans are projections of that one value, so
-      // bypass-and-plan-at-once is no longer expressible.
       const mode = String(req.mode ?? project.defaultSessionMode ?? 'auto')
       const planMode = mode === 'plan'
       starts.push({
         projectId: String(req.projectId),
         deniedMcpServers: req.deniedMcpServers as string[] | undefined,
-        // Recorded so a test can assert which mode a start actually asked for.
         mode,
         bypassPermissions: mode === 'bypass',
         planMode,
-        // Recorded so a test can prove Resume actually asked for a resume, rather
-        // than that the switch merely looked on.
         resume: req.resume === true,
-        // Recorded so a test can prove the previous session's transcript was
-        // actually asked for, rather than that a toggle merely looked on.
         carryTranscriptFrom: req.carryTranscriptFrom as string | undefined,
-        // Recorded so a test can prove the container switch reached the host,
-        // rather than that it merely looked on.
         containerised: req.containerised === true,
       })
       const session: MockSession = {
@@ -1187,8 +935,6 @@ export function installMockHost(scenario: MockScenario): void {
     'sessions.stop': async (req) => {
       const session = sessions.get(String(req.sessionId))
       if (!session) throw { code: 'NOT_FOUND', message: 'Session not found' }
-      // Real teardown takes a moment (SDK drain, container stop); the delay
-      // keeps the UI's ending bar observable instead of resolving instantly.
       await new Promise((resolve) => setTimeout(resolve, 250))
       session.endedAt = now()
       session.endReason = 'stopped'
@@ -1203,8 +949,6 @@ export function installMockHost(scenario: MockScenario): void {
       const session = sessions.get(String(req.sessionId))
       if (!session) throw { code: 'SESSION_ENDED', message: 'Session has ended' }
       ;(session as unknown as AnyRecord).backgroundTasks = []
-      // The real manager's clear releases the status the stale set was holding,
-      // which is the half a developer actually feels.
       setStatus(session.id, 'done')
     },
     'sessions.setPlanMode': (req) => {
@@ -1236,9 +980,6 @@ export function installMockHost(scenario: MockScenario): void {
       }
       return { eventId: event.id, queued }
     },
-    // Mirrors the real host including its refusal: once completeTurn has flushed
-    // the queue the message has gone, and saying otherwise would let a spec pass
-    // against behaviour the app does not have.
     'sessions.editQueued': (req) => {
       const sessionId = String(req.sessionId)
       const list = queuedBySession.get(sessionId) ?? []
@@ -1271,25 +1012,11 @@ export function installMockHost(scenario: MockScenario): void {
       setStatus(sessionId, 'working')
     },
     'sessions.events': (req) => [...(eventsBySession.get(String(req.sessionId)) ?? [])],
-    // Transcripts: the real host writes a markdown file into the OS temp
-    // directory, continuously and on demand. Here the file is only ever named,
-    // never written — the app's contract is the summary it gets back and the list
-    // it can offer, and a test that touched the real temp directory would leak.
-    /*
-     * The renderer's copy path. In the real app this is Electron's own clipboard
-     * in the main process; here it is the browser API, which is the closest a
-     * plain page can get. `setClipboardFails` forces the refusal so the failure
-     * label can be tested without depending on Chromium's permission model,
-     * which Playwright grants or denies for its own reasons.
-     */
     'clipboard.write': async (req) => {
       if (clipboardFails) throw { code: 'INTERNAL', message: 'Clipboard unavailable.' }
       try {
         await navigator.clipboard.writeText(String(req.text))
       } catch {
-        // A plain browser may still refuse. The real host cannot, so a refusal
-        // here is the environment's and not the contract's; swallow it so a
-        // passing test means what it says.
       }
     },
     'transcripts.save': (req) => {
@@ -1321,7 +1048,6 @@ export function installMockHost(scenario: MockScenario): void {
     'sessions.promptHistory': (req) => {
       const seen = new Set<string>()
       const out: string[] = []
-      // Iterate most-recent-first so the newest occurrence sets the order.
       for (let i = sends.length - 1; i >= 0; i -= 1) {
         const s = sends[i]
         const session = sessions.get(s.sessionId)
@@ -1332,7 +1058,6 @@ export function installMockHost(scenario: MockScenario): void {
       }
       return out
     },
-    // Eval loop: newest first, and every mutation answers with the full list.
     'evals.list': (req) => [...(evalsByProject.get(String(req.projectId)) ?? [])],
     'evals.add': (req) => {
       const projectId = String(req.projectId)
@@ -1360,7 +1085,6 @@ export function installMockHost(scenario: MockScenario): void {
       const list = evalsByProject.get(projectId) ?? []
       const row = list.find((r) => r.id === req.id)
       if (!row) throw { code: 'NOT_FOUND', message: 'That acceptance line no longer exists.' }
-      // The gate, same rule as the main process: no pass while the check has not.
       if (req.verdict === 'pass' && row.checkCmd && row.checkStatus !== 'pass') {
         throw { code: 'CONFIRM_REQUIRED', message: 'The check has not passed yet.' }
       }
@@ -1369,7 +1093,6 @@ export function installMockHost(scenario: MockScenario): void {
       }
       return [...list]
     },
-    // The real catalog's answer for this project, carried in as scenario data.
     'evals.suites': () =>
       (scenario.suites ?? []).map((stack) => ({ ...stack, suites: [...stack.suites] })),
     'evals.dispatch': async (req) => {
@@ -1380,7 +1103,6 @@ export function installMockHost(scenario: MockScenario): void {
       if (req.kind === 'check' && !row.checkCmd) {
         throw { code: 'INVALID_PATH', message: 'This line has no check — use the manual pass.' }
       }
-      // The real prompts live in main; the mock records enough to assert intent.
       const text =
         req.kind === 'check'
           ? `Verify this acceptance line: "${row.acceptance}"\nRun exactly: ${row.checkCmd}\nEVAL_CHECK`
@@ -1401,15 +1123,11 @@ export function installMockHost(scenario: MockScenario): void {
       return [...list]
     },
     'verify.list': (req) => [...(verifyByProject.get(String(req.projectId)) ?? [])],
-    // A run occupies the session and stays 'running' until the session reports —
-    // exactly like the real host, where the report is read off session output.
     'verify.start': async (req) => {
       const projectId = String(req.projectId)
       const suiteIds = (req.suiteIds ?? []) as string[]
       if (suiteIds.length === 0) throw { code: 'INVALID_PATH', message: 'Choose at least one suite to run.' }
       const text = `Verify the working tree of this project.\n${suiteIds.join('\n')}\nSWB_VERIFY`
-      // The Tests section's own session, not whichever one is open. Awaited
-      // because starting one is async here exactly as it is in the real host.
       const session = await sectionSession(projectId, 'tests')
       const result = { sessionId: session.id }
       sends.push({ sessionId: session.id, text })
@@ -1435,8 +1153,6 @@ export function installMockHost(scenario: MockScenario): void {
       const projectId = String(req.projectId)
       const list = verifyByProject.get(projectId) ?? []
       if (list.length === 0) throw { code: 'NOT_FOUND', message: 'Run a verification pass first — evidence attaches to a run.' }
-      // Back to the session that produced the run while it is alive, like the
-      // real handler; otherwise a fresh tests session.
       const ran = list[0]?.sessionId ? sessions.get(String(list[0].sessionId)) : undefined
       const session =
         ran && !ran.endedAt ? ran : (await sectionSession(projectId, 'tests'))
@@ -1445,14 +1161,11 @@ export function installMockHost(scenario: MockScenario): void {
       appendEvent(session.id, 'prompt', { text, pending: false })
       return { sessionId: session.id, runs: [...list] }
     },
-    // Cancelling closes the row the way the real host does: inconclusive, with a
-    // note saying the developer stopped it. A finished run is left alone.
     'verify.cancel': (req) => {
       const projectId = String(req.projectId)
       const list = verifyByProject.get(projectId) ?? []
       const at = list.findIndex((r) => r.id === req.runId)
       if (at < 0) throw { code: 'NOT_FOUND', message: 'Run not found' }
-      // Replaced, never mutated in place — see reportVerifyResult below for why.
       if (list[at].status === 'running') {
         list[at] = {
           ...list[at],
@@ -1464,10 +1177,6 @@ export function installMockHost(scenario: MockScenario): void {
       }
       return [...list]
     },
-    // The API eval set. The real host scans the project's source for routes and
-    // then makes the calls itself; the mock supplies a fixed catalogue and leaves
-    // a started run 'running', which is what the panel shows until the app's own
-    // calls finish and arrive on push.apiChanged.
     'api.endpoints': () => ({
       endpoints: [
         { method: 'GET', template: '/api/customers', source: 'Api/CustomersController.cs:12' },
@@ -1501,9 +1210,6 @@ export function installMockHost(scenario: MockScenario): void {
       }
       return [...runs]
     },
-    // The real host writes a markdown file under .switchboard/reports and returns
-    // its path. There is no filesystem here, so this reports the path it would
-    // have written and refuses in the same two cases: no run, or one still going.
     'api.report': (req) => {
       const runs = apiRunsByProject.get(String(req.projectId)) ?? []
       const run = req.runId ? runs.find((r) => r.id === req.runId) : runs[0]
@@ -1527,7 +1233,6 @@ export function installMockHost(scenario: MockScenario): void {
       if (endpoints.length === 0) {
         throw { code: 'INVALID_PATH', message: 'Choose at least one endpoint to test.' }
       }
-      // The Tests section's own session, shared with verification runs.
       const session = await sectionSession(projectId, 'tests')
       const result = { sessionId: session.id }
       const text = `Produce the request data for an automated API test.\n${endpoints
@@ -1588,7 +1293,6 @@ export function installMockHost(scenario: MockScenario): void {
       const projectId = String(req.projectId)
       const text = String(req.text).trim()
       const list = taskQueueByProject.get(projectId) ?? []
-      // Empty text is a no-op, matching the real manager: an edit never deletes.
       if (text.length > 0) {
         const task = list.find((t) => t.id === req.id)
         if (task) task.text = text
@@ -1608,11 +1312,8 @@ export function installMockHost(scenario: MockScenario): void {
     'inbox.decide': (req) =>
       decide(String(req.requestId), String(req.decision), Boolean(req.confirmHighRisk)),
     'inbox.alwaysAllow': (req) => {
-      // History-based (design): a decided Bash entry creates a command rule.
       const request = decisions.find((d) => d.id === req.requestId)
       if (!request) throw { code: 'NOT_FOUND', message: 'Not found' }
-      // Mirrors @shared/domain isDangerousCommand — inlined because this host is
-      // serialised into the page (addInitScript), so it can't call an import.
       const dangerous = /\b(rm|rmdir|del|rd|mkfs|dd|sudo|doas)\b|\bformat\s+[a-z]:|Remove-Item|git\s+(push|reset\s+--hard|clean)\b/i
       if (
         request.type === 'plan_approval' ||
@@ -1621,7 +1322,6 @@ export function installMockHost(scenario: MockScenario): void {
       ) {
         throw { code: 'RULE_NOT_ALLOWED', message: 'Not eligible' }
       }
-      // Flag-aware two-token base, as the real host derives server-side.
       const words = String(request.detail ?? '').trim().split(/\s+/)
       const base = words[1] && !words[1].startsWith('-') ? `${words[0]} ${words[1]}` : (words[0] ?? '')
       if (!base) throw { code: 'RULE_NOT_ALLOWED', message: 'No command' }
@@ -1638,7 +1338,6 @@ export function installMockHost(scenario: MockScenario): void {
       return { rule }
     },
     'inbox.approveAlways': (req) => {
-      // Pending-based: derive+insert the rule, then approve in one step.
       const request = pending.find((p) => p.id === req.requestId)
       if (!request) throw { code: 'NOT_FOUND', message: 'Not found' }
       const dangerous = /\b(rm|rmdir|del|rd|mkfs|dd|sudo|doas)\b|\bformat\s+[a-z]:|Remove-Item|git\s+(push|reset\s+--hard|clean)\b/i
@@ -1677,10 +1376,6 @@ export function installMockHost(scenario: MockScenario): void {
       let approved = 0
       let skippedHighRisk = 0
       for (const item of group) {
-        // `includeHighRisk` was ignored here, so the mock skipped every high-risk
-        // item even after the developer confirmed the sweep — the exact opposite
-        // of FR-011, and the e2e suite was asserting that opposite as correct.
-        // Mirrors permission-broker.approveAllForProject.
         const isHighRisk = item.risk === 'high' && item.type === 'tool_permission'
         if (isHighRisk && !req.includeHighRisk) {
           skippedHighRisk += 1
@@ -1702,8 +1397,6 @@ export function installMockHost(scenario: MockScenario): void {
     'rules.setRisk': (req) => {
       const rule = findRule(String(req.id), 'risk')
       if (rule) {
-        // null restores the shipped level; the mock has no separate copy of it, so
-        // it only clears the marker the editor reads.
         rule.risk = req.risk === null ? rule.risk : String(req.risk)
         rule.overridden = req.risk !== null
       }
@@ -1747,7 +1440,6 @@ export function installMockHost(scenario: MockScenario): void {
       const list = String(req.kind) === 'risk' ? rules.risk : rules.swallow
       const at = list.findIndex((r) => r.id === id)
       if (at !== -1) {
-        // A shipped rule cannot be deleted, only reset: clear its override markers.
         if (list[at].builtin) {
           list[at].disabled = false
           list[at].overridden = false
@@ -1780,16 +1472,11 @@ export function installMockHost(scenario: MockScenario): void {
       standingRules.push(rule)
       return { ...rule }
     },
-    // The rules.* editing channels are above. `swallowRules` here is separate and
-    // stays: classify() reads it to drive the clean-view behaviour the other specs
-    // assert on, which is about how tagged output renders rather than about which
-    // rules did the tagging.
     'settings.get': () => ({ ...settings }),
     'settings.set': (req) => {
       settings = { ...settings, ...req }
       return { ...settings }
     },
-    // The real host probes the CLI for this list; the panel renders it as-is.
     'models.available': () => availableModels,
   }
 
@@ -1797,12 +1484,6 @@ export function installMockHost(scenario: MockScenario): void {
     invoke: (method: string, req: unknown) => {
       const handler = invokeHandlers[method as InvokeMethod]
       if (!handler) return Promise.reject({ code: 'NOT_FOUND', message: `Unknown method ${method}` })
-      // The real boundary is structuredClone, and it rejects a Proxy — which is
-      // what Vue wraps every array and object in. A store handing its own
-      // reactive state to invoke fails with "An object could not be cloned",
-      // naming neither the field nor the call. Cloning here holds every renderer
-      // call in the whole suite to the same rule the packaged app enforces,
-      // rather than letting the mock accept what Electron would reject.
       let cloned: unknown
       try {
         cloned = structuredClone(req ?? {})
@@ -1831,8 +1512,6 @@ export function installMockHost(scenario: MockScenario): void {
   let floodTimer: number | null = null
   let nextFolderPick: string | null = null
   let nextFilePick: string | null = null
-  // Unsent composer text a previous run left behind, per project. Seeded by a
-  // test; the app restores it into the composer on open.
   const draftsByProject = new Map<string, string[]>(
     scenario.projects.filter((p) => p.drafts?.length).map((p) => [p.id, p.drafts as string[]]),
   )
@@ -1850,9 +1529,6 @@ export function installMockHost(scenario: MockScenario): void {
     emitEvent: (sessionId, kind, payload) => String(appendEvent(sessionId, kind, payload).id),
     updateEvent: (sessionId, eventId, payload) => updateEvent(sessionId, eventId, payload),
     setCommands: (projectId, commands) => {
-      // Mirrors the real host: a session's init message stores the commands AND
-      // pushes them so a live composer picks them up without a project switch.
-      // String entries mirror description-less init names.
       const shaped = commands.map((c) => (typeof c === 'string' ? { name: c } : c))
       projectCommands.set(projectId, shaped)
       push('push.projectCommands', { projectId, commands: shaped })
@@ -1954,7 +1630,6 @@ export function installMockHost(scenario: MockScenario): void {
         usage: { inputTokens: 100, outputTokens: 40 },
         durationMs: 1200,
       })
-      // Deliver queued composer messages (FR-019).
       const queue = queuedBySession.get(sessionId) ?? []
       const hadComposerQueue = queue.length > 0
       for (const item of queue.splice(0)) {
@@ -1962,7 +1637,6 @@ export function installMockHost(scenario: MockScenario): void {
       }
       setStatus(sessionId, 'done')
       pushCounters()
-      // A turn that left the session idle pulls the next planned task (FR-023).
       const session = sessions.get(sessionId)
       if (!hadComposerQueue && session) maybeDrainQueue(session.projectId)
     },
@@ -1980,9 +1654,6 @@ export function installMockHost(scenario: MockScenario): void {
       const index = list.findIndex((r) => r.status === 'running')
       const at = index >= 0 ? index : 0
       if (!list[at]) return
-      // Replaced, never mutated in place: the real host rebuilds each run from
-      // its SQLite row, so every push carries fresh objects. Mutating here would
-      // hand the renderer the identity it already holds and hide a stale view.
       list[at] = { ...list[at], status, report, finishedAt: new Date().toISOString() }
       verifyByProject.set(projectId, list)
       push('push.verifyChanged', { projectId, runs: [...list] })
@@ -2021,8 +1692,6 @@ export function installMockHost(scenario: MockScenario): void {
       if (floodTimer !== null) window.clearInterval(floodTimer)
       floodTimer = null
     },
-    /** What the NEXT skills.import call finds in the repository. The scenario
-     *  decides, because repository contents are not this file's business. */
     setSkillImport: (skills: CustomSkill[]) => {
       nextSkillImport = skills
     },
@@ -2043,12 +1712,9 @@ export function installMockHost(scenario: MockScenario): void {
   }
 }
 
-/** Convenience: a two-project scenario used by several specs. */
 export function twoProjectScenario(): MockScenario {
   return {
     settings: DEFAULT_SETTINGS,
-    // A node project, detected by the real catalog rather than described here, so
-    // the picker shows exactly the suites the real app would offer.
     suites: detectStacks(['package.json']),
     projects: [
       {

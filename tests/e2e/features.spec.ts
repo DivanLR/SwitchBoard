@@ -1,5 +1,3 @@
-// New feature coverage: tokens today, per-model settings, history descriptions,
-// and the "/" command palette listing all skills.
 import { expect, test } from '@playwright/test'
 import { installMockHost, twoProjectScenario } from './mock-host'
 
@@ -10,8 +8,6 @@ test.beforeEach(async ({ page }) => {
 })
 
 test('the status bar token count increases after a completed turn', async ({ page }) => {
-  // Token spend is counted from persisted event rows, so it works regardless of
-  // whether the subscription ever reports a rate-limit window.
   const tokens = page.getByTestId('usage-tokens')
   await expect(tokens).toHaveText('0 tok')
   await page.evaluate(() => window.__mock.completeTurn('s-alpha'))
@@ -23,17 +19,13 @@ test('settings exposes intelligent and worker model cards', async ({ page }) => 
   const panel = page.getByTestId('settings-panel')
   await expect(panel.getByTestId('intelligent-model-claude-fable-5')).toBeVisible()
   await expect(panel.getByTestId('worker-model-claude-sonnet-5')).toBeVisible()
-  // Picking an intelligent-model card selects it.
   await panel.getByTestId('intelligent-model-claude-opus-5[1m]').click()
   await expect(panel.getByTestId('intelligent-model-claude-opus-5[1m]')).toHaveClass(/sel/)
-  // The sidebar model summary reflects the choice, labelled from the id.
   await panel.getByTestId('settings-done').click()
   await expect(page.getByTestId('model-summary')).toContainText('Opus 5')
 })
 
 test('the picker follows the account: a new model appears, a retired one goes', async ({ page }) => {
-  // Simulate a model release: the account gains a model the app has never seen
-  // and loses the one it used to ship in code.
   await page.evaluate(() =>
     window.__mock.setAvailableModels([
       { id: 'claude-fable-5', label: 'Fable', description: '' },
@@ -43,25 +35,16 @@ test('the picker follows the account: a new model appears, a retired one goes', 
   )
   await page.getByTestId('open-settings').click()
   const panel = page.getByTestId('settings-panel')
-  // The brand-new model is selectable, named and described without a code change.
   const newCard = panel.getByTestId('intelligent-model-claude-opus-7-2[1m]')
   await expect(newCard).toBeVisible()
   await expect(newCard).toContainText('Opus 7.2 (1M)')
   await expect(newCard).toContainText('Newest Opus')
   await expect(panel.getByTestId('intelligent-model-claude-fable-5')).toBeVisible()
-  // Models the account no longer offers are gone, including the previous Opus.
   await expect(panel.getByTestId('intelligent-model-claude-opus-5[1m]')).toHaveCount(0)
   await expect(panel.getByTestId('intelligent-model-claude-opus-4-8')).toHaveCount(0)
-  // The account default is always offered, whatever the account reports.
   await expect(panel.getByTestId('intelligent-model-default')).toBeVisible()
 })
 
-// This asserted the opposite until 2026-08-21: that the This-project tab carried
-// its own intelligent- and worker-model pickers. The owner removed that scope,
-// because a project override meant the Models tab could say one thing while a
-// session ran on another. The tab still exists and still configures the project;
-// the models are simply not among the things it decides, and this pins that so
-// the pickers cannot drift back in unnoticed.
 test('the This project tab configures the project, but never its models', async ({ page }) => {
   await page.getByTestId('open-settings').click()
   const panel = page.getByTestId('settings-panel')
@@ -71,14 +54,11 @@ test('the This project tab configures the project, but never its models', async 
   await expect(panel.getByTestId('proj-model-global')).toHaveCount(0)
   await expect(panel.getByTestId('proj-worker-global')).toHaveCount(0)
 
-  // The one place a model is chosen, for every project at once.
   await panel.getByTestId('settings-tab-models').click()
   await expect(panel.getByTestId('intelligent-model-default')).toBeVisible()
 })
 
 test('no subscription rate-limit meter is rendered, even once usage reports', async ({ page }) => {
-  // It read the SDK's rate_limit_event, which never arrives for this account, so
-  // it only ever showed an em dash. Removed rather than left claiming a reading.
   await page.evaluate(() => window.__mock.setUsage('s-alpha', 72, 95, 'five_hour'))
   await expect(page.getByTestId('statusbar')).not.toContainText('5h limit')
   await expect(page.getByTestId('session-usage')).toHaveCount(0)
@@ -92,7 +72,6 @@ test('typing "/" lists many available skill commands (not just 6)', async ({ pag
 
   await page.getByTestId('composer-input').fill('/skill-')
   const items = page.getByTestId('suggest-list').locator('.suggest-item')
-  // More than the 6-item cap used for ordinary history matches.
   expect(await items.count()).toBeGreaterThan(10)
 })
 

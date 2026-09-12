@@ -1,12 +1,3 @@
-// A verification run: what the session is asked to execute, and how its answer
-// is read back into a report (spec 002 US1-US4).
-//
-// Same contract as the eval loop's check (eval-dispatch.ts) and for the same
-// reason: everything runs THROUGH the session (FR-041), so the only way to get a
-// deterministic result without spawning our own processes is to demand one
-// machine-readable line and read it off the session's own events. No line, no
-// figures (FR-047) — and a figure the run did not measure stays null, because
-// the app never derives or substitutes one (FR-072).
 import {
   emptyVerifyReport,
   type EndpointResult,
@@ -19,24 +10,15 @@ import {
 import { unavailableReason, type SandboxEnv, type TestSuite } from '@shared/test-catalog'
 import { firstJsonObject, markerTail, str } from './parse'
 
-/** Sentinel the session is told to emit, once, on its own line. */
 export const VERIFY_MARKER = 'SWB_VERIFY'
 
-/**
- * Per-suite progress, emitted as each suite finishes. Deliberately a different
- * sentinel from VERIFY_MARKER so the scanner cannot mistake a progress line for
- * the closing report and settle the run four suites early.
- */
 export const SUITE_MARKER = 'SWB_SUITE'
 
-/** A suite as the run sees it: the command, and whether this environment can run it. */
 export interface PlannedSuite {
   suite: TestSuite
-  /** Set when the suite cannot run here — it is reported, not attempted (FR-057). */
   unavailable: string | null
 }
 
-/** Split the chosen suites into what will run and what this environment cannot. */
 export function planSuites(
   suites: readonly TestSuite[],
   chosen: readonly string[],
@@ -47,21 +29,6 @@ export function planSuites(
     .map((suite) => ({ suite, unavailable: unavailableReason(suite, sandbox) }))
 }
 
-/**
- * What the run actually plans to measure, so the schema (and the guidance below
- * it) only describes fields that stand a chance of being non-null. A unit run
- * with no coverage, mutation or API suite chosen was sending a schema for
- * coverage files, a mutation score and endpoint results it would never have:
- * most of the JSON, sent every run, describing nothing.
- *
- * `quality` is the coarse one, and knowingly so. SuiteKind tags a lint suite
- * and an architecture suite alike as 'quality', so a lint-only run still gets
- * the gate/duplication/debt block it cannot fill. Splitting the kind would
- * reach the catalogue, the gate tiles and the panels; the cost of not splitting
- * it is one unfillable block, and qualitySection already tells the run to
- * answer `not_configured` rather than invent a figure. Split it when a suite
- * needs the distinction for its own sake, not for this.
- */
 interface SchemaFlags {
   coverage: boolean
   quality: boolean
@@ -131,30 +98,12 @@ function buildSchema(flags: SchemaFlags): string {
   return `{\n  ${blocks.join(',\n  ')}\n}`
 }
 
-/**
- * One honesty rule, stated once. Exported so apiDataPrompt uses this exact text
- * plus its own addendum instead of reinventing the rule — three independent
- * copies of "don't guess" is how they drift apart.
- */
 export const HONESTY =
   'Every number must come from output you actually ran or a report file you actually read. ' +
   'If you did not measure something, put null and leave its source null — a guessed, ' +
   'estimated or "typical" figure is far worse than no figure. Never mark a suite pass ' +
   'because it probably would.'
 
-/**
- * Tell the session to exercise the API for real, and to get its inputs from the
- * project's database MCP servers rather than inventing them.
- *
- * This is the difference between "the integration suite passed" and knowing what
- * the API answered. A test suite can pass against fixtures while every real
- * request 404s, and an endpoint called with a made-up id can answer 200 with an
- * empty body and look healthy. So the identifiers must come from real rows, and
- * the response must be checked back against those rows.
- *
- * When no database MCP server is connected, the section says so and asks for the
- * calls anyway, unseeded: fewer facts, honestly labelled, beats a silent skip.
- */
 function endpointSection(apiSuites: PlannedSuite[], dbServers: readonly string[]): string {
   if (apiSuites.length === 0) return ''
   const named = dbServers.length > 0
@@ -200,12 +149,6 @@ function endpointSection(apiSuites: PlannedSuite[], dbServers: readonly string[]
   )
 }
 
-/**
- * The guidance for gathering whatever quality figures this run actually planned
- * to produce. Conditioned the same way endpointSection is: a run with no
- * coverage suite gets no instruction to go read a coverage report, and a run
- * with no mutation suite is never told to go read Stryker's output.
- */
 function qualitySection(flags: SchemaFlags): string {
   const lines: string[] = []
   if (flags.coverage) {
@@ -230,10 +173,6 @@ function qualitySection(flags: SchemaFlags): string {
         "equivalent for this stack) rather than typing a remembered figure. Give the score, how " +
         'many mutants were killed versus survived, and the surviving mutants worth a look, worst ' +
         'first.',
-      // Two facts about invoking Stryker, both learned by watching it refuse on a
-      // real solution rather than guessed at. The catalogue's bare `dotnet
-      // stryker` is a guess about a conventional layout, and neither of these
-      // refusals is a fault in the code being verified.
       '- Running Stryker: it must be started from a directory holding a TEST project, not from ' +
         'the repository root — at the root it finds nothing to mutate. If that test project ' +
         'references more than one project, Stryker refuses until told which to mutate: pass ' +
@@ -244,36 +183,20 @@ function qualitySection(flags: SchemaFlags): string {
   return lines.length === 0 ? '' : `\n\nThen gather the quality figures, without re-running the tests:\n${lines.join('\n')}\n`
 }
 
-/**
- * The default run: execute the chosen suites in order, stop at the first failure
- * (FR-075 — figures gathered through failing tests are not reported, FR-076),
- * and report one line of JSON.
- *
- * The real-endpoint pass is deliberately outside the stop rule. FR-075 exists so
- * a quality figure measured through failing tests is never reported, and that
- * reasoning does not reach the API: whether the endpoints answer is independent
- * evidence, and gating it on `dotnet format` would hide the answer the developer
- * came for behind an unrelated failure.
- */
 export function verifyPrompt(
   plan: PlannedSuite[],
   stackLabel: string,
   sandbox: SandboxEnv,
-  /** Connected database MCP servers, so API suites can exercise real rows. */
   dbServers: readonly string[] = [],
 ): string {
   const runnable = plan.filter((p) => !p.unavailable)
   const blocked = plan.filter((p) => p.unavailable)
-  // Only worth asking for real endpoint exercise when an API-shaped suite is in
-  // the run: otherwise the instruction is noise the session has to read past.
   const apiSuites = runnable.filter((p) => p.suite.kind === 'api')
   const flags = schemaFlags(runnable, apiSuites.length > 0)
   return (
     `Verify the working tree of this ${stackLabel} project. This is a verification pass: ` +
     'run things and report what happened. Do not fix anything and do not edit any file.\n\n' +
     'Run these in order, and STOP at the first one that fails:\n' +
-    // An MCP-answered suite is not a command line, so it is not offered as one:
-    // told to "run" it, a session tries to execute the sentence in a shell.
     runnable
       .map((p) =>
         p.suite.mcp
@@ -294,22 +217,12 @@ export function verifyPrompt(
     (sandbox
       ? `\n\nYou are inside the bypass container: it has git, ripgrep and ${sandbox.join(', ')}` +
         ', and nothing else. Do not install a toolchain to work around that.' +
-        // The project folder is a bind mount shared with the host, so a file the
-        // HOST has open cannot be replaced from in here. The MSBuild error for it
-        // names a path and a permission and gives no hint of the cause, and the
-        // obvious reading — the container lacks rights — is wrong: it can create
-        // new files in that very directory. Observed on a real run, where the
-        // developer's own API was running on the host and holding the DLLs its
-        // build wanted to overwrite.
         '\n\n/workspace is the developer\'s own folder, shared live with their machine. ' +
         'If a build fails with MSB3021 or "Access to the path ... is denied" for a file ' +
         'under bin/ or obj/, that file is LOCKED BY A PROCESS ON THE HOST — usually the ' +
         'application itself running outside this container. It is not a permissions ' +
         'problem here and not a fault in the code: this container can create NEW files in ' +
         'that same directory, it just cannot replace one the host holds open.\n' +
-        // The remedy, proven on a real run: the lock is on the configuration the host is
-        // running, so building the other one writes to a different folder entirely. A
-        // Debug-locked project mutated cleanly in Release, 968 killed of 1078.
         'RETRY IN THE OTHER CONFIGURATION before giving up. The lock is on the ' +
         'configuration the host is running, almost always Debug, and Release writes to ' +
         'bin/Release instead — so `-c Release` (or `--configuration Release` for Stryker) ' +
@@ -321,9 +234,6 @@ export function verifyPrompt(
     endpointSection(apiSuites, dbServers) +
     qualitySection(flags) +
     `\n${HONESTY}\n\n` +
-    // Progress, not the verdict. Without this a six-suite run shows nothing at all
-    // until every suite has finished, so the developer cannot tell a slow suite
-    // from a stuck one.
     `As soon as EACH suite finishes, before you start the next one, print one line ` +
     `on its own starting with ${SUITE_MARKER}: followed by JSON (one line, no code ` +
     `fence):\n{"id": "<suite id>", "status": "pass|fail|skipped|not_run", ` +
@@ -335,11 +245,6 @@ export function verifyPrompt(
   )
 }
 
-/**
- * Evidence capture: a separate action against the build that already passed
- * (FR-059), because it launches and drives the app, which a default run must not
- * do (FR-058). Every item has to be the product of executing the code (FR-048).
- */
 export function evidencePrompt(acceptanceHints: readonly string[], sandboxed: boolean): string {
   return (
     'Capture evidence that the change in this working tree actually works. Execute the code — ' +
@@ -365,15 +270,6 @@ export function evidencePrompt(acceptanceHints: readonly string[], sandboxed: bo
   )
 }
 
-/**
- * Read a report out of session text. Tolerant on the way in — the model may fence
- * the JSON, spread it over lines, or send a bare number where a measured figure
- * belongs — and strict on the way out: anything unreadable becomes null rather
- * than a number nothing measured.
- *
- * The LAST marker wins: the prompt itself names the sentinel, and a turn may
- * restate it, so an early mention must never be mistaken for the answer.
- */
 export function parseVerifyReport(text: string): VerifyReport | null {
   const tail = markerTail(text, VERIFY_MARKER)
   if (tail === null) return null
@@ -388,31 +284,10 @@ export function parseVerifyReport(text: string): VerifyReport | null {
   return normalizeReport(raw)
 }
 
-/**
- * The turn carried a report line that could not be read.
- *
- * Distinct from "no marker at all", which is a session that simply never
- * reported. The two need opposite explanations to the developer, and telling
- * them apart is the whole reason `markerTail` returns null only on absence.
- */
 export function verifyMarkerBroken(text: string): boolean {
   return markerTail(text, VERIFY_MARKER) !== null && parseVerifyReport(text) === null
 }
 
-/**
- * One suite's outcome, announced the moment that suite finishes rather than in
- * the report at the end.
- *
- * The final marker is still the record: this is progress, and progress is allowed
- * to be wrong in a way a verdict is not. A suite ticked green here that the closing
- * report calls failed loses the argument, because `finish` overwrites the whole
- * suites array with the settled one. The value is that a run covering six suites
- * stops being a spinner for four minutes.
- *
- * The FIRST occurrence wins per suite, unlike the closing report where the last
- * marker wins: a suite announces itself once, and a later restatement in the
- * summary text must not be read as a second, contradictory run of it.
- */
 export function parseSuiteProgress(text: string): SuiteResult | null {
   const tail = markerTail(text, SUITE_MARKER)
   if (tail === null) return null
@@ -450,7 +325,6 @@ function normalizeReport(raw: unknown): VerifyReport | null {
   report.quality.duplication = toMeasured(quality.duplication)
   report.quality.debt = str(quality.debt)
   report.quality.mutation = toMeasured(quality.mutation)
-  // Counts, not percentages, so truncate — num() otherwise tolerates a decimal.
   report.quality.mutationKilled = truncOrNull(num(quality.mutationKilled))
   report.quality.mutationSurvived = truncOrNull(num(quality.mutationSurvived))
   report.quality.archViolations = toMeasured(quality.archViolations)
@@ -463,14 +337,6 @@ function normalizeReport(raw: unknown): VerifyReport | null {
   return report
 }
 
-/**
- * One reported HTTP call, kept only when it names a method and a path.
- *
- * `status` is deliberately NOT defaulted: a missing or unparseable status stays
- * null, so a call that never completed can never read as a response. `outcome`
- * falls back to 'not_run' for the same reason — an unrecognised value must not
- * become a pass, which is the one direction that would mislead.
- */
 function toEndpointResult(raw: unknown): EndpointResult | null {
   if (!isRecord(raw)) return null
   const method = str(raw.method)?.toUpperCase()
@@ -501,7 +367,6 @@ function toSuiteResult(raw: unknown): SuiteResult | null {
   return {
     id,
     label: str(raw.label) ?? id,
-    // An unrecognised status is not a pass: it proves nothing, so it did not run.
     status: SUITE_STATUSES.includes(status as SuiteStatus) ? (status as SuiteStatus) : 'not_run',
     detail: str(raw.detail) ?? '',
   }
@@ -519,9 +384,6 @@ function toEvidence(raw: unknown): EvidenceItem | null {
   }
 }
 
-/** A figure with its source. A bare number is accepted (the model often sends
- *  one) but keeps a null source, so the panel can still say where it came from —
- *  nowhere it named. */
 function toMeasured(raw: unknown): Measured {
   if (isRecord(raw)) return { value: num(raw.value), source: str(raw.source) }
   return { value: num(raw), source: null }
@@ -539,8 +401,6 @@ function isText(value: string | null): value is string {
   return value !== null
 }
 
-/** Percentages arrive as 82, "82", "82%" or 0.82 — and as "unknown" when nothing
- *  measured them, which must stay null rather than becoming 0. */
 function num(value: unknown): number | null {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null
   if (typeof value !== 'string') return null
@@ -548,7 +408,6 @@ function num(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-/** A mutant count, never a fraction — Math.trunc on a null is not an option. */
 function truncOrNull(value: number | null): number | null {
   return value === null ? null : Math.trunc(value)
 }

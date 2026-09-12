@@ -1,5 +1,3 @@
-// T040: clean view collapse, in-place expansion, raw completeness, rule
-// editing, and the error exemption (quickstart V3).
 import { expect, test } from '@playwright/test'
 import { installMockHost, twoProjectScenario } from './mock-host'
 
@@ -26,16 +24,12 @@ test('heavy build output collapses into a labelled swallowed block (FR-015)', as
   const block = page.getByTestId('swallowed-block')
   await expect(block).toHaveCount(1)
   await expect(block).toContainText('Worked quietly for a bit · build output')
-  // The narrative stays visible.
   await expect(page.getByTestId('stream-event-assistant_text')).toContainText('Build finished.')
-  // Clean view displays far fewer rows than the raw output (SC-005: >= 60% reduction).
   await expect(page.getByTestId('stream').getByTestId('stream-event-raw_output')).toHaveCount(0)
 })
 
 test('empty assistant text renders nothing — no orphan timestamp row', async ({ page }) => {
   await page.evaluate(() => {
-    // The SDK can emit an empty text block; it must not render as a bare row
-    // (which, with timestamps on, showed a stamp beside blank space).
     window.__mock.emitEvent('s-alpha', 'assistant_text', { text: '', partial: false })
     window.__mock.emitEvent('s-alpha', 'assistant_text', { text: 'Real narrative.', partial: false })
   })
@@ -66,10 +60,8 @@ test('clean view hides tool rows by default; raw view keeps them', async ({ page
     window.__mock.emitEvent('s-alpha', 'tool_activity', { toolName: 'Bash', inputPreview: 'npm test' })
     window.__mock.emitEvent('s-alpha', 'assistant_text', { text: 'Tests pass.', partial: false })
   })
-  // Clean view is narrative + approvals only (showToolRows defaults off).
   await expect(page.getByTestId('stream').getByTestId('stream-event-tool_activity')).toHaveCount(0)
   await expect(page.getByTestId('stream-event-assistant_text')).toContainText('Tests pass.')
-  // Raw view: the command line is present.
   await page.getByTestId('view-raw').click()
   await expect(page.getByTestId('stream')).toContainText('npm test')
 })
@@ -80,12 +72,10 @@ test('the raw view shows timestamps when the Timestamps setting is on', async ({
   )
   await page.getByTestId('view-raw').click()
   await expect(page.getByTestId('raw-stamp')).toHaveCount(0)
-  // Turn on Timestamps in Settings → Terminals.
   await page.getByTestId('open-settings').click()
   await page.getByTestId('settings-tab-term').click()
   await page.getByTestId('setting-timestamps').click()
   await page.getByTestId('settings-done').click()
-  // Raw lines now carry an HH:MM gutter.
   await expect(page.getByTestId('raw-stamp').first()).toHaveText(/^\d{2}:\d{2}$/)
 })
 
@@ -96,7 +86,6 @@ test('errors are never swallowed (FR-017)', async ({ page }) => {
   )
   await emitBuildNoise(page, 10)
 
-  // The error splits the noise into two blocks and stays prominent.
   await expect(page.getByTestId('error-event')).toBeVisible()
   await expect(page.getByTestId('swallowed-block')).toHaveCount(2)
 })
@@ -145,28 +134,21 @@ test('clicking an agent opens its chat: banner, scoped stream, addressed compose
     })
   })
 
-  // The main clean view hides subagent internals.
   const stream = page.getByTestId('stream')
   await expect(stream).toContainText('Main loop narrative.')
   await expect(stream).not.toContainText('Planned 9 cases')
 
-  // AGENTS card rows advertise the chat and open it.
   await expect(page.getByTestId('agent-list')).toContainText('chat')
   await page.getByTestId('agent-row').first().click()
 
   await expect(page.getByTestId('agent-banner')).toContainText('alpha')
   await expect(page.getByTestId('agent-banner')).toContainText('Write rotation tests')
   await expect(page.getByTestId('agent-banner')).toContainText('subagent')
-  // Scoped stream: the delegating prompt opens the chat, agent output follows,
-  // main-loop text is gone.
   await expect(stream).toContainText('[alpha] Cover reuse-revoke edge cases')
   await expect(stream).toContainText('Planned 9 cases — 6 written so far.')
   await expect(stream).not.toContainText('Main loop narrative.')
 
-  // The sidebar marks the open agent; the composer addresses it.
   await expect(page.getByTestId('sidebar-agent-test-writer')).toContainText('Write rotation tests')
-  // And it is marked as the open one. The mark is drawn now rather than a text
-  // arrow, so it is asserted by its own testid rather than by the row's text.
   await expect(
     page.getByTestId('sidebar-agent-test-writer').getByTestId('sidebar-agent-selected'),
   ).toBeVisible()
@@ -176,7 +158,6 @@ test('clicking an agent opens its chat: banner, scoped stream, addressed compose
   const sends = await page.evaluate(() => window.__mock.state().sends)
   expect(sends.some((s) => s.text === '[to test-writer] prioritise the replay case')).toBe(true)
 
-  // Back link returns to the session stream.
   await page.getByTestId('agent-back').click()
   await expect(stream).toContainText('Main loop narrative.')
   await expect(stream).not.toContainText('Planned 9 cases')
@@ -195,7 +176,6 @@ test('clean view shows only the action + status for a command, never the full co
   )
   const marker = page.getByTestId('permission-marker')
   await expect(marker).toBeVisible()
-  // Generic action + status, and NOT the actual command text.
   await expect(marker).toContainText('Ran a command')
   await expect(marker).toContainText('Needs approval')
   await expect(marker).not.toContainText('rm -rf')
@@ -205,7 +185,6 @@ test('clean view shows only the action + status for a command, never the full co
 test('clean view tool rows are command-free — description only, no command or output', async ({
   page,
 }) => {
-  // Turn on "Show tool activity" (off by default).
   await page.getByTestId('open-settings').click()
   await page.getByTestId('settings-tab-term').click()
   await page.getByTestId('setting-tool-rows').click()
@@ -226,18 +205,11 @@ test('clean view tool rows are command-free — description only, no command or 
   await expect(row).not.toContainText('rm -rf')
   await expect(row).not.toContainText('added 400 packages')
 
-  // The raw view keeps the full command and output.
   await page.getByTestId('view-raw').click()
   await expect(page.getByTestId('stream')).toContainText('rm -rf dist')
 })
 
-// The window that keeps the DOM bounded used to be recomputed from the END of the
-// list on every arriving event, which meant it fought the developer: page back to
-// read something, and the next token threw it away again. On a working session
-// that made the whole history above the fold unreachable.
 test('history paged in with "show earlier" survives new output', async ({ page }) => {
-  // Past MAX_RENDER (500), so the window genuinely starts part-way down and the
-  // first line is outside it.
   await page.evaluate(() => {
     for (let i = 0; i < 620; i++) {
       window.__mock.emitEvent('s-alpha', 'assistant_text', { text: `line ${i}`, partial: false })
@@ -249,7 +221,6 @@ test('history paged in with "show earlier" survives new output', async ({ page }
   await page.getByTestId('show-earlier').click()
   await expect(first).toBeVisible()
 
-  // The session keeps talking. The line the developer paged back to must stay.
   await page.evaluate(() => {
     for (let i = 0; i < 40; i++) {
       window.__mock.emitEvent('s-alpha', 'assistant_text', { text: `after ${i}`, partial: false })

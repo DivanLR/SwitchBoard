@@ -1,6 +1,3 @@
-// T027: broker lifecycle — pending -> decided/expired, standing-rule
-// short-circuit, plan approvals, question routing (never the inbox), and
-// undeliverable decisions (SC-004).
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk'
 import type { EventKind, EventPayloadMap, SessionEvent } from '@shared/domain'
@@ -49,7 +46,6 @@ interface Harness {
   pushes: InboxChangedPush[]
   attention: { raised: number; cleared: number }
   gate: (toolName: string, input: Record<string, unknown>, signal?: AbortSignal) => Promise<PermissionResult>
-  /** Sessions the broker told to leave plan mode, in order. */
   planExited: string[]
 }
 
@@ -166,7 +162,6 @@ describe('PermissionBroker lifecycle', () => {
     const [pending] = h.repos.requests.pending()
     h.broker.decide(pending.id, 'approve')
     await first
-    // Rules are created from history (design: right-click a decided command).
     h.broker.alwaysAllow(pending.id)
 
     const result = await h.gate('Bash', { command: 'git status --short' })
@@ -200,13 +195,11 @@ describe('PermissionBroker lifecycle', () => {
     await settle()
     const [b] = h.repos.requests.pending()
     h.broker.decide(b.id, 'approve')
-    // "npm install"/"git status" don't overlap — a second rule is fine…
     const { rule: other } = h.broker.alwaysAllow(b.id)
     expect(other.id).not.toBe(created.id)
-    // …but re-allowing an already-covered command returns the existing rule.
     const again = h.gate('Bash', { command: 'git status --short' })
     const result = await again
-    expect(result.behavior).toBe('allow') // rule short-circuits; nothing pending
+    expect(result.behavior).toBe('allow') 
     expect(h.repos.standingRules.listForProject(h.projectId)).toHaveLength(2)
   })
 
@@ -214,7 +207,6 @@ describe('PermissionBroker lifecycle', () => {
     void h.gate('Bash', { command: 'npm install' })
     await settle()
     const [pendingReq] = h.repos.requests.pending()
-    // Still pending: not yet in history, so no rule.
     expect(() => h.broker.alwaysAllow(pendingReq.id)).toThrow(BrokerError)
     h.broker.decide(pendingReq.id, 'deny')
 
@@ -240,8 +232,6 @@ describe('PermissionBroker lifecycle', () => {
   })
 
   it('allows rules for approved commands the classifier failed safe to high', async () => {
-    // `make build` matches no risk rule, so it lands at high via the fail-safe —
-    // but it is not destructive, so an approved entry is still always-allowable.
     const promise = h.gate('Bash', { command: 'make build --release' })
     await settle()
     const [req] = h.repos.requests.pending()
@@ -262,20 +252,19 @@ describe('PermissionBroker lifecycle', () => {
     expect((await first).behavior).toBe('allow')
     expect(h.repos.requests.byId(pending.id)?.status).toBe('approved')
 
-    // The rule short-circuits the next matching command with no pending item.
     const again = await h.gate('Bash', { command: 'git status --short' })
     expect(again.behavior).toBe('allow')
     expect(h.repos.requests.pending()).toHaveLength(0)
   })
 
   it('approveAlways refuses pending high risk, non-Bash, and already-decided items', async () => {
-    void h.gate('Bash', { command: 'make build --release' }) // fail-safe to high, not dangerous
+    void h.gate('Bash', { command: 'make build --release' }) 
     await settle()
     const [high] = h.repos.requests.pending()
     expect(high.risk).toBe('high')
     expect(() => h.broker.approveAlways(high.id)).toThrow(BrokerError)
     h.broker.decide(high.id, 'deny')
-    expect(() => h.broker.approveAlways(high.id)).toThrow(BrokerError) // already decided
+    expect(() => h.broker.approveAlways(high.id)).toThrow(BrokerError) 
 
     void h.gate('Bash', { command: 'rm -rf dist' })
     await settle()
@@ -283,8 +272,6 @@ describe('PermissionBroker lifecycle', () => {
     expect(() => h.broker.approveAlways(dangerous.id)).toThrow(BrokerError)
     h.broker.decide(dangerous.id, 'deny')
 
-    // Outside the project folder, so task #17's in-folder auto-approve does not
-    // fire and it stays pending for the non-Bash refusal check.
     const write = h.gate('Write', { file_path: 'C:\\other\\a.ts' })
     await settle()
     const [fileReq] = h.repos.requests.pending()
@@ -297,9 +284,7 @@ describe('PermissionBroker lifecycle', () => {
     const first = h.gate('mcp__oracle-sqlcl__sql_run', { sql: 'SELECT 1 FROM dual' })
     await settle()
     const [pending] = h.repos.requests.pending()
-    // No risk rule matches an MCP tool → fail-safe to high.
     expect(pending.risk).toBe('high')
-    // The broad grant needs explicit confirmation.
     expect(() => h.broker.approveAlways(pending.id)).toThrow(BrokerError)
 
     const { delivered, rule } = h.broker.approveAlways(pending.id, true)
@@ -308,29 +293,22 @@ describe('PermissionBroker lifecycle', () => {
     expect(rule.toolName).toBe('mcp__oracle-sqlcl__sql_run')
     expect((await first).behavior).toBe('allow')
 
-    // Every later call to that exact tool short-circuits with nothing pending,
-    // regardless of input.
     const again = await h.gate('mcp__oracle-sqlcl__sql_run', { sql: 'DROP TABLE t' })
     expect(again.behavior).toBe('allow')
     expect(h.repos.requests.pending()).toHaveLength(0)
-    // A different MCP tool is still gated.
     void h.gate('mcp__oracle-sqlcl__connect', { name: 'db' })
     await settle()
     expect(h.repos.requests.pending()).toHaveLength(1)
   })
 
   it('auto-approves file tools inside the session folder, prompts outside it', async () => {
-    // Inside the project: resolves allow immediately, no pending item.
     const inside = await h.gate('Read', { file_path: 'C:\\proj\\alpha\\src\\main.ts' })
     expect(inside.behavior).toBe('allow')
     expect(h.repos.requests.pending()).toHaveLength(0)
 
-    // A relative path resolves against the project cwd → still inside.
     expect((await h.gate('Write', { file_path: 'notes.md' })).behavior).toBe('allow')
 
-    // Traversal escaping the folder resolves outside → NOT auto-approved.
     void h.gate('Edit', { file_path: 'C:\\proj\\alpha\\..\\escape.ts' })
-    // A path outside the folder → pending too.
     void h.gate('Read', { file_path: 'C:\\elsewhere\\x.ts' })
     await settle()
     expect(h.repos.requests.pending()).toHaveLength(2)
@@ -366,12 +344,10 @@ describe('PermissionBroker lifecycle', () => {
     await settle()
     const [plan] = h.repos.requests.pending()
     expect(plan.detail).toContain('1. Do things')
-    // Single click: no confirm step even though it is a blocking decision.
     expect(h.broker.decide(plan.id, 'approve').delivered).toBe(true)
     await expect(promise).resolves.toMatchObject({ behavior: 'allow' })
     const marker = h.sink.events.find((e) => e.kind === 'plan_marker')
     expect(marker).toBeDefined()
-    // Approving the plan IS leaving plan mode, by ExitPlanMode's own contract.
     expect(h.planExited).toEqual([h.sessionId])
   })
 
@@ -392,9 +368,9 @@ describe('PermissionBroker lifecycle', () => {
   })
 
   it('approve-all approves pending non-high items only (FR-011)', async () => {
-    void h.gate('Bash', { command: 'git status' }) // low
-    void h.gate('Edit', { file_path: 'C:\\other\\a.ts' }) // medium (outside project: not in-folder auto-approved)
-    void h.gate('Bash', { command: 'rm -rf x' }) // high
+    void h.gate('Bash', { command: 'git status' }) 
+    void h.gate('Edit', { file_path: 'C:\\other\\a.ts' }) 
+    void h.gate('Bash', { command: 'rm -rf x' }) 
     await settle()
     const outcome = h.broker.approveAllForProject(h.projectId)
     expect(outcome.approved).toBe(2)
@@ -403,9 +379,9 @@ describe('PermissionBroker lifecycle', () => {
   })
 
   it('approve-all with confirmation includes high-risk items (FR-011)', async () => {
-    void h.gate('Bash', { command: 'git status' }) // low
-    void h.gate('Edit', { file_path: 'C:\\other\\a.ts' }) // medium
-    void h.gate('Bash', { command: 'rm -rf x' }) // high
+    void h.gate('Bash', { command: 'git status' }) 
+    void h.gate('Edit', { file_path: 'C:\\other\\a.ts' }) 
+    void h.gate('Bash', { command: 'rm -rf x' }) 
     await settle()
     const outcome = h.broker.approveAllForProject(h.projectId, true)
     expect(outcome.approved).toBe(3)
@@ -431,7 +407,6 @@ describe('PermissionBroker lifecycle', () => {
     h.broker.expireForSession(h.sessionId)
     expect(h.repos.requests.byId(pending.id)?.status).toBe('expired')
 
-    // Deciding after expiry reports NOT_FOUND (already decided).
     expect(() => h.broker.decide(pending.id, 'approve')).toThrow(BrokerError)
   })
 
@@ -439,7 +414,6 @@ describe('PermissionBroker lifecycle', () => {
     void h.gate('Bash', { command: 'npm test' })
     await settle()
     const [pending] = h.repos.requests.pending()
-    // Simulate a restart: the broker lost its in-memory pending entry.
     const fresh = new PermissionBroker(
       h.repos,
       {
@@ -482,7 +456,6 @@ describe('PermissionBroker lifecycle', () => {
     expect(answered.answered).toBe(true)
     expect(answered.answer).toBe('Fast')
 
-    // Second answer attempt is rejected.
     expect(() => h.broker.answerQuestion(h.sessionId, question!.id, 'Thorough')).toThrow(BrokerError)
   })
 

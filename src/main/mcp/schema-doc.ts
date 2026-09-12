@@ -1,7 +1,3 @@
-// The database MCP scan writes its schema map to `.switchboard/db-schema.md`
-// inside a project's folder. Shared here so both the renderer-facing
-// `mcp.readSchema` IPC and session startup (which injects the doc as system
-// context) read the same path without duplicating the convention.
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { comboDocRelPath } from '@shared/mcp-combo'
@@ -15,7 +11,6 @@ export function readSchemaDoc(projectPath: string): string | null {
   return existsSync(path) ? readFileSync(path, 'utf8') : null
 }
 
-/** A combination's own scan doc (.switchboard/scans/<combo-slug>.md). */
 export function comboDocPath(projectPath: string, servers: string[]): string {
   return join(projectPath, ...comboDocRelPath(servers).split('/'))
 }
