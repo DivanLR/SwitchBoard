@@ -1,6 +1,3 @@
-// T028: central inbox flow against the mock host (quickstart V1). The inbox is
-// a permanent right-hand panel in the Switchboard design, so no toggle is
-// needed to reach it.
 import { expect, test } from '@playwright/test'
 import { installMockHost, twoProjectScenario } from './mock-host'
 
@@ -15,14 +12,12 @@ test('the inbox panel can be dragged wider and the new width persists', async ({
   const before = (await inbox.boundingBox())!.width
   const handle = page.getByTestId('inbox-resize')
   const hb = (await handle.boundingBox())!
-  // Drag the left-edge handle 120px to the left → the inbox grows.
   await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2)
   await page.mouse.down()
   await page.mouse.move(hb.x - 120, hb.y + hb.height / 2, { steps: 8 })
   await page.mouse.up()
   const after = (await inbox.boundingBox())!.width
   expect(after).toBeGreaterThan(before + 80)
-  // The width is remembered for the next launch.
   expect(await page.evaluate(() => localStorage.getItem('sb-inbox-w'))).toBeTruthy()
 })
 
@@ -44,7 +39,6 @@ test('requests from two projects land in one inbox, grouped, with risk and expla
     })
   })
 
-  // Both sessions show needs-you dots and the inbox badge updates (FR-013).
   await expect(page.getByTestId('status-badge-alpha')).toHaveAttribute('data-status', 'needs_you')
   await expect(page.getByTestId('status-badge-beta')).toHaveAttribute('data-status', 'needs_you')
   await expect(page.getByTestId('inbox-badge')).toHaveText('2')
@@ -56,9 +50,6 @@ test('requests from two projects land in one inbox, grouped, with risk and expla
   await expect(alphaItem.locator('.chip-risk')).toHaveText('Low')
   await expect(alphaItem).toContainText(/\d+[smh] ago/)
 
-  // The explanation is reference material, not load-bearing, so it sits behind
-  // a closed-by-default disclosure toggle rather than costing every card the
-  // height of a paragraph.
   await expect(alphaItem).not.toContainText('The session wants to run a shell command.')
   await alphaItem.getByTestId('item-explain-toggle').click()
   await expect(alphaItem).toContainText('The session wants to run a shell command.')
@@ -91,7 +82,6 @@ test('high-risk approval requires the explicit confirm step (FR-010)', async ({ 
   })
 
   await page.getByTestId('approve-btn').click()
-  // Still pending: the first click only reveals the confirmation.
   await expect(page.getByTestId('confirm-high-risk')).toBeVisible()
   expect(await page.evaluate(() => window.__mock.state().decisions)).toHaveLength(0)
 
@@ -110,15 +100,9 @@ test('approve-all approves the group but skips high-risk items (FR-011)', async 
     window.__mock.raisePermission({ projectId: 'p-beta', title: 'other group', risk: 'low' })
   })
 
-  // A group containing a high-risk item asks for confirmation before bulk
-  // approval sweeps it in, so approve-all is a two-step click.
   await page.getByTestId('inbox-group-alpha').getByTestId('approve-all').click()
   await page.getByTestId('inbox-group-alpha').getByTestId('approve-all-confirm').click()
 
-  // Confirming means confirming: the high-risk item goes with the rest. This
-  // test used to assert it stayed, which was the mock's own bug read back as
-  // truth — the real broker passes includeHighRisk through from that confirm,
-  // and a confirm that changed nothing would make the second click pointless.
   const remaining = page.getByTestId('inbox-item')
   await expect(remaining).toHaveCount(1)
   await expect(page.getByTestId('inbox-group-alpha')).toHaveCount(0)
@@ -133,7 +117,6 @@ test('approve-all needs no confirm when the group holds nothing high-risk (FR-01
     window.__mock.raisePermission({ projectId: 'p-alpha', title: 'medium one', risk: 'medium' })
   })
 
-  // One click, because there is nothing here that a second click would protect.
   await page.getByTestId('inbox-group-alpha').getByTestId('approve-all').click()
   await expect(page.getByTestId('inbox-item')).toHaveCount(0)
 })
@@ -215,7 +198,6 @@ test('history rows expand via an arrow to show the full description', async ({ p
 
   const row = page.getByTestId('history-item').first()
   await expect(row).toContainText('Run: npm run build')
-  // Detail hidden until expanded.
   await expect(page.getByTestId('history-detail')).toHaveCount(0)
   await row.click()
   await expect(page.getByTestId('history-detail')).toContainText(
@@ -265,23 +247,19 @@ test('history right-click: destructive command gets no allow item; entries remov
   await page.getByTestId('inbox-tab-history').click()
   await expect(page.getByTestId('history-count')).toHaveText('DECISIONS · 2')
 
-  // Destructive entry (rm): menu opens, but there is no always-allow item.
   await page.getByTestId('history-item').filter({ hasText: 'Run: rm' }).click({ button: 'right' })
   await expect(page.getByTestId('hist-ctx-menu')).toBeVisible()
   await expect(page.getByTestId('hist-ctx-allow')).toHaveCount(0)
 
-  // Remove just that entry.
   await page.getByTestId('hist-ctx-remove').click()
   await expect(page.getByTestId('history-item')).toHaveCount(1)
   await expect(page.getByTestId('history-count')).toHaveText('DECISIONS · 1')
 
-  // A flag as word two narrows the base to a single word.
   await page.getByTestId('history-item').first().click({ button: 'right' })
   await expect(page.getByTestId('hist-ctx-allow')).toContainText('Always allow ls commands')
-  await page.mouse.click(10, 10) // overlay click closes the menu
+  await page.mouse.click(10, 10) 
   await expect(page.getByTestId('hist-ctx-menu')).toHaveCount(0)
 
-  // Clear the rest.
   await page.getByTestId('history-clear').click()
   await expect(page.getByTestId('history-item')).toHaveCount(0)
   await expect(page.getByTestId('history-count')).toHaveText('DECISIONS · 0')
@@ -291,17 +269,11 @@ test('inbox zero state communicates nothing needs attention', async ({ page }) =
   await expect(page.getByTestId('inbox-zero')).toContainText('Inbox zero')
 })
 
-// The History tab was a <div> with a click handler and no tabindex, role, or
-// keydown handler, so an entire top-level section of the app's central decision
-// pane could not be reached without a mouse. These assert the keyboard path, not
-// the appearance.
 test('the inbox and history tabs are reachable and operable by keyboard', async ({ page }) => {
   const history = page.getByTestId('inbox-tab-history')
   await expect(history).toHaveRole('tab')
   await expect(history).toHaveAttribute('aria-selected', 'false')
 
-  // Focus it directly rather than counting Tab presses: the claim under test is
-  // that it CAN hold focus and responds to a key, which a div never could.
   await history.focus()
   await expect(history).toBeFocused()
   await page.keyboard.press('Enter')

@@ -1,4 +1,3 @@
-// Collapsible project groups in the sidebar: create, assign, fold, remove.
 import { expect, test } from '@playwright/test'
 import { installMockHost, twoProjectScenario } from './mock-host'
 
@@ -8,7 +7,6 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
 })
 
-/** Creates a group named `name` via the section-row button and inline rename. */
 async function createGroup(page: import('@playwright/test').Page, name: string): Promise<void> {
   await page.getByTestId('new-group').click()
   const input = page.getByTestId('group-rename-input-New group')
@@ -20,11 +18,9 @@ async function createGroup(page: import('@playwright/test').Page, name: string):
 
 test('a group can be created and named inline', async ({ page }) => {
   await createGroup(page, 'Work')
-  // A new group starts empty and expanded, and every project stays visible.
   await expect(page.getByTestId('group-count-Work')).toHaveText('0')
   await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
   await expect(page.getByTestId('sidebar-project-beta')).toBeVisible()
-  // Once a group exists, the remaining projects are labelled as ungrouped.
   await expect(page.getByTestId('group-count-ungrouped')).toHaveText('2')
 })
 
@@ -45,7 +41,6 @@ test('folding a group hides its projects and leaves the others alone', async ({ 
   await page.getByTestId('group-head-Work').click()
   await expect(page.getByTestId('sidebar-project-alpha')).toHaveCount(0)
   await expect(page.getByTestId('sidebar-project-beta')).toBeVisible()
-  // The count stays readable while folded, so the group still says what it holds.
   await expect(page.getByTestId('group-count-Work')).toHaveText('1')
 
   await page.getByTestId('group-head-Work').click()
@@ -63,7 +58,6 @@ test('a folded group still shows the pending count of what it hides', async ({ p
 
   await page.getByTestId('group-head-Work').click()
   await expect(page.getByTestId('sidebar-project-alpha')).toHaveCount(0)
-  // Folding must not hide the fact that something inside needs attention.
   await expect(page.getByTestId('group-badge-Work')).toHaveText('1')
 })
 
@@ -99,8 +93,6 @@ test('a group is renamed and reordered from its own context menu', async ({ page
 
 test('dragging a project onto a group header joins that group', async ({ page }) => {
   await createGroup(page, 'Work')
-  // Synthetic drop with a real DataTransfer: exercises the drop handler itself
-  // rather than simulating mouse movement, which HTML5 drag makes unreliable.
   await page.evaluate(() => {
     const transfer = new DataTransfer()
     transfer.setData('text/x-sb-project', 'p-alpha')
@@ -111,7 +103,6 @@ test('dragging a project onto a group header joins that group', async ({ page })
   await expect(page.getByTestId('group-count-Work')).toHaveText('1')
   await expect(page.getByTestId('group-count-ungrouped')).toHaveText('1')
 
-  // Dropping on the Ungrouped divider takes it back out again.
   await page.evaluate(() => {
     const transfer = new DataTransfer()
     transfer.setData('text/x-sb-project', 'p-alpha')
@@ -125,8 +116,6 @@ test('dragging a project onto a group header joins that group', async ({ page })
 
 test('an empty group says what it is for, and the tail is labelled Ungrouped', async ({ page }) => {
   await createGroup(page, 'Work')
-  // A group with nothing in it is a drop target, and says so rather than
-  // reading as a broken heading.
   await expect(page.getByTestId('group-empty-Work')).toContainText('Drag a project here')
 
   await page.getByTestId('sidebar-project-alpha').click({ button: 'right' })
@@ -142,7 +131,6 @@ test('the ungrouped tail folds like any other section', async ({ page }) => {
 
   await page.getByTestId('group-head-ungrouped').click()
   await expect(page.getByTestId('sidebar-project-beta')).toHaveCount(0)
-  // Folding the tail leaves the real group alone.
   await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
 
   await page.getByTestId('group-head-ungrouped').click()
@@ -153,16 +141,13 @@ test('filtering opens a folded group that holds a match, and hides the rest', as
   await createGroup(page, 'Work')
   await page.getByTestId('sidebar-project-alpha').click({ button: 'right' })
   await page.getByTestId('ctx-move-to-Work').click()
-  await page.getByTestId('group-head-Work').click() // fold it shut
+  await page.getByTestId('group-head-Work').click() 
   await expect(page.getByTestId('sidebar-project-alpha')).toHaveCount(0)
 
-  // A match inside a folded group must surface — filtering beats folding.
   await page.getByTestId('project-filter').fill('alph')
   await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
-  // And a section with nothing matching drops out rather than sitting empty.
   await expect(page.getByTestId('group-head-ungrouped')).toHaveCount(0)
 
-  // Clearing restores the fold rather than losing it.
   await page.getByTestId('project-filter-clear').click()
   await expect(page.getByTestId('sidebar-project-alpha')).toHaveCount(0)
 })
@@ -177,12 +162,10 @@ test('the collapsed rail ignores grouping and still lists every project', async 
   await createGroup(page, 'Work')
   await page.getByTestId('sidebar-project-alpha').click({ button: 'right' })
   await page.getByTestId('ctx-move-to-Work').click()
-  await page.getByTestId('group-head-Work').click() // fold it shut
+  await page.getByTestId('group-head-Work').click() 
   await expect(page.getByTestId('sidebar-project-alpha')).toHaveCount(0)
 
   await page.getByTestId('collapse-toggle').click()
-  // No room for headers on the rail, so grouping is set aside rather than
-  // swallowing rows: a folded group must not hide a project from the rail.
   await expect(page.getByTestId('group-head-Work')).toHaveCount(0)
   await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
   await expect(page.getByTestId('sidebar-project-beta')).toBeVisible()
@@ -196,11 +179,9 @@ test('the sidebar filter narrows the list by name and by branch', async ({ page 
   await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
   await expect(page.getByTestId('sidebar-project-beta')).toHaveCount(0)
 
-  // Clearing restores the full list.
   await page.getByTestId('project-filter-clear').click()
   await expect(page.getByTestId('sidebar-project-beta')).toBeVisible()
 
-  // Escape clears it too, and a miss shows nothing rather than everything.
   await page.getByTestId('project-filter').fill('zzz-no-such-project')
   await expect(page.getByTestId('sidebar-project-alpha')).toHaveCount(0)
   await page.getByTestId('project-filter').press('Escape')

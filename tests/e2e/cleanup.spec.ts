@@ -1,5 +1,3 @@
-// Cleanup section: a launcher of Ponytail / Dotnet Claude Kit review + cleanup
-// commands that run in the selected project's session.
 import { expect, test } from '@playwright/test'
 import { installMockHost, twoProjectScenario } from './mock-host'
 
@@ -13,27 +11,16 @@ test.beforeEach(async ({ page }) => {
 test('the Cleanup tab lists grouped commands and runs one in the session', async ({ page }) => {
   await page.getByTestId('tab-cleanup').click()
   await expect(page.getByTestId('cleanup-view')).toBeVisible()
-  // Both plugin groups are present, with runnable command rows.
   await expect(page.getByTestId('cleanup-view')).toContainText('dotnet-claude-kit')
   await expect(page.getByTestId('cleanup-view')).toContainText('ponytail')
   await expect(page.getByTestId('cleanup-cmd-code-review')).toBeVisible()
 
-  // Running a command leaves the developer where they were: it used to jump to
-  // the Session tab, which shows the conversation the work is not in.
   await page.getByTestId('cleanup-cmd-de-sloppify').click()
   await expect(page.getByTestId('tab-cleanup')).toHaveClass(/sel/)
   await expect
     .poll(() => page.evaluate(() => window.__mock.state().sends.map((x) => x.text)))
     .toContain('/de-sloppify')
 
-  // It goes to the Cleanup section's OWN session, and this assertion has now been
-  // reversed twice. It went to the live session for a while because a background
-  // session was containerised and a container's ~/.claude was a fresh Docker
-  // volume with no plugins in it, so seven of the nine commands here could never
-  // resolve there however healthy the "Installed" badge looked. The sandbox mounts
-  // the host's plugins read-only since 0.20.0 and a section session is native
-  // unless the project asks for Docker, so the constraint is gone — and a cleanup
-  // pass is long work whose output nobody wants spliced into their conversation.
   const sends = await page.evaluate(() => window.__mock.state().sends)
   const run = sends.find((s) => s.text === '/de-sloppify')
   expect(run?.sessionId).not.toBe('s-alpha')
@@ -42,9 +29,6 @@ test('the Cleanup tab lists grouped commands and runs one in the session', async
 test('a stack-specific plugin is not advertised to a project that has not installed it', async ({
   page,
 }) => {
-  // Once the session reports its real command list, the app knows what is
-  // installed. The .NET toolkit used to be offered, with a download button, to
-  // every project whatever its language; only ponytail is ecosystem-neutral.
   await page.evaluate(() => window.__mock.setCommands('p-alpha', ['ponytail-review', 'ponytail-audit']))
   await page.getByTestId('tab-cleanup').click()
 
@@ -60,12 +44,6 @@ test('an installed stack-specific plugin still shows its commands', async ({ pag
   await expect(page.getByTestId('cleanup-cmd-code-review')).toBeVisible()
 })
 
-// The names a session actually reports are plugin-qualified, and every row in
-// this group is a SKILL rather than a command: dotnet-claude-kit ships no
-// commands/ directory at all. The tests above used bare names, so they would
-// have passed even with the colon handling broken — and the real symptom was
-// one row runnable out of six, with the other five reading "Not available"
-// while the plugin was installed the whole time.
 test('every skill a plugin reports is runnable, however the session qualifies its name', async ({
   page,
 }) => {

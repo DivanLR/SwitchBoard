@@ -1,7 +1,3 @@
-// Diagrams section: the developer describes a diagram, the app asks the
-// project's session for it (via the diagram-design plugin) and lists whatever
-// lands in docs/diagrams. Follows specs.spec.ts / diff-tab.spec.ts for
-// structure: installMockHost in beforeEach, select alpha, open the tab.
 import { expect, test } from '@playwright/test'
 import { installMockHost, twoProjectScenario } from './mock-host'
 import { DIAGRAM_PLUGIN, DIAGRAMS_DIR } from '../../src/shared/diagram'
@@ -38,20 +34,15 @@ test('lists existing diagrams, newest first, with the file name and the session 
       bytes: 5100,
     })
   })
-  // Re-load the tab so the load() action reads the freshly seeded folder.
   await page.getByTestId('tab-diff').click()
   await page.getByTestId('tab-diagrams').click()
 
   const rows = page.getByTestId(/^diagram-row-/)
   await expect(rows).toHaveCount(2)
-  // Newest (billing-webhook, 08-10) first.
   await expect(rows.nth(0)).toHaveAttribute('data-testid', 'diagram-row-billing-webhook.html')
   await expect(rows.nth(1)).toHaveAttribute('data-testid', 'diagram-row-auth-flow.html')
-  // The list is a way back to a diagram, so a row carries the name and nothing
-  // else; the session that made it belongs to the one on screen.
   await expect(page.getByTestId('diagram-row-auth-flow.html')).toContainText('auth-flow')
 
-  // Opening the tab shows the newest without being asked.
   await expect(page.getByTestId('diagram-frame')).toHaveAttribute(
     'srcdoc',
     /billing-webhook\.html/,
@@ -59,7 +50,6 @@ test('lists existing diagrams, newest first, with the file name and the session 
   await expect(page.getByTestId('diagrams-view')).toContainText('s-alpha')
 })
 
-// Single click reads it into the pane; double click hands it to the real browser.
 test('clicking a past diagram shows it, and double-clicking opens it in the browser', async ({
   page,
 }) => {
@@ -82,12 +72,10 @@ test('clicking a past diagram shows it, and double-clicking opens it in the brow
   await page.getByTestId('tab-diff').click()
   await page.getByTestId('tab-diagrams').click()
 
-  // The newest is shown first; clicking the older one swaps the frame.
   await expect(page.getByTestId('diagram-frame')).toHaveAttribute('srcdoc', /billing-webhook/)
   await page.getByTestId('diagram-row-auth-flow.html').click()
   await expect(page.getByTestId('diagram-frame')).toHaveAttribute('srcdoc', /auth-flow/)
 
-  // Nothing has been handed to the browser by merely looking at it.
   expect(await page.evaluate(() => window.__mock.state().diagramOpens)).toEqual([])
 
   await page.getByTestId('diagram-row-auth-flow.html').dblclick()
@@ -96,7 +84,6 @@ test('clicking a past diagram shows it, and double-clicking opens it in the brow
   ])
 })
 
-// The frame must never be able to run what a model wrote into the repo.
 test('the diagram frame refuses script, by sandbox as well as by CSP', async ({ page }) => {
   await page.evaluate(() => {
     window.__mock.addDiagram('p-alpha', {
@@ -113,8 +100,6 @@ test('the diagram frame refuses script, by sandbox as well as by CSP', async ({ 
   await page.getByTestId('tab-diagrams').click()
 
   const frame = page.getByTestId('diagram-frame')
-  // An empty sandbox attribute is the whole point: adding allow-scripts here
-  // would let a generated file execute inside the app.
   await expect(frame).toHaveAttribute('sandbox', '')
 })
 
@@ -130,8 +115,6 @@ test('Generate sends the prompt to a background session and stays on the tab', a
   await page.getByTestId('diagram-input').fill('Auth flow for login')
   await page.getByTestId('diagram-generate').click()
 
-  // The drawing runs in a background session, so the developer is NOT taken to
-  // the conversation: the tab they asked from is where the answer arrives.
   await expect(page.getByTestId('tab-diagrams')).toHaveClass(/sel/)
   await expect(page.getByTestId('diagram-pending')).toBeVisible()
 
@@ -140,10 +123,6 @@ test('Generate sends the prompt to a background session and stays on the tab', a
   expect(sends.some((s) => s.text.includes('Auth flow for login'))).toBe(true)
 })
 
-// The wait is for ONE file. When it lands, that is the thing to be looking at —
-// the pending row said so for however many minutes it took. It used to land in
-// the list and leave the pane on whatever was selected before it, or on nothing
-// at all, which reads as the diagram having failed.
 test('the diagram you asked for is the one showing when it arrives', async ({ page }) => {
   await page.evaluate(() => {
     window.__mock.addDiagram('p-alpha', {
@@ -188,9 +167,6 @@ test('the diagram you asked for is the one showing when it arrives', async ({ pa
   )
 })
 
-// Drawing is an ordinary request, not a command — but the plugin ships three
-// real commands, and reaching them meant knowing they existed and typing one
-// into the conversation.
 test('the section offers the plugin commands, and runs one on the diagram in the pane', async ({
   page,
 }) => {
@@ -217,15 +193,9 @@ test('the section offers the plugin commands, and runs one on the diagram in the
 
   const menu = page.getByTestId('diagram-command-menu')
   await expect(menu).toBeVisible()
-  // Every command the plugin ships, described in the plugin's own words.
   await expect(menu.getByTestId(/^diagram-command-/)).toHaveCount(3)
   await expect(page.getByTestId('diagram-command-export-diagram')).toContainText('.svg')
-  // Reported by the session, so it is offered; the other two are not, and say so.
   await expect(page.getByTestId('diagram-command-export-diagram')).toBeEnabled()
-  // A command the project does not have is NOT a dead row. It used to be disabled
-  // and labelled "not in this project", which named the problem and offered no way
-  // out: the big install card is suppressed once a project has diagrams, so this
-  // menu was the only place the absence was mentioned and it could not act on it.
   await expect(page.getByTestId('diagram-command-import-mermaid')).toBeEnabled()
   await expect(page.getByTestId('diagram-install-hint-import-mermaid')).toContainText(
     'install diagram-design',
@@ -235,22 +205,11 @@ test('the section offers the plugin commands, and runs one on the diagram in the
   await page.getByTestId('diagram-command-export-diagram').click()
   await expect(menu).toHaveCount(0)
 
-  // Picking WRITES the command, with the diagram on screen already filled in as
-  // its argument, and sends nothing. Dispatching on click made choosing a command
-  // and composing its message two acts in two orders, and swallowed anything
-  // typed first as the argument.
   await expect(page.getByTestId('diagram-input')).toHaveValue(
     `/${DIAGRAM_PLUGIN.namespace}:export-diagram ${DIAGRAMS_DIR}/auth-flow.html `,
   )
   expect(await page.evaluate(() => window.__mock.state().sends.length)).toBe(before)
 
-  // The developer sends it, and what runs STARTS with exactly what was on
-  // screen. It is no longer only that: the dispatch appends one sentence naming
-  // this section's folder, because a command sent truly verbatim let the plugin
-  // fall back to its own default of docs/ — one directory above the only folder
-  // the list reads — so a drawing that succeeded appeared nowhere. What the
-  // developer typed is still theirs and still first; the folder is stated after
-  // it, exactly as a person would add it.
   await page.getByTestId('diagram-generate').click()
   await expect
     .poll(async () => (await page.evaluate(() => window.__mock.state().sends)).at(-1)?.text)
@@ -265,8 +224,6 @@ test('the section offers the plugin commands, and runs one on the diagram in the
   await expect(page.getByTestId('diagram-input')).toHaveValue('')
 })
 
-// The point of prefixing rather than dispatching: the command carries the message
-// typed after it, instead of the message becoming a second, separate request.
 test('a command keeps the message typed after it, and sends both', async ({ page }) => {
   await page.evaluate(() =>
     window.__mock.setCommands('p-alpha', [
@@ -283,8 +240,6 @@ test('a command keeps the message typed after it, and sends both', async ({ page
   await page.getByTestId('diagram-input').pressSequentially('--png-only')
   await page.getByTestId('diagram-input').press('Enter')
 
-  // Same contract as above: the typed command and its argument survive intact
-  // as the first line, and the folder instruction follows it.
   await expect
     .poll(async () => (await page.evaluate(() => window.__mock.state().sends)).at(-1)?.text)
     .toBe(
@@ -297,8 +252,6 @@ test('a command keeps the message typed after it, and sends both', async ({ page
     )
 })
 
-// Text already in the box is not lost by opening the menu, and is not swallowed
-// as the command's argument either: it survives after the command.
 test('picking a command keeps what was already typed, after the command', async ({ page }) => {
   await page.evaluate(() =>
     window.__mock.setCommands('p-alpha', [
@@ -322,8 +275,6 @@ test('picking a command keeps what was already typed, after the command', async 
 test('Generate does nothing on an empty or whitespace-only description', async ({ page }) => {
   const before = await page.evaluate(() => window.__mock.state().sends.length)
 
-  // The button itself is disabled while the field is empty/whitespace, so the
-  // guard that matters is the one behind the Enter key on the input.
   await expect(page.getByTestId('diagram-generate')).toBeDisabled()
   await page.getByTestId('diagram-input').press('Enter')
   await page.getByTestId('diagram-input').fill('   ')
@@ -332,7 +283,6 @@ test('Generate does nothing on an empty or whitespace-only description', async (
 
   const after = await page.evaluate(() => window.__mock.state().sends.length)
   expect(after).toBe(before)
-  // Neither attempt left the Diagrams tab.
   await expect(page.getByTestId('diagrams-view')).toBeVisible()
 })
 
@@ -360,16 +310,11 @@ test('opening a diagram calls through to the host with the right file', async ({
 test('the install card shows only while the plugin is absent from the session commands', async ({
   page,
 }) => {
-  // Before any command list has been reported (twoProjectScenario sets none for
-  // p-alpha), the view assumes installed rather than flashing a card that a
-  // moment later turns out wrong.
   await expect(page.getByTestId('diagrams-install')).toHaveCount(0)
 
-  // A real command list, missing the plugin's probe command: the card shows.
   await page.evaluate(() => window.__mock.setCommands('p-alpha', ['some-other-command']))
   await expect(page.getByTestId('diagrams-install')).toBeVisible()
 
-  // The probe command shows up (installed): the card goes away.
   await page.evaluate(
     (probeCommand) => window.__mock.setCommands('p-alpha', [probeCommand]),
     DIAGRAM_PLUGIN.probeCommand,
@@ -377,13 +322,6 @@ test('the install card shows only while the plugin is absent from the session co
   await expect(page.getByTestId('diagrams-install')).toHaveCount(0)
 })
 
-// The form a session ACTUALLY reports. A plugin's skills arrive namespaced, and
-// this test exists because the one above used the bare name and therefore passed
-// against an app that was broken for every real user: normalizeForMatch strips
-// the colon rather than the namespace, so "diagram-design:export-diagram"
-// reduced to "diagramdesignexportdiagram" and never equalled the probe's
-// "exportdiagram". Every project with the plugin installed was told it was not,
-// and Download re-installed something already present.
 test('the card retires for the namespaced skill name a session really reports', async ({ page }) => {
   await page.evaluate(() => window.__mock.setCommands('p-alpha', ['some-other-command']))
   await page.getByTestId('tab-diagrams').click()
@@ -396,11 +334,6 @@ test('the card retires for the namespaced skill name a session really reports', 
   await expect(page.getByTestId('diagrams-install')).toHaveCount(0)
 })
 
-// A diagram is drawn in a session the developer never opens, so the wait used to
-// be a static word for however long it took, with no way to tell work from a
-// hang. The events were already streaming to the renderer; nothing rendered
-// them. This asserts LIVE output, not the presence of a label — a hard-coded
-// "drawing…" would satisfy a weaker test and prove nothing.
 test('the pending row shows the drawing session output as it arrives', async ({ page }) => {
   await page.getByTestId('tab-diagrams').click()
   await page.getByTestId('diagram-input').fill('Auth flow for login')
@@ -410,7 +343,6 @@ test('the pending row shows the drawing session output as it arrives', async ({ 
   const term = page.getByTestId('mini-terminal')
   await expect(term).toBeVisible()
 
-  // The session the request actually went to, not a guess.
   const sessionId = await page.evaluate(() => window.__mock.state().sends.at(-1)?.sessionId ?? '')
   expect(sessionId).not.toBe('')
 
@@ -420,7 +352,6 @@ test('the pending row shows the drawing session output as it arrives', async ({ 
   )
   await expect(term).toContainText('writing docs/diagrams')
 
-  // And it keeps up, rather than showing only whatever happened to be first.
   await page.evaluate(
     (id) => window.__mock.emitEvent(id, 'assistant_text', { text: 'rendering the SVG' }),
     sessionId,
@@ -428,11 +359,6 @@ test('the pending row shows the drawing session output as it arrives', async ({ 
   await expect(term).toContainText('rendering the SVG')
 })
 
-// The probe answers for the wrong environment. Diagrams are drawn in a container
-// whose ~/.claude is its own and holds no plugins, so a session's command list
-// can say "missing" for a project that has been drawing them all along — and the
-// card then sat above a list of finished diagrams offering to install what had
-// evidently just worked.
 test('a project with diagrams is never offered the download', async ({ page }) => {
   await page.evaluate(() => window.__mock.setCommands('p-alpha', ['some-other-command']))
   await expect(page.getByTestId('diagrams-install')).toBeVisible()
@@ -455,12 +381,6 @@ test('a project with diagrams is never offered the download', async ({ page }) =
   await expect(page.getByTestId('diagrams-install')).toHaveCount(0)
 })
 
-// A plugin is installed on the HOST, by the CLI, in a process no session knows
-// about — so nothing told the sessions, and the card that had just installed the
-// plugin carried on offering to install it. The only way out was starting a new
-// session, which is not an obvious thing to think of when a button looks like it
-// did nothing. The real handler now asks every live session to reload its
-// plugins, and this asserts the consequence a developer actually sees.
 test('installing the plugin retires the install card', async ({ page }) => {
   await page.evaluate(() => window.__mock.setCommands('p-alpha', ['some-other-command']))
   await page.getByTestId('tab-diagrams').click()
@@ -469,16 +389,11 @@ test('installing the plugin retires the install card', async ({ page }) => {
   await expect(card).toBeVisible()
   await card.click()
 
-  // Gone, without a restart and without a project switch.
   await expect(page.getByTestId('diagrams-install')).toHaveCount(0)
-  // And it reached the CLI with the right package, not just hid the card.
   const installs = await page.evaluate(() => window.__mock.state().pluginInstalls)
   expect(installs.at(-1)?.pkg).toBe(DIAGRAM_PLUGIN.pkg)
 })
 
-// The dead end this fixes: a project that already HAS diagrams suppresses the
-// install card by design, so a developer whose plugin is missing saw three
-// commands, each reporting itself absent, and nothing anywhere offering to add it.
 test('a missing command installs the plugin from the menu', async ({ page }) => {
   await page.evaluate(() => window.__mock.setCommands('p-alpha', ['some-other:command']))
   await page.evaluate(() => {
@@ -495,28 +410,17 @@ test('a missing command installs the plugin from the menu', async ({ page }) => 
   await page.getByTestId('tab-session').click()
   await page.getByTestId('tab-diagrams').click()
 
-  // Precondition: diagrams exist, so the install card is not on screen.
   await expect(page.getByTestId('diagrams-install')).toHaveCount(0)
 
   await page.getByTestId('diagram-commands').click()
   await page.getByTestId('diagram-command-export-diagram').click()
 
-  // The menu closes and the install runs, the same one the card would have started.
   await expect(page.getByTestId('diagram-command-menu')).toHaveCount(0)
   await expect
     .poll(async () => (await page.evaluate(() => window.__mock.state().pluginInstalls)).length)
     .toBeGreaterThan(0)
 })
 
-// This assertion has been the reverse of itself twice, and both turns were
-// right at the time. A containerised session's ~/.claude was a Docker volume with
-// the credentials copied in and nothing else, so it held NO plugins and a command
-// dispatched into one answered "Unknown command: /diagram-design:export-diagram";
-// running it in the live session was the fix. Since 0.20.0 the sandbox mounts the
-// host's ~/.claude/plugins read-only, and a section session is native unless the
-// project asks for Docker at all — so the constraint that forced it into the
-// conversation is gone, and a drawing command belongs where every other drawing
-// goes: a session of its own, which is what the developer asked for.
 test("a plugin command runs in the Diagrams section's own session, not the conversation", async ({
   page,
 }) => {
@@ -538,13 +442,9 @@ test("a plugin command runs in the Diagrams section's own session, not the conve
     .poll(async () => (await page.evaluate(() => window.__mock.state().sends)).at(-1)?.sessionId)
     .not.toBe('s-alpha')
 
-  // And WATCHED here, in the tab the developer asked from. Sending it anywhere
-  // without this left the section silent and the answer somewhere else.
   await expect(page.getByTestId('diagrams-view').getByTestId('mini-terminal')).toBeVisible()
 })
 
-// Every command this plugin ships takes a FILE. None of them draws anything, and
-// the first real use of the menu was the exporter handed a drawing request.
 test('a picked command says what it takes, and that it does not draw', async ({ page }) => {
   await page.evaluate(() =>
     window.__mock.setCommands('p-alpha', ['diagram-design:export-diagram']),
@@ -561,15 +461,10 @@ test('a picked command says what it takes, and that it does not draw', async ({ 
   await expect(hint).toContainText('<html-file>')
   await expect(hint).toContainText('To draw something new')
 
-  // Clearing the command clears the hint with it.
   await page.getByTestId('diagram-input').fill('the auth flow')
   await expect(hint).toHaveCount(0)
 })
 
-// Between pressing Generate and having a session to watch there is a real wait:
-// the id cannot exist until the session does, and that session is containerised,
-// so the first diagram of a run waits for a Docker container to start. The
-// section used to show nothing at all for that whole time.
 test('the section says it is starting before there is a session to watch', async ({ page }) => {
   await page.getByTestId('diagram-input').fill('the auth flow')
   await page.getByTestId('diagram-generate').click()
@@ -579,17 +474,11 @@ test('the section says it is starting before there is a session to watch', async
   await expect(starting).toContainText('starting')
   await expect(starting).toContainText('container session')
 
-  // It gives way to the real row, with the tail of the session doing the work.
   await expect(page.getByTestId('diagram-pending')).toBeVisible()
   await expect(page.getByTestId('diagram-starting')).toHaveCount(0)
   await expect(page.getByTestId('diagram-pending').getByTestId('mini-terminal')).toBeVisible()
 })
 
-// What actually happened to a real diagram: the container drawing it was killed
-// with exit 137 — out of memory — four minutes in, having read a few dozen source
-// files. Nothing was ever written. The section went on showing the row as on its
-// way for the rest of a twenty-minute budget, then blamed the budget. The session
-// knew, and had already said why in its own words.
 test('a drawing session that dies stops the wait and says why', async ({ page }) => {
   await page.getByTestId('diagram-input').fill('the whole project')
   await page.getByTestId('diagram-generate').click()
@@ -603,17 +492,12 @@ test('a drawing session that dies stops the wait and says why', async ({ page })
     sessionId,
   )
 
-  // The session's own words, not a guess, and not after twenty minutes.
   const error = page.getByTestId('diagram-error')
   await expect(error).toBeVisible({ timeout: 15_000 })
   await expect(error).toContainText('exit 137')
   await expect(page.getByTestId('diagram-pending')).toHaveCount(0)
 })
 
-// A section dispatches into a background session, and that session can ask a
-// question. The answer card used to render only in the conversation, so the
-// section showed the question as ordinary output with no controls under it and
-// the run waited for a reply that had nowhere to come from.
 test('a question from the drawing session can be answered in the section', async ({ page }) => {
   await page.getByTestId('diagram-input').fill('every endpoint and where it points')
   await page.getByTestId('diagram-generate').click()
@@ -633,27 +517,18 @@ test('a question from the drawing session can be answered in the section', async
     sessionId,
   )
 
-  // The card appears in the section, not only in the conversation.
   const card = page.getByTestId('diagrams-view').getByTestId('mini-terminal-question')
   await expect(card).toBeVisible()
 
   const before = await page.evaluate(() => window.__mock.state().sends.length)
   await card.getByRole('button', { name: /^A/ }).click()
 
-  // The answer goes to the SESSION THAT ASKED, not the open conversation.
   await expect
     .poll(async () => (await page.evaluate(() => window.__mock.state().sends)).at(-1))
     .toMatchObject({ sessionId, text: 'A' })
   expect(await page.evaluate(() => window.__mock.state().sends.length)).toBe(before + 1)
 })
 
-// The menu is 360px wide and lives in a 300px rail that sets `overflow-y: auto`.
-// A scroll container clips absolutely-positioned descendants on both axes, so the
-// menu used to be cut off at the rail's edges however tall it was allowed to be —
-// its own `max-height: 60vh` was capping against the window, which was never the
-// box doing the clipping. A hit test is the assertion, not a bounding box:
-// `boundingBox()` reports the element's own geometry whether or not an ancestor
-// is painting it, so it would have passed while the menu was invisible.
 test('the commands menu is not clipped by the rail it opens from', async ({ page }) => {
   await page.evaluate(() =>
     window.__mock.setCommands('p-alpha', [
@@ -673,15 +548,11 @@ test('the commands menu is not clipped by the rail it opens from', async ({ page
   expect(box).not.toBeNull()
   const viewport = page.viewportSize()
   expect(viewport).not.toBeNull()
-  // Inside the window on every side. The old menu ran off the left, because it
-  // anchored its right edge to a rail 60px narrower than the menu itself.
   expect(box!.x).toBeGreaterThanOrEqual(0)
   expect(box!.y).toBeGreaterThanOrEqual(0)
   expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width)
   expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height)
 
-  // And actually on top at its own corners: whatever the window hands back at
-  // those points has to be the menu, not the pane that was clipping it.
   for (const row of ['export-diagram', 'import-mermaid', 'import-drawio']) {
     const hit = await page
       .getByTestId(`diagram-command-${row}`)
@@ -694,8 +565,6 @@ test('the commands menu is not clipped by the rail it opens from', async ({ page
   }
 })
 
-// import-mermaid and import-drawio read a file from somewhere on the machine,
-// and the section knew no way to name one but typing the whole path by hand.
 test('Browse fills the file argument from a native picker, and cancelling changes nothing', async ({
   page,
 }) => {
@@ -712,14 +581,12 @@ test('Browse fills the file argument from a native picker, and cancelling change
   const input = page.getByTestId('diagram-input')
   const browse = page.getByTestId('diagram-browse-file')
 
-  // Nothing in the box is not a file argument, so there is nothing to browse for.
   await expect(browse).toHaveCount(0)
 
   await page.getByTestId('diagram-commands').click()
   await page.getByTestId('diagram-command-import-mermaid').click()
   await expect(browse).toBeVisible()
 
-  // Cancelled: an ordinary outcome that leaves the box exactly as it was.
   const beforeCancel = await input.inputValue()
   await page.evaluate(() => window.__mock.setNextFilePick(null))
   await browse.click()
@@ -729,16 +596,12 @@ test('Browse fills the file argument from a native picker, and cancelling change
   await browse.click()
   await expect(input).toHaveValue(`/${DIAGRAM_PLUGIN.namespace}:import-mermaid C:\\work\\flow.mmd `)
 
-  // Browsing again REPLACES the path. Appending would hand the command two files
-  // and it would read the wrong one.
   await page.evaluate(() => window.__mock.setNextFilePick('C:\\my diagrams\\other.mmd'))
   await browse.click()
-  // Quoted, because the line is read as a command line and the path has a space.
   await expect(input).toHaveValue(
     `/${DIAGRAM_PLUGIN.namespace}:import-mermaid "C:\\my diagrams\\other.mmd" `,
   )
 
-  // Flags typed after the file survive a browse; only the file slot is rewritten.
   await input.pressSequentially('--detail=high')
   await page.evaluate(() => window.__mock.setNextFilePick('C:\\work\\third.mmd'))
   await browse.click()
@@ -747,47 +610,34 @@ test('Browse fills the file argument from a native picker, and cancelling change
   )
 })
 
-// The other Browse only appears once a command is already in the box, so finding
-// it means knowing `import-drawio` exists and opening a menu headed "Commands"
-// to reach it. Someone with a .drawio on their desktop has a file in mind, not a
-// command — this one is in the bar from the start and works from the file back.
 test('Browse in the bar imports a file straight from the machine, choosing the command from it', async ({
   page,
 }) => {
   const input = page.getByTestId('diagram-input')
   const browse = page.getByTestId('diagram-import-file')
 
-  // Present with an empty box, which is the whole difference from the other one.
   await expect(browse).toBeVisible()
   await expect(page.getByTestId('diagram-browse-file')).toHaveCount(0)
 
-  // Cancelled leaves an empty box empty.
   await page.evaluate(() => window.__mock.setNextFilePick(null))
   await browse.click()
   await expect(input).toHaveValue('')
 
-  // A draw.io file picks the draw.io importer without being told.
   await page.evaluate(() => window.__mock.setNextFilePick('C:\\Users\\d\\Desktop\\arch.drawio'))
   await browse.click()
   await expect(input).toHaveValue(
     `/${DIAGRAM_PLUGIN.namespace}:import-drawio C:\\Users\\d\\Desktop\\arch.drawio `,
   )
 
-  // A Mermaid file picks the other importer, over the top of the first.
   await page.evaluate(() => window.__mock.setNextFilePick('C:\\Users\\d\\Desktop\\flow.mmd'))
   await browse.click()
   await expect(input).toHaveValue(
     `/${DIAGRAM_PLUGIN.namespace}:import-mermaid C:\\Users\\d\\Desktop\\flow.mmd `,
   )
 
-  // Written, not sent: the developer still presses the button.
   expect(await page.evaluate(() => window.__mock.state().sends.length)).toBe(0)
 })
 
-// archify's catalogue has no import at all, so the only thing Browse could write
-// on that engine is a diagram-design command — which would silently switch
-// engines for the one action, and address a plugin the project may never have
-// installed. Gone, therefore, rather than disabled or quietly wrong.
 test('Browse is absent on the archify engine, which has nothing to import with', async ({
   page,
 }) => {
@@ -797,14 +647,10 @@ test('Browse is absent on the archify engine, which has nothing to import with',
   await expect(page.getByTestId('diagram-engine-archify')).toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByTestId('diagram-import-file')).toHaveCount(0)
 
-  // And back, so the engine switch is what governs it rather than a one-way trip.
   await page.getByTestId('diagram-engine-diagram-design').click()
   await expect(page.getByTestId('diagram-import-file')).toBeVisible()
 })
 
-// The dialogue has to allow bare .png and .svg so `.drawio.png` can be selected
-// at all, so a plain screenshot is reachable by ordinary use. Refusing silently
-// would read as a broken button.
 test('Browse says so when it cannot read the file, instead of doing nothing', async ({ page }) => {
   const input = page.getByTestId('diagram-input')
   const browse = page.getByTestId('diagram-import-file')
@@ -815,11 +661,8 @@ test('Browse says so when it cannot read the file, instead of doing nothing', as
   const error = page.getByTestId('diagram-error')
   await expect(error).toBeVisible()
   await expect(error).toContainText('screenshot.png')
-  // The box is untouched, so nothing has to be undone before trying again.
   await expect(input).toHaveValue('')
 
-  // draw.io's own PNG export carries the source, and is accepted — the refusal
-  // above is about the extension in context, not about PNG.
   await page.evaluate(() => window.__mock.setNextFilePick('C:\\Users\\d\\Desktop\\arch.drawio.png'))
   await browse.click()
   await expect(input).toHaveValue(
@@ -828,23 +671,18 @@ test('Browse says so when it cannot read the file, instead of doing nothing', as
   await expect(page.getByTestId('diagram-error')).toHaveCount(0)
 })
 
-// The app always named the file from the sentence. That is a good default and
-// stays the default, but a developer who knows what the drawing is called should
-// not have to phrase the request around the file name they want.
 test('a typed name decides the file, and blank still derives one from the sentence', async ({
   page,
 }) => {
   const name = page.getByTestId('diagram-name')
   await expect(name).toBeVisible()
 
-  // Blank: unchanged behaviour, derived from the description.
   await page.getByTestId('diagram-input').fill('Auth flow for login')
   await page.getByTestId('diagram-generate').click()
   await expect
     .poll(async () => (await page.evaluate(() => window.__mock.state().sends)).at(-1)?.text)
     .toContain(`${DIAGRAMS_DIR}/auth-flow-for-login.html`)
 
-  // Typed: the name wins over the sentence entirely.
   await page.getByTestId('diagram-input').fill('something else entirely')
   await name.fill('Payment ledger')
   await page.getByTestId('diagram-generate').click()
@@ -852,14 +690,10 @@ test('a typed name decides the file, and blank still derives one from the senten
     .poll(async () => (await page.evaluate(() => window.__mock.state().sends)).at(-1)?.text)
     .toContain(`${DIAGRAMS_DIR}/payment-ledger.html`)
 
-  // Both fields name ONE drawing, so both clear; a name left behind would
-  // silently attach itself to the next diagram.
   await expect(name).toHaveValue('')
   await expect(page.getByTestId('diagram-input')).toHaveValue('')
 })
 
-// The field is for the drawing flow. A command names its own output and this
-// field could not reach it, so offering one would be a control that does nothing.
 test('the name field is absent while a command is in the box', async ({ page }) => {
   await expect(page.getByTestId('diagram-name')).toBeVisible()
   await page.getByTestId('diagram-input').fill('/diagram-design:export-diagram')

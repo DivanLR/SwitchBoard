@@ -1,9 +1,3 @@
-// Design screenshots. Not a test: it drives the mock host to a full board and
-// writes PNGs for a visual review pass. Skipped unless SHOTS=1, so `npm run
-// check` never pays for it.
-//
-// Run: SHOTS=1 npx playwright test tests/e2e/shots.spec.ts
-// Output: .impeccable/shots/<name>.png
 import { test } from '@playwright/test'
 import { installMockHost, type MockScenario } from './mock-host'
 import { DEFAULT_SETTINGS } from '../../src/shared/domain'
@@ -135,7 +129,6 @@ for (const [label, size] of [
   })
 }
 
-// The Diff tab with a change set big enough for the folder grouping to be the point.
 test('diff folders', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 1000 })
   await page.addInitScript(installMockHost, {
@@ -169,9 +162,6 @@ test('diff folders', async ({ page }) => {
   await page.screenshot({ path: `${OUT}/diff-folders.png` })
 })
 
-// A project running more than one session, so the nested subsession rows are visible.
-// Started through the context menu rather than seeded, because the scenario seed still
-// describes one session per project.
 test('subsessions', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 1000 })
   await seedBoard(page)
@@ -190,9 +180,6 @@ test('light theme', async ({ page }) => {
   await page.screenshot({ path: `${OUT}/board-light.png` })
 })
 
-// The start controls: one mode picker carrying every mode the SDK has, one
-// Resume switch, one Start button. Captured open, because the list is where the
-// descriptions live and a closed picker shows none of them.
 test('session start', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 1000 })
   await seedBoard(page)
@@ -223,8 +210,6 @@ test('settings', async ({ page }) => {
   await page.screenshot({ path: `${OUT}/settings.png` })
 })
 
-// The scrim and the dialogue tier are the one place the two themes dim
-// differently, so paper gets its own capture rather than being read off the dark one.
 test('settings light', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 1000 })
   await seedBoard(page)

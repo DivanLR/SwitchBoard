@@ -1,7 +1,3 @@
-// Planning mode: a session that reads before it acts, proposes a plan, and waits
-// for the developer to approve it. The inbox half of this already existed and was
-// unreachable — nothing ever started a session in plan mode, so nothing ever
-// called ExitPlanMode. These cover the half that turns it on.
 import { expect, test } from '@playwright/test'
 import { installMockHost, twoProjectScenario } from './mock-host'
 
@@ -11,11 +7,6 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
 })
 
-// The pair of switches that used to sit here (Plan, Bypass) had to clear each
-// other, because a bypass session approves everything before the gate a plan
-// needs is ever reached: the two together did nothing while the developer waited
-// on a review. One choice cannot express that, so the test is now that choosing
-// is exclusive rather than that two controls fight.
 test('the session type is one choice, so plan and bypass cannot both be asked for', async ({
   page,
 }) => {
@@ -27,8 +18,6 @@ test('the session type is one choice, so plan and bypass cannot both be asked fo
   await page.getByTestId('session-mode-bypass').check()
   await expect(page.getByTestId('session-mode-bypass')).toBeChecked()
   await expect(page.getByTestId('session-mode-plan')).not.toBeChecked()
-  // Bypass is the one mode that carries a warning, because it is the one that
-  // removes every gate rather than moving one.
   await expect(page.getByTestId('bypass-warning')).toBeVisible()
 
   await page.getByTestId('session-mode-plan').check()
@@ -42,8 +31,6 @@ test('a session started with Plan on says it is planning, and asks for it', asyn
   await page.getByTestId('session-mode-plan').check()
   await page.getByTestId('start-session').click()
 
-  // The pill first: the sidebar row appears at registration, which is before the
-  // session has started, so reading the recorded start any earlier races it.
   await expect(page.getByTestId('plan-mode-toggle')).toContainText('Planning')
   const start = await page.evaluate(() => window.__mock.state().starts.at(-1))
   expect(start?.planMode).toBe(true)
@@ -68,9 +55,6 @@ test('the live pill switches a running session in and out of planning', async ({
   ])
 })
 
-// Approving the plan IS leaving plan mode — the tool's own contract, so no
-// second click is needed and the header must not go on claiming a restriction
-// that has been lifted.
 test('approving the plan returns the session to acting, with no second click', async ({ page }) => {
   await page.getByTestId('plan-mode-toggle').click()
   await expect(page.getByTestId('plan-mode-toggle')).toContainText('Planning')
