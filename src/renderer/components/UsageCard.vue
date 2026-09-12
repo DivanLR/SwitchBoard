@@ -1,6 +1,4 @@
 <script setup lang="ts">
-// Structured /usage view: limit meters up top, then each activity window as a
-// dotted list (behaviours + Top skills/subagents/plugins/MCP servers).
 import type { UsageReport } from '@shared/usage-report'
 import Icon from '@renderer/components/Icon.vue'
 
@@ -15,7 +13,6 @@ function barColor(pct: number): string {
   <div class="usage-card" data-testid="usage-card">
     <div class="uc-label mono"><Icon name="spark" :size="11" /> USAGE</div>
 
-    <!-- Limit meters -->
     <div v-for="l in report.limits" :key="l.label" class="uc-meter" data-testid="usage-meter">
       <span class="uc-meter-label mono">{{ l.label }}</span>
       <span class="uc-meter-pct mono" :style="{ color: barColor(l.pct) }">{{ l.pct }}%</span>
@@ -27,7 +24,6 @@ function barColor(pct: number): string {
 
     <div v-if="report.notes.length" class="uc-notes">{{ report.notes.join(' ') }}</div>
 
-    <!-- Activity windows as dotted lists -->
     <div v-for="w in report.windows" :key="w.title" class="uc-window" data-testid="usage-window">
       <div class="uc-win-head mono">
         <span class="uc-win-title">{{ w.title.toUpperCase() }}</span>
@@ -65,7 +61,6 @@ function barColor(pct: number): string {
   margin-bottom: 9px;
 }
 
-/* Meter rows: label · % · bar · reset time. */
 .uc-meter {
   display: grid;
   grid-template-columns: 175px 38px 1fr auto;
@@ -95,10 +90,6 @@ function barColor(pct: number): string {
   overflow: hidden;
 }
 
-/* The track is a 7%-white wash, which is a lift on carbon and nothing at all on
-   a near-white card: the meter read as a coloured bar floating with no track to
-   measure it against, so the empty part of the meter carried no information.
-   Ink here, subtractive, like every other light-theme wash. */
 html.sb-light .uc-bar {
   background: rgba(20, 22, 26, 0.09);
 }

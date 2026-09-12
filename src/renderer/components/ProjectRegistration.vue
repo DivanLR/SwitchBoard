@@ -1,13 +1,4 @@
 <script setup lang="ts">
-// "New session" dialog (design reference): folder input with a live session
-// name, the default folder-access summary, a bypass-permissions toggle with
-// warning, and Start/Cancel. The folder is typed or chosen with the native
-// picker.
-//
-// The list of folders Claude Code had been used in was removed on request. It
-// answered "where have you worked before", which is a question the sidebar
-// already answers for every project that matters, and it pushed the folder
-// field and Start apart by however many rows it happened to find.
 import { useTemplateRef, computed, ref } from 'vue'
 import { useModal } from '@renderer/composables/useModal'
 import { isIpcError } from '@shared/ipc-types'
@@ -18,26 +9,15 @@ import Icon from '@renderer/components/Icon.vue'
 const projects = useProjectsStore()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
-// Escape closes, Tab stays inside, focus returns to the opener on close.
 const dialogEl = useTemplateRef<HTMLElement>('dialog')
 useModal(dialogEl, () => emit('close'))
 
 const folder = ref('')
 
-// One control for one SDK setting. This was a pair of switches (bypass, plan)
-// that each had to clear the other, because a plan under bypass raises no
-// approval at all and reads as simply not working. A single choice cannot
-// express that contradiction, and it is now the project's own setting rather
-// than this dialogue's: it persists and applies to every session the project
-// starts, changeable later in Settings.
 const mode = ref<SessionMode>(DEFAULT_SESSION_MODE)
 const error = ref<string | null>(null)
 const busy = ref(false)
 
-// The picked path goes into the same field a typed path goes into, so it takes
-// the same validation on Start rather than a second, quieter branch of its own.
-// The OS guarantees the folder exists; it guarantees nothing about whether this
-// project is already registered.
 async function browseFolder(): Promise<void> {
   const picked = await projects.pickFolder()
   if (picked) folder.value = picked
@@ -56,24 +36,17 @@ async function startSession(): Promise<void> {
   error.value = null
   busy.value = true
   try {
-    // The mode is registered ON the project, so the start call names nothing: it
-    // reads the project's own setting. That way the session the dialogue starts
-    // and every session after it agree by construction.
     const project = await projects.register(path, undefined, mode.value)
     projects.select(project.id)
     await projects.startSession(project.id)
     emit('close')
   } catch (e) {
     if (isIpcError(e) && e.code === 'DUPLICATE') {
-      // Pointing New session at an already-registered folder just opens it —
-      // and starts a session if none is live.
       await projects.refresh()
       const norm = (p: string): string => stripSlash(p).toLowerCase()
       const existing = projects.items.find((p) => norm(p.path) === norm(path))
       if (existing) {
         projects.select(existing.id)
-        // Pointing the dialogue at a registered folder is still a mode choice, so
-        // it lands on the project before anything starts.
         if (existing.defaultSessionMode !== mode.value) {
           await projects.setSessionMode(existing.id, mode.value)
         }
@@ -81,9 +54,6 @@ async function startSession(): Promise<void> {
           try {
             await projects.startSession(existing.id)
           } catch (startError) {
-            // Starting can fail on its own terms (a bypass session needs WSL
-            // container). Report it here rather than letting it escape this catch
-            // block as an unhandled rejection with the dialog looking idle.
             error.value = isIpcError(startError) ? startError.message : String(startError)
             return
           }
@@ -160,11 +130,6 @@ async function startSession(): Promise<void> {
         </div>
       </div>
 
-      <!-- One choice, five values, because the SDK takes one permission mode. Native
-           radios rather than buttons: arrow-key navigation, a single tab stop and the
-           group semantics all come for free. The input IS the mark — appearance: none
-           and styled square like everything else in this world — so there is no second
-           element mirroring its state, and what a test clicks is what a user clicks. -->
       <div class="section-label mono">SESSION TYPE</div>
       <div class="mode-list">
         <label
@@ -197,8 +162,6 @@ async function startSession(): Promise<void> {
 
       </div>
 
-      <!-- Pinned footer: Start session stays visible however long the body
-           grows. -->
       <div class="actions">
         <button
           class="btn-solid"
@@ -221,13 +184,10 @@ async function startSession(): Promise<void> {
   width: 470px;
   max-width: 92vw;
   max-height: 88vh;
-  /* Flex column: header + scrollable body + pinned footer. The dialog itself
-     no longer scrolls, so the actions stay put. */
   display: flex;
   flex-direction: column;
   overflow: hidden;
   padding: 22px;
-  /* A card, not a pill — 99px bows the corners in and clips the content. */
   border-radius: var(--rc);
   box-shadow: var(--shadow-dlg);
 }
@@ -236,8 +196,6 @@ async function startSession(): Promise<void> {
   flex-shrink: 0;
 }
 
-/* Only the middle scrolls; the negative margins + padding keep focus rings and
-   the suggestion hover from being clipped at the scroll edges. */
 .reg-body {
   flex: 1;
   min-height: 0;
@@ -266,12 +224,7 @@ async function startSession(): Promise<void> {
   margin: 18px 0 6px;
 }
 
-/* The scoped .switch / .knob radius override that used to live here is gone with
-   the two switches it reshaped: this dialogue renders no switch now, and the shared
-   ones in styles.css already take var(--rp). */
 
-/* The field takes the room; Browse takes what it needs. Typing a path stays the
-   primary way in, so the picker sits beside the field rather than above it. */
 .folder-row {
   display: flex;
   align-items: stretch;
@@ -346,9 +299,6 @@ async function startSession(): Promise<void> {
   color: var(--amber);
 }
 
-/* The two switch rows this dressed are gone; the label and description classes
-   below survive because the mode rows carry the same two-line shape. They are
-   spans inside a mode row now, so the column has to be declared here. */
 .bypass-text {
   flex: 1;
   min-width: 0;
@@ -356,8 +306,6 @@ async function startSession(): Promise<void> {
   flex-direction: column;
 }
 
-/* The five session types. Rows sit flush in one stack rather than as five separate
-   cards: they are one choice, and five bordered boxes read as five decisions. */
 .mode-list {
   display: flex;
   flex-direction: column;
@@ -387,11 +335,6 @@ async function startSession(): Promise<void> {
   background: var(--bg-active);
 }
 
-/* The real radio, drawn rather than replaced: appearance: none strips the platform
-   dot and the box below is square like every other mark in this world. Keeping the
-   input as the visible control means the accessible name, the arrow keys and the
-   focus ring belong to the thing being clicked, with no second element to keep in
-   sync. */
 .mode-input {
   appearance: none;
   flex-shrink: 0;
@@ -404,8 +347,6 @@ async function startSession(): Promise<void> {
   cursor: pointer;
 }
 
-/* Selection reads as a filled centre, so it survives without colour: the inner
-   ring is the row's own surface and the fill is the accent behind it. */
 .mode-input:checked {
   border-color: var(--green);
   box-shadow:
@@ -420,7 +361,6 @@ async function startSession(): Promise<void> {
     inset 0 0 0 11px var(--red);
 }
 
-/* On the row, not the 11px box: a focus ring that size is easy to miss. */
 .mode-row:has(.mode-input:focus-visible) {
   outline: 1px solid var(--green);
   outline-offset: -1px;
@@ -465,7 +405,6 @@ html.sb-light .bypass-warn {
   color: var(--red);
 }
 
-/* Pinned footer: stays visible below the scrollable body. */
 .actions {
   flex-shrink: 0;
   display: flex;

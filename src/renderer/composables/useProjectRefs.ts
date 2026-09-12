@@ -1,19 +1,9 @@
-// The REFS row and the drop target that feeds it: folders this project's
-// sessions may read, added by typing a path, by dragging a project across from
-// the sidebar, or by dropping a folder from the desktop. Extracted from
-// SessionView so the view stays focused on rendering the stream.
-//
-// One composable rather than two, because a dropped project and a dropped
-// folder are the same operation the typed path performs — only the way the path
-// arrived differs. A dropped FILE is the exception, and the only thing this
-// hands back to the caller: it belongs in the composer, which the view owns.
 import { ref, toValue, type MaybeRefOrGetter } from 'vue'
 import { errorMessage } from '@renderer/ipc'
 import { useProjectsStore } from '@renderer/stores/projects'
 
 export function useProjectRefs(opts: {
   projectId: MaybeRefOrGetter<string>
-  /** A dropped file's path, for the caller to put wherever it belongs. */
   onInsertPath: (path: string) => void
 }) {
   const projects = useProjectsStore()
@@ -45,7 +35,6 @@ export function useProjectRefs(opts: {
     await projects.removeRef(projectId(), path)
   }
 
-  // Drag & drop onto the pane: sidebar project → REF chip; OS file → @path.
   const dragKind = ref<null | 'project' | 'file'>(null)
 
   function onPaneDragOver(event: DragEvent): void {
@@ -73,7 +62,6 @@ export function useProjectRefs(opts: {
       const path = event.dataTransfer?.getData('text/x-sb-project-path') ?? ''
       if (path) await projects.addRef(projectId(), path).catch(() => {})
     } else if (kind === 'file') {
-      // A dropped FOLDER becomes a reference; a dropped FILE inserts its @path.
       for (const item of [...(event.dataTransfer?.items ?? [])]) {
         if (item.kind !== 'file') continue
         const isDir = item.webkitGetAsEntry?.()?.isDirectory ?? false

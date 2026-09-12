@@ -1,9 +1,4 @@
 <script setup lang="ts">
-// Cleanup section — a launcher of curated code-review and cleanup commands from
-// the dotnet-claude-kit and ponytail plugins. Each group is install-aware: when
-// the plugin's commands are available in the session it shows runnable command
-// rows; otherwise it shows a "download to project" card that installs it. A
-// command row sends its slash command to the session (output streams there).
 import { computed } from 'vue'
 import { CLEANUP_GROUPS, type CleanupCommand, type CleanupGroup } from '@shared/command-catalog'
 import { normalizeForMatch } from '@renderer/composables/useCommandSuggestions'
@@ -12,13 +7,9 @@ import Icon from '@renderer/components/Icon.vue'
 
 const props = defineProps<{
   projectName: string
-  /** Available slash-command names for this project (drives install state). */
   available: string[]
-  /** The background session a command was last sent to, for the terminal below. */
   sessionId?: string | null
-  /** True while a plugin install is running on the host. */
   installing?: boolean
-  /** Why the install failed, in the CLI's own words. */
   installError?: string | null
 }>()
 
@@ -27,76 +18,30 @@ const emit = defineEmits<{
   (e: 'install', group: CleanupGroup): void
 }>()
 
-/**
- * The session's own command list, keyed by each command's OWN name.
- *
- * A plugin's commands arrive namespaced (`dotnet-claude-kit:de-sloppify`,
- * `ponytail:ponytail-review`); the catalogue names them bare. Matching the whole
- * string doesn't work — normalizeForMatch strips the colon, so the namespaced
- * form reduces to one long run that never equals the bare name. That bug had an
- * installed toolkit reporting five of its seven commands unavailable, and
- * ponytail as not installed at all; only `code-review` and `verify` matched,
- * because Claude Code ships built-ins under those bare names too.
- *
- * The value is the name AS THE SESSION KNOWS IT, so a row runs the plugin's own
- * command rather than a same-named built-in.
- */
 const availableByName = computed(() => {
   const byName = new Map<string, string>()
   for (const full of props.available) {
     const own = full.slice(full.lastIndexOf(':') + 1)
     const key = normalizeForMatch(own)
-    // A namespaced command wins over a bare one of the same name: the row sits
-    // under a plugin's heading, so the plugin's command is the one it means.
     if (!byName.has(key) || full.includes(':')) byName.set(key, full)
   }
   return byName
 })
 
-// A group counts as installed when any of its commands is available. Before the
-// session's command list has loaded (empty), assume installed so the useful
-// command rows show rather than a flash of download cards.
 function isInstalled(g: CleanupGroup): boolean {
   if (props.available.length === 0) return true
   return g.commands.some((c) => availableByName.value.has(normalizeForMatch(c.command)))
 }
 
-/**
- * A single row is runnable only when the session offers that exact command.
- *
- * A group counts as installed on ANY match, which is right — a plugin need not
- * ship every command the catalogue lists. But that also meant one real command
- * in a group made every row in it clickable, including rows naming a command the
- * plugin does not have. Those sent a slash command that could only answer
- * "Unknown command". The catalogue is hand-maintained, so it will drift again
- * whenever a plugin renames or withdraws a command; checking each row against
- * the session's own list is what stops that drift reaching a button.
- */
 function isAvailable(c: CleanupCommand): boolean {
   if (props.available.length === 0) return true
   return availableByName.value.has(normalizeForMatch(c.command))
 }
 
-/**
- * A stack-specific plugin appears only once it is installed.
- *
- * Before this, the .NET toolkit was offered with a download button on every
- * project whatever its language. Installation is the signal that a developer
- * wants it, and it is a signal the app already has.
- */
 const groups = computed(() => CLEANUP_GROUPS.filter((g) => !g.stackSpecific || isInstalled(g)))
 
-/** Runs the name the SESSION knows, not the catalogue's short form: a bare
- *  `/code-review` reaches Claude Code's own built-in, while this row means the
- *  toolkit's. Falls back to the catalogue name before the list has loaded. */
 function run(command: string): void {
   const resolved = availableByName.value.get(normalizeForMatch(command)) ?? command
-  // The session's own names arrive already slashed (availableCommandNames maps
-  // every one through slashName), while the catalogue's fallback is bare. Adding
-  // one unconditionally sent "//de-sloppify" for every row the session had
-  // actually reported — which is every row in real use, and none of them in the
-  // tests, because those never set a command list and so always took the bare
-  // fallback.
   emit('run', resolved.startsWith('/') ? resolved : `/${resolved}`)
 }
 </script>
@@ -161,9 +106,6 @@ function run(command: string): void {
       </div>
     </div>
 
-    <!-- A cleanup command runs in the background session, so this tab had no way
-         to show that anything was happening: the output was arriving in a
-         session the developer never opens. -->
     <MiniTerminal v-if="sessionId" :session-id="sessionId" label="running" />
   </div>
 </template>
@@ -250,11 +192,6 @@ function run(command: string): void {
   align-items: center;
   gap: 12px;
   padding: 10px 13px;
-  /* A CARD, so --bg-card. These rested on --bg-hover, a translucent wash built
-     for a hover state: over the light canvas it reads as a grey slab instead of
-     a white card floating on it, which is the surface's whole idea. The Skills
-     section next door already used --bg-card, and the two side by side is what
-     made it visible. */
   background: var(--bg-card);
   box-shadow: var(--elev);
   border: 1px solid var(--border-card);
@@ -267,9 +204,6 @@ function run(command: string): void {
   border-color: var(--green);
 }
 
-/* A row the session cannot run stays readable rather than hidden: the command is
-   still worth knowing about, and hiding it would leave the group looking short
-   with no reason given. The title attribute carries the reason. */
 .cmd-row:disabled {
   cursor: default;
   opacity: 0.55;
@@ -303,11 +237,6 @@ function run(command: string): void {
   align-items: center;
   gap: 14px;
   padding: 13px 15px;
-  /* A CARD, so --bg-card. These rested on --bg-hover, a translucent wash built
-     for a hover state: over the light canvas it reads as a grey slab instead of
-     a white card floating on it, which is the surface's whole idea. The Skills
-     section next door already used --bg-card, and the two side by side is what
-     made it visible. */
   background: var(--bg-card);
   box-shadow: var(--elev);
   border: 1px dashed var(--border-strong);

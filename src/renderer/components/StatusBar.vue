@@ -1,15 +1,4 @@
 <script setup lang="ts">
-// The window's instrument line: the readings that describe the whole board
-// rather than any one session, on one rule pinned under every pane.
-//
-// These figures used to sit in the sidebar footer, stacked as a card above the
-// Settings row, which cost the lane list a sixth of its height and put
-// board-wide readings inside a pane that is about one project at a time. A
-// control room puts its gauges along the bottom edge, where they are always
-// legible and never in the way of the work.
-//
-// Every figure is reported, never estimated, and the test ids move with the
-// markup: the readings are the same truth, in a better place.
 import { computed } from 'vue'
 import Icon from '@renderer/components/Icon.vue'
 import { useProjectsStore } from '@renderer/stores/projects'
@@ -19,13 +8,11 @@ const projects = useProjectsStore()
 const costLabel = computed(() => `$${projects.counters.costTodayUsd.toFixed(2)}`)
 
 const tokensLabel = computed(() =>
-  // Compact notation; lowercase the 'K' suffix to keep the design's "1.2k" style.
   Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 })
     .format(projects.counters.tokensToday)
     .replace('K', 'k'),
 )
 
-/** Ctrl+C only does anything mid-turn, so the hint only claims it mid-turn. */
 const anyWorking = computed(() =>
   projects.items.some((p) => p.session && !p.session.endedAt && p.session.status === 'working'),
 )
@@ -33,16 +20,6 @@ const anyWorking = computed(() =>
 
 <template>
   <div class="statusbar mono" data-testid="statusbar">
-    <!-- Each mark takes the hue its own reading already uses. RUN was drawn in
-         --blue, the ATTENTION-OWED hue, which is byte-identical to the --amber
-         that WAIT's figure beside it is set in: two readings, one hue, told apart
-         by their labels alone. A running lane is --running everywhere else on the
-         board, so it is --running here.
-         WAIT stays on the attention hue and does NOT take --idle, even though
-         --idle is the warm amber a status row conventionally wants: this theme's
-         --idle is declared a BAR colour only, never a glyph, precisely so it is
-         never asked to be told apart from the red error mark at the same shape
-         and size — which is exactly what a 6px dot is. See styles.css. -->
     <span class="sb-stat" data-testid="counter-running">
       <span class="sb-dot" style="background: var(--running)"></span>
       <span class="sb-label">run</span>
@@ -64,15 +41,12 @@ const anyWorking = computed(() =>
       <span class="sb-val" data-testid="counter-cost-value">{{ costLabel }}</span>
     </span>
 
-    <!-- Exactly "<n> tok": the token total is asserted as whole text, and the
-         figure carries its unit rather than a separate label. -->
     <span class="sb-stat" data-testid="usage-tokens">
       <span class="sb-val">{{ tokensLabel }}</span> tok
     </span>
 
     <span class="sb-gap"></span>
 
-    <!-- Only bindings that exist. There is no command palette to advertise. -->
     <span v-if="anyWorking" class="sb-hint">
       <kbd>⌃C</kbd>
       interrupt
@@ -85,9 +59,6 @@ const anyWorking = computed(() =>
 </template>
 
 <style scoped>
-/* One rule, one line of readings. The bar is a hairline band, not a panel: it
-   borrows the sticky ground so it reads as part of the window frame rather than
-   as another card. */
 .statusbar {
   flex-shrink: 0;
   display: flex;
@@ -108,8 +79,6 @@ const anyWorking = computed(() =>
   gap: 6px;
 }
 
-/* Names of readings, not sentences: uppercase and tracked, in the label voice
-   this world declared in --track-label and had never adopted. */
 .sb-label {
   text-transform: uppercase;
   letter-spacing: var(--track-label);
@@ -124,16 +93,12 @@ const anyWorking = computed(() =>
   color: var(--amber);
 }
 
-/* A mark in this world is a cut square, not a bead: --sq is 0 on carbon and 2px
-   on the light sheet, and every other state mark in the app already reads it.
-   These two were the last hard-coded circles. */
 .sb-dot {
   width: 6px;
   height: 6px;
   border-radius: var(--sq);
 }
 
-/* A separator, not a divider: the same hairline the panes use, one glyph high. */
 .sb-rule {
   width: 1px;
   height: 11px;

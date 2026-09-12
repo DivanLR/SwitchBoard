@@ -1,6 +1,3 @@
-// API eval sets per project: the endpoints the app found, where it would call
-// them, and the runs it has made. Mirrors the verify store's view/transport split
-// — every mutation answers with the project's full list, so nothing merges.
 import { reactive } from 'vue'
 import type { ApiEvalRun, ApiTarget, DiscoveredEndpoint } from '@shared/api-endpoints'
 import { errorMessage, invoke } from '@renderer/ipc'
@@ -13,15 +10,12 @@ interface HostInfo {
   error: string | null
 }
 
-/** The deployed environment: what is stored, and why a run there would fail now. */
 interface QaInfo {
   baseUrl: string | null
   headers: string | null
   error: string | null
 }
 
-// Guards the shared state against a slower response from a project the developer
-// has already switched away from (mirrors evals.load).
 let requestToken = 0
 
 const loadEndpoints = (projectId: string) => invoke('api.endpoints', { projectId })
@@ -35,14 +29,12 @@ const store = reactive({
   scan: {} as Record<string, { filesRead: number; truncated: boolean }>,
   error: null as string | null,
   starting: false,
-  /** The report file the last write produced, so the panel can offer to open it. */
   reportPath: null as string | null,
 
   runsFor(projectId: string): ApiEvalRun[] {
     return this.runs[projectId] ?? []
   },
 
-  /** The run the panel renders: the newest, running or finished. */
   latestFor(projectId: string): ApiEvalRun | null {
     return this.runsFor(projectId)[0] ?? null
   },
@@ -70,8 +62,6 @@ const store = reactive({
     try {
       ;[runs, found] = await Promise.all([invoke('api.runs', { projectId }), loadEndpoints(projectId)])
     } catch (error) {
-      // A failed load leaves the panel with whatever it had and says why, rather
-      // than an empty list that reads as "this project has no endpoints".
       this.error = errorMessage(error)
       return
     }
@@ -88,7 +78,6 @@ const store = reactive({
     this.runs[projectId] = runs
   },
 
-  /** Start an eval set over the chosen endpoints. True when it was dispatched. */
   async start(
     projectId: string,
     endpoints: { method: string; template: string }[],
@@ -100,8 +89,6 @@ const store = reactive({
     try {
       const { runs } = await invoke('api.start', { projectId, endpoints, target })
       this.runs[projectId] = runs
-      // Refresh so a spawned tests session gets a sidebar row — see verify.ts's
-      // surfaceNewSessions for why.
       await useProjectsStore().refresh()
       return true
     } catch (error) {
@@ -112,8 +99,6 @@ const store = reactive({
     }
   },
 
-  /** Stop an eval set in progress. Reaches the session being asked for request
-   *  data; a run already mid-flight in the app's own call loop finishes itself. */
   async cancel(projectId: string, runId: string): Promise<boolean> {
     this.error = null
     try {
@@ -125,7 +110,6 @@ const store = reactive({
     }
   },
 
-  /** Set (or clear, with an empty string) where this project's API lives. */
   async setHost(
     projectId: string,
     fields: { baseUrl?: string; startCmd?: string; qaBaseUrl?: string; qaHeaders?: string },
@@ -139,7 +123,6 @@ const store = reactive({
     }
   },
 
-  /** Write the run's test report and remember where it landed. */
   async writeReport(projectId: string, runId?: string): Promise<void> {
     this.error = null
     this.reportPath = null

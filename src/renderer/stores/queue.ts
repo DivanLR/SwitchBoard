@@ -1,5 +1,3 @@
-// Planned task queue per project (FR-023): prompts/goals that auto-run in
-// sequence when the session goes idle. Backed by push.queueChanged.
 import { reactive } from 'vue'
 import type { QueuedTask } from '@shared/domain'
 import type { QueueChangedPush } from '@shared/ipc-types'
@@ -21,8 +19,6 @@ const store = reactive({
     this.byProject[projectId] = await invoke('queue.add', { projectId, text })
   },
 
-  /** Reword a queued task. Saving it empty removes it, which is what clearing
-   *  the box means. */
   async edit(projectId: string, id: string, text: string): Promise<void> {
     this.byProject[projectId] = await invoke('queue.edit', { projectId, id, text })
   },
