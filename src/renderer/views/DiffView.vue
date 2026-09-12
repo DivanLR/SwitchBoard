@@ -1,7 +1,4 @@
 <script setup lang="ts">
-// Diff tab: the project's uncommitted working-tree changes, tracked and
-// untracked alike, with one file's diff shown on selection. Read-only
-// (spec.md FR-010): no stage, discard, or revert action ships here.
 import { computed, nextTick, ref, watch } from 'vue'
 import type { DiffFileEntry } from '@shared/domain'
 import { useDiffStore } from '@renderer/stores/diff'
@@ -10,23 +7,11 @@ import Icon from '@renderer/components/Icon.vue'
 const props = defineProps<{ projectId: string }>()
 const diff = useDiffStore()
 
-// --- Commenting on a region ---
-//
-// The model is a pull-request comment: point at a line, or drag a few, and say
-// what should be different. The difference is that it is carried out rather than
-// recorded — the instruction goes to the section's containerised session, which
-// has the working tree bind-mounted, so the edit shows up in this same diff.
-//
-// This is the one thing in this tab that writes. It is not a stage, discard or
-// revert action (FR-010 rules those out and they stay out): those change the
-// repository behind the developer's back, whereas this asks for an edit the same
-// way the conversation does, and shows it as a diff to be read afterwards.
 const anchor = ref<number | null>(null)
 const head = ref<number | null>(null)
 const instruction = ref('')
 const composer = ref<HTMLTextAreaElement | null>(null)
 
-/** Selected range as [first, last], normalised so a drag upwards still works. */
 const range = computed<[number, number] | null>(() => {
   if (anchor.value === null || head.value === null) return null
   return anchor.value <= head.value ? [anchor.value, head.value] : [head.value, anchor.value]
@@ -47,12 +32,6 @@ const isSelected = (i: number): boolean => {
   return r !== null && i >= r[0] && i <= r[1]
 }
 
-/**
- * Click selects one line; shift-click extends from the line already anchored.
- *
- * Shift-to-extend rather than click-and-drag: a drag over a scrolling code pane
- * fights the scroll, and the diff is read with the keyboard hand free anyway.
- */
 function pickLine(i: number, extend: boolean): void {
   if (extend && anchor.value !== null) {
     head.value = i
@@ -71,7 +50,6 @@ function clearSelection(): void {
   diff.applyError = null
 }
 
-// A new file's lines have nothing to do with the old file's indices.
 watch(() => diff.selectedPath, clearSelection)
 
 async function sendInstruction(): Promise<void> {
@@ -83,8 +61,6 @@ async function sendInstruction(): Promise<void> {
     selectedLines.value,
     text,
   )
-  // The selection is cleared only on success: a failure leaves the region and the
-  // words intact, because the fix is usually to start a session and press again.
   if (sent) clearSelection()
 }
 
@@ -92,43 +68,22 @@ const result = computed(() => diff.resultFor(props.projectId))
 const notLive = computed(() => diff.isNotLive(props.projectId))
 const files = computed(() => result.value.files)
 
-/** One folder in the tree, with the files directly inside it and its own totals. */
 interface DiffGroup {
-  /** Project-relative directory, '' for the project root. */
   dir: string
-  /** The last segment only: the tree's indentation already says where it sits. */
   label: string
-  /** How deep to indent it. 0 for the root and for a top-level folder. */
   depth: number
   files: DiffFileEntry[]
-  /** Sum over this folder AND everything under it, so a folded parent still
-   *  reports what changed inside. Null when no file below it has known counts. */
   added: number | null
   removed: number | null
-  /** Files in this folder and every folder under it, for the heading's count. */
   total: number
 }
 
-/**
- * Changed files grouped by folder — a flat list stops being readable at a
- * screenful, and a refactor's working tree is mostly one folder repeated. A
- * renderer-side regroup of what diff.list already returns, not a second query.
- *
- * Root-level files lead, then folders alphabetically: the root holds a
- * project's loudest files (package.json, a config, a lockfile), and
- * alphabetical order would bury exactly the changes worth noticing first.
- */
 const groups = computed<DiffGroup[]>(() => {
   const byDir = Object.groupBy(files.value, (file) => {
     const cut = file.path.lastIndexOf('/')
     return cut === -1 ? '' : file.path.slice(0, cut)
   })
 
-  // Every ancestor, not only the folders that directly hold a changed file. A
-  // repository whose changes are all in src/main/sessions/ has nothing directly
-  // in src/, so grouping by immediate parent alone produced one row labelled
-  // with the whole path and no src/ to fold. The tree is the point: a folder
-  // with one child folder and nothing else still gets a row.
   const dirs = new Set<string>()
   for (const dir of Object.keys(byDir)) {
     dirs.add(dir)
@@ -136,9 +91,6 @@ const groups = computed<DiffGroup[]>(() => {
     for (let i = 1; i < parts.length; i++) dirs.add(parts.slice(0, i).join('/'))
   }
 
-  // Segment-wise, so a parent always sorts immediately before its own children
-  // and never lands after a sibling that merely shares a prefix ('src-gen'
-  // sorting between 'src' and 'src/main' would break the indentation).
   const ordered = [...dirs].sort((a, b) => {
     if (a === '') return -1
     if (b === '') return 1
@@ -152,11 +104,7 @@ const groups = computed<DiffGroup[]>(() => {
   })
 
   return ordered.map((dir) => {
-    // Object.groupBy types every value as possibly absent, because the key type
-    // is wider than the keys it actually produced.
     const own = byDir[dir] ?? []
-    // Totals cover the whole subtree, so folding a parent hides the detail
-    // without hiding how much changed under it.
     const under = files.value.filter((f) => (dir === '' ? true : f.path.startsWith(`${dir}/`)))
     const known = under.filter((f) => f.addedLines !== null && f.removedLines !== null)
     return {
@@ -171,11 +119,6 @@ const groups = computed<DiffGroup[]>(() => {
   })
 })
 
-/**
- * The rows actually drawn: a folder disappears when any folder ABOVE it is
- * folded, which is what makes folding a parent fold its whole subtree rather
- * than only the files sitting directly in it.
- */
 const visibleGroups = computed<DiffGroup[]>(() =>
   groups.value.filter((g) => {
     if (g.dir === '') return true
@@ -187,22 +130,14 @@ const visibleGroups = computed<DiffGroup[]>(() =>
   }),
 )
 
-/**
- * Folded folders, by directory. Local and unpersisted on purpose: which folders you
- * have collapsed is a reading position in one working tree, and a working tree is
- * gone by the next commit.
- */
 const folded = ref(new Set<string>())
 
 function toggleFolder(dir: string): void {
-  // A new Set, not a mutation: Vue's reactivity tracks Set operations, but replacing
-  // it keeps this readable next to the computed above and costs nothing at this size.
   const next = new Set(folded.value)
   if (!next.delete(dir)) next.add(dir)
   folded.value = next
 }
 
-/** The file's own name; its folder is already named by the heading above it. */
 function baseName(group: DiffGroup, path: string): string {
   return group.dir === '' ? path : path.slice(group.dir.length + 1)
 }
@@ -219,27 +154,11 @@ function selectFile(path: string): void {
   void diff.selectFile(props.projectId, path)
 }
 
-/** "+3 −1", or "binary" when counts are unavailable rather than a
- *  fabricated 0/0 (FR-011). */
 function countLabel(added: number | null, removed: number | null): string {
   if (added === null || removed === null) return 'binary'
   return `+${added} −${removed}`
 }
 
-/**
- * The lines of the selected file's diff, each paired with a stable v-for key.
- *
- * `diff.fileDiff.lines` is replaced wholesale on every file selection rather
- * than patched in place, so a bare index key was not WRONG today — but it is
- * the anti-pattern the house rules call out anyway: an index key defeats
- * Vue's reuse the moment a line is ever inserted or removed without the whole
- * array being swapped, and by then it is a silent rendering bug, not a lint
- * warning. The key composes the line's own identity (type + text) with its
- * position, because two context lines can read identically and the index
- * alone is exactly what an identity key is meant to stop leaning on. Built
- * once here, where the lines are prepared, rather than as an expression
- * re-evaluated in the template on every line of every render.
- */
 const keyedLines = computed(() =>
   (diff.fileDiff?.lines ?? []).map((line, i) => ({ line, i, key: `${i}:${line.type}:${line.text}` })),
 )
@@ -258,10 +177,6 @@ const keyedLines = computed(() =>
     </div>
     <div v-else class="diff-body">
       <div class="diff-files" aria-label="Changed files" data-testid="diff-file-list">
-        <!-- One block per folder. The heading carries its own totals, so folding it
-             still reports how much changed inside — folding stops you reading it,
-             not losing it. Files below show only their own name; the heading
-             already said where they are. -->
         <div v-for="g in visibleGroups" :key="g.dir" class="diff-group">
           <button
             type="button"
@@ -321,9 +236,6 @@ const keyedLines = computed(() =>
           No text diff is available for this file.
         </div>
         <div v-else class="diff-lines mono" data-testid="diff-pane-lines">
-          <!-- A line is a button because it does something: it selects a region to
-               comment on. Shift-click extends, which is why the title says so —
-               nothing else on screen could tell you that. -->
           <template v-for="row in keyedLines" :key="row.key">
           <button
             type="button"
@@ -334,13 +246,6 @@ const keyedLines = computed(() =>
             title="Click to comment on this line, shift-click to extend the selection"
             @click="pickLine(row.i, $event.shiftKey)"
           >
-            <!-- The affordance. The line has always been clickable and nothing on
-                 screen said so, which left the whole feature resting on a tooltip
-                 nobody hovers long enough to see. Its space is reserved at every
-                 line so revealing it cannot shift the code sideways, and it is
-                 aria-hidden because the button's own title already says what a
-                 click does; announcing a decorative mark as well would say it
-                 twice. -->
             <span class="dl-comment" aria-hidden="true">
               <Icon name="comment" :size="11" />
             </span>
@@ -350,20 +255,6 @@ const keyedLines = computed(() =>
             <span class="dl-text">{{ row.line.text }}</span>
           </button>
 
-          <!-- Attached to the last line of the selection, in the flow rather than
-               floating over it.
-               It used to sit at the foot of the pane, on the reasoning that a panel
-               between two lines pushes the code around. That reasoning was right
-               about the cost, and the obvious fix for it — take the panel out of
-               flow and float it under the clicked line — is wrong for a reason only
-               a real interaction shows: a floating box covers the lines below it,
-               and those are exactly the lines shift-click extends onto. Selecting
-               1 then shift-clicking 3 became impossible, because the box was over
-               line 3.
-               In the flow, nothing is ever covered and every line stays reachable.
-               The code shifts once when the box opens, which is what GitHub and
-               Azure both do; the box is a fixed height (see .dlc-input) so typing
-               into it never moves anything again. -->
           <div
             v-if="range && row.i === range[1]"
             class="dl-composer"
@@ -397,8 +288,6 @@ const keyedLines = computed(() =>
             {{ diff.applyError }}
           </div>
           <div class="dlc-foot">
-            <!-- Says where it goes. An edit arriving in the working tree from a
-                 session the developer never opened is alarming if unannounced. -->
             <span class="dlc-note mono">applied by a container session</span>
             <button
               type="button"
@@ -453,8 +342,6 @@ const keyedLines = computed(() =>
   gap: 3px;
 }
 
-/* One folder and the files in it, kept together so the gap between groups reads as
-   the boundary rather than the row spacing doing double duty. */
 .diff-group {
   display: flex;
   flex-direction: column;
@@ -465,8 +352,6 @@ const keyedLines = computed(() =>
   margin-top: 8px;
 }
 
-/* The folder heading. A control, because it folds — and the one place in this list
-   where the path is the subject rather than a file's address. */
 .diff-folder {
   display: flex;
   align-items: center;
@@ -518,16 +403,12 @@ const keyedLines = computed(() =>
   color: var(--text-faint);
 }
 
-/* Files sit in from their folder's heading, so the nesting is readable without a
-   rule or a guide line. */
 .diff-file-row {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 6px 8px;
   margin-left: 8px;
-  /* --rc, the content radius: a row is a container, not a tag reporting a figure.
-     Both resolve to 0px, so this is a correctness fix rather than a visual one. */
   border-radius: var(--rc);
   text-align: left;
   cursor: pointer;
@@ -603,18 +484,12 @@ const keyedLines = computed(() =>
   font-size: var(--fs-meta);
   line-height: 1.55;
   white-space: pre-wrap;
-  /* It is a button now, and a button that must still read as a line of code:
-     no border, no radius, and the text stays left. */
   text-align: left;
   background: none;
   border: 0;
   cursor: text;
 }
 
-/* 1px, not the 2px these two carried. DESIGN.md's sidecar records the thicker
-   inset rule as a carry-over defect from the previous world rather than a system
-   pattern, and this world holds selection marks to a hairline; these are the
-   rules that were being edited anyway, so they stop repeating it here. */
 .diff-line:hover {
   box-shadow: inset 1px 0 0 var(--border-strong);
 }
@@ -623,15 +498,11 @@ const keyedLines = computed(() =>
   opacity: 1;
 }
 
-/* The selected region. A left bar rather than a wash, so the add/del tint that
-   says what KIND of line it is survives underneath. */
 .diff-line.picked {
   background: color-mix(in srgb, var(--teal) 14%, transparent);
   box-shadow: inset 1px 0 0 var(--teal);
 }
 
-/* Space is held at every line, always. Reserving it is what lets the mark fade
-   in without moving a single character of code sideways. */
 .dl-comment {
   display: inline-flex;
   align-items: center;
@@ -643,15 +514,11 @@ const keyedLines = computed(() =>
   transition: opacity 90ms var(--ease);
 }
 
-/* Once the popup is open the mark stops being an invitation and starts being the
-   marker for the line it is attached to, so it takes the picked bar's own colour. */
 .diff-line.picked .dl-comment {
   color: var(--teal);
   opacity: 1;
 }
 
-/* Keyboard parity: tabbing to a line has to show the same affordance a pointer
-   does, or the feature is mouse-only. */
 .diff-line:focus-visible .dl-comment {
   opacity: 1;
 }
@@ -662,10 +529,6 @@ const keyedLines = computed(() =>
   }
 }
 
-/* Sits in the flow, attached to the last selected line. Inset from the left edge
-   so it reads as hanging off the region rather than as another line of code, and
-   held to a sentence's width because an instruction is prose and prose set across
-   the full pane is unreadable. */
 .dl-composer {
   display: flex;
   flex-direction: column;
@@ -676,8 +539,6 @@ const keyedLines = computed(() =>
   background: var(--bg-card);
   border: 1px solid var(--border-strong);
   border-radius: var(--rc);
-  /* Overlay tier is the one place this world allows real depth, and this box has
-     to separate from the code it is sitting inside. */
   box-shadow: var(--shadow-dd);
 }
 

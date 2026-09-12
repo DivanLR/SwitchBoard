@@ -1,7 +1,4 @@
 <script setup lang="ts">
-// Per-project specs view backed by GitHub Spec Kit — 1:1 with the design
-// (Switchboard.dc.html). When Spec Kit is not installed, an install button
-// scaffolds it per-project.
 import { computed, onUnmounted, ref, useTemplateRef, watch } from 'vue'
 import type { SpecPhase, SpecStatus } from '@shared/domain'
 import { SPEC_KIT_COMMANDS } from '@shared/command-catalog'
@@ -17,26 +14,15 @@ import Icon from '@renderer/components/Icon.vue'
 const props = defineProps<{ projectId: string }>()
 const specs = useSpecsStore()
 
-// New spec: a small popup collects a short description, then /speckit-specify
-// runs it in the background session (output streams into the Session tab).
-// The dialog's own state, its keydown handling and its document listener live
-// in the composable; this view only owns the template ref useModal's
-// convention says the caller should own (see the composable for why this
-// dialog bypasses useModal itself).
 const newSpecDialog = useTemplateRef<HTMLElement>('newSpecDialog')
 const { showNewSpec, newSpecDesc, newSpec, submitNewSpec, cancelNewSpec } = useNewSpecDialog({
   projectId: () => props.projectId,
   dialog: newSpecDialog,
-  onRan: () => emit('ran'), // the shell scrolls its stream; the state stays on the control
+  onRan: () => emit('ran'), 
 })
 
-// Read the spec aloud (design: "listen in on a spec") via the native Web Speech
-// API — title, description, then each section. Click again to stop.
 const speaking = ref(false)
 
-// Strip markdown + symbols so the synthesiser speaks prose, not "hashtag
-// hashtag" / "right arrow" / "asterisk". Structural symbols are dropped or
-// turned into sentence breaks; a few common arrows become words.
 function speakable(md: string): string {
   return md
     .replace(/```[\s\S]*?```/g, '. code block omitted. ')
@@ -48,8 +34,8 @@ function speakable(md: string): string {
     .replace(/^\s*[-*]\s+/gm, '')
     .replace(/[→⇒]/g, ' to ')
     .replace(/[←⇐]/g, ' from ')
-    .replace(/[✦✎⏺⎿■▊●◇✓✗⚖⧉↻▶]/g, ' ') // UI glyphs
-    .replace(/[#*_`>|~]/g, ' ') // any stray markdown punctuation
+    .replace(/[✦✎⏺⎿■▊●◇✓✗⚖⧉↻▶]/g, ' ') 
+    .replace(/[#*_`>|~]/g, ' ') 
     .replace(/\s{2,}/g, ' ')
     .trim()
 }
@@ -76,78 +62,44 @@ function listen(): void {
   synth.speak(utter)
 }
 
-// The keydown listener for the new-spec dialog is added and removed inside
-// useNewSpecDialog itself now — this onUnmounted only owns what this view
-// registered directly (speech synthesis, below).
 onUnmounted(() => {
   window.speechSynthesis.cancel()
 })
 
-// The spec/project can change out from under a running narration (chip click or
-// project switch reuse this same component instance) — stop it so the audio
-// never drifts out of sync with what's on screen.
 watch([() => props.projectId, () => specs.selectedSpecId], () => {
   window.speechSynthesis.cancel()
   speaking.value = false
 })
 
-/** The two implement controls, named so their state can be read back.
- *  A phase's key carries its label: two phases run independently. */
 const IMPLEMENT_KEY = 'implement'
 const phaseKey = (label: string): string => `implement:${label}`
 
 type Part = 'spec' | 'plan' | 'tasks' | 'clarify' | 'cmds'
 const part = ref<Part>('tasks')
 
-/**
- * Report a dispatch that never started.
- *
- * Every command here now opens a session of its own, and starting one can fail
- * for reasons the developer can act on — a containerised project has two
- * container slots for the whole machine, so a third command in flight is
- * refused. Left as a bare `void`, that refusal was an unhandled rejection and
- * the panel simply did not change.
- */
 function reportDispatch(p: Promise<unknown>): void {
   void p.catch((e: unknown) => {
     useToastsStore().show('error', 'Could not start that command', errorMessage(e))
   })
 }
 
-/**
- * Where one control has got to, and what it should say.
- *
- * Every control in this section starts a session of its own, and starting one
- * is not instant — on a containerised project an image may have to come up
- * first. A control that does not change until output arrives reads as a click
- * that missed, so the wait has its own state before the running one.
- */
 function controlPhase(key: string): 'starting' | 'running' | null {
   return specs.phaseOf(props.projectId, key)
 }
 
-/** Starting, then running, then whatever the control normally says. */
 function controlText(key: string, idle: string): string {
   const phase = controlPhase(key)
   return phase === 'starting' ? 'Starting…' : phase === 'running' ? 'Running' : idle
 }
 
-/** A turning arc while the session is being started, a pulsing dot once it is
- *  running, and the control's own glyph the rest of the time. The two are
- *  deliberately different shapes: waiting and running are different facts, and
- *  colour alone would not say which is which. */
 function controlIcon(key: string, idle: string): string {
   const phase = controlPhase(key)
   return phase === 'starting' ? 'refresh' : phase === 'running' ? 'dot' : idle
 }
 
-/** Send a stage command scoped to the selected spec (design: cmd + spec id). */
 function runCommand(command: string): void {
-  if (controlPhase(command)) return // already in flight from this control
+  if (controlPhase(command)) return 
   const suffix = detail.value ? ` ${detail.value.id}` : ''
-  // runSpecCommand, not a bare dispatch: it re-reads the spec while the command
-  // runs, so plan.md and tasks.md appear when they are written rather than on
-  // this panel's next mount.
   reportDispatch(
     specs.runSpecCommand(props.projectId, `/${command}${suffix}`, command, `Running /${command}`),
   )
@@ -155,13 +107,9 @@ function runCommand(command: string): void {
 
 
 
-/**
- * Start implementing a whole spec with live updates. Uses the
- * scaffold-and-implement flow: every task lands as a complete, verified slice.
- */
 function startImplementation(): void {
   if (!detail.value) return
-  emit('ran') // the shell scrolls its stream; the state stays on this control
+  emit('ran') 
   reportDispatch(
     specs.startPhase(
       props.projectId,
@@ -172,10 +120,9 @@ function startImplementation(): void {
   )
 }
 
-/** Start implementing one phase, scoped by its label. */
 function startPhase(phase: SpecPhase): void {
   if (!detail.value) return
-  emit('ran') // the shell scrolls its stream; the state stays on this control
+  emit('ran') 
   const ids = phase.tasks
     .filter((t) => !t.done)
     .map((t) => t.id)
@@ -197,31 +144,15 @@ function phaseDone(phase: SpecPhase): boolean {
   return phase.tasks.length > 0 && phase.tasks.every((t) => t.done)
 }
 
-/**
- * The stepper's model, added 2026-08-21 against the pinned multi-step wizard
- * reference.
- *
- * The phases were already a sequence and already carried every state a stepper
- * needs; what they lacked was a place to SEE the sequence. A list of collapsed
- * headers answers "what is in phase 3" and never answers "how far along am I",
- * which is the question a developer watching an implement run actually has.
- *
- * Derived, never stored: every value here comes from the same `detail.phases`
- * the list below renders, so the stepper cannot disagree with the tasks under it.
- */
 type StepState = 'done' | 'active' | 'pending'
 
 function phaseState(phase: SpecPhase): StepState {
   if (phaseDone(phase)) return 'done'
   if (phaseRunning(phase)) return 'active'
-  // The first phase with open tasks is where the work is, running or not: a
-  // stepper that shows nothing as current until a run starts is a stepper that
-  // is blank exactly when it is being read.
   const next = detail.value?.phases.find((p) => p.tasks.some((t) => !t.done))
   return next && next.label === phase.label ? 'active' : 'pending'
 }
 
-/** Overall completion, 0-100, for the bar across the top of the stepper. */
 const specProgress = computed<number>(() => {
   const phases = detail.value?.phases ?? []
   const tasks = phases.flatMap((p) => p.tasks)
@@ -229,14 +160,6 @@ const specProgress = computed<number>(() => {
   return Math.round((tasks.filter((t) => t.done).length / tasks.length) * 100)
 })
 
-/**
- * Jump to a phase's tasks.
- *
- * Scrolling rather than switching panes, because the phases are one scrolling
- * column and hiding the others would cost the context the stepper exists to
- * give. The reference makes completed steps clickable for backwards navigation;
- * here every step is clickable, since a developer may equally want to read ahead.
- */
 function goToPhase(label: string): void {
   const el = document.querySelector(`[data-phase="${CSS.escape(label)}"]`)
   el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -246,31 +169,13 @@ function phaseCount(phase: SpecPhase): string {
   return `${phase.tasks.filter((t) => t.done).length}/${phase.tasks.length}`
 }
 
-/**
- * Only a phase whose OWN control started a run is claimed to be running.
- *
- * A whole-spec run used to light up whichever phase still had open tasks, which
- * meant that the moment one phase finished the NEXT one announced itself as
- * running before anything had touched it. That was a guess dressed as a
- * reading: the app knows which control it started a session for, and it does
- * not know which phase an implement run is inside. The stepper still marks the
- * first unfinished phase as the current step, which says where the work is
- * without claiming it is under way, and the card's own "Implementing…" carries
- * the running claim for the spec as a whole.
- *
- * The done guard is the other half: a phase whose tasks are all ticked reads
- * Done even while its session is still open writing its summary.
- */
 function phaseRunning(phase: SpecPhase): boolean {
   return controlPhase(phaseKey(phase.label)) === 'running' && !phaseDone(phase)
 }
 
-// Opening the Specs view (mount) or switching project jumps to the LATEST spec
-// (highest id — Spec Kit zero-pads, so lexicographic desc = newest), regardless
-// of what was selected before. Clicking a chip afterwards still works.
 async function goToLatestSpec(projectId: string): Promise<void> {
   await specs.loadState(projectId)
-  if (projectId !== props.projectId) return // superseded by a newer switch
+  if (projectId !== props.projectId) return 
   const list = specs.stateFor(projectId).specs
   if (list.length === 0) return
   const latest = [...list].sort((a, b) => b.id.localeCompare(a.id))[0]
@@ -283,33 +188,8 @@ const state = computed(() => specs.stateFor(props.projectId))
 const detail = computed(() => specs.detail)
 const running = computed(() => specs.isRunning(props.projectId))
 const commandLabel = computed(() => specs.runningLabel(props.projectId))
-/**
- * The sessions this section's own commands are running in.
- *
- * Shown as tails here for the reason every other section shows one: a command
- * runs in a session the developer never opened, and when it ASKS something the
- * card that answers it renders only where that session's events are. Specs was
- * the one section without a tail, so /speckit-clarify — a command whose whole
- * purpose is to ask questions — could stop dead with the question unanswerable
- * and nothing on screen admitting it.
- */
 const runningSessions = computed(() => specs.runningIn(props.projectId))
 
-/**
- * Re-read the spec whenever ANY of this project's sessions stops working.
- *
- * The per-command watch covers what this section started. It cannot cover what
- * it did not: tasks ticked off by the developer's own conversation, or by a
- * session started from somewhere else, are written to tasks.md by a session this
- * panel knows nothing about. That is how a phase finished 10 of 10 and went on
- * offering "Start phase", and how a spec that was complete never said so.
- *
- * A turn ending is the right moment and a cheap signal: the app already tracks
- * every session's status, the files are settled by then, and the read is two
- * IPC calls. It deliberately does not watch the filesystem — an edit made
- * outside the app still waits for the next mount, which is the one case worth
- * paying nothing for.
- */
 const projects = useProjectsStore()
 const working = computed(
   () =>
@@ -345,66 +225,51 @@ function statusDot(status: SpecStatus): string {
   return STATUS_DOT[status]
 }
 
-// Sections for the docs parts: spec.md or plan.md (design: partDocs).
 const docSections = computed(() => {
   const d = detail.value
   if (!d) return []
   return part.value === 'plan' ? (d.plan ?? []) : d.sections
 })
 
-// `id` is the display label (Q1, Q2 …) and is positional by design — it is what
-// the card shows and what a Refine target names. It is deliberately NOT the
-// v-for key: keying by position means Vue reuses a card for a different question
-// when the list shifts. The question text is the stable identity.
 const openQs = computed(() =>
   (detail.value?.clarifications ?? []).map((q, i) => ({ id: `Q${i + 1}`, q })),
 )
 const closedQs = computed(() => detail.value?.resolvedClarifications ?? [])
 
-// SUGGESTED NEXT: the genuine next stage of the Spec Kit pipeline, derived from
-// which artifacts actually exist (specify → clarify → plan → tasks → implement →
-// checklist), not just the coarse status. This makes the suggestion true — it
-// won't tell you to implement before there's a plan or a tasks list.
 const suggested = computed(() => {
   const d = detail.value
   if (!d) return null
   const open = openQs.value.length
-  // 1. Unresolved clarifications block everything downstream.
   if (open > 0)
     return {
       command: 'speckit-clarify',
       label: '/speckit.clarify',
       why: `${open} open clarification${open > 1 ? 's' : ''} on this spec — resolve the ambiguity before planning or code`,
     }
-  // 2. Spec written but no plan.md yet.
   if (!d.plan || d.plan.length === 0)
     return {
       command: 'speckit-plan',
       label: '/speckit.plan',
       why: 'Spec is written but there is no plan.md yet — generate the implementation plan',
     }
-  // 3. Plan exists but no tasks yet.
   if (d.tasksTotal === 0)
     return {
       command: 'speckit-tasks',
       label: '/speckit.tasks',
       why: 'Plan is in place but tasks.md is empty — break the plan into actionable tasks',
     }
-  // 4. Every task ticked off — review the finished work.
   if (d.tasksDone >= d.tasksTotal)
     return {
       command: 'speckit-checklist',
       label: '/speckit.checklist',
       why: 'Every task is checked off — generate a review checklist for the finished work',
     }
-  // 5. Mid-implementation — cross-check for drift while work is underway.
   if (running.value || d.status === 'in_progress')
     return {
       command: 'speckit-analyze',
       label: '/speckit.analyze',
       why: 'Implementation is underway — cross-check spec, plan, and tasks for drift',
     }
-  // 6. Spec, plan, and tasks are settled and nothing is running — build.
   return {
     command: 'speckit-implement-scaffold',
     label: '/speckit.implement-scaffold',
@@ -412,8 +277,6 @@ const suggested = computed(() => {
   }
 })
 
-// ✎ Refine on a section/task/question sets a spec-edit target on the shared
-// composer (which stays visible under this view) — the reply lands in the chat.
 const emit = defineEmits<{ (e: 'set-target', label: string): void; (e: 'ran'): void }>()
 
 function setTarget(label: string): void {
@@ -431,7 +294,6 @@ const partTabs: { id: Part; label: string }[] = [
 
 <template>
   <div class="specs" data-testid="specs-view">
-    <!-- Not installed: offer per-project install -->
     <div v-if="!state.installed" class="not-installed" data-testid="specs-not-installed">
       <div class="ni-icon"><Icon name="diamond" :size="18" /></div>
       <div class="ni-title">Spec Kit is not set up in this project</div>
@@ -454,18 +316,13 @@ const partTabs: { id: Part; label: string }[] = [
       </div>
     </div>
 
-    <!-- Installed but no specs yet -->
     <div v-else-if="state.specs.length === 0" class="not-installed" data-testid="specs-empty">
       <div class="ni-icon"><Icon name="diamond" :size="18" /></div>
       <div class="ni-title">No specs in this project</div>
-      <!-- Scaffolding takes minutes, and until it says so this panel is
-           identical to the one before the button was pressed. -->
       <template v-if="commandLabel">
         <div class="ni-sub" data-testid="specs-scaffolding">
           {{ commandLabel }}. It appears here when it lands.
         </div>
-        <!-- The run itself, so a question it asks can be answered here. A create
-             is the one command with no spec to hang a tail under yet. -->
         <div
           v-for="run in runningSessions"
           :key="run.sessionId"
@@ -492,9 +349,7 @@ const partTabs: { id: Part; label: string }[] = [
       </template>
     </div>
 
-    <!-- Specs present -->
     <div v-else class="has-specs">
-      <!-- Spec chips -->
       <div class="chips">
         <button
           v-for="s in state.specs"
@@ -521,15 +376,11 @@ const partTabs: { id: Part; label: string }[] = [
         </span>
       </div>
 
-      <!-- Each running command's own session, above the spec itself: a command
-           that asks a question can only be answered where its events are, and
-           this section had nowhere for that card to render. -->
       <div v-for="run in runningSessions" :key="run.sessionId" :data-testid="`spec-run-${run.key}`">
         <MiniTerminal :session-id="run.sessionId" :label="run.label" />
       </div>
 
       <template v-if="detail">
-        <!-- Spec card -->
         <div class="spec-card">
           <div class="sc-head">
             <span class="sc-title mono">{{ detail.title }}</span>
@@ -573,7 +424,6 @@ const partTabs: { id: Part; label: string }[] = [
           <div class="sc-bar"><div class="sc-fill" :style="{ '--fill': progressPct / 100 }"></div></div>
         </div>
 
-        <!-- Part tabs: spec.md / plan.md / tasks.md / Clarify / Commands -->
         <div class="part-tabs mono">
           <button
             v-for="t in partTabs"
@@ -590,7 +440,6 @@ const partTabs: { id: Part; label: string }[] = [
           </button>
         </div>
 
-        <!-- spec.md / plan.md sections -->
         <div v-if="part === 'spec' || part === 'plan'" class="sections" data-testid="spec-sections">
           <div v-if="docSections.length === 0" class="muted">
             No {{ part }}.md content parsed.
@@ -610,7 +459,6 @@ const partTabs: { id: Part; label: string }[] = [
           </div>
         </div>
 
-        <!-- Clarify -->
         <div v-else-if="part === 'clarify'" data-testid="spec-clarify">
           <div v-if="openQs.length === 0 && closedQs.length === 0" class="muted">
             No clarifications yet — the spec has no
@@ -658,7 +506,6 @@ const partTabs: { id: Part; label: string }[] = [
           </div>
         </div>
 
-        <!-- Commands -->
         <div v-else-if="part === 'cmds'" data-testid="speckit-commands">
           <template v-if="suggested">
             <div class="cmd-label next mono">SUGGESTED NEXT</div>
@@ -702,15 +549,11 @@ const partTabs: { id: Part; label: string }[] = [
           </div>
         </div>
 
-        <!-- tasks.md by phase -->
         <div v-else data-testid="spec-tasks">
           <div v-if="detail.phases.length === 0" class="muted">
             No tasks.md yet. Run <span class="mono">/speckit.tasks</span> to generate the task
             list.
           </div>
-          <!-- THE STEPPER. One node per phase, with the run's overall progress
-               across the top. It replaces reading five collapsed headers to work
-               out where the implementation had got to. -->
           <div v-if="detail.phases.length > 1" class="stepper" data-testid="spec-stepper">
             <div class="step-track" role="progressbar" :aria-valuenow="specProgress" aria-valuemin="0" aria-valuemax="100">
               <span class="step-fill" :style="{ transform: `scaleX(${specProgress / 100})` }"></span>
@@ -795,7 +638,6 @@ const partTabs: { id: Part; label: string }[] = [
       </template>
     </div>
 
-    <!-- New-spec popup: a short description, then /speckit-specify runs it -->
     <div
       v-if="showNewSpec"
       class="ns-overlay"
@@ -887,24 +729,16 @@ const partTabs: { id: Part; label: string }[] = [
   text-align: left;
 }
 
-/* Fills the pane. The 840px cap left the whole section in the left two thirds
-   of a 1364px pane, which on a board this wide reads as broken rather than
-   measured. Structural content takes the room; only PROSE keeps a measure below,
-   because a paragraph set across 1300px is unreadable and the craft floor puts
-   body copy at 65-75ch. */
 .has-specs {
   max-width: none;
 }
 
-/* The three prose blocks, and only those. Tasks, phases, chips, cards and the
-   command grid are not prose and span the full width. */
 .sec-body,
 .q-text,
 .sc-desc {
   max-width: 78ch;
 }
 
-/* Spec chips */
 .chips {
   display: flex;
   gap: 8px;
@@ -947,7 +781,6 @@ const partTabs: { id: Part; label: string }[] = [
   border-color: var(--green);
 }
 
-/* Spec card */
 .spec-card {
   background: var(--bg-card);
   border: 1px solid var(--surface-line);
@@ -1021,7 +854,6 @@ const partTabs: { id: Part; label: string }[] = [
   border-color: var(--green);
 }
 
-/* New-spec popup — fixed so it centres over the window regardless of scroll. */
 .ns-overlay {
   position: fixed;
   inset: 0;
@@ -1132,9 +964,6 @@ const partTabs: { id: Part; label: string }[] = [
   overflow: hidden;
 }
 
-/* Scaled, not widened: .sc-bar above clips with overflow:hidden, so the fill can
-   be a full-width layer scaled from its left edge instead of animating a layout
-   property on every progress change. */
 .sc-fill {
   height: 100%;
   width: 100%;
@@ -1144,7 +973,6 @@ const partTabs: { id: Part; label: string }[] = [
   transition: transform 0.3s var(--ease);
 }
 
-/* Part tabs */
 .part-tabs {
   display: flex;
   gap: 2px;
@@ -1184,7 +1012,6 @@ const partTabs: { id: Part; label: string }[] = [
   line-height: 15px;
 }
 
-/* spec.md / plan.md sections */
 .sections {
   display: flex;
   flex-direction: column;
@@ -1235,7 +1062,6 @@ const partTabs: { id: Part; label: string }[] = [
   text-wrap: pretty;
 }
 
-/* Clarify */
 .q-label {
   font-size: var(--fs-micro);
   letter-spacing: 0.15em;
@@ -1333,7 +1159,6 @@ const partTabs: { id: Part; label: string }[] = [
   margin-top: 7px;
 }
 
-/* Commands */
 .cmd-label {
   font-size: var(--fs-micro);
   letter-spacing: 0.15em;
@@ -1440,7 +1265,6 @@ const partTabs: { id: Part; label: string }[] = [
   text-wrap: pretty;
 }
 
-/* tasks.md */
 .phase {
   margin-bottom: 12px;
 }
@@ -1468,8 +1292,6 @@ const partTabs: { id: Part; label: string }[] = [
   animation: sbFade 1.6s var(--ease) infinite;
 }
 
-/* Same reading as a running phase, because it is the same fact: work is in
-   flight and this panel is waiting on it. */
 .chip-scaffolding {
   display: inline-flex;
   align-items: center;
@@ -1566,16 +1388,6 @@ const partTabs: { id: Part; label: string }[] = [
   padding: 4px 2px 14px;
   line-height: 1.6;
 }
-/* THE STEPPER. Node states and the progress bar come from the pinned wizard
-   reference; the colours are this world's, where the accent means work in
-   progress and a finished step is simply filled. */
-/* ONE OBJECT, NOT TWO. This carried a progress bar across the top AND a row of
-   dots joined by 16px stubs, which stated the same fact twice. The dot's own rule
-   below already said "the dot sits ON the connector"; the bar IS that connector
-   now — a single line running through every dot, green as far as the work has
-   got — and the stubs are gone. Chosen in live mode over a hierarchy treatment
-   that promoted the current phase, and over a colour treatment that took the hue
-   off finished phases. */
 .stepper {
   position: relative;
   margin: 0 0 18px;
@@ -1586,7 +1398,6 @@ const partTabs: { id: Part; label: string }[] = [
   box-shadow: var(--elev);
 }
 
-/* 2px, across the top, the whole run's progress in one line. */
 .step-track {
   position: absolute;
   top: 23px;
@@ -1599,7 +1410,6 @@ const partTabs: { id: Part; label: string }[] = [
   overflow: hidden;
 }
 
-/* The empty state centres its content; a tail inside it needs the width back. */
 .ni-term {
   width: 100%;
   max-width: 640px;
@@ -1607,14 +1417,6 @@ const partTabs: { id: Part; label: string }[] = [
   text-align: left;
 }
 
-/* THE TWO STATES EVERY CONTROL IN THIS SECTION WEARS.
-   Applied as a class on the control itself rather than as a variant per button
-   type, because the fact is the same wherever it appears: this control started
-   something, and it is either waiting for a session or watching one run.
-
-   `starting` stays neutral and only dims: nothing has happened yet, and green
-   at that moment would claim a run that does not exist. `running` is green
-   because a run IS the reading this world spends colour on. */
 .starting {
   opacity: 0.65;
   cursor: progress;
@@ -1633,9 +1435,6 @@ const partTabs: { id: Part; label: string }[] = [
   color: var(--green-ink);
 }
 
-/* Waiting turns, running pulses. A control that only changed colour would
-   make the two states depend on reading a word; motion tells them apart at a
-   glance, and the shapes differ as well for anyone the motion is off for. */
 .starting :deep(svg) {
   animation: sbSpin 900ms linear infinite;
   transform-origin: center;
@@ -1658,9 +1457,6 @@ const partTabs: { id: Part; label: string }[] = [
   }
 }
 
-/* Scaled, not widened: the bar is drawn at full width and squeezed from the
-   left, so the 300ms fill is a compositor transform rather than a layout pass
-   on every frame. Same reading, same origin, no reflow. */
 .step-fill {
   display: block;
   width: 100%;
@@ -1670,8 +1466,6 @@ const partTabs: { id: Part; label: string }[] = [
   transition: transform 300ms var(--ease-overlay);
 }
 
-/* NOWRAP, because the line above spans the row: a wrapped second row would
-   leave it hanging across nothing. The labels already know how to ellipsis. */
 .step-list {
   display: flex;
   flex-wrap: nowrap;
@@ -1681,19 +1475,12 @@ const partTabs: { id: Part; label: string }[] = [
   list-style: none;
 }
 
-/* The connector runs in the GAP before a step's dot, never across the step
-   itself. It used to be drawn full width under the button, and since the button
-   has no ground of its own the line came out through the middle of the phase
-   label, reading as a strikethrough on every step after the first. */
 .step {
   position: relative;
   flex: 1 1 0;
   min-width: 0;
 }
 
-/* A COLUMN, and top-aligned. The label sits under its dot, which puts every
-   dot's centre a fixed 23px from the card's top edge — and that fixed distance is
-   what lets the connector line above be positioned against them at all. */
 .step-btn {
   position: relative;
   z-index: 1;
@@ -1710,9 +1497,6 @@ const partTabs: { id: Part; label: string }[] = [
   cursor: pointer;
 }
 
-/* A step is clickable — it scrolls to its tasks — so it answers the pointer.
-   Hover only, and only on the label: the dot carries state colour and must not
-   change meaning under the cursor. */
 .step-btn:hover .step-label {
   color: var(--text-strong);
 }
@@ -1727,23 +1511,16 @@ const partTabs: { id: Part; label: string }[] = [
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  /* 20px, baked from the accepted variant's dot parameter. The connector's own
-     `top` and `left` are derived from it: 14px of card padding plus half the
-     dot. Change one and the other two follow. */
   width: 20px;
   height: 20px;
   font-family: var(--mono);
   font-size: var(--fs-micro);
   border-radius: var(--rp);
-  /* The dot sits ON the connector, so it needs the card's own ground behind it. */
   background: var(--bg-card);
   border: 1px solid var(--border-strong);
   color: var(--text-meta);
 }
 
-/* Pending is an outline and nothing else. Active takes the accent and a ring, so
-   the eye lands on it before it reads a word. Done is filled, because a finished
-   step should stop asking for attention. */
 .step.active .step-dot {
   color: var(--green);
   border-color: var(--green);
@@ -1770,8 +1547,6 @@ const partTabs: { id: Part; label: string }[] = [
   white-space: nowrap;
 }
 
-/* The current phase is marked on its label instead of by a halo round its dot,
-   at the same 1px inset weight the selected tab uses elsewhere in this world. */
 .step.active .step-label {
   color: var(--text-strong);
   font-weight: var(--w-em);

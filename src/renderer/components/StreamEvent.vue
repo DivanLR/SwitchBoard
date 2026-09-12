@@ -1,7 +1,4 @@
 <script setup lang="ts">
-// One clean-view stream event — 1:1 with the design reference: ❯ prompts,
-// ✦ SUMMARY cards, approval marker rows, ✗ ERROR cards, ✓ result lines, and
-// mono tool/raw lines (FR-014).
 import { computed, ref } from 'vue'
 import Icon from '@renderer/components/Icon.vue'
 import MarkdownText from '@renderer/components/MarkdownText.vue'
@@ -19,20 +16,14 @@ import type {
   SummaryPayload,
   ToolActivityPayload,
 } from '@shared/domain'
-// Shared with the raw view, which states the same figures. Two copies could
-// disagree about what a turn cost, and one of them already did.
 import { INJECTION_LABEL, resultLabel } from '@shared/stream-lines'
 
 const props = defineProps<{ event: SessionEvent; stamps?: boolean }>()
 const emit = defineEmits<{
   (e: 'open-inbox', requestId: string): void
-  /** Reword a queued message, or withdraw it when the text is empty. */
   (e: 'edit-queued', eventId: string, text: string): void
 }>()
 
-// Editing a message that is still queued. Local because it is one line of text
-// and the same idiom the UP NEXT queue uses: click the text, Enter saves, Escape
-// abandons, leaving the field saves, and clearing it withdraws the message.
 const editing = ref(false)
 const draft = ref('')
 
@@ -54,13 +45,10 @@ function cancel(): void {
 
 const kind = computed(() => props.event.kind)
 
-/** HH:MM stamp shown when the Timestamps setting is on (toTimeString zero-pads). */
 const stamp = computed(() =>
   props.stamps ? new Date(props.event.createdAt).toTimeString().slice(0, 5) : null,
 )
 
-// Per-kind typed accessors: narrow on `kind` once here rather than casting the
-// payload inline throughout the template.
 const prompt = computed(() =>
   props.event.kind === 'prompt' ? (props.event.payload as PromptPayload) : null,
 )
@@ -71,8 +59,6 @@ const summary = computed(() =>
   props.event.kind === 'summary' ? (props.event.payload as SummaryPayload) : null,
 )
 
-// A /usage response (whichever kind it landed as) renders as a structured card
-// with limit meters and dotted lists. Skip while still streaming in.
 const usage = computed(() => {
   const text = assistant.value?.partial ? null : (assistant.value?.text ?? summary.value?.text)
   return text ? parseUsageReport(text) : null
@@ -99,9 +85,6 @@ const injectionLabel = computed(() =>
 )
 const rawText = computed(() => (props.event.payload as { text?: string }).text ?? '')
 
-// The SDK can emit empty text blocks (message-mapper), producing events with no
-// visible content. Rendering one leaves an orphan timestamp beside blank space,
-// so such events are dropped from the clean stream — and with them, the stamp.
 const hasContent = computed(() => {
   if (prompt.value) return Boolean(prompt.value.text?.trim())
   if (assistant.value) return Boolean(assistant.value.text?.trim())
@@ -122,8 +105,6 @@ const markerChipLabel: Record<string, string> = {
   rule_approved: 'Auto-approved',
 }
 
-// Clean view shows only the ACTION + status — never the full command or path
-// (those live in the inbox / raw view). Map the tool to a generic verb.
 const TOOL_ACTION: Record<string, string> = {
   Bash: 'Ran a command',
   Write: 'Wrote a file',
@@ -140,21 +121,13 @@ function actionVerb(tool: string | undefined | null): string {
 const markerLabel = computed(() => {
   const m = marker.value
   if (!m) return ''
-  // Plan markers have no tool — keep their (already generic) title.
   if (props.event.kind === 'plan_marker') return m.title
   return actionVerb((m as PermissionMarkerPayload).toolName)
 })
 
-// Clean-view tool row: a command-free line — the model's own description if it
-// gave one (a human summary, never the command), else a generic verb. The raw
-// command and its output live in the raw view only.
 const toolLabel = computed(() => {
   const t = tool.value
   if (!t) return ''
-  // Bash carries a human `description` alongside the command — surface that
-  // (command-free) via a regex (inputPreview is JSON.stringify, possibly
-  // truncated, so avoid a fragile JSON.parse). Other tools just get a verb, so
-  // a "description" buried in file content can never leak through.
   if (t.toolName === 'Bash') {
     const match = /"description"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(t.inputPreview ?? '')
     if (match) return match[1].replace(/\\(["\\/])/g, '$1')
@@ -166,11 +139,8 @@ const toolLabel = computed(() => {
 <template>
   <div v-if="hasContent" class="event" :class="{ stamped: stamp }" :data-testid="`stream-event-${kind}`" :data-event-id="event.id">
     <span v-if="stamp" class="stamp mono" data-testid="event-stamp">{{ stamp }}</span>
-    <!-- ❯ prompt -->
     <div v-if="prompt" class="prompt mono" :class="{ 'prompt-withdrawn': prompt.withdrawn }">
       <span class="caret">❯</span>
-      <!-- Only a QUEUED message is editable: once it has gone, the record of what
-           the session was actually told must not be rewritable. -->
       <textarea
         v-if="editing"
         ref="editor"
@@ -200,30 +170,24 @@ const toolLabel = computed(() => {
       </span>
     </div>
 
-    <!-- /usage response: structured meters + dotted lists instead of prose -->
     <UsageCard v-else-if="usage" :report="usage" />
 
-    <!-- assistant narrative (Markdown-formatted) -->
     <div v-else-if="assistant" class="assistant">
       <MarkdownText :text="assistant.text" />
       <span v-if="assistant.partial" class="blink" style="color: var(--green)">▊</span>
     </div>
 
-    <!-- ✦ SUMMARY card -->
     <div v-else-if="summary" class="summary-card">
       <div class="card-label mono"><span style="color: var(--green)"><Icon name="spark" :size="12" /></span> SUMMARY</div>
       <div class="card-body"><MarkdownText :text="summary.text" /></div>
     </div>
 
-    <!-- tool activity (unswallowed): command-free — action only, no command or
-         output dump (the raw view keeps the full ⏺ Bash(cmd) + ⎿ result). -->
     <div v-else-if="tool" class="tool mono">
       <div :class="{ 'tool-error': tool.isError }">
         <Icon name="dot" :size="8" /> {{ toolLabel }}<span v-if="tool.isError" class="tool-failed"> · failed</span>
       </div>
     </div>
 
-    <!-- permission / plan markers -->
     <div
       v-else-if="marker"
       class="marker mono"
@@ -247,26 +211,20 @@ const toolLabel = computed(() => {
       </button>
     </div>
 
-    <!-- ✗ ERROR card -->
     <div v-else-if="errorPayload" class="error-card" data-testid="error-event">
       <div class="card-label mono error-label"><Icon name="cross" :size="12" /> ERROR</div>
       <div class="error-body mono">{{ errorPayload.text }}</div>
     </div>
 
-    <!-- ✓ result -->
     <div v-else-if="result" class="done mono" data-testid="result-event">
       <Icon name="check" :size="12" /> {{ resultLabel(result) }}
     </div>
 
-    <!-- injected context (opt-in here; always shown in the Raw view). Native
-         <details> rather than a ref and a toggle: a long system reminder must be
-         collapsible, and the platform already does that with no script. -->
     <details v-else-if="injection" class="injection mono" data-testid="injection-event">
       <summary class="injection-label">⧉ {{ injectionLabel }}</summary>
       <div class="injection-body">{{ injection.text }}</div>
     </details>
 
-    <!-- raw output (unswallowed) -->
     <div v-else class="raw mono">{{ rawText }}</div>
   </div>
 </template>
@@ -276,7 +234,6 @@ const toolLabel = computed(() => {
   margin-bottom: 13px;
 }
 
-/* Timestamps setting: dim HH:MM gutter to the left of the event. */
 .event.stamped {
   display: grid;
   grid-template-columns: 38px 1fr;
@@ -290,8 +247,6 @@ const toolLabel = computed(() => {
   white-space: nowrap;
 }
 
-/* Your own messages stand out from the narrative: a green-tinted card with an
-   accent edge, so scanning back up the stream finds them at a glance. */
 .prompt {
   display: flex;
   gap: 9px;
@@ -300,16 +255,10 @@ const toolLabel = computed(() => {
   margin-top: 6px;
   padding: 8px 11px;
   background: color-mix(in srgb, var(--green) 6%, transparent);
-  /* 1px, not 2px. A coloured side border above a hairline is the refused
-     side-tab pattern; the Sidebar's part identity took the same cut. The wash
-     already carries the accent, so the rule only needs to mark the edge. */
   border-left: 1px solid var(--green);
   border-radius: var(--rc);
 }
 
-/* Derived from the token like every other wash. This was the last hardcoded
-   accent left in the renderer: a forest green from the replaced world that the
-   reconciliation sweep missed because that hue was never in its map. */
 html.sb-light .prompt {
   background: color-mix(in srgb, var(--green) 6%, transparent);
 }
@@ -322,7 +271,6 @@ html.sb-light .prompt {
 
 .prompt-text {
   color: var(--text-prompt);
-  /* Show the message with the spacing/newlines the developer typed. */
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -335,8 +283,6 @@ html.sb-light .prompt {
   padding: 0 6px;
 }
 
-/* A queued message can still be changed, so it has to look changeable. Matches
-   the UP NEXT queue's dotted-underline cue rather than inventing a second one. */
 .prompt-editable {
   text-align: left;
 }
@@ -346,8 +292,6 @@ html.sb-light .prompt {
   text-decoration: underline dotted;
 }
 
-/* Same type and wash as the text it replaces, so opening the editor does not
-   move the message or resize the row it sits in. */
 .prompt-edit {
   flex: 1;
   min-width: 0;
@@ -361,8 +305,6 @@ html.sb-light .prompt {
   padding: 2px 6px;
 }
 
-/* Withdrawn: the row stays because events are append-only, but it must never
-   read as something the session was told. Struck and dimmed, no accent wash. */
 .prompt-withdrawn {
   background: transparent;
   border-left-color: var(--border);
@@ -403,8 +345,6 @@ html.sb-light .prompt {
 .card-label {
   font-size: var(--fs-micro);
   letter-spacing: 0.13em;
-  /* On .summary-card, which is --bg-hover over the plate: the label tier measures
-     3.85:1 there (dark) and 4.13:1 (light). */
   color: var(--text-on-wash);
   margin-bottom: 6px;
 }
@@ -477,8 +417,6 @@ html.sb-light .prompt {
   color: var(--green);
 }
 
-/* Injected context: quieter than the narrative and marked as a block, matching
-   the Raw view's treatment of the same events. */
 .injection {
   font-size: var(--fs-meta);
   line-height: 1.65;

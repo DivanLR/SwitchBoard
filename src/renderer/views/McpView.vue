@@ -1,9 +1,4 @@
 <script setup lang="ts">
-// Database MCP view (design "Database MCP"): talk to a project's MCP server
-// directly, and run a multi-agent scan that writes a cached db-schema.md so
-// later questions consult the map instead of re-scanning. Both the scan and the
-// chat drive the project's live Agent SDK session — which already has the MCP
-// tools — so every answer is a real query, not a mock.
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { relativeTime } from '@renderer/relative-time'
 import { mcpStatusColor } from '@renderer/project-accent'
@@ -25,17 +20,12 @@ const active = useActiveSessionStore()
 const projects = useProjectsStore()
 const settings = useSettingsStore()
 
-// Roster: the servers Settings put on this view (Settings → MCP toggles).
 const rosterServers = computed(() => settings.settings?.databaseMcpServers ?? [])
 
-// Active combination: the checked subset the chat and scans target. Each
-// distinct combination has its own scan doc + history row.
 const activeServers = computed(() =>
   rosterServers.value.filter((n) => (settings.settings?.mcpActiveServers ?? []).includes(n)).sort(),
 )
 
-// Roster rows as checkboxes: ☑ = in the active combination; the dot is the
-// live connection status the session reports.
 const serverRows = computed(() =>
   [...rosterServers.value].sort().map((name) => ({
     name,
@@ -48,7 +38,6 @@ function toggleServer(name: string): void {
   settings.toggleMcpActiveServer(name)
 }
 
-// --- Scan history: one row per combination ever scanned ---
 const history = ref<McpScan[]>([])
 
 async function loadHistory(): Promise<void> {
@@ -61,12 +50,10 @@ const currentScan = computed(
   () => history.value.find((h) => h.comboKey === currentKey.value) ?? null,
 )
 
-/** Re-activate a previously scanned combination (its doc loads with it). */
 function activateCombo(scan: McpScan): void {
   settings.activateMcpCombo(scan.servers)
 }
 
-/** Shared with InboxView. Static: an MCP scan's age does not need a live tick. */
 const ago = (iso: string): string => relativeTime(iso, Date.now())
 
 const liveSession = computed(() =>
@@ -74,9 +61,6 @@ const liveSession = computed(() =>
 )
 const working = computed(() => liveSession.value?.status === 'working')
 
-// This view's project (the reserved Database project) is no longer always the
-// selected project, so the active-session store may hold a different project's
-// conversation. Load this project's own session, mirroring SessionView.
 watch(
   () => liveSession.value?.id ?? null,
   (sessionId) => void active.open(sessionId),
@@ -90,9 +74,6 @@ const composer = ref('')
 const streamEl = ref<HTMLElement | null>(null)
 const composerEl = ref<HTMLTextAreaElement | null>(null)
 
-// Terminal-style command suggestions (global /commands + history), same
-// composable as the session composer — the Database session's init message
-// reports the user-level (global) slash commands and skills.
 const {
   suggestions,
   ghostRest,
@@ -113,8 +94,6 @@ const {
 
 watch(() => props.project.id, (projectId) => void loadCommands(projectId), { immediate: true })
 
-// Commands arrive with the session init — pick them up live (first session
-// start in this view would otherwise show none until a reopen).
 let unsubscribeCommands: (() => void) | undefined
 onMounted(() => {
   unsubscribeCommands = window.switchboard.on('push.projectCommands', (push) => {
@@ -125,27 +104,12 @@ onUnmounted(() => unsubscribeCommands?.())
 
 const scanned = computed(() => schemaDoc.value !== null)
 
-// Main-loop events only — subagent internals stay folded into the parent stream,
-// exactly like the session view.
-/**
- * The DB chat renders the last MAX_RENDER events, not the whole history — this
- * view shares SessionView's store but had none of its capping, so every event a
- * scan produced stayed mounted, and a schema scan is the longest-running thing
- * this app does.
- *
- * ponytail: a plain tail slice, no paging control, because unlike the session
- * stream this view has no "show earlier" affordance to hang one on. Add paging
- * here the day someone needs to read the top of a scan.
- */
 const MAX_RENDER = 500
 const dbEvents = computed<SessionEvent[]>(() => {
   const all = active.events.filter((e) => agentIdOf(e) === undefined)
   return all.length > MAX_RENDER ? all.slice(all.length - MAX_RENDER) : all
 })
 const hasEvents = computed(() => dbEvents.value.length > 0)
-// Show the hero (with its Start-session / Scan buttons) whenever there is no
-// live session, even after a schema has been scanned — otherwise the only way
-// to start a session from this view disappears on every return visit.
 const showEmpty = computed(
   () =>
     subtab.value === 'chat' &&
@@ -158,25 +122,15 @@ async function loadSchema(): Promise<void> {
     ? await projects.readMcpSchema(props.project.id, activeServers.value)
     : null
 }
-// The doc follows the ACTIVE COMBINATION — switching combos swaps the doc.
 watch([() => props.project.id, currentKey], () => void loadSchema(), { immediate: true })
 
-// The combination a running scan was started for (active set may change mid-scan).
 let scanningCombo: string[] = []
 
-// A scan finishes when the session returns to idle: record the combination
-// (main verifies its doc landed) and re-read it. recordScan returns null until
-// the doc exists, so stay ARMED across an idle blip that isn't real completion
-// (e.g. a permission-prompt pause that flips working→false before the file is
-// written) — clearing `scanning` only on a real record avoids a "scanned but
-// shows never scanned" regression from a mid-scan pause consuming the flag early.
-// ponytail: if the agent never writes the doc at the expected path the spinner
-// stays until the next scan/combo change — acceptable vs. recording a phantom scan.
 watch(working, (now, was) => {
   if (was && !now) {
     if (scanning.value) {
       void projects.mcpRecordScan(props.project.id, scanningCombo).then((row) => {
-        if (!row) return // doc not written yet — stay armed, record on the next idle
+        if (!row) return 
         scanning.value = false
         void loadHistory()
       })
@@ -207,14 +161,6 @@ function scanPrompt(names: string[]): string {
   )
 }
 
-/**
- * Nothing to send, or nowhere to send it.
- *
- * A slash command is the exception that needs stating: it goes to the session
- * raw, so it stays available even with no server ticked — which is how the
- * developer runs /mcp or a plugin skill to fix the very state that is blocking
- * everything else.
- */
 const sendDisabled = computed(() => {
   const text = composer.value.trim()
   if (!liveSession.value || text.length === 0) return true
@@ -232,8 +178,6 @@ function askPrompt(names: string[], q: string): string {
 
 const sessionError = ref<string | null>(null)
 
-/** Start the Database project's session (a normal session; MCP servers are
- *  scoped by the project's own .mcp.json, not by an app-level deny-list). */
 async function startDbSession(): Promise<void> {
   sessionError.value = null
   try {
@@ -258,8 +202,6 @@ async function scan(): Promise<void> {
 async function ask(): Promise<void> {
   const text = composer.value.trim()
   if (!text || !liveSession.value) return
-  // A /command goes to the session raw (wrapping it in the MCP prompt would
-  // break it); ordinary questions get the combination-targeted prompt.
   if (text.startsWith('/')) {
     composer.value = ''
     recordSent(text)
@@ -315,7 +257,6 @@ function answer(eventId: string, choice: string): void {
         <span class="combo-hint">No servers on this view yet — add them in Settings → MCP.</span>
       </div>
 
-      <!-- Active combination + its scan state ("have I scanned this before?") -->
       <div class="combo-row mono" data-testid="mcp-combo">
         <span v-if="activeServers.length === 0" class="combo-hint">
           Tick the servers you want to chat to — each combination keeps its own scan.
@@ -354,7 +295,6 @@ function answer(eventId: string, choice: string): void {
         </button>
       </div>
     </header>
-    <!-- Own glass strip, matching the design's separate tabs bar -->
     <div class="tabs mono">
       <button class="tab" :class="{ sel: subtab === 'chat' }" data-testid="mcp-tab-chat" @click="subtab = 'chat'">
         Chat
@@ -452,8 +392,6 @@ function answer(eventId: string, choice: string): void {
       </div>
     </div>
 
-    <!-- Composer (chat): questions target the active combination; /commands
-         (global skills, plugins) go to the session raw with suggestions. -->
     <footer v-if="subtab === 'chat' && liveSession" class="composer">
       <div class="composer-row">
         <span class="caret"><Icon name="chevron-right" :size="12" /></span>
@@ -774,18 +712,13 @@ function answer(eventId: string, choice: string): void {
   color: var(--text-faint);
 }
 
-/* Composer caret is teal here (vs green in the session composer). */
 .caret {
   flex-shrink: 0;
   color: var(--teal);
-  /* Bottom-pinned row: lift the caret to the buttons' text line. */
   padding-bottom: 6px;
 }
 
-/* Command suggestions (same idioms as the session composer). */
 
-/* MCP accent: this view tints the whole matched command rather than splitting
-   cmd from args, so it overrides the shared ghost colouring. */
 .input-wrap:has(.is-command) .ghost-typed {
   color: var(--teal);
   font-weight: var(--w-em);

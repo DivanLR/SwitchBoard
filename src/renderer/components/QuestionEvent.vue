@@ -1,6 +1,4 @@
 <script setup lang="ts">
-// ? QUESTION card — 1:1 with the design reference: amber-tinted card with
-// clickable option chips; answers submit to the session (FR-020).
 import { computed, ref } from 'vue'
 import Icon from '@renderer/components/Icon.vue'
 import type { QuestionPayload } from '@shared/domain'
@@ -8,9 +6,6 @@ import type { QuestionPayload } from '@shared/domain'
 const props = defineProps<{ payload: QuestionPayload; eventId: string }>()
 const emit = defineEmits<{ (e: 'answer', eventId: string, choice: string): void }>()
 
-// The session marks its recommended option by appending "(Recommended)" to the
-// label (the AskUserQuestion convention). Surface that as a badge and show a
-// clean label, but keep the original label as the value sent back so it matches.
 const options = computed(() =>
   props.payload.options.map((o) => ({
     label: o.label,
@@ -20,8 +15,6 @@ const options = computed(() =>
   })),
 )
 
-// A free-text answer is always allowed alongside the offered options; the
-// broker stores whatever string is sent, no need to match a listed choice.
 const addingCustom = ref(false)
 const customText = ref('')
 
@@ -43,8 +36,6 @@ function cancelCustom(): void {
   customText.value = ''
 }
 
-// Drop the "(Recommended)" marker for display (the confirmation line and chips
-// show the clean label; the raw value with the marker is what's stored/sent).
 function cleanLabel(label: string): string {
   return label.replace(/\s*\(recommended\)\s*$/i, '')
 }
@@ -158,7 +149,6 @@ function cleanLabel(label: string): string {
   opacity: 1;
 }
 
-/* Recommended option: greener chrome + a small star badge. */
 .chip.recommended {
   border-color: var(--green);
 }

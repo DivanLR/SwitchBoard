@@ -1,12 +1,4 @@
 <script setup lang="ts">
-// Tests section shell — the design's verify surface: pick the project's stack,
-// choose what to verify, run it, then read the six gates and drill into a panel.
-//
-// A run executes through the session and reports one machine-readable line; this
-// view renders exactly what that line measured. A figure the run did not measure
-// reads "—" with the reason, never a number nothing produced (spec 002 FR-072),
-// and a suite this environment cannot run is named before the run starts rather
-// than reported as a failure of the code (FR-057).
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   defaultSelection,
@@ -47,29 +39,18 @@ const verify = useVerifyStore()
 const api = useApiStore()
 
 type SubTab = 'api' | 'coverage' | 'quality' | 'evidence' | 'qa' | 'skill'
-// Manual QA is the landing panel: with nothing run yet it is the one with
-// content. Starting a run switches to Results, where its output lands.
 const subTab = ref<SubTab>('qa')
-// No `target` ref: only the working tree is scoped today and the other two chips
-// are permanently disabled with no handler, so the ref could only ever hold
-// 'tree'. The chip below is rendered always-selected until they are implemented.
-/** Suite ids this run will cover; null until the stack is known. */
 const selected = ref<string[] | null>(null)
 
-// The shell owns the load: the picker needs detection before Manual QA (and so
-// EvalsView) has mounted, and the panels need the runs.
 let stopPush: (() => void) | null = null
 let stopApiPush: (() => void) | null = null
 onMounted(() => {
   void evals.load(props.projectId)
   void verify.load(props.projectId)
   void api.load(props.projectId)
-  // The report arrives from the session, not from a click.
   stopPush = window.switchboard.on('push.verifyChanged', (push) => {
     verify.applyPush(push.projectId, push.runs)
   })
-  // An API eval set finishes in the main process (the app makes the calls), so
-  // its result arrives on its own channel rather than as a reply to the click.
   stopApiPush = window.switchboard.on('push.apiChanged', (push) => {
     api.applyPush(push.projectId, push.runs)
   })
@@ -95,28 +76,15 @@ const stack = computed(() => stackById(chosenId.value))
 const latest = computed(() => verify.latestFor(props.projectId))
 const running = computed(() => latest.value?.status === 'running')
 
-/** A bypass session runs in the sandbox container: node, plus the .NET SDK when
- *  this project detects as .NET (wslc-sandbox picks the image from the very
- *  same detection). Never Python, never a browser — which suites that rules out
- *  is shown before the run, not reported as a failure afterwards. */
 const sandboxed = computed<SandboxEnv>(() =>
   projectsStore.items.find((p) => p.id === props.projectId)?.session?.bypassPermissions === true
     ? sandboxTools(sandboxNeedsDotnet(detected.value))
     : null,
 )
 
-// Prefer what detection actually found for this project over the raw catalog
-// entry: a .NET project's suites are narrowed to whether it holds an API, a Blazor
-// front end, or both, so a front end is not offered an HTTP smoke pass over
-// endpoints it does not have. A stack the developer picked that detection did NOT
-// find is an override, and gets the whole catalog entry — that choice is theirs.
 const suites = computed<TestSuite[]>(() => {
   const found = detected.value.find((d) => d.stackId === chosenId.value)
   const catalogue = [...(found?.suites ?? stack.value?.suites ?? [])]
-  // The catalogue's command is a guess about a conventional layout. Where the
-  // developer has corrected it, that correction is what the chip shows and what
-  // the run dispatches — verify.start applies the same overlay, so the two can
-  // never say different things.
   const overrides = commandOverrides.value
   return catalogue.map((suite) =>
     overrides[suite.id] ? { ...suite, command: overrides[suite.id] } : suite,
@@ -124,30 +92,6 @@ const suites = computed<TestSuite[]>(() => {
 })
 const blockedReason = (suite: TestSuite): string | null => unavailableReason(suite, sandboxed.value)
 
-/**
- * What hovering a suite chip says.
- *
- * A red chip provokes exactly one question — why — and the title used to answer
- * it with the bare `detail` string and nothing else, so "3 failed" was the whole
- * story and the command that produced it was only visible on a suite that had
- * never run. Both belong here: knowing what actually ran is most of knowing why
- * it failed, especially on a project whose command has been overridden.
- *
- * A native title rather than a hover panel, because that is the idiom this row
- * already uses for the blocked reason and the command, and the run's full
- * per-suite detail already has a permanent home in the Results panel below —
- * this is the glance, not the record.
- */
-/**
- * A suite that failed and is ticked for the next run.
- *
- * "Failed" is a fact about the last run; "queued" is an intention about the
- * next. A chip that only ever says the first leaves the developer counting
- * ticks to work out what pressing Run would actually do — so the moment a red
- * chip is selected, it is no longer only a failure, it is a failure about to be
- * tried again. Excluded while `retrying`, because at that point it is not
- * queued any more, it is running, and that has its own amber state.
- */
 function isQueuedRetry(row: {
   suite: TestSuite
   result: SuiteResult | null
@@ -166,9 +110,6 @@ function chipTitle(row: {
   if (blocked) return `${row.suite.label} — ${blocked}`
   if (!row.result) return row.suite.command
   const detail = row.result.detail ? `\n${row.result.detail}` : ''
-  // Worth saying: a verified figure came from the runner's own report file
-  // rather than from the session's account of it, which is the difference
-  // between a measurement and a claim.
   const verified = row.result.verified ? '\nchecked against the runner’s own report file' : ''
   return `${row.suite.label} — ${row.result.status}${detail}${verified}\n\ncommand: ${row.suite.command}`
 }
@@ -177,7 +118,6 @@ const commandOverrides = computed<Record<string, string>>(
   () => settingsStore.settings?.projectSuiteCommands?.[props.projectId] ?? {},
 )
 
-/** Which suite's command is open for editing; null when none is. */
 const editingCommand = ref<string | null>(null)
 const commandDraft = ref('')
 
@@ -186,15 +126,6 @@ function editCommand(suite: TestSuite): void {
   commandDraft.value = suite.command
 }
 
-/**
- * Save (or clear) one suite's command for this project.
- *
- * Both levels are spread deliberately: settings.set shallow-merges its patch, so
- * writing the project key without spreading the map would drop every other
- * project's overrides, and writing the suite key without spreading would drop
- * every other suite's. Typing the catalogue's own command back in, or emptying
- * the field, deletes the entry rather than storing a duplicate of the default.
- */
 function saveCommand(suite: TestSuite): void {
   editingCommand.value = null
   const all = settingsStore.settings?.projectSuiteCommands ?? {}
@@ -209,15 +140,10 @@ function saveCommand(suite: TestSuite): void {
   void settingsStore.save({ projectSuiteCommands: { ...all, [props.projectId]: mine } })
 }
 
-/** The developer's own ticks for this project (Settings.projectTestSelection),
- *  read back so leaving the section — or switching project and back — does not
- *  reset a choice already made. Null means nothing was ever chosen here. */
 const storedSelection = computed<string[] | null>(
   () => settingsStore.settings?.projectTestSelection?.[props.projectId] ?? null,
 )
 
-// The default selection follows the environment: heavy suites are opt-in, and a
-// suite this environment cannot run starts unticked instead of failing later.
 watch(
   [suites, sandboxed],
   ([list, sandbox]) => {
@@ -226,22 +152,12 @@ watch(
       return
     }
     if (selected.value === null) {
-      // A restored selection is narrowed against what THIS environment actually
-      // offers before it is trusted at all — the exact rule the "kept" branch
-      // below enforces on a live selection once detection narrows mid-session.
-      // Without this, a selection saved under one stack (or one bypass state)
-      // could restore an id this project no longer offers, and the count would
-      // read "9 of 7".
       const offered = new Set(list.map((suite) => suite.id))
       selected.value = storedSelection.value
         ? storedSelection.value.filter((id) => offered.has(id))
         : defaultSelection(list, sandbox)
       return
     }
-    // The offered list narrows once detection lands — a .NET project turns out to
-    // be an API and its Blazor suites go away. A selection may not outlive the
-    // suite it names: a run must never be dispatched with an id this project was
-    // never offered, and the count must never read "9 of 7".
     const offered = new Set(list.map((suite) => suite.id))
     const kept = selected.value.filter((id) => offered.has(id))
     if (kept.length !== selected.value.length) selected.value = kept
@@ -249,10 +165,6 @@ watch(
   { immediate: true },
 )
 
-// Persist every change — ticking a chip, or the narrowing above — the same
-// reasoning as projectTestStacks/projectSuiteCommands elsewhere in this file.
-// Skipped while `selected` is null: no stack chosen yet, or detection has not
-// landed, which is an absence of a choice, not a choice to remember.
 watch(selected, (ids) => {
   if (ids === null) return
   const current = settingsStore.settings?.projectTestSelection ?? {}
@@ -269,8 +181,6 @@ function toggleSuite(suite: TestSuite): void {
 
 const isSelected = (suite: TestSuite): boolean => (selected.value ?? []).includes(suite.id)
 
-/** Names what is actually being verified — ".NET Blazor" rather than ".NET" —
- *  falling back to the catalog entry when the choice was an override. */
 const profileName = computed(
   () =>
     detected.value.find((d) => d.stackId === chosenId.value)?.stackLabel ??
@@ -278,23 +188,12 @@ const profileName = computed(
     '',
 )
 
-/** Detection is a hint, never a decision — the developer confirms it (FR-034). */
 const detectHint = computed(() =>
   detected.value.length > 0
     ? `Looks like ${detected.value.map((s) => s.stackLabel).join(' + ')} from the project files — confirm that or pick another.`
     : 'Nothing conclusive in the project files — pick the stack yourself.',
 )
 
-/**
- * Run each ticked suite in its own fresh container, one at a time, instead of
- * every suite in the run sharing the project's one background container.
- *
- * Persisted per project (Settings.projectIsolatedRuns) for the same reason as
- * the suite selection above: a per-run choice the developer has to re-tick on
- * every project switch is a choice the app keeps forgetting. A plain computed
- * rather than a seeded ref — unlike `selected` it has no narrowing to do
- * against detection, so there is nothing to reconcile on a project switch.
- */
 const isolated = computed(() => settingsStore.settings?.projectIsolatedRuns?.[props.projectId] ?? false)
 
 function toggleIsolated(): void {
@@ -313,13 +212,6 @@ function chooseStack(id: string): void {
   })
 }
 
-// The six tiles, and the two rules that decide what each one may claim: an
-// unmeasured figure reads "—" with its reason, and a skipped suite is a warning
-// rather than a pass (see the composable).
-// Gates the developer has excused on this project, and the click that toggles
-// one. A tile nothing measured is a question only they can answer — this stack
-// has no mutation tool, that quality service is never getting connected — and
-// until now the only way to clear it was to leave it grey forever.
 const acceptedGates = computed(
   () => new Set(settingsStore.settings?.projectAcceptedGates?.[props.projectId] ?? []),
 )
@@ -337,11 +229,6 @@ function toggleAccepted(gateId: string): void {
 
 const { gates, score } = useVerifyGates(latest, acceptedGates)
 
-// --- The whole window ---------------------------------------------------------
-// The shell owns the sidebar, the inbox, the project header and the tab strip, so
-// the flag lives in the store both ends can see. This section only ever claims it
-// under its own name, so another section entering full screen cannot make this one
-// think it is in it.
 const activeSession = useActiveSessionStore()
 const FULL_SCREEN_KEY = 'tests'
 const isFullScreen = computed(() => activeSession.fullScreenSection === FULL_SCREEN_KEY)
@@ -350,7 +237,6 @@ function toggleFullScreen(): void {
   activeSession.setFullScreen(isFullScreen.value ? null : FULL_SCREEN_KEY)
 }
 
-/** Escape leaves, which is what every other full-screen surface has taught. */
 function onFullScreenKey(event: KeyboardEvent): void {
   if (event.key === 'Escape' && isFullScreen.value) {
     event.preventDefault()
@@ -361,10 +247,6 @@ function onFullScreenKey(event: KeyboardEvent): void {
 onMounted(() => window.addEventListener('keydown', onFullScreenKey))
 onUnmounted(() => {
   window.removeEventListener('keydown', onFullScreenKey)
-  // Hand the chrome back on the way out. Without this, anything that unmounts the
-  // section while it is full screen — switching project, opening the MCP view —
-  // leaves an app with no sidebar and no tab strip and no control that would
-  // bring either back.
   if (isFullScreen.value) activeSession.setFullScreen(null)
 })
 
@@ -380,14 +262,10 @@ const SUB_TABS: { id: SubTab; label: string; built: boolean }[] = [
 const subTabs = computed(() =>
   SUB_TABS.map((t) => ({
     ...t,
-    // Manual QA carries the count of lines still waiting on a verdict.
     badge: t.id === 'qa' ? evals.listFor(props.projectId).filter((r) => r.verdict === 'pending').length : 0,
   })),
 )
 
-// Starting a run does NOT jump to the session: the results land here, and
-// browsing them has to stay usable while the run holds the session (FR-080).
-// The session tab is one click away for the raw output.
 async function runVerify(): Promise<void> {
   if (!stack.value || (selected.value ?? []).length === 0) return
   if (await verify.start(props.projectId, stack.value.id, selected.value ?? [], isolated.value)) {
@@ -409,7 +287,6 @@ async function cancelApi(): Promise<void> {
   if (apiRun.value) await api.cancel(props.projectId, apiRun.value.id)
 }
 
-// The API eval set: picked endpoints, where the calls go, and running them.
 const {
   picked,
   search,
@@ -435,7 +312,6 @@ const {
   apiSummary,
 } = useApiEvalSet(() => props.projectId)
 
-/** The check the app performed, in the terms it performed it. */
 function expectWords(e: ApiExpect): string {
   const parts = [e.status !== null ? `status ${e.status}` : 'any 2xx']
   if (e.minItems !== null) parts.push(`at least ${e.minItems} items`)
@@ -446,33 +322,10 @@ function expectWords(e: ApiExpect): string {
 const report = computed(() => latest.value?.report ?? null)
 const evidence = computed(() => report.value?.evidence ?? [])
 
-// Suite outcome by id, so each chip in the picker can mark itself the moment that
-// suite reports rather than staying blank until the whole run settles. A Map and
-// not a find-per-chip: the picker renders every suite in the catalogue on every
-// tick of a running report.
 const suiteResults = computed(
   () => new Map((report.value?.suites ?? []).map((s) => [s.id, s])),
 )
 
-/** Each offered suite paired with its own result row, resolved once here rather
- *  than in the template. The chip template used to call suiteResults.get(s.id)
- *  six or seven times per chip per render, three of them followed by a `!`
- *  non-null assertion to get past the possibly-undefined return — a lookup
- *  called twice in the same expression is not narrowed by TypeScript just
- *  because the first call happened to be truthy. Joining once here gives the
- *  template a single value per chip that a nested v-if narrows properly. */
-/**
- * The suites the live run was asked for, while it is still running them.
- *
- * A re-run clears the board: the new run's report is null until it reports, so
- * the suite you just asked to try again loses its mark and reads as though it
- * had never run at all — which is the opposite of what pressing retry should
- * look like. These are the ids with a question in flight.
- *
- * Taken from the run's own `requested` list rather than from what was clicked,
- * so a full run marks everything it covers and a single re-run marks exactly
- * one, with no click state to keep in step.
- */
 const inFlight = computed<Set<string>>(() =>
   running.value ? new Set(latest.value?.requested ?? []) : new Set<string>(),
 )
@@ -487,9 +340,6 @@ const suiteRows = computed<
   })),
 )
 
-// The two quality tiles whose text is a decision rather than a value: an absent
-// figure and a figure of "not configured" mean different things and must not
-// read the same, and debt only has a source when there is a debt figure at all.
 const qualityGateLabel = computed(() => {
   const gate = report.value?.quality.gate
   if (gate === 'not_configured') return 'not connected'
@@ -502,31 +352,17 @@ const qualityDebtSource = computed(() =>
     : 'nothing measured it',
 )
 
-// "X killed / Y survived" beside the survivor list — the split the percentage
-// alone does not say. Either count absent means the run never reported them
-// (an older report, or a stack whose mutation tool the app cannot read), so
-// the line is left off rather than showing a half figure.
 const mutationCounts = computed(() => {
   const killed = report.value?.quality.mutationKilled
   const survived = report.value?.quality.mutationSurvived
   return killed == null || survived == null ? null : `${killed} killed · ${survived} survived`
 })
 
-// Real HTTP calls the run made, with the rows they were drawn from. Only API
-// suites produce these, so an empty list means one of four different things and
-// the message has to say which — otherwise "none" reads as "all passed".
 const endpoints = computed(() => report.value?.endpoints ?? [])
 const endpointsEmpty = computed(() => {
-  // What the run was ASKED to cover, not what it has reported: `requested` is
-  // there from the first moment, whereas the report only arrives at the end. A
-  // mid-run panel reading the report would claim there was no API suite while
-  // the API suite was still running.
   const asked = (latest.value?.requested ?? []).filter((id) => suiteById(id)?.kind === 'api')
   if (asked.length === 0) return 'No API suite in this run. Include one above to call real endpoints.'
   if (running.value) return 'The run is still going. Endpoint calls appear here as it reports them.'
-  // An inconclusive run has no report at all: the session ended its turn without
-  // reporting a result line. Saying anything about what "the API suite" did would
-  // claim knowledge of a run that reported nothing.
   if (!report.value) {
     return 'This run reported nothing, so no endpoint call can be shown. The note above says why.'
   }
@@ -536,9 +372,6 @@ const endpointsEmpty = computed(() => {
   return `The API suite ran but reported no individual endpoint calls, even though ${dbServers.value.join(' and ')} was available.`
 })
 
-/** The same list the run itself was given: named in settings AND connected on this
- *  project's session. Mirrors the filter in the verify.start handler, so the empty
- *  state cannot claim a server was available when the prompt never offered it. */
 const dbServers = computed(() => {
   const configured = settingsStore.settings?.databaseMcpServers ?? []
   const live = projectsStore.items.find((p) => p.id === props.projectId)?.session?.mcpServers ?? []
@@ -552,7 +385,6 @@ function statusClass(status: number | null): string {
   return status < 500 ? 'warn' : 'fail'
 }
 
-/** A suite result decorated with the catalog's own label. */
 const results = computed(() =>
   (report.value?.suites ?? []).map((r) => ({ ...r, label: suiteById(r.id)?.label ?? r.label })),
 )
@@ -565,12 +397,6 @@ const runSummary = computed(() => {
   return run.status === 'running' ? `Running since ${when}${where}` : `${when}${where}`
 })
 
-// How long this will take, learned from this project's own past runs — shown
-// before the run as well as during it, since "this is a four minute job" is
-// most useful while deciding whether to start it. A run's length is dominated
-// by which suites are in it, so past runs covering the same selection are
-// preferred (the basis line says which kind it used); a run still in progress
-// carries no finishedAt, so estimateRunMs ignores it without filtering.
 const verifyEstimate = computed(() => {
   const chosen = [...(selected.value ?? [])].sort().join(',')
   return estimateRunMs(
@@ -586,7 +412,6 @@ const verifyEstimateLine = computed(() => {
   return `${lead} ~${humanDuration(estimate.ms)} · ${estimate.basis}`
 })
 
-/** The same learning for API eval sets, where the suite question does not arise. */
 const apiEstimateLine = computed(() => {
   const estimate = estimateRunMs(api.runsFor(props.projectId))
   if (!estimate) return null
@@ -620,7 +445,6 @@ function statusWord(run: VerifyRun): string {
     </template>
 
     <template v-else>
-      <!-- Chosen profile: what is being verified, and the run control. -->
       <div class="prof">
         <div class="prof-head">
           <span class="prof-name">{{ profileName }}</span>
@@ -628,11 +452,6 @@ function statusWord(run: VerifyRun): string {
             {{ (selected ?? []).length }} of {{ suites.length }} suites
           </span>
           <span class="spacer"></span>
-          <!-- The whole window. This section is the widest thing in the app — six
-               gate tiles, a suite row and result tables — and it was sharing the
-               pane with two rails it does not need while reading a run. The exit
-               lives here rather than in the shell because the shell's own controls
-               are what got stood down. -->
           <button
             class="link"
             data-testid="tests-full-screen"
@@ -653,13 +472,6 @@ function statusWord(run: VerifyRun): string {
           its own process
         </div>
 
-        <!-- Run state, in the header rather than only inside the Results panel.
-             Starting a run deliberately does not jump anywhere, so the developer is
-             expected to keep working in another panel while it executes — which
-             meant the run finishing was announced nowhere at all, and a screen
-             reader user had no way to learn it had. role=status is an implicit
-             aria-live="polite", and the line is visible because a sighted user
-             gains the same thing: the verdict without navigating to find it. -->
         <div
           v-if="latest"
           class="prof-meta mono"
@@ -669,20 +481,13 @@ function statusWord(run: VerifyRun): string {
           {{ running ? 'Running…' : `Last run ${statusWord(latest)}` }} · {{ runSummary }}
         </div>
 
-        <!-- "Running…" for several minutes says nothing about whether anything is
-             actually happening. The run's own session output does, and it was
-             already streaming to the renderer the whole time. -->
         <MiniTerminal v-if="running && latest?.sessionId" :session-id="latest.sessionId" label="verifying" />
 
-        <!-- What this run costs in time, learned from history — same rationale as
-             verifyEstimate above; shown before the run, not only during it. -->
         <div v-if="verifyEstimateLine" class="prof-meta mono" data-testid="tests-estimate">
           {{ verifyEstimateLine
           }}<span v-if="verifyEstimate && !verifyEstimate.comparable"> — treat it loosely</span>
         </div>
 
-        <!-- Suite picker: heavy suites are opt-in, and what the environment
-             cannot run says so here rather than failing mid-run (FR-057). -->
         <div class="suites" data-testid="tests-suites">
           <template v-for="row in suiteRows" :key="row.suite.id">
             <button
@@ -700,14 +505,6 @@ function statusWord(run: VerifyRun): string {
               :data-testid="`tests-suite-${row.suite.id}`"
               @click="toggleSuite(row.suite)"
             >
-              <!-- The outcome sits before the label, where the eye lands first: the
-                   question this row answers is "did it pass", not "what is it called".
-                   A tick only ever means pass. A failed suite gets its own mark and
-                   its own colour, because a green tick on a failure is the one
-                   mistake this panel must never make. -->
-              <!-- A run is in flight for this suite: neither a pass nor a
-                   failure, and painting it as either would claim an outcome the
-                   run has not produced yet. -->
               <span
                 v-if="row.retrying"
                 class="suite-mark"
@@ -735,13 +532,6 @@ function statusWord(run: VerifyRun): string {
               <span v-else-if="row.suite.heavy" class="heavy-tag mono">slow</span>
               <span v-if="commandOverrides[row.suite.id]" class="heavy-tag mono">edited</span>
             </button>
-            <!-- No per-suite retry control. It sat beside every chip that had a
-                 result, and it was a third thing to aim at in a row whose own
-                 chip is already the target: tick the suites you want and press
-                 Run. Removed at the owner's request, along with runOne, which
-                 nothing else called. -->
-            <!-- The catalogue's command is a guess about a conventional layout; this
-                 is how it gets corrected without editing the app's source. -->
             <button
               class="chip cmd-edit mono"
               :data-testid="`tests-suite-edit-${row.suite.id}`"
@@ -778,9 +568,6 @@ function statusWord(run: VerifyRun): string {
           >
             Capture evidence
           </button>
-          <!-- Only while a run is live: before this, a run the developer no longer
-               wanted had to be waited out, and one whose session had died could
-               only be cleared by restarting the app. -->
           <button
             v-if="running && latest"
             class="chip"
@@ -790,9 +577,6 @@ function statusWord(run: VerifyRun): string {
           >
             Cancel
           </button>
-          <!-- Opt-in memory isolation: one container per suite instead of every
-               chosen suite sharing the project's one container for the whole run.
-               The idiom is SessionView's .bypass-inline switch, not a new control. -->
           <span class="iso-inline mono">
             <button
               class="switch"
@@ -821,10 +605,6 @@ function statusWord(run: VerifyRun): string {
         <div v-if="verify.error" class="err" data-testid="tests-error">{{ verify.error }}</div>
       </div>
 
-      <!-- One headline figure over the six gates, and it is COUNTED: the share
-           of gates this run measured that came back clean. What it left
-           unmeasured is printed beside it rather than folded in, so the figure
-           can never imply coverage the run did not have. -->
       <div class="score-row">
         <span class="score-label mono">QUALITY</span>
         <span
@@ -851,9 +631,6 @@ function statusWord(run: VerifyRun): string {
       </div>
 
       <div class="gates" data-testid="tests-gates">
-<!-- A cell rather than a bare tile, because the tile is already a button that
-             opens its panel and the accept control needs its own hit area. Nesting
-             one button inside another is invalid, so they are siblings. -->
         <div v-for="g in gates" :key="g.id" class="gate-cell">
           <button
             class="gate"
@@ -874,8 +651,6 @@ function statusWord(run: VerifyRun): string {
             <span class="gate-sub">{{ g.sub }}</span>
             <span class="gate-target mono">{{ g.target }}</span>
           </button>
-          <!-- Offered only where there is no measurement to argue with. A figure
-               that came back under target has no accept control, by design. -->
           <button
             v-if="g.acceptable"
             class="gate-accept mono"
@@ -917,7 +692,6 @@ function statusWord(run: VerifyRun): string {
         @run="(text) => emit('run', text)"
       />
 
-      <!-- API eval set: chosen endpoints, called by the app, judged in code. -->
       <div v-else-if="subTab === 'api'" class="panel" data-testid="tests-panel-api">
         <div class="panel-head">
           <span class="panel-title">API eval set</span>
@@ -929,8 +703,6 @@ function statusWord(run: VerifyRun): string {
           came back. The session is asked for one thing: identifiers that really exist.
         </p>
 
-        <!-- The session's part of an API run is fetching real identifiers, which
-             is the slow half and the half that silently fails. -->
         <MiniTerminal
           v-if="apiRunning && apiRun?.sessionId"
           :session-id="apiRun.sessionId"
@@ -957,9 +729,6 @@ function statusWord(run: VerifyRun): string {
             />
           </label>
         </div>
-        <!-- The deployed environment. Separate row because it is a different kind
-             of thing: never started, never stopped, and the same eval set run
-             against an API that already exists somewhere. -->
         <div class="host">
           <label class="host-field">
             <span class="host-lbl mono">QA URL</span>
@@ -1088,8 +857,6 @@ function statusWord(run: VerifyRun): string {
         <div class="targets">
           <span class="sec mono">EVAL SET</span>
           <span class="spacer"></span>
-          <!-- The report is written from the recorded calls, so it is offered for
-               any finished run rather than only the one just made. -->
           <button
             class="chip"
             :disabled="!apiRun || apiRunning"
@@ -1139,7 +906,6 @@ function statusWord(run: VerifyRun): string {
         </div>
       </div>
 
-      <!-- Results + evidence: what ran, and the proof it was executed. -->
       <div v-else-if="subTab === 'evidence'" class="panel" data-testid="tests-panel-evidence">
         <div class="panel-head">
           <span class="panel-title">Results</span>
@@ -1205,7 +971,6 @@ function statusWord(run: VerifyRun): string {
         </div>
       </div>
 
-      <!-- Coverage: the run's own figures, or nothing at all. -->
       <div v-else-if="subTab === 'coverage'" class="panel" data-testid="tests-panel-coverage">
         <div class="panel-head">
           <span class="panel-title">Coverage</span>
@@ -1234,7 +999,6 @@ function statusWord(run: VerifyRun): string {
         </div>
       </div>
 
-      <!-- Quality: architecture, mutation, and the external service's own gate. -->
       <div v-else-if="subTab === 'quality'" class="panel" data-testid="tests-panel-quality">
         <div class="panel-head">
           <span class="panel-title">Quality</span>
@@ -1308,8 +1072,6 @@ function statusWord(run: VerifyRun): string {
 </template>
 
 <style scoped>
-/* The run's headline. A rule of its own above the tiles rather than a seventh
-   tile: it is about the six, not one of them. */
 .score-row {
   display: flex;
   align-items: baseline;
@@ -1330,7 +1092,6 @@ function statusWord(run: VerifyRun): string {
   font-variant-numeric: tabular-nums;
 }
 
-/* Green only when every measured gate is clean. "Most of them" is not a pass. */
 .score-val.good {
   color: var(--green);
 }
@@ -1378,30 +1139,14 @@ function statusWord(run: VerifyRun): string {
   color: var(--text-faint);
 }
 
-/* FULL WIDTH -------------------------------------------------------------------
-   The section used to sit in an 840px column whatever the window was, so a wide
-   monitor showed a narrow strip of tests beside a field of empty canvas — the six
-   gate tiles wrapped onto three rows they had room to lay out in one, and the
-   result tables, which are the widest thing here, were the worst starved.
-
-   The cap is gone from the STRUCTURAL blocks only. Prose keeps its measure
-   (.intro, .empty, .dev-panel, .dev-body): a paragraph set to 2000px is
-   unreadable, and "use the whole window" was never a request to widen sentences. */
 .stack-row {
   display: flex;
-  /* Top, not centre: the offerings wrap to a second line now, and centring
-     would float the stack's name against the middle of that block. */
   align-items: flex-start;
   gap: 12px;
   width: 100%;
   padding: 10px 13px;
   margin-bottom: 6px;
   text-align: left;
-  /* A CARD, so --bg-card. These rested on --bg-hover, a translucent wash built
-     for a hover state: over the light canvas it reads as a grey slab instead of
-     a white card floating on it, which is the surface's whole idea. The Skills
-     section next door already used --bg-card, and the two side by side is what
-     made it visible. */
   background: var(--bg-card);
   box-shadow: var(--elev);
   border: 1px solid var(--border-card);
@@ -1420,9 +1165,6 @@ function statusWord(run: VerifyRun): string {
   color: var(--text-bright);
 }
 
-/* Wraps. This is the list of what picking a stack actually gets you, and every
-   one of the four was clipped mid-word against a pane that was two-thirds
-   empty — an ellipsis where the answer to the question on screen should be. */
 .stack-sub {
   flex: 1;
   min-width: 0;
@@ -1526,9 +1268,6 @@ function statusWord(run: VerifyRun): string {
   background: color-mix(in srgb, var(--green) 10%, transparent);
 }
 
-/* Outcome, once a suite has reported. Stronger than the `.on` selection tint it
-   sits on top of, because after a run the question is what happened, not what was
-   picked. These win by being declared after `.chip.on`. */
 .suite-mark {
   display: inline-flex;
   align-items: center;
@@ -1550,35 +1289,18 @@ function statusWord(run: VerifyRun): string {
   background: color-mix(in srgb, var(--red) 16%, transparent);
 }
 
-/* Failed, and queued to run again -------------------------------------------
-   A failed suite that is ticked for the next run. Amber because DESIGN.md
-   spends colour only on a reading outside tolerance, and "attention owed" is
-   exactly what a queued retry is.
-
-   Declared AFTER .ran-fail so it wins on a chip that is both: once you have
-   said you are running it again, what happens next matters more than what
-   happened last time. It deliberately takes the same amber the chip wears while
-   running (.ran-retry below), so queued and running are one story told twice
-   rather than two unrelated colours the eye has to learn separately. */
 .chip.suite.q-surface {
   color: var(--amber);
   border-color: var(--amber);
   background: color-mix(in srgb, var(--amber) 16%, transparent);
 }
 
-/* Asked for, not yet answered. Amber because it is neither outcome: a chip that
-   went back to plain grey the moment you pressed retry read as though the run
-   had never happened, and painting it green or red would claim a result the run
-   has not produced. It wins over .ran-* by being declared first and overwritten
-   by nothing — the class is applied instead of the outcome, not on top of it. */
 .chip.suite.ran-retry {
   color: var(--amber);
   border-color: var(--amber);
   background: color-mix(in srgb, var(--amber) 16%, transparent);
 }
 
-/* Skipped, not run, unavailable: reported, but nothing was proved. Deliberately
-   colourless — the one thing worse than no mark is a mark that reads as a pass. */
 .chip.suite.ran-skipped,
 .chip.suite.ran-not_run,
 .chip.suite.ran-unavailable {
@@ -1587,34 +1309,6 @@ function statusWord(run: VerifyRun): string {
   background: transparent;
 }
 
-/* TICKED FOR THE NEXT RUN --------------------------------------------------
-   A ring, and it exists because selection was invisible on exactly the chips
-   where it mattered most.
-
-   `.chip.on` carries the selection tint, but every outcome rule above is three
-   classes to its two AND declared later, so an outcome overwrote the tint. On a
-   pass or a failure that is intended: after a run, what happened outranks what
-   was picked. On the colourless three it was a bug — `background: transparent`
-   erased the only cue there was, so a grey "not run" suite looked identical
-   ticked and unticked. An API suite that answered `not_run` is the common case,
-   which is why this was reported against one.
-
-   Fixed with a channel no outcome rule touches, rather than by reordering them:
-   `box-shadow` is set nowhere else on these chips, so the ring survives every
-   state instead of racing it.
-
-   Two shadows, not one. The first is a 2px halo in the panel's own colour, which
-   opens a gap between the chip's border and the ring — without it the ring reads
-   as a slightly thicker border, which is not a signal anyone notices. The second
-   is the ring itself, in the NEUTRAL ink rather than `currentColor`: currentColor
-   was the first attempt and it failed on the exact chip this was reported
-   against, because a grey ring around grey text on a light panel is the same
-   invisibility all over again. Neutral ink is legible against every outcome
-   colour and against both themes, and it spends no new hue on a state that is
-   not a reading.
-
-   Weight rides along for anyone who cannot separate a ring from a border: it is
-   the one cue that survives a colourless chip and a monochrome display alike. */
 .chip.suite.on {
   box-shadow:
     0 0 0 2px var(--bg-panel),
@@ -1627,8 +1321,6 @@ function statusWord(run: VerifyRun): string {
   color: var(--text-ghost);
 }
 
-/* The edit affordance rides beside its suite chip rather than inside it: the
-   chip is the on/off target, and a control nested in it would swallow that. */
 .cmd-edit {
   padding: 4px 7px;
   margin-left: -4px;
@@ -1652,10 +1344,6 @@ function statusWord(run: VerifyRun): string {
   color: var(--text-body);
 }
 
-/* The isolate switch + its label, riding beside the Run button. Same shape as
-   SessionView's .bypass-inline (a .switch is too small to read alone in a row
-   of button chips) — reused here rather than invented, per the design tooling
-   note above about following this codebase's own switch idiom. */
 .iso-inline {
   display: inline-flex;
   align-items: center;
@@ -1688,18 +1376,11 @@ function statusWord(run: VerifyRun): string {
 
 .gates {
   display: grid;
-  /* auto-FIT, not auto-fill. With the 840px cap gone, auto-fill kept creating
-     168px tracks for tiles that do not exist, so on a wide window the six tiles
-     sat at their minimum with a field of empty tracks to their right. auto-fit
-     collapses the empty ones, and the 1fr then divides the real width between the
-     six that are actually there. */
   grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
   gap: 7px;
   margin-bottom: 16px;
 }
 
-/* The tile and its accept control. The tile stays the full size of the cell so
-   the grid is unchanged; the control floats in the corner it leaves free. */
 .gate-cell {
   position: relative;
   display: flex;
@@ -1713,11 +1394,6 @@ function statusWord(run: VerifyRun): string {
   gap: 2px;
   padding: 9px 11px;
   text-align: left;
-  /* A CARD, so --bg-card. These rested on --bg-hover, a translucent wash built
-     for a hover state: over the light canvas it reads as a grey slab instead of
-     a white card floating on it, which is the surface's whole idea. The Skills
-     section next door already used --bg-card, and the two side by side is what
-     made it visible. */
   background: var(--bg-card);
   box-shadow: var(--elev);
   border: 1px solid var(--border-card);
@@ -1735,9 +1411,6 @@ function statusWord(run: VerifyRun): string {
   color: var(--text-faint);
 }
 
-/* The mark that says the app read this figure out of the runner's own report file
-   rather than off the session's summary. Deliberately quiet: it qualifies the
-   figure, it is not the figure. */
 .gate-verified {
   font-size: var(--fs-micro);
   letter-spacing: 0.05em;
@@ -1769,11 +1442,6 @@ function statusWord(run: VerifyRun): string {
   color: var(--green);
 }
 
-/* An accepted tile deliberately carries NO hue of its own: its status is 'pass',
-   so it inherits the same green a measured pass gets, which is the point of the
-   control. The distinction is carried by the word in the value slot — "accepted"
-   rather than "passed" — and by the sub-line naming who decided. Text at a glance,
-   rather than a fourth hue nobody has been taught. */
 
 .gate-accept {
   position: absolute;
@@ -1786,12 +1454,6 @@ function statusWord(run: VerifyRun): string {
   background: var(--bg-hover);
   border: 1px solid var(--border-card);
   border-radius: var(--r-row);
-  /* Quiet, but never invisible. This was opacity 0 until hover, on the argument
-     that six of them shouting would compete with the figures they annotate. A
-     screenshot of the section settled it the other way: a control nobody can see
-     is a control nobody finds, which is the same complaint that produced the
-     selection ring above. Quiet enough to stay subordinate to the figure, present
-     enough to be discovered without hunting. */
   opacity: 0.55;
   transition: opacity 120ms var(--ease-overlay);
 }
@@ -1830,7 +1492,6 @@ function statusWord(run: VerifyRun): string {
   opacity: 0.62;
 }
 
-/* Labels a suite the current environment cannot run (blockedReason). */
 .dev-tag {
   font-size: var(--fs-micro);
   text-transform: uppercase;
@@ -2013,8 +1674,6 @@ function statusWord(run: VerifyRun): string {
   display: flex;
   align-items: baseline;
   gap: 10px;
-  /* width + text-align because the pickable variant is a <button>: it had no
-     keyboard path as a div, and a button is inline-block and centred by default. */
   width: 100%;
   text-align: left;
   padding: var(--pad-card);
@@ -2082,11 +1741,6 @@ function statusWord(run: VerifyRun): string {
   flex-direction: column;
   gap: 2px;
   padding: 9px 11px;
-  /* A CARD, so --bg-card. These rested on --bg-hover, a translucent wash built
-     for a hover state: over the light canvas it reads as a grey slab instead of
-     a white card floating on it, which is the surface's whole idea. The Skills
-     section next door already used --bg-card, and the two side by side is what
-     made it visible. */
   background: var(--bg-card);
   border: 1px solid var(--border-card);
   border-radius: var(--rc);
@@ -2116,11 +1770,6 @@ function statusWord(run: VerifyRun): string {
   gap: 10px;
   padding: 8px 10px;
   margin-bottom: 5px;
-  /* A CARD, so --bg-card. These rested on --bg-hover, a translucent wash built
-     for a hover state: over the light canvas it reads as a grey slab instead of
-     a white card floating on it, which is the surface's whole idea. The Skills
-     section next door already used --bg-card, and the two side by side is what
-     made it visible. */
   background: var(--bg-card);
   border: 1px solid var(--border-card);
   border-radius: var(--rc);
@@ -2159,15 +1808,9 @@ function statusWord(run: VerifyRun): string {
   margin-top: 3px;
 }
 
-/* One real HTTP call: its verdict, the call, then the row it was drawn from. */
 .ep {
   padding: 8px 10px;
   margin-bottom: 5px;
-  /* A CARD, so --bg-card. These rested on --bg-hover, a translucent wash built
-     for a hover state: over the light canvas it reads as a grey slab instead of
-     a white card floating on it, which is the surface's whole idea. The Skills
-     section next door already used --bg-card, and the two side by side is what
-     made it visible. */
   background: var(--bg-card);
   border: 1px solid var(--border-card);
   border-radius: var(--rc);
@@ -2243,14 +1886,9 @@ function statusWord(run: VerifyRun): string {
   font-size: var(--fs-meta);
   color: var(--text-mid);
   margin-top: 4px;
-  /* Same protection as .ep-line and .ev-result: this holds model-written prose
-     that can carry an unbroken URL or stack frame, which would otherwise widen
-     the row and push the panel into a horizontal scroll. */
   word-break: break-word;
 }
 
-/* The provenance lines: which server and query produced the identifiers, and
-   what the response was checked against. Labelled so neither reads as prose. */
 .ep-line {
   font-size: var(--fs-micro);
   color: var(--text-on-wash);

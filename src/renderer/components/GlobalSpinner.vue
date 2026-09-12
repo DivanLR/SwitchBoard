@@ -1,7 +1,4 @@
 <script setup lang="ts">
-// Global loading spinner: shows whenever any IPC invoke is in flight. A short
-// show-delay keeps fast calls from flickering; a short min-visible keeps it
-// from vanishing before the eye registers it.
 import { onMounted, onUnmounted, ref } from 'vue'
 
 const visible = ref(false)
@@ -10,8 +7,8 @@ let hideTimer: ReturnType<typeof setTimeout> | undefined
 let shownAt = 0
 let unsubscribe: (() => void) | undefined
 
-const SHOW_DELAY = 150 // don't flash for sub-150ms loads
-const MIN_VISIBLE = 350 // once shown, stay at least this long
+const SHOW_DELAY = 150 
+const MIN_VISIBLE = 350 
 
 function onPending(pending: number): void {
   if (pending > 0) {
@@ -23,7 +20,6 @@ function onPending(pending: number): void {
       shownAt = Date.now()
     }, SHOW_DELAY)
   } else {
-    // Nothing in flight: cancel a pending show, or hide after the min-visible.
     if (showTimer) {
       clearTimeout(showTimer)
       showTimer = undefined
@@ -74,9 +70,6 @@ onUnmounted(() => {
 .gs-ring {
   width: 15px;
   height: 15px;
-  /* The one thing in the app that stays a circle: it rotates, and a rotating
-     square reads as a glitch rather than as progress. The chamfer rule governs
-     surfaces and tags, not a spinner. */
   border-radius: 50%;
   border: 2px solid var(--border-strong);
   border-top-color: var(--green);
