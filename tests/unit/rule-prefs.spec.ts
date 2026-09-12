@@ -1,8 +1,3 @@
-// Merging the developer's changes over the shipped rule defaults.
-//
-// The property being protected is the one the earlier seeded-table design lost:
-// the shipped defaults stay authoritative, so changing one in code reaches every
-// install that has not overridden that exact rule, while an override survives.
 import { describe, expect, it } from 'vitest'
 import { classifyRisk, defaultRiskRules } from '@main/inbox/risk-rules'
 import { classifyNoise, defaultSwallowRules } from '@main/stream/swallow-rules'
@@ -40,7 +35,6 @@ describe('effectiveRiskRules', () => {
   })
 
   it('ships stable ids, so an override can outlive a restart', () => {
-    // Two separate calls must agree, or nothing could be keyed to a shipped rule.
     expect(defaultRiskRules().map((r) => r.id)).toEqual(defaultRiskRules().map((r) => r.id))
     expect(defaultRiskRules().every((r) => r.id.startsWith('builtin:'))).toBe(true)
   })
@@ -48,7 +42,6 @@ describe('effectiveRiskRules', () => {
   it('drops a shipped rule the developer switched off', () => {
     const rules = effectiveRiskRules([pref({ id: 'builtin:tool-read', kind: 'risk', disabled: true })])
     expect(rules.some((r) => r.id === 'builtin:tool-read')).toBe(false)
-    // Read now falls through to the fail-safe rather than reading as low risk.
     expect(classifyRisk(rules, 'Read', { file_path: 'a.ts' })).toBe('high')
   })
 
@@ -60,8 +53,6 @@ describe('effectiveRiskRules', () => {
   })
 
   it("puts the developer's own rules ahead of the shipped ones", () => {
-    // Bash rm -rf is high by default. A custom rule must be able to beat that,
-    // or writing one achieved nothing.
     const custom = {
       id: 'custom-1',
       scope: 'global',
@@ -76,7 +67,6 @@ describe('effectiveRiskRules', () => {
     ])
     expect(rules[0].id).toBe('custom-1')
     expect(classifyRisk(rules, 'Bash', { command: 'rm -rf ./tmp/build' })).toBe('low')
-    // The shipped rule still governs everything it always did.
     expect(classifyRisk(rules, 'Bash', { command: 'rm -rf /' })).toBe('high')
   })
 
@@ -98,7 +88,6 @@ describe('effectiveRiskRules', () => {
   })
 
   it('ignores an override for a rule that no longer ships', () => {
-    // Retiring a rule must not resurrect it or throw; the row just does nothing.
     const rules = effectiveRiskRules([
       pref({ id: 'builtin:removed-long-ago', kind: 'risk', disabled: true }),
     ])
@@ -106,8 +95,6 @@ describe('effectiveRiskRules', () => {
   })
 
   it('ignores a row whose body will not parse, leaving the defaults in force', () => {
-    // Conservative direction on purpose: an unreadable rule must never widen
-    // what is allowed.
     const rules = effectiveRiskRules([
       pref({ id: 'custom-broken', kind: 'risk', body: '{not json', position: 0 }),
     ])

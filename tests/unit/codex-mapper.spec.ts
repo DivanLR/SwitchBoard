@@ -1,9 +1,3 @@
-// The Codex engine's half of the stream contract: the CLI's JSONL vocabulary
-// mapped onto the same event kinds the Claude mapper produces, so both engines
-// render through one view.
-//
-// The frames below were copied from a real `codex exec --json` run rather than
-// written from a specification — the shapes are what the CLI actually emitted.
 import { describe, expect, it } from 'vitest'
 import type { EventKind, EventPayloadMap, SessionEvent } from '@shared/domain'
 import { CodexMapper } from '@main/sessions/codex-mapper'
@@ -82,7 +76,6 @@ describe('CodexMapper', () => {
     const update = sink.updates.at(-1)?.payload as { resultPreview: string; isError: boolean }
     expect(update.resultPreview).toBe('nope')
     expect(update.isError).toBe(true)
-    // One row, updated in place — not a second row for the result half.
     expect(sink.appended.filter((e) => e.kind === 'tool_activity')).toHaveLength(1)
   })
 
@@ -101,7 +94,6 @@ describe('CodexMapper', () => {
     )
     expect(sink.appended.at(-1)?.kind).toBe('result')
     expect(usage!['gpt-5.6-sol'].inputTokens).toBe(17999)
-    // Codex reports no cost, so the app states none rather than inventing $0.00.
     expect((sink.appended.at(-1)?.payload as { totalCostUsd: number }).totalCostUsd).toBe(0)
   })
 
@@ -121,9 +113,6 @@ describe('CodexMapper', () => {
     expect(turns()).toBe(1)
   })
 
-  // A command that was running when the turn died has a started row and no
-  // completed half to answer it. Left alone it sits in the transcript looking
-  // like work still in progress, for ever.
   it('fails the tool rows that were still open when the turn failed', () => {
     const { mapper, sink } = makeMapper()
     mapper.line(
@@ -144,8 +133,6 @@ describe('CodexMapper', () => {
     expect((sink.updates.at(-1)?.payload as { isError: boolean }).isError).toBe(true)
   })
 
-  // The map is keyed by an id the CLI restarts per turn, so an entry surviving a
-  // turn boundary would let the next turn update the previous turn's row.
   it('keeps no open item across a turn boundary', () => {
     const { mapper, sink } = makeMapper()
     mapper.line(
@@ -156,7 +143,6 @@ describe('CodexMapper', () => {
     mapper.line(
       '{"type":"item.completed","item":{"id":"item_1","type":"command_execution","aggregated_output":"late","exit_code":0}}',
     )
-    // The late half creates its own row rather than reopening the closed one.
     expect(sink.updates.length).toBe(before)
     expect(sink.appended.at(-1)?.kind).toBe('tool_activity')
   })
@@ -167,8 +153,6 @@ describe('codex argv', () => {
     const base = { prompt: 'do it', projectPath: 'C:/repo', mode: 'auto' as const }
     expect(turnArgs(base).slice(0, 2)).toEqual(['exec', '--json'])
     expect(turnArgs({ ...base, threadId: 't1' }).slice(0, 3)).toEqual(['exec', 'resume', 't1'])
-    // The prompt is the last argument, never piped: a piped stdin is read by
-    // `codex exec` as extra prompt material.
     expect(turnArgs(base).at(-1)).toBe('do it')
   })
 

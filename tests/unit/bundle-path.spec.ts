@@ -1,6 +1,3 @@
-// The containment rule for app://bundle/ requests. The pathname comes from the
-// renderer, so these are the cases that decide whether the UI's own origin can
-// be used to read the rest of the disk.
 import { describe, expect, it } from 'vitest'
 import { resolve, sep } from 'node:path'
 import { resolveBundlePath } from '@main/bundle-path'
@@ -34,7 +31,6 @@ describe('resolveBundlePath', () => {
   })
 
   it('refuses a sibling directory that merely shares the prefix', () => {
-    // The bug a bare startsWith(root) would let through.
     expect(resolveBundlePath(ROOT, '/../renderer-backup/index.html')).toBeNull()
   })
 
@@ -44,7 +40,6 @@ describe('resolveBundlePath', () => {
   })
 
   it('keeps every served path under the bundle directory', () => {
-    // The property the individual cases are examples of.
     for (const pathname of ['/index.html', '/a/b/c.js', '/./index.html', '/assets/x/../y.css']) {
       const served = resolveBundlePath(ROOT, pathname)
       expect(served).not.toBeNull()

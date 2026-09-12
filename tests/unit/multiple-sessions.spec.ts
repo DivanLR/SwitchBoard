@@ -1,6 +1,3 @@
-// A project may run several sessions at once. This was forbidden until 2026-08-05,
-// when the owner reversed it, so these tests exist to hold the new rule in place: the
-// old one was enforced by an explicit refusal that is easy to reintroduce by reflex.
 import { describe, expect, it } from 'vitest'
 import { openDatabase, type AppDatabase } from '@main/store/db'
 import { createRepositories, newId, nowIso, type Repositories } from '@main/store/repositories'
@@ -52,8 +49,6 @@ describe('a project can hold several live sessions', () => {
     const newer = sessionRow(projectId, '2026-08-05T10:05:00.000Z')
     repos.sessions.insert(older)
     repos.sessions.insert(newer)
-    // activeForProject already ordered by startedAt DESC LIMIT 1 before the limit was
-    // lifted, so every caller that means "a live session here" keeps working.
     expect(repos.sessions.activeForProject(projectId)?.id).toBe(newer.id)
   })
 
@@ -77,8 +72,6 @@ describe('a project can hold several live sessions', () => {
     const live = repos.sessions.listUnended().filter((s) => s.projectId === projectId)
     expect(live).toHaveLength(1)
     expect(live[0]?.id).toBe(first.id)
-    // And the project's "a live session" answer falls back to the one still running,
-    // rather than to the newest row overall.
     expect(repos.sessions.activeForProject(projectId)?.id).toBe(first.id)
   })
 

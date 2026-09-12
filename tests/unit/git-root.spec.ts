@@ -1,10 +1,3 @@
-// Which directory git commands run in for a project.
-//
-// A .NET repository is routinely registered by its containing folder while the
-// solution and the .git sit one level down. Stack detection already walks that
-// layout (stackEntries matches "Api/Api.sln"), so the Tests section happily
-// found seven suites for a project whose Diff tab reported no repository at
-// all. The two halves of the app disagreed about where the project was.
 import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -38,7 +31,6 @@ describe('gitRoot', () => {
     const inner = join(root, 'Ppl.Einstein.External.Api')
     mkdirSync(inner)
     mkdirSync(join(inner, '.git'))
-    // Ordinary sibling files must not distract it.
     writeFileSync(join(root, 'README.md'), '#')
     mkdirSync(join(root, 'docs'))
 
@@ -68,8 +60,6 @@ describe('gitRoot', () => {
     expect(gitRoot(root)).toBeNull()
   })
 
-  // Only one level, deliberately: deeper would start guessing which of several
-  // nested repositories the developer meant.
   it('does not go hunting two levels down', () => {
     const root = tempTree()
     const deep = join(root, 'a', 'b')

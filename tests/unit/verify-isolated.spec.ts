@@ -1,33 +1,10 @@
-// Suites shared one container and one memory ceiling, and a heavy suite had
-// been killing that container out from under the others (exit 137, SIGKILL, no
-// stderr). runSuitesIsolated is the opt-in fix: each chosen suite gets its own
-// fresh container, run one at a time, its container gone before the next
-// starts. The method did not exist before this change — every assertion below
-// is a compile error without it, which is as clean a "fails without the
-// feature" as a test gets.
-//
-// This pins the four things the contract calls out: suites run one at a time
-// (the second session never starts before the first was stopped), the run
-// closes ONCE at the end rather than per suite, a suite that never reports is
-// recorded rather than dropped, and a cancel stops the queue rather than only
-// the suite already running.
 import { describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { PlannedSuite } from '@main/evals/verify-dispatch'
 
-// Same shape as diagram-watch.spec.ts / container-admission.spec.ts: the run
-// loop is never really exercised (the mocked async iterator's next() never
-// resolves), so a suite's report is injected straight through the manager's
-// own sink rather than through a fabricated SDK message — see reportSuite
-// below. interrupt() is real (Promise.resolve()) because the cancel test needs
-// it to settle.
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
-  // Every session is now handed an in-process MCP server built at start-up
-  // (inter-session.ts, the cross-project handover tool), so a mock of this
-  // module without these two exports makes startSession throw before it
-  // reaches anything these tests measure.
   createSdkMcpServer: () => ({ type: 'sdk', name: 'switchboard', instance: {} }),
   tool: () => ({}),
   query: () => ({
@@ -35,11 +12,6 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
     supportedCommands: () => Promise.resolve([]),
     supportedModels: () => Promise.resolve([]),
     interrupt: () => Promise.resolve(),
-    // sendMessage's deliver path applies the routed model/effort on every send
-    // (applyModelForTurn / applyEffortForModel) — unlike the two tests this
-    // harness is copied from, runSuitesIsolated actually calls sendMessage, so
-    // both have to exist here or the call throws synchronously and the suite
-    // never gets its prompt.
     setModel: () => Promise.resolve(),
     applyFlagSettings: () => Promise.resolve(),
   }),
@@ -51,10 +23,6 @@ vi.mock('@main/sessions/claude-executable', () => ({
 
 vi.mock('@main/sessions/wslc-sandbox', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@main/sessions/wslc-sandbox')>()
-  // Both pre-flights, not just the image one: a containerised start also
-  // creates its named volumes up front now (wslc is not documented to create
-  // them on first mount the way Docker did), and an unstubbed one would spawn
-  // a real wslc on whatever machine runs this suite.
   return {
     ...actual,
     ensureSandboxImage: () => Promise.resolve(),
@@ -92,27 +60,16 @@ function setup() {
 }
 
 function teardown(repos: { events: { flush: () => void } }, db: { close: () => void }): void {
-  // Unlike diagram-watch.spec.ts / container-admission.spec.ts, this suite
-  // actually calls sendMessage, which buffers an events-table insert behind an
-  // unref'd 33ms timer (EventsRepo.insert). Closing the db without flushing
-  // first left that timer to fire against an already-closed handle — the same
-  // ordering main/index.ts's own before-quit handler is careful to avoid (see
-  // EventsRepo.flush's doc comment).
   repos.events.flush()
   db.close()
   for (const d of dirs.splice(0)) {
     try {
-      // Same EPERM dance as diagram-watch.spec.ts: observeBranch spawns git
-      // against this directory on turn end, and Windows will not remove a
-      // directory a live child process still holds onto.
       rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
     } catch {
-      // A leftover temp directory is not worth failing this suite over.
     }
   }
 }
 
-/** A minimal runnable suite — the fields verifyPrompt/noteSuite actually read. */
 function planned(id: string): PlannedSuite {
   return {
     suite: { id, kind: 'unit', label: id, acceptance: `${id} works`, command: `run ${id}`, needs: 'node' },
@@ -120,13 +77,6 @@ function planned(id: string): PlannedSuite {
   }
 }
 
-/**
- * Deliver one suite's SWB_VERIFY report straight through the manager's own
- * sink — the same object HostedSession was constructed with (makeSink), so it
- * exercises the real scanMarkers → scanIsolatedSuiteReport path without
- * needing a real SDK message to carry it. Mirrors diagram-watch.spec.ts's
- * `finishTurn`, which reaches into `session.options` the same way.
- */
 function reportSuite(manager: unknown, sessionId: string, suiteId: string, status: string, detail: string): void {
   const m = manager as {
     hosted: Map<string, { session: { options: { sink: { append: (kind: string, payload: unknown) => void } } } }>
@@ -172,10 +122,6 @@ describe('isolated verify suites run sequentially, one fresh container at a time
       const sessionAId = order[0].split(':')[1]
       reportSuite(manager, sessionAId, 'a', 'pass', '3 passed')
 
-      // Without the isolation fix (a shared container, or a suite 2 dispatch
-      // that does not wait on suite 1's own stop()) this would see "start:B"
-      // land before "stop:A" — two containers alive together is exactly the
-      // bug this feature exists to remove.
       await vi.waitFor(() => expect(order).toHaveLength(3))
       expect(order[1]).toBe(`stop:${sessionAId}`)
       expect(order[2].startsWith('start:')).toBe(true)
@@ -222,10 +168,6 @@ describe('isolated verify suites run sequentially, one fresh container at a time
       const sessionAId = manager.liveSessionIds()[0]
       reportSuite(manager, sessionAId, 'a', 'pass', 'ok a')
 
-      // Suite a settled and its own session is on its way out — this is the
-      // isolated watch's whole reason to exist, distinct from the
-      // shared-container watch that finishes the WHOLE run on its first
-      // report (see watchVerifyReport's own comment for that bug).
       await vi.waitFor(() => expect(manager.liveSessionIds()).toHaveLength(2))
       expect(finishSpy).not.toHaveBeenCalled()
 
@@ -266,9 +208,6 @@ describe('isolated verify suites run sequentially, one fresh container at a time
       await vi.waitFor(() => expect(manager.liveSessionIds()).toHaveLength(1))
       const sessionId = manager.liveSessionIds()[0]
 
-      // The turn ends with no SWB_VERIFY line ever sent — reached the same way
-      // diagram-watch.spec.ts reaches a turn end, by driving the private
-      // status-change path directly rather than a fabricated SDK message.
       const inner = manager as unknown as {
         handleStatusChange: (entry: unknown, status: string) => void
         hosted: Map<string, unknown>
@@ -279,7 +218,6 @@ describe('isolated verify suites run sequentially, one fresh container at a time
       const finished = repos.verifyRuns.byId(run.id)
       expect(finished?.report?.suites).toHaveLength(1)
       expect(finished?.report?.suites[0]).toMatchObject({ id: 'a', status: 'not_run' })
-      // Never a pass, never silently dropped (FR-047's rule, held here too).
       expect(finished?.status).not.toBe('pass')
       expect(finished?.note).toContain('a')
     } finally {
@@ -312,14 +250,9 @@ describe('isolated verify suites run sequentially, one fresh container at a time
       await vi.waitFor(() => expect(startSpy).toHaveBeenCalledTimes(1))
 
       await manager.cancelVerifyRun(run.id)
-      // cancelVerifyRun's own finish() call is the last thing it does before
-      // returning, so this is settled the instant the await above resolves —
-      // no polling needed for the row itself.
       expect(repos.verifyRuns.byId(run.id)?.status).toBe('inconclusive')
 
       await done
-      // The queue stopped: suite b's session was never started, whatever
-      // order the interrupted suite a's own teardown happened to finish in.
       expect(startSpy).toHaveBeenCalledTimes(1)
     } finally {
       teardown(repos, db)

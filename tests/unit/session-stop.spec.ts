@@ -1,8 +1,3 @@
-// stop() must not resolve until the SDK message loop has actually ended.
-//
-// It used to await only interrupt(), so app exit went on to finalise the session
-// row, close the database and quit while the `for await` loop was still running —
-// and the loop's own onExit then wrote to a closed handle.
 import { describe, expect, it } from 'vitest'
 import type { EventKind, EventPayloadMap, SessionEvent } from '@shared/domain'
 import { HostedSession } from '@main/sessions/session'
@@ -18,7 +13,6 @@ function makeSession() {
   }
   return new HostedSession({
     sessionId: 's1',
-    // Every session spawns in one resolved mode; 'auto' is the app default.
     mode: 'auto',
     projectPath: '.',
     sink,
@@ -30,7 +24,6 @@ function makeSession() {
   })
 }
 
-/** The loop promise start() would have stored; set directly so no CLI is spawned. */
 function setRunLoop(session: HostedSession, loop: Promise<void>): void {
   ;(session as unknown as { runLoop: Promise<void> }).runLoop = loop
 }
@@ -51,8 +44,6 @@ describe('HostedSession.stop', () => {
 
     await session.stop()
 
-    // The whole point: the caller that finalises rows and closes the database
-    // cannot observe stop() as done while the loop is still live.
     expect(loopEnded).toBe(true)
   })
 

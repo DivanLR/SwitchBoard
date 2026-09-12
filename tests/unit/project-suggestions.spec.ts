@@ -1,6 +1,3 @@
-// The add-project picker offers only the 10 most recently used Claude Code
-// folders: ~/.claude/projects keeps every folder ever run in, and an
-// alphabetical list of hundreds buries the folder actually being added.
 import { afterEach, describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -14,7 +11,6 @@ afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
 })
 
-/** Writes a fake ~/.claude/projects entry whose session log points at `cwd`. */
 function writeLog(claudeDir: string, slug: string, cwd: string, ageSeconds: number): void {
   const dir = join(claudeDir, slug)
   mkdirSync(dir, { recursive: true })
@@ -32,7 +28,6 @@ describe('suggestProjects', () => {
     dirs.push(root)
     const claudeDir = join(root, 'claude-projects')
 
-    // 14 folders, folder-0 used most recently and folder-13 the longest ago.
     for (let i = 0; i < 14; i++) {
       const cwd = join(root, `folder-${i}`)
       mkdirSync(cwd, { recursive: true })
@@ -63,7 +58,6 @@ describe('suggestProjects', () => {
 
     const names = (await suggestProjects(repos, claudeDir)).map((s) => s.name)
     expect(names).not.toContain('folder-0')
-    // folder-10 was outside the top 10 until the registered one dropped out.
     expect(names).toEqual(Array.from({ length: 10 }, (_, i) => `folder-${i + 1}`))
   })
 })

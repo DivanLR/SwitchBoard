@@ -1,10 +1,3 @@
-// The renderer's live event tail is capped, so a long session cannot grow the
-// app's heap for the rest of the day.
-//
-// The check that matters is not "it trimmed" but what it left behind: the newest
-// events, in order, and paging state that admits something was dropped. A trim
-// that quietly loses history without re-offering "show earlier" would be worse
-// than the leak.
 import { describe, expect, it } from 'vitest'
 import type { SessionEvent } from '@shared/domain'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
@@ -19,13 +12,6 @@ const event = (seq: number): SessionEvent => ({
   createdAt: '2026-07-31T08:00:00.000Z',
 })
 
-/**
- * A session already `held` events long, then whatever else is pushed.
- *
- * Seeded by assignment rather than by pushing thousands of events one at a time:
- * the trim is what is under test, and pushing 3600 events through a reactive
- * proxy is several seconds of test time that proves nothing extra.
- */
 function streamed(held: number, pushes: number): ReturnType<typeof useActiveSessionStore> {
   const store = useActiveSessionStore()
   store.sessionId = 's1'

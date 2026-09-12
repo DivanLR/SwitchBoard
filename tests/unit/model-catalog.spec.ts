@@ -1,6 +1,3 @@
-// The model list is read from the CLI and everything cosmetic is derived from the
-// id, so a newly released Claude model needs no code change. These checks pin
-// that: an id the app has never seen still gets a label, a price and a rung.
 import { describe, expect, it } from 'vitest'
 import { modelFamily, modelLabel, modelPrice } from '@shared/domain'
 import { toAvailableModels } from '@main/sessions/model-catalog'
@@ -46,7 +43,6 @@ describe('toAvailableModels (SDK report → selectable list)', () => {
       { value: 'opus[1m]', resolvedModel: 'claude-opus-5[1m]', displayName: 'Opus (1M context)' },
       { value: 'sonnet', resolvedModel: 'claude-sonnet-5', displayName: 'Sonnet' },
     ])
-    // The default row must not claim Opus 5's id, or Opus 5 loses its own card.
     expect(models.map((m) => m.id)).toEqual(['claude-opus-5[1m]', 'claude-sonnet-5'])
     expect(models[0]?.label).toBe('Opus (1M context)')
   })
@@ -57,17 +53,12 @@ describe('toAvailableModels (SDK report → selectable list)', () => {
       { value: 'claude-sonnet-5' },
       { value: '' },
     ])
-    // The engine is stamped here so the settings list can tell the two CLIs'
-    // models apart without re-deriving it from the id.
     expect(models).toEqual([
       { id: 'claude-sonnet-5', label: 'claude-sonnet-5', description: '', engine: 'claude' },
     ])
   })
 })
 
-// A model released after this code was written must need no code change. Fable
-// 5.1 is the live example: the CLI did not report it yet, and the question was
-// whether the app would show it once the CLI did.
 describe('a model the app has never seen', () => {
   it('gets a label, a family, a price and a downgrade rung from its id alone', () => {
     expect(modelLabel('claude-fable-5-1')).toBe('Fable 5.1')
@@ -76,15 +67,12 @@ describe('a model the app has never seen', () => {
     expect(modelPrice('claude-fable-5-1')).toBe('$$$')
   })
 
-  // An entirely unknown family still renders rather than breaking the picker.
   it('still renders an unrecognised family, without claiming a price it cannot know', () => {
     expect(modelLabel('claude-quartz-2')).toBe('Quartz 2')
     expect(modelFamily('claude-quartz-2')).toBeNull()
     expect(modelPrice('claude-quartz-2')).toBe('—')
   })
 
-  // The alias and the resolved id collapse to one row, which is what stops a new
-  // release appearing twice in the picker.
   it('collapses an alias onto the id it resolves to', () => {
     const models = toAvailableModels([
       { value: 'default', resolvedModel: 'claude-fable-5-1' },

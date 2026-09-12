@@ -1,6 +1,3 @@
-// The scan-doc path convention, which ipc/handlers.ts and session startup both
-// depend on: if these two disagree about where a scan doc lives, the app writes a
-// file the session never injects and the MCP view shows nothing, with no error.
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -44,9 +41,6 @@ describe('readSchemaDoc', () => {
 })
 
 describe('comboDocPath', () => {
-  // The agent writes to the shared relative path; main reads through this one.
-  // Deriving the expectation from comboDocRelPath is the point: a change to the
-  // slug rule that broke the join would show up here.
   it('resolves the shared relative path against the project', () => {
     const servers = ['postgres — production', 'github']
     expect(comboDocPath('C:\\proj', servers)).toBe(
@@ -59,8 +53,6 @@ describe('comboDocPath', () => {
   })
 
   it('separates server sets whose names sanitise identically', () => {
-    // Both slug to "postgres-production" before the hash suffix; without it, two
-    // different connections would silently share one scan doc.
     expect(comboDocPath('C:\\p', ['postgres — production'])).not.toBe(
       comboDocPath('C:\\p', ['postgres production']),
     )
@@ -80,7 +72,6 @@ describe('readComboDoc', () => {
 
     expect(readComboDoc(dir, servers)).toBe('combo scan')
     expect(readComboDoc(dir, ['postgres', 'github'])).toBe('combo scan')
-    // A different set is a different doc, not a fallback to this one.
     expect(readComboDoc(dir, ['github'])).toBeNull()
   })
 })

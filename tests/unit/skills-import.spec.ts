@@ -1,11 +1,3 @@
-// The parsing and safety rules of the custom-skill importer.
-//
-// These are the parts that decide what a URL is allowed to mean and what a
-// remote repository is allowed to write, so they are tested directly rather than
-// through a network call. Fetching a file is still not re-tested here — it is
-// fetch plus writeFile, and a test of that shape only asserts that Node works —
-// but WHICH failures end an import is a policy, not plumbing, and that is
-// tested against a stubbed fetch at the bottom of this file.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -20,8 +12,6 @@ import { readSkillSource } from '@shared/skill-source'
 
 describe('parseSkillSource', () => {
   it('reads the folder URL a developer actually pastes', () => {
-    // The exact shape GitHub's "browse a folder" address bar produces, which is
-    // what the owner asked to be able to paste.
     expect(parseSkillSource('https://github.com/mattpocock/skills/tree/main/skills/engineering')).toEqual({
       owner: 'mattpocock',
       repo: 'skills',
@@ -40,8 +30,6 @@ describe('parseSkillSource', () => {
     expect(parseSkillSource('https://github.com/owner/repo.git')).toMatchObject({ repo: 'repo' })
   })
 
-  // Every one of these reaches a URL that this app would then fetch, so each is
-  // refused before a request rather than sanitised into something plausible.
   it('refuses anything that is not a github.com https URL', () => {
     for (const bad of [
       'notaurl',
@@ -55,12 +43,6 @@ describe('parseSkillSource', () => {
     }
   })
 
-  // The guarantee is that no traversal segment ever reaches the parsed path, not
-  // that every such URL throws. `new URL()` resolves `..` out of the pathname
-  // before this function sees it, so one of these lands on a different but
-  // well-formed repository reference and the other stops being a /tree/ URL at
-  // all. Both outcomes are safe; asserting "throws" would have been asserting the
-  // wrong thing, and would break the moment URL parsing changed.
   it('never yields a path that could climb out of where it is written', () => {
     for (const input of [
       'https://github.com/o/r/tree/../../etc/x',
@@ -71,18 +53,13 @@ describe('parseSkillSource', () => {
       try {
         path = parseSkillSource(input).path
       } catch {
-        continue // refused outright, which is also fine
+        continue 
       }
       expect(path.split('/'), input).not.toContain('..')
       expect(path.startsWith('/'), input).toBe(false)
     }
   })
 
-  // Percent-encoded traversal is normalised away by URL parsing as well, which
-  // is worth pinning because it is not obvious: `%2e%2e` is decoded and resolved
-  // as `..` rather than surviving as a literal folder name. Recorded so that a
-  // future change away from `new URL()` cannot quietly remove the protection
-  // nobody realised was coming from there.
   it('normalises an encoded traversal away too, rather than passing it through', () => {
     expect(parseSkillSource('https://github.com/o/r/tree/main/%2e%2e/x').path).toBe('')
   })
@@ -95,9 +72,6 @@ describe('parseSkillFrontmatter', () => {
   })
 
   it('survives CRLF, quotes, and a leading byte-order mark', () => {
-    // All three turn up in files written on Windows or by an editor that adds a
-    // BOM, and a skill that fails to import for one of them looks like a bug in
-    // the repository rather than in this parser.
     const text = '﻿---\r\nname: "my-skill"\r\ndescription: \'Quoted.\'\r\n---\r\n'
     expect(parseSkillFrontmatter(text)).toEqual({ name: 'my-skill', description: 'Quoted.' })
   })
@@ -113,8 +87,6 @@ describe('parseSkillFrontmatter', () => {
 })
 
 describe('isUsableSkillName', () => {
-  // The name becomes a directory under ~/.claude/skills AND the slash command,
-  // so it has to be safe as both.
   it('accepts the lower-case dashed form skills actually use', () => {
     expect(isUsableSkillName('code-review')).toBe(true)
     expect(isUsableSkillName('a')).toBe(true)
@@ -127,10 +99,6 @@ describe('isUsableSkillName', () => {
   })
 })
 
-// The renderer-facing face of the same parser. The Settings field applies these
-// rules as the URL is typed, so it needs a verdict it can render rather than an
-// exception — and the two faces must never disagree, which is why they are one
-// implementation with a throwing wrapper over it.
 describe('readSkillSource', () => {
   it('answers with the parts, not an exception, for a URL it accepts', () => {
     const result = readSkillSource('https://github.com/owner/repo/tree/next/skills/a')
@@ -147,8 +115,6 @@ describe('readSkillSource', () => {
   })
 
   it('agrees with the throwing face on every input', () => {
-    // The whole point of sharing the implementation. If these two ever diverge,
-    // the field would arm a button for a URL the importer then refuses.
     const inputs = [
       'https://github.com/owner/repo',
       'https://github.com/owner/repo.git',
@@ -172,10 +138,6 @@ describe('readSkillSource', () => {
   })
 })
 
-// A skill is one HTTP request per file, and archify's is 190 of them. One of
-// those came back 400 — the same URL answered 200 from a shell moments later —
-// and the import threw away 85 files that had already landed. So a blip is
-// retried and a 404 is not.
 describe('importSkills download policy', () => {
   const SOURCE = 'https://github.com/tt-a1i/archify/tree/main/archify'
   const TREE = {
@@ -190,7 +152,6 @@ describe('importSkills download policy', () => {
     vi.unstubAllGlobals()
   })
 
-  /** Answers the tree and the SKILL.md, and hands `bin/archify.mjs` to `bin`. */
   function stubGitHub(bin: (attempt: number) => Response): string[] {
     const calls: string[] = []
     let attempt = 0

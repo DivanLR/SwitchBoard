@@ -1,8 +1,6 @@
-// Inline clarify-question detection + option parsing (Spec Kit idiom).
 import { describe, expect, it } from 'vitest'
 import { isInteractiveQuestion, parseInlineQuestion, pendingQuestion } from '@shared/inline-question'
 
-// Real /speckit-clarify closing message (markdown table flowed onto one line).
 const CLARIFY = `Contract defines run-level passRate and metric-level pass booleans, but never what makes a single test case pass. Asking max 2 questions, one at a time.
 
 Question 1 of 2
@@ -47,11 +45,6 @@ describe('inline questions', () => {
   })
 })
 
-// A section dispatches into a background session. When that session asks
-// something, the answer card used to render only in the conversation, so a
-// section could be stopped dead: the tail showed the question as ordinary output
-// with no controls under it, and the run waited for a reply that had nowhere to
-// come from. Both surfaces now derive "is a question still open" from here.
 describe('pendingQuestion', () => {
   const ev = (id: string, kind: string, text?: string) => ({ id, kind, payload: { text } })
   const QUESTION =
@@ -63,15 +56,12 @@ describe('pendingQuestion', () => {
     expect(found?.payload.options.map((o) => o.label)).toEqual(['A', 'B'])
   })
 
-  // A prompt after the question IS the answer, so the card must retire.
   it('is null once a prompt follows the question', () => {
     expect(
       pendingQuestion([ev('e1', 'assistant_text', QUESTION), ev('e2', 'prompt', 'A')]),
     ).toBeNull()
   })
 
-  // Tool rows and results say nothing either way; treating them as an answer
-  // would hide a live question behind the session's own noise.
   it('looks past tool activity and results between the question and now', () => {
     const found = pendingQuestion([
       ev('e1', 'assistant_text', QUESTION),
@@ -81,8 +71,6 @@ describe('pendingQuestion', () => {
     expect(found?.eventId).toBe('e1')
   })
 
-  // Local retirement, so a double click cannot send twice before the echoed
-  // prompt event lands and hides the card for good.
   it('is null for a card the developer has just answered', () => {
     expect(pendingQuestion([ev('e1', 'assistant_text', QUESTION)], 'e1')).toBeNull()
   })
@@ -92,7 +80,6 @@ describe('pendingQuestion', () => {
     expect(pendingQuestion([])).toBeNull()
   })
 
-  // Only the LATEST question is live: an older one has been overtaken.
   it('answers about the most recent question, not the first', () => {
     const found = pendingQuestion([
       ev('e1', 'assistant_text', QUESTION),
@@ -102,10 +89,6 @@ describe('pendingQuestion', () => {
     expect(found?.eventId).toBe('e3')
   })
 
-  // A question the SDK asked as a tool call rather than as prose. The
-  // conversation renders these from the stream; a section tail has no stream, so
-  // it asks here. Before this a Spec Kit command that asked one sat in its own
-  // session with the question showing and nothing to answer it with.
   describe('a question asked as a tool call', () => {
     const asked = (id: string, over: Record<string, unknown> = {}) => ({
       id,

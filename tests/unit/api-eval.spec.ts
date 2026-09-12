@@ -1,9 +1,3 @@
-// The deterministic half of an API run: route discovery, host resolution, the
-// verdict on a response, and reading request data back off a session's output.
-//
-// These are the pieces that replaced "ask the session whether the API works", so
-// each one is checked directly: a wrong verdict here would be a green eval set
-// that proves nothing, which is the exact failure the feature exists to remove.
 import { describe, expect, it } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -47,16 +41,12 @@ describe('scanEndpoints', () => {
       'GET /api/Customers',
       'GET /api/Customers/{id:int}',
       'POST /api/Customers/search',
-      // A leading slash on the action replaces the prefix, as routing does.
       'GET /health',
     ])
     expect(found[0].source).toBe('Api/CustomersController.cs:6')
   })
 
   it('substitutes the API version, so a versioned route is callable', () => {
-    // The shape Asp.Versioning writes, and the shape every controller in the real
-    // Pepkor External API uses. Left as a placeholder, every route it found was
-    // uncallable and the version became something a model had to guess.
     const versioned = `
 [ApiVersion("2")]
 [Route("v{version:apiVersion}/[controller]")]
@@ -211,9 +201,6 @@ describe('apiVerdict', () => {
 
   it('fails on any failed call, and passes only when every call completed', () => {
     expect(apiVerdict([call('pass'), call('fail')])).toBe('fail')
-    // A call that never went out takes PASS away: one endpoint answering while
-    // four time out is a run that mostly did not happen, and the badge is what a
-    // developer reads before anything else.
     expect(apiVerdict([call('pass'), call('not_run')])).toBe('error')
     expect(apiVerdict([call('pass')])).toBe('pass')
   })
@@ -232,7 +219,6 @@ describe('parseApiRequests', () => {
     expect(parsed).toHaveLength(1)
     expect(parsed[0]).toMatchObject({
       method: 'GET',
-      // A path without a leading slash still joins to the base URL correctly.
       path: '/api/c/4417',
       expect: { status: 200, minItems: 3, mustContain: null },
       dataSource: 'oracle-sqlcl',
@@ -251,9 +237,6 @@ describe('parseApiRequests', () => {
     expect(parseApiRequests(`${API_DATA_MARKER}: not json`)).toBeNull()
   })
 
-  // Same defect the verify reader had: slicing to the LAST brace in the turn let
-  // one brace in a closing sentence swallow the whole request set, and the run
-  // then reported that nothing was called.
   it('is not derailed by a closing brace in the prose after the data line', () => {
     const text =
       `${API_DATA_MARKER}: {"requests":[{"method":"GET","path":"/api/orders"}]}\n` +
@@ -333,8 +316,6 @@ describe('resolveApiHost', () => {
   it('takes the http URL from launchSettings and derives the start command', async () => {
     const host = await resolveApiHost(project(), {})
     expect(host).toMatchObject({ baseUrl: 'http://localhost:5057' })
-    // https first in the file, http chosen: a dev certificate the run does not
-    // trust would fail as if the API were broken.
     expect('startCmd' in host && host.startCmd).toContain('dotnet run --project')
   })
 

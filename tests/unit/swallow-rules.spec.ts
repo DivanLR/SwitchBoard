@@ -1,5 +1,3 @@
-// T039: swallow classifier — matching, ordering, and the
-// categorical exemptions (FR-015a/017).
 import { describe, expect, it } from 'vitest'
 import type { EventKind, SessionEvent, SwallowRule } from '@shared/domain'
 import { classifyNoise, defaultSwallowRules, displayTextOf } from '@main/stream/swallow-rules'
@@ -100,8 +98,6 @@ describe('default swallow rules', () => {
   })
 
   it('never hides a response that merely contains a percentage (e.g. /usage)', () => {
-    // A bare percentage is not progress: the model's narrative and command
-    // responses must stay visible in the clean view.
     expect(
       classifyNoise(defaults, event('assistant_text', { text: 'Current 5-hour usage: 45%', partial: false })),
     ).toBeNull()

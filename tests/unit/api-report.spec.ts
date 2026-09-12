@@ -1,10 +1,3 @@
-// The test report, the duration estimate, and the headers a deployed environment
-// carries.
-//
-// Each of these is a place where the app could start inventing things — a report
-// that summarises rather than transcribes, an estimate presented as a measurement,
-// an API key sent as the literal text "${VAR}" — so each is checked for the honest
-// behaviour rather than only the happy one.
 import { describe, expect, it } from 'vitest'
 import { apiReportFileName, apiReportMarkdown, reportFindings } from '@shared/api-report'
 import { estimateRunMs, humanDuration } from '@shared/domain'
@@ -116,7 +109,6 @@ describe('report redaction', () => {
     )
     expect(text).not.toContain('10201304100023231874')
     expect(text).toContain('<redacted:20 digits>')
-    // The facts that make the report worth reading survive.
     expect(text).toContain('"notes":3')
     expect(text).toContain('select * from account where account_no =')
   })
@@ -205,7 +197,6 @@ describe('estimateRunMs', () => {
   })
 
   it('takes the median, so one long run does not move it', () => {
-    // 60, 65, 70 and a 50-minute outlier: the answer stays a bit over a minute.
     const estimate = estimateRunMs([past(60), past(70), past(65), past(3000)])
     expect(estimate?.ms).toBe(67_500)
   })

@@ -1,11 +1,3 @@
-// The turn lifecycle, which is where the races live.
-//
-// `codex exec` runs one turn and exits, so a session is a SEQUENCE of child
-// processes. `kill()` is asynchronous, so a killed child's `close` can arrive
-// after the next turn has already started — and Node emits `close` after `error`
-// for a spawn failure. Both used to settle a turn that was already spoken for:
-// flushing the wrong buffer, clearing the replacement's handle, and draining the
-// queue a second time.
 import { EventEmitter } from 'node:events'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EventKind, EventPayloadMap, SessionEvent } from '@shared/domain'
@@ -92,17 +84,14 @@ describe('CodexSession turn lifecycle', () => {
     await session.interrupt()
     expect(first.killed).toBe(true)
 
-    // A replacement starts immediately, before the killed child has emitted.
     session.send('second').deliver('p2')
     expect(spawned).toHaveLength(2)
     expect(session.isMidTask).toBe(true)
 
-    // The late close from the FIRST child must change nothing.
     first.emit('close', null)
     expect(session.isMidTask).toBe(true)
     expect(turns()).toBe(0)
 
-    // The replacement still settles normally.
     spawned[1].emit('close', 0)
     expect(session.isMidTask).toBe(false)
     expect(turns()).toBe(1)
@@ -125,7 +114,6 @@ describe('CodexSession turn lifecycle', () => {
     const { session } = makeSession()
     session.start()
     session.send('first').deliver('p1')
-    // Queued behind the running turn.
     session.send('second').deliver('p2')
     expect(spawned).toHaveLength(1)
 
@@ -133,7 +121,6 @@ describe('CodexSession turn lifecycle', () => {
     first.emit('close', 0)
     expect(spawned).toHaveLength(2)
 
-    // A second close from the same, already-settled child must not start a third.
     first.emit('close', 0)
     expect(spawned).toHaveLength(2)
   })

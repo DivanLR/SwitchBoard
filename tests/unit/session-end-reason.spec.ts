@@ -1,35 +1,14 @@
-// "Sometimes my sessions just close with no message." They did, and this pins the
-// fix: every way a session can end now records WHY on the row.
-//
-// Four paths reached the database with `statusDetail` null, so that afterwards
-// nothing could tell them apart:
-//   - the developer pressing End, or a stray click on a row's own close control
-//   - a section session closing itself the moment its work finished
-//   - a graceful quit whose grace period expired
-//   - startup reconciliation, closing sessions the LAST run never closed at all
-// The last of those was the largest by count and the least obvious, because the
-// session did not close: the application did. Crashes were never silent
-// (explainExit), which is why they are not here.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-// A DRAINABLE run loop, unlike the never-yielding stub the other manager suites
-// use. `stop()` waits for the for-await loop to actually finish (bounded by a 5s
-// grace period, which is why a never-yielding stub makes every one of these tests
-// time out rather than fail). `drainLoops()` ends the loop the way a real CLI
-// exiting does, so the ordinary teardown path runs in full.
 const pending: ((value: { value: undefined; done: true }) => void)[] = []
 function drainLoops(): void {
   for (const resolve of pending.splice(0)) resolve({ value: undefined, done: true })
 }
 
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
-  // Every session is now handed an in-process MCP server built at start-up
-  // (inter-session.ts, the cross-project handover tool), so a mock of this
-  // module without these two exports makes startSession throw before it
-  // reaches anything these tests measure.
   createSdkMcpServer: () => ({ type: 'sdk', name: 'switchboard', instance: {} }),
   tool: () => ({}),
   query: () => ({
@@ -66,7 +45,6 @@ afterEach(() => {
     try {
       rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
     } catch {
-      // A temp directory the OS still holds open. The OS can have it.
     }
   }
 })
@@ -94,7 +72,6 @@ function setup() {
   return { db, repos, project, manager }
 }
 
-/** The private turn-end path, reached the way a real session reaches it. */
 function finishTurn(manager: unknown, sessionId: string): void {
   const m = manager as { hosted: Map<string, { session: { options: { onTurnComplete: () => void } } }> }
   m.hosted.get(sessionId)?.session.options.onTurnComplete()
@@ -112,8 +89,6 @@ describe('a session that ends says why', () => {
     const row = repos.sessions.byId(session.id)
     expect(row?.endedAt).toBeTruthy()
     expect(row?.endReason).toBe('stopped')
-    // The whole point: not null. A row that only says 'stopped' cannot tell the
-    // developer whether they did it, a section did it, or something else did.
     expect(row?.statusDetail).toBe('You ended this session.')
   })
 
@@ -124,40 +99,22 @@ describe('a session that ends says why', () => {
       handleStatusChange: (entry: unknown, status: string) => void
       hosted: Map<string, unknown>
     }
-    // A section's own session: background, so endIfIdleBackground owns its life.
     const session = await inner.startBackground(project.id, 'cleanup')
 
-    // It must have run a turn before it counts as idle, exactly as the real path
-    // requires, and a settled 'done' is then what triggers the self-close.
     finishTurn(manager, session.id)
     inner.handleStatusChange(inner.hosted.get(session.id), 'done')
-    // The self-close awaits the same drain a deliberate stop does.
     await vi.waitFor(() => expect(pending.length).toBeGreaterThan(0))
     drainLoops()
 
     await vi.waitFor(() => expect(repos.sessions.byId(session.id)?.endedAt).toBeTruthy())
     const row = repos.sessions.byId(session.id)
-    // COMPLETED, not 'stopped'. This asserted 'stopped' for as long as the reason
-    // was whatever the SDK reported, and the SDK cannot tell a session that
-    // finished its work apart from one somebody pressed End on: both arrive as a
-    // stop. The banner then told a developer whose drawing had just succeeded
-    // "Session ended (stopped)", which is the wording for a session that was
-    // killed. endIfIdleBackground records the intent before stopping so the two
-    // outcomes stay distinguishable in the one place that has to tell them apart.
     expect(row?.endReason).toBe('completed')
     expect(row?.statusDetail).toMatch(/closed itself when that work finished/)
-    // And the section it was opened for outlives it, so the finished row can be
-    // named for its work rather than falling back to a shared branch.
     expect(row?.sectionKind).toBe('cleanup')
   })
 
-  // The path that produced more silent rows than every other one put together.
-  // Nothing here calls stop(): these are sessions a PREVIOUS run left open, which
-  // is what makes them invisible — the session did not end, the application did.
   it('says so when the last run never closed the session at all', () => {
     const { repos, project } = setup()
-    // Written straight to the table, because that is the only state this path ever
-    // sees: a row with endedAt null and no manager holding it.
     const row = {
       id: 'left-open',
       projectId: project.id,
@@ -207,7 +164,6 @@ describe('a session that ends says why', () => {
 
     repos.sessions.reconcileAllEnded('app_exit', 'Switchboard stopped without closing this session.')
 
-    // The session's own account of why it died beats the generic one.
     const after = repos.sessions.byId('already-explained')
     expect(after?.statusDetail).toBe('The sandbox container was killed from outside.')
     expect(after?.status).toBe('error')

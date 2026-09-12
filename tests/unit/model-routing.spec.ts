@@ -1,4 +1,3 @@
-// Intent heuristic for automatic model routing.
 import { describe, expect, it } from 'vitest'
 import { subagentsAllowed, EFFORT_LEVELS } from '@shared/domain'
 import {
@@ -73,8 +72,6 @@ describe('nextStrongestModel (usage-limit fallback ladder)', () => {
   })
 })
 
-// Effort is the developer's own bar now (Settings.effort), not a per-role
-// derivation. The one rule left to hold is the rung at which subagents exist.
 describe('subagentsAllowed (subagents are a max-effort feature)', () => {
   it('is true at max and nowhere else', () => {
     expect(EFFORT_LEVELS.filter(subagentsAllowed)).toEqual(['max'])
@@ -99,10 +96,6 @@ describe('mainLoopModel (one model per session, never switched)', () => {
   })
 })
 
-// BASIC MODE EXISTS TO COST LESS, so its guarantees are about what does NOT
-// happen: no strong model, no second model registered, no delegation protocol.
-// Each of those is a separate mechanism, and any one of them left on would let
-// the expensive tier back in while the setting still said "basic".
 describe('basic mode', () => {
   const models = { intelligentModel: 'opus', workerModel: 'haiku' }
 
@@ -113,9 +106,6 @@ describe('basic mode', () => {
     expect(mainLoopModel('auto', models)).toBe('opus')
   })
 
-  // With no worker configured there is still only one model to run, and it is
-  // the account's. Falling back to the strong one is right: a mode that cannot
-  // find its cheap model must still produce a working session.
   it('falls back to the intelligent model when no worker is set', () => {
     expect(mainLoopModel('basic', { intelligentModel: 'opus' })).toBe('opus')
   })
