@@ -8,16 +8,18 @@
 // silently won), and they only ever offered two of the six modes the SDK
 // actually has.
 import { computed, onUnmounted, ref, toValue, watch, type MaybeRefOrGetter } from 'vue'
-import { DEFAULT_SESSION_MODE, SESSION_MODES } from '@shared/domain'
-import type { Session, SessionMode } from '@shared/domain'
+import { DEFAULT_SESSION_ENGINE, DEFAULT_SESSION_MODE, SESSION_MODES } from '@shared/domain'
+import type { Session, SessionEngine, SessionMode } from '@shared/domain'
 import { isIpcError, type ProjectListItem } from '@shared/ipc-types'
 import { useProjectsStore } from '@renderer/stores/projects'
+import { useSettingsStore } from '@renderer/stores/settings'
 
 export function useSessionStart(opts: {
   project: MaybeRefOrGetter<ProjectListItem>
   endedSession: MaybeRefOrGetter<Session | null>
 }) {
   const projects = useProjectsStore()
+  const settings = useSettingsStore()
   const project = (): ProjectListItem => toValue(opts.project)
   const endedSession = (): Session | null => toValue(opts.endedSession)
 
@@ -52,8 +54,29 @@ export function useSessionStart(opts: {
       void projects.setUseContainers(project().id, on)
     },
   })
-  const containerForced = computed(() => startMode.value === 'bypass')
-  const containerOn = computed(() => containerForced.value || runInContainer.value)
+  /**
+   * WHICH CLI the next session runs.
+   *
+   * Opens on the developer's default engine and is a per-session choice, because
+   * the two engines are not the same tool wearing different labels: a Codex
+   * session has no permission inbox, no plan mode and no container. The controls
+   * below reflect that rather than offering settings a Codex session would
+   * silently ignore.
+   */
+  const startEngine = ref<SessionEngine>(
+    settings.settings?.defaultEngine ?? DEFAULT_SESSION_ENGINE,
+  )
+  /** Codex runs on the host only — see the manager's refusal for why. */
+  const containerForced = computed(
+    () => startMode.value === 'bypass' && startEngine.value === 'claude',
+  )
+  const containerOn = computed(
+    () => startEngine.value === 'claude' && (containerForced.value || runInContainer.value),
+  )
+  /** Which modes a Codex session can honestly offer (see sandboxArgs). */
+  const engineModes = computed(() =>
+    startEngine.value === 'codex' ? SESSION_MODES.filter((m) => m.value !== 'bypass') : SESSION_MODES,
+  )
   /** Session-start failure (e.g. wslc missing for a bypass session), ended banner. */
   const startError = ref<string | null>(null)
 
@@ -67,9 +90,9 @@ export function useSessionStart(opts: {
    * developer choose a pair that cannot work, the impossible half is not offered.
    */
   const modeChoices = computed(() => {
-    if (!resumeSession.value) return SESSION_MODES
+    if (!resumeSession.value) return engineModes.value
     const wasBypass = endedSession()?.bypassPermissions === true
-    return SESSION_MODES.filter((m) => (m.value === 'bypass') === wasBypass)
+    return engineModes.value.filter((m) => (m.value === 'bypass') === wasBypass)
   })
 
   const startModeLabel = computed(
@@ -98,6 +121,7 @@ export function useSessionStart(opts: {
     modeOpen.value = false
     resumeSession.value = false
     startMode.value = project().defaultSessionMode ?? DEFAULT_SESSION_MODE
+    startEngine.value = settings.settings?.defaultEngine ?? DEFAULT_SESSION_ENGINE
   }
 
   // The picker opens on however the last session began — not on where it ended up.
@@ -120,6 +144,9 @@ export function useSessionStart(opts: {
         : previous?.planMode
           ? 'plan'
           : (project().defaultSessionMode ?? DEFAULT_SESSION_MODE)
+      // Same rule for the engine: offer again what this conversation was held on,
+      // so restarting a Codex session does not silently become a Claude one.
+      startEngine.value = previous?.engine ?? settings.settings?.defaultEngine ?? DEFAULT_SESSION_ENGINE
     },
     { immediate: true },
   )
@@ -194,6 +221,7 @@ export function useSessionStart(opts: {
         startMode.value,
         undefined,
         runInContainer.value,
+        startEngine.value,
       )
       // sessions.start resolves once the CLI is spawned, not once it has proven
       // it can run — watch the row it returned for the crash that would otherwise
@@ -216,6 +244,7 @@ export function useSessionStart(opts: {
 
   return {
     startMode,
+    startEngine,
     modeOpen,
     resumeSession,
     runInContainer,

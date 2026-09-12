@@ -3,6 +3,7 @@
 // an EventSink so it is unit-testable without the SDK or a database.
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { EventKind, EventPayloadMap, ResultUsage, SessionEvent } from '@shared/domain'
+import { classifyInjection } from '@shared/domain'
 import { isInteractiveQuestion } from '@shared/inline-question'
 
 /**
@@ -35,12 +36,29 @@ interface ContentBlockLike {
   content?: unknown
 }
 
-const PREVIEW_LIMIT = 400
+/**
+ * How much of a tool's input or output is kept.
+ *
+ * This was 400 characters, which made the raw view's promise of "100% of the
+ * output" impossible to keep: every command result longer than a short paragraph
+ * was cut off at ingestion, before any view could ask for the rest. The figure is
+ * now large enough that a real build log, test run or file read survives whole.
+ *
+ * ponytail: a flat per-field cap, not a spill-to-disk store. A single tool result
+ * above this ceiling is still clipped — and says so. Move the overflow to a blob
+ * table if someone actually hits it on ordinary work.
+ */
+const PREVIEW_LIMIT = 100_000
 
 export function previewOf(value: unknown): string {
   if (value === undefined || value === null) return ''
   const text = typeof value === 'string' ? value : JSON.stringify(value)
-  return text.length > PREVIEW_LIMIT ? `${text.slice(0, PREVIEW_LIMIT)}…` : text
+  if (text.length <= PREVIEW_LIMIT) return text
+  // Say what was dropped. A bare ellipsis cannot be told apart from output that
+  // genuinely ended in one, which is the worst way for a view that claims
+  // completeness to be incomplete.
+  const dropped = text.length - PREVIEW_LIMIT
+  return `${text.slice(0, PREVIEW_LIMIT)}\n… [${dropped} more characters not stored]`
 }
 
 function textOfToolResult(content: unknown): string {
@@ -126,6 +144,15 @@ export class MessageMapper {
   private seenAgentToolUses = new Set<string>()
   /** Final MAIN-LOOP assistant text of the current turn, candidate for the summary upgrade. */
   private lastAssistantText: { eventId: string; text: string } | null = null
+  /**
+   * Prompts the wrapper has just handed to the CLI, newest last.
+   *
+   * The CLI echoes each user turn back on the message stream with whatever it
+   * appended to it, so without this the developer's own message would be shown a
+   * second time as "injected context". Held only until the echo arrives, and
+   * capped so a session that never echoes cannot grow the list without bound.
+   */
+  private pendingEchoes: string[] = []
 
   constructor(options: MessageMapperOptions) {
     this.sink = options.sink
@@ -150,13 +177,57 @@ export class MessageMapper {
         this.handleResult(message)
         return
       case 'system':
-        // init/status frames carry no stream content, but the task_* subtypes
+        // The init frame is the session's opening state — model, working
+        // directory, tools, MCP servers — which is what a terminal prints on
+        // start and what the raw view had no way to show. The task_* subtypes
         // report subagents (deep-research fan-out) that must show in the stream.
+        this.handleSystemInit(message)
         this.handleTaskMessage(message)
         return
       default:
         this.handleUnclassified(message)
     }
+  }
+
+  /**
+   * Tell the mapper a prompt has just been handed to the CLI, so the echo of it
+   * on the message stream is not reported as injected context. Called by the
+   * session wrapper at the one point every send passes through.
+   */
+  noteDelivered(text: string): void {
+    this.pendingEchoes.push(text)
+    if (this.pendingEchoes.length > 10) this.pendingEchoes.shift()
+  }
+
+  /**
+   * Append one block of injected context, minus any echo of the message the
+   * developer just sent.
+   *
+   * The CLI may deliver the echo and the injection as separate blocks or as one
+   * block with the injection appended, so both shapes are handled: an exact echo
+   * is dropped whole, and a prefix echo is stripped and the remainder kept.
+   */
+  private emitInjection(text: string, agentId?: string): void {
+    let remainder = text
+    for (let i = 0; i < this.pendingEchoes.length; i++) {
+      const echo = this.pendingEchoes[i]
+      if (!echo) continue
+      if (remainder === echo) {
+        this.pendingEchoes.splice(i, 1)
+        return
+      }
+      if (remainder.startsWith(echo)) {
+        this.pendingEchoes.splice(i, 1)
+        remainder = remainder.slice(echo.length)
+        break
+      }
+    }
+    if (!remainder.trim()) return
+    this.sink.append('injection', {
+      text: remainder,
+      source: classifyInjection(remainder),
+      agentId,
+    })
   }
 
   /** Emits a fatal error event; called by the session wrapper on process death (FR-006). */
@@ -215,12 +286,23 @@ export class MessageMapper {
   }
 
   private handleUser(message: Extract<SDKMessage, { type: 'user' }>): void {
-    // Composer prompts are echoed by the session wrapper on delivery; only the
-    // tool_result half of tool activity is consumed here.
+    // Composer prompts are echoed by the session wrapper on delivery. Everything
+    // else in a user message is either the tool_result half of tool activity or
+    // context the developer never typed — system reminders, expanded slash
+    // commands, hook output — which is emitted as `injection` so the raw view can
+    // show it. Both halves matter; dropping the second was why the raw view could
+    // not show what the session was actually told.
+    const agentId = this.agentIdOf(message)
     const content = (message.message as { content?: unknown })?.content
+    if (typeof content === 'string') {
+      this.emitInjection(content, agentId)
+      return
+    }
     if (!Array.isArray(content)) return
     for (const block of content as ContentBlockLike[]) {
-      if (block.type === 'tool_result' && block.tool_use_id) {
+      if (block.type === 'text' && typeof block.text === 'string') {
+        this.emitInjection(block.text, agentId)
+      } else if (block.type === 'tool_result' && block.tool_use_id) {
         const open = this.openToolUses.get(block.tool_use_id)
         if (!open) continue
         this.openToolUses.delete(block.tool_use_id)
@@ -232,6 +314,39 @@ export class MessageMapper {
         this.sink.update(open.eventId, updated, { persist: true })
       }
     }
+  }
+
+  /**
+   * The SDK init frame, as the opening block a terminal would have printed.
+   *
+   * Only the fields that say what this session IS; the frame also carries long
+   * inventories (every slash command, every permission rule) that would bury the
+   * first screen of the stream in a list nobody reads, so those are stated as
+   * counts. Emitted once — a resumed session gets a second init frame, which is a
+   * fact worth showing rather than one to hide.
+   */
+  private handleSystemInit(message: SDKMessage): void {
+    const frame = message as {
+      subtype?: string
+      model?: string
+      cwd?: string
+      permissionMode?: string
+      tools?: unknown[]
+      mcp_servers?: unknown[]
+      slash_commands?: unknown[]
+      agents?: unknown[]
+    }
+    if (frame.subtype !== 'init') return
+    const lines = ['session started']
+    if (frame.model) lines.push(`model: ${frame.model}`)
+    if (frame.cwd) lines.push(`cwd: ${frame.cwd}`)
+    if (frame.permissionMode) lines.push(`permission mode: ${frame.permissionMode}`)
+    if (Array.isArray(frame.tools)) lines.push(`tools: ${frame.tools.length}`)
+    if (Array.isArray(frame.mcp_servers)) lines.push(`mcp servers: ${frame.mcp_servers.length}`)
+    if (Array.isArray(frame.slash_commands))
+      lines.push(`slash commands: ${frame.slash_commands.length}`)
+    if (Array.isArray(frame.agents)) lines.push(`agents: ${frame.agents.length}`)
+    this.sink.append('injection', { text: lines.join('\n'), source: 'system' })
   }
 
   /**

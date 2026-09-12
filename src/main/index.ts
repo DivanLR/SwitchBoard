@@ -21,6 +21,7 @@ import { readDiagramList } from './diagrams/list'
 import { reconcileSkills, stagingSkillsRoot } from './skills/install'
 import { initUpdater } from './updater'
 import { completeApiRun } from './evals/api-runner'
+import { PtyHost } from './terminal/pty-host'
 
 const TRAY_ICON_DATA_URL =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAE7SURBVDhPY2CgJYhP+6SRnP7eISXlvQG6HE4QH/+fIyX1Y3ty2ofvyWkf/6Ph5fFZXyTQ9cAByKbk1A/XsWhE4NQPz0GuQtcLtjk59eN9DA3Y8XsMlySnf5yOrnDxku//9+77+X/Xnp/oBvxPSv24HdV2ND8XlXz6/+vXfzjo6vmKYUh8+nsFsAFgv6NJnjv/G6zx0eM/EPrRn/8Z2WiuSHsfADYgKeVDBrJE/8SvYE0gF5RVfPr//PlfMH/Fyu+orkj92AD1/3sHmCDIFnQNyAaCvAZ3Qcr7BGgYvBeACeYWfPq//+BPDCeDvHT5ym8UA1ASWFLax/3IzkP3LzofFOVwzWBXgJIt9tSHHWNLTEmpHyKIMSQx7X0Bul44ALkkKe3DcXRNYIwrGWMDKSkfLcDRm/qxAWQjLo0AbJPd8XqLsGkAAAAASUVORK5CYII='
@@ -289,6 +290,14 @@ async function main(): Promise<void> {
     () => computeCounters(repos),
   )
 
+  // Real terminals (one per project), whose output is pushed to the renderer on
+  // the same cadence as session events. Created here rather than inside the
+  // handlers so the quit sequence below can kill every shell it opened.
+  const ptyHost = new PtyHost({
+    onData: (id, data) => pusher.terminalData(id, data),
+    onExit: (id, exitCode) => pusher.push('push.terminalExit', { id, exitCode }),
+  })
+
   const manager = new SessionManager(repos, {
     onEvent: (event) => pusher.event(event),
     onSessionStatus: (push) => pusher.push('push.sessionStatus', push),
@@ -409,6 +418,7 @@ async function main(): Promise<void> {
     getWindow: () => mainWindow,
     dbProjectId: dbProject.id,
     skillsStagingRoot: stagingSkillsRoot(app.getPath('userData')),
+    ptyHost,
   })
   // The registry and the filesystem can drift while the app is not running: a
   // developer can delete ~/.claude/skills/<name> by hand, or restore a machine
@@ -472,6 +482,10 @@ async function main(): Promise<void> {
         return
       }
     }
+    // Every shell this window opened dies with it. A pseudo-terminal is a real
+    // child process: without this, quitting would leave one running per project
+    // terminal that was ever opened, with no window left to show or stop them.
+    ptyHost.closeAll()
     void manager.endAllForAppExit().finally(() => {
       shutdownComplete = true
       // Buffered events (repositories.ts EventsRepo) live only in memory until

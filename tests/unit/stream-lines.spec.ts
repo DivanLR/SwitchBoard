@@ -74,6 +74,51 @@ describe('rawLinesOf', () => {
     ])
   })
 
+  // The CLI shows `Read(src/main/index.ts)`. This view used to show the tool's
+  // whole input as escaped JSON, which is not what any terminal prints.
+  it('names the tool by the argument that identifies the call, not its whole input', () => {
+    expect(
+      rawLinesOf(
+        event('tool_activity', {
+          toolName: 'Read',
+          inputPreview: JSON.stringify({ file_path: 'src/main/index.ts', offset: 1 }),
+        }),
+      ),
+    ).toEqual(['⏺ Read(src/main/index.ts)'])
+    expect(
+      rawLinesOf(
+        event('tool_activity', {
+          toolName: 'Bash',
+          inputPreview: JSON.stringify({ command: 'npm run check', description: 'Run checks' }),
+        }),
+      ),
+    ).toEqual(['⏺ Bash(npm run check)'])
+    // A tool with no known identifying field keeps the JSON: a blob beats nothing.
+    expect(
+      rawLinesOf(event('tool_activity', { toolName: 'Mystery', inputPreview: '{"a":1}' })),
+    ).toEqual(['⏺ Mystery({"a":1})'])
+  })
+
+  it('indents a multi-line tool result under its elbow', () => {
+    expect(
+      rawLinesOf(
+        event('tool_activity', { toolName: 'Bash', inputPreview: 'ls', resultPreview: 'one\ntwo' }),
+      ),
+    ).toEqual(['⏺ Bash(ls)', '  ⎿ one', '    two'])
+  })
+
+  it('shows injected context whole, under a header naming what it is', () => {
+    expect(
+      rawLinesOf(
+        event('injection', { source: 'system_reminder', text: 'be brief\nand correct' }),
+      ),
+    ).toEqual(['⧉ system reminder (injected)', '  be brief', '  and correct'])
+  })
+
+  it('keeps the shape of a multi-line message the developer sent', () => {
+    expect(rawLinesOf(event('prompt', { text: 'first\nsecond' }))).toEqual(['❯ first', '  second'])
+  })
+
   it('says a pending permission is still waiting, and how a decided one went', () => {
     expect(rawLinesOf(event('permission_marker', { status: 'pending', title: 'rm -rf' }))).toEqual([
       '? Permission: rm -rf',
@@ -105,6 +150,7 @@ describe('rawLinesOf', () => {
       'error',
       'result',
       'raw_output',
+      'injection',
     ]
     for (const kind of kinds) {
       expect(rawLinesOf(event(kind, { text: 'x', toolName: 't', status: 'approved' })).length)

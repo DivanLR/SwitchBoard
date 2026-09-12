@@ -10,6 +10,7 @@ import { parseUsageReport } from '@shared/usage-report'
 import type {
   AssistantTextPayload,
   ErrorPayload,
+  InjectionPayload,
   PermissionMarkerPayload,
   PlanMarkerPayload,
   PromptPayload,
@@ -20,7 +21,7 @@ import type {
 } from '@shared/domain'
 // Shared with the raw view, which states the same figures. Two copies could
 // disagree about what a turn cost, and one of them already did.
-import { resultLabel } from '@shared/stream-lines'
+import { INJECTION_LABEL, resultLabel } from '@shared/stream-lines'
 
 const props = defineProps<{ event: SessionEvent; stamps?: boolean }>()
 const emit = defineEmits<{
@@ -90,6 +91,12 @@ const errorPayload = computed(() =>
 const result = computed(() =>
   props.event.kind === 'result' ? (props.event.payload as ResultPayload) : null,
 )
+const injection = computed(() =>
+  props.event.kind === 'injection' ? (props.event.payload as InjectionPayload) : null,
+)
+const injectionLabel = computed(() =>
+  injection.value ? (INJECTION_LABEL[injection.value.source] ?? 'injected context') : '',
+)
 const rawText = computed(() => (props.event.payload as { text?: string }).text ?? '')
 
 // The SDK can emit empty text blocks (message-mapper), producing events with no
@@ -99,6 +106,7 @@ const hasContent = computed(() => {
   if (prompt.value) return Boolean(prompt.value.text?.trim())
   if (assistant.value) return Boolean(assistant.value.text?.trim())
   if (summary.value) return Boolean(summary.value.text?.trim())
+  if (injection.value) return Boolean(injection.value.text?.trim())
   if (tool.value || marker.value || errorPayload.value || result.value) return true
   return Boolean(rawText.value.trim())
 })
@@ -249,6 +257,14 @@ const toolLabel = computed(() => {
     <div v-else-if="result" class="done mono" data-testid="result-event">
       <Icon name="check" :size="12" /> {{ resultLabel(result) }}
     </div>
+
+    <!-- injected context (opt-in here; always shown in the Raw view). Native
+         <details> rather than a ref and a toggle: a long system reminder must be
+         collapsible, and the platform already does that with no script. -->
+    <details v-else-if="injection" class="injection mono" data-testid="injection-event">
+      <summary class="injection-label">⧉ {{ injectionLabel }}</summary>
+      <div class="injection-body">{{ injection.text }}</div>
+    </details>
 
     <!-- raw output (unswallowed) -->
     <div v-else class="raw mono">{{ rawText }}</div>
@@ -459,6 +475,32 @@ html.sb-light .prompt {
 .done {
   font-size: var(--fs-ui);
   color: var(--green);
+}
+
+/* Injected context: quieter than the narrative and marked as a block, matching
+   the Raw view's treatment of the same events. */
+.injection {
+  font-size: var(--fs-meta);
+  line-height: 1.65;
+  color: var(--text-noise);
+  border-left: 1px solid var(--border);
+  padding-left: 9px;
+}
+
+.injection-label {
+  cursor: pointer;
+  color: var(--text-ghost);
+  letter-spacing: 0.04em;
+}
+
+.injection-label:hover {
+  color: var(--text-mid);
+}
+
+.injection-body {
+  margin-top: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .raw {

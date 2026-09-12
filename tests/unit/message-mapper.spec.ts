@@ -188,7 +188,11 @@ describe('MessageMapper (contracts/session-events.md)', () => {
     expect((sink.updates.at(-1)?.payload as { isError: boolean }).isError).toBe(true)
   })
 
-  it('ignores plain user text (the composer echoes prompts on delivery)', () => {
+  // Was "ignores plain user text". It did, and that was the defect: everything
+  // injected into the conversation arrives in exactly this shape, so dropping it
+  // meant the raw view could not show the largest category of what the model
+  // read. Only an echo of a message the wrapper just delivered is dropped now.
+  it('surfaces plain user text as injected context', () => {
     const { sink, mapper } = makeMapper()
     mapper.handle(
       asMessage({
@@ -197,7 +201,8 @@ describe('MessageMapper (contracts/session-events.md)', () => {
         message: { content: [{ type: 'text', text: 'typed elsewhere' }] },
       }),
     )
-    expect(sink.appended).toHaveLength(0)
+    expect(sink.appended).toHaveLength(1)
+    expect(sink.appended[0].kind).toBe('injection')
   })
 
   it('upgrades the closing assistant text to summary when the result repeats it', () => {
@@ -296,8 +301,11 @@ describe('MessageMapper (contracts/session-events.md)', () => {
     expect(sink.appended.map((e) => e.seq)).toEqual([1, 2, 3])
   })
 
-  it('truncates long previews', () => {
-    expect(previewOf('x'.repeat(1000)).length).toBeLessThanOrEqual(401)
+  // The cap is a backstop against a pathological single field, not a display
+  // budget: an ordinary build log or file read has to survive it whole.
+  it('truncates only past the storage ceiling', () => {
+    expect(previewOf('x'.repeat(1000))).toHaveLength(1000)
+    expect(previewOf('x'.repeat(200_000)).length).toBeLessThan(200_000)
   })
 })
 
@@ -476,6 +484,81 @@ describe('the /usage response is not hidden by the clean view (regression)', () 
     )
     expect(totals['claude-sonnet-5']).toEqual({ tokens: 500, costUsd: 0.01 })
     expect(totals['claude-opus-4-8']).toEqual({ tokens: 15, costUsd: 0.001 })
+  })
+
+  // The raw view's promise is 100% of what the session saw. Before these, the
+  // mapper read only the tool_result blocks out of a user message and dropped
+  // every injected block, and clipped every tool result at 400 characters.
+  describe('injected context', () => {
+    const userText = (...texts: string[]): SDKMessage =>
+      asMessage({
+        type: 'user',
+        session_id: 'sdk-1',
+        message: { content: texts.map((text) => ({ type: 'text', text })) },
+      })
+
+    it('emits an injection event for a system reminder', () => {
+      const { mapper, sink } = makeMapper()
+      mapper.handle(userText('<system-reminder>Codebase instructions</system-reminder>'))
+      const event = sink.appended.at(-1)
+      expect(event?.kind).toBe('injection')
+      expect((event?.payload as { source: string }).source).toBe('system_reminder')
+      expect((event?.payload as { text: string }).text).toContain('Codebase instructions')
+    })
+
+    it('classifies slash-command expansions and hook output apart from plain context', () => {
+      const { mapper, sink } = makeMapper()
+      mapper.handle(userText('<command-name>/loop</command-name>'))
+      mapper.handle(userText('PreToolUse hook blocked the call'))
+      mapper.handle(userText('some other injected text'))
+      expect(sink.appended.map((e) => (e.payload as { source?: string }).source)).toEqual([
+        'command',
+        'hook',
+        'context',
+      ])
+    })
+
+    it('does not report the echo of the developer\u2019s own message as injected', () => {
+      const { mapper, sink } = makeMapper()
+      mapper.noteDelivered('run the check suite')
+      mapper.handle(userText('run the check suite'))
+      expect(sink.appended).toHaveLength(0)
+    })
+
+    it('keeps only what the CLI appended when the echo and the injection share one block', () => {
+      const { mapper, sink } = makeMapper()
+      mapper.noteDelivered('run the check suite')
+      mapper.handle(userText('run the check suite\n<system-reminder>be brief</system-reminder>'))
+      expect(sink.appended).toHaveLength(1)
+      expect((sink.appended[0].payload as { text: string }).text.trim()).toBe(
+        '<system-reminder>be brief</system-reminder>',
+      )
+    })
+
+    it('reports the init frame as the session opening block', () => {
+      const { mapper, sink } = makeMapper()
+      mapper.handle(
+        asMessage({
+          type: 'system',
+          subtype: 'init',
+          session_id: 'sdk-1',
+          model: 'claude-opus-5',
+          cwd: 'C:/repo',
+          tools: ['Read', 'Bash'],
+        }),
+      )
+      const event = sink.appended.at(-1)
+      expect(event?.kind).toBe('injection')
+      expect((event?.payload as { source: string }).source).toBe('system')
+      expect((event?.payload as { text: string }).text).toContain('model: claude-opus-5')
+      expect((event?.payload as { text: string }).text).toContain('tools: 2')
+    })
+
+    it('keeps a tool result far longer than the old 400-character clip, and says when it clips', () => {
+      expect(previewOf('x'.repeat(5_000))).toHaveLength(5_000)
+      const clipped = previewOf('x'.repeat(100_050))
+      expect(clipped).toContain('[50 more characters not stored]')
+    })
   })
 
   it('keeps interactive-question closings as plain assistant text, not summary', () => {

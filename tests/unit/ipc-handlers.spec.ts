@@ -5,6 +5,7 @@
 //
 // The individual handlers have their own specs (permission-broker, task-queue,
 // folder-access, ...). What is tested here is the wrapper they all share.
+import type { PtyHost } from '@main/terminal/pty-host'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -80,6 +81,7 @@ function setup() {
     // A temp path: these suites never import a skill, and the handlers only
     // read this when one is imported.
     skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),
+    ptyHost: { open: () => ({ scrollback: '', reused: false }), write: () => {}, resize: () => {}, close: () => {}, closeAll: () => {} } as unknown as PtyHost,
   })
 
   const listener = registered.get(INVOKE_CHANNEL)
@@ -269,6 +271,7 @@ describe('the sender-trust check', () => {
       // A temp path: these suites never import a skill, and the handlers only
       // read this when one is imported.
       skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),
+      ptyHost: { open: () => ({ scrollback: '', reused: false }), write: () => {}, resize: () => {}, close: () => {}, closeAll: () => {} } as unknown as PtyHost,
     })
     const listener = registered.get(INVOKE_CHANNEL)!
     const result = (await listener(

@@ -6,8 +6,14 @@
 import { useTemplateRef, computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useModal } from '@renderer/composables/useModal'
 import { MATCHER_KIND_LABEL, useAllowedRules } from '@renderer/composables/useAllowedRules'
-import type { CustomSkill, ModelChoice, SessionMode, Settings } from '@shared/domain'
-import { modelLabel, modelPrice, SESSION_MODES } from '@shared/domain'
+import type {
+  CustomSkill,
+  ModelChoice,
+  SessionEngine,
+  SessionMode,
+  Settings,
+} from '@shared/domain'
+import { engineOf, modelLabel, modelPrice, SESSION_MODES } from '@shared/domain'
 import { readSkillSource, skillSourceLabel } from '@shared/skill-source'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { useProjectsStore } from '@renderer/stores/projects'
@@ -241,6 +247,11 @@ const FONT_SIZES = [
 // no hardcoded catalogue — so a model released today is selectable today, and a
 // retired one stops being offered.
 const availableModels = computed(() => store.availableModels)
+// Split by engine. The Intelligent/Worker pickers below drive the Claude Agent
+// SDK's own pairing, so offering a Codex id there would let the developer pick a
+// model that session could never run; the Codex model has its own field.
+const claudeModels = computed(() => availableModels.value.filter((m) => engineOf(m) === 'claude'))
+const codexModels = computed(() => availableModels.value.filter((m) => engineOf(m) === 'codex'))
 const modelChoices = computed<ModelChoice[]>(() => [
   {
     id: 'default',
@@ -248,13 +259,43 @@ const modelChoices = computed<ModelChoice[]>(() => [
     desc: 'Follows your subscription default model',
     price: '—',
   },
-  ...availableModels.value.map((m) => ({
+  ...claudeModels.value.map((m) => ({
     id: m.id,
     label: modelLabel(m.id),
     desc: m.description,
     price: modelPrice(m.id),
   })),
 ])
+
+/**
+ * The Codex picker's cards.
+ *
+ * Labels and descriptions come from the Codex CLI's own `model/list`, not from a
+ * catalogue kept here — the same rule the Claude list follows. No price column:
+ * Codex reports none, and inventing one would be a figure this app made up.
+ */
+const codexChoices = computed<ModelChoice[]>(() => [
+  {
+    id: '',
+    label: 'CLI default',
+    desc: 'Whatever model the Codex CLI is configured to use',
+    price: '—',
+  },
+  ...codexModels.value.map((m) => ({ id: m.id, label: m.label, desc: m.description, price: '—' })),
+])
+
+const ENGINE_CHOICES: { id: SessionEngine; label: string; desc: string }[] = [
+  {
+    id: 'claude',
+    label: 'Claude Code',
+    desc: 'The full app: permission inbox, plan mode, WSL containers, advisor/worker pairing.',
+  },
+  {
+    id: 'codex',
+    label: 'Codex',
+    desc: 'The OpenAI Codex CLI. One model, its own sandbox, and no approval prompts routed here.',
+  },
+]
 
 // Advisor/Orchestrator pairing modes (see src/main/sessions/modes.ts).
 const MODE_CHOICES: { id: Settings['modelMode']; label: string; desc: string }[] = [
@@ -470,6 +511,62 @@ const updateLine = computed(() => {
                     <div class="opt-sub">{{ m.desc }}</div>
                   </div>
                   <span class="opt-price mono">{{ m.price }}</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- The other engine. Its own group rather than more cards in the
+                 lists above, because a Codex session runs ONE model and has no
+                 advisor/worker pairing to take part in. -->
+            <div class="group">
+              <div class="group-label mono">ENGINE FOR NEW SESSIONS</div>
+              <div class="group-desc">
+                Which CLI a new session starts on. A Codex session has no permission inbox, no plan
+                mode and no container: Codex decides inside its own sandbox, and the session's mode
+                chooses which sandbox. Either engine can be picked per session when starting one.
+              </div>
+              <div class="cards">
+                <button
+                  v-for="e in ENGINE_CHOICES"
+                  :key="e.id"
+                  class="card-opt"
+                  :class="{ sel: settings.defaultEngine === e.id }"
+                  :data-testid="`default-engine-${e.id}`"
+                  @click="save({ defaultEngine: e.id })"
+                >
+                  <span class="opt-dot" :class="{ on: settings.defaultEngine === e.id }"></span>
+                  <div class="opt-body">
+                    <div class="opt-name mono">{{ e.label }}</div>
+                    <div class="opt-sub">{{ e.desc }}</div>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            <div class="group">
+              <div class="group-label mono">CODEX MODEL</div>
+              <div class="group-desc">
+                The model Codex sessions run, read from the Codex CLI itself.
+                <template v-if="codexModels.length === 0">
+                  No models listed — the Codex CLI was not found, or it did not answer. Install it
+                  with <span class="mono">npm i -g @openai/codex</span> and sign in with
+                  <span class="mono">codex login</span>.
+                </template>
+              </div>
+              <div class="cards">
+                <button
+                  v-for="m in codexChoices"
+                  :key="m.id || 'cli-default'"
+                  class="card-opt"
+                  :class="{ sel: settings.codexModel === m.id }"
+                  :data-testid="`codex-model-${m.id || 'default'}`"
+                  @click="save({ codexModel: m.id })"
+                >
+                  <span class="opt-dot" :class="{ on: settings.codexModel === m.id }"></span>
+                  <div class="opt-body">
+                    <div class="opt-name mono">{{ m.label }}</div>
+                    <div class="opt-sub">{{ m.desc }}</div>
+                  </div>
                 </button>
               </div>
             </div>
@@ -972,6 +1069,27 @@ const updateLine = computed(() => {
                 role="switch"
                 :aria-checked="settings.showToolRows"
                 @click="save({ showToolRows: !settings.showToolRows })"
+              >
+                <span class="knob"></span>
+              </button>
+            </div>
+
+            <div class="setting-row">
+              <div class="sr-text">
+                <div class="sr-label">Show injected context in Clean view</div>
+                <div class="sr-desc">
+                  System reminders, expanded slash commands and hook output — everything added to
+                  your message before the model read it. Off: Clean view hides them. Raw view always
+                  shows them in full.
+                </div>
+              </div>
+              <button
+                class="switch"
+                :class="{ on: settings.showInjections }"
+                data-testid="setting-injections"
+                role="switch"
+                :aria-checked="settings.showInjections"
+                @click="save({ showInjections: !settings.showInjections })"
               >
                 <span class="knob"></span>
               </button>

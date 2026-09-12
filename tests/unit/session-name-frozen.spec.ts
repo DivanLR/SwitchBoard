@@ -5,6 +5,7 @@
 // the developer still could not learn a session by its name.
 //
 // This pins the fix (migration 029): the name is derived once, kept, and reused.
+import type { PtyHost } from '@main/terminal/pty-host'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -98,6 +99,7 @@ function setup() {
     getWindow: () => window as never,
     dbProjectId: 'db-project',
     skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),
+    ptyHost: { open: () => ({ scrollback: '', reused: false }), write: () => {}, resize: () => {}, close: () => {}, closeAll: () => {} } as unknown as PtyHost,
   })
   const listener = registered.get(INVOKE_CHANNEL)
   if (!listener) throw new Error(`nothing registered on ${INVOKE_CHANNEL}`)

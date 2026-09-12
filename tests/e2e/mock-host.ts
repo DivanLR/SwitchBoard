@@ -1109,6 +1109,13 @@ export function installMockHost(scenario: MockScenario): void {
     },
     'updates.check': () => ({ status: 'none' }),
     'updates.install': () => undefined,
+    // The real Terminal tab drives a pseudo-terminal in the main process, which
+    // the mock host has none of. Answered rather than omitted so opening the tab
+    // in an end-to-end run renders an empty terminal instead of throwing.
+    'terminal.open': () => ({ scrollback: '', reused: false }),
+    'terminal.write': () => undefined,
+    'terminal.resize': () => undefined,
+    'terminal.close': () => undefined,
     'sessions.start': async (req) => {
       const project = projects.find((p) => p.id === req.projectId)
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }

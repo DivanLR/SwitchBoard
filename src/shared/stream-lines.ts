@@ -7,6 +7,16 @@
 // tsconfig and Vitest can reach it without pulling in the Vue-dependent renderer.
 import type { ResultPayload, SessionEvent } from './domain'
 
+/** What each injected block is called on its header line. Shared with the clean
+ *  view's collapsed row, so the two cannot name the same block differently. */
+export const INJECTION_LABEL: Record<string, string> = {
+  system_reminder: 'system reminder (injected)',
+  command: 'slash command expansion (injected)',
+  hook: 'hook output (injected)',
+  system: 'session init',
+  context: 'injected context',
+}
+
 /**
  * What a finished turn cost, as one line: `turn complete · 1.2s · $0.42 · 140 tok`.
  *
@@ -40,6 +50,58 @@ export function resultLabel(payload: ResultPayload): string {
  * than an untyped cast. A kind with nothing special to say falls through to its
  * text, which is why an unrecognised kind still appears rather than vanishing.
  */
+/**
+ * The argument a terminal would have shown beside a tool name.
+ *
+ * `inputPreview` is `JSON.stringify` of the tool's whole input, which is what the
+ * raw view used to print: a wall of escaped JSON where the CLI shows
+ * `Read(src/main/index.ts)`. The one field that identifies the call is picked per
+ * tool; anything unrecognised falls back to the JSON, because showing a blob is
+ * still better than showing nothing.
+ */
+const TOOL_ARG_FIELDS: Record<string, readonly string[]> = {
+  Bash: ['command'],
+  Read: ['file_path'],
+  Write: ['file_path'],
+  Edit: ['file_path'],
+  NotebookEdit: ['notebook_path'],
+  Glob: ['pattern'],
+  Grep: ['pattern'],
+  WebFetch: ['url'],
+  WebSearch: ['query'],
+  Task: ['description'],
+  Agent: ['description'],
+  Skill: ['skill'],
+}
+
+export function toolArgOf(toolName: string | undefined, inputPreview: string | undefined): string {
+  const raw = inputPreview ?? ''
+  if (!raw) return ''
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    // Truncated or already a bare string: nothing to pick a field out of.
+    return raw
+  }
+  if (typeof parsed === 'string') return parsed
+  if (typeof parsed !== 'object' || parsed === null) return raw
+  const record = parsed as Record<string, unknown>
+  for (const field of TOOL_ARG_FIELDS[toolName ?? ''] ?? []) {
+    const value = record[field]
+    if (typeof value === 'string' && value) return value
+  }
+  return raw
+}
+
+/**
+ * Continuation lines under a tool call, in the CLI's own shape: the first result
+ * line carries the `⎿` elbow and the rest are indented to sit under it.
+ */
+function resultLines(text: string): string[] {
+  return text.split('\n').map((line, i) => (i === 0 ? `  ⎿ ${line}` : `    ${line}`))
+}
+
 export function rawLinesOf(event: SessionEvent): string[] {
   const p = event.payload as Partial<{
     text: string
@@ -48,18 +110,29 @@ export function rawLinesOf(event: SessionEvent): string[] {
     resultPreview: string
     status: string
     title: string
+    source: string
   }>
   switch (event.kind) {
     case 'prompt':
-      return [`❯ ${p.text}`]
+      // A multi-line message keeps its shape, indented under the caret, rather
+      // than being flattened onto one line that no longer reads as what was sent.
+      return String(p.text ?? '')
+        .split('\n')
+        .map((line, i) => (i === 0 ? `❯ ${line}` : `  ${line}`))
     case 'assistant_text':
     case 'summary':
       return String(p.text ?? '')
         .split('\n')
         .map((line, i) => (event.kind === 'summary' && i === 0 ? `✦ ${line}` : line))
+    case 'injection': {
+      // Injected context, whole. The header names what it is so a system reminder
+      // is never mistaken for something the developer typed.
+      const label = INJECTION_LABEL[String(p.source)] ?? 'injected context'
+      return [`⧉ ${label}`, ...String(p.text ?? '').split('\n').map((line) => `  ${line}`)]
+    }
     case 'tool_activity': {
-      const lines = [`⏺ ${p.toolName}(${p.inputPreview ?? ''})`]
-      if (p.resultPreview) lines.push(`  ⎿ ${p.resultPreview}`)
+      const lines = [`⏺ ${p.toolName}(${toolArgOf(p.toolName, p.inputPreview)})`]
+      if (p.resultPreview) lines.push(...resultLines(p.resultPreview))
       return lines
     }
     case 'permission_marker':
@@ -92,12 +165,14 @@ export function rawLinesOf(event: SessionEvent): string[] {
  * index is passed because two kinds print a continuation line that reads
  * differently from their first — a tool's `⎿` result, a summary's body.
  */
-export type LineTone = 'prompt' | 'text' | 'tool' | 'result' | 'ok' | 'warn' | 'err'
+export type LineTone = 'prompt' | 'text' | 'tool' | 'result' | 'ok' | 'warn' | 'err' | 'inject'
 
 function toneOf(event: SessionEvent, i: number): LineTone {
   switch (event.kind) {
     case 'prompt':
       return 'prompt'
+    case 'injection':
+      return 'inject'
     case 'tool_activity':
       return i === 0 ? 'tool' : 'result'
     case 'summary':
