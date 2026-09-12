@@ -1,10 +1,3 @@
-// "My sessions keep renaming themselves." They did: Session.name was re-derived
-// on every project list from facts that keep moving — the branch is re-read after
-// every turn, an ending trades the branch for "- Complete", and a run row that
-// points back at a session renames it after the fact. Each answer was true and
-// the developer still could not learn a session by its name.
-//
-// This pins the fix (migration 029): the name is derived once, kept, and reused.
 import type { PtyHost } from '@main/terminal/pty-host'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -60,7 +53,6 @@ afterEach(() => {
     try {
       rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
     } catch {
-      // A temp directory the OS still holds open. The OS can have it.
     }
   }
 })
@@ -105,7 +97,6 @@ function setup() {
   if (!listener) throw new Error(`nothing registered on ${INVOKE_CHANNEL}`)
   const event = { sender: { id: 7 }, senderFrame: window.webContents.mainFrame }
 
-  /** The one session name the sidebar would show for this project. */
   const nameNow = async (): Promise<string | null | undefined> => {
     const result = (await listener(event, 'projects.list', undefined)) as WireResult<{
       projects: ProjectListItem[]
@@ -117,7 +108,6 @@ function setup() {
   return { repos, manager, project, nameNow }
 }
 
-/** The live row the manager holds, which is what a project list reads from. */
 function liveRow(manager: unknown, sessionId: string): { branch: string | null; endReason: string | null } {
   const m = manager as { hosted: Map<string, { row: { branch: string | null; endReason: string | null } }> }
   const entry = m.hosted.get(sessionId)
@@ -132,16 +122,12 @@ describe('a session keeps the name it was learnt by', () => {
       startBackground: (projectId: string, kind: string) => Promise<{ id: string }>
     }
     const session = await inner.startBackground(project.id, 'diff')
-    // The branch is read asynchronously just after start, and this project is a
-    // bare temp directory — so set it the way refreshBranch would.
     liveRow(manager, session.id).branch = 'main'
 
     expect(await nameNow()).toBe('Diff - main')
 
-    // A checkout. Every session on it used to be renamed by the next list.
     liveRow(manager, session.id).branch = 'feature/x'
     expect(await nameNow()).toBe('Diff - main')
-    // Kept on the row, not merely in memory, so it survives the session ending.
     expect(repos.sessions.byId(session.id)?.derivedName).toBe('Diff - main')
   })
 
@@ -152,14 +138,11 @@ describe('a session keeps the name it was learnt by', () => {
     }
     const session = await inner.startBackground(project.id, 'diff')
 
-    // No branch yet, and not ended: the name shows, and nothing is committed to.
     expect(await nameNow()).toBe('Diff')
     expect(repos.sessions.byId(session.id)?.derivedName).toBeNull()
 
-    // Once the branch lands, THAT is the answer that sticks.
     liveRow(manager, session.id).branch = 'main'
     expect(await nameNow()).toBe('Diff - main')
     expect(repos.sessions.byId(session.id)?.derivedName).toBe('Diff - main')
   })
 })
-

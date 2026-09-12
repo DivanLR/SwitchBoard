@@ -1,4 +1,3 @@
-// Spec Kit detection and markdown parsing.
 import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'

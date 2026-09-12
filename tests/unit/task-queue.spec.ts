@@ -1,4 +1,3 @@
-// Planned task queue repository: prompts/goals that auto-run in sequence (FR-023).
 import { describe, expect, it } from 'vitest'
 import { openDatabase } from '@main/store/db'
 import { createRepositories } from '@main/store/repositories'

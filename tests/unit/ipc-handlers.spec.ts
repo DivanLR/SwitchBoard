@@ -1,10 +1,3 @@
-// The IPC boundary itself: the sender-trust check, the WireResult envelope, and
-// error-code mapping. Every invoke in the app rides through this one callback, and
-// until now its only exercise was the real-app suite, which the normal test run
-// excludes — so a regression here reached a release without a red test.
-//
-// The individual handlers have their own specs (permission-broker, task-queue,
-// folder-access, ...). What is tested here is the wrapper they all share.
 import type { PtyHost } from '@main/terminal/pty-host'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -12,7 +5,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { IpcError, WireResult } from '@shared/ipc-types'
 import { INVOKE_CHANNEL, isIpcErrorCode } from '@shared/ipc-types'
 
-/** Captures the callback registered on the invoke channel. */
 const registered = new Map<string, (...args: unknown[]) => unknown>()
 
 vi.mock('electron', () => ({
@@ -27,9 +19,6 @@ vi.mock('electron', () => ({
   BrowserWindow: class {},
 }))
 
-// handlers.ts imports the updater, which constructs electron-updater's NsisUpdater
-// at module load and reads the real app's version. Mocked at the module boundary
-// rather than reaching into electron-updater's internals.
 vi.mock('@main/updater', () => ({
   initUpdater: () => {},
   check: async () => 'idle',
@@ -42,7 +31,6 @@ const { SessionManager } = await import('@main/sessions/session-manager')
 const { PermissionBroker } = await import('@main/inbox/permission-broker')
 const { registerIpcHandlers } = await import('@main/ipc/handlers')
 
-/** The trusted window shape the sender check compares against. */
 function fakeWindow() {
   const mainFrame = { name: 'main' }
   return { webContents: { id: 7, mainFrame } }
@@ -78,8 +66,6 @@ function setup() {
     broker,
     getWindow: () => window as never,
     dbProjectId: 'db-project',
-    // A temp path: these suites never import a skill, and the handlers only
-    // read this when one is imported.
     skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),
     ptyHost: { open: () => ({ scrollback: '', reused: false }), write: () => {}, resize: () => {}, close: () => {}, closeAll: () => {} } as unknown as PtyHost,
   })
@@ -87,7 +73,6 @@ function setup() {
   const listener = registered.get(INVOKE_CHANNEL)
   if (!listener) throw new Error(`nothing registered on ${INVOKE_CHANNEL}`)
 
-  /** An event from the trusted window's top frame. */
   const trustedEvent = { sender: { id: 7 }, senderFrame: window.webContents.mainFrame }
 
   const call = (method: string, req?: unknown, event: unknown = trustedEvent) =>
@@ -132,8 +117,6 @@ describe('the invoke channel', () => {
       path: 'C:\\a',
       source: 'manual',
     })
-    // projects.rename returns void; the envelope must still carry a cloneable value,
-    // because undefined and "no value" are not the same thing across the bridge.
     const result = await harness.call('projects.rename', { projectId: project.id, name: 'b' })
     expect(result).toEqual({ ok: true, value: null })
   })
@@ -146,8 +129,6 @@ describe('the invoke channel', () => {
   })
 
   it('maps an unexpected throw to INTERNAL and keeps the message', async () => {
-    // A malformed request reaches the handler and fails on its own terms; the
-    // envelope must still come back, never a rejected promise.
     const result = await harness.call('projects.rename', null)
     expect(result.ok).toBe(false)
     if (result.ok) return
@@ -165,9 +146,6 @@ describe('the invoke channel', () => {
 })
 
 describe('isIpcErrorCode', () => {
-  // The renderer switches on these codes, so one it does not recognise falls
-  // through every branch and the developer is shown nothing at all. isIpcError
-  // cannot catch that: across a wire it can only check that `code` is a string.
   it('accepts every real code', () => {
     for (const code of [
       'NOT_FOUND',
@@ -189,8 +167,6 @@ describe('isIpcErrorCode', () => {
   })
 
   it('rejects inherited object keys, which is why it uses Object.hasOwn', () => {
-    // `'toString' in obj` is true for any object literal. A plain `in` check here
-    // would have let these through as valid error codes.
     expect(isIpcErrorCode('toString')).toBe(false)
     expect(isIpcErrorCode('constructor')).toBe(false)
     expect(isIpcErrorCode('hasOwnProperty')).toBe(false)
@@ -219,8 +195,6 @@ describe('the sender-trust check', () => {
   })
 
   it('rejects a subframe of the trusted window', async () => {
-    // The whole reason the frame is compared as well as the id: an iframe shares
-    // its host's webContents id and would otherwise have passed.
     const { call } = setup()
     const result = await call('projects.list', undefined, {
       sender: { id: 7 },
@@ -268,8 +242,6 @@ describe('the sender-trust check', () => {
       broker,
       getWindow: () => null,
       dbProjectId: 'db-project',
-      // A temp path: these suites never import a skill, and the handlers only
-      // read this when one is imported.
       skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),
       ptyHost: { open: () => ({ scrollback: '', reused: false }), write: () => {}, resize: () => {}, close: () => {}, closeAll: () => {} } as unknown as PtyHost,
     })
@@ -285,15 +257,6 @@ describe('the sender-trust check', () => {
   })
 })
 
-/**
- * Which engine `diagrams.generate` actually asks for.
- *
- * The choice is one ternary in the handler, and until this existed nothing
- * exercised it: the unit tests call archifyPrompt directly, and the e2e mock
- * host cannot import the shared module (it is serialised into the page), so it
- * hand-duplicates the prompt and its assertions test that copy. This is the only
- * place the real pairing of request field to real prompt builder is checked.
- */
 describe('diagrams.generate chooses its engine from the request', () => {
   let harness: ReturnType<typeof setup>
   let sent: string[]
@@ -301,8 +264,6 @@ describe('diagrams.generate chooses its engine from the request', () => {
   beforeEach(() => {
     harness = setup()
     sent = []
-    // Stubbed at the manager boundary rather than the session's: starting a real
-    // one would spawn the Agent SDK. What is under test is which text goes out.
     vi.spyOn(harness.manager, 'diagramSessionFor').mockResolvedValue({
       id: 's-diagram',
     } as never)
@@ -339,7 +300,6 @@ describe('diagrams.generate chooses its engine from the request', () => {
     expect(sent[0]).toContain('Use the sequence type')
     expect(sent[0]).toContain('--quality standard')
     expect(sent[0]).toContain('meta.animation to "trace"')
-    // The rule that cannot be recovered from in a background session.
     expect(sent[0]).toContain('NEVER run `archify preview`')
     expect(sent[0]).not.toContain('Use the default editorial skin')
   })
@@ -354,12 +314,7 @@ describe('diagrams.generate chooses its engine from the request', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     const { file } = result.value as { file: string }
-    // The app names the file, not the model — that is what lets a finished
-    // drawing be attributed back to the sentence that asked for it, whichever
-    // engine drew it.
     expect(file).toBe('the-auth-flow.html')
-    // forProject answers a Map keyed by file name — the shape readDiagramList
-    // wants when it joins the folder listing to the requests behind it.
     expect([...harness.repos.diagramRequests.forProject(id).keys()]).toContain(file)
   })
 })

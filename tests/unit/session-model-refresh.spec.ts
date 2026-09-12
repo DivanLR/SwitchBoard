@@ -1,9 +1,3 @@
-// Two rules about the main-loop model, both of which cost real money if broken:
-//   1. It NEVER changes mid-session. Switching it invalidates the tools, system
-//      and message prompt-cache tiers, so the whole prefix is re-written at the
-//      cache-write rate on the next turn. The cheap tier is a subagent instead.
-//   2. A model changed in Settings still reaches a RUNNING session (the Settings
-//      note promises it) — and a usage-limit downgrade survives that re-read.
 import { describe, expect, it } from 'vitest'
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { EffortLevel, EventKind, EventPayloadMap, ModelMode, SessionEvent } from '@shared/domain'
@@ -30,7 +24,6 @@ function makeSession(mode: ModelMode = 'auto') {
   }
   const session = new HostedSession({
     sessionId: 's1',
-    // Every session spawns in one resolved mode; 'auto' is the app default.
     mode: 'auto',
     projectPath: '.',
     mainModel: mainLoopModel(mode, routing),
@@ -46,7 +39,6 @@ function makeSession(mode: ModelMode = 'auto') {
     onTurnComplete: () => {},
     onExit: () => {},
   })
-  // Stand in for the live query: the routing path only setModel/applyFlagSettings.
   ;(session as unknown as { q: unknown }).q = {
     setModel: (model?: string) => {
       setModelCalls.push(model)
@@ -81,7 +73,6 @@ describe('the main-loop model is pinned for the session', () => {
     send('Fix the typo in SessionView.vue')
     send('Audit every view in the app and restyle all of them')
     send('And what about the sidebar?')
-    // One setModel for the whole session — every later turn is already on it.
     expect(setModelCalls).toEqual(['claude-opus-5[1m]'])
   })
 
@@ -149,7 +140,7 @@ describe('settings changes reach a running session', () => {
   it('keeps a usage-limit downgrade instead of re-reading back up', () => {
     const { setModelCalls, send, feed } = makeSession('auto')
     feed(limitResult())
-    expect(setModelCalls.at(-1)).toBe('sonnet') // opus → sonnet, one rung down
+    expect(setModelCalls.at(-1)).toBe('sonnet') 
 
     send('Audit every view in the app and restyle all of them')
     expect(setModelCalls.at(-1)).toBe('sonnet')

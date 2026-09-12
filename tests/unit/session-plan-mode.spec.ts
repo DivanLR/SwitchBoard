@@ -1,7 +1,3 @@
-// Plan mode has two facts that must never be confused: how a session STARTED
-// (planMode, a column) and where it is RIGHT NOW (inPlanMode, in memory only,
-// because the mode can be switched at runtime and a stale column would be
-// believed by the sidebar and by the next launch).
 import { describe, expect, it } from 'vitest'
 import { openDatabase, type AppDatabase } from '@main/store/db'
 import { createRepositories, newId, nowIso, type Repositories } from '@main/store/repositories'
@@ -38,16 +34,12 @@ function sessionRow(projectId: string, planMode: boolean): Session {
   }
 }
 
-/** A HostedSession with nothing real behind it: these cover the two methods that
- *  never touch the SDK's transport, so no query has to exist to drive them. */
 function hosted(onPlanModeChange: (inPlanMode: boolean) => void): HostedSession {
   return new HostedSession({
     sessionId: 's1',
     projectPath: 'C:\\a',
     claudeExecutablePath: 'C:\\claude.exe',
     input: 'hello',
-    // The fixture is cast, so this is not enforced by the compiler here: a real
-    // session always carries a resolved mode, and leaving plan mode returns to it.
     mode: 'auto',
     onPlanModeChange,
     sink: { append: () => ({ id: 'e1' }) } as never,
@@ -84,8 +76,6 @@ describe('the plan-mode flag a session starts with', () => {
     const { repos, projectId, db } = setup()
     const row = sessionRow(projectId, true)
     repos.sessions.insert(row)
-    // What an upgraded database looks like: the migration adds the column, and
-    // every session that predates it carries NULL rather than 0.
     db.prepare('UPDATE sessions SET planMode = NULL WHERE id = ?').run(row.id)
     expect(repos.sessions.byId(row.id)?.planMode).toBe(false)
   })
@@ -99,10 +89,6 @@ describe('the plan-mode flag a session starts with', () => {
 })
 
 describe('the mode a session spawns with', () => {
-  // The pair of booleans this replaces could ask for bypass AND plan at once,
-  // which is a session the SDK cannot spawn, so the manager had to drop one
-  // silently. One value cannot express the contradiction, and the old test for
-  // "bypass wins over plan" has nothing left to assert.
   it('passes every app mode through under the SDK name for it', () => {
     expect(resolvePermissionMode('default')).toBe('default')
     expect(resolvePermissionMode('auto')).toBe('auto')
@@ -118,10 +104,6 @@ describe('the mode a session spawns with', () => {
     for (const { value } of SESSION_MODES) {
       expect(resolvePermissionMode(value)).toBeTruthy()
     }
-    // All six the SDK can spawn in, in escalation order. The list was four for a
-    // while, which is a picker deciding for you: 'dontAsk' in particular is the
-    // only mode that REDUCES what can happen — nothing interrupts, and anything
-    // not already approved is refused rather than asked.
     expect(SESSION_MODES.map((m) => m.value)).toEqual([
       'default',
       'dontAsk',
@@ -133,9 +115,6 @@ describe('the mode a session spawns with', () => {
   })
 
   it('spells every mode exactly as the SDK does, except bypass', () => {
-    // The SDK union is 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' |
-    // 'dontAsk' | 'auto'. A mode this app spells differently would be rejected at
-    // spawn, and 'bypass' is the only rename the mapper is allowed to make.
     const sdk = ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk', 'auto']
     for (const { value } of SESSION_MODES) {
       expect(sdk).toContain(resolvePermissionMode(value))
@@ -162,9 +141,6 @@ describe('the live plan-mode switch', () => {
 
     session.setPlanMode(true)
     session.setPlanMode(false)
-    // Back to the mode the session was started in, which is 'auto' for this
-    // fixture — never to 'default'. One visit to planning must not turn asking
-    // back on for the rest of the session, and must not change what it may do.
     expect(asked).toEqual(['plan', 'auto'])
   })
 
@@ -176,9 +152,6 @@ describe('the live plan-mode switch', () => {
     expect(() => session.setPlanMode(true)).not.toThrow()
   })
 
-  // The header must state the mode the CLI reports, never the one that was asked
-  // for: a CLI that declined 'plan' would otherwise leave it claiming a
-  // restriction that is not in force.
   it('reports the mode the CLI states, including when it refused the one requested', () => {
     const seen: boolean[] = []
     const session = hosted((inPlanMode) => seen.push(inPlanMode))
@@ -187,10 +160,8 @@ describe('the live plan-mode switch', () => {
 
     handle({ type: 'system', subtype: 'init', permissionMode: 'default' })
     handle({ type: 'system', subtype: 'status', permissionMode: 'plan' })
-    // Unchanged: reported twice, announced once.
     handle({ type: 'system', subtype: 'status', permissionMode: 'plan' })
     handle({ type: 'system', subtype: 'status', permissionMode: 'default' })
-    // Not a system message, so it says nothing about the mode.
     handle({ type: 'assistant', message: { model: 'claude-opus-5' } })
 
     expect(seen).toEqual([false, true, false])

@@ -1,6 +1,3 @@
-// The verification run's contract with the session: what it is asked to run, and
-// what is trusted from its answer. The rule under test throughout is FR-072 —
-// a figure nothing measured must come back null, never a number.
 import { describe, expect, it } from 'vitest'
 import { verifyVerdict } from '@shared/domain'
 import {
@@ -21,7 +18,6 @@ import {
 const dotnet = stackById('dotnet')!
 const node = stackById('node')!
 
-// The two sandbox images, as the planner sees them. `null` is a host session.
 const NODE_BOX = sandboxTools(false)
 const DOTNET_BOX = sandboxTools(true)
 
@@ -31,7 +27,6 @@ describe('planning a run', () => {
     expect(plan).toHaveLength(2)
     expect(plan.every((p) => p.unavailable?.includes('dotnet'))).toBe(true)
 
-    // The same suites are fine when the session runs on the host.
     expect(planSuites(dotnet.suites, ['dotnet-unit'], null)[0].unavailable).toBeNull()
   })
 
@@ -39,7 +34,6 @@ describe('planning a run', () => {
     expect(sandboxNeedsDotnet([{ stackId: 'dotnet', stackLabel: '.NET', suites: dotnet.suites }])).toBe(true)
     expect(sandboxNeedsDotnet([{ stackId: 'node', stackLabel: 'Node', suites: node.suites }])).toBe(false)
     expect(planSuites(dotnet.suites, ['dotnet-unit'], DOTNET_BOX)[0].unavailable).toBeNull()
-    // Still no browser in there — a bigger image is not a different promise.
     expect(unavailableReason(node.suites.find((s) => s.id === 'node-e2e')!, DOTNET_BOX)).toContain('browser')
   })
 
@@ -51,8 +45,8 @@ describe('planning a run', () => {
   it('leaves slow suites out of the default selection, and unavailable ones too', () => {
     const chosen = defaultSelection(node.suites, NODE_BOX)
     expect(chosen).toContain('node-unit')
-    expect(chosen).not.toContain('node-mutation') // heavy: opt in per run
-    expect(chosen).not.toContain('node-e2e') // no browser in the container
+    expect(chosen).not.toContain('node-mutation') 
+    expect(chosen).not.toContain('node-e2e') 
   })
 
   it('tells the session what not to attempt, and why', () => {
@@ -120,9 +114,6 @@ describe('reading the report back', () => {
     expect(parseVerifyReport(line('{"suites": [oops}'))).toBeNull()
   })
 
-  // The old reader sliced from the first { to the LAST } in the rest of the turn,
-  // so one closing brace in a closing sentence swallowed the report and every
-  // gate read "not measured" — the opposite of what the run had just proved.
   it('is not derailed by a closing brace in the prose after the report line', () => {
     const report = parseVerifyReport(
       `${VERIFY_MARKER}: {"suites":[{"id":"node-unit","status":"pass","detail":"41 passed"}],"coverage":{"line":88}}\n` +
@@ -139,8 +130,6 @@ describe('reading the report back', () => {
     expect(report?.suites[0].detail).toBe('expected } got EOF')
   })
 
-  // Two states that need opposite explanations: a session that never reported,
-  // and one whose report line could not be read.
   it('tells a broken report line apart from no report line at all', () => {
     expect(verifyMarkerBroken('All tests passed!')).toBe(false)
     expect(verifyMarkerBroken(line('{"suites": [oops}'))).toBe(true)
@@ -184,7 +173,6 @@ describe('reading the report back', () => {
       ),
     )
     expect(report?.endpoints).toHaveLength(1)
-    // Method is normalised up, outcome down: the UI groups on both.
     expect(report?.endpoints[0]).toMatchObject({
       method: 'GET',
       path: '/api/v1/policies/{id}',
@@ -208,8 +196,6 @@ describe('reading the report back', () => {
         }),
       ),
     )
-    // The unparseable status stays null rather than becoming 0, the outcome the
-    // model made up drops to not_run, and the call with no method is discarded.
     expect(report?.endpoints).toHaveLength(2)
     expect(report?.endpoints[0]).toMatchObject({ status: null, ms: null, outcome: 'not_run' })
     expect(report?.endpoints[1]).toMatchObject({ status: 503, outcome: 'fail' })
@@ -221,9 +207,6 @@ describe('reading the report back', () => {
   })
 
   it('fails the run when a real call failed, even though every suite passed', () => {
-    // This is the whole point of exercising real endpoints: the suite went green
-    // against fixtures while the real request was wrong. A verdict blind to the
-    // call would report the green suite and hide what was actually broken.
     const report = parseVerifyReport(
       line(
         JSON.stringify({
@@ -260,7 +243,6 @@ describe('reading the report back', () => {
   })
 
   it('is not rescued from inconclusive by a call that never ran', () => {
-    // A skipped suite plus a not_run call proved nothing at all.
     const report = parseVerifyReport(
       line(
         JSON.stringify({
@@ -273,8 +255,6 @@ describe('reading the report back', () => {
   })
 
   it('does not report a quality shortfall as a failure, which is still not a test result', () => {
-    // The endpoint change must not have widened FR-071: a missed coverage or
-    // duplication threshold is reported and never flips the verdict.
     const report = parseVerifyReport(
       line(
         JSON.stringify({
@@ -296,40 +276,28 @@ describe('asking for real endpoint calls', () => {
     expect(prompt).toContain('postgres-main')
     expect(prompt).toContain('oracle-reporting')
     expect(prompt).toContain('endpoints')
-    // The one figure that must never be invented is named as such.
     expect(prompt).toMatch(/never (write|report) a status/i)
-    // And the schema is to be read, not guessed: a wrong table name fails in a way
-    // that looks exactly like a broken API when the API is fine.
     expect(prompt).toContain('Read the schema through that server')
     expect(prompt).toMatch(/its dialect/i)
   })
 
   it('exempts the endpoint pass from the stop-at-first-failure rule', () => {
-    // A formatting or coverage failure says nothing about whether the API
-    // answers, so gating the one thing the developer came for behind it would
-    // hide the answer. The exception is stated where the stop rule is given.
     const plan = planSuites(dotnet.suites, ['dotnet-format', 'dotnet-http'], null)
     const prompt = verifyPrompt(plan, '.NET', null, ['postgres-main'])
     expect(prompt).toContain('STOP at the first one that fails')
     expect(prompt).toContain('exception to that stop rule')
     expect(prompt).toContain('even if an earlier suite failed')
 
-    // With no API suite, no exception is claimed — there is nothing to exempt.
     expect(verifyPrompt(planSuites(dotnet.suites, ['dotnet-format'], null), '.NET', null, [])).not.toContain(
       'exception to that stop rule',
     )
   })
 
   it('says plainly that there is no real data source, rather than staying silent', () => {
-    // Asserting only that a name is absent would be vacuous: it was never an input.
-    // What matters is that the section still asks for the calls AND labels the
-    // inputs as not drawn from real rows, so an unseeded run cannot be mistaken
-    // for a verified one.
     const prompt = verifyPrompt(apiPlan, '.NET', null, [])
     expect(prompt).toContain('No database MCP server is connected')
     expect(prompt).toContain('Still call the endpoints')
     expect(prompt).toMatch(/"dataSource" and "dataQuery" to null/)
-    // And it must not claim a source it does not have.
     expect(prompt).not.toContain('Get your inputs from the connected database MCP server')
   })
 
@@ -339,23 +307,14 @@ describe('asking for real endpoint calls', () => {
   })
 })
 
-// Observed on a real run: the developer's own API was running on the host and
-// holding the DLLs its build wanted to overwrite. MSBuild reports that as
-// MSB3021 "Access to the path ... is denied", which reads as the container
-// lacking rights — and it does not: it can create new files in that same folder.
-// Left unexplained, the session reports the developer's code as broken.
 describe('the bind-mount lock note', () => {
   it('tells a containerised run what a denied bin path actually means', () => {
     const plan = planSuites(stackById('dotnet')!.suites, ['dotnet-unit'], DOTNET_BOX)
     const prompt = verifyPrompt(plan, '.NET', ['dotnet'], [])
     expect(prompt).toContain('MSB3021')
     expect(prompt).toMatch(/locked by a process on the host/i)
-    // The remedy that actually works, proven on a real run: the lock is on the
-    // configuration the host is running, so building the other one writes to a
-    // different folder and the suite completes instead of failing.
     expect(prompt).toMatch(/RETRY IN THE OTHER CONFIGURATION/i)
     expect(prompt).toContain('-c Release')
-    // And never by deleting the developer's build outputs.
     expect(prompt).toMatch(/Never delete bin\/ or obj\//i)
   })
 
@@ -365,10 +324,6 @@ describe('the bind-mount lock note', () => {
   })
 })
 
-// Both learned by watching Stryker refuse on a real solution, not guessed: it
-// must start from a directory holding a test project, and it needs --project when
-// that test project references more than one. Neither refusal is a fault in the
-// code being verified, and both cost a whole run to discover.
 describe('the Stryker invocation note', () => {
   it('is present whenever a mutation suite is in the run', () => {
     const dotnet = stackById('dotnet')!

@@ -1,11 +1,3 @@
-// An API eval set's life: started against a session, handed request data by the
-// session's own output, then completed by the app making the calls. Drives the
-// real repository and the real SessionManager scan.
-//
-// The point being protected here is the split. The session hands over DATA; the
-// verdict is the app's. So a session that reports nothing must still finish the
-// run (with a reason), and a run with nowhere to call must fail honestly rather
-// than record calls it never made.
 import { describe, expect, it } from 'vitest'
 import { openDatabase } from '@main/store/db'
 import { createRepositories } from '@main/store/repositories'
@@ -49,7 +41,6 @@ function setup() {
     changed,
     sweep: (deadlineMs: number): void =>
       (manager as unknown as Record<string, (ms: number) => void>).sweepStaleRuns(deadlineMs),
-    /** Push a run's start time into the past, which is what the sweep reads. */
     backdate: (runId: string, minutes: number): void => {
       db.prepare('UPDATE api_runs SET startedAt = ? WHERE id = ?').run(
         new Date(Date.now() - minutes * 60_000).toISOString(),
@@ -59,8 +50,6 @@ function setup() {
     start: () =>
       repos.apiRuns.start({
         projectId: project.id,
-        // Port 1 is never listening, which is what makes the honest-failure path
-        // testable without a server.
         baseUrl: 'http://127.0.0.1:1',
         target: 'local',
         sessionId: 's1',
@@ -140,14 +129,11 @@ describe('an API eval set', () => {
     expect(stored?.note).toContain('You stopped this run')
     expect(changed).toEqual([projectId])
 
-    // And a second click cannot rewrite what the first one recorded.
     await manager.cancelApiRun(run.id)
     expect(repos.apiRuns.byId(run.id)?.note).toContain('You stopped this run')
     expect(changed).toEqual([projectId])
   })
 
-  // Same orphan as a verification run, same cause, and the same repair: without
-  // the sweep the row read Running until the app was restarted.
   it('closes a run whose session went quiet, and leaves a fresh one alone', () => {
     const { repos, projectId, changed, start, sweep, backdate } = setup()
     const stale = start()
@@ -190,7 +176,6 @@ describe('runApiCalls', () => {
     )
     expect(outcome.launched).toBe(false)
     expect(outcome.note).toContain('Nothing is listening')
-    // 'not_run', never 'fail': an unreachable port says nothing about the code.
     expect(outcome.calls[0].outcome).toBe('not_run')
     expect(outcome.calls[0].status).toBeNull()
   })
@@ -212,18 +197,10 @@ describe('runApiCalls', () => {
   })
 })
 
-/**
- * A stand-in for a deployed environment: a real socket, so the run takes the same
- * path it takes against QA, and a record of what actually arrived — which is the
- * only way to prove a blocked write was never sent rather than merely reported as
- * blocked.
- */
 async function withServer(
   handler: (req: IncomingMessage, res: ServerResponse) => void,
   work: (baseUrl: string, seen: string[]) => Promise<void>,
 ): Promise<void> {
-  // The run's own reachability probe (a bare GET /) is dropped: it is how the
-  // runner decides whether a server is there at all, not a planned call.
   const seen: string[] = []
   const server = createServer((req, res) => {
     const line = `${req.method} ${req.url}`
@@ -273,13 +250,11 @@ describe('a run against a deployed QA environment', () => {
           { ...request, method: 'DELETE', path: '/api/x/1', expect: { status: 204, minItems: null, mustContain: null } },
           { ...request, method: 'POST', path: '/api/x', body: '{}', expect: { status: 201, minItems: null, mustContain: null } },
         ])
-        // The read happened; neither write reached the server at all.
         expect(seen).toEqual(['GET /api/x'])
         expect(outcome.calls[1].outcome).toBe('not_run')
         expect(outcome.calls[2].outcome).toBe('not_run')
         expect(outcome.calls[1].detail).toContain('blocked')
         expect(outcome.note).toContain('2 write requests were not sent')
-        // Blocked, not failed: nothing here says the write endpoint is broken.
         expect(outcome.calls[1].status).toBeNull()
       },
     )
@@ -301,8 +276,6 @@ describe('a run against a deployed QA environment', () => {
   })
 
   it('judges the whole body, so a long correct response is not failed for its length', async () => {
-    // 400 items is comfortably past the 2000-character display limit: the check
-    // used to run on the truncated copy, which no longer parsed as JSON.
     const items = Array.from({ length: 400 }, (_, i) => ({ id: i, name: `row ${i}` }))
     await withServer(
       (_req, res) => {
@@ -315,7 +288,6 @@ describe('a run against a deployed QA environment', () => {
         ])
         expect(outcome.calls[0].outcome).toBe('pass')
         expect(outcome.calls[0].detail).toBeNull()
-        // Stored truncated all the same: the report is evidence, not an archive.
         expect((outcome.calls[0].body ?? '').length).toBeLessThanOrEqual(2_000)
       },
     )

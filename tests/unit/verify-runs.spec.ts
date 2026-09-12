@@ -1,7 +1,3 @@
-// A verification run's life: started against a session, finished by whatever the
-// session reported, evidence attached afterwards, and history bounded. Drives the
-// real repository and the real SessionManager scan — the e2e mock cannot prove
-// either.
 import { describe, expect, it } from 'vitest'
 import { openDatabase } from '@main/store/db'
 import { createRepositories } from '@main/store/repositories'
@@ -51,7 +47,6 @@ function setup() {
     endTurn: () => drive('closeUnreportedVerify')(),
     sweep: (deadlineMs: number): void =>
       (manager as unknown as Record<string, (ms: number) => void>).sweepStaleRuns(deadlineMs),
-    /** Push a run's start time into the past, which is what the sweep reads. */
     backdate: (runId: string, minutes: number): void => {
       db.prepare('UPDATE verify_runs SET startedAt = ? WHERE id = ?').run(
         new Date(Date.now() - minutes * 60_000).toISOString(),
@@ -61,7 +56,6 @@ function setup() {
   }
 }
 
-/** An assistant_text payload carrying the run's report line. */
 const line = (json: string): { text: string } => ({ text: `Done.\n${VERIFY_MARKER}: ${json}` })
 
 describe('a verification run', () => {
@@ -94,20 +88,16 @@ describe('a verification run', () => {
     expect(stored?.status).toBe('inconclusive')
     expect(stored?.note).toContain('without reporting a result line')
 
-    // And the run is closed once: a later turn ending cannot touch it again.
     endTurn()
     expect(repos.verifyRuns.byId(run.id)?.status).toBe('inconclusive')
   })
 
-  // "Never reported" and "reported something unreadable" used to close with the
-  // same note, which sent the developer looking for output that was right there.
   it('says the report line was unreadable, rather than that none arrived', () => {
     const { repos, manager, start, scan, endTurn } = setup()
     const run = start()
     manager.watchVerifyReport('s1', run.id, 'suites')
 
     scan('assistant_text', line('{"suites": [oops}'))
-    // The watch stays open: a clean line may still be a moment behind.
     expect(repos.verifyRuns.byId(run.id)?.status).toBe('running')
 
     endTurn()
@@ -155,10 +145,6 @@ describe('a verification run', () => {
     expect(stored?.report?.suites[0].detail).toBe('142 passed')
   })
 
-  // The failure this exists for: a container killed by SIGKILL produces no turn
-  // end, so nothing closed the run, and the launch-time reconcile could not reach
-  // it while the app stayed up. The row read Running — with the Run button
-  // disabled behind it — until the developer restarted the app.
   it('closes a run whose session went quiet, without waiting for a restart', () => {
     const { repos, manager, projectId, changed, start, sweep, backdate } = setup()
     const run = start()
@@ -185,14 +171,11 @@ describe('a verification run', () => {
     expect(changed).toEqual([])
   })
 
-  // Before this, a run the developer no longer wanted had to be waited out.
   it('closes a cancelled run saying you stopped it, not that the session gave up', async () => {
     const { repos, manager, projectId, changed, start } = setup()
     const run = start()
     manager.watchVerifyReport('s1', run.id, 'suites')
 
-    // No hosted session here, so the interrupt fails — deliberately swallowed,
-    // because the row still needs closing whether or not the session is alive.
     await manager.cancelVerifyRun(run.id)
 
     const stored = repos.verifyRuns.byId(run.id)
@@ -233,11 +216,6 @@ describe('a verification run', () => {
   })
 })
 
-// A run is closed by the session's turn ending. A container killed by SIGKILL (this
-// app's bypass sessions have done that 18 times), an app that was killed, or a
-// machine that slept never produces that turn end, so the row stayed 'running' for
-// ever and the Tests section read it as a live run: the button said Running and
-// refused to start another. Reproduced from a real stuck row dated 2026-07-29.
 describe('startup reconciliation of orphaned runs (FR-022)', () => {
   it('closes a verification run the previous launch never finished', () => {
     const { repos, manager, projectId } = setup()
@@ -253,12 +231,9 @@ describe('startup reconciliation of orphaned runs (FR-022)', () => {
     manager.reconcileOnStartup()
 
     const after = repos.verifyRuns.byId(run.id)
-    // Inconclusive, never failed: nothing is known about what the suites did, and a
-    // figure nothing measured is never reported as a result.
     expect(after?.status).toBe('inconclusive')
     expect(after?.finishedAt).toBeTruthy()
     expect(after?.note).toContain('closed before this run reported')
-    // And the view's own "is a run live" question now answers no.
     expect(repos.verifyRuns.runningFor(projectId)).toBeNull()
   })
 
@@ -288,14 +263,10 @@ describe('startup reconciliation of orphaned runs (FR-022)', () => {
     })
     expect(repos.apiRuns.byId(run.id)?.status).toBe('running')
     manager.reconcileOnStartup()
-    // api_runs has no 'inconclusive'; 'error' is its word for a run that proved nothing.
     expect(repos.apiRuns.byId(run.id)?.status).toBe('error')
   })
 })
 
-// One watch per session, so starting a second pass before the first has reported
-// must close the first out rather than silently inherit its marker. Two ordinary
-// clicks produce this: both buttons become live the moment a run finishes.
 describe('a second pass started before the first reported', () => {
   const REPORT = '{"suites":[{"id":"node-unit","status":"pass","detail":"12 passed"}]}'
 
@@ -309,14 +280,12 @@ describe('a second pass started before the first reported', () => {
     const abandoned = repos.verifyRuns.byId(first.id)
     expect(abandoned?.status).toBe('inconclusive')
     expect(abandoned?.note).toContain('Another verification pass was started')
-    // And it says so rather than sitting on a spinner forever.
     expect(abandoned?.finishedAt).not.toBeNull()
 
     scan('assistant_text', line(REPORT))
     const landed = repos.verifyRuns.byId(second.id)
     expect(landed?.status).toBe('pass')
     expect(landed?.report?.suites[0].detail).toBe('12 passed')
-    // The first run keeps the honest outcome, never the second's figures.
     expect(repos.verifyRuns.byId(first.id)?.report).toBeNull()
   })
 
@@ -331,8 +300,6 @@ describe('a second pass started before the first reported', () => {
   })
 
   it('does not finish a run when the evidence pass is what gets abandoned', () => {
-    // An evidence watch has nothing to finish: the run it attaches to has already
-    // reported, so replacing that watch must not mark anything inconclusive.
     const { repos, manager, start } = setup()
     const finished = start()
     manager.watchVerifyReport('s1', finished.id, 'evidence')
@@ -342,9 +309,6 @@ describe('a second pass started before the first reported', () => {
   })
 })
 
-// A run covering six suites used to be a spinner until every one of them had
-// finished, so a slow suite and a stuck one looked identical. Each suite now
-// announces itself as it lands, and the picker marks it.
 describe('per-suite progress while the run is still going', () => {
   const suiteLine = (id: string, status: string): string =>
     `SWB_SUITE: {"id":"${id}","status":"${status}","detail":"done"}`
@@ -377,8 +341,6 @@ describe('per-suite progress while the run is still going', () => {
     ])
   })
 
-  // Progress is allowed to be wrong in a way a verdict is not, so a suite states
-  // its result once. A restatement later in the same turn is narration.
   it('ignores a second announcement of the same suite', () => {
     const { repos, manager, start, scan } = setup()
     const run = start()
@@ -392,8 +354,6 @@ describe('per-suite progress while the run is still going', () => {
     ])
   })
 
-  // The closing report is the record: it overwrites the whole suites array, so a
-  // suite ticked green by progress that the report calls failed loses.
   it('lets the closing report overrule what progress claimed', () => {
     const { repos, manager, start, scan } = setup()
     const run = start()
@@ -411,7 +371,6 @@ describe('per-suite progress while the run is still going', () => {
     ])
   })
 
-  // A progress line arriving after the run settled must not reopen it.
   it('drops progress for a run that has already finished', () => {
     const { repos, manager, start, scan } = setup()
     const run = start()

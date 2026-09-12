@@ -1,5 +1,3 @@
-// rule_prefs round-trips: only the difference from the shipped defaults is stored,
-// and forgetting a row restores the default because a missing row IS the default.
 import { describe, expect, it } from 'vitest'
 import { openDatabase } from '@main/store/db'
 import { createRepositories } from '@main/store/repositories'
@@ -44,7 +42,6 @@ describe('RulePrefsRepo', () => {
   })
 
   it('keeps risk and disabled independent on the same rule', () => {
-    // Both write the same row, so one must not clear the other.
     const r = repos()
     r.rulePrefs.setRisk('builtin:tool-write', 'high')
     r.rulePrefs.setDisabled('builtin:tool-write', 'risk', true)
@@ -93,7 +90,6 @@ describe('RulePrefsRepo', () => {
   })
 
   it('keeps risk and swallow prefs for the same id apart', () => {
-    // The primary key is (id, kind); one id can legitimately appear under both.
     const r = repos()
     r.rulePrefs.setDisabled('builtin:progress', 'swallow', true)
     r.rulePrefs.setDisabled('builtin:progress', 'risk', true)

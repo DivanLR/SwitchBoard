@@ -1,4 +1,3 @@
-// /usage response parsing into meters + dotted-list windows.
 import { describe, expect, it } from 'vitest'
 import { parseUsageReport } from '@shared/usage-report'
 

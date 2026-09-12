@@ -1,8 +1,3 @@
-// The per-project session mode: how a project's sessions decide what they may do.
-// Two facts matter and are easy to get wrong. A project that predates the setting
-// must keep behaving exactly as it did (migration 022 backfills 'auto', which is
-// what every session already spawned as), and the mode must survive the round trip
-// through SQLite rather than living only in the object the insert returned.
 import { describe, expect, it } from 'vitest'
 import { openDatabase, type AppDatabase } from '@main/store/db'
 import { createRepositories, type Repositories } from '@main/store/repositories'
@@ -36,8 +31,6 @@ describe('a project carries its own session mode', () => {
         source: 'manual',
         defaultSessionMode: value,
       })
-      // byId re-reads the column: an insert that forgot to write it would still
-      // return the right object here and fail on the next launch instead.
       expect(repos.projects.byId(project.id)?.defaultSessionMode).toBe(value)
     }
   })
@@ -59,26 +52,22 @@ describe('a project carries its own session mode', () => {
         .prepare('UPDATE projects SET defaultSessionMode = ? WHERE id = ?')
         .run('whatever', project.id),
     ).toThrow()
-    // The refusal left the old value in place rather than a null.
     expect(repos.projects.byId(project.id)?.defaultSessionMode).toBe('auto')
   })
 
   it('keeps the mode across archive and re-add, and lets a re-add choose a new one', () => {
     const { repos } = setup()
-    // A real folder: registerProject stats the path before it will touch a row.
     const dir = mkdtempSync(join(tmpdir(), 'sb-mode-'))
     const first = registerProject(repos, { path: dir, defaultSessionMode: 'acceptEdits' })
     expect(first.defaultSessionMode).toBe('acceptEdits')
 
     repos.projects.archive(first.id)
-    // Re-added without choosing: the archived row keeps what it had.
     const again = registerProject(repos, { path: dir })
     expect(again.id).toBe(first.id)
     expect(again.defaultSessionMode).toBe('acceptEdits')
     expect(repos.projects.byId(first.id)?.defaultSessionMode).toBe('acceptEdits')
 
     repos.projects.archive(first.id)
-    // Re-added WITH a choice: the developer just picked, so the choice wins.
     const third = registerProject(repos, { path: dir, defaultSessionMode: 'plan' })
     expect(third.defaultSessionMode).toBe('plan')
     expect(repos.projects.byId(first.id)?.defaultSessionMode).toBe('plan')

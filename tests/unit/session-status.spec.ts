@@ -1,6 +1,3 @@
-// A completed foreground turn must not read as an idle session while SDK
-// background tasks (a /deep-research workflow, backgrounded subagents) are still
-// running. Drives the real HostedSession message pipeline.
 import { describe, expect, it } from 'vitest'
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { EventKind, EventPayloadMap, SessionEvent, SessionStatus } from '@shared/domain'
@@ -19,7 +16,6 @@ function makeSession() {
   const session = new HostedSession({
     sessionId: 's1',
     projectPath: '.',
-    // Every session spawns in one resolved mode; 'auto' is the app default.
     mode: 'auto',
     sink,
     gate: (async () => ({ behavior: 'allow', updatedInput: {} })) as never,
@@ -28,7 +24,6 @@ function makeSession() {
     onTurnComplete: () => {},
     onExit: () => {},
   })
-  // handleMessage is the private ingest point the run loop feeds; drive it directly.
   const feed = (message: unknown): void =>
     (session as unknown as { handleMessage(m: SDKMessage): void }).handleMessage(message as SDKMessage)
   return { session, statuses, feed }
@@ -48,11 +43,9 @@ describe('session status with background tasks', () => {
     feed(bgChanged([{ task_id: 't1', task_type: 'workflow', description: 'deep research' }]))
     expect(statuses.at(-1)).toEqual({ status: 'working', detail: 'Running in background: deep research' })
 
-    // The foreground turn finishes: without the fix this flipped to 'done'.
     feed(resultSuccess())
     expect(session.currentStatus).toBe('working')
 
-    // The background task finishes (empty REPLACE payload): now genuinely idle.
     feed(bgChanged([]))
     expect(session.currentStatus).toBe('done')
     expect(statuses.at(-1)).toEqual({ status: 'done', detail: null })

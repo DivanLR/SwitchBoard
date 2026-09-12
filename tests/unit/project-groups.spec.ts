@@ -1,4 +1,3 @@
-// Sidebar grouping: the partition must never lose or reorder a project.
 import { describe, expect, it } from 'vitest'
 import type { ProjectGroup } from '@shared/domain'
 import { groupSections } from '@shared/project-groups'

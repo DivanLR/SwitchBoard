@@ -1,7 +1,3 @@
-// Session transcripts: the temp-file export a following session can be seeded
-// with. The build is pure, so it is asserted directly; the filesystem half is
-// asserted against a real temp directory, because an expiry sweep that does not
-// actually delete is worth nothing.
 import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -71,7 +67,6 @@ describe('buildTranscript', () => {
     )
     expect(text).toContain('tighten the lane rows')
     expect(text).toContain('Done: rows are 40px.')
-    // Counted in the digest, never transcribed into the body.
     expect(text).toContain('Edit 1×')
     expect(text).not.toContain('npm warn deprecated')
   })
@@ -135,8 +130,6 @@ describe('buildTranscript', () => {
     const append = transcriptContextAppend({ ...built.summary, path: '/tmp/t/sess-1.md' })
     expect(append).toContain(built.summary.digest)
     expect(append).toContain('/tmp/t/sess-1.md')
-    // The digest quotes the last prompt on purpose — that is the cheapest useful
-    // fact about where a session got to. What must NOT travel inline is the body.
     expect(append).toContain('a very specific thing that was asked')
     expect(append).not.toContain('a long answer that belongs in the file')
   })
@@ -174,13 +167,10 @@ describe('the temp directory', () => {
     const old = (Date.now() - TRANSCRIPT_TTL_MS - 60_000) / 1000
     utimesSync(stray(), old, old)
 
-    // Every write sweeps, so an expired file cannot outlive the next save even if
-    // nothing ever calls the sweep directly.
     const fresh = writeTranscript(session(), 'alpha', [], Date.now())
     expect(existsSync(stray())).toBe(false)
     expect(existsSync(fresh.path)).toBe(true)
 
-    // And the sweep is idempotent: nothing left to remove, the fresh one stays.
     expect(sweepExpiredTranscripts()).toBe(0)
     expect(existsSync(fresh.path)).toBe(true)
   })

@@ -1,11 +1,3 @@
-// The routing half of the cross-project handover tool (inter-session.ts). The
-// two refusals are the ones that cost something real if they regress: a fuzzy
-// match would send work to the wrong codebase, and a self-send would let a
-// session queue itself work for ever.
-//
-// The third thing worth pinning is that a handover STARTS the target session.
-// Queueing alone was the reported fault: the work sat in a queue the sender
-// could not see and the developer had no reason to open.
 import { describe, expect, it } from 'vitest'
 import { handoff, sessionsReport, type InterSessionDeps } from '@main/sessions/inter-session'
 
@@ -82,7 +74,6 @@ describe('starting the receiving session', () => {
     const result = await handoff(d, 'Ledger API', 'x')
     expect(result.ok).toBe(true)
     expect(started).toEqual(['p2'])
-    // Queued before started: a fresh session drains the queue as it comes up.
     expect(sent).toHaveLength(1)
     expect(result.text).toContain('Started a session for Ledger API')
   })
@@ -97,7 +88,6 @@ describe('starting the receiving session', () => {
   it('still reports the handover as queued when the start fails, and names the reason', async () => {
     const { deps: d, sent } = deps('Switchboard', { startFails: 'p2' })
     const result = await handoff(d, 'Ledger API', 'x')
-    // ok, because the message IS queued — it is waiting, not lost.
     expect(result.ok).toBe(true)
     expect(sent).toHaveLength(1)
     expect(result.text).toContain('Docker is not running')

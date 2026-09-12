@@ -1,6 +1,3 @@
-// T047: retention — events survive for the current and previous session per
-// project only; resolved decisions older than 30 days are pruned; sessions
-// rows and pending items are kept (FR-021a).
 import { describe, expect, it } from 'vitest'
 import { openDatabase } from '@main/store/db'
 import { createRepositories, newId, nowIso } from '@main/store/repositories'
@@ -16,8 +13,6 @@ function insertSession(
   repos: ReturnType<typeof createRepositories>,
   projectId: string,
   startedAt: string,
-  /** Still running: no endedAt, no endReason. The keep-set treats these
-   *  differently from an ended session of the same age (see the live test). */
   live = false,
 ) {
   const id = newId()
@@ -65,16 +60,9 @@ describe('runRetention', () => {
     insertEvent(repos, previous, 1)
     insertEvent(repos, current, 1)
 
-    // runRetention reads/deletes the events table with its own raw SQL,
-    // bypassing EventsRepo (repositories.ts), so it never sees a row still
-    // sitting in the repo's write buffer. Production wiring (main/index.ts)
-    // flushes before every scheduled run for exactly this reason; this test
-    // calls runRetention directly, so it has to do the same flush itself to
-    // mean what it says.
     repos.events.flush()
     const dry = runRetention(db, { dryRun: true })
     expect(dry.eventsDeleted).toBe(2)
-    // Dry run deletes nothing.
     expect(repos.events.page(oldSession)).toHaveLength(2)
 
     const result = runRetention(db)
@@ -82,21 +70,9 @@ describe('runRetention', () => {
     expect(repos.events.page(oldSession)).toHaveLength(0)
     expect(repos.events.page(previous)).toHaveLength(1)
     expect(repos.events.page(current)).toHaveLength(1)
-    // Session rows are kept so history references stay resolvable.
     expect(repos.sessions.byId(oldSession)).toBeDefined()
   })
 
-  /**
-   * The keep-set ranks by startedAt DESC, and a project can now run several
-   * sessions at once, so the session that STARTED first is not the session that
-   * matters least. A long-running conversation opened this morning ranks third
-   * behind two short ones opened since, and the nightly job would delete its
-   * events out from under the developer while they were still reading them.
-   *
-   * Ranking is not the fix and is not what this asserts: `live` still ranks
-   * outside SESSIONS_PER_PROJECT here, deliberately. What it asserts is that
-   * being unfinished exempts a session from the sweep whatever its rank.
-   */
   it('never prunes a session that is still running, however it ranks by start time', () => {
     const { db, repos } = makeDb()
     const project = repos.projects.insert({ name: 'a', path: 'C:\\live', source: 'manual' })
@@ -107,9 +83,8 @@ describe('runRetention', () => {
     insertEvent(repos, live, 2)
     insertEvent(repos, newer, 1)
     insertEvent(repos, newest, 1)
-    repos.events.flush() // see the note in the test above
+    repos.events.flush() 
 
-    // Third of three by startedAt, so the rank alone would have pruned it.
     const result = runRetention(db)
     expect(result.eventsDeleted).toBe(0)
     expect(repos.events.page(live)).toHaveLength(2)

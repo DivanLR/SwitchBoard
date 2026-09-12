@@ -1,7 +1,3 @@
-// A killed process cannot explain itself, so the app has to. Every crash in this
-// user's history was exit 137 on a bypass session, reported as "crashed" with the
-// raw SDK string — an environment limit dressed up as the developer's code failing,
-// which is the one thing PRODUCT.md forbids.
 import { describe, expect, it } from 'vitest'
 import { explainExit } from '@main/sessions/session'
 
@@ -10,17 +6,10 @@ describe('explainExit', () => {
     const msg = explainExit('Claude Code process exited with code 137', true)
     expect(msg).toContain('SIGKILL')
     expect(msg).toContain('ran out of memory')
-    // The container's own cap and the virtual machine's are different fixes, and
-    // sending the developer to edit .wslconfig when the container limit was the
-    // ceiling they hit is an afternoon wasted.
     expect(msg).toContain('SWITCHBOARD_SANDBOX_MEMORY')
     expect(msg).toContain('.wslconfig')
-    // The cap is a Settings field now — the fix must be reachable from the app,
-    // not "an env var where Switchboard is launched from".
     expect(msg).toContain('Settings')
-    // The developer must know their work is not lost.
     expect(msg).toContain('resumes')
-    // And it must not read as their code crashing.
     expect(msg).not.toContain('ended unexpectedly')
   })
 
@@ -32,7 +21,6 @@ describe('explainExit', () => {
   })
 
   it('reads 13 as the unfinished top-level await it actually is', () => {
-    // 13 and 137 are entirely different diagnoses and must never be conflated.
     const msg = explainExit('Claude Code process exited with code 13', true)
     expect(msg).toContain('top-level await')
     expect(msg).not.toContain('SIGKILL')

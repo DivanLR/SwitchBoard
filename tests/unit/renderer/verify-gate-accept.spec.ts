@@ -1,9 +1,3 @@
-// Accepting a gate nothing measured.
-//
-// The rule this has to hold on to: acceptance is an overlay on an ABSENT
-// measurement and nothing else. A developer may excuse a mutation gate on a stack
-// with no mutation tool; they may not click away a coverage figure that came back
-// under target. The first is a judgement, the second is laundering the run.
 import { computed, ref } from 'vue'
 import { describe, expect, it } from 'vitest'
 import { useVerifyGates } from '@renderer/composables/useVerifyGates'
@@ -48,7 +42,6 @@ function run(over: Partial<VerifyReport> = {}): VerifyRun {
   } as unknown as VerifyRun
 }
 
-/** The gates for one run, with `ids` accepted. */
 function gatesFor(latestRun: VerifyRun | null, ids: string[] = []) {
   const latest = ref(latestRun)
   const { gates, score } = useVerifyGates(
@@ -67,16 +60,11 @@ describe('a gate nothing measured', () => {
     const gate = gatesFor(run(), ['mutation']).byId('mutation')
 
     expect(gate.status).toBe('pass')
-    // The word is the whole safeguard: green alone would be indistinguishable
-    // from a gate a run actually proved.
     expect(gate.value).toBe('accepted')
     expect(gate.sub).toContain('you accepted this')
   })
 
   it('stays out of the counted score, exactly as an unmeasured gate does', () => {
-    // The score answers "of what this run measured, how much held". An accepted
-    // gate was not measured, so counting it as a pass would put a judgement
-    // inside a counted figure.
     const before = gatesFor(run()).score
     const after = gatesFor(run(), ['mutation']).score
 
@@ -103,16 +91,12 @@ describe('a gate a run did measure', () => {
   })
 
   it('offers no acceptance when the figure came UNDER target', () => {
-    // The case the whole design turns on. Under-target is a real shortfall; an
-    // accept control here would be a button for making bad numbers look good.
     const under = run({ quality: { ...report().quality, mutation: measured(12) } })
 
     expect(gatesFor(under).byId('mutation').acceptable).toBe(false)
   })
 
   it('ignores an acceptance recorded for it, rather than honouring the stale one', () => {
-    // Order matters: a developer accepts a gate while it is unmeasured, then a
-    // later run measures it. The measurement must win with no cleanup step.
     const under = run({ quality: { ...report().quality, mutation: measured(12) } })
     const gate = gatesFor(under, ['mutation']).byId('mutation')
 
