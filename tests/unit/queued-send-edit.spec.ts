@@ -1,10 +1,3 @@
-// Rewording or withdrawing a composer message that is still queued behind the
-// running turn.
-//
-// The case worth protecting is the race, not the happy path: the turn can finish
-// between the developer opening the editor and saving it, and at that point the
-// session has already been told. editQueuedSend must report that rather than
-// appear to succeed, or they are left believing they changed what ran.
 import { describe, expect, it } from 'vitest'
 import type { EventKind, EventPayloadMap, SessionEvent } from '@shared/domain'
 import { HostedSession } from '@main/sessions/session'
@@ -31,7 +24,6 @@ function makeSession() {
   }
   const session = new HostedSession({
     sessionId: 's1',
-    // Every session spawns in one resolved mode; 'auto' is the app default.
     mode: 'auto',
     projectPath: '.',
     sink: sink as never,
@@ -48,7 +40,6 @@ function makeSession() {
     flushQueuedSends(): void
   }
 
-  /** Queue a message the way sendMessage does: send(), then deliver(eventId). */
   const queue = (text: string): string => {
     internals.turnInFlight = true
     const handle = session.send(text)
@@ -68,7 +59,6 @@ describe('HostedSession.editQueuedSend', () => {
 
     expect(session.editQueuedSend(id, 'run the tests, then lint')).toBe(true)
     expect(internals.queuedSends).toEqual([{ eventId: id, text: 'run the tests, then lint' }])
-    // The stream shows the new text, still marked queued.
     expect(updates.at(-1)).toEqual({ id, payload: { text: 'run the tests, then lint', pending: true } })
   })
 
@@ -79,7 +69,6 @@ describe('HostedSession.editQueuedSend', () => {
 
     internals.flushQueuedSends()
 
-    // deliverNow marks it delivered with the text that was actually sent.
     expect(updates.at(-1)).toMatchObject({ id, payload: { text: 'new plan', pending: false } })
     expect(internals.queuedSends).toEqual([])
   })
@@ -90,8 +79,6 @@ describe('HostedSession.editQueuedSend', () => {
 
     expect(session.editQueuedSend(id, '   ')).toBe(true)
     expect(internals.queuedSends).toEqual([])
-    // The original text is preserved: what was typed is part of the record, and
-    // it is flagged so it cannot read as something the session was told.
     expect(updates.at(-1)).toEqual({
       id,
       payload: { text: 'never mind this', pending: false, withdrawn: true },
@@ -106,13 +93,13 @@ describe('HostedSession.editQueuedSend', () => {
 
     internals.flushQueuedSends()
 
-    expect(updates.length).toBe(after) // nothing further happened
+    expect(updates.length).toBe(after) 
   })
 
   it('refuses once the turn has finished and the message has gone', () => {
     const { session, internals, queue } = makeSession()
     const id = queue('already on its way')
-    internals.flushQueuedSends() // the race: the turn ended mid-edit
+    internals.flushQueuedSends() 
 
     expect(session.editQueuedSend(id, 'too late')).toBe(false)
   })

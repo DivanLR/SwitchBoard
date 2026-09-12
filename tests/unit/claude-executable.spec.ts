@@ -1,5 +1,3 @@
-// The app drives the user's own native Claude Code install; nothing else is
-// accepted, because the packaged build ships no CLI of its own.
 import { describe, expect, it } from 'vitest'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'

@@ -1,5 +1,3 @@
-// The store's own transaction wrapper: node:sqlite has none, so the commit and
-// rollback behaviour better-sqlite3 used to provide is ours to get right.
 import { describe, expect, it } from 'vitest'
 import { openDatabase, transaction } from '@main/store/db'
 
@@ -43,7 +41,6 @@ describe('transaction', () => {
         throw new Error('boom')
       })
     } catch {
-      /* expected */
     }
     transaction(db, () => db.prepare('INSERT INTO t (id) VALUES (?)').run('after'))
     expect(count(db)).toBe(1)
@@ -53,7 +50,6 @@ describe('transaction', () => {
     const db = openDatabase(':memory:')
     const applied = (db.prepare('SELECT COUNT(*) AS n FROM migrations').get() as { n: number }).n
     expect(applied).toBeGreaterThan(0)
-    // Re-running openDatabase's migrate step must be a no-op, not a duplicate.
     const again = openDatabase(':memory:')
     expect((again.prepare('SELECT COUNT(*) AS n FROM migrations').get() as { n: number }).n).toBe(
       applied,

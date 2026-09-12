@@ -1,9 +1,3 @@
-// What the app injects into every session: the sandbox note, heavy-subagent mode
-// and the Advisor/Orchestrator mode protocol.
-//
-// The terse and ADHD output-style appends were removed on 2026-08-14, and the
-// temp-directory fixtures went with them: only the ADHD accessor touched the
-// filesystem, to read its opt-in flag file.
 import { describe, expect, it } from 'vitest'
 import {
   heavySubagentModelMode,
@@ -22,14 +16,10 @@ describe('heavySubagentSystemPromptAppend', () => {
     const append = heavySubagentSystemPromptAppend(true)
     expect(append).toContain('DIVIDE AND CONQUER')
     expect(append).toContain('as many dynamic subagents')
-    // Sequential single dispatches are the failure this instruction exists to stop.
     expect(append).toContain('ONE batch')
   })
 
   it('exempts only single actions, never "it would be quicker to just do it"', () => {
-    // The old text excused any work whose steps "depend on the previous result"
-    // and anything where "dispatching costs more than doing" — two clauses that
-    // fit almost any task, which is most of why the setting read as inert.
     const append = heavySubagentSystemPromptAppend(true) ?? ''
     expect(append).toContain('single action')
     expect(append).toContain('is not an exemption')
@@ -45,9 +35,6 @@ describe('heavySubagentModelMode', () => {
   })
 
   it('drops auto to advisor when off, so nothing still tells the loop to delegate', () => {
-    // Auto teaches BOTH paragraphs, and the orchestrator one says to delegate
-    // every chunk to `worker` subagents. Off has to remove the licence as well as
-    // the directive, or it reads as ignored.
     expect(heavySubagentModelMode(false, 'auto')).toBe('advisor')
     expect(modesSystemPromptAppend(heavySubagentModelMode(false, 'auto'))).not.toContain(
       'delegate each chunk',
@@ -55,8 +42,6 @@ describe('heavySubagentModelMode', () => {
   })
 
   it('pins to orchestrator when on, so the two appends cannot contradict', () => {
-    // Advisor's own protocol says to implement scoped work yourself, which is the
-    // opposite instruction sitting in the same system prompt.
     for (const chosen of ['auto', 'advisor', 'orchestrator'] as const) {
       expect(heavySubagentModelMode(true, chosen)).toBe('orchestrator')
     }
@@ -96,8 +81,6 @@ describe('modesSystemPromptAppend', () => {
   })
 
   it('keeps the orchestrator "own turns" clause out of the heavy-subagent append', () => {
-    // Heavy mode forces orchestrator (heavySubagentModelMode), so the two appends
-    // are never apart; the instruction should live in exactly one of them.
     const heavy = heavySubagentSystemPromptAppend(true) ?? ''
     const orchestrator = modesSystemPromptAppend('orchestrator')
     expect(orchestrator).toContain('Keep your own turns')
@@ -123,9 +106,6 @@ describe('sandboxSystemPromptAppend prose', () => {
 })
 
 describe('basic mode shaping', () => {
-  // Nothing at all, not even the header. The header announces two subagents
-  // that basic does not register, and a loop told they exist would spend turns
-  // trying to delegate to agents that are not there.
   it('appends no protocol, because there is no second tier to describe', () => {
     expect(modesSystemPromptAppend('basic')).toBe('')
     for (const mode of ['auto', 'advisor', 'orchestrator'] as const) {
@@ -133,9 +113,6 @@ describe('basic mode shaping', () => {
     }
   })
 
-  // The prompt going quiet is not enough on its own: a registered agent can be
-  // reached whatever the prompt says, and the advisor definition carries the
-  // strong model. Basic must register neither.
   it('registers no subagents, so the expensive tier cannot be reached at all', () => {
     const agents = modeAgents({ strongModel: 'opus', cheapModel: 'haiku', mode: 'basic' })
     expect(Object.keys(agents)).toEqual([])

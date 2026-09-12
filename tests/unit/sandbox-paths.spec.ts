@@ -1,7 +1,3 @@
-// A bypass session's CLI runs in a Linux container, so a Windows path in the
-// message text points at nothing. The composer appends `@<host path>` per REFS
-// chip, so without translation the agent hunts for /mnt/c, finds nothing, and
-// reports a repo unreachable that is in fact mounted read-only at /refs/<name>.
 import { afterEach, describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -103,8 +99,6 @@ describe('sandboxSystemPromptAppend', () => {
 
   it('spells out the search command, since refs sit outside the cwd', () => {
     const note = sandboxSystemPromptAppend(MOUNTS) as string
-    // "0 hits repo-wide" from /workspace says nothing about a ref — the agent has
-    // to be told to pass them, and given the exact command.
     expect(note).toContain('does not reach them')
     expect(note).toContain('rg -n "pattern" /workspace /refs/Einstein.Renewal.FE /refs/ExternalAPI')
   })
@@ -126,12 +120,6 @@ describe('sandboxSystemPromptAppend', () => {
   })
 })
 
-// The container mounts ONLY the project folder at /workspace, so git works there
-// exactly when a real .git directory sits at the project root. Every other shape
-// (repo nested one level down, project inside a larger repo, worktree gitfile,
-// no repo at all) looks to the agent like "history was deleted" — the notice says
-// what is actually true BEFORE it goes hunting, the same stated-up-front rule as
-// "browser is not in the bypass container".
 describe('gitNotice', () => {
   const dirs: string[] = []
   const scratch = (): string => {
@@ -185,10 +173,6 @@ describe('gitNotice', () => {
   })
 })
 
-// The container memory cap became a Settings field because the env-var escape
-// hatch asks a desktop-app user to "set it where Switchboard is launched from",
-// which is nowhere they can reach. The env var still wins so existing setups
-// keep behaving.
 describe('sandboxMemoryArg', () => {
   const saved = process.env.SWITCHBOARD_SANDBOX_MEMORY
   afterEach(() => {
@@ -217,15 +201,6 @@ describe('sandboxMemoryArg', () => {
     expect(sandboxMemoryArg('12g')).toEqual(['--memory', '9G'])
   })
 
-  // This used to assert the opposite: that every branch emitting a cap emitted
-  // `--memory-swap` pinned to the same figure, because with `--memory` alone
-  // Docker permitted swap up to the same figure again and a 12g container could
-  // reach ~24 GiB, more than the whole VM on a 32 GB machine.
-  //
-  // wslc has no `--memory-swap`. So the cap is a soft one again, and the honest
-  // test is the one that says so: this pins the ABSENCE, so that reintroducing
-  // the flag is a deliberate act that updates a test rather than something that
-  // drifts in unnoticed. Flip it back the day wslc gains the flag.
   it('emits the cap alone, because wslc has no --memory-swap to pin it with', () => {
     delete process.env.SWITCHBOARD_SANDBOX_MEMORY
     for (const setting of [undefined, '4g', '12g', '512m']) {
@@ -236,41 +211,24 @@ describe('sandboxMemoryArg', () => {
     }
   })
 
-  // Every branch that emits a cap must emit it in the form wslc accepts, which
-  // is not the form this app has always stored. `wslc run -m 6g` is refused
-  // outright ("Invalid memory argument value: '6g'"), and the stored setting,
-  // the default, and the SWITCHBOARD_SANDBOX_MEMORY on at least one real machine
-  // are all lowercase, so without normalising, every containerised session died
-  // at spawn on an argument nobody had reason to think was wrong. Asserted on
-  // the emitted args and not only on normalizeSize, because it is the argv that
-  // reaches wslc.
   it('emits the cap in the case wslc accepts, whatever case it was stored in', () => {
     delete process.env.SWITCHBOARD_SANDBOX_MEMORY
     expect(sandboxMemoryArg('512m')).toEqual(['--memory', '512M'])
     expect(sandboxMemoryArg('1gb')).toEqual(['--memory', '1G'])
     expect(sandboxMemoryArg('2GiB')).toEqual(['--memory', '2G'])
     expect(sandboxMemoryArg('1.5g')).toEqual(['--memory', '1.5G'])
-    // Already right stays right, rather than being mangled by a second pass.
     expect(sandboxMemoryArg('12G')).toEqual(['--memory', '12G'])
   })
 
-  // A value wslc genuinely cannot read must reach wslc unchanged, so its own
-  // error names it. Rewriting it into something plausible would replace a clear
-  // complaint about the developer's input with a silent substitution.
   it('passes an unrecognisable size through rather than inventing one', () => {
     delete process.env.SWITCHBOARD_SANDBOX_MEMORY
     expect(normalizeSize('lots')).toBe('lots')
     expect(normalizeSize('6 gigs')).toBe('6 gigs')
-    // Bare byte counts carry no unit to upcase and are already valid.
     expect(normalizeSize('1073741824')).toBe('1073741824')
   })
 })
 
 describe('cpuShare', () => {
-  // Without --cpus a container sees every host core, and both Playwright and
-  // vitest size their worker pools from that count — so two containers on a
-  // twelve-core host each started twelve workers and twenty-four workers' peak
-  // memory arrived at once, inside two caps that each looked reasonable alone.
   it('gives a container half the host, never fewer than two cores', () => {
     const share = Number(cpuShare())
     expect(Number.isInteger(share)).toBe(true)
@@ -279,12 +237,6 @@ describe('cpuShare', () => {
   })
 })
 
-// Two containerised sessions of the SAME project used to share one home
-// volume (keyed by projectId) and collide on the CLI's own storage key, which is
-// derived from cwd alone (always /workspace inside the container) — confirmed to
-// let them read each other's transcripts. Keying the volume to the session itself
-// removes that collision; resume is the one case that must deliberately bridge to
-// an ancestor's volume instead, since that is the only place its transcript exists.
 describe('homeVolumeFor', () => {
   it('gives two fresh sessions of the same project different home volumes', () => {
     expect(homeVolumeFor('sess-a')).not.toBe(homeVolumeFor('sess-b'))
@@ -304,11 +256,6 @@ describe('homeVolumeFor', () => {
   })
 })
 
-// A browser is in the bypass container ONLY where the project actually drives one.
-// For every other project it is deliberately absent, and that absence is the common
-// case: Chromium's shared libraries are several hundred megabytes that a project
-// with no browser tests would carry in every session for nothing. The Tests section
-// reads the same answer and says so before a run rather than failing one after.
 describe('browser in the bypass container, only where earned', () => {
   it('is absent for a plain node project, and the suites that need it say why', () => {
     expect(needsBrowser(['package.json', 'src', 'vite.config.ts'])).toBe(false)
@@ -316,8 +263,6 @@ describe('browser in the bypass container, only where earned', () => {
     const tools = sandboxTools(false, false)
     expect(tools).not.toContain('browser')
 
-    // The node stack always OFFERS an end-to-end run, which is exactly why "a suite
-    // wants a browser" is useless as a gate: it is true almost always.
     const e2e = suiteById('node-e2e')!
     expect(e2e.needs).toBe('browser')
     expect(unavailableReason(e2e, tools)).toBe('browser is not in the bypass container')
@@ -337,8 +282,6 @@ describe('browser in the bypass container, only where earned', () => {
   it('is present for an Angular workspace, whose unit tests run ChromeHeadless', () => {
     expect(needsBrowser(['angular.json', 'package.json'])).toBe(true)
     expect(needsBrowser(['karma.conf.js'])).toBe(true)
-    // All four Angular suites are browser-gated, so without this an Angular project
-    // in a bypass session could run only its production build.
     for (const id of ['ng-unit', 'ng-coverage', 'ng-e2e', 'ng-mutation']) {
       expect(suiteById(id)!.needs).toBe('browser')
       expect(unavailableReason(suiteById(id)!, sandboxTools(false, true))).toBeNull()
@@ -348,13 +291,10 @@ describe('browser in the bypass container, only where earned', () => {
   it('reads the manifest when there is no config file of its own', () => {
     const manifest = JSON.stringify({ devDependencies: { '@playwright/test': '^1.61.0' } })
     expect(needsBrowser(['package.json'], () => manifest)).toBe(true)
-    // And stays false for a manifest that merely mentions unrelated packages.
     expect(needsBrowser(['package.json'], () => '{"devDependencies":{"vitest":"^4"}}')).toBe(false)
   })
 
   it('says no when it cannot read anything, rather than assuming a browser', () => {
-    // A false negative costs one honest message; a false positive costs every
-    // session on that project an image it never uses.
     expect(needsBrowser(['package.json'], () => null)).toBe(false)
     expect(needsBrowser([])).toBe(false)
   })
@@ -365,22 +305,15 @@ describe('browser in the bypass container, only where earned', () => {
     for (const id of ['blazor-ui', 'blazor-interactive']) {
       expect(suiteById(id)!.needs).toBe('browser')
       expect(unavailableReason(suiteById(id)!, tools)).toBeNull()
-      // Without a browser, both of a Blazor project's UI suites are unavailable.
       expect(unavailableReason(suiteById(id)!, sandboxTools(true, false))).toContain('not in the bypass container')
     }
   })
 })
 
-// Containerisation and permission-bypass used to be the same boolean, read from
-// `mode === 'bypass'` in two places. The sections need the combination that split
-// could not express: isolated from the developer's checkout, still gated. These
-// pin the two axes apart, because nothing else would notice them re-merging.
 describe('a container is not a permission decision', () => {
   it('tells a containerised session its node_modules is private, so a failed import is fixable', () => {
     const append = sandboxSystemPromptAppend([{ container: '/workspace' }], null, true)
     expect(append).toContain('/workspace/node_modules')
-    // The reason matters as much as the fact: a Windows-installed tree cannot run
-    // here, which is why `npm ci` inside the container is safe rather than reckless.
     expect(append).toMatch(/npm ci|npm install/)
     expect(append?.toLowerCase()).toContain('safe')
   })
@@ -391,25 +324,12 @@ describe('a container is not a permission decision', () => {
   })
 
   it('reports the container memory ceiling for any containerised session, not only a bypass one', () => {
-    // exit 137 is the container being SIGKILLed at its --memory cap. That is true
-    // of a section's session too, and explaining it as a bypass problem would send
-    // the developer looking in the wrong place.
     const detail = explainExit('exited with code 137', true)
     expect(detail).toContain('Sandbox memory')
     expect(detail).not.toContain('bypass sandbox')
   })
 })
 
-// The image is built only when `wslc image inspect` misses it, which is right:
-// rebuilding on every session start would be unusable. Paired with a FIXED tag it
-// meant an image, once built, was never rebuilt however the recipe changed.
-//
-// That cost a real feature. The mutation suite runs `dotnet stryker`; the .NET
-// image gained a `dotnet tool install --global dotnet-stryker` line to support
-// it; and every machine that had already run one session kept the old image. The
-// suite came back "Could not execute because the specified command or file was
-// not found" — which reads as the developer's project being broken, and is
-// exactly the confusion FR-057 exists to prevent.
 describe('the sandbox image tag', () => {
   const dir = mkdtempSync(join(tmpdir(), 'sbimg-'))
 
@@ -419,10 +339,6 @@ describe('the sandbox image tag', () => {
     expect(first).toMatch(/^switchboard-sandbox(-dotnet)?(-browser)?:[0-9a-f]{12}$/)
   })
 
-  // The property that matters: a DIFFERENT recipe is a different tag, which is
-  // what makes the inspect miss and the build actually happen. Asserted on the
-  // recipes themselves rather than through folder detection, so this test is
-  // about tagging and not about what a temporary directory looks like.
   it('gives every distinct recipe its own tag', () => {
     const tags = new Set([
       recipeTag(false, false),

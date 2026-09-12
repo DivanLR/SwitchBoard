@@ -1,11 +1,3 @@
-// A section's work runs in a background session the developer never opens, so
-// for the length of a verify pass or a diagram the panel said "Running…" and
-// nothing else. The events were crossing the wire the whole time — the store
-// dropped every one that did not belong to the OPEN conversation.
-//
-// The tail is what those events feed. It has to stay separate from `events`:
-// the open conversation and the session doing background work are different
-// sessions, and merging them would put a verify run's output in the chat.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionEvent } from '@shared/domain'
 
@@ -45,7 +37,6 @@ describe('watching a background session without opening it', () => {
       'npm test',
       '12 passed',
     ])
-    // The chat is untouched: this is the whole reason the tail is a separate array.
     expect(store.events).toEqual([])
   })
 
@@ -84,7 +75,6 @@ describe('watching a background session without opening it', () => {
     store.unwatchTail('bg')
     expect(store.tails.bg).toBeUndefined()
 
-    // And a later push for it is a no-op rather than resurrecting the tail.
     store.applyEventPush(event('bg', 2, 'more work'))
     expect(store.tails.bg).toBeUndefined()
   })
@@ -96,8 +86,6 @@ describe('watching a background session without opening it', () => {
 
     const tail = store.tails.bg ?? []
     expect(tail.length).toBeLessThanOrEqual(150)
-    // The NEWEST lines are the ones kept: a trimmed tail showing the start of a
-    // run would be worse than no tail at all.
     expect((tail.at(-1)?.payload as { text: string }).text).toBe('line 400')
   })
 })

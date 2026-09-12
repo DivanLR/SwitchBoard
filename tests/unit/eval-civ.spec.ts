@@ -1,6 +1,3 @@
-// The Coordinator-Implementor-Verifier parts of the eval loop: which suites a
-// project can run, the marker that carries a check's real outcome back out of the
-// session, the gate that stops a false pass, and the derived stage.
 import { describe, expect, it } from 'vitest'
 import { canPassEval, evalStage, type EvalRun } from '@shared/domain'
 import { detectStacks, stackEntries, TEST_STACKS } from '@shared/test-catalog'
@@ -37,9 +34,6 @@ describe('stack detection', () => {
     expect(detectStacks(['notes.txt'])).toEqual([])
   })
 
-  // Both shapes below are real registered projects that a root-only scan reported
-  // as having no stack, which emptied their Tests section and sent their bypass
-  // session to the node-only sandbox image.
   it('finds a solution one level down, where repos usually wrap it', () => {
     const tree: Record<string, string[]> = {
       '/ExternalAPI': ['CLAUDE.md', 'Ppl.Einstein.External.Api', 'device_recon.txt'],
@@ -52,7 +46,6 @@ describe('stack detection', () => {
 
   it('matches an exact marker on the basename, not the whole nested path', () => {
     expect(detectStacks(['app/global.json']).map((s) => s.stackId)).toEqual(['dotnet'])
-    // ...but not a file that merely ends with the marker's name.
     expect(detectStacks(['my-global.json'])).toEqual([])
   })
 
@@ -72,7 +65,6 @@ describe('stack detection', () => {
       const kinds = new Set(stack.suites.map((s) => s.kind))
       expect(kinds.has('unit'), `${stack.id} has unit`).toBe(true)
       expect(kinds.has('api') || kinds.has('ui'), `${stack.id} has api or ui`).toBe(true)
-      // Every suite must carry both halves: what it proves, and how.
       for (const suite of stack.suites) {
         expect(suite.acceptance.length, `${suite.id} acceptance`).toBeGreaterThan(10)
         expect(suite.command.length, `${suite.id} command`).toBeGreaterThan(3)
@@ -163,10 +155,6 @@ describe('derived stage', () => {
   })
 })
 
-// ".NET" is not one thing to verify. An HTTP smoke pass over the endpoints is the
-// strongest evidence there is for a Web API, and close to worthless for a Blazor
-// front end: every interactive render mode prerenders first, so the server's HTML
-// is the same whether or not the component ever became interactive.
 describe('what kind of .NET application a project holds', () => {
   const suiteIds = (entries: string[], files: Record<string, string>): string[] => {
     const stacks = detectStacks(entries, (entry) => files[entry] ?? null)
@@ -199,7 +187,6 @@ describe('what kind of .NET application a project holds', () => {
     expect(ids).toContain('blazor-interactive')
     expect(ids).not.toContain('dotnet-http')
     expect(ids).not.toContain('dotnet-api')
-    // The core suites are shape-agnostic and must survive the narrowing.
     expect(ids).toContain('dotnet-unit')
     expect(ids).toContain('dotnet-coverage')
     expect(label(entries, files)).toBe('.NET Blazor')
@@ -225,33 +212,20 @@ describe('what kind of .NET application a project holds', () => {
   })
 
   it('offers everything only when there is no reader at all', () => {
-    // The sandbox-image decision passes no reader, because it only asks whether
-    // .NET is needed. With no evidence gathered, nothing is withheld.
     const all = TEST_STACKS.find((s) => s.id === 'dotnet')?.suites.map((s) => s.id)
     expect(detectStacks(['Api.sln'])[0].suites.map((s) => s.id)).toEqual(all)
   })
 
   it('withholds the browser suites once a reader has looked and found no screens', () => {
-    // This used to offer the whole catalogue, on the reasoning that hiding a suite
-    // on a guess is worse than offering an extra. It is not a guess. Blazor is read
-    // from file evidence — a .razor component, a wwwroot/index.html, or a Razor
-    // registration — so a tree that was scanned and has none of them has no screens
-    // to drive, and "drive the affected screens in a real browser" was being put in
-    // front of plain Web APIs.
     const ids = suiteIds(['Api.sln', 'Program.cs'], {})
     expect(ids).not.toContain('blazor-ui')
     expect(ids).not.toContain('blazor-interactive')
-    // The API side keeps its suites: the two mistakes are not equal, which is the
-    // same asymmetry the Controllers-folder rule already turns on.
     expect(ids).toContain('dotnet-unit')
     expect(ids).toContain('dotnet-http')
-    // Nothing was confirmed, so the label still says only ".NET".
     expect(label(['Api.sln'], {})).toBe('.NET')
   })
 
   it('does not read a class named like a controller as evidence of a routed API', () => {
-    // Naming a type is not registering it. Only the framework call, or the
-    // Controllers folder convention, counts.
     const ids = suiteIds(['App.sln', 'Program.cs'], {
       'Program.cs': 'app.MapRazorComponents<App>();\n// class PolicyController lives elsewhere\n',
     })
@@ -260,9 +234,6 @@ describe('what kind of .NET application a project holds', () => {
   })
 
   it('takes a Controllers folder as an API, the asymmetry being deliberate', () => {
-    // The shape this project really has on disk: a web SDK csproj whose Program.cs
-    // is a level deeper than detection reads. Without the folder convention it
-    // would fall through to "offer everything" and the narrowing would never fire.
     const entries = ['Api.sln', 'Sample.Api.csproj', 'Controllers', 'Controllers/PoliciesController.cs']
     const files = { 'Sample.Api.csproj': '<Project Sdk="Microsoft.NET.Sdk.Web"></Project>' }
     expect(label(entries, files)).toBe('.NET API')
@@ -270,35 +241,21 @@ describe('what kind of .NET application a project holds', () => {
   })
 
   it('withholds the browser suites from a .NET project with no screens at all', () => {
-    // The case the owner reported: a Web API whose shape reads as NOTHING —
-    // no .razor anywhere, no wwwroot, no Controllers folder, and a Program.cs
-    // deeper than detection reads, so neither signal fires. That used to fall
-    // through to "offer everything", which put "drive the affected screens in a
-    // real browser" in front of a service that has no screens.
     const entries = ['Service.sln', 'Directory.Build.props', 'src', 'tests']
     const files = { 'Directory.Build.props': '<Project></Project>' }
     const ids = suiteIds(entries, files)
     expect(ids).not.toContain('blazor-ui')
     expect(ids).not.toContain('blazor-interactive')
-    // The asymmetry the API side already argued for: unconfirmed keeps the API
-    // suites, because offering one costs a skipped suite, while offering a
-    // browser suite costs a run that goes looking for a UI and reports its
-    // absence as a failure of the code.
     expect(ids).toContain('dotnet-unit')
     expect(ids).toContain('dotnet-http')
   })
 
   it('still offers everything when the tree was never read', () => {
-    // No `read` means no evidence either way, and the sandbox-image decision
-    // depends on that path staying wide: it only asks whether .NET is needed.
     const ids = detectStacks(['Service.sln']).flatMap((s) => s.suites.map((x) => x.id))
     expect(ids).toContain('blazor-ui')
   })
 })
 
-// A suite the project is not equipped for is worse than a missing figure: a
-// verification run stops at its first failure, so one suite that cannot work took
-// the rest of the run down with it and every later suite reported "not run".
 describe('a coverage suite the project cannot run', () => {
   const nodeSuites = (manifest: string): string[] => {
     const stacks = detectStacks(['package.json'], () => manifest)
@@ -308,7 +265,6 @@ describe('a coverage suite the project cannot run', () => {
   it('is not offered when no coverage provider is installed', () => {
     const ids = nodeSuites('{"devDependencies":{"vitest":"^4.1.0"}}')
     expect(ids).not.toContain('node-coverage')
-    // Everything else the stack offers is untouched.
     expect(ids).toContain('node-unit')
     expect(ids).toContain('node-types')
   })
@@ -321,8 +277,6 @@ describe('a coverage suite the project cannot run', () => {
   })
 
   it('offers everything when the files cannot be read at all', () => {
-    // No reader is the sandbox-image question, which only asks whether .NET is
-    // needed. Hiding a suite on no evidence would be a guess.
     const stacks = detectStacks(['package.json'])
     expect(stacks.find((s) => s.stackId === 'node')?.suites.map((s) => s.id)).toContain(
       'node-coverage',

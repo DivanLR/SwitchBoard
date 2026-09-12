@@ -1,4 +1,3 @@
-// Command history repository: powers terminal-style composer suggestions.
 import { describe, expect, it } from 'vitest'
 import { openDatabase } from '@main/store/db'
 import { createRepositories } from '@main/store/repositories'
@@ -16,7 +15,7 @@ describe('CommandHistoryRepo', () => {
     const { repos, projectId } = setup()
     repos.commandHistory.add(projectId, 'git status')
     repos.commandHistory.add(projectId, 'npm test')
-    repos.commandHistory.add(projectId, 'git status') // repeat moves it to the front
+    repos.commandHistory.add(projectId, 'git status') 
     const recent = repos.commandHistory.recent(projectId)
     expect(recent).toEqual(['git status', 'npm test'])
   })

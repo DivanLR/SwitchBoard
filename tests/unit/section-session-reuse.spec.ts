@@ -1,29 +1,11 @@
-// Which section dispatches share a session, and which never do.
-//
-// backgroundSessionFor is the whole of that rule. Reuse is the default: a diff
-// comment or a cleanup command is short, and a second one arriving while the
-// first runs is not worth another CLI process. Two kinds are exempt, and both
-// exemptions were paid for in complaints — a second drawing queueing behind the
-// first, and (2026-08-22) a Spec Kit command queueing behind another that had
-// minutes left to run, with nothing on screen saying so.
-//
-// Written against the manager rather than against the resolver's inputs, because
-// the rule is one line and the value of a test here is that the line is wired to
-// the path the sections actually call.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-// A never-yielding run loop: these tests only ask which session a dispatch
-// resolves to, so no turn ever has to complete.
 const pending: ((value: { value: undefined; done: true }) => void)[] = []
 
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
-  // Every session is now handed an in-process MCP server built at start-up
-  // (inter-session.ts, the cross-project handover tool), so a mock of this
-  // module without these two exports makes startSession throw before it
-  // reaches anything these tests measure.
   createSdkMcpServer: () => ({ type: 'sdk', name: 'switchboard', instance: {} }),
   tool: () => ({}),
   query: () => ({
@@ -60,7 +42,6 @@ afterEach(() => {
     try {
       rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
     } catch {
-      // A temp directory the OS still holds open. The OS can have it.
     }
   }
 })
