@@ -1,14 +1,8 @@
-// Desktop notifications (FR-013a, R9): raised when a session starts needing
-// the developer while the window is unfocused, minimised, or hidden to tray.
-// On Windows, permission/plan notifications carry an Approve button (custom
-// toast XML with protocol activation — Electron's `actions` are macOS-only);
-// clicking any part routes back through the switchboard:// deep link handler.
 import { Notification } from 'electron'
 import type { FocusRequestPush } from '@shared/ipc-types'
 import { buildApprovalToastXml } from './deep-link'
 
 interface NotifierDeps {
-  /** True when the window is visible and focused (no notification needed). */
   isWindowActive: () => boolean
   showWindow: () => void
   pushFocusRequest: (push: FocusRequestPush) => void
@@ -38,7 +32,6 @@ export function createNotifier(deps: NotifierDeps): (context: NeedsYouContext) =
     if (!Notification.isSupported()) return
 
     const projectName = deps.projectName(context.projectId)
-    // Windows: approvable requests get action buttons via custom toast XML.
     const approvable =
       process.platform === 'win32' && context.requestId && context.kind !== 'question'
     const notification = new Notification({

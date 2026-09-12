@@ -1,6 +1,3 @@
-// Preload bridge (T009): exposes the typed IPC contract as `window.switchboard`
-// with contextIsolation on and nodeIntegration off. The renderer has no other
-// capability (FR-021b).
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import type {
   InvokeMap,
@@ -12,8 +9,6 @@ import type {
 } from '@shared/ipc-types'
 import { INVOKE_CHANNEL, PUSH_CHANNELS } from '@shared/ipc-types'
 
-// In-flight invoke tracking so the renderer can show a global loading spinner
-// whenever anything is loading — one chokepoint covers every IPC call.
 let pending = 0
 const loadingListeners = new Set<(n: number) => void>()
 function notifyLoading(): void {
@@ -49,17 +44,9 @@ const api: SwitchboardApi = {
     if (!PUSH_CHANNELS.includes(channel)) {
       throw new Error(`Unknown push channel: ${channel}`)
     }
-    // push.event arrives as transport-level batches; the contract surface
-    // delivers one event per listener call (contracts/ipc-contract.md).
     const wrapped =
       channel === 'push.event'
         ? (_event: IpcRendererEvent, batch: PushMap[C][]) => {
-            // Each item gets its OWN try/catch. Events are append-only with no
-            // re-fetch trigger (see activeSession.ts), so a listener that threw
-            // partway through a batch used to silently drop every item after it —
-            // the live view then stayed desynchronised until a manual reload, with
-            // nothing in the console pointing at why. One item failing to apply
-            // must not cost its neighbours in the same batch.
             for (const item of batch) {
               try {
                 listener(item)

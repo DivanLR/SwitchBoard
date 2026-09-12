@@ -1,13 +1,3 @@
-// Risk classification rule engine (FR-008a): ordered, first match wins,
-// unmatched actions fail safe to high. The defaults below follow the spec
-// assumption: read-only inspection low, file modification medium, destructive or
-// outward-facing actions high.
-//
-// These are DEFAULTS, not policy (PRODUCT.md Principle 3). The developer can
-// switch any of them off, change its level, or add their own, and what they
-// changed is stored separately — see inbox/rule-prefs.ts. This file stays the
-// authority on what ships, which is what makes editing one a normal code change
-// rather than a migration.
 import type { RiskClassificationRule, RiskInputMatcher, RiskLevel } from '@shared/domain'
 
 function inputValue(input: Record<string, unknown>, field: string): string {
@@ -17,9 +7,6 @@ function inputValue(input: Record<string, unknown>, field: string): string {
 }
 
 function matchesInput(matcher: RiskInputMatcher, input: Record<string, unknown>): boolean {
-  // Bound the tested length: this runs on the main thread on every permission
-  // check, so a pathological user pattern against a long tool input cannot hang
-  // the app. (See the note in swallow-rules for the residual short-input case.)
   const value = inputValue(input, matcher.field).slice(0, 5000)
   try {
     return new RegExp(matcher.pattern).test(value)
@@ -28,15 +15,6 @@ function matchesInput(matcher: RiskInputMatcher, input: Record<string, unknown>)
   }
 }
 
-/**
- * `rules` MUST already be in position order. This runs on the main thread on
- * EVERY permission check, and copying the whole rule array and re-sorting it
- * on every single call was wasted work for a list that only changes when the
- * developer edits a rule — RuleSet (rule-set.ts) now sorts once when it
- * rebuilds its cache and hands out that same ordered array to every check, so
- * classifyRisk just iterates in the order it is given. A caller that builds
- * an ad-hoc array (tests, mainly) is responsible for sorting it first.
- */
 export function classifyRisk(
   rules: RiskClassificationRule[],
   toolName: string,
@@ -47,26 +25,18 @@ export function classifyRisk(
     if (rule.inputMatcher && !matchesInput(rule.inputMatcher, input)) continue
     return rule.risk
   }
-  // Fail-safe: anything not matched by a rule is high risk (FR-008a).
   return 'high'
 }
 
 interface DefaultRuleSeed {
-  /**
-   * Stable slug, never a generated id — a developer's override is keyed to it,
-   * so renaming orphans that override. Retire a rule rather than rename it; see
-   * rule-prefs.ts for why the defaults live in code, not a seeded table.
-   */
   id: string
   toolMatcher: string
   inputMatcher?: RiskInputMatcher
   risk: RiskLevel
-  /** Shown in the rules editor: what this rule is for, in the developer's terms. */
   label: string
 }
 
 const DEFAULT_RULE_SEEDS: DefaultRuleSeed[] = [
-  // Destructive commands first: order matters, first match wins.
   {
     id: 'bash-destructive',
     label: 'Destructive shell commands',
@@ -89,7 +59,6 @@ const DEFAULT_RULE_SEEDS: DefaultRuleSeed[] = [
     },
     risk: 'low',
   },
-  // Package and build commands change the working tree but are routine.
   {
     id: 'bash-build',
     label: 'Package and build commands',
@@ -113,7 +82,6 @@ const DEFAULT_RULE_SEEDS: DefaultRuleSeed[] = [
   { id: 'tool-websearch', label: 'Search the web', toolMatcher: 'WebSearch', risk: 'high' },
 ]
 
-/** Label for a shipped rule, for the rules editor. Empty for a custom rule. */
 export function riskRuleLabel(id: string): string {
   return DEFAULT_RULE_SEEDS.find((s) => `builtin:${s.id}` === id)?.label ?? ''
 }

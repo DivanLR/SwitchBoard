@@ -1,16 +1,8 @@
-// Implements contracts/session-events.md: Claude Agent SDK messages ->
-// normalised Switchboard events. The mapper is pure state-machine logic over
-// an EventSink so it is unit-testable without the SDK or a database.
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { EventKind, EventPayloadMap, ResultUsage, SessionEvent } from '@shared/domain'
 import { classifyInjection } from '@shared/domain'
 import { isInteractiveQuestion } from '@shared/inline-question'
 
-/**
- * Materialises mapper output. `persist: false` appends/updates are pushed to
- * the renderer only; text partials persist solely their final form while
- * marker/question status updates persist (contracts/session-events.md).
- */
 export interface EventSink {
   append<K extends EventKind>(
     kind: K,
@@ -36,27 +28,12 @@ interface ContentBlockLike {
   content?: unknown
 }
 
-/**
- * How much of a tool's input or output is kept.
- *
- * This was 400 characters, which made the raw view's promise of "100% of the
- * output" impossible to keep: every command result longer than a short paragraph
- * was cut off at ingestion, before any view could ask for the rest. The figure is
- * now large enough that a real build log, test run or file read survives whole.
- *
- * ponytail: a flat per-field cap, not a spill-to-disk store. A single tool result
- * above this ceiling is still clipped — and says so. Move the overflow to a blob
- * table if someone actually hits it on ordinary work.
- */
 const PREVIEW_LIMIT = 100_000
 
 export function previewOf(value: unknown): string {
   if (value === undefined || value === null) return ''
   const text = typeof value === 'string' ? value : JSON.stringify(value)
   if (text.length <= PREVIEW_LIMIT) return text
-  // Say what was dropped. A bare ellipsis cannot be told apart from output that
-  // genuinely ended in one, which is the worst way for a view that claims
-  // completeness to be incomplete.
   const dropped = text.length - PREVIEW_LIMIT
   return `${text.slice(0, PREVIEW_LIMIT)}\n… [${dropped} more characters not stored]`
 }
@@ -83,16 +60,11 @@ function usageOf(raw: Record<string, unknown> | undefined): ResultUsage {
 
 interface MessageMapperOptions {
   sink: EventSink
-  /** Fired once when the SDK reports its session id (used for resume). */
   onSdkSessionId?: (sdkSessionId: string) => void
-  /** Relabel a turn's closing message as ✦ SUMMARY. Off keeps it plain
-   *  assistant text (the raw response). Defaults to on. */
   summaries?: boolean
-  /** Per-model usage for the finished turn (the SDK result's modelUsage). */
   onModelUsage?: (modelUsage: Record<string, ModelTurnUsage>) => void
 }
 
-/** The slice of the SDK's per-model usage the app aggregates. */
 export interface ModelTurnUsage {
   inputTokens: number
   outputTokens: number
@@ -101,16 +73,6 @@ export interface ModelTurnUsage {
   costUSD: number
 }
 
-/**
- * Merge a result message's per-model usage into the running session totals.
- *
- * IMPORTANT: in streaming-input mode the SDK emits one `result` per turn, and
- * its `modelUsage`/`total_cost_usd`/`num_turns` are CUMULATIVE for the whole
- * session — not the delta for that turn. So each model's figures are REPLACED
- * with the latest cumulative snapshot, never added (adding sums cumulative
- * snapshots and inflates the totals every turn). Models absent from a later
- * snapshot keep their last known value.
- */
 export function foldModelTotals(
   prev: Record<string, { tokens: number; costUsd: number }>,
   modelUsage: Record<string, ModelTurnUsage>,
@@ -131,27 +93,11 @@ export class MessageMapper {
   private onModelUsage?: (modelUsage: Record<string, ModelTurnUsage>) => void
   private readonly summaries: boolean
   private sdkSessionIdSeen = false
-  /** Live streaming assistant text per producer ('' = main loop, else the subagent's tool_use id). */
   private partials = new Map<string, { eventId: string; text: string }>()
-  /** tool_use id -> tool_activity event id awaiting its result half. */
   private openToolUses = new Map<string, { eventId: string; payload: EventPayloadMap['tool_activity'] }>()
-  /** task_id -> tool_activity event id for subagents reported via the SDK task
-   *  channel (backgrounded / parallel fan-outs like /deep-research), which never
-   *  appear as ordinary in-band Task tool_use/tool_result pairs. */
   private openTasks = new Map<string, { eventId: string; payload: EventPayloadMap['tool_activity'] }>()
-  /** Task/Agent tool_use ids ever seen in-band, so a late task_started for the
-   *  same id is deduped even after its in-band tool_result already closed it. */
   private seenAgentToolUses = new Set<string>()
-  /** Final MAIN-LOOP assistant text of the current turn, candidate for the summary upgrade. */
   private lastAssistantText: { eventId: string; text: string } | null = null
-  /**
-   * Prompts the wrapper has just handed to the CLI, newest last.
-   *
-   * The CLI echoes each user turn back on the message stream with whatever it
-   * appended to it, so without this the developer's own message would be shown a
-   * second time as "injected context". Held only until the echo arrives, and
-   * capped so a session that never echoes cannot grow the list without bound.
-   */
   private pendingEchoes: string[] = []
 
   constructor(options: MessageMapperOptions) {
@@ -177,10 +123,6 @@ export class MessageMapper {
         this.handleResult(message)
         return
       case 'system':
-        // The init frame is the session's opening state — model, working
-        // directory, tools, MCP servers — which is what a terminal prints on
-        // start and what the raw view had no way to show. The task_* subtypes
-        // report subagents (deep-research fan-out) that must show in the stream.
         this.handleSystemInit(message)
         this.handleTaskMessage(message)
         return
@@ -189,24 +131,11 @@ export class MessageMapper {
     }
   }
 
-  /**
-   * Tell the mapper a prompt has just been handed to the CLI, so the echo of it
-   * on the message stream is not reported as injected context. Called by the
-   * session wrapper at the one point every send passes through.
-   */
   noteDelivered(text: string): void {
     this.pendingEchoes.push(text)
     if (this.pendingEchoes.length > 10) this.pendingEchoes.shift()
   }
 
-  /**
-   * Append one block of injected context, minus any echo of the message the
-   * developer just sent.
-   *
-   * The CLI may deliver the echo and the injection as separate blocks or as one
-   * block with the injection appended, so both shapes are handled: an exact echo
-   * is dropped whole, and a prefix echo is stripped and the remainder kept.
-   */
   private emitInjection(text: string, agentId?: string): void {
     let remainder = text
     for (let i = 0; i < this.pendingEchoes.length; i++) {
@@ -230,7 +159,6 @@ export class MessageMapper {
     })
   }
 
-  /** Emits a fatal error event; called by the session wrapper on process death (FR-006). */
   fatalError(text: string): void {
     this.sink.append('error', { text, fatal: true })
   }
@@ -243,7 +171,6 @@ export class MessageMapper {
     }
   }
 
-  /** Subagent attribution: the SDK stamps messages produced inside a Task tool run. */
   private agentIdOf(message: SDKMessage): string | undefined {
     const parent = (message as { parent_tool_use_id?: string | null }).parent_tool_use_id
     return parent ?? undefined
@@ -257,7 +184,6 @@ export class MessageMapper {
       if (block.type === 'text' && typeof block.text === 'string') {
         const partial = this.partials.get(partialKey)
         if (partial) {
-          // The final message replaces its partials in place (contract).
           this.sink.update(partial.eventId, { text: block.text, partial: false, agentId }, { persist: true })
           if (!agentId) this.lastAssistantText = { eventId: partial.eventId, text: block.text }
           this.partials.delete(partialKey)
@@ -275,23 +201,15 @@ export class MessageMapper {
         const event = this.sink.append('tool_activity', payload)
         if (block.id) {
           this.openToolUses.set(block.id, { eventId: event.id, payload })
-          // Dedup guard for a later task_started (see seenAgentToolUses).
           if (block.name === 'Task' || block.name === 'Agent') this.seenAgentToolUses.add(block.id)
         }
       } else if (block.type === 'thinking' && typeof block.thinking === 'string') {
-        // Not part of the narrative kinds; retained for raw-view completeness (FR-018).
         this.sink.append('raw_output', { text: block.thinking, agentId })
       }
     }
   }
 
   private handleUser(message: Extract<SDKMessage, { type: 'user' }>): void {
-    // Composer prompts are echoed by the session wrapper on delivery. Everything
-    // else in a user message is either the tool_result half of tool activity or
-    // context the developer never typed — system reminders, expanded slash
-    // commands, hook output — which is emitted as `injection` so the raw view can
-    // show it. Both halves matter; dropping the second was why the raw view could
-    // not show what the session was actually told.
     const agentId = this.agentIdOf(message)
     const content = (message.message as { content?: unknown })?.content
     if (typeof content === 'string') {
@@ -316,15 +234,6 @@ export class MessageMapper {
     }
   }
 
-  /**
-   * The SDK init frame, as the opening block a terminal would have printed.
-   *
-   * Only the fields that say what this session IS; the frame also carries long
-   * inventories (every slash command, every permission rule) that would bury the
-   * first screen of the stream in a list nobody reads, so those are stated as
-   * counts. Emitted once — a resumed session gets a second init frame, which is a
-   * fact worth showing rather than one to hide.
-   */
   private handleSystemInit(message: SDKMessage): void {
     const frame = message as {
       subtype?: string
@@ -349,13 +258,6 @@ export class MessageMapper {
     this.sink.append('injection', { text: lines.join('\n'), source: 'system' })
   }
 
-  /**
-   * SDK task channel (task_started/task_updated/task_notification): surfaces
-   * subagents that run backgrounded or in parallel (e.g. a /deep-research
-   * fan-out) and so never arrive as ordinary in-band Task tool_use blocks. Each
-   * becomes a Task tool_activity event, exactly the shape activeAgents() reads,
-   * so no new agent concept or renderer change is needed.
-   */
   private handleTaskMessage(message: SDKMessage): void {
     const msg = message as {
       subtype?: string
@@ -373,21 +275,17 @@ export class MessageMapper {
     if (!taskId) return
     switch (msg.subtype) {
       case 'task_started': {
-        if (msg.skip_transcript) return // ambient/housekeeping — hide per the SDK
-        // A foreground Task already shown via its in-band tool_use block (open or
-        // already closed), or an already-open task — don't list it twice.
+        if (msg.skip_transcript) return 
         if (msg.tool_use_id && this.seenAgentToolUses.has(msg.tool_use_id)) return
         if (this.openTasks.has(taskId)) return
         const payload: EventPayloadMap['tool_activity'] = {
           toolName: 'Task',
-          // Same JSON shape agentOf() parses for name/task/prompt.
           inputPreview: previewOf({
             subagent_type: msg.subagent_type,
             description: msg.description,
             prompt: msg.prompt,
           }),
           toolUseId: msg.tool_use_id ?? taskId,
-          // Stays visible across a turn's result until its close signal arrives.
           background: true,
         }
         const event = this.sink.append('tool_activity', payload)
@@ -405,11 +303,10 @@ export class MessageMapper {
         this.closeTask(taskId, msg.summary || msg.status || 'done')
         return
       default:
-        return // task_progress and others: no per-agent state change needed
+        return 
     }
   }
 
-  /** Mark a task-channel subagent finished so activeAgents() stops listing it. */
   private closeTask(taskId: string, resultPreview: string): void {
     const open = this.openTasks.get(taskId)
     if (!open) return
@@ -449,11 +346,9 @@ export class MessageMapper {
   }
 
   private handleResult(message: Extract<SDKMessage, { type: 'result' }>): void {
-    // Per-model usage for the turn (session totals + the header's top models).
     const modelUsage = (message as { modelUsage?: Record<string, ModelTurnUsage> }).modelUsage
     if (modelUsage && this.onModelUsage) this.onModelUsage(modelUsage)
 
-    // Dangling partials at turn end are finalised as-is so nothing is lost.
     for (const [key, partial] of this.partials) {
       const agentId = key || undefined
       this.sink.update(partial.eventId, { text: partial.text, partial: false, agentId }, { persist: true })
@@ -464,19 +359,12 @@ export class MessageMapper {
     if (message.subtype === 'success') {
       const text = message.result ?? ''
       if (text) {
-        // A closing message that ASKS the user something (e.g. /speckit-clarify's
-        // "Question N of M" with an options table) is not a summary of work —
-        // keep it plain assistant text so the answer card renders under it.
         const asSummary = this.summaries && !isInteractiveQuestion(text)
         if (this.lastAssistantText && this.lastAssistantText.text === text) {
-          // The turn's closing assistant message is the summary (design: ✦ SUMMARY).
-          // Summaries off: leave it as the plain assistant text already streamed.
           if (asSummary) {
             this.sink.update(this.lastAssistantText.eventId, { text }, { persist: true, kind: 'summary' })
           }
         } else {
-          // No streamed twin (e.g. a /usage report): show the raw text, styled as
-          // a summary only when summaries are on.
           this.sink.append(asSummary ? 'summary' : 'assistant_text', { text })
         }
       }
@@ -501,7 +389,6 @@ export class MessageMapper {
   }
 
   private handleUnclassified(message: SDKMessage): void {
-    // Contract: any stdout/stderr-like content not otherwise classified -> raw_output.
     const candidate = message as { text?: unknown; output?: unknown; content?: unknown }
     const text =
       typeof candidate.text === 'string'

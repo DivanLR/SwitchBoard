@@ -1,21 +1,10 @@
-// Splitting the sidebar's project list into collapsible groups.
 import type { ProjectGroup } from './domain'
 
 export interface GroupSection<T> {
-  /** null for the tail of projects that belong to no group. */
   group: ProjectGroup | null
   items: T[]
 }
 
-/**
- * Groups the sidebar list: one section per group in group order, then the
- * ungrouped tail. Order WITHIN a section follows `items`, so the existing
- * drag-to-reorder keeps working untouched.
- *
- * Empty groups are kept (they are still a drop target), and a mapping to a group
- * that no longer exists reads as ungrouped, so removing a group can never hide a
- * project. The ungrouped section is omitted when everything is grouped.
- */
 export function groupSections<T extends { id: string }>(
   items: readonly T[],
   groups: readonly ProjectGroup[],

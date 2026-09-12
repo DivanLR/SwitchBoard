@@ -1,7 +1,3 @@
-// switchboard:// deep links and the Windows approval toast XML. Kept free of
-// Electron imports so the parsing/escaping logic is unit-testable — the URL
-// arrives from outside the app (protocol activation), so it is untrusted.
-
 export const PROTOCOL_SCHEME = 'switchboard'
 
 function escapeXml(value: string): string {
@@ -13,11 +9,6 @@ function escapeXml(value: string): string {
     .replace(/'/g, '&apos;')
 }
 
-/**
- * Windows toast XML for a permission/plan request: body click opens the inbox,
- * the Approve button approves in place. Both are protocol activations, so they
- * work whether or not the app window is around when clicked.
- */
 export function buildApprovalToastXml(options: {
   requestId: string
   projectName: string
@@ -40,10 +31,6 @@ export function buildApprovalToastXml(options: {
   )
 }
 
-/**
- * Strictly parse a switchboard:// deep link. Anything but the two known verbs
- * with a UUID request id is rejected.
- */
 export function parseDeepLink(url: string): { verb: 'approve' | 'inbox'; requestId: string } | null {
   const match = /^switchboard:\/\/(approve|inbox)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i.exec(
     url.trim(),

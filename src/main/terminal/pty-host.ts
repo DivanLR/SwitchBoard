@@ -1,17 +1,3 @@
-// Real terminals, one per project.
-//
-// WHY THIS EXISTS ALONGSIDE THE SESSION STREAM: the session views reconstruct a
-// terminal from normalised events, which is what makes the permission inbox, the
-// diff panel and the stored transcript possible — but it is a reconstruction,
-// and no reconstruction is the CLI's own interface. This is: a pseudo-terminal
-// running the developer's real shell, rendered by a real terminal emulator, so
-// what the Terminal tab shows is what a terminal shows, character for character.
-//
-// WHAT IT DOES NOT DO, deliberately: nothing here is parsed, classified,
-// gated or stored. A command run in this terminal does not reach the permission
-// inbox, because there is no protocol to intercept — the developer is talking to
-// a shell on their own machine, exactly as they would in any other terminal
-// window. The session stream remains the place where approvals and history live.
 import { spawn, type IPty } from '@lydell/node-pty'
 import type { SessionEngine } from '@shared/domain'
 import { resolveClaudeExecutable } from '@main/sessions/claude-executable'
@@ -24,22 +10,12 @@ export interface PtyCallbacks {
 
 interface LiveTerminal {
   pty: IPty
-  /** Everything written so far, so re-opening the tab redraws what is on screen. */
   scrollback: string
   cwd: string
 }
 
-/**
- * How much output is replayed when the tab is re-opened.
- *
- * ponytail: a flat character budget, trimmed from the front. A real terminal
- * emulator keeps a line-based scrollback with its own buffer; this only has to
- * survive a tab switch. Raise it, or move the buffer into the renderer's own
- * xterm instance, if someone needs real history here.
- */
 const SCROLLBACK_LIMIT = 200_000
 
-/** The shell a terminal opens, the developer's own rather than a fixed one. */
 export function defaultShell(): string {
   if (process.platform === 'win32') {
     return process.env.COMSPEC ?? 'cmd.exe'
@@ -47,20 +23,9 @@ export function defaultShell(): string {
   return process.env.SHELL ?? '/bin/bash'
 }
 
-/**
- * The command typed into a fresh terminal for an engine, or null to leave the
- * developer at a bare shell prompt.
- *
- * The CLI is launched through the shell rather than spawned as the pty's own
- * process, so that when it exits the developer still has a terminal instead of a
- * pane that closed itself. On Windows the Codex launcher is a `.cmd` shim, which
- * only a shell can run — another reason the shell is the pty's process.
- */
 export function launchCommand(engine: SessionEngine | 'shell'): string | null {
   if (engine === 'shell') return null
   if (engine === 'codex') return resolveCodexExecutable() ? 'codex' : null
-  // Quoted: the Claude executable lives under the user's home directory, which
-  // routinely contains a space.
   const claude = resolveClaudeExecutable()
   return claude ? `& "${claude}"` : null
 }
@@ -70,13 +35,6 @@ export class PtyHost {
 
   constructor(private callbacks: PtyCallbacks) {}
 
-  /**
-   * Open a terminal, or return what is already on screen for one that is open.
-   *
-   * Re-opening is the common case — the tab is switched away from and back — so
-   * an existing terminal is never restarted: doing so would kill whatever the
-   * developer had running in it.
-   */
   open(input: {
     id: string
     cwd: string
@@ -116,8 +74,6 @@ export class PtyHost {
   }
 
   resize(id: string, cols: number, rows: number): void {
-    // A zero or negative dimension is what a hidden pane reports mid-transition;
-    // ConPTY rejects it outright, so clamp rather than pass it through.
     this.terminals.get(id)?.pty.resize(Math.max(2, cols), Math.max(2, rows))
   }
 
@@ -128,7 +84,6 @@ export class PtyHost {
     terminal.pty.kill()
   }
 
-  /** Every terminal, killed on app quit so no shell outlives the window. */
   closeAll(): void {
     for (const id of [...this.terminals.keys()]) this.close(id)
   }

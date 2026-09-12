@@ -1,39 +1,5 @@
-// Everything Switchboard injects into every hosted session: the system-prompt
-// appends (sandbox notes, heavy-subagent mode and the cost-aware mode protocol)
-// and the two mode subagents. One module because they are one decision per session start, applied
-// at one call site in session-manager, and the mode instructions and the mode
-// subagents must always describe the same pair.
-//
-// All the text here is authored, not third-party.
-//
-// The terse output mode and the ADHD output style were removed on 2026-08-14 at
-// the owner's direction: a standing answer-style preference now governs prose, so
-// a per-session instruction telling the model how to write was redundant. The
-// ADHD accessor was already inert, gated on a flag file created by a plugin that
-// is no longer installed.
 import type { AgentDefinition } from '@anthropic-ai/claude-agent-sdk'
 import type { EffortLevel, ModelMode } from '@shared/domain'
-
-// --- Heavy subagent mode ---
-// One thread is the wrong shape for work that decomposes: a five-file audit is
-// five reads that could all be in flight at once. This append tells the session to
-// spend agents rather than wall-clock wherever the task graph allows it.
-//
-// The first version of this text read as balanced advice and was reported as not
-// working. Two things were wrong with it, and both are fixed below.
-//
-// The GUARD WAS WIDER THAN THE INSTRUCTION. It excused a model from fanning out
-// for "work whose steps each depend on the previous result" and "anything where
-// dispatching costs more than doing" — two clauses that fit almost any task if
-// you squint, and a model reading its own plan will squint. The exclusions are
-// now a short closed list of things that are genuinely one action.
-//
-// And it CONTRADICTED THE MODE PROTOCOL sitting a few paragraphs above it, which
-// in Advisor mode says in as many words to implement scoped work yourself. Two
-// instructions, one telling the loop to delegate and one telling it not to. That
-// is resolved at the call site rather than here: with this setting on, the mode
-// protocol is pinned to Orchestrator so the two texts agree (see
-// heavySubagentModelMode).
 
 const HEAVY_SUBAGENTS_APPEND =
   '## WORK SHAPE — DIVIDE AND CONQUER. THIS OVERRIDES YOUR DEFAULT TENDENCY TO WORK ALONE.\n' +
@@ -57,47 +23,18 @@ const HEAVY_SUBAGENTS_APPEND =
   'fan-out spends more tokens than one thread, and paying that for speed is precisely ' +
   'the trade this setting was switched on to make.'
 
-/** The fan-out append when heavy subagent mode is on, else null. */
 export function heavySubagentSystemPromptAppend(enabled: boolean): string | null {
   return enabled ? HEAVY_SUBAGENTS_APPEND : null
 }
 
-/**
- * The mode protocol to teach when heavy subagent mode is on.
- *
- * Orchestrator, whatever the Models tab says, because Advisor's own text ("SCOPED
- * WORK … implement directly yourself") is the opposite instruction and sits in the
- * same system prompt. Leaving both in was most of why the setting read as doing
- * nothing: the model had licence either way and took the cheaper one.
- *
- * OFF plus `auto` is the mirror of that bug, and was reported the same way ("I
- * switched it off and it still uses subagents"). Auto ships BOTH paragraphs, and
- * the orchestrator one says to delegate every chunk to `worker` subagents — so
- * off removed the hard directive and left the licence. Off now teaches Advisor
- * only, which is the same claim in the opposite direction.
- *
- * The Models tab still decides which MODEL runs the loop; this only decides which
- * protocol the loop is taught. Those are separate levers (see mainLoopModel).
- */
 export function heavySubagentModelMode(enabled: boolean, chosen: ModelMode): ModelMode {
   if (enabled) return 'orchestrator'
   return chosen === 'auto' ? 'advisor' : chosen
 }
 
-// --- Container layout (bypass sessions) ---
-// A bypass session's CLI runs inside a Linux container, so the project and the
-// REFS folders are at container paths. Message text is translated on the way in
-// (toContainerPaths), but the agent still has to know the shape of what it is
-// standing in — without this it treats a missing /mnt/c as "the repo is
-// unreachable" and asks the developer to git clone something already mounted.
-
-/** The container-layout append for a bypass session, else null. `gitNote` is
- *  gitNotice()'s verdict — stated here so the agent never reads a missing .git
- *  at /workspace as "the history was deleted". */
 export function sandboxSystemPromptAppend(
   mounts: readonly { container: string }[] = [],
   gitNote: string | null = null,
-  /** True when this project's node_modules is a container-private volume. */
   nodeModulesVolume = false,
 ): string | null {
   if (mounts.length === 0) return null
@@ -132,41 +69,12 @@ export function sandboxSystemPromptAppend(
   )
 }
 
-// --- Advisor / Orchestrator model modes (the Fable-5 era cost patterns) ---
-// Pair a strong model with a cheap one so most tokens bill at the cheaper rate.
-//
-//   Advisor      — the CHEAP model runs the main loop and does the mechanical
-//                  work; a strong-model `advisor` subagent is consulted rarely
-//                  (approach, stuck, final review). For scoped coding tasks.
-//   Orchestrator — the STRONG model runs the main loop, decomposes the goal,
-//                  and delegates well-scoped chunks to cheap `worker`
-//                  subagents (parallel when independent). For broad,
-//                  multi-step or research-shaped goals.
-//
-// The Messages-API advisor tool (advisor_20260301) is not wireable through a
-// Claude Code session, so both patterns are expressed with the Agent SDK's
-// native levers: ONE main-loop model per session plus per-subagent models. The
-// main loop never switches model mid-session — that would invalidate every
-// prompt-cache tier — so the other tier is always reached through a subagent,
-// which carries its own context (see mainLoopModel in model-routing).
-
 const norm = (m?: string): string | undefined => (m && m !== 'default' ? m : undefined)
 
-/**
- * The two mode subagents, injected into every session so the protocol below
- * can reach for them regardless of which model runs a given turn.
- */
 export function modeAgents(options: {
-  /** The strong model (Settings "Intelligent model"); default = account model. */
   strongModel?: string
-  /** The cheap model (Settings worker model); default = inherit the main model. */
   cheapModel?: string
-  /** The pairing mode. `basic` registers NOTHING: a mode whose whole purpose is
-   *  one model must not ship two agent definitions carrying a second one, or the
-   *  loop can still reach the expensive tier whatever the prompt says. */
   mode?: ModelMode
-  /** The subagent effort bar (Settings.subagentEffort), applied to both agents.
-   *  undefined inherits the SDK default. */
   effort?: EffortLevel
 }): Record<string, AgentDefinition> {
   if (options.mode === 'basic') return {}
@@ -201,12 +109,6 @@ export function modeAgents(options: {
   }
 }
 
-/**
- * System-prompt append teaching the session both protocols. Static text (never
- * interpolated) so it stays prompt-cache friendly. The per-turn model routing
- * in session.ts decides which tier runs the loop; these instructions make
- * either tier behave correctly for its workload.
- */
 export function modesSystemPromptAppend(mode: ModelMode): string {
   const header =
     '## MODEL MODES — cost-aware execution protocol\n' +
@@ -232,9 +134,6 @@ export function modesSystemPromptAppend(mode: ModelMode): string {
     'Token hygiene: prefer `worker` delegation for templated or repetitive work; keep ' +
     'delegation specs short and precise; a worker that reports ambiguity gets a tighter spec, ' +
     'not a retry of the same one.'
-  // Nothing at all for `basic`. The header alone would announce two subagents
-  // that this mode does not register, which is worse than silence: the loop
-  // would spend turns trying to delegate to agents that are not there.
   if (mode === 'basic') return ''
   if (mode === 'advisor') return header + advisor + hygiene
   if (mode === 'orchestrator') return header + orchestrator + hygiene

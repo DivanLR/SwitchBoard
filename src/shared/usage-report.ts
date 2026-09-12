@@ -1,6 +1,3 @@
-// Parses the Claude Code /usage response into a structured report so the
-// stream can render meters and dotted lists instead of a wall of flowed prose.
-
 export interface UsageLimit {
   label: string
   pct: number
@@ -13,13 +10,9 @@ export interface UsageTop {
 }
 
 export interface UsageWindow {
-  /** e.g. "Last 24h" */
   title: string
-  /** e.g. "3833 requests · 32 sessions" */
   volume: string
-  /** "77% of your usage came from…" behaviour lines. */
   behaviors: string[]
-  /** "Top skills: a 3%, b 2%" rows. */
   tops: UsageTop[]
 }
 
@@ -34,7 +27,6 @@ const WINDOW = /^(Last \d+\w*)\s*·\s*(.+)$/
 const TOP = /^Top ([\w ]+):\s*(.+)$/
 const BEHAVIOR = /^\d+% of your usage/
 
-/** Structured /usage report, or null when the text is not one. */
 export function parseUsageReport(text: string): UsageReport | null {
   if (!/Current session:\s*\d+% used/.test(text)) return null
   const limits: UsageLimit[] = []
@@ -65,7 +57,6 @@ export function parseUsageReport(text: string): UsageReport | null {
       current.behaviors.push(line)
       continue
     }
-    // Intro/asterisk-note prose before the first window ("What's contributing…").
     if (!current && limits.length > 0) notes.push(line)
   }
 

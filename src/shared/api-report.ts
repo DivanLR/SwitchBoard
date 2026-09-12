@@ -1,58 +1,14 @@
-// The test report a run leaves behind: the document a developer keeps, reviews
-// with a colleague, and attaches to a ticket.
-//
-// Written from the recorded run and NOTHING else. Every status, timing, body and
-// query in it is something the app sent or received (api-runner.ts), so the report
-// is a transcript rather than a summary — the same reason the run does not ask a
-// model whether the API works. Where a run measured nothing, the report says so;
-// it never fills a gap, and it has no opinions to offer that the calls did not
-// establish.
-//
-// The shape follows the reports this replaces (what the action is, the contracts,
-// a response matrix, the cases with their live results, findings, and an appendix
-// naming the environment and every query verbatim), because that shape is what a
-// reviewer already knows how to read.
 import type { ApiCall, ApiEvalRun } from './api-endpoints'
 
-/** Context the run row does not hold, supplied by whoever writes the file. */
 export interface ReportContext {
-  /** The project, as the developer named it. */
   projectName: string
-  /** Database MCP servers connected while the request data was produced. */
   dbServers?: readonly string[]
 }
 
-/**
- * Mask long digit runs — account, contract, card and identity numbers.
- *
- * A report is a document that gets attached to a ticket and pasted into chat, and
- * the run that produced it called a real environment with real identifiers, so
- * without this the file carries live customer numbers to wherever it is sent. The
- * hand-written reports this replaces redact exactly these by hand and remain
- * perfectly readable, which is the evidence that the redaction costs nothing worth
- * keeping.
- *
- * Eight digits is the threshold because it clears everything the report needs to
- * stay useful — row counts, statuses, millisecond timings, ISO dates, prices — and
- * catches the identifiers, which in this domain run from ten digits to twenty. The
- * length is kept, so "the same id appears in the query and the response" is still
- * visible. The run itself used the real values; only the document is masked.
- *
- * ponytail: digit runs, not a PII classifier. It cannot know that a free-text note
- * mentions a person, and pretending otherwise would be a false promise — which is
- * why the report says out loud that it holds live data.
- */
 function maskIdentifiers(text: string): string {
   return text.replace(/\d{8,}/g, (run) => `<redacted:${run.length} digits>`)
 }
 
-/**
- * The run as a markdown report.
- *
- * A run that called nothing still produces a report: "nothing was called, and
- * here is why" is the most important thing such a run has to say, and leaving it
- * out is how a failed run becomes an unnoticed one.
- */
 export function apiReportMarkdown(run: ApiEvalRun, context: ReportContext): string {
   const lines: string[] = []
   const push = (...text: string[]): void => {
@@ -128,8 +84,6 @@ export function apiReportMarkdown(run: ApiEvalRun, context: ReportContext): stri
       '',
     )
     if (call.request.headers) {
-      // Header NAMES only. A report is a document that gets pasted into a ticket,
-      // and an API key in it outlives every precaution taken elsewhere.
       push(`**Headers sent:** ${Object.keys(call.request.headers).map(code).join(', ')}`, '')
     }
     if (call.request.body) push('**Request body:**', '', fence(maskIdentifiers(call.request.body)), '')
@@ -178,12 +132,6 @@ export function apiReportMarkdown(run: ApiEvalRun, context: ReportContext): stri
   return `${lines.join('\n')}\n`
 }
 
-/**
- * The file name for a run's report, in the shape the existing reports use.
- *
- * Deterministic on purpose: asking for the report twice rewrites the same file
- * rather than leaving a numbered trail of near-identical documents.
- */
 export function apiReportFileName(run: ApiEvalRun): string {
   const templates = [...new Set(run.calls.map((c) => c.request.template))]
   const day = run.startedAt.slice(0, 10)
@@ -214,10 +162,6 @@ function verdictWords(run: ApiEvalRun): string {
   if (run.status === 'pass') return 'PASS — every call answered as expected'
   if (run.status === 'fail') return 'FAIL — at least one call did not'
   if (run.status === 'running') return 'still running'
-  // An inconclusive run is not always an empty one: a run where some calls
-  // answered and others never went out proved something about the first group and
-  // nothing about the second, and saying so is more use than either "pass" or
-  // "proved nothing".
   const completed = count(run.calls, 'pass') + count(run.calls, 'fail')
   const never = count(run.calls, 'not_run')
   if (completed > 0 && never > 0) {
@@ -231,7 +175,6 @@ function outcomeWords(outcome: ApiCall['outcome']): string {
   return outcome === 'fail' ? 'FAIL' : 'NOT RUN'
 }
 
-/** The check as the app performed it, in the app's own terms. */
 function expectWords(call: ApiCall): string {
   const expect = call.request.expect
   const parts = [expect.status !== null ? `status ${expect.status}` : 'any 2xx']
@@ -240,13 +183,6 @@ function expectWords(call: ApiCall): string {
   return parts.join(', ')
 }
 
-/**
- * What the run established that is worth acting on, and nothing else.
- *
- * Every entry is a fact about the recorded calls. There is no advice here that a
- * program cannot justify from the transcript: a report that speculates is one a
- * reviewer has to check, which defeats the point of it being deterministic.
- */
 export function reportFindings(run: ApiEvalRun): string[] {
   const findings: string[] = []
   for (const [index, call] of run.calls.entries()) {
@@ -310,7 +246,6 @@ function code(text: string): string {
   return `\`${text.replace(/`/g, "'")}\``
 }
 
-/** A fenced block that cannot be broken out of by a body containing backticks. */
 function fence(text: string, language = ''): string {
   const longest = /(`{3,})/.exec(text)?.[1]?.length ?? 0
   const fenceMark = '`'.repeat(Math.max(3, longest + 1))
