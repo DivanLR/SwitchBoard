@@ -1,4 +1,3 @@
-// T044: composer queueing, clickable questions, and interrupt (quickstart V4).
 import { expect, test } from '@playwright/test'
 import { installMockHost, twoProjectScenario } from './mock-host'
 
@@ -12,7 +11,6 @@ test.beforeEach(async ({ page }) => {
 test('mid-task sends queue visibly and deliver when the session is ready (FR-019)', async ({
   page,
 }) => {
-  // s-alpha starts in status working, so the send queues.
   await page.getByTestId('composer-input').fill('queued message')
   await page.getByTestId('composer-send').click()
 
@@ -32,7 +30,6 @@ test('multiple-choice questions are answered by click, in the stream, never the 
 
   await expect(page.getByTestId('question-event')).toContainText('Which approach should I take?')
   await expect(page.getByTestId('status-badge-alpha')).toHaveAttribute('data-status', 'needs_you')
-  // Questions never appear in the inbox (FR-020).
   await expect(page.getByTestId('inbox-badge')).toHaveCount(0)
   await expect(page.getByTestId('inbox-zero')).toBeVisible()
 
@@ -42,15 +39,12 @@ test('multiple-choice questions are answered by click, in the stream, never the 
   const answers = await page.evaluate(() => window.__mock.state().answers)
   expect(answers).toEqual([{ eventId: expect.any(String), choice: 'Thorough' }])
 
-  // Clicking again does nothing: the options are disabled once answered.
   await expect(page.getByTestId('question-option-Fast')).toBeDisabled()
 })
 
 test('Ctrl+C interrupts the activity and the session remains usable (FR-019a)', async ({
   page,
 }) => {
-  // Terminal-style: Ctrl+C in the composer opens a confirm; a second Ctrl+C
-  // confirms and interrupts.
   const input = page.getByTestId('composer-input')
   await input.focus()
   await page.keyboard.press('Control+c')
@@ -70,11 +64,7 @@ test('an ended session shows the banner and offers a new start (FR-019a)', async
   await expect(page.getByTestId('start-session')).toBeVisible()
 })
 
-// Scrolled back through a long session, there was no way to return to the newest
-// line but to drag the scrollbar the whole way down.
 test('a scrolled-back stream offers a jump to the newest line', async ({ page }) => {
-  // Nothing to jump to on a short stream: the button must not sit there
-  // permanently on a session with three lines in it.
   await expect(page.getByTestId('scroll-to-bottom')).toHaveCount(0)
 
   await page.evaluate(() => {
@@ -86,7 +76,7 @@ test('a scrolled-back stream offers a jump to the newest line', async ({ page })
     }
   })
   const stream = page.getByTestId('stream')
-  await expect(page.getByTestId('scroll-to-bottom')).toHaveCount(0) // pinned to the bottom
+  await expect(page.getByTestId('scroll-to-bottom')).toHaveCount(0) 
 
   await stream.evaluate((el) => {
     el.scrollTop = 0
@@ -100,13 +90,8 @@ test('a scrolled-back stream offers a jump to the newest line', async ({ page })
   ).toBeLessThan(24)
 })
 
-// 0.16.0 removed this button. The action survived only as Ctrl+C, and only while
-// the composer had focus, with nothing on screen saying so.
 test('a working session offers a red stop button that interrupts the turn', async ({ page }) => {
   await expect(page.getByTestId('stop-session')).toBeVisible()
-  // A plain block, not a key cap. The ⌃C legend put a second glyph in a control
-  // whose job is to be the one obvious thing to hit when a turn runs away; the
-  // binding still works and the status bar still names it.
   await expect(page.getByTestId('stop-session')).not.toContainText('⌃C')
   await expect(page.getByTestId('stop-session')).toHaveAttribute(
     'aria-label',
@@ -116,10 +101,8 @@ test('a working session offers a red stop button that interrupts the turn', asyn
   await page.getByTestId('stop-session').click()
   await expect.poll(() => page.evaluate(() => window.__mock.state().interrupts.length)).toBe(1)
 
-  // It interrupts the TURN. The session stays open, which is what End does not do.
   await expect(page.getByTestId('end-session')).toBeVisible()
 
-  // Nothing to interrupt once the turn is over, so the control goes.
   await page.evaluate(() => window.__mock.completeTurn('s-alpha'))
   await expect(page.getByTestId('stop-session')).toHaveCount(0)
 })

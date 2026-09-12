@@ -1,5 +1,3 @@
-// Specs (Spec Kit) view: session/specs tabs, install prompt when not set up,
-// and rendering of specs with the docs/clarify/tasks parts.
 import { expect, test } from '@playwright/test'
 import { installMockHost, twoProjectScenario } from './mock-host'
 
@@ -14,7 +12,6 @@ test('a project without Spec Kit shows an install button', async ({ page }) => {
   await page.getByTestId('tab-specs').click()
   await expect(page.getByTestId('specs-not-installed')).toBeVisible()
   await expect(page.getByTestId('specs-install')).toBeVisible()
-  // Installing scaffolds it and switches to the spec list.
   await page.getByTestId('specs-install').click()
   await expect(page.getByTestId('spec-chip-001-example')).toBeVisible()
 })
@@ -49,11 +46,9 @@ test('a project with specs shows chips, progress, and tasks', async ({ page }) =
       },
     }),
   )
-  // Reload the project so specs state is fetched.
   await page.getByTestId('sidebar-project-beta').click()
   await page.getByTestId('sidebar-project-alpha').click()
 
-  // The specs tab badge shows the count.
   await expect(page.getByTestId('tab-specs')).toContainText('1')
   await page.getByTestId('tab-specs').click()
 
@@ -61,18 +56,13 @@ test('a project with specs shows chips, progress, and tasks', async ({ page }) =
   await expect(page.getByTestId('specs-view')).toContainText('Cart Race Fix')
   await expect(page.getByTestId('specs-view')).toContainText('1/3 tasks')
 
-  // Tasks part is default; shows done and todo tasks.
   await expect(page.getByTestId('task-done')).toHaveCount(1)
   await expect(page.getByTestId('task-todo')).toHaveCount(2)
 
-  // Switch to the spec (docs) part.
   await page.getByTestId('part-spec').click()
   await expect(page.getByTestId('spec-sections')).toContainText('Version cart state')
 })
 
-// Policy change: the composer belongs to the transcript it types into. Off the
-// Session tab it was a second, quieter place to type the same thing, which made
-// every pane look like a chat window that happened to also list tasks.
 test('the composer is hidden off the Session tab', async ({ page }) => {
   await page.getByTestId('tab-specs').click()
   await expect(page.getByTestId('composer-input')).toHaveCount(0)
@@ -80,8 +70,6 @@ test('the composer is hidden off the Session tab', async ({ page }) => {
   await expect(page.getByTestId('composer-input')).toBeVisible()
 })
 
-// The one exception, and the reason the rule is not unconditional: Refine sends a
-// section back to the agent, so it needs somewhere to type without leaving Specs.
 test('Refine brings the composer back while staying on the Specs tab', async ({ page }) => {
   await seedSpec(page)
   await page.getByTestId('part-spec').click()
@@ -97,14 +85,9 @@ test('+ New spec opens a description popup that runs /speckit-specify', async ({
   await page.getByTestId('new-spec-input').fill('A per-domain container')
   await page.getByTestId('new-spec-submit').click()
   await expect(page.getByTestId('new-spec-popup')).toHaveCount(0)
-  // Polled, not sampled: the section dispatches into a background session, and
-  // starting one is not instantaneous.
   await expect
     .poll(() => page.evaluate(() => window.__mock.state().sends.map((x) => x.text)))
     .toContain('/speckit-specify A per-domain container')
-  // And the section says so meanwhile. Scaffolding takes minutes; without this
-  // the panel is identical to the one before the button was pressed, which is
-  // how a working dispatch got reported as a button that does nothing.
   await expect(page.getByTestId('specs-scaffolding')).toBeVisible()
 })
 
@@ -137,7 +120,6 @@ test('the Commands part suggests the next stage and lists all commands', async (
   await seedSpec(page)
   await page.getByTestId('part-cmds').click()
   await expect(page.getByTestId('speckit-commands')).toBeVisible()
-  // One open clarification → the suggested next stage is /speckit.clarify.
   await expect(page.getByTestId('suggested-next')).toContainText('/speckit.clarify')
   await expect(page.getByTestId('suggested-next')).toContainText('1 open clarification')
   await page.getByTestId('speckit-cmd-speckit-clarify').click()
@@ -162,25 +144,16 @@ test('start phase sends an implement command to the background session and shows
     .poll(() => page.evaluate(() => window.__mock.state().sends.map((x) => x.text).join(' ')))
     .toContain('Phase 1: Core')
   const sends = await page.evaluate(() => window.__mock.state().sends)
-  // It runs beside the conversation, not in it: the developer stays on Specs,
-  // which goes on showing the implementing state.
   expect(sends.find((x) => x.text.includes('Phase 1: Core'))?.sessionId).not.toBe('s-alpha')
   await expect(page.getByTestId('tab-specs')).toHaveClass(/sel/)
   await expect(page.getByTestId('implementing')).toBeVisible()
 })
 
-// A Spec Kit command runs in a session of its own, and /speckit-clarify's whole
-// purpose is to ask questions. Until the section showed that session, the
-// question had nowhere to render: the card lives with the session's events, the
-// conversation's composer addresses a different session, and the run simply sat
-// there looking like work in progress. Answering has to be possible from where
-// the command was started.
 test('a question from a spec command is answerable in the section', async ({ page }) => {
   await seedSpec(page)
   await page.getByTestId('part-cmds').click()
   await page.getByTestId('speckit-cmd-speckit-clarify').click()
 
-  // The session the dispatch actually went to, not a guess.
   const sessionId = await page.evaluate(async () => {
     for (let i = 0; i < 60; i += 1) {
       const sent = window.__mock.state().sends.find((s) => s.text.startsWith('/speckit-clarify'))
@@ -207,7 +180,6 @@ test('a question from a spec command is answerable in the section', async ({ pag
   await expect(question).toBeVisible()
   await question.getByText('Device code').click()
 
-  // The answer goes back to the command's own session, not to the conversation.
   await expect
     .poll(() =>
       page.evaluate(
@@ -222,11 +194,6 @@ test('a question from a spec command is answerable in the section', async ({ pag
     .toContain('Device code')
 })
 
-// Tasks are ticked off in tasks.md by whichever session is doing the work, and
-// that is often the developer's own conversation rather than anything this
-// section started. The panel read the spec on mount and never again, so a phase
-// that had finished 10 of 10 went on offering "Start phase", and a spec whose
-// tasks were all done never said so.
 test('a phase finished by another session shows as done without leaving the tab', async ({
   page,
 }) => {
@@ -235,7 +202,6 @@ test('a phase finished by another session shows as done without leaving the tab'
   await expect(page.getByTestId('specs-view')).toContainText('0/2 tasks')
   await expect(page.getByTestId('start-phase-Phase 1: Core')).toBeVisible()
 
-  // The conversation does the work and ticks both tasks off.
   await page.getByTestId('tab-session').click()
   await page.getByTestId('composer-input').fill('implement phase 1 please')
   await page.getByTestId('composer-send').click()
@@ -260,8 +226,6 @@ test('a phase finished by another session shows as done without leaving the tab'
     }),
   )
 
-  // Nothing on screen changes until that session's turn ends, which is the
-  // moment the files are settled.
   await page.evaluate(() => window.__mock.completeTurn('s-alpha'))
 
   await expect(page.getByTestId('specs-view')).toContainText('2/2 tasks')
@@ -270,9 +234,6 @@ test('a phase finished by another session shows as done without leaving the tab'
   await expect(page.getByTestId('specs-view')).toContainText('Done')
 })
 
-// The panel used to light up whichever phase still had open tasks whenever an
-// implement run was live, so the moment one phase finished the NEXT one
-// announced itself as running before anything had touched it.
 test('a finished phase does not hand "Running" to the next one', async ({ page }) => {
   await page.evaluate(() =>
     window.__mock.setSpecKit('p-alpha', {
@@ -296,11 +257,9 @@ test('a finished phase does not hand "Running" to the next one', async ({ page }
   await page.getByTestId('tab-specs').click()
   await page.getByTestId('part-tasks').click()
 
-  // A whole-spec run: nothing here names a phase, so nothing may claim one.
   await page.getByTestId('start-implementation').click()
   await expect(page.getByTestId('specs-view')).toContainText('Implementing')
 
-  // Phase 1 finishes while the run is still live.
   await page.evaluate(() =>
     window.__mock.setSpecKit('p-alpha', {
       installed: true,
@@ -322,8 +281,6 @@ test('a finished phase does not hand "Running" to the next one', async ({ page }
     .poll(async () => (await page.getByTestId('specs-view').textContent())?.includes('1/2 tasks'))
     .toBe(true)
 
-  // Phase 1 reads as finished; phase 2 says nothing about running, because
-  // nothing knows whether it has been started.
   const phase2 = page.locator('[data-phase="Phase 2: Next"]')
   await expect(phase2).not.toContainText('Running')
   await expect(page.locator('[data-phase="Phase 1: Core"]')).toContainText('Done')

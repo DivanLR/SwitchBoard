@@ -1,19 +1,6 @@
-// Tests section — the verify surface: pick a stack, choose the suites, run them
-// through the session, and read what the run actually measured. The rule under
-// test throughout is that a figure nothing measured shows as "—" and names why,
-// never as a number the app filled in (spec 002 FR-072).
 import { expect, test, type Page } from '@playwright/test'
 import { installMockHost, twoProjectScenario, type MockScenario } from './mock-host'
 
-/**
- * Click Run and wait until the run row actually exists.
- *
- * A run is dispatched into the project's OWN tests session now, so verify.start
- * has to spawn one before the row is written. Reporting a result in the same tick
- * as the click used to work only because the dispatch reused a session that was
- * already open; it now reports into a run that is not there yet. "Running" on the
- * button is the first thing that can only be true once the row exists.
- */
 async function startRun(page: import('@playwright/test').Page): Promise<void> {
   await page.getByTestId('tests-run').click()
   await expect(page.getByTestId('tests-run')).toContainText('Running')
@@ -24,16 +11,8 @@ async function startApiRun(page: import('@playwright/test').Page): Promise<void>
   await expect(page.getByTestId('tests-api-run')).toContainText('Running')
 }
 
-
-/**
- * The last thing dispatched to a session, once it has actually been dispatched.
- * Waits because dispatch now spawns the project's own tests session first — see
- * startRun above for why a same-tick read used to work and no longer does.
- */
 async function lastSend(
   page: import('@playwright/test').Page,
-  /** Wait for a send carrying this, when a previous send would otherwise satisfy
-   *  "something was sent" and the poll would return the wrong one. */
   contains?: string,
 ): Promise<string> {
   let text = ''
@@ -46,8 +25,6 @@ async function lastSend(
   return text
 }
 
-
-/** A report shaped like the one the session emits on its marker line. */
 function report(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     suites: [
@@ -77,7 +54,6 @@ function report(over: Record<string, unknown> = {}): Record<string, unknown> {
   }
 }
 
-/** One real HTTP call as the run reports it, drawn from a real row. */
 function call(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     method: 'GET',
@@ -106,15 +82,12 @@ async function openTests(page: Page, scenario: MockScenario = twoProjectScenario
 test('the headline quality figure counts gates, and says what it left out', async ({ page }) => {
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
-  // Before a run there is nothing to count, and it says so rather than showing 0%.
   await expect(page.getByTestId('tests-score')).toHaveText('—')
   await expect(page.getByTestId('tests-score-sub')).toContainText('nothing measured yet')
 
   await startRun(page)
   await page.evaluate((r) => window.__mock.reportVerifyResult('p-alpha', 'pass', r), report())
 
-  // Counted, never estimated: whatever the gates say, the figure is their own
-  // arithmetic, and any gate that measured nothing is named rather than folded in.
   const sub = await page.getByTestId('tests-score-sub').textContent()
   const clean = /(\d+)\/(\d+) gates clean/.exec(sub ?? '')
   expect(clean).not.toBeNull()
@@ -125,16 +98,11 @@ test('the headline quality figure counts gates, and says what it left out', asyn
 
 test('a run takes its own session and leaves the conversation where it was', async ({ page }) => {
   await openTests(page)
-  // One session before the run: the one the developer is chatting in, which is
-  // the only session there is, so no subsession rows are drawn.
   await expect(page.getByTestId('sidebar-subsessions-alpha')).toHaveCount(0)
 
   await page.getByTestId('tests-stack-node').click()
   await startRun(page)
 
-  // Two now, and the run went to the new one. Before this, verification queued
-  // into whichever session was open — in the ordinary case, the conversation —
-  // and blocked it for the whole run.
   const rows = page.getByTestId('sidebar-subsessions-alpha').getByTestId(/^sidebar-subsession-/)
   await expect(rows).toHaveCount(2)
   await expect(page.getByTestId('sidebar-subsession-s-alpha')).toHaveClass(/sel/)
@@ -167,7 +135,6 @@ test('the section opens on a stack picker seeded by detection', async ({ page })
   await expect(page.getByTestId('tests-stack-dotnet')).toBeVisible()
   await expect(page.getByTestId('tests-stack-angular')).toBeVisible()
   await expect(page.getByTestId('tests-stack-python')).toBeVisible()
-  // Detection is a hint, not a decision: the detected stack is only marked.
   await expect(page.getByTestId('tests-stack-node')).toContainText('DETECTED')
   await expect(page.getByTestId('tests-stack-dotnet')).not.toContainText('DETECTED')
 })
@@ -179,14 +146,9 @@ test('before any run, every gate says nothing measured it', async ({ page }) => 
   for (const id of ['unit', 'integration', 'architecture', 'mutation', 'coverage', 'quality-service']) {
     await expect(page.getByTestId(`tests-gate-${id}`)).toContainText('no run yet')
   }
-  // The gate's own threshold is on the tile, so the target is never implied.
   await expect(page.getByTestId('tests-gate-coverage')).toContainText('≥ 80% line')
 })
 
-// A gate nothing measured used to be grey forever: the stack has no mutation
-// tool, or the quality service is never getting connected, and the tile sat
-// there implying unfinished work. These cover the control that clears it, and the
-// line it must not cross.
 test('a gate nothing measured can be accepted, and then reads green', async ({ page }) => {
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
@@ -196,15 +158,10 @@ test('a gate nothing measured can be accepted, and then reads green', async ({ p
 
   await page.getByTestId('tests-gate-accept-mutation').click()
 
-  // Green, which is what was asked for. Asserted on the class the hue comes from
-  // AND on the words, because the colour is the thing that must never be the
-  // whole story: a measured pass and an accepted gate share it, and only the text
-  // says which of the two you are looking at.
   await expect(gate).toHaveClass(/gate pass/)
   await expect(gate).toContainText('accepted')
   await expect(gate).toContainText('you accepted this')
 
-  // And it is a decision, not a one-way door.
   await page.getByTestId('tests-gate-accept-mutation').click()
   await expect(gate).toContainText('no run yet')
   await expect(gate).not.toHaveClass(/gate pass/)
@@ -218,8 +175,6 @@ test('accepting a gate survives leaving the section, because it is a project fac
   await page.getByTestId('tests-gate-accept-mutation').click()
   await expect(page.getByTestId('tests-gate-mutation')).toContainText('accepted')
 
-  // Tabs, not openTests — that helper reloads the page and reinstalls the mock
-  // host, which would reset the very thing under test.
   await page.getByTestId('tab-session').click()
   await page.getByTestId('tab-tests').click()
 
@@ -227,9 +182,6 @@ test('accepting a gate survives leaving the section, because it is a project fac
 })
 
 test('a measured figure offers no way to accept it away', async ({ page }) => {
-  // The line the feature must not cross. A coverage figure that came back UNDER
-  // target is a real shortfall, and a button that painted it green would make
-  // this section a place where bad numbers go to look good.
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
   await startRun(page)
@@ -251,10 +203,8 @@ test('a run sends the chosen suites to the session, and its report fills the gat
 
   const sent = await lastSend(page)
   expect(sent).toContain('node-unit')
-  // Slow suites stay out of a default run until they are ticked.
   expect(sent).not.toContain('node-mutation')
 
-  // While it runs, the run is running — no figures invented in the meantime.
   await expect(page.getByTestId('tests-run')).toContainText('Running')
   await expect(page.getByTestId('tests-panel-evidence')).toContainText('running')
 
@@ -267,22 +217,6 @@ test('a run sends the chosen suites to the session, and its report fills the gat
   await expect(page.getByTestId('tests-result-node-unit')).toContainText('142 passed')
 })
 
-/**
- * A red suite is the one you actually want to try again.
- *
- * Until this, the chips were selection ONLY: the single Run verification button
- * ran everything ticked, so re-running one failed suite meant unticking the
- * other six, running, and ticking them all back afterwards — at which point the
- * tick boxes no longer described the next full run either.
- *
- * So the re-run is its own control and deliberately does NOT touch the
- * selection: "run this one again" is a different statement from "change what a
- * full run covers", and conflating them is what made the manual route so
- * tedious.
- */
-// Removed at the owner's request. It was a third target in a row whose own chip
-// is already the thing you aim at: tick what you want, press Run. Asserted on a
-// suite that HAS run, which is the only state that ever offered it.
 test('no suite offers a per-suite re-run control', async ({ page }) => {
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
@@ -296,10 +230,6 @@ test('no suite offers a per-suite re-run control', async ({ page }) => {
   await expect(page.getByTestId('tests-suite-rerun-node-unit')).toHaveCount(0)
 })
 
-// Selection was invisible on exactly the chips where it mattered: the outcome
-// rules for skipped / not-run / unavailable set `background: transparent` and
-// outrank `.chip.on`, so a grey suite looked the same ticked and unticked. An API
-// suite reporting `not_run` is the common case, which is how it was found.
 test('a ticked suite is visibly ticked even when its outcome left it grey', async ({ page }) => {
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
@@ -316,23 +246,17 @@ test('a ticked suite is visibly ticked even when its outcome left it grey', asyn
 
   const grey = page.getByTestId('tests-suite-node-api')
   await expect(grey).toHaveClass(/ran-not_run/)
-  // Still ticked from the run, and the class that draws the ring is present.
   await expect(grey).toHaveClass(/ on/)
 
-  // The ring itself, not merely the class: a shadow is what survives the outcome
-  // rules, and it is the whole reason this is fixed rather than reordered.
   const ringed = await grey.evaluate((el) => getComputedStyle(el).boxShadow)
   expect(ringed).not.toBe('none')
 
-  // Untick it, and the ring goes.
   await grey.click()
   await expect(grey).not.toHaveClass(/ on/)
   const bare = await grey.evaluate((el) => getComputedStyle(el).boxShadow)
   expect(bare).toBe('none')
 })
 
-// A run whose session dies used to leave the button disabled with no way back
-// inside the app: the only recovery was to restart it.
 test('a run in progress can be stopped, and the panel says who stopped it', async ({ page }) => {
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
@@ -341,16 +265,12 @@ test('a run in progress can be stopped, and the panel says who stopped it', asyn
 
   await page.getByTestId('tests-cancel').click()
 
-  // The Run button comes back without a restart, and the row says why it proved
-  // nothing — which is a different reason from a session that gave up on its own.
   await expect(page.getByTestId('tests-run')).toContainText('Run verification')
   await expect(page.getByTestId('tests-run')).toBeEnabled()
   await expect(page.getByTestId('tests-run-state')).toContainText('inconclusive')
   await expect(page.getByTestId('tests-cancel')).toHaveCount(0)
 })
 
-// The catalogue's command is a guess about a conventional layout. Before this,
-// a layout it did not fit could only be corrected by editing this app's source.
 test('a suite command can be corrected, and that is what the run sends', async ({ page }) => {
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
@@ -367,7 +287,6 @@ test('a suite command can be corrected, and that is what the run sends', async (
     'npm test --workspace packages/api',
   )
 
-  // Emptying it restores the catalogue default rather than storing a blank.
   await page.getByTestId('tests-suite-edit-node-unit').click()
   await page.getByTestId('tests-suite-command-node-unit').fill('')
   await page.getByTestId('tests-suite-command-node-unit').blur()
@@ -432,15 +351,12 @@ test('the quality panel shows the service report, the mutants and the rule break
   await expect(page.getByTestId('tests-panel-quality')).toContainText('sonarqube')
   await expect(page.getByTestId('tests-quality-debt')).toContainText('2d 4h')
   await expect(page.getByTestId('tests-panel-quality')).toContainText('removed the WAL pragma')
-  // The score alone does not say how many mutants survived — the count beside
-  // the survivor list is what makes "61%" actionable.
   await expect(page.getByTestId('tests-panel-quality')).toContainText('39 killed · 25 survived')
 })
 
 test('evidence is captured against the run and shows what actually executed', async ({ page }) => {
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
-  // Nothing to attach evidence to until a run exists.
   await expect(page.getByTestId('tests-evidence')).toBeDisabled()
 
   await startRun(page)
@@ -468,10 +384,6 @@ test('Run verification survives the clone boundary that used to break it', async
   await openTests(page)
   await page.getByTestId('tests-stack-dotnet').click()
 
-  // The bug: the button handed invoke the reactive array of selected suite ids,
-  // and Electron's structuredClone rejects a Proxy. All 7 suites are ticked here,
-  // which is the exact state that failed. The mock enforces the same clone, so a
-  // dispatch landing at all is proof the request crossed the real boundary.
   await expect(page.getByTestId('tests-run')).toContainText('Run verification')
   await startRun(page)
 
@@ -482,8 +394,6 @@ test('Run verification survives the clone boundary that used to break it', async
   expect(sent).toContain('dotnet-unit')
   expect(sent).toContain('dotnet-http')
 
-  // And the guard is genuinely armed: a Proxy handed over directly is rejected,
-  // so this test cannot pass because the boundary was quietly removed.
   const rejected = await page.evaluate(async () => {
     const proxy = new Proxy({ projectId: 'p-alpha' }, {})
     try {
@@ -523,13 +433,11 @@ test('an API run shows each real call, the row behind it, and what the row prove
   await expect(first).toContainText('/api/v1/policies/{id}')
   await expect(first).toContainText('200')
   await expect(first).toContainText('84 ms')
-  // The provenance is the point: which server, which query, and what it proved.
   await expect(first).toContainText('postgres reporting')
   await expect(first).toContainText('select id from policies')
   await expect(first).toContainText('the response listed 3')
   await expect(first).toContainText('"contracts":3')
 
-  // A call that SHOULD fail is reported with what it actually returned.
   await expect(page.getByTestId('tests-endpoint-1')).toContainText('404')
   await expect(page.getByTestId('tests-endpoint-1')).toContainText('404 is the right answer')
 })
@@ -541,8 +449,6 @@ test('a failed real call fails the integration gate, even with the suite green',
   await page.evaluate(
     (r) => window.__mock.reportVerifyResult('p-alpha', 'fail', r),
     report({
-      // The suite reports pass. Only the real call caught it — which is the entire
-      // reason the endpoint pass exists.
       suites: [
         { id: 'node-unit', label: 'Unit tests', status: 'pass', detail: '142 passed' },
         { id: 'node-api', label: 'HTTP smoke', status: 'pass', detail: '9 routes, all 2xx' },
@@ -553,7 +459,6 @@ test('a failed real call fails the integration gate, even with the suite green',
 
   await expect(page.getByTestId('tests-gate-integration')).toContainText('failed')
   await expect(page.getByTestId('tests-gate-integration')).toContainText('/api/v1/policies/{id}')
-  // Unit is untouched: only the API gate answers for the API.
   await expect(page.getByTestId('tests-gate-unit')).toContainText('passed')
 })
 
@@ -561,8 +466,6 @@ test('a run that reported nothing does not claim the API suite ran', async ({ pa
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
   await startRun(page)
-  // Inconclusive with no report at all: the session ended its turn without a
-  // result line. Saying anything about what the API suite did would be invented.
   await page.evaluate(() => window.__mock.reportVerifyResult('p-alpha', 'inconclusive', null))
 
   await page.getByTestId('tests-sub-evidence').click()
@@ -572,7 +475,6 @@ test('a run that reported nothing does not claim the API suite ran', async ({ pa
 })
 
 test('with a database server connected and still no calls, it says exactly that', async ({ page }) => {
-  // The fourth reason: everything was in place and the run reported no calls.
   const scenario = twoProjectScenario()
   scenario.settings = { ...scenario.settings, databaseMcpServers: ['postgres — production'] }
   await openTests(page, scenario)
@@ -583,7 +485,6 @@ test('with a database server connected and still no calls, it says exactly that'
   await page.getByTestId('tests-sub-evidence').click()
   const empty = page.getByTestId('tests-endpoints-empty')
   await expect(empty).toContainText('reported no individual endpoint calls')
-  // And it names the server that WAS available, so the gap is unambiguous.
   await expect(empty).toContainText('postgres — production')
 })
 
@@ -612,21 +513,14 @@ test('with no endpoint calls, the panel says which of the reasons it was', async
   await page.getByTestId('tests-stack-node').click()
   await startRun(page)
 
-  // Mid-run there is no report yet. Reading the report's suites here would say
-  // "no API suite in this run" while the API suite was running, so the panel has
-  // to read what the run was ASKED to cover instead.
   await page.getByTestId('tests-sub-evidence').click()
   await expect(page.getByTestId('tests-endpoints-empty')).toContainText('still going')
   await expect(page.getByTestId('tests-endpoints-empty')).not.toContainText('No API suite')
 
-  // node-api is in this report, so the missing piece is the database server.
   await page.evaluate((r) => window.__mock.reportVerifyResult('p-alpha', 'pass', r), report())
 
   await expect(page.getByTestId('tests-endpoints-empty')).toContainText('No database MCP server was connected')
 
-  // With no API suite in the run at all, it says that instead. The reason comes
-  // from what the run was asked to cover, so this unticks the suite rather than
-  // editing the report — editing the report would test nothing real.
   await page.getByTestId('tests-suite-node-api').click()
   await startRun(page)
   await page.evaluate((r) => window.__mock.reportVerifyResult('p-alpha', 'pass', r), report())
@@ -643,12 +537,6 @@ test('a run that reports nothing is inconclusive, never a pass', async ({ page }
   await expect(page.getByTestId('tests-gate-unit')).not.toContainText('passed')
 })
 
-// The API eval set: the deterministic path. No report line decides anything
-// here — the app sends the requests and computes the verdict, so the
-// session's only contribution is data, and the panel shows the calls the app
-// actually made.
-
-/** One call as the app records it: the request it sent, and what came back. */
 function apiCall(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     request: {
@@ -680,13 +568,11 @@ async function openApiPanel(page: Page): Promise<void> {
 
 test('the API panel offers the last tested endpoints and a search over the rest', async ({ page }) => {
   await openApiPanel(page)
-  // Last tested first, so the common case is one click and no typing.
   await expect(page.getByTestId('tests-api-recent-0')).toContainText('/api/customers/{id}')
   await expect(page.getByTestId('tests-api-endpoint-0')).toContainText('/api/customers')
   await page.getByTestId('tests-api-search').fill('search')
   await expect(page.getByTestId('tests-api-endpoint-0')).toContainText('/api/customers/search')
   await expect(page.getByTestId('tests-api-endpoint-1')).toHaveCount(0)
-  // Where the calls would go, and where that came from — never an implied port.
   await expect(page.getByTestId('tests-api-host-from')).toContainText('launchSettings.json')
 })
 
@@ -698,7 +584,6 @@ test('running the set asks the session for data only, and the app reports the ca
 
   const sent = await lastSend(page)
   expect(sent).toContain('/api/customers/{id}')
-  // The instruction is for data, not for a verdict.
   expect(sent).toContain('request data')
   await expect(page.getByTestId('tests-api-run')).toContainText('Running')
 
@@ -708,7 +593,6 @@ test('running the set asks the session for data only, and the app reports the ca
   )
   await expect(page.getByTestId('tests-api-call-0')).toContainText('200')
   await expect(page.getByTestId('tests-api-call-0')).toContainText('84 ms')
-  // The check the app performed, in the terms it performed it.
   await expect(page.getByTestId('tests-api-call-0')).toContainText('status 200 · at least 3 items')
   await expect(page.getByTestId('tests-api-call-0')).toContainText('oracle-sqlcl')
 })
@@ -734,13 +618,10 @@ test('a bypass session marks the suites its container cannot run, before the run
   await openTests(page, scenario)
   await page.getByTestId('tests-stack-dotnet').click()
 
-  // The container has node and nothing else: every .NET suite is out, and says so.
   await expect(page.getByTestId('tests-suite-dotnet-unit')).toBeDisabled()
   await expect(page.getByTestId('tests-suite-dotnet-unit')).toContainText('not in the bypass container')
-  // Nothing left to run, so the run cannot start on an empty selection.
   await expect(page.getByTestId('tests-run')).toBeDisabled()
 
-  // The same project's node suites are runnable there.
   await page.getByTestId('tests-change-stack').click()
   await page.getByTestId('tests-stack-node').click()
   await expect(page.getByTestId('tests-suite-node-unit')).toBeEnabled()
@@ -777,28 +658,16 @@ test('the working tree is the only verify target offered', async ({ page }) => {
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
   await expect(page.getByTestId('tests-target-tree')).toBeEnabled()
-  // Last-commit and spec-criteria targets were advertised as "in development" and
-  // permanently disabled. A target the app cannot verify is not offered at all:
-  // an inert control on the screen that reports what a run measured only misleads.
   await expect(page.getByTestId('tests-target-head')).toHaveCount(0)
   await expect(page.getByTestId('tests-target-spec')).toHaveCount(0)
 })
 
-// The section used to sit in an 840px column whatever the window was. On a wide
-// monitor that meant a narrow strip of tests beside empty canvas, with the six
-// gate tiles wrapping onto rows they had the room to lay out in one.
 test('the section uses the width it is given, rather than an 840px column', async ({ page }) => {
-  // A WIDE window, because that is the only place the cap was visible. At the
-  // default 1280 the sidebar and inbox leave the pane narrower than 840, so the
-  // column was never the binding constraint there — which is why this is set
-  // explicitly rather than left to the default.
   await page.setViewportSize({ width: 1800, height: 900 })
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
 
   const pane = await page.getByTestId('tests-view').evaluate((el) => el.clientWidth)
-  // Guards the test itself: below the old cap, everything after this would pass
-  // without proving anything.
   expect(pane).toBeGreaterThan(880)
 
   for (const id of ['tests-gates', 'tests-suites']) {
@@ -806,8 +675,6 @@ test('the section uses the width it is given, rather than an 840px column', asyn
     expect(width, id).toBeGreaterThan(840)
   }
 
-  // Prose keeps its measure. Widening sentences was never the point, and a
-  // paragraph running the full width of an ultrawide is worse than the column was.
   const prose = await page
     .getByTestId('tests-view')
     .locator('.intro')
@@ -815,9 +682,6 @@ test('the section uses the width it is given, rather than an 840px column', asyn
   expect(prose).toBeLessThanOrEqual(841)
 })
 
-// FULL SCREEN. Widening the section inside the pane was half of it; this is the
-// other half — the sidebar, inbox, project header and tab strip stand down so the
-// section has every pixel.
 test('the section can take the whole window, and give it back', async ({ page }) => {
   await page.setViewportSize({ width: 1800, height: 900 })
   await openTests(page)
@@ -828,16 +692,12 @@ test('the section can take the whole window, and give it back', async ({ page })
 
   await page.getByTestId('tests-full-screen').click()
 
-  // Every piece of chrome the shell owns is gone.
   await expect(page.getByTestId('sidebar-project-alpha')).toHaveCount(0)
   await expect(page.getByTestId('tab-tests')).toHaveCount(0)
   await expect(page.getByTestId('inbox-rail')).toHaveCount(0)
-  // And the section actually got the space, rather than merely losing its
-  // neighbours.
   const after = await page.getByTestId('tests-view').evaluate((el) => el.clientWidth)
   expect(after).toBeGreaterThan(before)
 
-  // The way back, since the tab strip that would normally offer one is hidden.
   await page.getByTestId('tests-full-screen').click()
   await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
   await expect(page.getByTestId('tab-tests')).toBeVisible()
@@ -857,9 +717,6 @@ test('Escape leaves full screen, so the chrome is never trapped away', async ({ 
 })
 
 test('leaving the project hands the chrome back rather than stranding the app', async ({ page }) => {
-  // The failure this prevents: full screen hides the tab strip, so anything that
-  // unmounts the section while it is on would leave an app with no sidebar, no
-  // tabs, and no control that brings either back.
   await page.setViewportSize({ width: 1800, height: 900 })
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
@@ -878,7 +735,6 @@ test('the stack choice persists per project and can be changed', async ({ page }
   await page.getByTestId('tests-stack-node').click()
   await expect(page.getByTestId('tests-run')).toBeVisible()
 
-  // Leave the section and come back: no picker, the choice stuck.
   await page.getByTestId('tab-session').click()
   await page.getByTestId('tab-tests').click()
   await expect(page.getByTestId('tests-run')).toBeVisible()
@@ -887,9 +743,6 @@ test('the stack choice persists per project and can be changed', async ({ page }
   await expect(page.getByTestId('tests-stack-node')).toBeVisible()
 })
 
-// A figure the app read out of the runner's own report file is different evidence
-// from the same number typed into the session's report line, and the tile says so.
-// The mark is the visible half of the artefact reconciliation the main process does.
 test('a figure checked against the runner’s own report file is marked as checked', async ({ page }) => {
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()
@@ -901,9 +754,6 @@ test('a figure checked against the runner’s own report file is marked as check
         { id: 'node-unit', label: 'Unit tests', status: 'pass', detail: '142 passed, 0 failed, per TestResults/r.trx', verified: true },
       ],
       coverage: {
-        // A Cobertura report carries TOTAL line coverage and nothing about which
-        // lines this working tree changed, so the line figure is artefact-backed
-        // and the changed-line figure stays unmeasured rather than being derived.
         line: { value: 78.2, source: 'coverage/cobertura-coverage.xml', verified: true },
         changed: { value: null, source: null },
         files: [],
@@ -911,14 +761,11 @@ test('a figure checked against the runner’s own report file is marked as check
     }),
   )
 
-  // Read from a file the app parsed itself.
   await expect(page.getByTestId('tests-gate-verified-unit')).toBeVisible()
   await expect(page.getByTestId('tests-gate-verified-coverage')).toBeVisible()
   await expect(page.getByTestId('tests-gate-coverage')).toContainText('78.2%')
   await expect(page.getByTestId('tests-gate-coverage')).toContainText('cobertura')
 
-  // ...and taken on the session's word, so it carries no mark. The figure is still
-  // shown: unverified is not the same as unmeasured.
   await expect(page.getByTestId('tests-gate-verified-mutation')).toHaveCount(0)
   await expect(page.getByTestId('tests-gate-mutation')).toContainText('74%')
 })

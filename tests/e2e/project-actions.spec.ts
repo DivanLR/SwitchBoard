@@ -1,4 +1,3 @@
-// Plugin/skill command suggestions, project removal, and Ctrl+C interrupt.
 import { expect, test } from '@playwright/test'
 import { installMockHost, twoProjectScenario } from './mock-host'
 
@@ -12,16 +11,12 @@ test("a project's plugin/skill commands are suggested in the composer", async ({
   await page.evaluate(() =>
     window.__mock.setCommands('p-alpha', ['ponytail', 'ponytail-review', 'speckit-plan']),
   )
-  // Commands load when a project is selected, so switch away and back to pick
-  // up the seeded set (they normally arrive from the session init message).
   await page.getByTestId('sidebar-project-beta').click()
   await page.getByTestId('sidebar-project-alpha').click()
 
   const input = page.getByTestId('composer-input')
   await input.fill('/pony')
-  // Ghost text completes the first matching command.
   await expect(page.getByTestId('ghost-suggestion')).toHaveText('tail')
-  // Dropdown lists the matching plugin commands.
   const list = page.getByTestId('suggest-list')
   await expect(list).toBeVisible()
   await expect(page.getByTestId('suggest-item-0')).toContainText('/ponytail')
@@ -36,13 +31,10 @@ test('commands arriving from the session init message load live, without a proje
   await page.getByTestId('sidebar-project-alpha').click()
   const input = page.getByTestId('composer-input')
   await input.fill('/pony')
-  // Nothing yet: a fresh project has no stored commands.
   await expect(page.getByTestId('suggest-list')).toHaveCount(0)
 
-  // The session's init message delivers the commands (pushed to the renderer).
   await page.evaluate(() => window.__mock.setCommands('p-alpha', ['ponytail', 'ponytail-review']))
 
-  // They appear immediately in the already-open composer (no switch needed).
   await expect(page.getByTestId('ghost-suggestion')).toHaveText('tail')
   await expect(page.getByTestId('suggest-item-0')).toContainText('/ponytail')
 })
@@ -60,10 +52,8 @@ test('suggestions show a small explanation of what each command does', async ({ 
 })
 
 test('a project can be removed via the confirmation popup', async ({ page }) => {
-  // Removal requires no live session, so end beta's session first.
   await page.evaluate(() => window.__mock.endSession('s-beta'))
   await page.getByTestId('sidebar-project-beta').getByTestId('remove-project-beta').click({ force: true })
-  // A popup confirms before removing.
   const dialog = page.getByTestId('remove-dialog')
   await expect(dialog).toBeVisible()
   await expect(dialog).toContainText('beta')
@@ -77,14 +67,12 @@ test('an archived project waits in the folded Archived section until restored', 
   await page.getByTestId('sidebar-project-beta').getByTestId('remove-project-beta').click({ force: true })
   await page.getByTestId('remove-dialog').getByTestId('remove-confirm').click()
   await expect(page.getByTestId('sidebar-project-beta')).toHaveCount(0)
-  // Folded by default: the header counts it, the row itself is not shown yet.
   const head = page.getByTestId('group-head-archived')
   await expect(head).toBeVisible()
   await expect(page.getByTestId('group-count-archived')).toHaveText('1')
   await expect(page.getByTestId('archived-project-beta')).toHaveCount(0)
   await head.click()
   await page.getByTestId('restore-project-beta').click()
-  // Restored AND opened: it comes back selected, and the section goes with it.
   await expect(page.getByTestId('sidebar-project-beta')).toHaveAttribute('aria-selected', 'true')
   await expect(head).toHaveCount(0)
 })
@@ -98,7 +86,6 @@ test('cancel in the popup keeps the project', async ({ page }) => {
 })
 
 test('removing a project with a running session is refused with a clear message', async ({ page }) => {
-  // s-alpha is 'working' in the scenario.
   await page.getByTestId('sidebar-project-alpha').getByTestId('remove-project-alpha').click({ force: true })
   await page.getByTestId('remove-dialog').getByTestId('remove-confirm').click()
   await expect(page.getByTestId('remove-error')).toContainText('Stop the session')
@@ -125,9 +112,6 @@ test('renaming a project inline updates its name', async ({ page }) => {
 })
 
 test('a renamed project may contain spaces, typed key by key', async ({ page }) => {
-  // fill() sets the value without pressing anything, which is why the test above
-  // passed throughout: the row's own keydown.space handler was swallowing the
-  // space bar, so a name typed by hand could never contain one.
   await page.getByTestId('sidebar-project-beta').click({ button: 'right' })
   await page.getByTestId('ctx-rename').click()
   const input = page.getByTestId('rename-input-beta')
@@ -140,7 +124,6 @@ test('a renamed project may contain spaces, typed key by key', async ({ page }) 
 })
 
 test('the context menu moves a project up and down the sidebar', async ({ page }) => {
-  // Scenario order: alpha, beta. Move beta up → beta first.
   await page.getByTestId('sidebar-project-beta').click({ button: 'right' })
   await page.getByTestId('ctx-move-up').click()
   await expect(page.locator('.project').first()).toHaveAttribute(
@@ -148,7 +131,6 @@ test('the context menu moves a project up and down the sidebar', async ({ page }
     'sidebar-project-beta',
   )
 
-  // Move beta back down → alpha first again.
   await page.getByTestId('sidebar-project-beta').click({ button: 'right' })
   await page.getByTestId('ctx-move-down').click()
   await expect(page.locator('.project').first()).toHaveAttribute(
@@ -171,15 +153,10 @@ test('sidebar collapses to an initials rail and the theme toggle flips light mod
   const alpha = page.getByTestId('sidebar-project-alpha')
   await expect(alpha.locator('.initials')).toHaveText('al')
   await expect(alpha.locator('.name')).toHaveCount(0)
-  // The per-project color code stays visible on the collapsed rail.
   await expect(page.getByTestId('project-accent-alpha')).toBeVisible()
   await page.getByTestId('collapse-toggle').click()
   await expect(alpha.locator('.name')).toHaveText('alpha')
 
-  // LIGHT is the default as of 2026-08-21, so a fresh profile opens on the light
-  // world and the first click goes the other way. This asserted the reverse until
-  // then; the direction of the first click is the part that changed, not the
-  // toggle. Both states are pinned so neither default can drift unnoticed.
   await expect(page.locator('html')).toHaveClass(/sb-light/)
   await page.getByTestId('theme-toggle').click()
   await expect(page.locator('html')).not.toHaveClass(/sb-light/)
@@ -203,9 +180,9 @@ test('a reference can be added by project name and removed from the REFS row', a
 test('Ctrl+C interrupts the running session, like a terminal (confirm first)', async ({ page }) => {
   await page.getByTestId('sidebar-project-alpha').click()
   const input = page.getByTestId('composer-input')
-  await input.press('Control+c') // opens the confirm
+  await input.press('Control+c') 
   await expect(page.getByTestId('stop-confirm')).toBeVisible()
-  await input.press('Control+c') // confirms → interrupt
+  await input.press('Control+c') 
   await expect
     .poll(async () => (await page.evaluate(() => window.__mock.state().interrupts)).length)
     .toBeGreaterThan(0)
@@ -215,18 +192,11 @@ test('Ctrl+C interrupts the running session, like a terminal (confirm first)', a
 test('End ends the session (distinct from Ctrl+C interrupt)', async ({ page }) => {
   await page.getByTestId('sidebar-project-alpha').click()
   await page.getByTestId('end-session').click()
-  // Teardown is not instant, so the End button shows a loading bar meanwhile.
   await expect(page.getByTestId('ending-bar')).toBeVisible()
   await expect(page.getByTestId('ended-banner')).toContainText('stopped')
-  // The live-only controls are gone once the session has ended.
   await expect(page.getByTestId('end-session')).toHaveCount(0)
 })
 
-// The menu floats over the project list, so it has to bring its own ground. It
-// used --bg-hover, a 6% wash meant for tinting a row that already has a
-// background under it, and the board showed straight through the menu and its
-// own text. Asserted as "opaque", not as a colour, so a palette change does not
-// break it but a transparent surface does.
 test('the project menu has an opaque surface, not a wash you can read the board through', async ({
   page,
 }) => {
@@ -235,7 +205,6 @@ test('the project menu has an opaque surface, not a wash you can read the board 
   await expect(menu).toBeVisible()
 
   const alpha = await menu.evaluate((el) => {
-    // rgb() has three components and is opaque; only a fourth is the alpha.
     const parts = getComputedStyle(el).backgroundColor.match(/[\d.]+/g) ?? []
     return parts.length < 4 ? 1 : Number(parts[3])
   })

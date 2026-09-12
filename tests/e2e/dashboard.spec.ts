@@ -1,6 +1,3 @@
-// T034: dashboard identity, counters, registration, and input isolation
-// (quickstart V2). Aligned to the Switchboard design: status is an animated
-// dot carrying a data-status attribute, counters are label/value pairs.
 import { expect, test } from '@playwright/test'
 import { installMockHost, twoProjectScenario } from './mock-host'
 
@@ -16,10 +13,6 @@ test('sidebar shows name, branch, status dot and a ticking timer (FR-003/004)', 
   await expect(alpha).toContainText('alpha')
   await expect(page.getByTestId('status-badge-alpha')).toHaveAttribute('data-status', 'working')
 
-  // The branch belongs to every row with a live session, not just the selected
-  // one — the old selected-only rule collapsed a background project's branch the
-  // moment you looked elsewhere, so the busiest rows were the least legible.
-  // Changed on the owner's direction, 2026-08-05.
   await expect(alpha).toContainText('main')
   await expect(beta).toContainText('feature/x')
   await beta.click()
@@ -27,9 +20,6 @@ test('sidebar shows name, branch, status dot and a ticking timer (FR-003/004)', 
   await expect(alpha).toContainText('main')
   await alpha.click()
 
-  // The other half of the rule: a lane with nothing running stays on one line, so
-  // the list does not become a wall of text. Ending beta's session must collapse it
-  // while leaving the selected row alone.
   await page.evaluate(() => window.__mock.endSession('s-beta'))
   await expect(beta).not.toContainText('feature/x')
   await expect(alpha).toContainText('main')
@@ -50,30 +40,24 @@ test('status pushes update the dot without user action (FR-004)', async ({ page 
 test('the New session dialog validates paths and starts', async ({ page }) => {
   await page.getByTestId('add-project').click()
 
-  // Live session-name preview follows the folder input.
   await page.getByTestId('folder-input').fill('C:\\work\\gamma')
   await expect(page.getByTestId('session-name-preview')).toContainText('Session name: gamma')
 
-  // Bad paths and duplicates are refused with clear errors.
   await page.getByTestId('folder-input').fill('C:\\work\\missing')
   await page.getByTestId('start-session').click()
   await expect(page.getByTestId('registration-error')).toContainText('does not exist')
 
-  // An already-registered folder just opens that project (no error).
   await page.getByTestId('folder-input').fill('C:\\work\\alpha')
   await page.getByTestId('start-session').click()
   await expect(page.getByTestId('registration-dialog')).toHaveCount(0)
   await expect(page.getByTestId('session-project-name')).toHaveText('alpha')
 
-  // A typed folder registers and opens the session.
   await page.getByTestId('add-project').click()
   await page.getByTestId('folder-input').fill('C:\\work\\gamma')
   await page.getByTestId('start-session').click()
   await expect(page.getByTestId('sidebar-project-gamma')).toBeVisible()
 })
 
-// Browse fills the same field a typed path goes into, so the picked folder
-// takes the same validation on Start rather than a quieter path of its own.
 test('the folder picker fills the folder field, and cancelling leaves it alone', async ({
   page,
 }) => {
@@ -84,7 +68,6 @@ test('the folder picker fills the folder field, and cancelling leaves it alone',
   await expect(page.getByTestId('folder-input')).toHaveValue('C:\\work\\gamma')
   await expect(page.getByTestId('session-name-preview')).toContainText('Session name: gamma')
 
-  // Cancelling answers null, which must not blank a field already filled.
   await page.evaluate(() => window.__mock.setNextFolderPick(null))
   await page.getByTestId('browse-folder').click()
   await expect(page.getByTestId('folder-input')).toHaveValue('C:\\work\\gamma')
@@ -93,9 +76,6 @@ test('the folder picker fills the folder field, and cancelling leaves it alone',
   await expect(page.getByTestId('sidebar-project-gamma')).toBeVisible()
 })
 
-// Starting a session is not a background task: it spawns the CLI, and a bypass
-// start builds a container first. A corner spinner let the dialog sit there
-// looking idle, so the whole window says what it is waiting for.
 test('starting a session takes the whole window until the session is up', async ({ page }) => {
   await page.getByTestId('add-project').click()
   await page.getByTestId('folder-input').fill('C:\\work\\gamma')
@@ -104,7 +84,6 @@ test('starting a session takes the whole window until the session is up', async 
   const overlay = page.getByTestId('session-start-overlay')
   await expect(overlay).toContainText('Starting session')
 
-  // It clears on its own once the session row has landed, not before.
   await expect(overlay).toHaveCount(0)
   await expect(page.getByTestId('sidebar-project-gamma')).toBeVisible()
 })
@@ -136,7 +115,6 @@ test('messages go only to the selected project (SC-002)', async ({ page }) => {
   const sends = await page.evaluate(() => window.__mock.state().sends)
   expect(sends).toEqual([{ sessionId: 's-alpha', text: 'hello alpha' }])
 
-  // Beta's stream contains no prompt events at all.
   await page.getByTestId('sidebar-project-beta').click()
   await expect(page.getByTestId('stream').getByTestId('stream-event-prompt')).toHaveCount(0)
 })
@@ -145,7 +123,6 @@ test('header always names the selected project and its path (SC-003)', async ({ 
   await page.getByTestId('sidebar-project-beta').click()
   await expect(page.getByTestId('session-project-name')).toHaveText('beta')
   await expect(page.getByTestId('session-project-path')).toHaveText('C:\\work\\beta')
-  // The design header carries the branch and git diff stats.
   await expect(page.getByTestId('diff-stats')).toContainText('+12')
   await expect(page.getByTestId('diff-stats')).toContainText('4')
 })
