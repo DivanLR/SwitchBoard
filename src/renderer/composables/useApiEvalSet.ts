@@ -1,11 +1,3 @@
-// The API eval set: which endpoints are picked, where the calls go, and running
-// them. Extracted from TestsView so the view is left rendering panels.
-//
-// This is the deterministic path, and the reason the panel exists: the endpoints
-// come from a scan of the project's own source, the calls are made by the app,
-// and pass or fail is computed from the status that came back. The session is
-// asked for one thing only — identifiers that really exist — and nothing it says
-// decides a verdict.
 import { computed, ref, toValue, watch, type MaybeRefOrGetter } from 'vue'
 import type { ApiTarget, DiscoveredEndpoint } from '@shared/api-endpoints'
 import { searchEndpoints } from '@shared/api-endpoints'
@@ -26,8 +18,6 @@ export function useApiEvalSet(projectIdInput: MaybeRefOrGetter<string>) {
   const startCmdField = ref('')
   const qaUrlField = ref('')
   const qaHeadersField = ref('')
-  /** Which environment the next run goes to. Local by default, always: a
-   *  deployed environment is a deliberate choice, never one made for them. */
   const apiTarget = ref<ApiTarget>('local')
 
   const apiRun = computed(() => api.latestFor(projectId()))
@@ -36,8 +26,6 @@ export function useApiEvalSet(projectIdInput: MaybeRefOrGetter<string>) {
   const apiQa = computed(() => api.qaFor(projectId()))
   const apiScan = computed(() => api.scan[projectId()] ?? null)
 
-  /** The last five endpoints actually tested — or, before anything has run, the
-   *  first few the scan found, so the panel is never an empty search box. */
   const apiShortlist = computed<Endpoint[]>(() => {
     const recent = api.recentFor(projectId())
     return recent.length > 0 ? recent : api.endpointsFor(projectId()).slice(0, 5)
@@ -49,7 +37,6 @@ export function useApiEvalSet(projectIdInput: MaybeRefOrGetter<string>) {
 
   const apiFoundCount = computed(() => api.endpointsFor(projectId()).length)
 
-  /** Where the base URL came from, or why there is none. */
   const apiHostLine = computed(
     () =>
       apiHost.value?.error ??
@@ -73,8 +60,6 @@ export function useApiEvalSet(projectIdInput: MaybeRefOrGetter<string>) {
       : [...picked.value, { method: e.method, template: e.template }]
   }
 
-  // The fields show what a run would use right now, resolved or overridden, so
-  // saving pins exactly what is on screen rather than something implied.
   watch(
     apiHost,
     (host) => {
@@ -93,7 +78,6 @@ export function useApiEvalSet(projectIdInput: MaybeRefOrGetter<string>) {
     { immediate: true },
   )
 
-  /** No QA URL means no QA choice: the chip is not offered until there is one. */
   const qaReady = computed(() => !!apiQa.value?.baseUrl)
 
   watch(qaReady, (ready) => {

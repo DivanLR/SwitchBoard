@@ -1,16 +1,4 @@
 <script setup lang="ts">
-// The toast stack, top-right, one per transient outcome.
-//
-// Geometry, depth, motion and behaviour follow the pinned reference
-// (design.dev/ai/prompts/toast-notification-stack): 16px inset, 360px cap, 10px
-// gap, five visible, a 2px progress bar in the type's own colour, 350ms in with
-// overshoot and 300ms out without, hover pauses the countdown.
-//
-// The colours are this world's, not the reference's. It keys four types to
-// cyan-family accents; here green means an action completed, red a real failure,
-// amber attention owed, and teal is the identity hue that carries no tolerance
-// meaning at all — which is exactly what "info" should be in a world where
-// colour is spent on readings outside tolerance.
 import { useToastsStore } from '@renderer/stores/toasts'
 import Icon from '@renderer/components/Icon.vue'
 
@@ -25,8 +13,6 @@ const ICONS: Record<string, string> = {
 </script>
 
 <template>
-  <!-- `log` + polite, per the reference and the WAI pattern: an outcome is worth
-       announcing, and worth announcing without interrupting what is being read. -->
   <div class="toast-host" role="log" aria-live="polite" data-testid="toast-host">
     <TransitionGroup name="toast">
       <div
@@ -53,9 +39,6 @@ const ICONS: Record<string, string> = {
         >
           <Icon name="close" :size="11" />
         </button>
-        <!-- The countdown made visible. Animated by CSS off the toast's own
-             duration, so pausing on hover is a single animation-play-state
-             change rather than a timer this component has to mirror. -->
         <span
           v-if="t.duration > 0"
           class="t-progress"
@@ -69,10 +52,6 @@ const ICONS: Record<string, string> = {
 <style scoped>
 .toast-host {
   position: fixed;
-  /* 16px in the reference, and 52px here: at 16 the stack sat squarely on the
-     inbox's own INBOX / HISTORY tabs, so a toast hid the control it was most
-     likely to be reporting about. Clearing that row costs nothing and is the
-     kind of thing a reference written for a generic page cannot know. */
   top: 52px;
   right: 16px;
   z-index: 60;
@@ -80,8 +59,6 @@ const ICONS: Record<string, string> = {
   flex-direction: column;
   gap: 10px;
   width: min(360px, calc(100vw - 32px));
-  /* The stack must not swallow clicks on the board behind it; each toast turns
-     pointer events back on for itself. */
   pointer-events: none;
 }
 
@@ -100,9 +77,6 @@ const ICONS: Record<string, string> = {
   box-shadow: var(--shadow-toast);
 }
 
-/* The type's colour appears twice and only twice: the icon, and the progress
-   bar. Not the border, not the background — a whole tinted card for "saved"
-   is the shout this world spends colour to avoid. */
 .toast.success .t-icon,
 .toast.success .t-progress {
   color: var(--green);
@@ -124,7 +98,6 @@ const ICONS: Record<string, string> = {
   background-color: var(--teal);
 }
 
-/* The icon takes the colour but never the fill. */
 .t-icon {
   display: inline-flex;
   padding-top: 1px;
@@ -172,7 +145,6 @@ const ICONS: Record<string, string> = {
   animation: toastCountdown linear forwards;
 }
 
-/* Paused with the countdown it draws, so the bar and the timer never disagree. */
 .toast:hover .t-progress {
   animation-play-state: paused;
 }
@@ -186,8 +158,6 @@ const ICONS: Record<string, string> = {
   }
 }
 
-/* In with a little overshoot, out with none: arriving should catch the eye,
-   leaving should not. */
 .toast-enter-active {
   transition:
     transform var(--dur-toast-in) var(--ease-toast-in),
@@ -198,8 +168,6 @@ const ICONS: Record<string, string> = {
   transition:
     transform var(--dur-toast-out) var(--ease-toast-out),
     opacity var(--dur-toast-out) var(--ease-toast-out);
-  /* Out of flow while leaving, so the toasts below close the gap smoothly
-     instead of jumping the moment this one is removed. */
   position: absolute;
   right: 0;
   width: 100%;
@@ -229,7 +197,6 @@ const ICONS: Record<string, string> = {
   .toast-leave-to {
     transform: none;
   }
-  /* The bar still shows how long is left; it simply stops being a moving part. */
   .t-progress {
     animation: none;
     opacity: 0.5;

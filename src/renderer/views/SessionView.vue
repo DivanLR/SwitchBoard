@@ -1,17 +1,8 @@
 <script lang="ts">
-// Unsent composer text kept per project for the app's lifetime, so switching
-// projects (or opening another view) never loses what you typed. Module-level
-// so it survives this component unmounting/remounting. In-memory only — distinct
-// from the persisted `drafts` table, which holds undelivered *queued* sends.
-// ponytail: in-memory Map; add DB persistence only if drafts must survive restart.
 const composerDrafts = new Map<string, string>()
 </script>
 
 <script setup lang="ts">
-// Session stream — 1:1 with the design reference: two-row header (identity,
-// status pill, clean/raw segments, meta line), clean stream with swallowed
-// blocks and a live status line, dark raw log, and the ❯ composer bar
-// (FR-014..019a, R2 resume).
 import { computed, nextTick, onMounted, onUnmounted, onWatcherCleanup, ref, watch } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
 import { agentIdOf } from '@shared/domain'
@@ -21,11 +12,6 @@ import { DIAGRAM_PLUGIN } from '@shared/diagram'
 import { activeAgents } from '@shared/agents'
 import { parseInlineQuestion } from '@shared/inline-question'
 import type { ProjectListItem } from '@shared/ipc-types'
-// Single door for the words describing what came back through the IPC bridge —
-// see the re-export comment in ipc.ts. `ProjectListItem` stays imported from
-// '@shared/ipc-types' itself: that module owns the wire type, and ipc.ts only
-// re-exports `errorMessage`. (`isIpcError` moved out with `start()`, its only
-// caller in this file, into useSessionStart — see that composable.)
 import { errorMessage } from '@renderer/ipc'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useProjectsStore } from '@renderer/stores/projects'
@@ -59,8 +45,6 @@ import SkillsView from '@renderer/views/SkillsView.vue'
 import SessionWaitOverlay from '@renderer/components/SessionWaitOverlay.vue'
 
 const props = defineProps<{ project: ProjectListItem }>()
-/** The Skills section's "Manage skills" link. Settings is owned by App, so the
- *  view asks rather than reaching for it. */
 const emit = defineEmits<{ (e: 'open-settings', tab: 'skills'): void }>()
 
 const projects = useProjectsStore()
@@ -73,10 +57,8 @@ const diff = useDiffStore()
 
 const queuedTasks = computed(() => queue.forProject(props.project.id))
 
-// Per-project accent square before the name (design), matching the sidebar row.
 const headerColor = computed(() => accentFor(props.project.id))
 
-// Output settings (Terminals tab): font size, tool rows, timestamps, autoscroll.
 const outputPrefs = computed(() => ({
   fontSize: settingsStore.settings?.fontSize ?? 'md',
   showToolRows: settingsStore.settings?.showToolRows ?? false,
@@ -84,7 +66,6 @@ const outputPrefs = computed(() => ({
   timestamps: settingsStore.settings?.timestamps ?? false,
   autoscroll: settingsStore.settings?.autoscroll ?? true,
 }))
-// ponytail: zoom scales the fixed-px stream typography in one place (Chromium-only, fine in Electron).
 const streamZoom = computed(
   () => ({ sm: '0.92', md: '1', lg: '1.1' })[outputPrefs.value.fontSize],
 )
@@ -99,14 +80,6 @@ function pillLabel(status: string): string {
   return PILL_LABELS[status] ?? status
 }
 
-// Main-area tab: the live session stream, the project's Spec Kit specs, the
-// verification section, the working-tree diff, or the review/cleanup command
-// launcher.
-// A pseudo-terminal is a real shell process, so one is opened only once the
-// developer has actually asked for the tab — never on mount, which would spawn
-// a shell for every project the moment its view was rendered. After that the
-// pane stays mounted (see its v-show) so the session in it survives tab
-// switches.
 const terminalEverOpened = ref(false)
 const mainTab = ref<
   'session' | 'terminal' | 'specs' | 'tests' | 'diff' | 'cleanup' | 'diagrams' | 'skills'
@@ -117,29 +90,11 @@ const specCount = computed(() => specs.stateFor(props.project.id).specs.length)
 const diffCount = computed(() => diff.resultFor(props.project.id).files.length)
 
 const composer = ref('')
-// Spec-edit target (design ✎ chip): when set, the composer rewrites this spec
-// file/section instead of chatting. Set by SpecsView's Refine actions.
 const editTarget = ref<string | null>(null)
-/**
- * The text restored from a previous run, for as long as the composer still holds
- * exactly it.
- *
- * A boolean could not answer the question the note makes. It said "restored
- * draft" about whatever happened to be in the composer, so clearing the box and
- * typing something of your own kept the note up, now describing text the app had
- * never seen. Holding the restored string means any edit ends the claim, because
- * the claim is about THAT text and is not true of anything else.
- */
 const restoredDraft = ref<string | null>(null)
-// Ended-banner start controls (mode picker, Resume, container switch, busy,
-// start()) live in useSessionStart — see its construction below, deliberately
-// placed AFTER the project-switch watcher; the composable's own comment there
-// explains why the order cannot be the other way round.
 const streamEl = ref<HTMLElement | null>(null)
 const composerEl = ref<HTMLTextAreaElement | null>(null)
 
-// Terminal-style composer suggestions (history + plugin/skill commands, ghost
-// text, dropdown, up-arrow recall) live in a dedicated composable.
 const {
   suggestions,
   availableCommandNames,
@@ -159,15 +114,12 @@ const {
   composer,
   composerEl,
   onSubmit: () => void send(),
-  // Plugin toggles (Settings → This project) hide a plugin's commands here.
   filterCommands: (commands) => {
     const disabled = settingsStore.settings?.disabledCommands?.[props.project.id] ?? []
     return commands.filter((c) => !disabled.includes(c.name))
   },
 })
 
-// Split the composer into the leading command token and the rest, so the ghost
-// mirror can colour only the command green while the arguments stay normal.
 const commandParts = computed(() => {
   const text = composer.value
   const lead = text.length - text.trimStart().length
@@ -187,15 +139,8 @@ const pendingCount = computed(
   () => inbox.pending.filter((p) => p.projectId === props.project.id).length,
 )
 
-// Session timer (HH:MM:SS, ticking) and usage figures from loaded result events.
 const now = useNow(1000)
 
-// Ctrl+C stop-confirm cluster (composer-focus guard, session-working guard,
-// selection guard, Escape dismiss, 4s auto-dismiss) — extracted to its own
-// composable; it owns its own keydown listener and cleanup. `interrupt` is a
-// hoisted function declaration (defined further down as `async function
-// interrupt()`), so referencing it here before its textual line is safe — it is
-// only ever CALLED later, once the user actually confirms a stop.
 const { stopConfirm, cancelStop, confirmStop } = useStopConfirm({
   composerEl,
   liveSession: () => liveSession.value,
@@ -204,23 +149,12 @@ const { stopConfirm, cancelStop, confirmStop } = useStopConfirm({
 
 let unsubscribeCommands: (() => void) | undefined
 onMounted(() => {
-  // A session's init message delivers its slash commands / skills after start;
-  // pick them up live so a newly-added project's suggestions load without a
-  // project switch.
   unsubscribeCommands = window.switchboard.on('push.projectCommands', (push) => {
     if (push.projectId === props.project.id) setSuggestionCommands(push.commands)
   })
 })
 onUnmounted(() => {
-  // The stop-confirm timer/listener and the crash-watch drain both moved into
-  // their own composables (useStopConfirm, useSessionStart) — each owns its own
-  // onUnmounted now, so doing it again here would be cleaning up twice (the
-  // second removeEventListener/clearTimeout would be a harmless no-op, but the
-  // point of "own your own cleanup" is that this file no longer needs to know
-  // these two things exist to clean up).
   unsubscribeCommands?.()
-  // Opening another view (MCP, no selection) unmounts us without firing the
-  // project-switch watcher — save the draft here so it survives the round-trip.
   composerDrafts.set(props.project.id, composer.value)
 })
 
@@ -228,50 +162,19 @@ const sessionTimer = computed(() =>
   liveSession.value ? elapsedClock(liveSession.value.startedAt, now.value) : null,
 )
 
-// Matches the sidebar's clocks: one setting governs both, so the header cannot end
-// up ticking while the rows are silent. Defaults to shown before settings load.
 const showTimer = computed(() => settingsStore.settings?.showSessionTimer ?? true)
 
-/**
- * The run's id, quoted short the way a commit hash is. Eight characters is
- * enough to name one run in conversation or to match this pane against a log
- * line; the header keeps the full id on its title attribute rather than
- * spending header width on it.
- */
 const sessionStamp = computed(() => {
   const id = liveSession.value?.id ?? endedSession.value?.id ?? null
   return id ? { short: id.slice(0, 8), full: id } : null
 })
 
-// Subagents still working this turn — listed under the live line (goal: see
-// the agents when multiple are running).
 const workingAgents = computed(() =>
   liveSession.value?.status === 'working' ? activeAgents(active.events) : [],
 )
 
-// Live background tasks (deep-research workflows, backgrounded subagents/bash).
 const backgroundTasks = computed(() => liveSession.value?.backgroundTasks ?? [])
 
-// Summaries that arrive WHILE background work runs are interim noise: during a
-// fan-out the clean view would otherwise fill with half-finished restatements of a
-// turn that has not landed yet. Their ids are recorded here so they can be hidden
-// while that run is live.
-//
-// Hidden while it is live, and no longer. Two earlier versions of this hid more
-// than they should have and never gave anything back:
-//
-//   - the first re-scanned the whole event list on every tick, so the first
-//     background task to start retro-marked every summary already in the session,
-//     including ones from an hour earlier that had nothing to do with it;
-//   - the second stopped that, but still hid the marked ones for the remaining
-//     life of the session, so a summary written during a fan-out was gone for
-//     good and the developer could not scroll back to what the agent had said.
-//
-// Interim is a statement about the moment, not about the content. Once the run
-// drains, these are simply history, and history renders.
-//
-// `scanned` is the high-water mark of events already considered. Events are
-// append-only and ordered by seq, so everything below it has had its answer.
 let scanned = 0
 const interimSummaries = ref<Set<string>>(new Set())
 watch(
@@ -283,24 +186,12 @@ watch(
         if (events[i].kind === 'summary') interimSummaries.value.add(events[i].id)
       }
     } else if (interimSummaries.value.size > 0) {
-      // The run has drained, so the set empties and everything it was holding back
-      // returns to the transcript. This is the half that makes the hiding safe:
-      // nothing is suppressed for longer than the work it belonged to.
       interimSummaries.value = new Set()
     }
-    // Advanced even when nothing is running, which is the half that fixes it:
-    // an event seen while the session was quiet can never be marked later.
     scanned = events.length
   },
 )
 
-// Cap how many parallel agents / background tasks are shown at once so a big
-// fan-out doesn't fill the pane; a toggle expands to all and collapses back.
-//
-// The state is shared through one helper rather than two hand-copied ref/computed
-// pairs. The MARKUP stays written out twice on purpose: a shared component would
-// need six props and a slot to cover two uses that differ in four data-testids
-// and their whole row content, which is more machinery than the repetition costs.
 const SHOW_LIMIT = 6
 function useCapped<T>(list: ComputedRef<T[]>): { expanded: Ref<boolean>; shown: ComputedRef<T[]> } {
   const expanded = ref(false)
@@ -312,12 +203,10 @@ function useCapped<T>(list: ComputedRef<T[]>): { expanded: Ref<boolean>; shown: 
 const { expanded: agentsExpanded, shown: shownAgents } = useCapped(workingAgents)
 const { expanded: tasksExpanded, shown: shownTasks } = useCapped(backgroundTasks)
 
-// --- Subagent chat view (design: click an agent → its own conversation) ---
 const selectedAgent = computed(
   () => workingAgents.value.find((a) => a.id === active.selectedAgentId) ?? null,
 )
 
-// A finished/vanished agent closes its chat view; opening one jumps to Session.
 watch(
   [() => active.selectedAgentId, workingAgents],
   ([agentId]) => {
@@ -334,31 +223,17 @@ const sendTo = computed(
   () => selectedAgent.value?.task || selectedAgent.value?.name || props.project.name,
 )
 
-/** What the composer invites: a spec edit, a message, or nothing yet. */
 const composerPlaceholder = computed(() => {
   if (editTarget.value) return `Describe the change for ${editTarget.value}…`
   return liveSession.value ? `Send a message to ${sendTo.value}…` : 'Start a session first'
 })
 
-/**
- * Nothing can be sent from here: the session has ended and this is not an edit.
- *
- * The same expression the textarea and the send button were each testing
- * separately. Named because a third reader now needs it — the composer greys
- * itself out — and three copies of one condition is how the three stop agreeing.
- */
 const composerDead = computed(() => !liveSession.value && !editTarget.value)
 
-/** Nothing to send. Both buttons ask the same question, so they ask it once. */
 const composerEmpty = computed(() => composer.value.trim().length === 0)
 
-// The header's usage strip: prompt-cache hit rate and per-model totals. All
-// reported figures, never estimates (see the composable). The subscription
-// rate-limit meter used to sit here too; the SDK's rate_limit_event never
-// arrives for this account, so it only ever rendered an em dash.
 const { cacheHitPct, cacheColor, sessionUsage, currentModelLabel } = useSessionUsage(liveSession)
 
-/** The full view = exactly what /usage reports, rendered as the ✦ USAGE card. */
 async function openFullUsage(): Promise<void> {
   if (!liveSession.value) return
   mainTab.value = 'session'
@@ -367,23 +242,9 @@ async function openFullUsage(): Promise<void> {
 }
 
 watch(
-  // The FOCUSED session, live or ended — not `liveSession`, which is null the
-  // moment a session ends.
-  //
-  // Keyed on liveSession, this called `active.open(null)` for every ended
-  // session, and open(null) clears the stream and returns. The consequence was
-  // larger than it looks: startup reconciliation ends every session a previous
-  // run left open, so after ANY restart the whole board is ended and not one
-  // conversation could be read back — while the ended banner sitting on top of
-  // the empty stream says "The conversation can be resumed". The events were on
-  // disk and `sessions.events` served them the whole time; nothing ever asked.
   () => (liveSession.value ?? endedSession.value)?.id ?? null,
   async (sessionId) => {
-    interimSummaries.value = new Set() // reset per session
-    // A session can be superseded while its history is still loading (starting a
-    // session, switching project, a restart). Everything after the await touches
-    // the COMPOSER, so an unguarded late callback restores one session's draft
-    // over another's, then scrolls a stream that has already moved on.
+    interimSummaries.value = new Set() 
     let superseded = false
     onWatcherCleanup(() => {
       superseded = true
@@ -399,8 +260,6 @@ watch(
   { immediate: true },
 )
 
-// Put the caret in the composer as soon as it can take input (session open,
-// project switch, returning from the Specs tab) — no click needed to type.
 watch(
   [() => liveSession.value?.id ?? null, mainTab, () => props.project.id, () => active.selectedAgentId],
   () => {
@@ -410,69 +269,23 @@ watch(
   { immediate: true },
 )
 
-/**
- * How many raw events the clean and raw views derive from: a tail window, not the
- * whole session.
- *
- * Measured, deriving over the full history: 5.0 ms of scripting per incoming event
- * at 200 events, 6.4 at 1000, 14.0 at 3000, 41.7 at 6000 — because BOTH passes
- * (scopedEvents, then items) re-scanned every event from the start, and the render
- * then threw all but the last MAX_RENDER items away. Past roughly 3000 events each
- * arriving event cost more than a frame, on a stream whose whole job is to keep up
- * with output. The DOM was never the problem: node count was already flat at ~2004
- * thanks to MAX_RENDER.
- *
- * Generous on purpose: 1500 raw events to produce 500 rendered items leaves room
- * for grouping and filtering to collapse a lot, and `showEarlier` widens it before
- * falling back to the store.
- */
 const DERIVE_WINDOW = 1500
 const deriveWindow = ref(DERIVE_WINDOW)
 
-// Whether the transcript window follows the tail; false once the developer pages
-// back. Declared up here with the window it governs because the project watcher
-// below resets it and runs `immediate`, so a declaration further down would be in
-// its temporal dead zone and the component would not mount at all. See the render
-// window near `MAX_RENDER` for what it is actually for.
 const followTail = ref(true)
 
-// Forward-declared, assigned right after this watcher (see the comment beside
-// that assignment for why it has to be this way round): the project watcher
-// below needs to call the composable's `reset()` on every switch, but the
-// composable's OWN internal ended-session watcher has to be registered AFTER
-// this watcher so it runs second and wins (see useSessionStart.ts). A `const`
-// declared after this point could not be referenced inside this watcher's own
-// body without a TDZ error even though the reference only ever fires later;
-// `let`, declared first and assigned second, sidesteps that. On this
-// component's very first mount the immediate call below runs before the
-// assignment has happened, so `sessionStart` is still undefined there and the
-// optional call is a no-op — harmless, because useSessionStart seeds its own
-// refs with the same values `reset()` would have produced.
 let sessionStart: ReturnType<typeof useSessionStart> | undefined
 
 watch(
   () => props.project.id,
   (projectId, prevId) => {
-    // Stash the project we're leaving, restore the one we're entering, so unsent
-    // composer text is preserved across switches instead of being wiped.
     if (prevId) composerDrafts.set(prevId, composer.value)
     composer.value = composerDrafts.get(projectId) ?? ''
     restoredDraft.value = null
     mainTab.value = 'session'
     editTarget.value = null
-    // Per-project: a start failure from the project we left must not read as
-    // this one's, and a chosen mode must never carry over and silently start
-    // the NEXT project's session with permissions skipped. Delegated to
-    // useSessionStart's own reset() — see the forward-declaration above.
     sessionStart?.reset()
-    // Also per-project: this component instance is reused across projects, so an
-    // armed "press Ctrl+C again to stop" left over from the project being left
-    // would otherwise sit above the composer of the project being entered, where
-    // a second Ctrl+C means to stop a session the developer never asked about.
     cancelStop()
-    // Per-project too: a window widened by paging through one long session must
-    // not carry into the next project and derive over its whole history. Following
-    // resumes with it, so the next project opens on its latest output.
     deriveWindow.value = DERIVE_WINDOW
     followTail.value = true
     resetSuggestions()
@@ -484,19 +297,6 @@ watch(
   { immediate: true },
 )
 
-// Diff tab refresh: the same cadence that refreshes the header's +adds/−dels
-// counter (session-manager.ts observeBranch) re-derives the per-file list too.
-// A same-project refresh keeps the current selection (stores/diff.ts).
-//
-// liveSession's id is watched separately from diffAdds/diffDels because both
-// counters stay null until the first turn completes — without it the tab would
-// sit on its pre-session "not live" read, and starting/ending a session
-// wouldn't refresh it.
-//
-// Skipped while the Diff tab is closed, taken once when it opens instead: each
-// refresh costs two git processes over the whole working tree, and a busy
-// session completes a turn every few seconds — wasted on a list nobody is
-// looking at most of the time.
 watch(
   [
     () => liveSession.value?.diffAdds ?? null,
@@ -509,19 +309,10 @@ watch(
   },
 )
 
-// Opening the tab pays for the refresh the guard above skipped — costs the
-// list read, nothing visibly changes since selection is kept (see above).
 watch(mainTab, (tab) => {
   if (tab === 'diff') void diff.loadList(props.project.id)
 })
 
-// The ended-session start controls: mode picker, Resume switch, container
-// switch, start()/watchForImmediateCrash(). Constructed HERE and not earlier —
-// its own internal "prefill mode from the ended session" watcher must be
-// registered after the project watcher above so it wins on a project switch
-// (see the forward-declared `sessionStart` and its comment). This is also
-// where the original file declared that watcher, so nothing else's relative
-// order shifts.
 sessionStart = useSessionStart({
   project: () => props.project,
   endedSession,
@@ -543,21 +334,14 @@ const {
   start,
 } = sessionStart
 
-// --- Clean view derivation (FR-015): consecutive same-noiseKind grouping ---
 type StreamItem =
   | { type: 'event'; event: SessionEvent }
   | { type: 'block'; noiseKind: string; events: SessionEvent[]; key: string }
 
-// The main stream hides subagent internals (they live in the agent chat view);
-// the agent view shows only that agent's events, opened by its delegating
-// prompt (synthesized — the Task tool input is the conversation opener).
 const derivedFrom = computed<SessionEvent[]>(() => {
   const all = active.events
   if (all.length <= deriveWindow.value) return all
   let start = all.length - deriveWindow.value
-  // Back up to a natural block boundary (an event that is not noise) so the oldest
-  // visible block is a whole run rather than the tail of one that began before the
-  // window. Bounded, so a long unbroken run of noise cannot walk this to the start.
   const floor = Math.max(0, start - 200)
   while (start > floor && all[start].noiseKind) start -= 1
   return all.slice(start)
@@ -582,20 +366,12 @@ const items = computed<StreamItem[]>(() => {
   const result: StreamItem[] = []
   let block: { noiseKind: string; events: SessionEvent[] } | null = null
   for (const event of scopedEvents.value) {
-    // Clean view narrative: subagents are represented by the AGENTS card, never
-    // as raw tool rows; other tool activity (commands being run) shows unless the
-    // "Show tool activity" setting is off. The raw view always keeps everything.
     if (event.kind === 'tool_activity') {
       const toolName = (event.payload as { toolName?: string }).toolName
       if (toolName === 'Task' || toolName === 'Agent') continue
       if (!outputPrefs.value.showToolRows) continue
     }
-    // Injected context is off by default here and unconditional in the Raw view:
-    // the clean view is the narrative, and a system reminder is not narrative.
     if (event.kind === 'injection' && !outputPrefs.value.showInjections) continue
-    // Interim summaries (posted while background work ran) stay hidden in the
-    // clean view — only turn-complete lines show during a run, then the single
-    // consolidated summary after it settles. The raw view keeps everything.
     if (event.kind === 'summary' && interimSummaries.value.has(event.id)) continue
     if (event.noiseKind) {
       if (block && block.noiseKind === event.noiseKind) {
@@ -616,20 +392,9 @@ const items = computed<StreamItem[]>(() => {
   return result
 })
 
-// Simple windowing keeps the DOM bounded on flood-heavy sessions (SC-007).
 const MAX_RENDER = 500
 const renderStart = ref(0)
 
-// `followTail` (declared with `deriveWindow` above) is the whole fix for the worst
-// thing this view did: the watcher below used to recompute the start from the END
-// of the list on every arriving event, so history paged in by `showEarlier` was
-// thrown straight back out by the next token. On a working session that made
-// anything above the fold unreachable. The developer would page back to a summary
-// they wanted to re-read and watch it leave again as the agent kept talking.
-//
-// Nothing turns following back on within a session, on purpose. The alternative is
-// scroll-position tracking to guess when the developer has returned to the bottom,
-// and a wrong guess there deletes their history all over again.
 watch(
   () => items.value.length,
   (length) => {
@@ -638,19 +403,11 @@ watch(
       renderStart.value = tail
       return
     }
-    // Pinned, but never past the end: switching sessions shortens the list under
-    // a start index that was valid for the longer one.
     if (renderStart.value > length) renderStart.value = tail
   },
 )
 const visibleItems = computed(() => items.value.slice(renderStart.value))
 
-// Paging back also has to hold the DERIVATION open. `derived` slices the last
-// `deriveWindow` events, so on a session still producing output the front of that
-// slice walks forward and silently eats the history the developer just paged in —
-// the same bug as above, one layer down, and slower to notice because it needs a
-// flood to show up. Growing the window costs derivation time on a long session,
-// which is the trade the developer implicitly accepted by asking to read back.
 watch(
   () => active.events.length,
   (count) => {
@@ -662,8 +419,6 @@ function showEarlier(): void {
   followTail.value = false
   renderStart.value = Math.max(0, renderStart.value - MAX_RENDER)
   if (renderStart.value > 0) return
-  // Widen before reaching for the store: what the developer is asking for may
-  // already be in memory and merely outside the derivation window.
   if (deriveWindow.value < active.events.length) {
     deriveWindow.value += DERIVE_WINDOW
     return
@@ -671,9 +426,6 @@ function showEarlier(): void {
   if (active.hasMoreHistory) void active.loadEarlier()
 }
 
-// --- Raw view: complete session output as mono lines (FR-018) ---
-// The per-kind formatting is pure, so it lives in stream-lines.ts with its own
-// tests; this is only the reactive wrapper around it.
 const rawLines = computed(() => toRawLines(derivedFrom.value, outputPrefs.value.timestamps))
 
 function scrollToBottom(): void {
@@ -682,16 +434,6 @@ function scrollToBottom(): void {
   })
 }
 
-/**
- * Whether the stream is parked at its newest line.
- *
- * Drives the jump-to-latest button, and only that: autoscroll keeps its own
- * threshold below, because the two questions are different. Autoscroll asks "may
- * I move the view under you", and answers generously at 160px so a line arriving
- * mid-read does not yank the page. This asks "are you already at the bottom",
- * where anything but a few pixels of slack would leave the button showing when
- * there is nowhere to go.
- */
 const atBottom = ref(true)
 
 function onStreamScroll(): void {
@@ -699,26 +441,15 @@ function onStreamScroll(): void {
   atBottom.value = !el || el.scrollHeight - el.scrollTop - el.clientHeight < 24
 }
 
-// A short stream has no scrollback, so the button must not appear on a session
-// with three lines in it. Re-checked when the content changes, not only on
-// scroll, because content arriving is what turns a short stream into a long one.
 watch([() => active.events.length, () => active.view, () => liveSession.value?.id, mainTab], () =>
   void nextTick(onStreamScroll),
 )
 
-// Clean/Raw toggle re-pins to the newest line — the two views have separate
-// scroll containers, so switching would otherwise land wherever the other was.
 function switchView(view: 'clean' | 'raw'): void {
   active.setView(view)
   scrollToBottom()
 }
 
-// Coming BACK to the conversation lands on its newest line, for the same reason
-// the Clean/Raw toggle does. The stream is a v-else-if, so leaving the tab
-// unmounts it and returning mounts a fresh element scrolled to zero: the top of
-// a long session, which is the least useful place to be put and reads as having
-// lost your place. Always the bottom, not a remembered offset — the whole point
-// of coming back is what arrived while you were away.
 watch(mainTab, (tab) => {
   if (tab === 'session') scrollToBottom()
 })
@@ -744,14 +475,6 @@ watch(
   },
 )
 
-/**
- * Naming the focused session, in the developer's own words.
- *
- * `null` means the field is closed; a string means it is open and holding an
- * edit in progress, which is why the empty string has to be a valid open state
- * and cannot double as "closed". Saving an empty one clears the stored name and
- * the derived one takes over again, so there is no second control for undoing it.
- */
 const nameDraft = ref<string | null>(null)
 const nameInputEl = ref<HTMLInputElement | null>(null)
 
@@ -770,39 +493,14 @@ function saveName(): void {
   void projects.renameSession(target.id, draft)
 }
 
-/**
- * Another session in this project, started from the header.
- *
- * Deliberately the project's own defaults and nothing else — no mode picker, no
- * resume. The full start controls already exist on an ended session's panel; this
- * is the one-click case, for a developer who wants a second conversation going in
- * the same checkout while the first is busy.
- */
 function startAnother(): void {
   void projects.startSession(props.project.id)
 }
 
-/** The project's container switch. Uncontrolled input read back from the event:
- *  the store writes the project optimistically and re-reads on failure, so the
- *  box follows the stored fact rather than holding a second copy of it. */
 function onContainersToggle(e: Event): void {
   void projects.setUseContainers(props.project.id, (e.target as HTMLInputElement).checked)
 }
 
-/**
- * The command palette's grouping and match highlighting.
- *
- * Grouped by the plugin that ships each command, which is what a namespaced name
- * already encodes: `/ponytail:ponytail-review` belongs under PONYTAIL, a bare
- * `/init` under COMMANDS. With fifty commands matching a single slash, an
- * unlabelled list is a wall; the labels are the difference between scanning and
- * reading. Follows the pinned reference (design.dev command palette), which
- * groups results under uppercase section labels.
- *
- * Each row carries its FLAT index, because keyboard navigation still walks the
- * one-dimensional `suggestions` array that `suggestIndex` indexes. Grouping is a
- * presentation of that array, never a second source of truth for it.
- */
 const suggestGroups = computed<{ label: string; items: { cmd: string; index: number }[] }[]>(() => {
   const groups = new Map<string, { cmd: string; index: number }[]>()
   suggestions.value.forEach((cmd, index) => {
@@ -816,17 +514,11 @@ const suggestGroups = computed<{ label: string; items: { cmd: string; index: num
   return [...groups].map(([label, items]) => ({ label, items }))
 })
 
-/** The `/token` being typed, so the palette can show which part of each row
- *  actually matched. Read off the composer rather than threaded out of the
- *  composable: it is a presentation concern and nothing else needs it. */
 const typedToken = computed<string>(() => {
   const match = /(?:^|\s)\/([^\s]*)$/.exec(composer.value)
   return match ? match[1].toLowerCase() : ''
 })
 
-/** A command split around the matched run, for highlighting. Case-insensitive
- *  and substring, matching how the suggestions themselves were filtered; a
- *  highlight that disagreed with the filter would be worse than none. */
 function matchParts(cmd: string): { before: string; hit: string; after: string } {
   const token = typedToken.value
   if (token === '') return { before: cmd, hit: '', after: '' }
@@ -835,29 +527,11 @@ function matchParts(cmd: string): { before: string; hit: string; after: string }
   return { before: cmd.slice(0, at), hit: cmd.slice(at, at + token.length), after: cmd.slice(at + token.length) }
 }
 
-// --- Actions ---
-// A Refine action in SpecsView sets a spec-edit target. Stay on the Specs tab
-// (the composer footer is shared across tabs) and focus it, so the developer can
-// type the change in place instead of being pulled back to the session stream.
 function onSetTarget(label: string): void {
   editTarget.value = label
   void nextTick(() => composerEl.value?.focus())
 }
 
-/**
- * A section asked for work: it goes to the background session, not the chat.
- *
- * This is what Cleanup's rows and the Tests section's manual pass emit into. The
- * tab no longer switches, because the Session tab shows the conversation and the
- * work is no longer in it; the store's refresh surfaces the background session
- * as its own sidebar row, which is where the output is read.
- */
-/**
- * The session each section last dispatched to, so that section can show its
- * own output. Keyed by section: the sections no longer share one background
- * session, so one shared id would have pointed the Cleanup terminal at
- * whichever drawing happened to run most recently.
- */
 const sectionSessionIds = ref<Partial<Record<SectionKind, string>>>({})
 
 function runInSection(text: string, kind: SectionKind): void {
@@ -866,62 +540,20 @@ function runInSection(text: string, kind: SectionKind): void {
   })
 }
 
-/**
- * A plugin's own slash command, in its section's own session like anything else.
- *
- * This used to run in the CONVERSATION. A containerised session's ~/.claude was
- * a volume with the credentials copied in and nothing else, so a command detected
- * in the project's live session and sent to the container came back "Unknown
- * command: /diagram-design:export-diagram" — true of the environment it arrived
- * in and nothing to do with the developer. The sandbox mounts the host's
- * ~/.claude/plugins read-only as of 0.20.0 (see pluginsPath in wslc-sandbox), and
- * a section session is native unless the project asks for containers at all, so
- * both ways out of that hole are now open and the output can land where the
- * developer asked from instead of in the middle of their conversation.
- */
 function runPluginCommand(text: string, kind: SectionKind, watchDiagrams = false): void {
   void specs.runInSession(props.project.id, text, true, watchDiagrams, kind).then((id) => {
     sectionSessionIds.value = { ...sectionSessionIds.value, [kind]: id }
   })
 }
 
-/**
- * A diagram command: a plugin command that may WRITE something.
- *
- * The same dispatch as any other plugin command, with one extra fact told to the
- * main process — this turn may leave a diagram behind, so announce the folder
- * when it ends. Without it the Generate button's drawings appeared the instant
- * they landed and a command's did not appear at all until some later, unrelated
- * load: two routes to the same folder behaving differently, which is exactly the
- * kind of difference nobody can guess at from the outside.
- */
 function runDiagramCommand(text: string): void {
   runPluginCommand(text, 'diagram', true)
 }
 
-/**
- * A child tab reports it dispatched something. Same reasoning as runInSection
- * above — no tab switch; the dispatch surfaces as its own sidebar row.
- */
 function onRanInSection(): void {
   scrollToBottom()
 }
 
-/**
- * "Download to project" installs the plugin on the host, through the CLI's own
- * subcommands, and waits for the answer.
- *
- * This used to send `/plugin marketplace add …` then `/plugin install …` to a
- * background session as two chat messages. That could not work: `/plugin` is an
- * interactive CLI command an Agent SDK session answers with "isn't available in
- * this environment", and the two messages went to two SEPARATE containers on a
- * project with no prior background work, so the marketplace was registered in
- * one throwaway home and the install ran in another. Neither failure was
- * visible, because nothing caught the rejection and nothing showed a result.
- *
- * `installing` is the plugin id currently being fetched, so the row that was
- * clicked is the row that shows it.
- */
 const installing = ref<string | null>(null)
 const installError = ref<string | null>(null)
 
@@ -931,8 +563,6 @@ async function installPlugin(marketplace: string, pkg: string): Promise<void> {
   installError.value = null
   try {
     const commands = await projects.installPlugin(props.project.id, marketplace, pkg)
-    // The freshly installed commands, so the install card can retire itself
-    // instead of waiting for a session that may not be running to notice.
     setSuggestionCommands(commands)
   } catch (e) {
     installError.value = errorMessage(e)
@@ -952,14 +582,6 @@ async function send(): Promise<void> {
   if (!text) return
   busy.value = true
   try {
-    // Spec-edit target: the message rewrites the referenced spec.
-    //
-    // In the SPECS section's own session, not the conversation. It used to go to
-    // whichever session was open, which is the one place left where a Specs
-    // action could interrupt a chat the developer was in the middle of, and it
-    // meant an edit queued behind whatever that session was doing. The section
-    // shows it running and re-reads the spec when it lands, so there is nothing
-    // left for the Session tab to show that the panel does not.
     if (editTarget.value) {
       const target = editTarget.value
       composer.value = ''
@@ -974,19 +596,12 @@ async function send(): Promise<void> {
     }
     if (!liveSession.value) return
     const agent = selectedAgent.value
-    // Attach any REFS as @path mentions so the model reads them this turn. The
-    // chips stay (they also grant the session folder access) — user setting.
     const refs = props.project.refs
-    // One @path per line so multiple refs (and paths containing spaces) stay
-    // unambiguous rather than running together on one space-delimited line.
     const withRefs =
       refs.length > 0 ? `${text}\n\n${refs.map((r) => `@${r.path}`).join('\n')}` : text
-    // Agent chat: the message goes to the session addressed at the subagent
-    // (the SDK has no direct subagent input channel; the main loop relays).
     if (agent) await active.send(`[to ${agent.name}] ${withRefs}`, agent.id)
     else await active.send(withRefs)
     composer.value = ''
-    // Surface the just-sent command at the top of the suggestion history at once.
     recordSent(text)
     scrollToBottom()
   } finally {
@@ -1002,20 +617,11 @@ async function enqueue(): Promise<void> {
   resetSuggestions()
 }
 
-// start(), watchForImmediateCrash() and the pendingCrashWatches it fills now
-// live in useSessionStart — see its construction above. `start` is destructured
-// from that composable's return and used directly by the template's
-// start-session button.
 
-// Ctrl+C, like a terminal (the design has no interrupt button).
 async function interrupt(): Promise<void> {
   await active.interrupt()
 }
 
-// End the session outright (distinct from Ctrl+C, which only interrupts the turn).
-// Stopping can take a few seconds (SDK drain, container teardown), so the End
-// button shows an indeterminate bar until the session row flips to ended. Keyed
-// by project id because this view is reused across projects.
 const endingFor = ref<string | null>(null)
 const ending = computed(() => endingFor.value === props.project.id)
 
@@ -1032,12 +638,6 @@ function answerQuestion(eventId: string, choice: string): void {
   void active.answerQuestion(eventId, choice)
 }
 
-// Inline question card: when the LATEST message is a plain-text question with
-// an options table (Spec Kit's /speckit-clarify idiom), offer clickable chips
-// + a type-your-own input. Answering sends a normal message; the card vanishes
-// once a newer prompt lands.
-// Locally retires a just-answered card so a double-click can't send twice
-// before the echoed prompt event lands and hides it for good.
 const inlineAnswered = ref<string | null>(null)
 
 const inlineQuestion = computed(() => {
@@ -1045,23 +645,20 @@ const inlineQuestion = computed(() => {
   const events = scopedEvents.value
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const event = events[i]
-    if (event.kind === 'prompt') return null // already answered
+    if (event.kind === 'prompt') return null 
     if (event.kind === 'assistant_text' || event.kind === 'summary') {
       if (event.id === inlineAnswered.value) return null
       const text = (event.payload as { text?: string }).text ?? ''
       const payload = parseInlineQuestion(text)
       return payload ? { eventId: event.id, payload } : null
     }
-    // tool rows / markers / results between the question and now don't matter
   }
   return null
 })
 
 function onInlineAnswer(eventId: string, choice: string): void {
   inlineAnswered.value = eventId
-  // The ★ Recommended marker is display convention — send the bare option.
   const text = choice.replace(/\s*\(recommended\)\s*$/i, '')
-  // In a subagent's chat view the answer goes to that agent, like the composer.
   const agent = selectedAgent.value
   if (agent) void active.send(`[to ${agent.name}] ${text}`, agent.id)
   else void active.send(text)
@@ -1071,20 +668,16 @@ function openInbox(requestId: string): void {
   inbox.focusRequest(requestId)
 }
 
-/** Queued-message edit. Empty text withdraws it, as in the UP NEXT queue. */
 const queuedEditError = ref('')
 async function editQueued(eventId: string, text: string): Promise<void> {
   queuedEditError.value = ''
   try {
     await active.editQueued(eventId, text)
   } catch (error) {
-    // The turn can finish mid-edit and deliver the message. Say so rather than
-    // failing quietly: the developer would otherwise believe they changed what ran.
     queuedEditError.value = errorMessage(error, 'That message could not be changed')
   }
 }
 
-// A file dropped on this project's sidebar row lands here as @path text.
 watch(
   () => active.composerInsert,
   (text) => {
@@ -1095,9 +688,6 @@ watch(
   },
 )
 
-// REFS row and the pane's drop target (design): folders this project's sessions
-// may read, typed or dragged in. A dropped FILE is the one case that is not a
-// reference — its path goes to the composer, which this view owns.
 const {
   addingRef,
   refInput,
@@ -1116,7 +706,6 @@ const {
   },
 })
 
-// UP NEXT strip: planned tasks, editable in place.
 const {
   editingQueued,
   queuedDraft,
@@ -1129,14 +718,6 @@ const {
 </script>
 
 <template>
-  <!-- `is-ended` greys the TRANSCRIPT the moment the session is over, so a dead
-       session is legible at a glance rather than only from the small "Ended"
-       pill. Bound on the root because the header, the stream and the composer
-       are siblings under it with no nearer common ancestor; the rules themselves
-       reach only the stream and the raw log, so the section tabs (Diagrams,
-       Skills, Tests…) stay live — they each start a background session of their
-       own and work fine without this one. See the style block for what is
-       exempt and why. -->
   <div
     class="session-view"
     :class="{ 'is-ended': !!endedSession }"
@@ -1145,15 +726,8 @@ const {
     @dragleave="onPaneDragLeave"
     @drop="onPaneDrop"
   >
-    <!-- The project header and the tab strip below both stand down when a section
-         has the whole window. Hiding the strip means the section owns the way
-         back, which is why the section renders an exit control of its own. -->
     <header v-if="!active.fullScreenSection" class="head">
       <div class="head-row">
-        <!-- The project's identity as ONE block rather than three loose spans
-             on a row that also carries five controls. The dot, the name and
-             the path all answer a single question — which lane is this — so
-             they are grouped, and can then be laid out as a unit. -->
         <div class="ident">
           <span class="h-dot" :style="{ background: headerColor }"></span>
           <span class="h-name mono" data-testid="session-project-name">{{ project.name }}</span>
@@ -1168,9 +742,6 @@ const {
         >
           <Icon name="warning" :size="12" /> Bypass
         </span>
-        <!-- Indicator and control in one: it reads the mode the CLI reports, and
-             clicking it asks for the other. Hidden on a bypass session, which
-             approves everything and so has nothing to plan against. -->
         <button
           v-if="liveSession && !liveSession.bypassPermissions"
           class="pill plan-pill"
@@ -1187,11 +758,6 @@ const {
         >
           <Icon name="panel" :size="12" /> {{ liveSession.inPlanMode ? 'Planning' : 'Plan' }}
         </button>
-        <!-- The Effort bar: a global setting, shown here because this is where the
-             usage meter is watched. It reaches the live session on its next message
-             and every session after. The second bar only appears at max, which is
-             the one rung that creates subagents; below it there is nothing for a
-             subagent effort to apply to. -->
         <template v-if="settingsStore.settings">
           <EffortBar
             :model-value="settingsStore.settings.effort"
@@ -1211,9 +777,6 @@ const {
             @update:model-value="(subagentEffort) => settingsStore.save({ subagentEffort })"
           />
         </template>
-        <!-- Stated before the agent is asked for a diff, not discovered mid-task:
-             the container mounts only this folder, so git works there exactly
-             when .git sits at the project root. -->
         <span
           v-if="liveSession?.bypassPermissions && project.gitNotice"
           class="pill nogit-pill"
@@ -1222,9 +785,6 @@ const {
         >
           <Icon name="warning" :size="12" /> No git
         </span>
-        <!-- The setting is read at spawn, so a toggle flipped mid-session changes
-             nothing until the next start. Without this pill that is invisible, and
-             invisible is indistinguishable from broken. -->
         <span
           v-if="liveSession?.heavySubagents"
           class="pill fanout-pill"
@@ -1267,17 +827,6 @@ const {
         >
           + Session
         </button>
-        <!-- No interrupt button and no transcript glyph here. Both appeared only
-             mid-turn or mid-session, so the row reflowed under the developer while
-             they were reading it. Ctrl+C still interrupts (onGlobalKeydown, and the
-             status bar names the binding), and the main process writes every
-             session's transcript continuously without being asked. -->
-        <!-- Stop the turn in flight. Restored after 0.16.0 removed it: the action
-             still existed, but only as Ctrl+C, and only while the composer had
-             focus, with nothing on screen saying so. It interrupts the TURN and
-             leaves the session open, which is what End beside it does not do.
-             The binding is real, so the control names it rather than hiding it
-             in a tooltip. -->
         <button
           v-if="liveSession?.status === 'working'"
           class="stop-btn mono"
@@ -1286,11 +835,6 @@ const {
           title="Interrupt the current turn (Ctrl+C)"
           @click="interrupt()"
         >
-          <!-- A red block and nothing else. The ⌃C key cap beside it spelled out
-               a binding the status bar already names, and put two glyphs in a
-               control whose whole job is to be the one obvious thing to hit when
-               a turn is running away. The binding still works; the tooltip and
-               the status bar still say so. -->
           <span class="stop-block" aria-hidden="true"></span>
         </button>
         <button
@@ -1303,11 +847,6 @@ const {
         >
           {{ ending ? 'Ending…' : 'End session' }}
         </button>
-        <!-- Ending blocks the window for the whole teardown, and looks exactly
-             like starting one does: same wait, same screen. `ending` spans the
-             whole stop — sessions.stop resolves in main only once the SDK has
-             drained and the container is down, and this unmounts with
-             liveSession either way. -->
         <SessionWaitOverlay
           v-if="ending"
           testid="ending-overlay"
@@ -1317,11 +856,6 @@ const {
         />
       </div>
       <div class="head-meta mono">
-        <!-- The session's name, edited in place. It is the first thing on the
-             row because it is the one fact that tells two sessions of the same
-             project apart — every one of them runs against the same checkout,
-             so the branch beside it is identical on all of them. Untyped, it
-             shows whatever the app derived from the work. -->
         <div class="name-block">
           <span class="name-cap" aria-hidden="true">session</span>
           <input
@@ -1346,28 +880,8 @@ const {
             {{ (liveSession ?? endedSession)?.name ?? 'Name this session' }}
           </button>
         </div>
-        <!-- The same labelled-block idiom as the session name beside it: a
-             caption saying which fact it is, and an enclosure saying it can
-             be changed. Moved off the control row for visibility. -->
         <div class="run-block">
           <span class="run-cap" aria-hidden="true">run</span>
-          <!-- One question, asked once, for the whole project: does its work run in
-               a container? It governs every section's session (specs, tests, diff
-               comments, cleanup, diagrams) AND what the start controls below offer
-               a chat session, because it is the same question each time. Read at
-               spawn, so it applies from the next session.
-
-               LABELLED "Run in Container", at the owner's direction. It read
-               "WSL" before, on the reasoning that the runtime is wslc, which
-               ships inside WSL (see wslc-sandbox.ts), and that naming it was
-               not pedantry because WSL is what the developer must have
-               installed for the box to do anything at all.
-
-               That reasoning is recorded rather than deleted, because the cost
-               of the new label is exactly what the old one bought: "Run in
-               Container" says what the switch DOES and no longer says what it
-               needs. The prerequisite now lives only in the checkbox's own
-               title, which names WSL and the 2.9.3 floor in both states. -->
           <label class="wsl-check mono" data-testid="project-containers">
             <input
               type="checkbox"
@@ -1440,8 +954,6 @@ const {
             {{ m.label }} <span class="uw-model-tok">{{ fmtTok(m.tokens) }}</span>
           </span>
         </button>
-        <!-- The run's short id — see sessionStamp above for why; the full id sits
-             on the title. -->
         <span
           v-if="sessionStamp"
           class="head-stamp"
@@ -1453,7 +965,6 @@ const {
       </div>
     </header>
 
-    <!-- Drag-over overlay (design): dashed frame naming the drop action -->
     <div v-if="dragKind" class="drop-overlay mono" data-testid="drop-overlay">
       <div class="drop-box">
         <div class="drop-title">
@@ -1479,8 +990,6 @@ const {
       >
         Session
       </button>
-      <!-- A REAL terminal, not the stream drawn to look like one. Next to
-           Session because it is the other way of talking to the same folder. -->
       <button
         class="mt"
         :class="{ sel: mainTab === 'terminal' }"
@@ -1521,9 +1030,6 @@ const {
       >
         Diagrams
       </button>
-      <!-- The developer's own imported skills. Last on the rule because it is the
-           only section whose contents they supply themselves; the five before it
-           are the app's own. -->
       <button
         class="mt"
         :class="{ sel: mainTab === 'skills' }"
@@ -1532,12 +1038,6 @@ const {
       >
         Skills
       </button>
-      <!-- Clean/Raw belongs on this rule, not in the header above it. It switches
-           how THE STREAM is drawn, so it sits with the tabs that choose what the
-           pane shows, right-aligned on the same seam — and it only exists while
-           the stream does. In the header it rode beside End and the status pill,
-           which are about the session's life, and it stayed on screen on Specs,
-           Tests and Diff, where there is no stream for it to switch. -->
       <div
         v-if="mainTab === 'session'"
         class="segments mono"
@@ -1570,9 +1070,6 @@ const {
       </div>
     </div>
 
-    <!-- Kept mounted with v-show rather than v-if: destroying the pane on every
-         tab switch would throw away the emulator and its scroll position, and
-         re-attaching redraws the buffer from the start each time. -->
     <TerminalPane
       v-if="terminalEverOpened"
       v-show="mainTab === 'terminal'"
@@ -1606,9 +1103,6 @@ const {
       @run="(text: string) => runPluginCommand(text, 'cleanup')"
       @install="installCleanup"
     />
-    <!-- No @ran: a diagram is drawn in a background session, so asking for one
-         does not take you to the conversation. The tab you are on is where the
-         answer arrives. -->
     <DiagramsView
       v-else-if="mainTab === 'diagrams'"
       :project-id="project.id"
@@ -1628,7 +1122,6 @@ const {
       @manage="emit('open-settings', 'skills')"
     />
 
-    <!-- Clean stream (an open agent chat always renders clean) -->
     <div
       v-else-if="active.view === 'clean' || selectedAgent"
       ref="streamEl"
@@ -1668,13 +1161,6 @@ const {
             <span v-if="endedSession.statusDetail" class="faint"> — {{ endedSession.statusDetail }}</span>
           </div>
           <div class="ended-actions">
-            <!-- Mode first, then whether to carry the conversation, then Start. It
-                 reads as one sentence: run it LIKE THIS, PICKING UP where we left
-                 off, GO. Every mode the SDK has is here, each carrying its own
-                 description on the row and on hover. -->
-            <!-- WHICH CLI, before WHICH MODE: the engine decides which of the
-                 controls after it even apply, so asking it second would offer a
-                 container and a bypass mode that a Codex session then ignores. -->
             <div
               class="segments mono"
               data-testid="start-engine"
@@ -1743,8 +1229,6 @@ const {
                   <span class="mode-item-name mono">{{ m.label }}</span>
                   <span class="mode-item-detail">{{ m.detail }}</span>
                 </button>
-                <!-- Said where the choice is made, not discovered after a start
-                     that quietly found no transcript. -->
                 <div v-if="resumeSession" class="mode-note">
                   Resuming keeps the last session's sandbox: its transcript lives
                   {{ endedSession.bypassPermissions ? 'inside the container' : 'on this machine' }},
@@ -1773,14 +1257,6 @@ const {
               <span :class="{ faint: !canResume }">Resume session</span>
             </span>
 
-            <!-- The SAME project setting as the WSL box in the header, not a
-                 per-start toggle. It used to be one: a local ref that reset to off
-                 on every mount, so flipping it affected exactly the next start and
-                 nothing else. It now writes Project.useContainers, which is what
-                 makes "one checkbox" true, and that means flipping it here also
-                 decides where this project's specs, tests, diff comments, cleanup
-                 and diagrams run from now on. The label has to say so, or the
-                 control lies about its own blast radius. -->
             <span v-if="startEngine === 'claude'" class="bypass-inline">
               <button
                 class="switch"
@@ -1805,11 +1281,6 @@ const {
               {{ resumeSession ? 'Resume' : 'Start session' }}
             </button>
           </div>
-          <!-- Bypass used to arm a red switch that sat on this row whether or not
-               the picker was open, so "nothing will ask you" was ambient. A closed
-               dropdown says it once, in small type, and then hides it. Stated in
-               full instead, the same sentence the new-project dialogue uses, so the
-               one mode that skips every approval never depends on a colour. -->
           <div
             v-if="startMode === 'bypass'"
             class="bypass-warn"
@@ -1857,7 +1328,6 @@ const {
           />
         </template>
 
-        <!-- Inline question card: clarify-style options asked in plain text -->
         <QuestionEvent
           v-if="inlineQuestion"
           :event-id="inlineQuestion.eventId"
@@ -1871,7 +1341,6 @@ const {
           {{ selectedAgent.task || selectedAgent.label }}
         </div>
 
-        <!-- Subagents working in parallel (design: replaces the live line) -->
         <div v-else-if="workingAgents.length > 1" class="agents mono" data-testid="agent-list">
           <div class="agents-head">
             <span class="agents-label"><Icon name="fork" :size="12" /> AGENTS</span>
@@ -1912,10 +1381,6 @@ const {
           </div>
         </div>
 
-        <!-- Live status line. role=status (an implicit aria-live="polite") so a
-             screen reader announces the session changing state; the session's
-             status is the one thing in this app that changes without the user
-             doing anything, and silence there is the whole product failing. -->
         <div
           v-else-if="liveSession?.status === 'working'"
           class="live mono"
@@ -1925,8 +1390,6 @@ const {
           <span class="blink" style="color: var(--green)" aria-hidden="true">▊</span>
           {{ liveSession.statusDetail || 'Working…' }}
         </div>
-        <!-- assertive, not polite: this one means the session has stopped and is
-             waiting on the human, so it should interrupt rather than queue. -->
         <div
           v-else-if="liveSession?.status === 'needs_you'"
           class="live live-blocked mono"
@@ -1937,9 +1400,6 @@ const {
           Blocked — {{ pendingCount > 0 ? `${pendingCount} pending` : 'needs your answer' }}
         </div>
 
-        <!-- Background tasks: deep-research workflows / backgrounded work still
-             running while the main loop continues. Independent of the live-line
-             chain so it can show alongside any status. -->
         <div
           v-if="backgroundTasks.length > 0"
           class="agents bg-tasks mono"
@@ -1957,9 +1417,6 @@ const {
             >
               {{ tasksExpanded ? 'show fewer' : `show all ${backgroundTasks.length}` }}
             </button>
-            <!-- For work that finished without the CLI saying so. The session is
-                 held out of 'done' while this list has anything in it, so a task
-                 that never reported keeps the project's queue waiting. -->
             <button
               class="agents-toggle"
               data-testid="bg-task-clear"
@@ -2004,31 +1461,17 @@ const {
         <span v-if="outputPrefs.timestamps" class="raw-stamp" data-testid="raw-stamp">{{ line.stamp }}</span>
         <span>{{ line.text }}</span>
       </div>
-      <!-- The one thing a transcript of past lines cannot say: it is still being
-           written. A blinking block on its own line is how a terminal says it,
-           and it costs nothing once the turn ends. -->
       <div v-if="liveSession?.status === 'working'" class="raw-line mono term-caret" data-testid="term-caret">
         <span class="blink">█</span>
       </div>
     </div>
 
-    <!-- The composer belongs to the SESSION tab and is hidden on the others: a
-             field for talking to the session has no business under a diff. The one
-             exception is a spec-edit target, because Specs Refine sets one and then
-             expects this field to type it into; hiding it unconditionally would
-             delete that flow rather than tidy it. -->
         <footer
           v-if="mainTab === 'session' || editTarget"
           class="composer"
           :class="{ dead: composerDead, term: mainTab === 'session' && active.view === 'raw' }"
           :data-testid="composerDead ? 'composer-dead' : 'composer-live'"
         >
-      <!-- Jump to the newest line. Anchored to the composer rather than to the
-           stream, because the stream is the scrolling box: anything absolute
-           inside it scrolls away with the content. The composer is the fixed
-           thing directly under it, so hanging the button off its top edge keeps
-           it in the stream's bottom-right corner however tall the composer
-           grows. Shown only when there is somewhere to go. -->
       <button
         v-if="!atBottom"
         type="button"
@@ -2040,8 +1483,6 @@ const {
       >
         <Icon name="arrow-down" :size="14" />
       </button>
-      <!-- REFS (design): folders this session may read — floats just above the
-           composer, overlapping the bottom of the stream. -->
       <div class="refs-row mono" data-testid="refs-row">
         <span class="refs-label">REFS</span>
         <span
@@ -2093,9 +1534,6 @@ const {
           :data-testid="`queue-item-${index}`"
         >
           <span class="queue-num">{{ index + 1 }}</span>
-          <!-- Enter saves, Escape abandons, and leaving the field saves too: the
-               edit is one line of text, so a dialog would be heavier than the
-               thing being changed. -->
           <input
             v-if="editingQueued === task.id"
             v-model="queuedDraft"
@@ -2168,8 +1606,6 @@ const {
             aria-label="Commands"
           >
             <div v-for="group in suggestGroups" :key="group.label" class="suggest-group">
-              <!-- One label per plugin. Uppercase and small, per the reference:
-                   it has to name the group without competing with the commands. -->
               <div class="suggest-label">{{ group.label }}</div>
               <div
                 v-for="row in group.items"
@@ -2183,8 +1619,6 @@ const {
                 @mousedown.prevent="acceptSuggestion(row.cmd)"
                 @mouseenter="suggestIndex = row.index"
               >
-                <!-- The matched run carries the accent. It is the one thing on the
-                     row that answers "why is this here". -->
                 <span class="suggest-typed"
                   >{{ matchParts(row.cmd).before
                   }}<span class="suggest-hit">{{ matchParts(row.cmd).hit }}</span
@@ -2194,9 +1628,6 @@ const {
               </div>
             </div>
           </div>
-          <!-- Inline ghost-text completion behind the input. When the first token
-               is a command, the input text is transparent and this mirror colours
-               only the command green, leaving the arguments normal. -->
           <div class="ghost mono" aria-hidden="true">
             <template v-if="isCommandMatch"
               ><span class="ghost-cmd">{{ commandParts.cmd }}</span
@@ -2245,18 +1676,6 @@ const {
 </template>
 
 <style scoped>
-/* THE COMPOSER FOOTER. Reworked in live mode: shorter, with the restored-draft
-   note lifted out of the flow so it costs no height, and confined to the Session
-   tab. Accepted variant: density, tight padding, meta line kept.
-
-   Selectors are semantic. The live accept splices the chosen markup in and drops
-   its data-impeccable-* attributes, so any rule keyed to those matches nothing
-   the moment it lands. */
-/* IN FLOW, as the composer's first row, so the floating REFS row sits above it
-   rather than under it. It was absolute for two rounds to save the footer a row
-   of height; the owner asked for REFS on top, and REFS itself floats at
-   bottom: 100%, so the only way to sit beneath it is to stop floating. The cost
-   is one row, and only while a restored draft actually exists. */
 .draft-float {
   margin-bottom: 5px;
   padding: 4px 8px;
@@ -2268,11 +1687,6 @@ const {
   box-shadow: var(--shadow-dd);
 }
 
-/* Inline, so the send target no longer needs a rule of its own under the field. */
-/* The 8px padding-bottom that used to sit here was a nudge to fake alignment
-   against the row's flex-end, and it is gone: styles.css now gives every
-   control in this row one shared height so their centres agree without any
-   per-control compensation. */
 .to-inline {
   flex: none;
   font-size: var(--fs-micro);
@@ -2285,83 +1699,24 @@ const {
   flex-direction: column;
   height: 100%;
   min-width: 0;
-  position: relative; /* anchors the drop-overlay */
+  position: relative; 
 }
 
-/* ── AN ENDED SESSION READS AS ENDED ───────────────────────────────────────
-   The only thing that used to say a session was over was a small "Ended" pill in
-   the header, above a transcript that still rendered at full strength. A dead
-   session and a live idle one looked identical from a metre away, which is the
-   distance most of this is read from.
 
-   ONE RULE GOVERNS THE WHOLE TREATMENT: nothing that still works is dimmed. A
-   faded control that is nonetheless clickable is a lie — it reads as unavailable
-   and is not — so every exemption below is an element that outlives the session.
-
-   That rule is also why the transcript is dimmed CHILD BY CHILD
-   (`.stream-inner > *`) rather than by fading `.stream` as a whole. `opacity` on
-   an ancestor composites the entire subtree as one group, so an `opacity: 1` on
-   the ended banner inside a faded stream would do exactly nothing; the same goes
-   for `filter`. Selecting the siblings is the only version that works.
-
-   WHAT IS EXEMPT, AND WHY:
-   - The ended banner. It carries the mode picker, the resume switch and Start.
-     Greying the exit along with the room is how a dead end gets built.
-   - `.load-earlier`, which still fetches earlier events.
-   - The whole header. Three of its controls outlive the session — the WSL
-     container toggle, "+ Session", and the rename button, whose own v-if takes
-     `liveSession || endedSession` — and per the ancestor-opacity trap above, a
-     faded header cannot exempt them. Dimming it correctly would mean naming
-     every non-interactive element in the header and keeping that list in step
-     with it for ever, and it buys nothing: the header already states the fact
-     outright in its `.pill.ended` badge.
-   - The section views (Diagrams, Skills, Tests…), siblings under this root that
-     work perfectly well with no live session — each starts a background session
-     of its own. Hence rules that name `.stream-inner` and `.raw-view` rather
-     than fading everything inside `.session-view`.
-   - The composer, which already carries `.composer.dead`.
-
-   Nothing here sets `pointer-events`. An ended transcript is still readable,
-   scrollable, selectable and copyable: this says "over", not "gone". */
-
-/* The raw log takes `filter: saturate()` because it is ONE element and holds no
-   controls, only `.raw-line`s. The clean stream cannot: there the property would
-   land on every event row, and a filter forces a containing block per element,
-   so a long transcript would pay for it on every scroll. */
 .session-view.is-ended .raw-view {
   opacity: 0.7;
   filter: saturate(0.4);
 }
 
-/* 0.7, and not the 0.55 this started at. --text-meta is already the design
-   system's dimmest body tier at roughly 5:1 against --bg, and fading it to 0.55
-   took the transcript to about 2.5:1 — under every readable floor, for content
-   the developer still has to read. An ended session is precisely the one gone
-   back to in order to find out what happened. 0.7 is plainly greyer than a live
-   pane and still legible; the hover rule removes even that cost while reading. */
 .session-view.is-ended .stream-inner > *:not(.ended):not(.load-earlier) {
   opacity: 0.7;
 }
 
-/* Reading it should cost nothing. focus-within carries the same for the keyboard. */
 .session-view.is-ended .stream-inner:hover > *:not(.ended),
 .session-view.is-ended .stream-inner:focus-within > *:not(.ended) {
   opacity: 1;
 }
 
-/* Standing at full strength inside a faded field, the banner is the one thing
-   left to look at — which is the point. The border does the rest.
-
-   AND IT STICKS. This is the fix for the complaint that an ended session was not
-   visible enough, and the fault was not the banner's weight but its position: the
-   stream is bottom-anchored, so a long ended transcript opens scrolled to its
-   end, and the one element on screen that says the session is over was sitting
-   off the top of the scrollport. Weight cannot help a thing that is not in view.
-
-   It needs its own opaque ground because transcript now scrolls underneath it,
-   and `--bg-card` is already what it had. No shadow: DESIGN.md grants a real
-   blurred shadow to the overlay tier only, and a sticky header inside a pane is
-   not that tier — the strong border and the opaque ground do the separating. */
 .session-view.is-ended .stream-inner > .ended {
   position: sticky;
   top: 0;
@@ -2369,30 +1724,6 @@ const {
   border-color: var(--border-strong);
 }
 
-/* THE DEAD TRANSCRIPT LOSES ITS COLOUR, by re-pointing the status tokens on each
-   faded row rather than by filtering them.
-
-   `filter: grayscale()` is the obvious way and is ruled out here for the reason
-   the comment above `.raw-view` already gives: on the clean stream it would land
-   on every event row, and a filter forces a containing block per element, so a
-   long transcript would pay for it on every scroll. Custom properties cost
-   nothing — they inherit, and each row's own rules resolve against the neutral
-   values instead of the live ones.
-
-   It also keeps the Tolerance Rule intact. An ended session is not a reading
-   outside tolerance and must not earn amber or red to announce itself; what
-   happens instead is that it stops earning any hue at all, which is what The
-   Fine Gets No Hue Rule asks for. A green "approved" marker and an amber
-   "pending" one both go to ink, so the only coloured thing left in the pane is
-   the banner's own Start button — the one control that still does something.
-
-   Stated as "while not being read" rather than as a drain plus a restore. The
-   restore would have to name the live colours to put them back, which means
-   either duplicating six literals this file is not allowed to hold or inventing
-   an alias token for each; withholding the override instead lets them resolve
-   from `:root` exactly as they do in a live pane. Hovering to read therefore
-   brings the colour back along with the opacity, so the transcript is quietened
-   rather than rewritten. */
 .session-view.is-ended
   .stream-inner:not(:hover):not(:focus-within)
   > *:not(.ended):not(.load-earlier) {
@@ -2425,9 +1756,6 @@ const {
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
   box-shadow: var(--hairline-shine);
-  /* The strip scrolls rather than spilling over the pane beside it. Without
-     these it overflowed the main column and its right-hand controls sat on top
-     of the inbox's own buttons, swallowing clicks meant for Approve. */
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
@@ -2441,9 +1769,6 @@ const {
   flex: none;
 }
 
-/* Tabs name places, so they take the label idiom rather than reading as prose.
-   One voice across every tab strip in the app: these, the view segments below,
-   the inbox's pane tabs, the Tests sub-tabs and the Specs part tabs. */
 .mt {
   padding: 9px 13px;
   font-size: var(--fs-meta);
@@ -2476,16 +1801,6 @@ const {
   line-height: 15px;
 }
 
-/* 10px, not 12px. The name and path both truncate, so the row's true floor is its
-   unshrinkable right-hand group: two pills, the transcript glyph, End, the gear
-   and the CLEAN/RAW segments. At the window's 1080px minimum that group overran
-   the pane by 15px, and eight gaps at 2px less than before is more than enough to
-   pay for it without removing a control or narrowing the label voice. */
-/* WRAPS. Every control on this row is `flex-shrink: 0`, so its min-content width
-   is a floor the pane cannot go under, and measured in a browser it broke that
-   floor: 14px of horizontal page overflow at 1280x800 and 194px at 1100x700.
-   Wrapping lets the trailing controls drop to a second line instead of dragging
-   the whole window wider than itself. */
 .head-row {
   display: flex;
   flex-wrap: wrap;
@@ -2504,17 +1819,9 @@ const {
   font-weight: var(--w-em);
   color: var(--text-bright);
   white-space: nowrap;
-  /* The same treatment .h-path already has, right beside it. Without min-width: 0
-     a nowrap flex child cannot shrink below its text, so a long project name — a
-     dotted .NET solution folder, say — pushed the branch, pills, Stop, End and the
-     settings gear off the end of the row instead of truncating itself. */
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  /* Both this and .h-path can now shrink, so say which one yields first. The name
-     identifies the lane the developer is working in; the path is corroboration and
-     is shown in full in the sidebar. Left to the flex default they truncated
-     together and the name lost as much as the path. */
   flex-shrink: 1;
 }
 
@@ -2536,16 +1843,9 @@ const {
   border-radius: var(--rp);
   overflow: hidden;
   font-size: var(--fs-ui);
-  /* Pushed to the far end of the tab rule and centred on it. The tabs claim the
-     rule's full height so their underline lands on the seam; a bordered control
-     cannot, so it centres in the leftover instead of stretching. */
   margin: auto 0 auto auto;
 }
 
-/* Sentence case, not the spec-label uppercase the rest of the chrome uses: a
-   view toggle is read, not scanned as an identifier, and 11px uppercase at
-   0.08em tracking was the one treatment here that read as dated. Strip height
-   is unchanged — 4px padding on a 15px line matches the old 5px on 13. */
 .seg {
   padding: 4px 12px;
   line-height: 15px;
@@ -2558,12 +1858,6 @@ const {
   color: var(--text-body);
 }
 
-/* Weight carries the selected tab; tracking no longer can, now that the label
-   is sentence case. */
-/* The selected option is drawn in the SELECTION wash, not the action colour.
-   Which view you are reading is not a thing you are being asked to do, and
-   filling it with green made a view preference the loudest control in the
-   header — louder than End, louder than the pending count. */
 .seg.on {
   background: var(--bg-active);
   color: var(--text-strong);
@@ -2590,11 +1884,6 @@ const {
   cursor: default;
 }
 
-/* The project's container switch. A checkbox rather than the switch the start
-   controls use: those switches decide what happens to THIS session, and this one
-   states a standing fact about the project, which is what a checkbox reads as.
-   Quiet by default and only coloured when ticked, because off is the common
-   answer and an always-lit control stops carrying information. */
 .wsl-check {
   flex-shrink: 0;
   display: inline-flex;
@@ -2626,9 +1915,6 @@ const {
   border-color: color-mix(in srgb, var(--green) 45%, transparent);
 }
 
-/* The session's own name, on the meta row. Reads as text until hovered: it is a
-   label first and a control second, and an untyped session shows the prompt in
-   the faint tier so it invites without shouting. */
 .name-btn {
   font-family: var(--mono);
   font-size: var(--fs-meta);
@@ -2662,9 +1948,6 @@ const {
   border-color: var(--blue);
 }
 
-/* Red, because it is the one control here that stops work already running. It
-   sits beside End and means something different: End closes the session, this
-   interrupts the turn and leaves it open. */
 .stop-btn {
   flex-shrink: 0;
   width: 26px;
@@ -2680,26 +1963,17 @@ const {
 }
 
 .stop-btn:hover {
-  /* --red-ink is the token that exists for exactly this: white on the fill
-     measured too low once --red became a lighter red-pencil red. */
   color: var(--red-ink);
   background: var(--red);
 }
 
-/* The stop mark itself: a square of the control's own colour, so it fills on
-   hover with the button rather than needing a rule of its own. */
 .stop-block {
   width: 9px;
   height: 9px;
   background: currentColor;
 }
 
-/* The teardown overlay lives in SessionWaitOverlay now, sharing one screen with
-   the session start. The bespoke veil, strip and sliding rule that used to sit
-   here went with it; ending-bar rides the shared ring. */
 
-/* Same family as the agents pill it sits beside: one says the session is shaped
-   to fan out, the other says it currently is. */
 .pill.fanout-pill {
   color: var(--purple);
   border: 1px solid color-mix(in srgb, var(--purple) 30%, transparent);
@@ -2722,9 +1996,6 @@ const {
   border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
 }
 
-/* Off, it is an offer, so it stays in neutral ink like any quiet control. On, it
-   takes amber — the attention-owed hue — because a planning session is
-   holding, waiting on the developer to approve what it proposes. */
 .pill.plan-pill {
   cursor: pointer;
   color: var(--text-tab);
@@ -2741,16 +2012,12 @@ const {
   border-color: color-mix(in srgb, var(--amber) 40%, transparent);
 }
 
-/* Amber, not red: the session works, only git history is absent (hover says why). */
 .pill.nogit-pill {
   color: var(--amber);
   background: color-mix(in srgb, var(--amber) 9%, transparent);
   border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
 }
 
-/* REFS row (design): floats just above the composer, overlapping the bottom of
-   the stream. The container ignores pointer events so the stream stays usable;
-   the chips/buttons re-enable them. */
 .refs-row {
   position: absolute;
   bottom: 100%;
@@ -2833,7 +2100,6 @@ const {
   pointer-events: auto;
 }
 
-/* Drag-over overlay (design): full-pane dashed frame naming the drop action. */
 .drop-overlay {
   position: absolute;
   inset: 8px;
@@ -2871,9 +2137,6 @@ const {
   flex-wrap: wrap;
 }
 
-/* The run's short id: machine truth, so it sits at the ghost tier and never
-   competes with the readings beside it. Earned monospace — it is a hash, and a
-   hash is only useful if you can match it character for character. */
 .head-stamp {
   font-family: var(--mono);
   font-size: var(--fs-micro);
@@ -2881,7 +2144,6 @@ const {
   white-space: nowrap;
 }
 
-/* Pairing-mode chip (Advisor/Orchestrator) for the latest work turn. */
 .mode-chip {
   font-size: var(--fs-micro);
   color: var(--blue);
@@ -2891,7 +2153,6 @@ const {
   white-space: nowrap;
 }
 
-/* Session usage widget: total tokens + top-2 model chips; click = full /usage. */
 .usage-widget {
   display: inline-flex;
   align-items: center;
@@ -2937,10 +2198,6 @@ const {
 }
 
 
-/* The card. Scoped to a direct child of the stream for the same reason the
-   is-ended rule below is: the header's `<span class="pill ended">` shares this
-   class name, and a bare `.ended` handed it the card's padding and bottom
-   margin. */
 .stream-inner > .ended {
   background: var(--bg-card);
   border: 1px solid var(--border-soft);
@@ -2949,13 +2206,6 @@ const {
   margin-bottom: 13px;
 }
 
-/* Three parts, not one flat queue. Row 1 is the frame — how it runs, and the
-   button that runs it. Rows 2 and 3 are the choices that shape the frame, and
-   they sit together in a well of their own. This replaced a single flex row in
-   which a dropdown, two switch-and-label pairs and a button shared 476px of
-   content box with no wrapping allowed, so every item shrank toward its label
-   and the two choices read as debris between the two things that looked like
-   controls. */
 .ended-actions {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -2969,29 +2219,11 @@ const {
   grid-row: 1;
 }
 
-/* Start is the commit; it sits at the far right of the frame row, after the
-   mode that shapes it and above the two choices that qualify it. Placed by the
-   grid rather than by `margin-left: auto`, which is what held it right when this
-   row was flex. */
 .ended-actions .btn-solid {
   grid-column: 2;
   grid-row: 1;
 }
 
-/* THE TWO SWITCHES ARE ONE ORGAN. An inset well, one hairline around both rows,
-   label left and switch right on each — so a choice is a row you read across,
-   not a pair you find in a queue.
-
-   There is no wrapper element to draw the well with, and adding one would mean
-   re-authoring markup for something CSS can do: the rows draw it between
-   themselves instead. The first rounds its top, the second drops its top border
-   and rounds its bottom, and the seam between them is the shared hairline.
-   `nth-of-type` is safe here because these are the only two spans in the row.
-
-   The label also drops its `mono` class and the caption tier. It sat at 11px
-   --text-faint beside a 17px --text-bright heading, which made two live choices
-   read as footnotes; DESIGN.md reserves the monospace face for code, paths, ids,
-   diffs and ticking figures, and "Resume session" is none of those. */
 .bypass-inline {
   grid-column: 1 / -1;
   display: flex;
@@ -3018,21 +2250,11 @@ const {
   border-radius: 0 0 var(--rc) var(--rc);
 }
 
-/* The switch carried no border, so an off track read as a dark patch rather than
-   an empty well with a handle in it. It needs the track lighter than its ground
-   now that the ground is the well's own --bg-code, or an off switch would be
-   --bg-code on --bg-code and show nothing but its hairline.
-
-   Scoped to .bypass-inline deliberately. The same three gaps exist on every
-   other .switch in the app (SettingsPanel, TestsView), but those are not what
-   was reviewed here, and the global rule lives in styles.css. */
 .bypass-inline .switch {
   background: var(--bg-seg);
   border: 1px solid var(--border-strong);
 }
 
-/* 15px inside a 38x21 border-box with a 1px border: 2 + 15 + 2 clears the 19px
-   content box exactly, so adding the border does not push the knob off-centre. */
 .bypass-inline .switch .knob {
   top: 2px;
   left: 2px;
@@ -3052,9 +2274,6 @@ const {
   background: var(--green-ink);
 }
 
-/* 0.45 and a default cursor is what DESIGN.md already grants every other
-   disabled control; the switch was simply never told, so one that cannot be
-   operated looked exactly like one that can. */
 .bypass-inline .switch:disabled {
   opacity: 0.45;
   cursor: default;
@@ -3065,7 +2284,6 @@ const {
   outline-offset: 2px;
 }
 
-/* --- Session mode picker (ended banner) --- */
 .mode-pick {
   position: relative;
 }
@@ -3091,8 +2309,6 @@ const {
   cursor: default;
 }
 
-/* The one mode that approves everything says so on the closed control, not only
-   once the list is open. */
 .mode-dd.armed .mode-dd-name {
   color: var(--red);
 }
@@ -3113,9 +2329,6 @@ const {
   color: var(--text-ghost);
 }
 
-/* Opens downward. It was drawn upward first, to keep the stream's first messages
-   clear — but this banner sits directly under a sticky header, so upward put the
-   menu behind it and swallowed the clicks. */
 .mode-list {
   position: absolute;
   top: calc(100% + 4px);
@@ -3147,8 +2360,6 @@ const {
   background: var(--bg-hover);
 }
 
-/* Selection reads on the wash and on the name's colour. The rule is a hairline
-   because a coloured band down the side of a list row is decoration. */
 .mode-item.sel {
   background: var(--bg-active);
   border-left-color: var(--green);
@@ -3167,8 +2378,6 @@ const {
   color: var(--red);
 }
 
-/* The description IS the row, not a tooltip you have to discover. The title
-   attribute repeats it for anyone reading by hover. */
 .mode-item-detail {
   font-size: var(--fs-micro);
   line-height: 1.45;
@@ -3183,9 +2392,6 @@ const {
   color: var(--text-ghost);
 }
 
-/* The same warning box ProjectRegistration draws for the same choice. Duplicated
-   rather than shared because it is four properties and two files, and a shared
-   class for it would be the third place to look. */
 .bypass-warn {
   margin-top: 8px;
   padding: 8px 10px;
@@ -3202,9 +2408,6 @@ html.sb-light .bypass-warn {
 }
 
 .load-earlier {
-  /* display/width because this is a <button> now (it had no keyboard path as a
-     div): a button is inline-block, so without these the pager would stop
-     spanning the stream and its centred label would sit left. */
   display: block;
   width: 100%;
   font-size: var(--fs-meta);
@@ -3266,7 +2469,6 @@ html.sb-light .bypass-warn {
   white-space: nowrap;
 }
 
-/* Parallel-agents card (design: ⑂ AGENTS · N working in parallel). */
 .agents {
   border: 1px solid color-mix(in srgb, var(--green) 18%, transparent);
   background: color-mix(in srgb, var(--surface-inset) 55%, transparent);
@@ -3293,7 +2495,6 @@ html.sb-light .bypass-warn {
   color: var(--text-faint);
 }
 
-/* Cap-toggle + "+N more" row for large fan-outs. */
 .agents-toggle {
   font-size: var(--fs-micro);
   color: var(--text-tab);
@@ -3320,7 +2521,6 @@ html.sb-light .bypass-warn {
   color: var(--green);
 }
 
-/* Background-tasks card: amber accent to distinguish from blue subagents. */
 .bg-tasks {
   margin-top: 8px;
 }
@@ -3348,7 +2548,6 @@ html.sb-light .bypass-warn {
   display: flex;
   align-items: center;
   gap: 10px;
-  /* width so the flex row still spans its container as a <button>. */
   width: 100%;
   margin: 0 -6px;
   padding: 4px 6px;
@@ -3393,13 +2592,6 @@ html.sb-light .bypass-warn {
   color: var(--amber);
 }
 
- /* TERMINAL VIEW ---------------------------------------------------------------
-   Not a debug dump any more: this is the session AS A TERMINAL, so it takes the
-   whole pane as one console surface and the composer below it drops its own
-   panel colour to join in (.composer.term). The lines already carried a
-   terminal's glyphs (❯, ⏺, ⎿, ✦) from stream-lines.ts; what was missing was the
-   thing that makes a terminal readable at a glance, which is colour per role.
-   Tones come from the EVENT KIND in shared/, not from sniffing the glyph here. */
 .raw-view {
   flex: 1;
   overflow-y: auto;
@@ -3416,9 +2608,6 @@ html.sb-light .bypass-warn {
   word-break: break-word;
 }
 
-/* One rule per tone. Reusing the app's semantic colours rather than inventing a
-   palette keeps the terminal in whichever theme is on, which a hard-coded black
-   box would not. */
 .raw-line.t-prompt {
   color: var(--text-bright);
   font-weight: var(--w-em);
@@ -3448,10 +2637,6 @@ html.sb-light .bypass-warn {
   color: var(--red);
 }
 
-/* Injected context: present, readable, and clearly not part of the conversation.
-   Dimmer than the narrative so a long system reminder never competes with what
-   the session actually said, with a rule down its left edge marking the block as
-   one thing rather than a run of loose lines. */
 .raw-line.t-inject {
   color: var(--text-noise);
   border-left: 1px solid var(--border);
@@ -3459,12 +2644,10 @@ html.sb-light .bypass-warn {
   margin-left: 1px;
 }
 
-/* The turn is still writing. Sits where the next line will appear. */
 .term-caret {
   color: var(--green);
 }
 
-/* Timestamps setting: dim HH:MM gutter to the left of each raw line. */
 .raw-line.stamped {
   display: grid;
   grid-template-columns: 38px 1fr;
@@ -3477,31 +2660,16 @@ html.sb-light .bypass-warn {
   white-space: nowrap;
 }
 
-/* Positioning context for the floating REFS row; base composer chrome is global. */
 .composer {
   position: relative;
   box-shadow: var(--hairline-shine);
 }
 
-/* Terminal view: the prompt line is part of the console, not a panel bolted
-   under it. Same surface, same seam colour, so the screen reads as one terminal
-   from the first line of output to the caret you type at. */
 .composer.term {
   background: var(--bg-code);
   border-top-color: var(--border-code);
 }
 
-/* ENDED. Nothing typed here can go anywhere, and until now the box did not say
-   so: `.composer-input` sets its own `color`, which beats the browser's disabled
-   dimming, so a dead composer looked exactly like a live one. The only cues were
-   a changed placeholder and a greyed Send.
-
-   The panel recedes to the canvas colour so the box stops reading as a surface
-   you can act on, and everything in the row fades with it. Including the buttons:
-   the queue is project-scoped, so a queued message would outlive the session and
-   run on the next one — but the textarea is disabled here, so nothing can be
-   typed, `composerEmpty` stays true, and Queue is unreachable as well. Nothing in
-   this row is actionable, and the row should say exactly that much. */
 .composer.dead {
   background: var(--bg);
   box-shadow: none;
@@ -3521,16 +2689,10 @@ html.sb-light .bypass-warn {
   color: var(--text-ghost);
 }
 
-/* The block caret is the composer's "ready" signal. On a dead one it would be a
-   green cursor blinking in a box that cannot send. */
 .composer.dead .composer-input {
   caret-color: transparent;
 }
 
-/* The one round thing in a world of cut corners, and deliberately so: it is a
-   floating control over the text rather than a part of the sheet, and the three
-   existing exemptions are round for the same reason — a mark that is not a
-   surface. It sits clear of the composer's own right-hand controls. */
 .to-bottom {
   position: absolute;
   top: -44px;
@@ -3555,11 +2717,6 @@ html.sb-light .bypass-warn {
   border-color: var(--green);
 }
 
-/* Its own centred box, not a glyph on a baseline. The row is align-items:
-   flex-end so a growing input pushes upward while the controls stay on the
-   bottom line; a bare inline span therefore sat the 14px chevron on a 13px text
-   baseline and it read as low in a 28px row. A fixed box centres it on both axes
-   and keeps the row's flex-end behaviour intact. */
 .caret {
   flex-shrink: 0;
   display: flex;
@@ -3575,7 +2732,6 @@ html.sb-light .bypass-warn {
   color: var(--amber);
 }
 
-/* Spec-edit target chip in the composer (design ✎ → file). */
 .target-chip {
   flex-shrink: 0;
   display: inline-flex;
@@ -3601,11 +2757,6 @@ html.sb-light .bypass-warn {
 }
 
 
-/* The project's identity as ONE enclosed block. The header carries fifteen items
-   across two rows and nothing said which of them belonged together; the dot, the
-   name and the path all answer a single question — which lane is this — so they
-   are boxed as a unit and read as the header's subject rather than as its first
-   three items. */
 .ident {
   display: inline-flex;
   align-items: baseline;
@@ -3617,17 +2768,11 @@ html.sb-light .bypass-warn {
   border-radius: var(--rc);
 }
 
-/* Baseline-aligned text with a centred mark beside it: the dot has no baseline
-   of its own, so it takes the row's middle instead. */
 .ident .h-dot {
   align-self: center;
   border-radius: var(--rp);
 }
 
-/* The session's name as a labelled block. It is the only CONTROL on a row of
-   figures — branch, model, mode, diff, timer, cache, usage, stamp — and it read
-   as one more of them. The caption says which of the two it is, and the
-   enclosure says it can be clicked. */
 .name-block,
 .run-block {
   display: inline-flex;
@@ -3639,22 +2784,11 @@ html.sb-light .bypass-warn {
   border-radius: var(--rc);
 }
 
-/* AT THE END OF THE ROW, baked from the accepted `place` parameter. The meta row
-   reads left to right as what this session IS — its name, branch, model, mode,
-   diff, timer, cost — and this is the one item on it that is a setting rather
-   than a reading, so it sits apart from them rather than among them.
-
-   It is here at all, and not on the control row above, because the developer
-   asked for it to be easier to see: whether this project's work runs in a
-   container governs every session it starts, and inline among five other
-   controls it was the easiest thing on the header to miss. */
 .run-block {
   order: 9;
   margin-left: auto;
 }
 
-/* Two nested boxes on one control is one box too many, so the label gives up its
-   own enclosure to the block around it. */
 .run-block .wsl-check {
   padding: 0;
   background: transparent;
@@ -3665,9 +2799,6 @@ html.sb-light .bypass-warn {
   border-color: transparent;
 }
 
-/* aria-hidden in the markup: the control it labels already carries its own
-   accessible name through `title`, and "session Name this session" read twice
-   over is worse for a screen reader than the caption not being there. */
 .name-cap,
 .run-cap {
   flex: none;
@@ -3680,63 +2811,21 @@ html.sb-light .bypass-warn {
 }
 
 
-/* AN ENDED SESSION HIDES ITS CHAT AND BECOMES AN END CARD.
-
-   Asked for three times, in rising clarity, ending at "my chat should not be
-   visible when a session has ended". It overrides the reasoning immediately
-   above, which argues for keeping an ended transcript readable because it is the
-   one you came back to read. That reasoning is left in place rather than deleted,
-   because it is still true about the RECORD — what changed is which view shows
-   it.
-
-   What makes this recoverable rather than destructive: the Clean/Raw toggle is
-   gated on `mainTab === 'session'` alone, not on a live session, so the raw log
-   is still one click away on an ended session and holds every line. Nothing is
-   deleted, nothing stops being recorded, and the noise rules are untouched. The
-   agent banner is exempt, because it carries the only way back out of a subagent
-   chat.
-
-   `.load-earlier` IS EXEMPT TOO, and it is not decoration. It is the only control
-   that raises `deriveWindow`, and `rawLines` derives from that same window — so
-   hiding it does not just remove a button from a hidden column, it caps the RAW
-   view at the last DERIVE_WINDOW events with nothing left anywhere to extend it.
-   On a session past that ceiling the earlier transcript would be unreachable in
-   both views, which is the one outcome this change must not cause, since the raw
-   log being complete is exactly what makes hiding the clean one safe. The dimming
-   rule above already exempts it for the same reason, and says so. */
 .session-view.is-ended
   .stream-inner
   > *:not(.ended):not(.agent-banner):not(.load-earlier) {
   display: none;
 }
 
-/* Centred rather than left at the top of a column it no longer shares. Both
-   margins are auto so the card sits in the middle of the pane; this deliberately
-   overrides `.stream-inner:has(> .ended) { margin-top: 0 }` in styles.css, which
-   exists to top-anchor a transcript that began with a banner — and there is no
-   transcript here any more. */
 .session-view.is-ended .stream-inner {
   margin-top: auto;
   margin-bottom: auto;
 }
 
-/* 520px is baked from the accepted variant's width parameter. Held in one place
-   because two elements answer to it now: the card, and the one control exempted
-   from the hide rule above. */
 .session-view.is-ended {
   --end-card-w: 520px;
 }
 
-/* THE CARD, and not the header pill that shares its class name.
-   `<span class="pill ended">Ended</span>` in the header also carries `.ended`, so
-   the descendant form of this selector matched it too and handed a badge the
-   card's 520px block layout: width 100%, 20px/22px padding and the panel ground,
-   in a row of 11px pills. Two attempts to size `.pill.ended` had no effect at
-   all, because (0,2,0) loses to this rule's (0,3,0) — the badge was never being
-   sized by its own rule.
-
-   Scoped to a direct child of the stream, which is what the card is and what the
-   pill can never be. The sticky rule below already uses exactly this form. */
 .session-view.is-ended .stream-inner > .ended {
   width: 100%;
   max-width: var(--end-card-w);
@@ -3752,20 +2841,11 @@ html.sb-light .bypass-warn {
   border-top: 1px solid var(--border-soft);
 }
 
-/* The one control the hide rule spares has to be the same width as the card, or
-   it reads as a full-bleed strip slung under it: its own rule is `display: block`
-   at `width: 100%` with no cap, and it appears on any session past the 300-event
-   page size, which is most of them. Capped here rather than there, because it is
-   only in this state that it stands alone. */
 .session-view.is-ended .load-earlier {
   max-width: var(--end-card-w);
   margin-inline: auto;
 }
 
-/* The status line is the card's heading now, so it takes a heading tier. It
-   could only be reached at all once its inline `style` came off in the markup —
-   an inline declaration outranks every selector, and the alternative was
-   `!important`, which this file otherwise never needs. */
 .ended-line {
   font-size: var(--fs-title);
   color: var(--text-bright);

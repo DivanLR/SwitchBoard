@@ -1,23 +1,7 @@
-// The session header's usage readouts: the prompt-cache hit rate for the latest
-// turn, and the per-model token/cost totals. Extracted from SessionView so the
-// view stays focused on rendering the stream; these figures are read together,
-// in one strip, and share nothing with the rest of it.
-//
-// Every figure here is REPORTED, never estimated. The cache rate comes off the
-// turn's own usage block, and the totals are what the SDK billed. An absent
-// figure stays null and renders as "—", because a placeholder number in a
-// spend readout is worse than no number.
-//
-// A subscription rate-limit meter used to live here as well, reading the SDK's
-// `rate_limit_event`. That event never arrived, so the meter only ever rendered
-// an em dash in two places; it was removed rather than left claiming a reading
-// nothing produces. `Session.usageUtilization` and friends are still written by
-// the main process (session.ts captureUsage) — nothing renders them.
 import { computed, type ComputedRef } from 'vue'
 import { modelLabel, type Session } from '@shared/domain'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 
-/** Compact token count: 1.2M, 340k, 512. */
 export function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${Math.round(n / 1_000)}k`
@@ -33,11 +17,6 @@ export interface SessionUsageTotals {
 export function useSessionUsage(liveSession: ComputedRef<Session | null>) {
   const active = useActiveSessionStore()
 
-  /**
-   * Prompt-cache hit rate for the latest completed turn: cache_read /
-   * (cache_read + cache_creation + fresh input). A high number means the
-   * conversation prefix is being reused instead of re-billed at full price.
-   */
   const cacheHitPct = computed(() => {
     for (let i = active.events.length - 1; i >= 0; i -= 1) {
       const event = active.events[i]
@@ -53,12 +32,10 @@ export function useSessionUsage(liveSession: ComputedRef<Session | null>) {
     return null
   })
 
-  /** Green once most of the prefix is being reused rather than re-billed. */
   const cacheColor = computed(() =>
     (cacheHitPct.value ?? 0) > 50 ? 'var(--green)' : 'var(--amber)',
   )
 
-  /** Session totals plus the two most-used models, for the header widget. */
   const sessionUsage = computed<SessionUsageTotals | null>(() => {
     const totals = liveSession.value?.modelTotals
     if (!totals) return null
@@ -71,7 +48,6 @@ export function useSessionUsage(liveSession: ComputedRef<Session | null>) {
     }
   })
 
-  /** The model the SDK reported for the latest turn (reflects routing live). */
   const currentModelLabel = computed(() => {
     const id = liveSession.value?.currentModel
     return id ? modelLabel(id) : null

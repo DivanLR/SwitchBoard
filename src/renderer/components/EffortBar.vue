@@ -1,9 +1,4 @@
 <script setup lang="ts">
-// One reasoning-effort bar: a native range over the SDK's five levels, with the
-// level's name printed beside it. Used twice in the session header (main loop and
-// subagents) and twice in Settings, so the four never drift in shape or copy.
-// A native <input type="range"> because it IS a bar: keyboard-steppable, labelled
-// through aria-valuetext, and nothing to maintain.
 import { computed } from 'vue'
 import { EFFORT_LEVELS, type EffortLevel } from '@shared/domain'
 import Icon from '@renderer/components/Icon.vue'
@@ -13,7 +8,6 @@ const props = defineProps<{
   label: string
   testid: string
   title?: string
-  /** Icon drawn before the label, when the bar sits in a row of pills. */
   icon?: string
 }>()
 const emit = defineEmits<{ (e: 'update:modelValue', value: EffortLevel): void }>()
@@ -60,8 +54,6 @@ function onInput(event: Event): void {
   cursor: pointer;
 }
 
-/* Max is the one rung with a consequence beyond depth: it is where subagents
-   exist. It takes the action colour so the bar says so without a word. */
 .effort.max {
   color: var(--green);
   border-color: color-mix(in srgb, var(--green) 40%, transparent);
@@ -75,7 +67,6 @@ function onInput(event: Event): void {
   cursor: pointer;
 }
 
-/* Widest level name is "medium": fixed so the row does not shift as it steps. */
 .effort-value {
   min-width: 6ch;
 }

@@ -1,9 +1,4 @@
 <script setup lang="ts">
-// Diagrams section: type what you want, the project's session hands it to the
-// diagram-design plugin, and the plugin writes a standalone HTML file into the
-// project's own docs/diagrams. Drawing one has no slash command — the skill
-// activates on an ordinary request — but the plugin does ship commands for
-// exporting and importing, and those are offered in the Commands menu.
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import {
   ARCHIFY,
@@ -36,11 +31,8 @@ import Icon from '@renderer/components/Icon.vue'
 const props = defineProps<{
   projectId: string
   available: string[]
-  /** The section's own background session, so a dispatched command is watchable. */
   sessionId?: string | null
-  /** True while this plugin's host-side install is running. */
   installing?: boolean
-  /** Why the install failed, in the CLI's own words. Null when it has not. */
   installError?: string | null
 }>()
 
@@ -53,45 +45,15 @@ const active = useActiveSessionStore()
 
 onMounted(() => {
   void diagrams.load(props.projectId)
-  // The archify engine is a SKILL, so whether it is available is a question
-  // about the imported-skills list rather than about the session's command list
-  // this view is handed. Loaded here for the same reason SkillsView loads it:
-  // the store is shared, and nothing else guarantees it has been fetched.
   void skills.load()
-  // Guarded, as Sidebar.vue does it: App.vue already loads settings at startup,
-  // and a second load would replace the store wholesale mid-edit.
   if (!settings.settings) void settings.load()
 })
 watch(() => props.projectId, (id) => void diagrams.load(id))
 
 const description = ref('')
-/**
- * The file name the developer chose, when they chose one.
- *
- * Blank is the default and means "derive it", which is what the app did for
- * every diagram before this field existed: diagramFileName slugifies the
- * sentence. A typed name goes through that same slugifier in the main process,
- * so it cannot carry a separator or an extension, and it is still uniquified
- * against the folder — naming two diagrams the same thing produces a revision
- * rather than an overwrite.
- *
- * Cleared with the description on a successful send: it names ONE drawing, and
- * a name left behind would silently attach itself to the next one.
- */
 const fileName = ref('')
-/** The command/description field, so picking a command can put the caret after it. */
 const input = ref<HTMLInputElement | null>(null)
 
-// ── WHICH ENGINE ────────────────────────────────────────────────────────────
-//
-// Two ways to draw, and they are not variations on one prompt. diagram-design is
-// a plugin that activates on an ordinary request; archify is a skill wrapping a
-// CLI that validates a typed specification against a schema and only then
-// compiles it. So the choice changes the prompt, the commands in the menu, what
-// counts as installed, and how it is installed.
-//
-// Kept in Settings rather than in this component: it is a preference about how
-// the developer likes diagrams made, and it should survive leaving the tab.
 const engine = computed(() => settings.settings?.diagramEngine ?? 'diagram-design')
 const onArchify = computed(() => engine.value === 'archify')
 
@@ -101,22 +63,10 @@ function setEngine(next: 'diagram-design' | 'archify'): void {
   void settings.save({ diagramEngine: next })
 }
 
-/**
- * What archify is told before it draws — the interactive part of the archify
- * path.
- *
- * Not persisted, and deliberately so. The type is a fact about the ONE diagram
- * being asked for, not a standing preference: a developer who drew a sequence
- * diagram this morning is no more likely to want another one now, and a sticky
- * type would quietly mis-draw the next request.
- */
 const archify = ref<ArchifyOptions>({ ...DEFAULT_ARCHIFY })
 
 const archifyInstalled = computed(() => skills.enabled.some((s) => s.name === ARCHIFY.skill))
 
-/** Its own install path, because it is a skill and not a plugin: the Skills
- *  importer reads it over HTTPS, where `plugins.install` would shell out to
- *  `claude plugin` for a marketplace that does not carry it. */
 const importingArchify = computed(() => skills.importing)
 
 async function installArchify(): Promise<void> {
@@ -124,32 +74,12 @@ async function installArchify(): Promise<void> {
   await skills.import(ARCHIFY.source)
 }
 
-/**
- * A field holding a slash command is a command, not a description of a drawing.
- *
- * The one field does both because the alternative is a second input that is empty
- * and meaningless most of the time. The leading slash is the whole test, and it is
- * the same test the session's own composer applies.
- *
- * archify adds the second form. Its subcommands are a CLI, not slash commands,
- * so there is no leading slash to test for and `archify ` is the marker instead
- * — which is also exactly what the developer would type by hand.
- */
 const isPluginCommand = computed(() => description.value.trimStart().startsWith('/'))
 const isArchifyCommand = computed(() =>
   description.value.trimStart().toLowerCase().startsWith(ARCHIFY_PREFIX),
 )
 const isCommand = computed(() => isPluginCommand.value || isArchifyCommand.value)
 
-/**
- * The command currently in the box, when it is one of the two catalogues.
- *
- * Drives the hint under the bar. Every diagram-design command takes a FILE —
- * none of them draws anything — and the developer who has just picked one from a
- * menu headed "Commands" has no way to know that. The first real use of this
- * menu was `/export-diagram Generate a diagram of all my endpoints`, which is a
- * drawing request handed to the exporter.
- */
 const pickedCommand = computed<{ description: string; argumentHint: string } | null>(() => {
   const words = description.value.trim().split(/\s+/)
   if (isArchifyCommand.value) {
@@ -161,19 +91,8 @@ const pickedCommand = computed<{ description: string; argumentHint: string } | n
   return DIAGRAM_COMMANDS.find((c) => c.command === name) ?? null
 })
 
-/** Only the plugin's commands take a file and draw nothing; archify's `deliver`
- *  and `render` very much do produce a diagram, so the warning would be wrong. */
 const commandTakesFileOnly = computed(() => pickedCommand.value !== null && !isArchifyCommand.value)
 
-/**
- * The command in the box, when a native picker can name its file for it.
- *
- * `takesDiagram` covers the file the section already knows — the drawing in the
- * pane. This covers the other one: `import-mermaid` and `import-drawio` read a
- * file from somewhere on the machine, and until now the only way to give them
- * one was to type the whole path by hand, correctly, with no completion. Export
- * is offered too, for the case of exporting a diagram that is not the one open.
- */
 const browsableCommand = computed<DiagramFilePick | null>(() => {
   if (isArchifyCommand.value) return null
   const first = description.value.trim().split(/\s+/)[0] ?? ''
@@ -181,33 +100,13 @@ const browsableCommand = computed<DiagramFilePick | null>(() => {
   return isDiagramFilePick(name) ? name : null
 })
 
-/** A token already standing in the file slot: has a separator or an extension and
- *  is not a flag. Distinguishing this is what stops a second Browse producing
- *  `/import-drawio new.drawio old.drawio`.
- *
- *  Quotes come off first. Browse puts them there itself whenever the path has a
- *  space in it, so a splitter that does not understand them fails on the second
- *  browse of the pair it just wrote — it reads `"C:\my` and `diagrams\file.mmd"`
- *  as two tokens, drops the first and leaves the tail behind in the line. */
 function looksLikePath(token: string | undefined): boolean {
   const bare = token?.replace(/^"|"$/g, '')
   if (!bare || bare.startsWith('-')) return false
   return /[\\/]/.test(bare) || /\.[A-Za-z0-9]+$/.test(bare)
 }
 
-/**
- * Browse with nothing in the box: pick the file first, and let the file say
- * which command reads it.
- *
- * The other Browse only appears once a command is already in the field, which
- * means finding it requires knowing that `import-mermaid` exists and opening a
- * menu headed "Commands" to reach it. Someone with a .drawio on their desktop
- * does not have a command in mind, they have a file — so this one sits in the
- * bar, always, and works from the file backwards.
- */
 async function browseImport(): Promise<void> {
-  // Cancelled, or nothing here reads it — the store says which, and says so on
-  // screen in the second case.
   const picked = await diagrams.pickImport()
   if (!picked) return
   const argument = /\s/.test(picked.path) ? `"${picked.path}"` : picked.path
@@ -220,19 +119,6 @@ async function browseImport(): Promise<void> {
   })
 }
 
-// ── THE ARCHIFY PIPELINE, AS A STEPPER ──────────────────────────────────────
-//
-// archify does not draw straight to HTML. It authors a typed JSON specification,
-// validates that against a schema, and only then compiles it — and each of those
-// can fail on its own. A drawing that stops has stopped at one of them, and the
-// section used to say only "drawing…" for however long it took, which is the
-// same thing it says when everything is fine.
-//
-// Read from what the SESSION actually did, never from elapsed time: only
-// tool_activity and raw_output are scanned. The prompt and the model's own
-// narration are excluded deliberately — the prompt contains the words "validate"
-// and "deliver" as instructions, so matching those would mark every stage done
-// the instant the request went out.
 const ARCHIFY_STEPS = [
   { key: 'type', label: '1. Type chosen' },
   { key: 'schema', label: '2. Schema and example read' },
@@ -242,11 +128,7 @@ const ARCHIFY_STEPS = [
   { key: 'done', label: 'In docs/diagrams' },
 ] as const
 
-/** Only what the session DID: tool calls and their output. See above. */
 const runOutput = computed(() => {
-  // The DRAWING session, which is the one the pending row tails. props.sessionId
-  // is the section session a command was dispatched into, and on the Generate
-  // path that is a different session entirely.
   const id = pending.value?.sessionId ?? props.sessionId
   if (!id) return ''
   return (active.tails[id] ?? [])
@@ -258,59 +140,35 @@ const runOutput = computed(() => {
     .join(' ')
 })
 
-/**
- * How far the current drawing has got, as an index into ARCHIFY_STEPS.
- *
- * Monotonic by construction — each stage is only reached through the one before
- * it — so a receipt scrolling past cannot walk the stepper backwards.
- */
 const archifyStep = computed(() => {
   if (!pending.value) return list.value.length > 0 ? ARCHIFY_STEPS.length : 0
   const text = runOutput.value
-  // The spec is named by the app, so its exact filename is the signal rather
-  // than a guess at what "wrote a spec" looks like in prose.
   const spec = archifySpecFile(pending.value.file, archify.value.type)
   let reached = 1
-  // Step 2 is archify's own: read ONE matching schema and ONE matching example,
-  // and only those. A Read of either directory is the signal.
   if (/schemas\/|examples\//.test(text)) reached = 2
   if (text.includes(spec)) reached = 3
-  // The CLI invocation, not the bare word: "validate" and "deliver" appear in
-  // ordinary prose too, and a receipt scrolling past must not advance a stage
-  // that has not actually run.
   if (/archify\S*\s+validate\b/.test(text)) reached = 4
   if (/archify\S*\s+deliver\b/.test(text)) reached = 5
   return reached
 })
 
-/** The reference file archify draws from. Cancelling leaves whatever was already
- *  chosen, so a mis-click does not silently drop the reference. */
 async function pickReference(): Promise<void> {
   const path = await diagrams.pickFile('archify-reference')
   if (path) archify.value.reference = path
 }
 
-/** Native picker for the file slot, writing the path and sending nothing — the
- *  same division of labour as the Commands menu. */
 async function browse(): Promise<void> {
   const command = browsableCommand.value
   if (!command) return
   const path = await diagrams.pickFile(command)
-  // Cancelled. An ordinary outcome, and the box is left exactly as it was.
   if (!path) return
-  // Quoted only when it needs to be: these lines are read as a command line, and
-  // a Windows path with a space in it is otherwise two arguments.
   const argument = /\s/.test(path) ? `"${path}"` : path
   const text = description.value.trim()
   const head = text.split(/\s+/)[0] ?? ''
   let rest = text.slice(head.length).trimStart()
-  // A quoted argument is ONE token; matching bare-word-first would split the
-  // very paths this function writes. Everything after the file slot survives, so
-  // flags typed against the command are not lost by browsing again.
   const existing = /^("[^"]*"|\S+)/.exec(rest)?.[0]
   if (looksLikePath(existing)) rest = rest.slice(existing!.length).trimStart()
   description.value = `${head} ${argument} ${rest}`.trimEnd() + ' '
-  // Caret at the end, for the same reason pickCommand does it.
   void nextTick(() => {
     const field = input.value
     if (!field) return
@@ -319,17 +177,6 @@ async function browse(): Promise<void> {
   })
 }
 
-/**
- * An archify command that must not be dispatched, currently in the box.
- *
- * The `sendable` flag used to be consulted in exactly one place — the Commands
- * menu's disabled button — which stopped it being PICKED and did nothing at all
- * about it being TYPED. `archify preview …` typed by hand went straight to a
- * background session, which is precisely the thing the flag exists to prevent:
- * preview watches a file on a loopback port and returns only on Ctrl-C, and
- * there is nobody at that session's keyboard to press it. The guard belongs on
- * the dispatch path, so it is here as well.
- */
 const refusedCommand = computed(() => {
   if (!isArchifyCommand.value) return null
   const sub = (description.value.trim().split(/\s+/)[1] ?? '').toLowerCase()
@@ -340,28 +187,17 @@ const refusedCommand = computed(() => {
 async function generate(): Promise<void> {
   const text = description.value.trim()
   if (!text) return
-  // Refused rather than silently dropped: the box keeps what was typed and the
-  // hint under it says why. See refusedCommand.
   if (refusedCommand.value) return
   if (isArchifyCommand.value) {
-    // Same rule as the plugin path below: what was typed is theirs, and this
-    // only appends where the CLI lives and which folder is listed.
     emit('run', archifyCommandText(text))
     description.value = ''
     return
   }
   if (isPluginCommand.value) {
-    // What the developer typed, plus one sentence naming this section's own
-    // folder. It used to be sent truly verbatim, and the plugin then wrote to
-    // its own default of docs/ — one directory above the only folder the list
-    // below reads — so a drawing that succeeded showed up nowhere. Picking a
-    // command from the menu only writes it here; sending stays the developer's.
     emit('run', diagramCommandText(text))
     description.value = ''
     return
   }
-  // The drawing happens in a background session and the finished file turns up
-  // in the list below, so there is nothing to switch to and nothing to watch.
   const options = onArchify.value ? { ...archify.value } : undefined
   if (await diagrams.generate(props.projectId, text, options, fileName.value)) {
     description.value = ''
@@ -369,96 +205,36 @@ async function generate(): Promise<void> {
   }
 }
 
-/** Shown only while it belongs to the project on screen. */
 const pending = computed(() =>
   diagrams.pending?.projectId === props.projectId ? diagrams.pending : null,
 )
 
-// Newest first: what was just asked for is what a developer wants to check on.
 const list = computed(() =>
   [...diagrams.forProject(props.projectId)].sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt)),
 )
 
-// Whether to keep quiet about installing anything.
-//
-// EVIDENCE FIRST. A project with diagrams in its folder, or one on its way,
-// plainly can draw them, whatever a command list says — and the drawing runs in
-// a container whose ~/.claude is its own and holds no plugins, so the probe is
-// answering for an environment that is not the one doing the work. Offering to
-// install underneath a list of finished diagrams reads as the app not knowing
-// what it is showing.
-//
-// The probe still decides the empty case, and only once the folder has been
-// read: before that the answer is not "missing", it is "not known yet", and a
-// download card that appears for one frame and then leaves is worse than one
-// that arrives a moment late.
 const installed = computed(() => {
-  // archify answers this question from a different place entirely. It is an
-  // imported SKILL, so the app installed it itself and knows for certain
-  // whether it is there — no probe, no "not known yet", and no evidence-first
-  // guessing. The list below may well be full of diagrams the OTHER engine drew.
   if (onArchify.value) return archifyInstalled.value || skills.loading
   if (diagrams.byProject[props.projectId] === undefined) return true
   if (list.value.length > 0 || pending.value) return true
   if (props.available.length === 0) return true
   const key = normalizeForMatch(DIAGRAM_PLUGIN.probeCommand)
-  // Match the command's OWN name, after the plugin namespace. A session reports
-  // this skill as "diagram-design:export-diagram", and normalizeForMatch strips
-  // the colon rather than the namespace, so the whole string reduces to
-  // "diagramdesignexportdiagram" and never equalled the probe's
-  // "exportdiagram". The card therefore claimed the plugin was missing on every
-  // project that had it installed, and clicking Download re-installed something
-  // already present, which changed nothing and looked broken.
-  // CleanupView already does exactly this; the two now agree.
   return props.available.some((c) => normalizeForMatch(c.slice(c.lastIndexOf(':') + 1)) === key)
 })
 
 const ago = (iso: string): string => relativeTime(iso, Date.now())
 
-/** The diagram in the preview pane, and its HTML once read. */
 const selected = computed(() =>
   diagrams.selected?.projectId === props.projectId ? diagrams.selected.file : null,
 )
 const selectedHtml = computed(() => (selected.value ? diagrams.html[selected.value] : undefined))
 const selectedEntry = computed(() => list.value.find((d) => d.file === selected.value) ?? null)
 
-// THE COMMANDS MENU.
-//
-// Drawing a diagram is not a command — the skill activates on an ordinary
-// request, which is why this section is a text box and not a list of buttons.
-// The plugin does ship three commands, though, and until now the only way to
-// reach them was to know they existed and type one into the conversation.
-//
-// Availability is reported per command rather than assumed from the plugin
-// being installed, on the same rule the rest of the view follows: an empty
-// command list means "not known yet", not "missing".
 const menuOpen = ref(false)
 
-/**
- * THE MENU HAS TO ESCAPE THE RAIL, or it is cut off however tall it is allowed
- * to be.
- *
- * It used to be `position: absolute` under a `position: relative` wrapper, with
- * `max-height: 60vh` and its own scroll to keep it inside the window. That cap
- * was measuring the wrong box. The rail sets `overflow-y: auto` so it can scroll
- * a long install card without pushing the file list out of reach, and a scroll
- * container clips absolutely-positioned descendants — on BOTH axes, because a
- * computed `overflow-y` other than `visible` forces `overflow-x: visible` to
- * `auto` as well. So the menu was cut at the rail's bottom edge whatever 60vh
- * came to, and cut again on the left, since it is 360px wide inside a 300px rail
- * and anchors to the rail's right edge.
- *
- * Fixed positioning is how the rest of the app already solves this (`.ctx-menu`
- * in Sidebar): the menu leaves the rail's coordinate space entirely and is
- * placed from the button's own rect. The scrim behind it is fixed too, so the
- * rail cannot scroll out from under an open menu and the coordinates cannot go
- * stale while it is up.
- */
 const cmdBtn = ref<HTMLElement | null>(null)
 const menuPos = ref<{ left: number; top: string; bottom: string; maxHeight: number } | null>(null)
 
-/** Matches `.cmd-menu`'s own width, the gap it used to get from `calc(100% + 5px)`,
- *  and the margin it keeps off the window edge. */
 const MENU_W = 360
 const MENU_GAP = 5
 const MENU_EDGE = 8
@@ -472,9 +248,6 @@ function toggleMenu(): void {
   if (r) {
     const below = window.innerHeight - r.bottom - MENU_GAP - MENU_EDGE
     const above = r.top - MENU_GAP - MENU_EDGE
-    // The bar sits near the top of the view, so down is nearly always right and
-    // opening upwards would be worse. Nearly: a short window can leave no room
-    // at all below, and a menu with 40px of itself showing is the bug again.
     const up = below < 220 && above > below
     menuPos.value = {
       left: Math.max(
@@ -494,21 +267,10 @@ interface MenuCommand {
   description: string
   argumentHint: string
   available: boolean
-  /** False for `preview`, which never returns. See ARCHIFY_COMMANDS. */
   sendable: boolean
-  /** Where this command sits in archify's pipeline. Absent on the plugin path,
-   *  whose three commands are peers rather than a sequence. */
   stage?: ArchifyStage
 }
 
-/**
- * archify's commands grouped by pipeline stage, in order.
- *
- * The menu used to be fourteen equal-looking rows, which is a list of what the
- * tool can do and not a description of how it is used. Most of them only make
- * sense at one point: validate before deliver, check only on something already
- * delivered. Empty groups are dropped so the headings never outnumber the rows.
- */
 const archifyGroups = computed(() =>
   ARCHIFY_STAGES.map((s) => ({
     ...s,
@@ -517,10 +279,6 @@ const archifyGroups = computed(() =>
 )
 
 const commands = computed<MenuCommand[]>(() => {
-  // archify's availability is the skill's, once, for the whole catalogue: they
-  // are subcommands of one binary, so either all of them can run or none can.
-  // There is no per-command probe to do, and pretending otherwise would show
-  // fourteen identical "missing" badges.
   if (onArchify.value) {
     return ARCHIFY_COMMANDS.map((c) => ({ ...c, available: archifyInstalled.value }))
   }
@@ -535,28 +293,9 @@ const commands = computed<MenuCommand[]>(() => {
   }))
 })
 
-/**
- * Writes the command into the box, in front of whatever is being typed, and sends
- * nothing.
- *
- * It used to dispatch on click, which made picking a command and composing the
- * message it needs two different acts in two different orders: anything typed
- * afterwards was a new, separate request, and anything typed BEFORE was silently
- * swallowed as the command's argument. Now the menu writes and the developer
- * sends, so what runs is what is on screen.
- *
- * The path is filled in for a command that takes the diagram in the pane, because
- * that is the argument the section already knows and typing it back by hand proves
- * nothing. Everything after the command survives, so a half-typed message is not
- * lost by opening the menu.
- */
 function pickCommand(entry: MenuCommand): void {
   menuOpen.value = false
   if (onArchify.value) {
-    // Its subcommands are argv, not slash commands, so the whole `archify …`
-    // line is rewritten rather than a leading token replaced. The selected
-    // diagram is offered to the two that take a delivered HTML file, on the
-    // same rule as the plugin path: the section already knows that argument.
     const wantsHtml = entry.command === 'check' || entry.command === 'visual-check'
     const argument = wantsHtml && selected.value ? ` ${DIAGRAMS_DIR}/${selected.value}` : ''
     description.value = `${ARCHIFY_PREFIX}${entry.command}${argument} `
@@ -566,10 +305,6 @@ function pickCommand(entry: MenuCommand): void {
     const argument = takesDiagram && selected.value ? ` ${DIAGRAMS_DIR}/${selected.value}` : ''
     description.value = `/${DIAGRAM_PLUGIN.namespace}:${entry.command}${argument} ${rest}`.trimEnd() + ' '
   }
-  // Focus with the caret at the END, after the render that carries the new value.
-  // Without this the field keeps the caret at 0 and the next keystroke lands in
-  // FRONT of the command, which turns the whole line back into a description and
-  // draws a diagram called "--png-only/diagram-design:export-diagram".
   void nextTick(() => {
     const field = input.value
     if (!field) return
@@ -578,9 +313,6 @@ function pickCommand(entry: MenuCommand): void {
   })
 }
 
-/** Install from the command menu, for the case where the install card is not
- *  shown. Each engine has its own installer: a plugin marketplace for one, the
- *  app's Skills importer for the other. */
 function installFromMenu(): void {
   if (onArchify.value) {
     void installArchify()
@@ -590,14 +322,11 @@ function installFromMenu(): void {
   emit('install')
 }
 
-/** True while whichever installer this engine uses is running. */
 const installBusy = computed(() =>
   onArchify.value ? importingArchify.value : props.installing === true,
 )
 
 
-// Opening the tab on a project that already has diagrams shows one rather than an
-// empty pane. The newest is the one most likely to be the reason you came here.
 watch(
   list,
   (entries) => {
@@ -611,10 +340,6 @@ watch(
 <template>
   <div class="dgm" data-testid="diagrams-view">
     <div class="rail">
-      <!-- Which engine draws. Two genuinely different tools, not two skins on one:
-           diagram-design activates on a sentence, archify validates a typed
-           specification against a schema and only then compiles it. The choice
-           changes the prompt, the commands below, and what "installed" means. -->
       <div class="engine" data-testid="diagram-engine">
         <button
           type="button"
@@ -666,9 +391,6 @@ watch(
             <template v-if="onArchify">{{ ARCHIFY.source }}</template>
             <template v-else>{{ DIAGRAM_PLUGIN.marketplace }} · {{ DIAGRAM_PLUGIN.pkg }}</template>
           </div>
-          <!-- Two different installers, so two different error sources. The plugin's
-               comes back from the host CLI through the parent; archify's is the
-               Skills importer's own, which the store already holds. -->
           <div
             v-if="onArchify ? skills.error : installError"
             class="install-error"
@@ -699,13 +421,6 @@ watch(
           :disabled="diagrams.generating"
           @keydown.enter="generate()"
         />
-        <!-- The file name, when the developer wants to choose it. Left blank the
-             app derives one from the sentence above, which is what it has always
-             done; typed, this wins. Hidden while a COMMAND is in the box: a
-             command names its own output and this field would not reach it.
-
-             Its own row rather than beside the sentence, because the rail is
-             300px and two fields sharing a line would leave neither readable. -->
         <input
           v-if="!isCommand"
           v-model="fileName"
@@ -715,8 +430,6 @@ watch(
           :disabled="diagrams.generating"
           @keydown.enter="generate()"
         />
-        <!-- One button, two jobs, and it says which: a field holding a slash command
-             sends that command, and anything else describes a drawing. -->
         <button
           class="add-btn"
           data-testid="diagram-generate"
@@ -728,16 +441,6 @@ watch(
           <template v-else><Icon name="pencil" :size="12" /> Generate</template>
         </button>
         <div class="cmds">
-          <!-- Browse is a peer of Commands, not something inside it. Importing a
-               file is one of the two things this section does, and until now it
-               was reachable only by knowing `import-drawio` existed and opening a
-               menu to find it. The file names the command; see browseImport.
-
-               Gone on the archify engine, and not merely disabled. archify's
-               catalogue has no import at all, so the only thing Browse could
-               write there is a diagram-design command — which would silently
-               switch engines for that one action, and fail outright if the
-               plugin this project never installed is the one being addressed. -->
           <button
             v-if="!onArchify"
             type="button"
@@ -773,14 +476,6 @@ watch(
                 : undefined
             "
           >
-            <!-- A missing command installs the engine instead of doing nothing. The
-                 big install card is deliberately suppressed once this project has
-                 diagrams (see `installed`), which left this menu as a dead end: it
-                 named three commands, said each was absent, and offered no way to
-                 fix that. Same action the card's button takes. -->
-            <!-- Grouped on the archify path so the list says which command comes
-                 before which; flat on the plugin path, whose three commands are
-                 peers rather than a sequence. -->
             <template v-if="onArchify">
               <div v-for="g in archifyGroups" :key="g.stage" class="cmd-group">
                 <div class="cmd-group-label">{{ g.label }}</div>
@@ -827,10 +522,6 @@ watch(
               <span class="cmd-name mono">{{ onArchify ? 'archify ' : '/' }}{{ c.command }}</span>
               <span class="cmd-desc">{{ c.description }}</span>
               <span class="cmd-args mono">{{ c.argumentHint }}</span>
-              <!-- `preview` is listed and refused rather than hidden. It watches a
-                   file on a loopback port and returns only on Ctrl-C, and these
-                   commands run in a background session with nobody at the keyboard:
-                   sending it would hold that session open until it was killed. -->
               <span
                 v-if="c.available && !c.sendable"
                 class="cmd-missing"
@@ -852,11 +543,6 @@ watch(
         </div>
       </div>
 
-      <!-- THE INTERACTIVE BAR. archify commits to one of five types before it
-           draws, and the five draw genuinely different pictures, so the type is
-           asked for rather than inferred from a sentence. Hidden while a command
-           is in the box: a command carries its own arguments and none of this
-           applies to it. -->
       <div v-if="onArchify && !isCommand" class="archify-bar" data-testid="archify-options">
         <div class="ab-row">
           <span class="ab-label">type</span>
@@ -912,10 +598,6 @@ watch(
             <Icon name="play" :size="11" /> interactive viewer
           </button>
         </div>
-        <!-- A file for the skill to draw FROM. Everything else on this bar shapes
-             HOW it draws; this is the only control that changes WHAT it draws, so
-             it takes its own row and says which file it holds rather than turning
-             a button green. -->
         <div class="ab-row">
           <span class="ab-label">reference</span>
           <button
@@ -953,19 +635,12 @@ watch(
         </div>
       </div>
 
-      <!-- What the command in the box actually takes. Sits under the bar rather than
-           in the placeholder, because by the time a command is in the field the
-           placeholder is gone. -->
       <div v-if="pickedCommand" class="cmd-hint mono" data-testid="diagram-command-hint">
         <span class="ch-args">{{ pickedCommand.argumentHint }}</span>
         <span class="ch-desc">{{ pickedCommand.description }}</span>
         <span v-if="commandTakesFileOnly" class="ch-note">
           Takes a file. To draw something new, clear this and describe it instead.
         </span>
-        <!-- Says "takes a file" and then gives you one, rather than leaving the
-             developer to type an absolute path by hand into a single-line box
-             with no completion. Writes the path and sends nothing, the same
-             division of labour the Commands menu follows. -->
         <button
           v-if="browsableCommand"
           type="button"
@@ -976,9 +651,6 @@ watch(
         >
           <Icon name="folder" :size="11" /> Browse…
         </button>
-        <!-- Says why the button will not go, rather than leaving a dead control.
-             Typed by hand this is the only warning there is: the menu's disabled
-             row never appeared. -->
         <span v-if="refusedCommand" class="ch-refuse" data-testid="diagram-command-refused">
           Runs until Ctrl-C, and nothing can press it in a background session. Use
           <span class="mono">archify validate</span> or <span class="mono">archify deliver</span>.
@@ -989,11 +661,6 @@ watch(
 
       <MiniTerminal v-if="props.sessionId && !pending" :session-id="props.sessionId" label="running" />
 
-      <!-- The gap between pressing Generate and having something to watch.
-           `diagrams.generate` cannot return a session id until one exists, and the
-           session it uses is containerised, so on the first diagram of a run that
-           wait is a container starting: long enough that the section looked
-           inert, with nothing on screen claiming the button had done anything. -->
       <div
         v-if="diagrams.generating && !pending"
         class="row pending"
@@ -1013,9 +680,6 @@ watch(
           <span class="when mono">drawing…</span>
         </div>
         <div class="desc">{{ pending.description }}</div>
-        <!-- archify authors a spec, validates it, then compiles it, and each of
-             those fails on its own. Without this the section said "drawing…" for
-             however long it took, which is what it also says when all is well. -->
         <ol v-if="onArchify" class="steps" data-testid="archify-steps">
           <li
             v-for="(step, i) in ARCHIFY_STEPS"
@@ -1057,27 +721,9 @@ watch(
       </div>
     </div>
 
-    <!-- The drawing gets the pane; the controls get a rail. This replaced a
-         version where the explorer and a bounded preview shared a row at the
-         BOTTOM of a vertical stack, under the engine picker, the intro, the
-         install card, the composer and the archify options. That preview was
-         locked to 16 / 10 and took its height from whatever the stack left over,
-         so it derived a small width from a small height and sat in bands of
-         empty panel — which is the complaint that produced this layout.
-
-         Four alternatives have now been built and rejected here, and they are
-         recorded so none is proposed again as though it were fresh. A
-         rail-and-stage split and a tile grid lost the first round: the grid's
-         thumbnails can only render a diagram the store has already read, so most
-         tiles would sit empty. A split pane and a three-lane board lost the
-         second: both kept the controls at their full size and so bought the
-         drawing less room than starving the chrome does. -->
     <aside v-if="list.length > 0" class="side" aria-label="Diagram preview">
       <div class="dock">
         <div class="mini">
-          <!-- Scripts refused twice over: no allow-scripts on the frame, and the
-               app's own CSP (script-src 'self') reaches srcdoc content. Never add
-               allow-scripts here. -->
           <iframe
             v-if="selectedHtml !== undefined"
             data-testid="diagram-frame"
@@ -1092,12 +738,6 @@ watch(
           <div class="foot-text">
             <span class="fn mono">{{ selectedEntry?.file ?? '—' }}</span>
             <div v-if="selectedEntry?.description" class="desc">{{ selectedEntry.description }}</div>
-            <!-- What the session decided before it drew. The diagram-design skill states
-                 its type, semantic pattern, size preset and the cuts the complexity
-                 budget forced, then draws; that message used to scroll past in the
-                 transcript and the section kept only a file name. It is the one thing
-                 that says what the picture was TRYING to be, which is what you need in
-                 order to judge whether it succeeded. -->
             <div v-if="selectedEntry?.plan" class="plan" data-testid="diagram-plan">
               <span v-if="selectedEntry.plan.type" class="pl mono" data-testid="diagram-plan-type">
                 <span class="pk">type</span>{{ selectedEntry.plan.type }}
@@ -1108,8 +748,6 @@ watch(
               <span v-if="selectedEntry.plan.size" class="pl mono" data-testid="diagram-plan-size">
                 <span class="pk">size</span>{{ selectedEntry.plan.size }}
               </span>
-              <!-- Cuts are the honest half: what would not fit. Kept last and marked,
-                   because "this drawing omits X" is a caveat, not a specification. -->
               <span
                 v-for="cut in selectedEntry.plan.cuts"
                 :key="cut"
@@ -1120,9 +758,6 @@ watch(
               </span>
             </div>
           </div>
-          <!-- Which session drew it. Dropped by the accepted live variant and
-               restored here: a diagram is an artefact of a particular run, and the
-               run is how you find what was asked for. -->
           <span v-if="selectedEntry?.sessionId" class="chip mono" :title="selectedEntry.sessionId">
             session {{ selectedEntry.sessionId.slice(0, 8) }}
           </span>
@@ -1136,21 +771,6 @@ watch(
 </template>
 
 <style scoped>
-/* The section stretches to the pane rather than scrolling as one long column:
-   the explorer owns the scroll, so the composer bar and the docked preview stay
-   put while a long list moves under them. Chosen in live mode.
-
-   These rules live HERE, in the SFC's own style block, and not in a <style> tag
-   inside <template>. That is not a preference: Vue's compiler rejects a template
-   containing <style> outright ("Tags with side effect (<script> and <style>) are
-   ignored in client component templates"), so a preview stylesheet written into
-   the template breaks the component every time. See CLAUDE.md. */
-/* A VIEWER WITH A CONTROL RAIL, not a page with a preview underneath it.
-   Chosen in live mode over a split pane and a three-lane board. The complaint
-   that drove it was that the drawing had no room, and the reading that buys it
-   the most room is the one that stops treating the drawing as the thing left
-   over at the bottom: everything that authors a diagram compresses into the rail
-   on the left, and the drawing takes the rest. */
 .dgm {
   flex: 1;
   min-height: 0;
@@ -1167,27 +787,17 @@ watch(
   gap: 6px;
 }
 
-/* The field takes a whole line of the rail and the two buttons share the next.
-   At 300px they cannot sit on one row without the field collapsing to nothing. */
 .bar .in {
   flex: 1 1 100%;
   min-width: 0;
 }
 
-/* The optional name reads as secondary to the sentence above it: same field, one
-   step quieter, because most drawings never need it and a second full-strength
-   input would read as a second required answer. */
 .bar .name-in {
   font-size: var(--fs-meta);
   color: var(--text-body);
 }
 
 .table {
-  /* It no longer sets its own width. The rail is 300px and the list fills it,
-     which is what replaced the old fixed 240px column; what the list needs is a
-     readable name, and the rail's width is chosen to give it one. It takes the
-     height the controls above it leave, down to a floor of a few rows — past
-     that the rail scrolls rather than the list vanishing. */
   flex: 1 1 auto;
   min-width: 0;
   min-height: 96px;
@@ -1204,8 +814,6 @@ watch(
   grid-template-columns: 1fr 58px;
   gap: 8px;
   align-items: baseline;
-  /* The tightest legible step, baked from the accepted variant's density
-     parameter: in a 300px rail the name is what the width is for. */
   padding: 4px 9px;
 }
 
@@ -1253,15 +861,10 @@ watch(
 .trow .ag {
   font-size: var(--fs-micro);
   color: var(--text-faint);
-  /* Figures in a column are compared, so they line up. */
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
 
-/* The viewer panel, baked from the accepted variant's `frame: card` parameter:
-   the drawing is enclosed and its facts sit in a footer strip inside the same
-   panel, rather than the drawing floating bare on the ground with loose meta
-   under it. */
 .dock {
   flex: 1 1 auto;
   min-width: 0;
@@ -1276,22 +879,6 @@ watch(
   box-shadow: var(--elev);
 }
 
-/* The rectangle the diagram renders into, and it FILLS the panel rather than
-   holding a ratio inside it.
-
-   It used to be locked to 16 / 10, a browser viewport's shape, which was the
-   right instinct in the wrong place. The frame took its height from whatever the
-   controls left at the bottom of the column and then derived its width from that
-   height, so a short pane produced a small drawing with bands of empty panel
-   down both sides — the fault the rail was built to remove. With the controls
-   out of the way there is no leftover to divide: the panel IS the frame. The
-   page inside is a standalone HTML file that lays itself out, so it does not
-   need a ratio imposed from here either. */
-/* The white ground is theme-invariant on purpose: a diagram is a document with
-   its own page colour, and letting the carbon sheet show through its margins
-   would read as part of the drawing. See --diagram-page in styles.css. This
-   rationale was carried by the deleted `.frame` rule, which painted the ground
-   before this element did. */
 .mini {
   flex: 1 1 auto;
   align-self: stretch;
@@ -1310,10 +897,6 @@ watch(
   border: 0;
 }
 
-/* In the rail this is a hint rather than a paragraph: at the meta scale and
-   clamped, so it cannot push the file list off the bottom of a 300px column.
-   Clamped and not cut — the whole sentence stays in the DOM and in the
-   accessibility tree, so it is the visual budget that is bounded, not the text. */
 .intro {
   margin-bottom: 2px;
   font-size: var(--fs-micro);
@@ -1326,9 +909,6 @@ watch(
   overflow: hidden;
 }
 
-/* Two engines, one segmented control. A segmented control rather than a dropdown
-   because there are exactly two and both names matter: which one drew a diagram
-   is the first thing you want to know when it comes out wrong. */
 .engine {
   flex: none;
   display: inline-flex;
@@ -1361,10 +941,6 @@ watch(
   box-shadow: var(--elev);
 }
 
-/* The interactive bar. Chips rather than a <select>, because the hint under them
-   changes with the choice and a native select cannot show that while it is open —
-   and the whole reason the type is asked for is that the developer may not know
-   which of the five they want. */
 .archify-bar {
   flex: none;
   display: flex;
@@ -1383,10 +959,6 @@ watch(
   flex-wrap: wrap;
 }
 
-/* A legend on a hairline rather than a column of text. The 46px label column
-   was a sixth of a 300px rail, and it was what pushed the six type chips into a
-   ragged four-line wrap; as a full-width caption it costs one 11px line and
-   hands the chips the whole width back. */
 .ab-label {
   flex: 1 1 100%;
   display: flex;
@@ -1411,15 +983,6 @@ watch(
   flex: 1;
 }
 
-/* THE BOXES COME OFF. Six bordered chips in a 300px rail draw twelve vertical
-   edges, and every one competes with the only mark that matters: which type is
-   selected. Weight and hue carry the state instead. The border is kept and made
-   transparent rather than removed, so selecting a chip cannot shift the row.
-
-   The selected chip keeps a 1px border AS WELL AS its colour. State has to stay
-   readable without relying on colour alone — WCAG 2.2 SC 1.4.1, which
-   PRODUCT.md carries as a requirement that outlives any visual register — and a
-   border plus a heavier weight are the two non-colour signals that carry it. */
 .ab-chip {
   display: inline-flex;
   align-items: center;
@@ -1438,10 +1001,6 @@ watch(
   border-color: var(--border-strong);
 }
 
-/* --green, not --green-ink. The ink token is the colour that sits ON a solid
-   green fill (#FFFFFF light, #0E1013 dark); over --bg-chip, which is a 5% wash
-   and therefore essentially the page, it is white-on-white in the light theme.
-   A wash background takes the foreground colour, not its ink. */
 .ab-chip.on {
   color: var(--green);
   background: transparent;
@@ -1454,11 +1013,6 @@ watch(
   cursor: default;
 }
 
-/* The file name only: an absolute path is mostly folders the developer already
-   knows, and at 300px it would push the clear button off the row. The full path
-   is on the clear button's title, which is where someone checking WHICH file
-   would hover. `direction: rtl` keeps the extension visible when even the bare
-   name is too long, since the extension is what says what kind of source it is. */
 .ab-ref {
   flex: 1 1 auto;
   min-width: 0;
@@ -1471,15 +1025,6 @@ watch(
   color: var(--text-body);
 }
 
-/* archify's own words for the chosen type, from its type router. It is the one
-   line that stops the choice being six names with no meaning.
-
-   No hanging indent to line it up under the chips: .ab-row wraps, and the moment
-   it does there is no single column to align to — the indent was only ever right
-   for the unwrapped case. Flush left is right in both. */
-/* The pipeline, one line per stage. Done is ticked and quiet; the stage in
-   flight is the only coloured thing here, because "where is it now" is the
-   single question this list exists to answer. */
 .steps {
   list-style: none;
   margin: 8px 0 0;
@@ -1516,11 +1061,6 @@ watch(
   color: var(--text-faint);
 }
 
-/* In the rail this is a two-line notice rather than a banner: the sentence
-   takes the full width on its own line and the import action sits at the end of
-   the next one. Beside a 105px button it had a 150px column to wrap in and ran
-   to six or seven lines, which is what made it the largest thing in the rail.
-   The dashed border stays — it is what says "not installed yet". */
 .install-card {
   display: flex;
   flex-wrap: wrap;
@@ -1545,11 +1085,6 @@ watch(
   color: var(--text-body);
 }
 
-/* WRAPS RATHER THAN ELLIPSING. It was `nowrap` with an ellipsis, which suited a
-   full-width banner; in a 300px rail it cut about a third off the archify source
-   URL at every window size, so the one line that says where the skill comes from
-   could never be read in full. `anywhere` because a URL has no spaces to break
-   at. */
 .install-cmds {
   font-size: var(--fs-micro);
   color: var(--text-faint);
@@ -1613,8 +1148,6 @@ watch(
   box-shadow: none;
 }
 
-/* Browse and Commands are one cluster, so a narrow rail wraps them together
-   rather than stranding one of them on a line of its own. */
 .cmds {
   position: relative;
   display: flex;
@@ -1641,29 +1174,16 @@ watch(
   border-color: var(--border-strong);
 }
 
-/* The disabled convention the rest of the system uses. Browse can be disabled
-   while a drawing is in flight; Commands never is, so this arrived with it. */
 .cmd-btn:disabled {
   opacity: 0.45;
   cursor: default;
 }
 
-/* Brings its own ground, like every other menu in the app (.ctx-menu): it
-   floats over the list rather than sitting in it. */
 .cmd-menu {
-  /* Fixed, not absolute, and placed by `toggleMenu` from the button's rect. The
-     rail scrolls, and a scroll container clips an absolutely-positioned child on
-     both axes; see the comment on `cmdBtn`. `left`, `top`/`bottom` and the real
-     `max-height` all arrive inline — the space actually left in the window, not
-     a fraction of it. */
   position: fixed;
   z-index: 30;
-  /* Explicit, because a fixed box shrinks to fit and the placement arithmetic
-     needs to know the width. Narrower than 360 only when the window is. */
   width: 360px;
   max-width: calc(100vw - 16px);
-  /* archify lists fourteen commands, each three lines tall, so the menu still
-     scrolls its own tail; what changed is that the cap is now the room it has. */
   overflow-y: auto;
   padding: 4px;
   background: var(--bg-panel-2);
@@ -1672,8 +1192,6 @@ watch(
   box-shadow: var(--elev);
 }
 
-/* The stage heading. Quiet and uppercase: it orders the rows below it, it is not
-   one of them. */
 .cmd-group + .cmd-group {
   margin-top: 6px;
 }
@@ -1745,10 +1263,6 @@ watch(
   color: var(--amber);
 }
 
-/* .btn-quiet's idiom at the hint row's scale: transparent, one hairline, and a
-   hover that greens toward an affirmative action. Its own rule rather than the
-   shared class because the shared one is sized for a control row (12.5px type,
-   6px 14px padding) and this sits inline in a micro-type line. */
 .ch-browse {
   display: inline-flex;
   align-items: center;
@@ -1773,13 +1287,10 @@ watch(
   cursor: default;
 }
 
-/* A refusal, not a caution: the button is disabled and this says why. Amber is
-   earned here — the reading is "this command cannot run from here". */
 .ch-refuse {
   color: var(--amber);
 }
 
-/* The plan strip: facts about the drawing, set as data rather than prose. */
 .plan {
   display: flex;
   flex-wrap: wrap;
@@ -1816,16 +1327,11 @@ watch(
   color: var(--amber);
 }
 
-/* An absent command is still a live row: it installs. Dimming it the way a
-   disabled control is dimmed would say the opposite. */
 .cmd-item.missing .cmd-name,
 .cmd-item.missing .cmd-desc {
   color: var(--text-meta);
 }
 
-/* `preview` IS installed and does work — just not from a background session with
-   nobody to press Ctrl-C. Dimmed rather than hidden, so the menu still says what
-   the tool can do, and its note says why this is the one row that will not go. */
 .cmd-item.inert .cmd-name,
 .cmd-item.inert .cmd-desc {
   color: var(--text-faint);
@@ -1848,8 +1354,6 @@ watch(
   color: var(--red);
 }
 
-/* Sits inside the install card rather than beside it: the reason an install
-   failed belongs with the thing that failed, not in the page's error slot. */
 .install-error {
   margin-top: 6px;
   font-size: var(--fs-meta);
@@ -1872,8 +1376,6 @@ watch(
   border-radius: var(--rc);
 }
 
-/* On its way: the same row, quieter, so its arrival is a change of state
-   rather than a new thing appearing. */
 .row.pending {
   border-style: dashed;
   opacity: 0.8;
@@ -1948,16 +1450,6 @@ watch(
 .act:hover {
   border-color: var(--green);
 }
-/* ── THE CONTROL RAIL ────────────────────────────────────────────────────────
-   Fixed width, baked from the accepted variant's `chrome` parameter at 300px.
-   The rail owns its own scroll, so a long install card or a command hint pushes
-   itself out of view rather than pushing the file list out of reach. */
-/* NOTHING IN THE RAIL MAY BE CRUSHED. This column sets `overflow-y: auto`, and
-   per the flexbox spec that makes every child's automatic minimum size zero, so
-   the shrink algorithm will squash them rather than let the column scroll.
-   Measured before this rule existed: at 1400x560 the intro rendered 0px tall
-   with its whole sentence still in the DOM. The list is the one child that is
-   meant to yield, and it says so itself with its own `flex`. */
 .rail > *:not(.table) {
   flex: none;
 }
@@ -1973,11 +1465,6 @@ watch(
   overflow-y: auto;
 }
 
-/* ── THE VIEWER ──────────────────────────────────────────────────────────────
-   Everything the rail does not take: far right, full height, behind one hairline
-   seam. This is the whole point of the layout — the drawing is the thing being
-   read, so it gets the room, and the seam is the only mark separating it from
-   the controls. */
 .side {
   flex: 1 1 auto;
   min-width: 0;
@@ -1987,15 +1474,6 @@ watch(
   border-left: 1px solid var(--border);
 }
 
-/* The drawing's facts, under the drawing and inside the same panel. The file
-   name and description read as a caption; the session chip and the open control
-   sit at the end of the strip, where they do not compete with it. */
-/* WRAPS, because two of its three children cannot shrink. `.chip` and `.act`
-   are both `flex-shrink: 0`, so without wrapping the strip's min-content width
-   is a floor the panel cannot go under: measured at 1100x700 it pushed 107px of
-   horizontal scroll onto the whole window and squeezed the file name to nothing.
-   Wrapping lets the two controls drop to a second line instead, and the name
-   keeps a floor of its own so it can never be the thing that yields to zero. */
 .foot {
   flex: none;
   display: flex;
@@ -2028,12 +1506,6 @@ watch(
   margin-top: 6px;
 }
 
-/* MiniTerminal is a child component, so its inner box is reachable only through
-   :deep — the same escape MarkdownText.vue uses. Its own height is 118px, which
-   is right in a full-width pane and too much of a 300px rail; 72px is baked from
-   the accepted variant's tail parameter. The corners are squared because in this
-   world a machine-text block takes `--sq`, and at this size the rounded corner
-   was the loudest thing about the frame. */
 .rail :deep(.mini-term) {
   margin-top: 4px;
 }

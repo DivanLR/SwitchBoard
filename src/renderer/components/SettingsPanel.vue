@@ -1,8 +1,4 @@
 <script setup lang="ts">
-// Settings modal — 1:1 with the design reference: header, left icon-tab rail
-// (Models / This project / Terminals / General) with a Plan/Build footer,
-// card + toggle + segmented controls, and a "Changes apply immediately · Done"
-// footer. State and transport live in the settings store.
 import { useTemplateRef, computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useModal } from '@renderer/composables/useModal'
 import { MATCHER_KIND_LABEL, useAllowedRules } from '@renderer/composables/useAllowedRules'
@@ -22,67 +18,35 @@ import { useSkillsStore } from '@renderer/stores/skills'
 import Icon from '@renderer/components/Icon.vue'
 import EffortBar from '@renderer/components/EffortBar.vue'
 
-// The prop deliberately omits 'mcp' even though the Tab union below includes it:
-// the MCP tab is reachable by clicking, but no caller opens the panel straight
-// onto it, so accepting the value would be a promise nothing keeps.
 const props = defineProps<{ initialTab?: 'models' | 'proj' | 'allowed' | 'skills' | 'term' | 'gen' }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
-// Escape closes, Tab stays inside, focus returns to the opener on close.
 const dialogEl = useTemplateRef<HTMLElement>('dialog')
 useModal(dialogEl, () => emit('close'))
 const store = useSettingsStore()
 const skills = useSkillsStore()
 
-// The URL being typed into the Skills tab. Local to the panel: an unsubmitted
-// input is not application state, and keeping it in the store would make it
-// survive closing the panel, which is not what a half-typed URL should do.
 const skillUrl = ref('')
 
-/**
- * What the typed URL actually names, read by the SAME parser the importer uses
- * (`@shared/skill-source`).
- *
- * The field used to be opaque: paste anything, press Import, and wait for a
- * network round trip to find out whether it was even a repository. Now the URL
- * reports itself — owner, repository, branch, folder — or says exactly why it
- * will be refused, before anything is requested. Null while the field is empty,
- * because a blank field is not an error.
- */
 const skillSource = computed(() => (skillUrl.value.trim() === '' ? null : readSkillSource(skillUrl.value)))
 
-/** The parts of a valid source, as a row of readable facts. */
 const skillSourceParts = computed(() => {
   const parsed = skillSource.value
   if (!parsed?.ok) return null
   const { owner, repo, ref: gitRef, path } = parsed.source
   return [
     { label: 'repository', value: `${owner}/${repo}` },
-    // A null ref is not "unknown" — it means the repository's own default branch,
-    // which is what the importer will resolve. Saying "default branch" is the
-    // honest version of that; showing "main" would be a guess.
     { label: 'branch', value: gitRef ?? 'default branch' },
     { label: 'folder', value: path === '' ? 'whole repository' : path },
   ]
 })
 
-/** Import, and clear the field only when something actually landed, so a mistyped
- *  URL stays put to be corrected rather than vanishing with the error. */
 async function importSkills(): Promise<void> {
   const url = skillUrl.value.trim()
   if (!url || skills.importing || skillSource.value?.ok !== true) return
   if (await skills.import(url)) skillUrl.value = ''
 }
 
-/**
- * The imported skills, grouped by the repository each came from.
- *
- * Twenty skills from one repository used to be twenty rows each repeating their
- * own folder and file count with nothing tying them together, so "what did I
- * import from where" could only be answered by reading all twenty. The Skills
- * section next door already groups by source; this is the same grouping in the
- * place where they are managed.
- */
 const skillsBySource = computed<{ url: string; label: string; items: CustomSkill[] }[]>(() => {
   const groups = new Map<string, CustomSkill[]>()
   for (const skill of skills.items) {
@@ -96,8 +60,6 @@ const skillsBySource = computed<{ url: string; label: string; items: CustomSkill
   })
 })
 
-/** Switch a whole repository's skills on or off. With a repository of a dozen,
- *  the alternative is a dozen clicks to answer one question about one source. */
 async function setGroupEnabled(items: CustomSkill[], on: boolean): Promise<void> {
   for (const skill of items) {
     if (skill.enabled !== on) await skills.setEnabled(skill.name, on)
@@ -107,16 +69,8 @@ const projects = useProjectsStore()
 const updates = useUpdatesStore()
 const settings = computed(() => store.settings)
 
-// No 'rules' tab. The risk and noise engines still run on every tool call and
-// every streamed event; what is gone is the editor for overriding them, which
-// nobody used and which cost a whole tab in a rail of seven.
 type Tab = 'models' | 'proj' | 'mcp' | 'allowed' | 'skills' | 'term' | 'gen'
 const tab = ref<Tab>(props.initialTab ?? 'models')
-// One family, one weight. These were drawn from four unrelated Unicode blocks —
-// a four-pointed star, a filled square, a database cylinder, a tick, a chevron
-// and a gear — so the rail read as six marks that happened to be stacked rather
-// than one set. Now icons from the one drawn set (Icon.vue), each named for
-// what the tab does rather than for a shape.
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'models', label: 'Models', icon: 'spark' },
   { id: 'proj', label: 'This project', icon: 'folder' },
@@ -127,19 +81,8 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'gen', label: 'General', icon: 'settings' },
 ]
 
-// "This project": which project the tab configures (defaults to the selected one).
 const projId = ref<string | null>(null)
 const projDd = ref(false)
-/**
- * The project picker's search, added 2026-08-21 against the pinned searchable
- * dropdown reference. It earns its place on the numbers: this dropdown lists
- * every registered project, and a developer with a dozen of them was scanning a
- * list rather than picking from one.
- *
- * DOM focus stays on the input while `projActive` walks the list, which is the
- * WAI combobox active-descendant pattern the reference calls for: moving real
- * focus onto each option would take it off the field being typed into.
- */
 const projFilter = ref('')
 const projActive = ref(0)
 const projFilterEl = useTemplateRef<HTMLInputElement>('projFilterEl')
@@ -166,9 +109,6 @@ function chooseProj(id: string): void {
   projDd.value = false
 }
 
-/** Arrows move the active row, Enter takes it, Escape closes. Clamped rather
- *  than wrapping: a list that jumps from the end back to the top loses the
- *  developer's place, and this one is short. */
 function onProjKeydown(event: KeyboardEvent): void {
   if (event.key === 'Escape') {
     projDd.value = false
@@ -190,8 +130,6 @@ function onProjKeydown(event: KeyboardEvent): void {
   }
 }
 
-// Typing narrows the list, so an active index pointing past the end would leave
-// Enter doing nothing. Reset to the top on every change of the match set.
 watch(projMatches, () => {
   projActive.value = 0
 })
@@ -199,7 +137,6 @@ const proj = computed(
   () => projects.items.find((p) => p.id === projId.value) ?? projects.items[0] ?? null,
 )
 
-/** Applies to the project's NEXT session: the SDK permission mode is fixed at spawn. */
 async function saveSessionMode(mode: SessionMode): Promise<void> {
   const target = proj.value
   if (!target || target.defaultSessionMode === mode) return
@@ -217,8 +154,6 @@ function save(patch: Partial<Settings>): void {
   void store.save(patch)
 }
 
-// Sandbox memory: edited locally, saved on Enter/blur — saving per keystroke
-// would persist half-typed sizes like "1" on the way to "12g".
 const sandboxMemVal = ref('')
 watch(
   () => settings.value?.sandboxMemory,
@@ -234,22 +169,13 @@ function saveSandboxMemory(): void {
   save({ sandboxMemory: value })
 }
 
-// Hoisted like TABS / MODE_CHOICES / MODEL_SECTIONS: an array literal written
-// inline in a v-for is rebuilt on every render, and these never change.
 const FONT_SIZES = [
   ['sm', 'Small'],
   ['md', 'Medium'],
   ['lg', 'Large'],
 ] as const satisfies readonly (readonly [Settings['fontSize'], string])[]
 
-// Models this subscription can select, read from the CLI by the main process
-// and owned by the settings store. The cards are built from that list alone —
-// no hardcoded catalogue — so a model released today is selectable today, and a
-// retired one stops being offered.
 const availableModels = computed(() => store.availableModels)
-// Split by engine. The Intelligent/Worker pickers below drive the Claude Agent
-// SDK's own pairing, so offering a Codex id there would let the developer pick a
-// model that session could never run; the Codex model has its own field.
 const claudeModels = computed(() => availableModels.value.filter((m) => engineOf(m) === 'claude'))
 const codexModels = computed(() => availableModels.value.filter((m) => engineOf(m) === 'codex'))
 const modelChoices = computed<ModelChoice[]>(() => [
@@ -267,13 +193,6 @@ const modelChoices = computed<ModelChoice[]>(() => [
   })),
 ])
 
-/**
- * The Codex picker's cards.
- *
- * Labels and descriptions come from the Codex CLI's own `model/list`, not from a
- * catalogue kept here — the same rule the Claude list follows. No price column:
- * Codex reports none, and inventing one would be a figure this app made up.
- */
 const codexChoices = computed<ModelChoice[]>(() => [
   {
     id: '',
@@ -297,7 +216,6 @@ const ENGINE_CHOICES: { id: SessionEngine; label: string; desc: string }[] = [
   },
 ]
 
-// Advisor/Orchestrator pairing modes (see src/main/sessions/modes.ts).
 const MODE_CHOICES: { id: Settings['modelMode']; label: string; desc: string }[] = [
   {
     id: 'auto',
@@ -321,8 +239,6 @@ const MODE_CHOICES: { id: Settings['modelMode']; label: string; desc: string }[]
   },
 ]
 
-// The Intelligent and Worker model pickers are the same card list bound to
-// a different Settings field — render both from one loop.
 const MODEL_SECTIONS = [
   {
     key: 'intelligentModel',
@@ -342,15 +258,11 @@ function setModel(key: 'intelligentModel' | 'workerModel', id: string): void {
   save(key === 'intelligentModel' ? { intelligentModel: id } : { workerModel: id })
 }
 
-// Allowed list tab (design): risk auto-approve + per-project command rules.
 const { allowedRules, newCmd, setRuleMode, addAllowedCommand } = useAllowedRules({
   projectId: () => proj.value?.id,
   active: () => tab.value === 'allowed',
 })
 
-// --- Database MCP (General tab): designate which reported MCP server is the DB.
-// Options are the union of MCP servers reported by any live session, plus the
-// current designation so it stays visible even when no session reports it. ---
 const dbMcpInput = ref('')
 const mcpServerNames = computed(() => {
   const names = new Set<string>()
@@ -373,13 +285,9 @@ function toggleDatabaseMcp(name: string): void {
   const activeNow = settings.value.mcpActiveServers
   const adding = !current.includes(name)
   const next = adding ? [...current, name] : current.filter((n) => n !== name)
-  // A server added to the view defaults to active in the chat combination; a
-  // removed one leaves the combination too (it is no longer tickable).
   const nextActive = adding
     ? [...new Set([...activeNow, name])]
     : activeNow.filter((n) => n !== name)
-  // Apply locally first so a second quick click computes from this state, not
-  // the pre-save snapshot (the save round-trip would otherwise drop a toggle).
   settings.value.databaseMcpServers = next
   settings.value.mcpActiveServers = nextActive
   save({ databaseMcpServers: next, mcpActiveServers: nextActive })
@@ -413,7 +321,6 @@ const updateLine = computed(() => {
     case 'none':
       return 'You are on the latest version.'
     case 'error':
-      // Not always a *check* failure — the message says what actually failed.
       return `Update problem: ${s.message ?? 'unknown error'}`
     default:
       return 'Updates are delivered from GitHub releases.'
@@ -430,7 +337,6 @@ const updateLine = computed(() => {
       aria-modal="true"
       aria-label="Settings"
       tabindex="-1" data-testid="settings-panel">
-      <!-- Header -->
       <div class="s-head">
         <Icon name="settings" class="gear" />
         <span class="s-title mono">Settings</span>
@@ -446,7 +352,6 @@ const updateLine = computed(() => {
       </div>
 
       <div class="s-main">
-        <!-- Left tab rail -->
         <div class="rail">
           <button
             v-for="t in TABS"
@@ -465,9 +370,7 @@ const updateLine = computed(() => {
           </div>
         </div>
 
-        <!-- Content pane -->
         <div v-if="settings" class="s-body">
-          <!-- MODELS -->
           <template v-if="tab === 'models'">
             <div class="group">
               <div class="group-label mono">MODE</div>
@@ -515,9 +418,6 @@ const updateLine = computed(() => {
               </div>
             </div>
 
-            <!-- The other engine. Its own group rather than more cards in the
-                 lists above, because a Codex session runs ONE model and has no
-                 advisor/worker pairing to take part in. -->
             <div class="group">
               <div class="group-label mono">ENGINE FOR NEW SESSIONS</div>
               <div class="group-desc">
@@ -598,7 +498,6 @@ const updateLine = computed(() => {
             </div>
           </template>
 
-          <!-- THIS PROJECT -->
           <template v-else-if="tab === 'proj'">
             <div v-if="!proj" class="note">No projects yet — add one from the sidebar first.</div>
             <template v-else>
@@ -618,7 +517,6 @@ const updateLine = computed(() => {
                     <Icon name="chevron-down" class="dd-arrow" :class="{ open: projDd }" :size="11" />
                   </button>
                   <div v-if="projDd" class="dd-list">
-                    <!-- The field keeps DOM focus while the list moves under it. -->
                     <input
                       ref="projFilterEl"
                       v-model="projFilter"
@@ -651,8 +549,6 @@ const updateLine = computed(() => {
                         </span>
                         <span class="mono">{{ p.name }}</span>
                       </button>
-                      <!-- Named, not blank: a filter that matches nothing should say
-                           what it matched nothing against. -->
                       <div
                         v-if="projMatches.length === 0"
                         class="dd-empty mono"
@@ -668,9 +564,6 @@ const updateLine = computed(() => {
                 </div>
               </div>
 
-              <!-- The mode chosen when the project was added, changeable here. Same
-                   card idiom as the model sections below rather than a second kind of
-                   picker, so one project tab reads as one list of settings. -->
               <div class="group">
                 <div class="group-label mono">SESSION TYPE</div>
                 <div class="group-desc">
@@ -702,7 +595,6 @@ const updateLine = computed(() => {
             </template>
           </template>
 
-          <!-- MCP -->
           <template v-else-if="tab === 'mcp'">
             <div class="group-label mono">MCP SERVERS</div>
             <div class="group-desc">
@@ -751,7 +643,6 @@ const updateLine = computed(() => {
             </div>
           </template>
 
-          <!-- ALLOWED LIST -->
           <template v-else-if="tab === 'allowed'">
             <div class="group-label mono">AUTO-APPROVE BY RISK</div>
             <div class="group-desc">
@@ -846,7 +737,6 @@ const updateLine = computed(() => {
             </div>
           </template>
 
-          <!-- SKILLS -->
           <template v-else-if="tab === 'skills'">
             <div class="group-label mono">IMPORT FROM GITHUB</div>
             <div class="group-desc">
@@ -877,10 +767,6 @@ const updateLine = computed(() => {
               </button>
             </div>
 
-            <!-- What the URL says, read by the importer's own parser before a
-                 single request is made. The field was opaque until now: the only
-                 way to learn that a URL was not even a repository was to press
-                 Import and wait for the round trip to fail. -->
             <div v-if="skillSource" id="skills-url-reading" class="skill-reading" aria-live="polite">
               <div
                 v-if="skillSourceParts"
@@ -898,10 +784,6 @@ const updateLine = computed(() => {
               </div>
             </div>
 
-            <!-- Said plainly, once, where the developer is about to paste a URL.
-                 The import itself never executes anything from the repository, but
-                 a skill IS instructions a session will follow, and that is the part
-                 no mechanism can check for them. -->
             <div class="group-desc skills-caution">
               <Icon name="warning" :size="11" /> A skill is a set of instructions a session will
               follow. Import from repositories you trust, and read a skill before switching it on.
@@ -915,10 +797,6 @@ const updateLine = computed(() => {
               class="skills-skipped"
               data-testid="skills-skipped"
             >
-              <!-- One per line with the name apart from the reason. These ran
-                   together as a single wrapped sentence, which is unreadable at
-                   the point it matters most: eight of ten imported, and the two
-                   that did not are the whole message. -->
               <div class="skipped-head mono">
                 Skipped {{ skills.lastImport.skipped.length }} of
                 {{ skills.lastImport.skipped.length + skills.lastImport.imported.length }}
@@ -934,9 +812,6 @@ const updateLine = computed(() => {
               None yet.
             </div>
 
-            <!-- Grouped by the repository each skill came from, so the source is
-                 stated once for a dozen skills instead of a dozen times, and so
-                 the whole of one source can be switched off in one click. -->
             <div
               v-for="group in skillsBySource"
               :key="group.url"
@@ -1005,7 +880,6 @@ const updateLine = computed(() => {
             </div>
           </template>
 
-          <!-- TERMINALS -->
           <template v-else-if="tab === 'term'">
             <div class="group-label mono">OUTPUT</div>
             <div class="group-desc">How each session's output looks and behaves.</div>
@@ -1239,7 +1113,6 @@ const updateLine = computed(() => {
             </div>
           </template>
 
-          <!-- GENERAL -->
           <template v-else>
             <div class="group-label mono">NOTIFICATIONS</div>
             <div class="group-desc">How Switchboard gets your attention.</div>
@@ -1296,7 +1169,6 @@ const updateLine = computed(() => {
         </div>
       </div>
 
-      <!-- Footer -->
       <div class="s-foot mono">
         <span>Changes apply immediately</span>
         <span class="spacer"></span>
@@ -1308,13 +1180,6 @@ const updateLine = computed(() => {
 
 <style scoped>
 .settings {
-  /* This dialog used to alias the generic ink token at 9 and 22 per cent to
-     draw the edge of a clickable card. Against the light surface that computed
-     to roughly 1.0-1.4:1, under the 3:1 floor styles.css itself documents for a
-     control's own boundary, and it is why the option list read as one flat
-     field rather than a set of choices. The app already has boundary tokens for
-     that role and the rest of it uses them; this was the one place reinventing
-     them. Dialog and dropdown shadows come from --shadow-dlg / --shadow-dd. */
   width: 730px;
   max-width: 94vw;
   height: 580px;
@@ -1326,18 +1191,12 @@ const updateLine = computed(() => {
   box-shadow: var(--shadow-dlg);
 }
 
-/* This dialog's own overlay tint/blur (design: separate from other dialogs') —
-   scoped so it only touches the overlay this component renders. */
 .overlay {
   background: color-mix(in srgb, var(--bg) 62%, transparent);
   backdrop-filter: blur(3px);
   -webkit-backdrop-filter: blur(3px);
 }
 
-/* On paper this was 62% graphite: a near-blackout under one dialogue while every
-   other dialogue in the theme used the pale --scrim, so light mode dimmed two
-   different ways depending on which control you opened. --scrim is now itself a
-   graphite veil, so this tier can just use it. */
 html.sb-light .overlay {
   background: var(--scrim);
 }
@@ -1406,12 +1265,6 @@ html.sb-light .overlay {
   box-shadow: var(--elev);
 }
 
-/* Neutral, and deliberately NOT the green wash the option cards use. The rail
-   says WHERE YOU ARE; a card says WHAT YOU CHOSE. Those are different questions
-   and a reader answers them at different moments, so giving both the same
-   accent would put two green washes on screen at once, each meaning something
-   the other does not. The green stays on the rail's icon alone, which marks the
-   position without competing with the choice the panel is actually asking for. */
 .rail-tab.sel {
   background: var(--bg-active);
   border-color: var(--border-strong);
@@ -1449,15 +1302,6 @@ html.sb-light .overlay {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  /* Says there is more below. The panel scrolls against a fixed footer whose
-     divider is held to no contrast floor, so a row clipped mid-height looked
-     like the end of the list rather than the middle of it. The mask fades the
-     last few pixels only while there is something to scroll to: scroll to the
-     bottom and it resolves to a hard edge again. */
-  /* #000 here is a STENCIL, not a colour: a mask reads the alpha channel only,
-     so the hue never reaches the screen and a palette token would be both
-     meaningless and misleading in its place. Opaque means "keep", transparent
-     means "fade". */
   mask-image: linear-gradient(to bottom, #000 calc(100% - 18px), transparent 100%);
   mask-size: 100% calc(100% + 18px);
   mask-repeat: no-repeat;
@@ -1562,16 +1406,10 @@ html.sb-light .overlay {
   flex-shrink: 0;
 }
 
-/* MCP tab: a checkbox + database icon before the server name (design). */
 .mcp-check {
   flex-shrink: 0;
   width: 18px;
   height: 18px;
-  /* A fold is a cut: corners are square. The comment that used to sit here
-     called 3px "the documented content radius", which was never true — the
-     content radius is --rc, and it is 0. Both this and EvalsView's callout were
-     leftovers from the replaced world's softer corners, missed when the token
-     changed (DESIGN.md, Shapes: "drift to fix, not a third named exception"). */
   border-radius: var(--rc);
   border: 1.5px solid var(--border-strong);
   color: var(--green-ink);
@@ -1631,8 +1469,6 @@ html.sb-light .overlay {
   outline: none;
 }
 
-/* The sandbox memory field: a short boxed input on the setting row's right,
-   where the other rows put their toggle or segmented control. */
 .sandbox-mem-input {
   flex: 0 0 72px;
   text-align: right;
@@ -1670,9 +1506,6 @@ html.sb-light .overlay {
   position: relative;
 }
 
-/* THE SEARCHABLE DROPDOWN. Trigger geometry and open state from the pinned
-   reference (design.dev searchable dropdown), rendered in this world's accent
-   rather than its cyan. */
 .dd {
   display: flex;
   align-items: center;
@@ -1684,15 +1517,10 @@ html.sb-light .overlay {
   border: 1px solid var(--border-strong);
   cursor: pointer;
   text-align: left;
-  /* The trigger takes the panel's own radius, so the closed control and the open
-     list read as one object. The reference says 10px for the trigger and 12px
-     for the panel; agreeing on one is better than being faithful to two. */
   border-radius: var(--r-panel);
   transition: border-color 120ms var(--ease), box-shadow 120ms var(--ease);
 }
 
-/* Open takes the accent border and a soft ring, so the trigger and the panel
-   below it read as one object rather than two stacked ones. */
 .dd.open {
   border-color: var(--green);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--green) 16%, transparent);
@@ -1741,8 +1569,6 @@ html.sb-light .overlay {
   top: calc(100% + 6px);
   left: 0;
   right: 0;
-  /* Opaque, like every other floating panel here: --bg-hover is a translucent
-     wash and let the settings behind it show through the options. */
   background: var(--surface-overlay);
   border: 1px solid var(--border-card);
   border-radius: var(--r-panel);
@@ -1779,8 +1605,6 @@ html.sb-light .overlay {
   outline: none;
 }
 
-/* The list scrolls; the field above it does not, so typing never chases the
-   input off the top of the panel. */
 .dd-scroll {
   max-height: 260px;
   overflow-y: auto;
@@ -1863,9 +1687,6 @@ html.sb-light .overlay {
   text-wrap: pretty;
 }
 
-/* When a setting does not take effect where the developer just flipped it, that
-   sentence is the whole point of the paragraph. Its own line, brighter, not bold
-   prose buried mid-description. */
 .sr-warn {
   display: block;
   margin-top: 5px;
@@ -1898,8 +1719,6 @@ html.sb-light .overlay {
   color: var(--text-strong);
 }
 
-/* Allowed-list rows (design): the Auto pill, once active, gets its own
-   lower-emphasis green treatment distinct from the generic seg selection. */
 .seg-auto.on {
   background: color-mix(in srgb, var(--green) 15%, transparent);
   color: var(--green);
@@ -1940,8 +1759,6 @@ html.sb-light .overlay {
   color: var(--text-faint);
 }
 
-/* Design's toggle track/knob are rounded rects (var(--rc)), not a pill — scoped
-   here so it only reshapes the switches this dialog renders. */
 .switch {
   border-radius: var(--rc);
 }
@@ -1949,8 +1766,6 @@ html.sb-light .overlay {
 .switch .knob {
   border-radius: var(--rc);
 }
-/* Skills tab. The caution line is amber because it is attention owed, not an
-   error; the world reserves red for something that has actually gone wrong. */
 .skills-caution {
   display: flex;
   align-items: flex-start;
@@ -1980,8 +1795,6 @@ html.sb-light .overlay {
 .skipped-one {
   display: flex;
   gap: 6px;
-  /* The name is the identity and the reason is the explanation. Indented as a
-     pair so a list of four reads as four entries rather than as prose. */
   padding-left: 8px;
 }
 
@@ -1995,7 +1808,6 @@ html.sb-light .overlay {
   color: var(--text-faint);
 }
 
-/* --- What the pasted URL says, before anything is requested --- */
 
 .skill-reading {
   margin-top: 6px;
@@ -2032,14 +1844,10 @@ html.sb-light .overlay {
   color: var(--amber);
 }
 
-/* A malformed URL is amber on the field, not red: nothing has failed yet, and it
-   is usually a URL half-typed rather than a URL wrong. Red is kept for an import
-   that actually came back with an error (.skills-err above). */
 .add-cmd-input.bad {
   color: var(--amber-ink);
 }
 
-/* --- Imported skills, grouped by the repository they came from --- */
 
 .skill-group {
   margin-bottom: 14px;
@@ -2103,8 +1911,6 @@ html.sb-light .overlay {
 .skills-remove:hover {
   color: var(--red);
 }
-/* The row Enter would take. Distinct from :hover on purpose — the pointer and
-   the keyboard can be on two different rows, and the one that acts is this. */
 .dd-item.active {
   background: color-mix(in srgb, var(--green) 12%, transparent);
   color: var(--text-strong);

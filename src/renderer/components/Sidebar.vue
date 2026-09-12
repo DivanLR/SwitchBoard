@@ -1,7 +1,4 @@
 <script setup lang="ts">
-// Sidebar — 1:1 with the design reference: logo, PROJECTS list with status
-// fold marks, mono names, per-project pending badges, branch + timer line,
-// and the running / needs-you / cost-today stats card (FR-003/004/005).
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { isIpcError } from '@shared/ipc-types'
 import { modelLabel, type ProjectGroup, type Session } from '@shared/domain'
@@ -11,8 +8,6 @@ import { useProjectsStore } from '@renderer/stores/projects'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useInboxStore } from '@renderer/stores/inbox'
 import { useSettingsStore } from '@renderer/stores/settings'
-// accentFor is gone from this file with the identity bar it coloured; the six-hue
-// rotation still lives on in the group swatches, which read GROUP_COLORS.
 import { GROUP_COLORS, mcpStatusColor } from '@renderer/project-accent'
 import { elapsedClock } from '@renderer/relative-time'
 import { useProjectGroups } from '@renderer/composables/useProjectGroups'
@@ -26,24 +21,8 @@ const activeSession = useActiveSessionStore()
 const inbox = useInboxStore()
 const settings = useSettingsStore()
 
-// Agents working in parallel, listed under the project row (design); clicking
-// one opens its chat view in the session pane.
-// ponytail: events exist client-side only for the selected project's session,
-// so other rows stay plain; push agent names via sessionStatus if that matters.
 const parallelAgents = computed(() => activeAgents(activeSession.events))
 
-/**
- * Agents-by-project, cached instead of rebuilt on every read.
- *
- * The old agentsFor(item) function ran TWICE per project row — the v-if
- * gating the block and the v-for reading it — allocating a fresh array each
- * time, which also left the v-for's source referentially unstable across
- * renders (a new array identity every render, even when nothing changed).
- * Only the selected, working project can ever have an entry (see the
- * ponytail note above: agent events only exist client-side for the selected
- * project's session), so this map holds at most one key regardless of how
- * many projects are in the list.
- */
 const agentsByProject = computed<Record<string, { id: string; name: string; task: string }[]>>(
   () => {
     const selectedId = projects.selectedProjectId
@@ -62,27 +41,13 @@ const emit = defineEmits<{
   (e: 'open-settings'): void
 }>()
 
-// Short label of the current work model for the settings row (design).
 const modelSummary = computed(() => {
   const id = settings.settings?.intelligentModel ?? 'default'
   if (id === 'default') return 'default model'
   return modelLabel(id)
 })
 
-// --- Theme + collapse toggles (design: icon buttons beside the logo) ---
 const collapsed = ref(false)
-// Theme reads localStorage directly rather than the settings store, and this is
-// deliberate, not an oversight: the theme class has to be on <html> before first
-// paint, localStorage is synchronous and readable at module init, and the
-// settings store's load() is an await behind an IPC round trip — routing theme
-// through it would flash the wrong theme on every launch. It is also pure
-// renderer chrome with nothing in the main process that ever reads it, unlike
-// every other preference, which lives in SQLite via the settings store.
-// LIGHT is the default from 2026-08-21, on the owner's direction: the app's
-// world moved to a light card surface, and a dark default would mean every new
-// install met a theme the design no longer leads with. An existing developer's
-// stored choice still wins, in either direction, which is why this reads the
-// key for 'dark' rather than assuming an absent key means the old default.
 const theme = ref<'dark' | 'light'>(localStorage.getItem('sb-theme') === 'dark' ? 'dark' : 'light')
 
 function applyTheme(): void {
@@ -94,16 +59,13 @@ function toggleTheme(): void {
   localStorage.setItem('sb-theme', theme.value)
   applyTheme()
 }
-applyTheme() // restore the persisted choice on startup
+applyTheme() 
 
-/** Compact row label while collapsed: initials of the first two words. */
 function initials(name: string): string {
   const words = name.split(/[^a-zA-Z0-9]+/).filter(Boolean)
   return (words.length > 1 ? `${words[0][0]}${words[1][0]}` : name.slice(0, 2)).toLowerCase()
 }
 
-// Stable per-project accent colour on the lane rule (shared with the
-// session header dot) — identifies the project at a glance in the collapsed rail.
 const now = useNow(1000)
 onMounted(() => {
   if (!settings.settings) void settings.load()
@@ -119,38 +81,12 @@ function timerOf(startedAt: string): string {
   return elapsedClock(startedAt, now.value)
 }
 
-// Defaults to shown, including in the moment before settings have loaded: a clock
-// that appears a beat late is a smaller surprise than one that flickers away.
 const showTimer = computed(() => settings.settings?.showSessionTimer ?? true)
 
-/**
- * Which state matters most when a project is running several sessions at once. The
- * project row can only draw one mark, and it must be the one that needs the developer:
- * PRODUCT.md's whole premise is knowing at a glance which project is blocked, so a
- * held session must not be hidden behind a focused one that happens to be idle.
- *
- * Lower index wins. Error before needs-you because a misfold is not going to clear
- * itself; both before working, which needs nothing from anyone.
- */
 const STATUS_URGENCY = ['error', 'needs_you', 'working', 'done', 'ended', 'none']
 
-/**
- * The states that mean a session actually exists behind this lane.
- *
- * Derived from the urgency list rather than spelled out again: everything above
- * 'ended' has a live process. 'done' belongs here and is the one worth naming —
- * the turn finished, the session did not, so the lane is still live and still
- * yours to type into. Only a session that ended, or a project that never started
- * one, reads as idle.
- */
 const LIVE_STATES = new Set(STATUS_URGENCY.slice(0, STATUS_URGENCY.indexOf('ended')))
 
-/**
- * The project row's own mark: the most urgent state across every session it is
- * running, not the state of whichever one the pane happens to be showing. With one
- * session — the only case that existed before subsessions — this is exactly the old
- * answer, because the list holds that one session and nothing else.
- */
 function statusOf(item: (typeof projects.items)[number]): string {
   const states = item.sessions.map((s) => (s.endedAt ? 'ended' : s.status))
   if (states.length === 0) return item.session ? statusOfSession(item.session) : 'none'
@@ -163,35 +99,18 @@ function statusOfSession(session: Session): string {
   return session.endedAt ? 'ended' : session.status
 }
 
-/**
- * A lane reads expanded — its branch line showing — when it is selected OR when its
- * session is still running. Selection alone was the old rule, which meant a project
- * working away in the background collapsed to a single line the moment you looked at
- * another one, and the board's busiest rows were the least legible. A lane that has
- * ended, or never started, stays on one line: nothing about it is changing.
- */
 function isExpanded(item: (typeof projects.items)[number]): boolean {
   return (
     item.id === projects.selectedProjectId || item.sessions.some((s) => !s.endedAt)
   )
 }
 
-/**
- * Each project's lane status, resolved once per change instead of per read.
- *
- * The row template asks for this nine times — the class, two data attributes,
- * the title, and a five-way branch picking the fold mark — so calling the
- * function inline re-derived the same answer nine times per row, on every
- * render of a list that redraws whenever any session ticks.
- */
 const statusById = computed<Record<string, string>>(() => {
   const out: Record<string, string> = {}
   for (const item of projects.items) out[item.id] = statusOf(item)
   return out
 })
 
-/** Plain language, no vocabulary to learn. Hover and screen readers get the same
- *  words, and the mark beside them only narrows the guess. */
 function markTitle(status: string): string {
   if (status === 'needs_you') return 'Needs you'
   if (status === 'working') return 'Working'
@@ -200,12 +119,6 @@ function markTitle(status: string): string {
   return 'Done'
 }
 
-/**
- * The one set character that stands for a lane's state, per DESIGN.md's fold
- * vocabulary. A function rather than the template's own v-if chain because a project
- * row and each of its subsession rows now draw the same mark, and two copies of this
- * mapping would be two places for a state to go missing.
- */
 function glyphFor(status: string): string {
   if (status === 'needs_you') return '!'
   if (status === 'working') return '»'
@@ -214,19 +127,8 @@ function glyphFor(status: string): string {
   return '—'
 }
 
-/** A single session's lane state; see statusOfSession, which this simply names. */
 const sessionStatus = statusOfSession
 
-/**
- * Whether this subsession row is the one the centre pane is showing.
- *
- * `item.session` is every project's OWN focused session and is set whether or
- * not that project is the one open, so testing it alone marked a row selected
- * in every project at once: switch to another project and the row you left
- * stayed lit, claiming to be what the pane was showing when it was not. The
- * selection mark answers "is this what I am looking at", and that is two facts,
- * not one — the project has to be the open one as well.
- */
 function isFocusedSub(item: (typeof projects.items)[number], sessionId: string): boolean {
   return item.id === projects.selectedProjectId && item.session?.id === sessionId
 }
@@ -236,39 +138,16 @@ function focusSub(projectId: string, sessionId: string): void {
   projects.focusSession(projectId, sessionId)
 }
 
-/**
- * Ends one session, leaving the project and its other sessions alone.
- *
- * No confirmation. Ending a session is not destructive — the transcript stays,
- * the row stays, and it can be resumed — and the existing End session control in
- * the header does not ask either. A dialogue here would be the only one.
- */
 function endOneSession(sessionId: string): void {
   void projects.endSessions([sessionId])
 }
 
-/**
- * Pending-request count per project, resolved once per change instead of
- * per read.
- *
- * pendingFor used to re-scan the whole of inbox.pending with a fresh
- * .filter() on every call, and the template calls it FOUR times per project
- * row (the two badges, each printing the count and gating on it) plus once
- * more per section in `sections`' reduce — and useNow(1000) redraws this
- * entire list every second, so that was a full re-scan of the inbox for
- * every row, every tick. Exactly the cost statusById above already exists to
- * avoid, just against inbox.pending instead of projects.items.
- */
 const pendingByProject = computed<Record<string, number>>(() => {
   const out: Record<string, number> = {}
   for (const item of inbox.pending) out[item.projectId] = (out[item.projectId] ?? 0) + 1
   return out
 })
 
-// --- Global database session (design: one project-less MCP chat, bound to the
-// reserved "Database" project — see main/index.ts — rather than to whichever
-// project happens to be selected. It starts on demand from the DB view, like
-// any project; there is no launch auto-start. ---
 const dbProject = computed(() => projects.dbProject)
 const dbServers = computed(() => settings.settings?.databaseMcpServers ?? [])
 function mcpStatusOf(name: string): string {
@@ -276,10 +155,6 @@ function mcpStatusOf(name: string): string {
   if (!session || session.endedAt) return 'not started'
   return session.mcpServers?.find((m) => m.name === name)?.status ?? 'connecting'
 }
-// Collapsible project groups (sidebar-only organisation, kept in Settings
-// beside the other per-project maps, so it persists with no schema change).
-// The inline-rename refs are declared here because the same pair also renames
-// PROJECTS, which is the context menu's business rather than the group CRUD's.
 const renamingGroupId = ref<string | null>(null)
 const renameVal = ref('')
 const {
@@ -294,8 +169,6 @@ const {
   moveGroup,
 } = useProjectGroups({ renamingGroupId, renameVal })
 
-/** Sidebar filter (design: the ⌕ box under the logo). Narrows the list by name
- *  or branch — with a dozen projects, scanning beats scrolling. */
 const filterQuery = ref('')
 const filtered = computed(() => {
   const q = filterQuery.value.trim().toLowerCase()
@@ -305,14 +178,6 @@ const filtered = computed(() => {
   )
 })
 
-/**
- * The sections as the sidebar draws them: colour, fold state, count and pending
- * total per group, then the ungrouped tail.
- *
- * Filtering overrides folding — a folded group that holds a match opens rather
- * than hiding it — and a group with no match drops out entirely, so what is left
- * on screen is exactly what matched.
- */
 const sections = computed(() => {
   const filtering = filterQuery.value.trim().length > 0
   const withColor = groups.value.map((group, index) => ({
@@ -327,20 +192,17 @@ const sections = computed(() => {
       return {
         group: section.group,
         items: section.items,
-        // The tail is only worth labelling once a group exists to contrast it.
         head: !!section.group || groups.value.length > 0,
         name: section.group?.name ?? 'Ungrouped',
         color: section.group?.color ?? 'var(--text-faint)',
         folded,
         pending: section.items.reduce((sum, item) => sum + (pendingByProject.value[item.id] ?? 0), 0),
-        // Only a real, open, unfiltered group invites a drop when it is empty.
         emptyOpen: !!section.group && !folded && !filtering && section.items.length === 0,
       }
     })
     .filter((section) => !filtering || section.items.length > 0)
 })
 
-// --- Context menu (right-click) + inline rename ---
 const ctx = ref<{
   kind: 'project' | 'group'
   id: string
@@ -350,9 +212,6 @@ const ctx = ref<{
 } | null>(null)
 const renamingId = ref<string | null>(null)
 
-// Function refs run on every re-render (each keystroke updates renameVal), so
-// only focus+select when the input isn't already focused — otherwise typing
-// gets select()-ed away after every character.
 function focusOnMount(el: unknown): void {
   if (el instanceof HTMLInputElement && document.activeElement !== el) {
     el.focus()
@@ -416,7 +275,6 @@ function ctxMove(delta: number): void {
   ctx.value = null
 }
 
-/** Context-menu "Move to" — the keyboard-free route into a group. */
 function ctxAssign(groupId: string | null): void {
   if (!ctx.value || ctx.value.kind !== 'project') return
   assignGroup(ctx.value.id, groupId)
@@ -430,16 +288,6 @@ function ctxNewGroup(): void {
   newGroup(projectId)
 }
 
-/**
- * Starts another session in this project, alongside whatever it is already running.
- * It uses the project's own session mode, like every other start that names none.
- * Failures land on the store's `starting` state and the ended-session banner the same
- * way the other start paths do, so this deliberately does not grow its own error UI.
- *
- * Reached from the row's own ＋ and from the context menu. The context menu used to
- * be the only way, which meant a project could run as many sessions as it liked and
- * nothing on screen ever said so.
- */
 async function startAnotherSession(projectId: string): Promise<void> {
   projects.select(projectId)
   await projects.startSession(projectId).catch(() => {})
@@ -452,21 +300,12 @@ async function ctxNewSession(): Promise<void> {
   await startAnotherSession(projectId)
 }
 
-/** The live sessions of the right-clicked project, for the end-all item. */
 const ctxLiveSessions = computed<string[]>(() => {
   if (ctx.value?.kind !== 'project') return []
   const project = projects.items.find((p) => p.id === ctx.value?.id)
   return (project?.sessions ?? []).filter((s) => !s.endedAt).map((s) => s.id)
 })
 
-/**
- * End every session this project is running.
- *
- * Ending them one at a time was the only way, which is tedious at two and
- * genuinely annoying at four — and a project accumulates them, since a section
- * starts its own. Ended sessions drop out of the list on the refresh that
- * follows, so this is also how the row count comes back down.
- */
 async function ctxEndAll(): Promise<void> {
   const ids = ctxLiveSessions.value
   ctx.value = null
@@ -479,9 +318,6 @@ function ctxRemoveGroup(): void {
   ctx.value = null
 }
 
-// Drag & drop (design): drag a row to REORDER only; dropping into a group's
-// header or rows also joins it, and OS files dropped on a row insert their
-// @path into that project's composer.
 const {
   rowDrop,
   groupDrop,
@@ -493,9 +329,6 @@ const {
   onDragEnd,
 } = useProjectDragDrop({ groupOf, assignGroup })
 
-// --- Archive a project, via a confirmation popup. The testids still say
-// "remove": archiving IS what remove always did underneath (archivedAt), the
-// change is that the row now stays reachable in the Archived section below. ---
 const confirmRemoveId = ref<string | null>(null)
 const removeError = ref<string | null>(null)
 const busy = ref(false)
@@ -514,8 +347,6 @@ function cancelRemove(): void {
   removeError.value = null
 }
 
-// --- Change folder (repoint): declared before the shared overlay keydown/watch
-// below, which read repointId at setup time ---
 const repointId = ref<string | null>(null)
 const repointVal = ref('')
 const repointError = ref<string | null>(null)
@@ -557,11 +388,6 @@ async function commitRepoint(): Promise<void> {
   }
 }
 
-// Escape closes whichever overlay is open, and opening one moves focus into it.
-// These live in Sidebar rather than in useModal because both are v-if blocks
-// inside a component that mounts once, so a composable's onMounted would fire
-// long before either overlay exists. Without this the context menu could only be
-// dismissed with the mouse, and the remove dialogue could not be reached at all.
 function onOverlayKeydown(event: KeyboardEvent): void {
   if (event.key === 'Tab' && (confirmRemoveId.value || repointId.value)) {
     trapTab(event)
@@ -580,9 +406,6 @@ function onOverlayKeydown(event: KeyboardEvent): void {
   }
 }
 
-/** Keeps Tab inside the open remove/repoint dialog, using the same trap useModal
- *  applies — shared so the two cannot drift apart, even though this overlay
- *  cannot use the mount-time composable itself (see the note above). */
 function trapTab(event: KeyboardEvent): void {
   const dialog = document.querySelector<HTMLElement>(
     '[data-testid="remove-dialog"], [data-testid="repoint-dialog"]',
@@ -619,8 +442,6 @@ async function confirmRemoveNow(): Promise<void> {
   }
 }
 
-// --- Archived section: folded by default, because putting a project away is
-// the point. Fold state is per launch; nothing about it is worth a setting. ---
 const archivedFolded = ref(true)
 
 function restore(projectId: string): void {
@@ -661,7 +482,6 @@ function restore(projectId: string): void {
       </div>
     </div>
 
-    <!-- Filter (design): narrows the list by project name or branch. -->
     <div v-if="!collapsed" class="filter-wrap">
       <div class="filter" :class="{ on: filterQuery.length > 0 }">
         <span class="filter-icon mono"><Icon name="search" :size="13" /></span>
@@ -685,8 +505,6 @@ function restore(projectId: string): void {
     </div>
 
     <div class="project-list">
-      <!-- Sticky above the rows (design), so the heading and its controls stay
-           reachable however far the list is scrolled. -->
 
       <div class="section-row">
         <template v-if="!collapsed">
@@ -694,10 +512,6 @@ function restore(projectId: string): void {
           <span class="section-count mono" data-testid="project-count">{{ filtered.length }}</span>
         </template>
         <span class="spacer"></span>
-        <!-- The plus leads and the stack sits under it, so the mark reads add
-             first. The words belong to the row rather than to the button: they
-             borrow the heading's own label voice and sit out in the margin, where
-             no amount of text can push the row's controls around. -->
         <button
           v-if="!collapsed"
           class="add add-caption"
@@ -717,17 +531,11 @@ function restore(projectId: string): void {
           </svg>
           <span class="caption section-label">Add group</span>
         </button>
-        <!-- Single line, no surrounding whitespace: a text node around the glyph
-             becomes a flex text run with trailing space that shifts + off-centre. -->
         <button class="add mono" data-testid="add-project" title="New session" @click="emit('add-project')"><Icon name="plus" :size="13" /></button>
       </div>
 
 
       <template v-for="section in sections" :key="section.group?.id ?? UNGROUPED">
-        <!-- Group header: click to fold, right-click for rename/reorder/remove,
-             and a drop target for dragging a project in. Hidden on the collapsed
-             rail, where there is no room for headers. The ungrouped tail uses the
-             same header, so it folds and accepts a drop like any other. -->
         <div
           v-if="section.head && !collapsed"
           class="group-head"
@@ -778,7 +586,6 @@ function restore(projectId: string): void {
           </button>
         </div>
 
-        <!-- An empty open group says what it is for, and takes the drop itself. -->
         <div
           v-if="section.emptyOpen && !collapsed"
           class="group-empty"
@@ -817,12 +624,6 @@ function restore(projectId: string): void {
         @dragend="onDragEnd"
       >
         <div class="active-bg"></div>
-        <!-- Lane identity is a 1px stroke in the lane's own colour, run the full
-             height of the row: still a stroke, never a coloured edge bar. The
-             scored fold tick this replaced stood 26px in a 51px row, so it read as
-             a fragment of a rule rather than as the lane's own edge. Drawn in CSS,
-             because a hairline that has to match the row's height exactly is a
-             worse job for artwork than for a border. -->
         <span
           class="brace"
           :data-testid="`project-accent-${item.name}`"
@@ -830,10 +631,6 @@ function restore(projectId: string): void {
         ></span>
         <div class="content">
           <div class="row">
-            <!-- The lane's current sign: one set character in the state colour,
-                 nothing behind it. HELD asks for you, DEPLOYING advances, MISFOLD
-                 contradicts itself, PACKED FLAT closes to a point, and LOCKED is a
-                 seated rule. The word beside it still settles it. -->
             <span
               v-if="statusById[item.id] !== 'none'"
               class="mark"
@@ -844,8 +641,6 @@ function restore(projectId: string): void {
             >
               <span class="glyph" aria-hidden="true">{{ glyphFor(statusById[item.id]) }}</span>
             </span>
-            <!-- Collapsed rail: initials (+ pending badge). One template so the
-                 v-else below always pairs with the collapsed check itself. -->
             <template v-if="collapsed">
               <span class="initials mono">{{ initials(item.name) }}</span>
               <span
@@ -876,7 +671,6 @@ function restore(projectId: string): void {
               >
                 {{ pendingByProject[item.id] ?? 0 }}
               </span>
-              <!-- Design: the elapsed time rides on the title line, not below it. -->
               <span
                 v-if="item.session && !item.session.endedAt && showTimer"
                 class="timer mono"
@@ -884,8 +678,6 @@ function restore(projectId: string): void {
               >
                 {{ timerOf(item.session.startedAt) }}
               </span>
-              <!-- A project runs as many sessions as it is asked to. That was only
-                   reachable by right-clicking the row, so nothing on screen said so. -->
               <button
                 class="row-add mono"
                 :data-testid="`new-session-${item.name}`"
@@ -904,29 +696,15 @@ function restore(projectId: string): void {
               </button>
             </template>
           </div>
-          <!-- Branch belongs to the rows that are doing something: the one you are in,
-               and any whose session is still running. Showing it on EVERY row turns the
-               list into a wall of text, which is what the old selected-only rule was
-               defending against — but it also hid the branch of every project working in
-               the background, which is exactly when it is worth reading. -->
           <div v-if="!collapsed && isExpanded(item)" class="meta">
             <span class="branch code"><Icon name="branch" :size="11" /> {{ item.session?.branch ?? '—' }}</span>
           </div>
           <div v-if="!collapsed && collisions.has(item.name)" class="path code">{{ item.path }}</div>
-          <!-- Subsessions. A project runs as many sessions as it is asked to, and each
-               gets a row inside the project's own card: the card is the project, the
-               rows in it are what that project is doing. Listed only when there is
-               more than one, because with a single session the lane already IS that
-               session and a lone child row would be noise. Nested inside .content, so
-               the whole group moves and floats as one sheet. -->
           <div
             v-if="!collapsed && item.sessions.length > 1"
             class="subs"
             :data-testid="`sidebar-subsessions-${item.name}`"
           >
-            <!-- A row is a div holding two buttons, not one button: the close
-                 control is a button of its own and a button cannot be nested
-                 inside another. -->
             <div
               v-for="(s, i) in item.sessions"
               :key="s.id"
@@ -944,22 +722,8 @@ function restore(projectId: string): void {
               <span class="mark sub-mark" :class="sessionStatus(s)">
                 <span class="glyph" aria-hidden="true">{{ glyphFor(sessionStatus(s)) }}</span>
               </span>
-              <!-- Ordinal first: every session of a project runs against the same
-                   checkout, so the branch name is identical on all of them and two
-                   rows read as one repeated row without a number in front. The array
-                   is start-ordered, so the number is stable for a session's life. -->
               <span class="sub-ord mono">{{ i + 1 }}</span>
-              <!-- What it is about, when the app knows: every session of a
-                   project runs against the same checkout, so the branch is
-                   identical on all of them and the rows read as one repeated
-                   row. A section's session knows what it was started for. -->
               <span class="sub-name code">{{ s.name ?? s.branch ?? s.id.slice(0, 8) }}</span>
-              <!-- WHICH MODEL THIS ROW IS ACTUALLY ON. Read from the session's
-                   own reported model, not from Settings: a skill's frontmatter can
-                   move a turn, and a usage limit can downgrade one, so what
-                   Settings asked for and what is running are two different facts.
-                   Only while live — an ended row's model is history, and the row
-                   is already carrying its outcome. -->
               <span v-if="!s.endedAt && s.currentModel" class="sub-model mono">{{
                 modelLabel(s.currentModel)
               }}</span>
@@ -967,9 +731,6 @@ function restore(projectId: string): void {
                 timerOf(s.startedAt)
               }}</span>
             </button>
-            <!-- Ends THIS session, not the project. Only on a live one: an ended
-                 row is history, and offering to close what is already closed is
-                 how a developer learns to distrust a control. -->
             <button
               v-if="!s.endedAt"
               type="button"
@@ -1001,9 +762,6 @@ function restore(projectId: string): void {
                 :class="{ sel: activeSession.selectedAgentId === agent.id }"
               >
                 {{ agent.task || agent.name }}
-                <!-- Which agent's chat is open. Carries a testid because it is
-                     now a drawn mark rather than a text arrow, so a spec can no
-                     longer assert it by reading the row's text. -->
                 <Icon
                   v-if="activeSession.selectedAgentId === agent.id"
                   name="arrow-left"
@@ -1021,9 +779,6 @@ function restore(projectId: string): void {
         No projects yet — press + to add one.
       </div>
 
-      <!-- Archived projects: out of the list above and out of every picker, kept
-           here so a project put away can be found and brought back. Not on the
-           collapsed rail, where there is no room for a header. -->
       <template v-if="!collapsed && projects.archived.length > 0">
         <div
           class="group-head archived-head"
@@ -1062,8 +817,6 @@ function restore(projectId: string): void {
       </template>
     </div>
 
-    <!-- Global MCP (design): one project-less row per designated server. They
-         all open the same combined chat/scan view (see McpView). -->
     <template v-if="dbServers.length > 0 && dbProject">
       <div v-if="!collapsed" class="section-row mcp-section">
         <span class="section-label mono">MCP</span>
@@ -1079,8 +832,6 @@ function restore(projectId: string): void {
       >
         <span class="mcp-ico"><Icon name="database" /></span>
         <template v-if="!collapsed">
-          <!-- The dot IS the status; spelling it out under the name doubled the
-               row's height to repeat what the colour already says. -->
           <div class="mcp-name mono">{{ s }}</div>
           <span class="mcp-dot" :style="{ background: mcpStatusColor(mcpStatusOf(s)) }"></span>
         </template>
@@ -1099,11 +850,6 @@ function restore(projectId: string): void {
     >
       <Icon :name="theme === 'light' ? 'moon' : 'sun'" />
     </button>
-    <!-- Footer: Settings and the current work model, and nothing else. The
-         counters, the token total and the limit meter moved to the window's
-         status bar (components/StatusBar.vue): they describe the whole board, not
-         this pane, and stacking them here cost the lane list a sixth of its
-         height. -->
     <div v-if="!collapsed" class="foot">
       <div
         class="settings-row"
@@ -1135,7 +881,6 @@ function restore(projectId: string): void {
     </div>
   </aside>
 
-  <!-- Right-click context menu -->
   <div v-if="ctx" class="ctx-catcher" @click="closeCtx" @contextmenu.prevent="closeCtx">
     <div
       class="ctx-menu"
@@ -1154,14 +899,9 @@ function restore(projectId: string): void {
         <span><Icon name="arrow-down" /></span>Move down
       </button>
       <template v-if="ctx.kind === 'project'">
-        <!-- A project can run more than one session; this is how a second one starts.
-             It leads the project menu because it is the only item here that makes the
-             project DO something rather than describe it. -->
         <button class="ctx-item mono" data-testid="ctx-new-session" @click="ctxNewSession">
           <span style="color: var(--green)"><Icon name="plus" /></span>New session here
         </button>
-        <!-- The way back down. A project accumulates sessions — a section starts
-             its own — and ending them one at a time is tedious at two. -->
         <button
           v-if="ctxLiveSessions.length > 1"
           class="ctx-item mono"
@@ -1211,7 +951,6 @@ function restore(projectId: string): void {
     </div>
   </div>
 
-  <!-- Change-folder (repoint) popup: same shell as the remove dialog. -->
   <div v-if="repointTarget" class="overlay" @click.self="cancelRepoint">
     <div
       class="dialog remove-dialog"
@@ -1256,7 +995,6 @@ function restore(projectId: string): void {
     </div>
   </div>
 
-  <!-- Archive-project confirmation popup -->
   <div v-if="confirmRemove" class="overlay" @click.self="cancelRemove">
     <div
       class="dialog remove-dialog"
@@ -1292,26 +1030,9 @@ function restore(projectId: string): void {
 
 <style scoped>
 .sidebar {
-  /* The PROJECTS bar's height, shared so the group headers that stick beneath it
-     cannot drift out of sync. This was a hard-coded 31px in two places, and
-     changing the bar's padding silently desynced them. */
-  /* Derived, not hand-synced: .group-head's sticky offset has to equal the
-     section row's real height, and that height is the glyph buttons plus the row's
-     symmetric padding. Change either part and the offset follows. */
   --add-h: 21px;
   --section-row-pad: 5px;
-  /* The 1px is the seam ruled under the row (see .section-row): it is part of the
-     row's real height, so a group header sticking at this offset would otherwise
-     leave a one-pixel sliver of scrolling list showing above it. */
   --section-row-h: calc(var(--add-h) + 2 * var(--section-row-pad) + 1px);
-  /* 252px fitted a proportional face. The interface moved onto the character
-     grid, where a lowercase letter is roughly 0.6em wide instead of ~0.5em, so
-     the same project names stopped fitting and truncated to "storef…" and
-     "ml-pip…" — a lane you cannot read is a lane you cannot pick. Widened for
-     the grid, then brought back in once the grid itself came down to 12.5px:
-     288px was sized for a 14px cell; 262 was too tight for the one row that
-     carries a pending badge AND a timer beside the name, which is the row that
-     actually sets the width. 276 clears it. */
   width: 276px;
   min-width: 276px;
   background: var(--bg-panel);
@@ -1349,21 +1070,10 @@ function restore(projectId: string): void {
   font-size: var(--fs-head);
 }
 
-/* Centres its glyph on both axes. It was display: block with line-height 17px,
-   so a 14px icon rested on a text baseline and read as sitting low in its 28x21
-   box. Fixed on the base rule rather than on the one button that was reported:
-   all three users of this class had it, and a modifier would have left two
-   visibly off-centre icons beside a class asserting the third was correct.
-   min-width and min-height hold the previous outer size, so nothing reflows. */
 .icon-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  /* The sidebar's own control height, not a literal: --add-h is what the
-     section-row buttons use, so the brand row stays in step with them. Setting
-     line-height: 1 for the centring above had dropped these to 18px. A fixed box
-     also makes the two toggles equal structurally rather than by both happening
-     to hold a 14px glyph. box-sizing is border-box, so this is the outer size. */
   min-width: 26px;
   min-height: var(--add-h);
   color: var(--text-faint);
@@ -1384,7 +1094,6 @@ function restore(projectId: string): void {
   border-color: var(--green);
 }
 
-/* Collapsed-rail theme toggle: bare icon (design's bottom footer), no chip. */
 .theme-collapsed {
   border: none;
   padding: 0;
@@ -1404,9 +1113,6 @@ function restore(projectId: string): void {
   color: var(--text-body);
 }
 
-/* The rail has 64px to spend, so a lane keeps its lift but gives most of the inset
-   back: 8px either side plus the expanded padding would leave a card 23px of content
-   to hold both a pair of initials and a pending count. */
 .sidebar.collapsed .project {
   text-align: center;
   margin: 0 4px 5px;
@@ -1432,9 +1138,6 @@ function restore(projectId: string): void {
   line-height: 12px;
 }
 
-/* Drag-and-drop states: green insertion line for reorder, dashed teal ring for
-   drop-to-reference (design reference). One mark each, now that there is no lift
-   to carry alongside it. */
 .project.drop-before {
   box-shadow: inset 0 2px 0 var(--green);
 }
@@ -1443,9 +1146,6 @@ function restore(projectId: string): void {
   box-shadow: inset 0 -2px 0 var(--green);
 }
 
-/* Whole-row highlight while dragging an OS file onto a project (→ @path into
-   its composer). Project drags only ever reorder, never reference. The wash layers
-   over the card fill for the same reason hover does. */
 .project.drop-file {
   outline: 1px dashed var(--green);
   outline-offset: -1px;
@@ -1464,7 +1164,6 @@ function restore(projectId: string): void {
   letter-spacing: 0.02em;
 }
 
-/* Filter box (design): hairline field that greens on focus or when filtering. */
 .filter-wrap {
   padding: 0 14px 10px 18px;
   flex-shrink: 0;
@@ -1476,8 +1175,6 @@ function restore(projectId: string): void {
   gap: 8px;
   padding: 5px 10px;
   border: 1px solid var(--border-seg);
-  /* 3px, not 8px: DESIGN.md names the filter field under the content radius, and
-     8px is the interactive-row corner. Every other input in the app uses --rc. */
   border-radius: var(--rc);
   transition:
     border-color 0.14s var(--ease),
@@ -1514,8 +1211,6 @@ function restore(projectId: string): void {
   color: var(--text-strong);
 }
 
-/* Design: the heading rides above the rows on a blurred bar rather than
-   scrolling away with them, so its controls are reachable from anywhere. */
 .section-row {
   position: sticky;
   top: 0;
@@ -1523,24 +1218,10 @@ function restore(projectId: string): void {
   display: flex;
   align-items: center;
   gap: 8px;
-  /* Symmetric vertical padding. It was 2px top against 8px bottom, which left the
-     content band sitting 3px above the block's centre: align-items centred the
-     children within the band, but the band itself was high.
-     The vertical padding is --section-row-pad and the buttons are --add-h, which
-     is how var(--section-row-h) is computed — .group-head's sticky offset depends
-     on this row's height matching it exactly, and the seam below counts too. */
   padding: var(--section-row-pad) 14px var(--section-row-pad) 18px;
   background: var(--bg-sticky);
 }
 
-/* The seam: where the panel's heading hands over to the list. It runs the full
-   width, so it reads as a table head ruling off its body — everything below the
-   line is the list. It used to clear a 7px gap below itself, which the floating
-   lanes needed so the first sheet did not butt into the rule; rows do not need
-   it, and the gap was reading as a dead band under the heading.
-
-   Not on .mcp-section: that row is static, sits further down with its own padding, and
-   was not part of what was reviewed. */
 .section-row:not(.mcp-section) {
   border-bottom: 1px solid var(--border);
   margin-bottom: 2px;
@@ -1562,7 +1243,6 @@ function restore(projectId: string): void {
   color: var(--text-ghost);
 }
 
-/* Bare glyph controls (design): no chrome until hovered. */
 .add {
   display: inline-flex;
   align-items: center;
@@ -1581,11 +1261,6 @@ function restore(projectId: string): void {
   background: var(--bg-hover);
 }
 
-/* The row explains its own control. Hover or keyboard focus prints the words out
-   in the margin beside the button, borrowing .section-label so the caption is
-   literally the heading voice rather than a second one. Absolute, because this
-   row is sticky and holds the section height every group header offsets from:
-   nothing here may change width when a label appears. */
 .add-caption {
   position: relative;
 }
@@ -1618,16 +1293,9 @@ function restore(projectId: string): void {
   flex: 1;
   overflow-y: auto;
   padding: 2px 0 8px;
-  /* --lane-cast lived here: the one surface below the dialogue tier that DESIGN.md
-     let cast a real shadow, granted by direction rather than by precedent. The
-     direction has been withdrawn and the token with it, so the Earned Shadow Rule
-     is whole again and only the overlay tier casts. */
 }
 
 
-/* --- Collapsible group headers ---
-   Full-bleed and sticky under the PROJECTS bar (design), so the group a row
-   belongs to is still named once its header has scrolled past. */
 .group-head {
   position: sticky;
   top: var(--section-row-h);
@@ -1635,11 +1303,6 @@ function restore(projectId: string): void {
   display: flex;
   align-items: center;
   gap: 8px;
-  /* A group header names the rows under it, so it sits closer to them than to the
-     group above. It was opened to 12px/6px when the lanes floated, because a header
-     3px above a shadowed sheet read as attached to that one sheet. With rows there
-     is nothing to detach from, and the extra 7px per group was pure height in the
-     one pane whose height is always spoken for. */
   margin: 9px 0 2px;
   padding: 4px 18px 4px 16px;
   background: var(--bg-sticky);
@@ -1655,8 +1318,6 @@ function restore(projectId: string): void {
   color: var(--text-strong);
 }
 
-/* Drop highlight is an inset overlay, not a border, so the sticky bar keeps
-   its exact height as a project is dragged over it. */
 .group-head.drop-into::after {
   content: '';
   position: absolute;
@@ -1674,7 +1335,6 @@ function restore(projectId: string): void {
   color: var(--text-faint);
 }
 
-/* The group's own colour, carried from the palette it was created with. */
 .group-swatch {
   width: 6px;
   min-width: 6px;
@@ -1685,8 +1345,6 @@ function restore(projectId: string): void {
 .group-name {
   flex: 1;
   min-width: 0;
-  /* Group names are typed by the developer — shown as typed. Uppercasing and
-     letter-spacing a name like "Work stuff" reads as a label, not a folder. */
   font-size: var(--fs-meta);
   color: var(--text-meta);
   overflow: hidden;
@@ -1708,11 +1366,7 @@ function restore(projectId: string): void {
   opacity: 0.7;
 }
 
-/* An open group with nothing in it: the drop target IS the explanation. */
 .group-empty {
-  /* Inset from the pane edges even though the lanes are not, because this is a
-     dashed target rather than a row: a dashed rule running edge to edge reads as a
-     torn panel, not as a place to drop something. */
   margin: 0 10px 3px;
   padding: 8px 10px;
   border: 1px dashed var(--border-strong);
@@ -1722,12 +1376,6 @@ function restore(projectId: string): void {
   text-align: center;
 }
 
-/* A lane is a ROW, not a tile. It was a tile for one release — inset, filled,
-   floating on a cast shadow — and the owner's verdict was that eight lanes
-   drawing eight rectangles/shadows/colour bars at rest, all at the same volume,
-   meant no lane could raise its voice when it actually had news. Back to a
-   plain row: no fill or cast at rest, full-bleed (reclaims the 16px inset, and
-   ~1 more project per 6 rows), separated by rhythm and its own edge rule. */
 .project {
   position: relative;
   margin: 0 0 1px;
@@ -1737,41 +1385,17 @@ function restore(projectId: string): void {
   transition: background 0.12s var(--ease);
 }
 
-/* Hover is the FIRST fill a lane ever gets now, so it does the work the card tier
-   used to do: it says "this row", and it is the only row saying it. */
 .project:hover {
   background: var(--bg-hover);
 }
 
-/* Lanes are keyboard-operable (PRODUCT.md records keyboard and screen reader as
-   requirements). Focus is an inset rule so it never shifts the lane's geometry. */
 .project:focus-visible {
   outline: none;
   box-shadow: inset 0 0 0 1px var(--green);
 }
 
-/* The five-hairline staff that used to be ruled across each lane is gone. Behind
-   12px text in a 252px margin it read as guitar strings rather than as a staff,
-   which is the opposite of what the metaphor was for. The lane still reads as a
-   part through the marks that survived: its edge rule and its status glyph. */
 
-/* The now-line — one shared animated rule that used to cross every lane — is
-   gone with the score it belonged to: it was that world's one authored motion,
-   and the state mark plus its word already say "working", which is why the
-   reduced-motion block could stop every animation without losing information.
-   Nothing replaces it; a sheet at rest does not pulse. */
 
-/* THE LANE BAR REPORTS STATE (green = live session, orange = none), not
-   identity — reversing the prior per-project accent bar. That bar hashed six
-   hues out of the project id, dimmed to 0.45, precisely because those six also
-   mean working/attention-owed/error elsewhere: eight lanes at full strength was
-   noise wearing the signal's own vocabulary. Two colours, each meaning exactly
-   what they look like, reads at a glance where six accent hues never did. Cost:
-   telling rows apart is now the name's job; accentFor still colours the group
-   swatches. Width settled at 2px on the right (needs less than the busier left
-   edge did), sitting inside the sidebar's own 1px border — both halves of
-   DESIGN.md's original rule for this bar (the width cap, the "never on the
-   row's outer edge" clause) are superseded by this direction. */
 .brace {
   position: absolute;
   right: 0;
@@ -1783,21 +1407,10 @@ function restore(projectId: string): void {
   transition: background-color 0.12s var(--ease);
 }
 
-/* Live means a session exists and has not ended: working, waiting on you, errored
-   or finished-but-open all still have a process behind them. Only an ended
-   session and a project that never started one read as idle. */
 .project.live .brace {
   background: var(--running);
 }
 
-/* Nothing separates one lane from the next but the 1px of air between them. No
-   rules, no edges, no cast: a list of rows in a narrow pane already reads as a
-   list, and every mark added to defend that is one more thing on screen.
-
-   Selection no longer borrows the bar. The bar answers "is this project
-   running", which is true or false whether or not you are looking at the row, so
-   dimming it on the rows you are not in would hide the very thing it is for.
-   Selection is carried by the --bg-active wash and the brighter name instead. */
 
 .active-bg {
   display: none;
@@ -1818,21 +1431,9 @@ function restore(projectId: string): void {
 .row {
   display: flex;
   align-items: center;
-  /* 6px, not 7: four gaps across the row, so this is 4px of name back. See the
-     padding note on .project. */
   gap: 6px;
 }
 
-/* The lane's current sign. Colour comes from meaning: amber for held (needs
-   you), green for deploying (working), red for a misfold (error), and no hue
-   at all for locked, because a done fold needs none.
-
-   There is no plate, by decision rather than by drift: the tinted wash and the
-   cut frame that used to sit under the mark were both taken out on request, so
-   the state now rests on the set character and its hue alone. DESIGN.md still
-   argues for the plate on the grounds that 1px geometry read as lint at the edge
-   of vision; that argument was answered by setting the state rather than drawing
-   it. The padding stays, as the mark's own room away from the name beside it. */
 .mark {
   flex-shrink: 0;
   display: flex;
@@ -1841,15 +1442,6 @@ function restore(projectId: string): void {
   padding: 2px;
 }
 
-/* The state is set, not drawn. The glyph box is a fixed 14x12, so the mark takes
-   the same room down the lane whichever of the five characters lands in it, on
-   the collapsed rail as well as in the list. The size is tuned to optical weight
-   rather than to the type ramp, so it lives in styles.css as --fs-glyph: it is
-   off the ramp on purpose and a value that escapes the design system is the one
-   value that needs a name there. See that token for the open question about
-   whether DESIGN.md should document a glyph step or the mark should move to
-   --fs-micro. (This comment previously cited a DESIGN.md rule, "Glyph sizing is
-   not type sizing", which DESIGN.md does not contain.) */
 .mark .glyph {
   width: 14px;
   height: 12px;
@@ -1864,8 +1456,6 @@ function restore(projectId: string): void {
   color: var(--amber);
 }
 
-/* The glyph and the lane bar report the same state, so they read the same
-   token. Split them and paper would show a blue chevron beside a green bar. */
 .mark.working {
   color: var(--running);
 }
@@ -1882,9 +1472,6 @@ function restore(projectId: string): void {
   color: var(--text-ghost);
 }
 
-/* The project name sits in the margin, to the LEFT of where the lane begins.
-   It needs no background of its own: an earlier pass gave it a background and
-   spread shadow, and that read as a text input. */
 .name {
   flex: 1;
   min-width: 0;
@@ -1900,18 +1487,12 @@ function restore(projectId: string): void {
   color: var(--text-bright);
 }
 
-/* The selected lane is washed in 12% valley blue, which lifts the surface under its
-   own metadata: the timer and path measure 4.32:1 there (dark) and the branch
-   4.19:1 (light), so the one lane the interface highlights had the least readable
-   detail line of any row. The branch only ever renders on the selected lane, so it
-   only ever rendered on this wash. */
 .project.active .timer,
 .project.active .path,
 .project.active .branch {
   color: var(--text-on-wash);
 }
 
-/* Remove control: hidden until the row is hovered, like a close affordance. */
 .remove {
   display: inline-flex;
   align-items: center;
@@ -1933,9 +1514,6 @@ function restore(projectId: string): void {
   color: var(--red);
 }
 
-/* Archived rows: the name is present but put away, and the row itself does
-   nothing on click, so it does not invite one. The restore control is always
-   visible, faintly, because a row with no visible control reads as inert. */
 .project.archived {
   cursor: default;
 }
@@ -1967,8 +1545,6 @@ function restore(projectId: string): void {
   opacity: 1;
 }
 
-/* Same box as .remove so adding it does not move the row, and revealed by the
-   same hover, so the row is quiet until you are actually in it. */
 .row-add {
   display: inline-flex;
   align-items: center;
@@ -1990,15 +1566,10 @@ function restore(projectId: string): void {
   color: var(--green);
 }
 
-/* Remove-project confirmation popup: the design renders this as its own
-   glass pane (not the shared .dialog card look) — wide, pill-cornered, with a
-   heavier drop shadow, so every box-model property is overridden here. The
-   scrim itself comes from the shared .overlay (var(--scrim) + blur). */
 .remove-dialog {
   width: 400px;
   background: var(--bg-panel);
   border: 1px solid var(--border-card);
-  /* A card, not a pill — 99px bows the corners in and clips the text. */
   border-radius: var(--rc);
   padding: 24px;
   box-shadow: var(--shadow-dlg);
@@ -2048,8 +1619,6 @@ function restore(projectId: string): void {
   margin: 8px 0 0;
 }
 
-/* The repoint dialog's path input: the registration dialog's folder input,
-   inside the remove dialog's shell. */
 .repoint-input {
   width: 100%;
   font-size: var(--fs-ui);
@@ -2068,8 +1637,6 @@ function restore(projectId: string): void {
   margin-top: 20px;
 }
 
-/* The design sizes these as equal-width, sans-serif, centered buttons —
-   distinct from the shared .btn-solid/.btn-outline (mono, auto-width) look. */
 .rd-actions .btn-solid,
 .rd-actions .btn-outline {
   flex: 1;
@@ -2114,7 +1681,6 @@ function restore(projectId: string): void {
   text-overflow: ellipsis;
 }
 
-/* Tabular figures so a ticking clock does not jitter the row's width. */
 .timer {
   flex-shrink: 0;
   font-size: var(--fs-meta);
@@ -2132,11 +1698,6 @@ function restore(projectId: string): void {
   text-overflow: ellipsis;
 }
 
-/* Subsession rows. Same nested-child idiom as .agents below — indented under the
-   lane's reading edge, one line each, mono — because they are the same kind of thing
-   at a different level: what this project is doing right now. A session is a bigger
-   unit than a subagent, so it keeps a real status mark and a running clock, and it is
-   a <button> because clicking it repoints the whole centre pane. */
 .subs {
   display: flex;
   flex-direction: column;
@@ -2145,23 +1706,6 @@ function restore(projectId: string): void {
   padding-left: 15px;
 }
 
-/* The row: the session button takes the width, the close control sits at its end
-   and appears on hover or focus. Always-visible would put a small X on every row
-   of a busy sidebar, which reads as clutter and invites a mis-click. */
-/* A PROJECT RUNNING SEVERAL SESSIONS IS READ BY SCANNING, not by hovering each
-   row in turn, so each one states its own condition as a line down its edge:
-   trace-green running, amber waiting on a decision from you, red errored.
-
-   The RIGHT edge, and not the left. The left carries `.sub-line.sel`'s green
-   rule, so a green status line there would mean both "this is running" and "this
-   is the one you are looking at", and the two are independent facts about the
-   same row. Right leaves them separable at a glance.
-
-   A finished session gets no line at all. The Tolerance Rule spends colour on a
-   reading outside tolerance; "done" is not one, and giving every completed row a
-   colour is how a board stops being scannable. The glyph in `.sub-mark` still
-   carries the state for anyone reading one row closely, so nothing depends on
-   colour alone. */
 .sub-row {
   display: flex;
   align-items: center;
@@ -2227,9 +1771,6 @@ function restore(projectId: string): void {
   background: var(--bg-hover);
 }
 
-/* The focused session, the one the pane is showing. A left rule rather than a fill:
-   the lane's own identity bar already owns the left edge of the card, and this is the
-   same gesture one level in. */
 .sub-line.sel {
   background: var(--bg-active);
   box-shadow: inset 2px 0 0 var(--green);
@@ -2244,16 +1785,12 @@ function restore(projectId: string): void {
   padding: 0;
 }
 
-/* Quieter than the name and the same weight as the timer beside it: the model is
-   a condition of the row, not its identity. */
 .sub-model {
   flex-shrink: 0;
   font-size: var(--fs-micro);
   color: var(--text-meta);
 }
 
-/* The session's number in the project, dimmer than its branch: it is how you
-   tell two rows apart, not what either row is about. */
 .sub-ord {
   flex-shrink: 0;
   font-size: var(--fs-micro);
@@ -2334,8 +1871,6 @@ function restore(projectId: string): void {
   padding: 2px 7px;
 }
 
-/* MCP server row (design): ⛁ teal icon, name + status, connection dot, teal
-   right stripe. */
 .mcp-item {
   position: relative;
   margin: 4px 8px 0;
@@ -2381,7 +1916,6 @@ function restore(projectId: string): void {
 .mcp-dot {
   width: 7px;
   height: 7px;
-  /* Round, unlike the square status dots — overrides the global corner reset. */
   border-radius: 50% !important;
   flex-shrink: 0;
 }
@@ -2395,12 +1929,6 @@ function restore(projectId: string): void {
   background: var(--teal);
 }
 
-/* An OPAQUE surface, like every other floating menu here (.suggest-list in
-   styles.css, .hctx-menu in InboxView). This used --bg-hover, which is a 6%
-   wash meant for tinting a row that already has a background under it: over the
-   project list the board showed straight through the menu and its own text, and
-   in light mode there was almost nothing left to read. A menu floats above the
-   page rather than sitting on it, so it brings its own ground. */
 .ctx-menu {
   position: fixed;
   min-width: 180px;
@@ -2412,8 +1940,6 @@ function restore(projectId: string): void {
   animation: sbIn 0.12s var(--ease);
 }
 
-/* White, as the light sheet's floating surfaces are: the panel tone that reads
-   as raised on carbon reads as sunken against a near-white page. */
 html.sb-light .ctx-menu {
   background: var(--bg-card);
 }
@@ -2457,20 +1983,12 @@ html.sb-light .ctx-menu {
   color: var(--red);
 }
 
-/* Footer: one row, hairlined off from the list. It carries Settings and the
-   work model only; every reading moved to the status bar. */
 .foot {
   flex-shrink: 0;
-  /* The room sits ABOVE the rule, not below it. A margin, not padding: the gap
-     belongs between the lane list and the seam, so the rule reads as this
-     footer's own top edge rather than as a line with a space under it. Padding
-     is back to its original 6px, so the gear keeps the spacing it always had
-     from the rule. */
   margin-top: 12px;
   border-top: 1px solid var(--border);
   padding: 6px 14px 7px 18px;
 }
-/* Settings is the last row of the footer block, highlighted only on hover. */
 .settings-row {
   display: flex;
   align-items: center;
@@ -2491,7 +2009,6 @@ html.sb-light .ctx-menu {
   box-shadow: inset 0 0 0 1px var(--green);
 }
 
-/* On the rail it is a bare centred gear, with no room for anything else. */
 .settings-row.rail {
   margin: 10px 0 12px;
   justify-content: center;

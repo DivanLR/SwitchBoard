@@ -1,6 +1,4 @@
 <script setup lang="ts">
-// Central inbox panel — 1:1 with the design reference (inbox/history tabs,
-// per-project groups, item cards, history rows). FR-007..013, SC-004.
 import { nextTick, onMounted, onWatcherCleanup, ref, watch } from 'vue'
 import { isDangerousCommand, type DecisionRecord, type PermissionRequest } from '@shared/domain'
 import { useInboxStore } from '@renderer/stores/inbox'
@@ -17,17 +15,11 @@ const emit = defineEmits<{ (e: 'collapse'): void }>()
 
 const tab = ref<'inbox' | 'history'>('inbox')
 const confirmingId = ref<string | null>(null)
-// Separate confirm state for the broad "Always allow <tool>" grant so it never
-// gets conflated with the one-time high-risk Approve confirm.
 const alwaysConfirmId = ref<string | null>(null)
 const expandedHistory = ref(new Set<string>())
-// Per-card "why" disclosure on pending items — closed by default so the common
-// case (title + risk + command) is all a card costs; same Set-toggle idiom as
-// expandedHistory above.
 const expandedExplain = ref(new Set<string>())
 
 function toggleHistory(id: string): void {
-  // Vue 3 tracks mutations on a reactive Set, so toggle in place — no clone.
   const set = expandedHistory.value
   if (set.has(id)) set.delete(id)
   else set.add(id)
@@ -39,14 +31,9 @@ function toggleExplain(id: string): void {
   else set.add(id)
 }
 
-// 5s, not 1s: these stamps are minute-grained, so a faster tick would re-render
-// four times out of five for no visible change.
 const now = useNow(5000)
 onMounted(() => void inbox.refresh())
 
-// Covered bases are needed on BOTH tabs now: history for the right-click menu,
-// inbox for the "Always allow similar" button. Reload whenever the pending
-// project set changes; the history tab additionally reloads on switch.
 watch(
   () => inbox.groups.map((g) => g.projectId).join(','),
   () => void loadCoveredBases(),
@@ -54,9 +41,6 @@ watch(
 )
 watch(tab, async (value) => {
   if (value !== 'history') return
-  // Toggling tabs faster than the load returns must not leave a superseded run
-  // finishing its second step. The store ticket already protects the history
-  // list itself; this stops the follow-up from running for an abandoned switch.
   let superseded = false
   onWatcherCleanup(() => {
     superseded = true
@@ -82,7 +66,6 @@ function projectName(projectId: string): string {
   return projects.items.find((p) => p.id === projectId)?.name ?? 'unknown'
 }
 
-/** Shared with McpView; `now` ticks every 5s so these re-render on their own. */
 const age = (createdAt: string): string => relativeTime(createdAt, now.value)
 
 async function approve(item: PermissionRequest): Promise<void> {
@@ -101,37 +84,26 @@ async function deny(item: PermissionRequest): Promise<void> {
   await inbox.decide(item.id, 'deny')
 }
 
-/** An MCP server tool, e.g. `mcp__oracle-sqlcl__sql_run`. */
 function isMcpItem(item: PermissionRequest): boolean {
   return item.toolName?.startsWith('mcp__') ?? false
 }
 
-/** Tools whose title verb already names the action (describeTool in
- *  permission-broker.ts), so the mono tool-name chip beside it would repeat
- *  what the title already said. */
 const SELF_NAMING_TOOLS = new Set(['Bash', 'Write', 'Edit', 'NotebookEdit', 'Read', 'WebFetch', 'WebSearch'])
 
-/** Whether the tool-name chip earns its place: MCP tools and the generic
- *  "Use the {toolName} tool" fallback have no other name for the tool in view. */
 function showToolChip(item: PermissionRequest): boolean {
   return isMcpItem(item) || !SELF_NAMING_TOOLS.has(item.toolName ?? '')
 }
 
-/** Bash's detail box just repeats the title verbatim ("Run a command: " + the
- *  command); Write/Edit/Read/MCP details carry a diff, path or JSON the title
- *  never states, so only Bash's box is a pure duplicate. */
 function isDuplicateDetail(item: Pick<PermissionRequest, 'toolName' | 'title' | 'detail'>): boolean {
   return item.toolName === 'Bash' && item.title.endsWith(item.detail)
 }
 
-/** `mcp__oracle-sqlcl__sql_run` → `sql_run` for a compact button label. */
 function toolShortName(item: PermissionRequest): string {
   const name = item.toolName ?? ''
   const parts = name.split('__')
   return parts.length >= 3 ? parts.slice(2).join('__') : name
 }
 
-// --- History right-click menu (design: always allow a command from history) ---
 const histCtx = ref<{
   id: string
   detail: string
@@ -140,17 +112,11 @@ const histCtx = ref<{
   y: number
 } | null>(null)
 
-/**
- * Flag-aware two-token base command — mirrors the server-side matcher
- * derivation (`deriveMatcher`); display only, the broker re-derives it.
- */
 function baseCmd(detail: string): string {
   const words = detail.trim().split(/\s+/)
   return words[1] && !words[1].startsWith('-') ? `${words[0]} ${words[1]}` : (words[0] ?? '')
 }
 
-// Bash command-prefixes already always-allowed, per project — loaded when the
-// history tab opens so the menu can hide "Always allow" for covered commands.
 const coveredBases = ref<Record<string, string[]>>({})
 
 async function loadCoveredBases(): Promise<void> {
@@ -163,20 +129,12 @@ async function loadCoveredBases(): Promise<void> {
   coveredBases.value = Object.fromEntries(entries)
 }
 
-/** A command is already covered when an active rule prefix matches its base. */
 function alreadyAllowed(projectId: string, base: string): boolean {
   return (coveredBases.value[projectId] ?? []).some(
     (v) => base === v || base.startsWith(`${v} `),
   )
 }
 
-/**
- * Whether to offer an "Always allow" button on a pending item.
- * - MCP tools: always — a pending item proves no tool_only rule covers it yet
- *   (one would have auto-approved it). The broad grant is gated by a confirm.
- * - Bash: same eligibility as the history menu, but never for high risk — one
- *   click must not both widen a rule and skip the high-risk confirm.
- */
 function canAlwaysAllow(item: PermissionRequest): boolean {
   if (item.type !== 'tool_permission') return false
   if (isMcpItem(item)) return true
@@ -186,8 +144,6 @@ function canAlwaysAllow(item: PermissionRequest): boolean {
 }
 
 async function alwaysAllowSimilar(item: PermissionRequest): Promise<void> {
-  // A broad MCP tool_only grant on a high-risk item (high by fail-safe) gets the
-  // same deliberate two-step confirm as a high-risk Approve.
   if (isMcpItem(item) && item.risk === 'high' && alwaysConfirmId.value !== item.id) {
     alwaysConfirmId.value = item.id
     confirmingId.value = null
@@ -199,14 +155,7 @@ async function alwaysAllowSimilar(item: PermissionRequest): Promise<void> {
   await loadCoveredBases()
 }
 
-/** Opens the history menu at a point. Separated from the mouse event so the
- *  keyboard path (ContextMenu / Shift+F10 on the focused row) opens the same
- *  menu at the row's own position, rather than the menu being mouse-only. */
 function openHistCtxAt(h: DecisionRecord, x: number, y: number): void {
-  // Any approved shell command can be always-allowed except the destructive set
-  // — the risk classifier fails safe to `high` for ordinary unmatched commands,
-  // so gating on risk would hide the option for most vetted commands. Hide it
-  // too once an active standing rule already covers the command.
   const base = baseCmd(h.detail)
   const eligible =
     h.type === 'tool_permission' &&
@@ -217,7 +166,6 @@ function openHistCtxAt(h: DecisionRecord, x: number, y: number): void {
     id: h.id,
     detail: h.detail,
     allowBase: eligible ? base || null : null,
-    // Clamped to the viewport so the menu never opens off-screen.
     x: Math.min(x, window.innerWidth - 345),
     y: Math.min(y, window.innerHeight - 130),
   }
@@ -227,13 +175,6 @@ function openHistCtx(h: DecisionRecord, event: MouseEvent): void {
   openHistCtxAt(h, event.clientX, event.clientY)
 }
 
-/**
- * The keyboard equivalent of the right-click, on the focused row: the platform's
- * own Menu key, or Shift+F10 where a keyboard has no Menu key. Chosen over a
- * visible per-row "..." button so every history row keeps the shape DESIGN.md
- * gave it, while "Always allow this command" and "Remove this entry" stop being
- * reachable by mouse alone.
- */
 function openHistCtxKeyboard(h: DecisionRecord, event: KeyboardEvent): void {
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
   openHistCtxAt(h, rect.left + 24, rect.bottom)
@@ -244,7 +185,7 @@ async function allowFromHist(): Promise<void> {
   histCtx.value = null
   if (ctx?.allowBase) {
     await inbox.alwaysAllow(ctx.id)
-    await loadCoveredBases() // so re-opening the menu now hides the option
+    await loadCoveredBases() 
   }
 }
 
@@ -254,7 +195,6 @@ async function removeHist(): Promise<void> {
   if (ctx) await inbox.deleteHistory(ctx.id)
 }
 
-// Project group whose "Approve all" is awaiting the high-risk "are you sure".
 const approveAllConfirmId = ref<string | null>(null)
 
 function groupHighRiskCount(items: PermissionRequest[]): number {
@@ -263,8 +203,6 @@ function groupHighRiskCount(items: PermissionRequest[]): number {
 
 async function approveAll(group: { projectId: string; items: PermissionRequest[] }): Promise<void> {
   const highRisk = groupHighRiskCount(group.items)
-  // Groups with high-risk items get one "are you sure" before bulk approval
-  // sweeps them in; safe-only groups approve straight away as before.
   if (highRisk > 0 && approveAllConfirmId.value !== group.projectId) {
     approveAllConfirmId.value = group.projectId
     return
@@ -276,7 +214,6 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
 
 <template>
   <aside class="inbox" data-testid="inbox-view">
-    <!-- Tabs -->
     <div class="tabs" role="tablist" aria-label="Inbox and history">
       <button
         type="button"
@@ -310,11 +247,6 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
         title="Collapse the inbox"
         @click="emit('collapse')"
       >
-        <!-- A drawn chevron, not the ‹ character. Measured: the glyph was already
-             centred horizontally (8.63px each side) but sat ~1px high, because
-             U+203A's ink rides high inside its own line box and no alignment
-             property reaches that. A path centres by construction and does not
-             depend on the machine's system font. -->
         <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
           <path
             d="M5.75 3.5 L10.25 8 L5.75 12.5"
@@ -335,11 +267,6 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
       </button>
     </div>
 
-    <!-- Inbox tab. aria-live=polite on the list itself, because items arrive from
-         background sessions with no user action: a screen-reader user otherwise
-         has no way to learn that something is now waiting on them. Polite rather
-         than assertive, since the per-session "Blocked" alert already interrupts
-         and two interrupts for one event is worse than none. -->
     <div v-if="tab === 'inbox'" class="body" aria-live="polite" aria-relevant="additions">
       <div v-if="inbox.groups.length === 0" class="empty" data-testid="inbox-zero">
         <Icon name="check" class="empty-icon" :size="18" />
@@ -450,10 +377,6 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
             </template>
           </div>
 
-          <!-- Not a third decision. Approve and Deny answer the question; a
-               standing rule answers every question like it, which is a different
-               size of choice and was reading as a peer wide enough to push Deny
-               onto a line of its own. -->
           <button
             v-if="canAlwaysAllow(item) && confirmingId !== item.id && alwaysConfirmId !== item.id"
             class="item-standing"
@@ -472,7 +395,6 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
       </div>
     </div>
 
-    <!-- History tab -->
     <div v-else class="body history">
       <div class="hist-header">
         <span class="hist-count mono" data-testid="history-count">
@@ -543,20 +465,11 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
         </div>
         <div v-if="expandedHistory.has(h.id)" class="hist-detail" data-testid="history-detail" @click.stop>
           <div v-if="h.explanation" class="hd-explain">{{ h.explanation }}</div>
-          <!-- Same duplicate-box judgement as the pending card: for Bash, the
-               title already IS the command, so a second copy below adds nothing. -->
           <pre v-if="!isDuplicateDetail(h)" class="hd-detail detail-box mono">{{ h.detail }}</pre>
         </div>
       </div>
     </div>
 
-    <!-- History right-click context menu. Teleported to <body> so its fixed
-         overlay covers the viewport rather than the pane. This was originally
-         needed because .inbox carried a backdrop-filter, which makes an element
-         the containing block for position:fixed; that blur is gone now (DESIGN.md
-         forbids glass on panels), so the Teleport is kept as the robust form
-         rather than as a workaround — any ancestor gaining a transform or filter
-         later would reintroduce the same trap. -->
     <Teleport to="body">
       <div
         v-if="histCtx"
@@ -592,7 +505,6 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
 
 <style scoped>
 .inbox {
-  /* Width is user-resizable (App sets --inbox-w on the panes container). */
   width: var(--inbox-w, 332px);
   min-width: var(--inbox-w, 332px);
   background: var(--bg-panel);
@@ -609,9 +521,6 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   padding: 0 8px;
 }
 
-/* The chevron is drawn, so there is no font-size or line-height here any more:
-   both existed to position a text glyph that no longer exists. Density was
-   tunable while choosing the variant and settled at 1, so 22px is the literal. */
 .inbox-collapse {
   flex-shrink: 0;
   width: 22px;
@@ -632,13 +541,10 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   border-color: var(--border-strong);
 }
 
-/* Block, so the svg does not sit on a text baseline inside the flex line. */
 .inbox-collapse svg {
   display: block;
 }
 
-/* Pane tabs are names of places, not prose: the label idiom, so all three panes
-   head themselves the same way. */
 .tab {
   padding: 11px 12px;
   font-family: var(--mono);
@@ -738,11 +644,6 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   color: var(--text-faint);
 }
 
-/* Pulsing status dot before the project name. Radius is stated as 99px rather
-   than var(--rc): it relied on --rc exceeding half the 7px box to round itself,
-   which was true at the previous world's 10px and false once --rc became 3px, so
-   it silently rendered a rounded square. A thing that reports a value is round
-   on purpose, not by arithmetic coincidence. */
 .group-dot {
   width: 7px;
   min-width: 7px;
@@ -753,7 +654,6 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   flex-shrink: 0;
 }
 
-/* "Approve all" high-risk confirm row (mono links, matching .link-green). */
 .approve-all-warn {
   font-size: var(--fs-micro);
   color: var(--amber);
@@ -769,9 +669,6 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   padding: 0;
 }
 
-/* .link-green is a shared class (styles.css); scoped here so the override
-   only reaches elements this component renders. Design uses the UI (sans)
-   face for this control, not the shared class's mono default. */
 .link-green {
   font-family: var(--sans);
 }
@@ -791,7 +688,6 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
 }
 
 .item {
-  /* Design fills this card from --bg-hover (not --bg-card) with a glass blur. */
   background: var(--bg-hover);
   border: 1px solid var(--border-card-alt);
   border-radius: var(--rc);
@@ -833,14 +729,10 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   font-size: var(--fs-body);
   font-weight: var(--w-em);
   color: var(--text-title);
-  /* Full ask, wrapped — never truncated or off-screen. */
   overflow-wrap: anywhere;
   line-height: 1.4;
 }
 
-/* Disclosure for .item-explain — closed by default, reusing .hist-arrow's
-   glyph and rotate-on-open rather than a second visual language for the
-   same gesture. */
 .item-explain-toggle {
   display: inline-flex;
   align-items: center;
@@ -869,11 +761,6 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   overflow-wrap: anywhere;
 }
 
-/* Shared "glass detail box" chrome (item detail + history detail): a
-   translucent near-black pane with a blur, matching the design's inline
-   rgba(--rgb-8-11-24) fill. No app token covers this exact translucent value,
-   so it's kept literal per the brief's "no token → match design exactly"
-   rule, with an explicit light-theme swap. */
 .detail-box {
   color: var(--detail);
   background: color-mix(in srgb, var(--bg) 50%, transparent);
@@ -884,11 +771,6 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   word-break: break-word;
 }
 
-/* The dark theme's translucent plate has no light equivalent: 50% graphite over
-   a paper card lands on mid-grey, and the command printed on it fell to about
-   2.3:1 — the least legible text in the interface, on the line that says what is
-   about to be run. On paper the plate is sunken rather than translucent, which is
-   the code tier this app already has. 6.6:1. */
 html.sb-light .detail-box {
   background: var(--bg-code);
   border-color: var(--border-code);
@@ -910,7 +792,6 @@ html.sb-light .detail-box {
   flex-wrap: wrap;
 }
 
-/* Quiet by design: a standing rule is offered, not urged. */
 .item-standing {
   display: flex;
   align-items: center;
@@ -930,16 +811,11 @@ html.sb-light .detail-box {
   color: var(--green);
 }
 
-/* Risk chips are a shared class (styles.css) whose radius/padding are still
-   hardcoded there; scoped here so the fix reaches this file's usage without
-   touching the shared stylesheet. */
 .item-head .chip-risk {
   border-radius: var(--rc);
   padding: 1px 7px;
 }
 
-/* Design gives Approve / Confirm high-risk / Deny a sans face (the shared
-   .btn-* classes default to mono) and a subtle press/lift on hover+active. */
 .item-actions .btn-solid,
 .item-actions .btn-armed,
 .item-actions .btn-outline {
@@ -978,8 +854,6 @@ html.sb-light .detail-box {
   color: var(--text-faint);
 }
 
-/* Design renders "Clear history" as a chip button (glass fill, border,
-   elevation), not a bare underlined link. */
 .hist-clear {
   display: flex;
   align-items: center;

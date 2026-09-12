@@ -1,9 +1,4 @@
 <script setup lang="ts">
-// Tests section — the eval loop for small changes (spec 002 US7, FR-086..FR-092).
-// A change is one observable acceptance line plus the check that proves it; the
-// verdict and the 1-5 rating are the developer's own and are the whole record.
-// Nothing here spawns a process: the check and the manual pass both go through
-// the session like Cleanup does (FR-041), so output lands in the Session tab.
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { canPassEval, evalStage, EVAL_RELOOP_RATING, type EvalRun } from '@shared/domain'
 import type { TestSuite } from '@shared/test-catalog'
@@ -15,9 +10,7 @@ const evals = useEvalsStore()
 const props = defineProps<{ projectId: string; projectName: string }>()
 
 const emit = defineEmits<{
-  /** A dispatch went to the session — the caller switches to the Session tab. */
   (e: 'ran'): void
-  /** Run text in the session (the manual pass hands over a prompt, not a check). */
   (e: 'run', text: string): void
 }>()
 
@@ -27,20 +20,12 @@ const showSuites = ref(false)
 
 const runs = computed(() => evals.listFor(props.projectId))
 const ratings = computed(() => runs.value.map((r) => r.rating).filter((r): r is number => r != null))
-// Only over rated rows — an unrated row is not a zero.
 const meanRating = computed(() =>
   ratings.value.length === 0
     ? null
     : Math.round((ratings.value.reduce((sum, r) => sum + r, 0) / ratings.value.length) * 10) / 10,
 )
 
-/**
- * Acceptance pass rate: the share of DECIDED lines that passed, not all lines —
- * for the same reason meanRating excludes unrated rows. A line nobody has judged
- * yet is not a failure, and counting it as one would make the figure fall every
- * time work was added. With nothing decided it reads as unmeasured, per
- * PRODUCT.md principle 2.
- */
 const decided = computed(() => runs.value.filter((r) => r.verdict !== 'pending'))
 const passRate = computed(() =>
   decided.value.length === 0
@@ -53,7 +38,6 @@ const suites = computed(() => evals.suitesFor(props.projectId))
 let stopPush: (() => void) | null = null
 onMounted(() => {
   void evals.load(props.projectId)
-  // The gate result arrives from the session, not from a click.
   stopPush = window.switchboard.on('push.evalsChanged', (push) => {
     evals.applyPush(push.projectId, push.runs)
   })
@@ -70,21 +54,16 @@ async function add(): Promise<void> {
   }
 }
 
-/** A suite from the project's own tooling becomes a line, check pre-filled. */
 async function addFromSuite(suite: TestSuite): Promise<void> {
   await evals.add(props.projectId, suite.acceptance, suite.command)
   showSuites.value = false
 }
 
-// Implement / verify / review all run through the session; its output decides the
-// check outcome (the app never claims a result the session did not report).
 async function dispatch(run: EvalRun, kind: 'check' | 'attempts' | 'judge'): Promise<void> {
   await evals.dispatch(props.projectId, run.id, kind)
   if (!evals.error) emit('ran')
 }
 
-// The manual pass: launch the app and hand over the acceptance line as what to
-// look at (FR-088). A prompt, not a command — the session decides how to launch.
 function manualPass(run: EvalRun): void {
   emit(
     'run',
@@ -168,8 +147,6 @@ const shortDate = (iso: string): string =>
 
     <div class="summary mono">
       <span data-testid="eval-count">{{ runs.length }} line{{ runs.length === 1 ? '' : 's' }}</span>
-      <!-- Measured, never derived: with nothing decided this says so rather than
-           showing a 0% that would read as "everything failed". -->
       <span
         v-if="runs.length > 0"
         class="rate"
@@ -306,8 +283,6 @@ const shortDate = (iso: string): string =>
 </template>
 
 <style scoped>
-/* The pass rate reads as a gate, so it takes the gate colours: green only at
-   100%, because "most of the acceptance lines hold" is not a pass. */
 .rate.good {
   color: var(--green);
 }
@@ -464,7 +439,6 @@ const shortDate = (iso: string): string =>
   border: 1px solid var(--border-strong);
 }
 
-/* CIV stage of the line: implement → verify → review → done. */
 .stage {
   flex-shrink: 0;
   font-family: var(--mono);
@@ -499,10 +473,7 @@ const shortDate = (iso: string): string =>
   line-height: 1.5;
   color: var(--text-mid);
   background: color-mix(in srgb, var(--amber) 7%, transparent);
-  /* 1px: same refused side-tab pattern as StreamEvent's prompt callout. */
   border-left: 1px solid var(--amber);
-  /* Square, like every other surface: the 3px here was the second of the two
-     unmigrated leftovers DESIGN.md names under Shapes. */
   border-radius: var(--rc);
   text-wrap: pretty;
 }
