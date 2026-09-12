@@ -17,8 +17,14 @@ files:
   # errors clearly if it is missing. This roughly halves the packaged size.
   - '!**/node_modules/@anthropic-ai/claude-agent-sdk-*/**'
 
-# No native modules: the SQLite store runs on the runtime's own `node:sqlite`,
-# so there is nothing to rebuild per ABI and nothing to unpack from the asar.
+# ONE native module: @lydell/node-pty, which backs the real Terminal tab. It is
+# a prebuilt N-API addon shipped as per-platform optional dependencies, so there
+# is still no node-gyp step and no ABI to match — but a .node file cannot be
+# loaded from inside an asar archive, so it has to be unpacked.
+#
+# The SQLite store is unaffected: it runs on the runtime's own `node:sqlite`.
+asarUnpack:
+  - '**/node_modules/@lydell/node-pty*/**'
 
 # Harden the packaged binary so it cannot be relaunched to run arbitrary Node
 # code (Electron security checklist A19). The app needs neither fuse: it spawns

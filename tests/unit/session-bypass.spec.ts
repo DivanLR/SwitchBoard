@@ -19,6 +19,7 @@ function sessionRow(projectId: string, bypassPermissions: boolean): Session {
   return {
     id: newId(),
     projectId,
+    engine: 'claude',
     sdkSessionId: 'sdk-1',
     status: 'working',
     statusDetail: null,

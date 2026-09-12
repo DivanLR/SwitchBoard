@@ -1,7 +1,14 @@
 // Sidebar state (FR-003/004/005): projects with live sessions, selection, and
 // aggregate counters.
 import { computed, reactive, toRefs } from 'vue'
-import type { McpScan, Project, ProjectCommand, Session, SessionMode } from '@shared/domain'
+import type {
+  McpScan,
+  Project,
+  ProjectCommand,
+  Session,
+  SessionEngine,
+  SessionMode,
+} from '@shared/domain'
 import type { Counters, ProjectListItem, SessionStatusPush } from '@shared/ipc-types'
 import { useActiveSessionStore } from './activeSession'
 import { invoke } from '@renderer/ipc'
@@ -241,6 +248,8 @@ const store = reactive({
      *  one place that question is answered, so a second button that quietly
      *  ignored it would make the checkbox a lie. */
     containerised?: boolean,
+    /** Which CLI runs it; omit for the developer's default engine. */
+    engine?: SessionEngine,
   ): Promise<Session> {
     state.starting = true
     try {
@@ -249,6 +258,7 @@ const store = reactive({
         resume,
         mode,
         carryTranscriptFrom,
+        engine,
         containerised:
           containerised ?? state.items.find((p) => p.id === projectId)?.useContainers ?? false,
       })

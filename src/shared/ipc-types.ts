@@ -26,6 +26,7 @@ import type {
   SectionKind,
   Session,
   SessionEvent,
+  SessionEngine,
   SessionMode,
   Settings,
   SkillImportResult,
@@ -93,6 +94,8 @@ export type IpcErrorCode =
   | 'NOT_LIVE'
   /** Too many sessions already hold a container; they share one virtual machine. */
   | 'SANDBOX_FULL'
+  /** The engine running this session has no such capability (see SessionEngine). */
+  | 'UNSUPPORTED'
   | 'INTERNAL'
 
 export interface IpcError {
@@ -130,6 +133,7 @@ const IPC_ERROR_CODE_KEYS: Record<IpcErrorCode, true> = {
   DUPLICATE: true,
   NOT_LIVE: true,
   SANDBOX_FULL: true,
+  UNSUPPORTED: true,
   INTERNAL: true,
 }
 
@@ -254,6 +258,26 @@ export interface InvokeMap {
   'projects.refs.remove': { req: { projectId: string; path: string }; res: ProjectRef[] }
   'projects.archive': { req: { projectId: string }; res: void }
   'projects.unarchive': { req: { projectId: string }; res: void }
+  /**
+   * Open (or re-attach to) the project's real terminal — a pseudo-terminal
+   * running the developer's own shell. `scrollback` is what is already on
+   * screen, so switching back to the tab redraws rather than restarts.
+   */
+  'terminal.open': {
+    req: {
+      id: string
+      cwd: string
+      cols: number
+      rows: number
+      /** Which CLI to launch in it, or 'shell' for a bare prompt. */
+      engine: SessionEngine | 'shell'
+    }
+    res: { scrollback: string; reused: boolean }
+  }
+  /** Keystrokes, verbatim. This is a terminal: nothing interprets them here. */
+  'terminal.write': { req: { id: string; data: string }; res: void }
+  'terminal.resize': { req: { id: string; cols: number; rows: number }; res: void }
+  'terminal.close': { req: { id: string }; res: void }
   'sessions.start': {
     req: {
       projectId: string
@@ -279,6 +303,17 @@ export interface InvokeMap {
        * before the choice existed.
        */
       containerised?: boolean
+      /**
+       * WHICH CLI runs this session: Claude or Codex. Omitted uses the
+       * developer's `defaultEngine` setting.
+       *
+       * Per session rather than per project because the choice is about the work
+       * in front of you, not about the checkout — and because the two engines
+       * differ in what they can do (a Codex session has no permission inbox and
+       * cannot run in a container), which is a decision worth making each time
+       * rather than inheriting silently.
+       */
+      engine?: SessionEngine
       /**
        * Seed the new session with a previous session's transcript: its digest
        * goes into the system prompt and the full file is named there for the
@@ -823,6 +858,17 @@ export interface ApiChangedPush {
   runs: ApiEvalRun[]
 }
 
+/** A chunk of a real terminal's output, straight from the pseudo-terminal. */
+export interface TerminalDataPush {
+  id: string
+  data: string
+}
+
+export interface TerminalExitPush {
+  id: string
+  exitCode: number
+}
+
 export interface PushMap {
   /** Individual events; the transport batches them (>= 30 Hz flushes) and the bridge fans out per event. */
   'push.event': SessionEvent
@@ -837,6 +883,10 @@ export interface PushMap {
   'push.projectCommands': ProjectCommandsPush
   'push.focusRequest': FocusRequestPush
   'push.updateStatus': UpdateStatus
+  /** Terminal output. Batched by the transport like `push.event`, because a
+   *  build log arrives far faster than a frame. */
+  'push.terminalData': TerminalDataPush
+  'push.terminalExit': TerminalExitPush
 }
 
 export type PushChannel = keyof PushMap
@@ -863,6 +913,8 @@ const PUSH_CHANNEL_KEYS: Record<PushChannel, true> = {
   'push.projectCommands': true,
   'push.focusRequest': true,
   'push.updateStatus': true,
+  'push.terminalData': true,
+  'push.terminalExit': true,
 }
 
 export const PUSH_CHANNELS: readonly PushChannel[] = Object.keys(

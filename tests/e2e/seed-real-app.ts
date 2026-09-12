@@ -57,6 +57,7 @@ export function seedRealApp(): SeededApp {
   repos.sessions.insert({
     id: 'seeded-session',
     projectId: project.id,
+    engine: 'claude',
     sdkSessionId: null,
     // 'done' is the schema's idle-but-alive state; the row has endedAt null, so
     // activeForProject finds it and verify.start reuses it instead of spawning.

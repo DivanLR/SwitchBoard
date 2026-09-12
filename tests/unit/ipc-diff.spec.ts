@@ -2,6 +2,7 @@
 // project-resolution and liveness gating. The git-read behaviour itself
 // (porcelain parsing, untracked files, binary detection) has its own spec —
 // tests/unit/git-diff-files.spec.ts — so only delegation is checked here.
+import type { PtyHost } from '@main/terminal/pty-host'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { execSync } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -73,6 +74,7 @@ function setup() {
     // A temp path: this suite never imports a skill, and the handlers only read
     // this when one is imported.
     skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),
+    ptyHost: { open: () => ({ scrollback: '', reused: false }), write: () => {}, resize: () => {}, close: () => {}, closeAll: () => {} } as unknown as PtyHost,
   })
 
   const listener = registered.get(INVOKE_CHANNEL)

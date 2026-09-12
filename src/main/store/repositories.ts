@@ -26,6 +26,7 @@ import type {
   Session,
   SuiteResult,
   SessionEndReason,
+  SessionEngine,
   SessionEvent,
   SessionMode,
   SessionStatus,
@@ -34,7 +35,12 @@ import type {
   VerifyReport,
   VerifyRun,
 } from '@shared/domain'
-import { DEFAULT_SESSION_MODE, DEFAULT_SETTINGS, emptyVerifyReport } from '@shared/domain'
+import {
+  DEFAULT_SESSION_ENGINE,
+  DEFAULT_SESSION_MODE,
+  DEFAULT_SETTINGS,
+  emptyVerifyReport,
+} from '@shared/domain'
 import type { ApiCall, ApiEvalRun, ApiTarget } from '@shared/api-endpoints'
 import type { RulePref, RuleKind } from '@main/inbox/rule-prefs'
 
@@ -71,6 +77,9 @@ function toProject(row: ProjectRow): Project {
 interface SessionRow {
   id: string
   projectId: string
+  /** Which CLI ran it (migration 030). Null only on a row written before the
+   *  column existed, which was necessarily a Claude session. */
+  engine: SessionEngine | null
   sdkSessionId: string | null
   status: SessionStatus
   statusDetail: string | null
@@ -106,6 +115,7 @@ function toSession(row: SessionRow | undefined): Session | undefined {
   // inPlanMode is deliberately absent: it is the live mode, which no row holds.
   return {
     ...row,
+    engine: row.engine ?? DEFAULT_SESSION_ENGINE,
     bypassPermissions: row.bypassPermissions === 1,
     planMode: row.planMode === 1,
   }
@@ -280,8 +290,8 @@ export class SessionsRepo {
   insert(session: Session): void {
     this.db
       .prepare(
-        `INSERT INTO sessions (id, projectId, sdkSessionId, status, statusDetail, branch, diffAdds, diffDels, usageUtilization, usageResetsAt, usageLimitType, startedAt, endedAt, endReason, bypassPermissions, planMode)
-         VALUES (@id, @projectId, @sdkSessionId, @status, @statusDetail, @branch, @diffAdds, @diffDels, @usageUtilization, @usageResetsAt, @usageLimitType, @startedAt, @endedAt, @endReason, @bypassPermissions, @planMode)`,
+        `INSERT INTO sessions (id, projectId, engine, sdkSessionId, status, statusDetail, branch, diffAdds, diffDels, usageUtilization, usageResetsAt, usageLimitType, startedAt, endedAt, endReason, bypassPermissions, planMode)
+         VALUES (@id, @projectId, @engine, @sdkSessionId, @status, @statusDetail, @branch, @diffAdds, @diffDels, @usageUtilization, @usageResetsAt, @usageLimitType, @startedAt, @endedAt, @endReason, @bypassPermissions, @planMode)`,
       )
       // SQLite takes no booleans, and the in-memory Session carries non-scalar
       // extras (mcpServers, backgroundTasks) that are not columns — so bind the
@@ -289,6 +299,7 @@ export class SessionsRepo {
       .run({
         id: session.id,
         projectId: session.projectId,
+        engine: session.engine ?? DEFAULT_SESSION_ENGINE,
         sdkSessionId: session.sdkSessionId,
         status: session.status,
         statusDetail: session.statusDetail,

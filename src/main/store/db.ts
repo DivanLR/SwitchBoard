@@ -659,6 +659,17 @@ const MIGRATIONS: Migration[] = [
       db.exec(`ALTER TABLE sessions ADD COLUMN derivedName TEXT;`)
     },
   },
+  {
+    /**
+     * Which CLI a session runs. Defaulted rather than nullable: every session
+     * that existed before this column was a Claude session, and a row that could
+     * say "no engine" would force every reader to invent an answer.
+     */
+    name: '030-session-engine',
+    up: (db) => {
+      db.exec(`ALTER TABLE sessions ADD COLUMN engine TEXT NOT NULL DEFAULT 'claude';`)
+    },
+  },
 ]
 
 /**
