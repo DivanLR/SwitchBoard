@@ -1,12 +1,4 @@
-// Permission broker (R3, FR-007/007a/009/012): implements the Agent SDK
-// canUseTool flow for every session. Standing rules short-circuit as
-// rule_approved history entries; everything else becomes a pending inbox item
-// whose promise resolves when the developer decides. Plan approvals are inbox
-// items shaped by FR-007a; AskUserQuestion routes to the stream, never the
-// inbox (FR-020).
 import { win32 } from 'node:path'
-// Through sessions/, not from the SDK directly: src/main/sessions/ is the SDK's
-// only home (CLAUDE.md), and eslint.config.mjs enforces that.
 import type { PermissionResult } from '@main/sessions/session'
 import {
   isDangerousCommand,
@@ -21,8 +13,6 @@ import { classifyRisk } from './risk-rules'
 import { RuleSet } from './rule-set'
 import { deriveMatcher, evaluateStandingRules, isPathWithinProject, pathOf } from './standing-rules'
 
-/** File tools auto-approved without a prompt when their target is inside the
- *  session's own project folder. */
 const CWD_AUTO_APPROVE_TOOLS = new Set(['Read', 'Write', 'Edit', 'NotebookEdit'])
 
 export class BrokerError extends Error {
@@ -61,7 +51,6 @@ interface QuestionGroup {
 interface BrokerCallbacks {
   onInboxChanged: (push: InboxChangedPush) => void
   onCountersChanged: () => void
-  /** Desktop notification hook; fired when an item starts blocking (FR-013a). */
   onNeedsYou: (context: {
     projectId: string
     sessionId: string
@@ -85,11 +74,6 @@ interface CanUseToolContext {
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v.length > 0 ? v : null)
 
-/**
- * Produces a clear, human-first title, a plain-language explanation of what the
- * action would do, and the underlying detail (exact command / file / input).
- * Titles are full (never truncated) — the inbox card wraps them.
- */
 function describeTool(toolName: string, input: Record<string, unknown>): {
   title: string
   explanation: string
@@ -143,26 +127,14 @@ function describeTool(toolName: string, input: Record<string, unknown>): {
   return {
     title: `Use the ${toolName} tool`,
     explanation: `Claude wants to use the ${toolName} tool.`,
-    // Bounded like the Write branch above (4000 chars): this is persisted to
-    // SQLite and pushed across the IPC bridge to the renderer, and unlike the
-    // named branches above, an MCP tool's input shape is arbitrary — nothing
-    // stops one from carrying a multi-megabyte field. The detail is evidence
-    // for a decision, not an archive, so truncate it rather than storing and
-    // shipping the whole thing.
     detail: JSON.stringify(input, null, 2).slice(0, 4000),
   }
 }
 
 export class PermissionBroker {
   private pending = new Map<string, PendingEntry>()
-  /** question event id -> its group */
   private questions = new Map<string, QuestionGroup>()
 
-  /**
-   * The rules in force. Built here rather than injected so the six existing test
-   * harnesses keep working, and exposed because the noise classifier needs the
-   * SAME instance: one reload then reaches both hot paths (see rule-set.ts).
-   */
   readonly rules: RuleSet
 
   constructor(
@@ -173,7 +145,6 @@ export class PermissionBroker {
     this.rules = new RuleSet(repos)
   }
 
-  /** The PermissionGate bound into every hosted session. */
   async handle(context: CanUseToolContext): Promise<PermissionResult> {
     if (context.toolName === 'AskUserQuestion') {
       return this.handleQuestion(context)
@@ -190,15 +161,11 @@ export class PermissionBroker {
     const projectId = session.projectId
     const project = this.repos.projects.byId(projectId)
 
-    // A standing rule or an enabled risk-level auto-approval (Allowed list tab)
-    // short-circuits, recorded as rule_approved (FR-009b); otherwise enqueue.
     const standing = evaluateStandingRules(
       this.repos.standingRules.listForProject(projectId),
       context.toolName,
       context.input,
     )
-    // File tools targeting the session's OWN folder need no prompt — the session
-    // already owns read/write inside its working directory.
     const withinOwnFolder =
       CWD_AUTO_APPROVE_TOOLS.has(context.toolName) &&
       project !== undefined &&
@@ -253,8 +220,6 @@ export class PermissionBroker {
       explanation:
         'The session finished planning and asks for approval before making changes (plan badge; single-click approval).',
       detail: planText,
-      // Plan approvals carry a "plan" badge in the UI instead of a risk level;
-      // stored low so the high-risk confirm step never applies (FR-007a).
       risk: 'low',
       status: 'pending',
       createdAt: nowIso(),
@@ -349,11 +314,9 @@ export class PermissionBroker {
         )
       }
     } catch {
-      // Session already gone; the persisted row was updated by the repo call.
     }
   }
 
-  /** Developer decision from the inbox (FR-009, FR-010). */
   decide(
     requestId: string,
     decision: 'approve' | 'deny',
@@ -375,7 +338,6 @@ export class PermissionBroker {
 
     const entry = this.pending.get(requestId)
     if (!entry) {
-      // Undeliverable: the originating session is gone (SC-004).
       this.repos.requests.resolve(requestId, 'expired', true)
       this.callbacks.onInboxChanged({
         resolved: { requestId, status: 'expired', deliveryFailed: true },
@@ -388,9 +350,6 @@ export class PermissionBroker {
     this.settleEntry(entry, status)
     if (decision === 'approve') {
       entry.resolve({ behavior: 'allow', updatedInput: entry.input })
-      // Approving an ExitPlanMode IS leaving plan mode, by the tool's own
-      // contract — there is no second step. Denying deliberately leaves the
-      // session in plan mode, so the model revises and proposes again.
       if (request.type === 'plan_approval') this.manager.planExited(request.sessionId)
     } else {
       entry.resolve({ behavior: 'deny', message: 'Denied by the developer in Switchboard' })
@@ -398,16 +357,6 @@ export class PermissionBroker {
     return { delivered: true }
   }
 
-  /**
-   * Saves a standing rule from a DECIDED Bash request (design: right-click a
-   * command in history → always allow). The matcher is DERIVED server-side from
-   * the recorded command (`detail` holds it verbatim for Bash), never taken
-   * from the caller — a renderer must not be able to widen a rule beyond the
-   * action shown. Any approved command is eligible EXCEPT the destructive set
-   * (`isDangerousCommand`); the risk classifier's fail-safe-to-high must not bar
-   * ordinary vetted commands. An overlapping active rule is reused instead of
-   * stacking a duplicate.
-   */
   alwaysAllow(requestId: string) {
     const request = this.repos.requests.byId(requestId)
     if (!request) throw new BrokerError('NOT_FOUND', 'Permission request not found')
@@ -426,23 +375,6 @@ export class PermissionBroker {
     return this.insertRuleForBashCommand(request)
   }
 
-  /**
-   * From a PENDING inbox item ("Always allow …"): inserts the standing rule then
-   * approves the request via the normal `decide()` path (marker, push,
-   * resolution — no duplicated settlement). Both calls are synchronous, so
-   * rule-then-approve is atomic within the event loop.
-   *
-   * Two shapes:
-   * - Bash: a flag-aware command-prefix rule. Refused for high risk (one click
-   *   must not both widen future auto-approval AND skip the high-risk confirm a
-   *   plain Approve requires) and for the destructive set.
-   * - MCP tools (`mcp__…`): a `tool_only` rule allow-listing every future call
-   *   to that exact tool for the project. These are high only by the risk
-   *   classifier's fail-safe (no rule matches an MCP tool), so the gate is the
-   *   developer's explicit confirm (`confirmHighRisk`), not a command check —
-   *   there is no command to vet. ponytail: per-project like every standing
-   *   rule; a narrower per-session scope would need a whole new mechanism.
-   */
   approveAlways(
     requestId: string,
     confirmHighRisk = false,
@@ -461,7 +393,6 @@ export class PermissionBroker {
         throw new BrokerError('CONFIRM_REQUIRED', 'Allowing every call to this tool requires confirmation')
       }
       const { rule } = this.insertRuleForMcpTool(request)
-      // Already confirmed (or not high) — bypass decide()'s own high-risk gate.
       const { delivered } = this.decide(requestId, 'approve', true)
       return { delivered, rule }
     }
@@ -480,7 +411,6 @@ export class PermissionBroker {
     return { delivered, rule }
   }
 
-  /** Dedupe-insert of a `tool_only` rule allow-listing an MCP tool by name. */
   private insertRuleForMcpTool(request: PermissionRequest): { rule: PermissionRule } {
     const toolName = request.toolName as string
     const existing = this.repos.standingRules
@@ -496,7 +426,6 @@ export class PermissionBroker {
     return { rule }
   }
 
-  /** Shared matcher-derivation + dedupe-insert for `alwaysAllow`/`approveAlways`. */
   private insertRuleForBashCommand(request: PermissionRequest): { rule: PermissionRule } {
     const matcher = deriveMatcher(request.detail)
     const base = matcher.value ?? ''
@@ -522,12 +451,6 @@ export class PermissionBroker {
     return { rule }
   }
 
-  /**
-   * Approves every pending item in one project group (FR-011). High-risk tool
-   * permissions are skipped unless `includeHighRisk` is set — the UI passes it
-   * only after an explicit "are you sure" confirm, so bulk approval never
-   * silently clears a destructive action.
-   */
   approveAllForProject(
     projectId: string,
     includeHighRisk = false,
@@ -541,14 +464,12 @@ export class PermissionBroker {
         skippedHighRisk += 1
         continue
       }
-      // decide() re-checks the high-risk gate, so pass the confirm through.
       this.decide(request.id, 'approve', isHighRisk)
       approved += 1
     }
     return { approved, skippedHighRisk }
   }
 
-  /** Session death or app exit: cancel its pending items out of the inbox. */
   expireForSession(sessionId: string): void {
     for (const [requestId, entry] of [...this.pending]) {
       if (entry.sessionId !== sessionId) continue
@@ -649,7 +570,6 @@ export class PermissionBroker {
     })
   }
 
-  /** Click on a choice in the stream (FR-020). */
   answerQuestion(sessionId: string, eventId: string, choice: string): void {
     const group = this.questions.get(eventId)
     if (!group || group.sessionId !== sessionId) {
@@ -682,7 +602,6 @@ export class PermissionBroker {
         { persist: true },
       )
     } catch {
-      // Session ended mid-answer; the resolution below still settles the group.
     }
 
     if (!group.settled && group.questions.every((q) => q.answered)) {
@@ -692,13 +611,6 @@ export class PermissionBroker {
   }
 }
 
-/**
- * Shapes the AskUserQuestion allow result per the Agent SDK user-input
- * contract (code.claude.com/docs/en/agent-sdk/user-input, verified against
- * SDK 0.3.215): pass `questions` through unchanged and return an `answers`
- * object mapping each question's `question` text to the selected option's
- * `label`.
- */
 function buildQuestionResult(
   input: Record<string, unknown>,
   answers: (string | null)[],

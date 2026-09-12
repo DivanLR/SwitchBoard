@@ -1,18 +1,8 @@
-// The three things an acceptance line dispatches to the session, and how the
-// answer is read back (spec 002 US7 + the Coordinator-Implementor-Verifier
-// pattern: implement in isolation, then pass a deterministic gate).
-//
-// Everything runs THROUGH the session (FR-041) — nothing here spawns a process.
-// The gate is made deterministic the only way that leaves the session in charge:
-// the prompt demands one machine-readable line, and the main process reads that
-// line off the session's own events. No line, no pass (FR-047).
 import type { EvalCheckStatus } from '@shared/domain'
 
-/** Sentinels the session is told to emit. Deliberately unmistakable. */
 export const CHECK_MARKER = 'EVAL_CHECK'
 export const JUDGE_MARKER = 'EVAL_JUDGE'
 
-/** Verify: run the check and report its real outcome, nothing else. */
 export function checkPrompt(acceptance: string, command: string): string {
   return (
     `Verify this acceptance line: "${acceptance}"\n\n` +
@@ -25,16 +15,6 @@ export function checkPrompt(acceptance: string, command: string): string {
   )
 }
 
-/**
- * Implement: N independent attempts, each isolated in its own git worktree, then
- * one report saying which passed the check. Best-of-N — the developer keeps the
- * winner.
- *
- * ponytail: the isolation is the session agent's own worktree support, not
- * worktrees managed here. Managing them in the app would mean lifting the
- * one-live-session-per-project rule first; do that only if attempts need to be
- * driven from the app while the session is busy elsewhere.
- */
 export function attemptsPrompt(acceptance: string, command: string | null, attempts: number): string {
   return (
     `Acceptance line: "${acceptance}"\n\n` +
@@ -49,7 +29,6 @@ export function attemptsPrompt(acceptance: string, command: string | null, attem
   )
 }
 
-/** Review: a second opinion on the diff against the acceptance line. */
 export function judgePrompt(acceptance: string): string {
   return (
     `Judge the current diff against this acceptance line: "${acceptance}"\n\n` +
@@ -60,7 +39,6 @@ export function judgePrompt(acceptance: string): string {
   )
 }
 
-/** What the session reported, or null when this text carries no marker. */
 export type EvalMarker =
   | { kind: 'check'; status: EvalCheckStatus }
   | { kind: 'judge'; verdict: string }
@@ -68,11 +46,6 @@ export type EvalMarker =
 const CHECK_RE = new RegExp(`^\\s*\\**${CHECK_MARKER}\\**\\s*:\\s*\\**\\s*(PASS|FAIL|INCONCLUSIVE)`, 'im')
 const JUDGE_RE = new RegExp(`^\\s*\\**${JUDGE_MARKER}\\**\\s*:\\s*(.+)$`, 'im')
 
-/**
- * Read a marker out of session text. The LAST occurrence wins: the prompt text
- * itself echoes the sentinels, and a turn may restate them, so an early mention
- * must never be mistaken for the answer.
- */
 export function parseEvalMarker(text: string): EvalMarker | null {
   const check = lastMatch(text, CHECK_RE)
   if (check) {
