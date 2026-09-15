@@ -264,7 +264,9 @@ watch(
   [() => liveSession.value?.id ?? null, mainTab, () => props.project.id, () => active.selectedAgentId],
   () => {
     if (!liveSession.value || mainTab.value !== 'session') return
-    void nextTick(() => composerEl.value?.focus())
+    void nextTick(() => {
+      if (document.activeElement?.getAttribute('role') !== 'tab') composerEl.value?.focus()
+    })
   },
   { immediate: true },
 )
@@ -283,6 +285,7 @@ watch(
     composer.value = composerDrafts.get(projectId) ?? ''
     restoredDraft.value = null
     mainTab.value = 'session'
+    terminalEverOpened.value = false
     editTarget.value = null
     sessionStart?.reset()
     cancelStop()
@@ -446,8 +449,32 @@ watch([() => active.events.length, () => active.view, () => liveSession.value?.i
 )
 
 function switchView(view: 'clean' | 'raw'): void {
+  mainTab.value = 'session'
   active.setView(view)
   scrollToBottom()
+}
+
+function openTerminal(): void {
+  editTarget.value = null
+  terminalEverOpened.value = true
+  mainTab.value = 'terminal'
+}
+
+function onViewKeydown(event: KeyboardEvent): void {
+  const views = ['clean', 'raw', 'terminal'] as const
+  const current = mainTab.value === 'terminal' ? 'terminal' : active.view
+  let index = views.indexOf(current)
+  if (event.key === 'ArrowRight') index = (index + 1) % views.length
+  else if (event.key === 'ArrowLeft') index = (index + views.length - 1) % views.length
+  else if (event.key === 'Home') index = 0
+  else if (event.key === 'End') index = views.length - 1
+  else return
+  event.preventDefault()
+  const view = views[index]
+  if (view === 'terminal') openTerminal()
+  else switchView(view)
+  const tabs = (event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('[role="tab"]')
+  void nextTick(() => tabs[index]?.focus())
 }
 
 watch(mainTab, (tab) => {
@@ -984,19 +1011,11 @@ const {
     <div v-if="!active.fullScreenSection" class="main-tabs mono">
       <button
         class="mt"
-        :class="{ sel: mainTab === 'session' }"
+        :class="{ sel: mainTab === 'session' || mainTab === 'terminal' }"
         data-testid="tab-session"
         @click="mainTab = 'session'"
       >
         Session
-      </button>
-      <button
-        class="mt"
-        :class="{ sel: mainTab === 'terminal' }"
-        data-testid="tab-terminal"
-        @click="((mainTab = 'terminal'), (terminalEverOpened = true))"
-      >
-        Terminal
       </button>
       <button class="mt" :class="{ sel: mainTab === 'specs' }" data-testid="tab-specs" @click="mainTab = 'specs'">
         Specs
@@ -1038,20 +1057,24 @@ const {
       >
         Skills
       </button>
+    </div>
+    <div v-if="!active.fullScreenSection && (mainTab === 'session' || mainTab === 'terminal')" class="view-toolbar">
+      <span class="view-label">Workspace</span>
       <div
-        v-if="mainTab === 'session'"
-        class="segments mono"
+        class="segments view-segments"
         data-testid="view-toggle"
         role="tablist"
         aria-label="Stream view"
+        @keydown="onViewKeydown"
       >
         <button
           type="button"
           class="seg"
-          :class="{ on: active.view === 'clean' }"
+          :class="{ on: mainTab === 'session' && active.view === 'clean' }"
           data-testid="view-clean"
           role="tab"
-          :aria-selected="active.view === 'clean'"
+          :aria-selected="mainTab === 'session' && active.view === 'clean'"
+          :tabindex="mainTab === 'session' && active.view === 'clean' ? 0 : -1"
           @click="switchView('clean')"
         >
           Clean
@@ -1059,13 +1082,26 @@ const {
         <button
           type="button"
           class="seg"
-          :class="{ on: active.view === 'raw' }"
+          :class="{ on: mainTab === 'session' && active.view === 'raw' }"
           data-testid="view-raw"
           role="tab"
-          :aria-selected="active.view === 'raw'"
+          :aria-selected="mainTab === 'session' && active.view === 'raw'"
+          :tabindex="mainTab === 'session' && active.view === 'raw' ? 0 : -1"
           @click="switchView('raw')"
         >
           Raw
+        </button>
+        <button
+          type="button"
+          class="seg"
+          :class="{ on: mainTab === 'terminal' }"
+          data-testid="tab-terminal"
+          role="tab"
+          :aria-selected="mainTab === 'terminal'"
+          :tabindex="mainTab === 'terminal' ? 0 : -1"
+          @click="openTerminal()"
+        >
+          <Icon name="terminal" :size="13" /> Terminal
         </button>
       </div>
     </div>
@@ -1076,6 +1112,7 @@ const {
       :id="project.id"
       :cwd="project.path"
       :engine="liveSession?.engine ?? startEngine"
+      :visible="mainTab === 'terminal'"
     />
 
     <SpecsView
@@ -1123,7 +1160,7 @@ const {
     />
 
     <div
-      v-else-if="active.view === 'clean' || selectedAgent"
+      v-else-if="mainTab === 'session' && (active.view === 'clean' || selectedAgent)"
       ref="streamEl"
       class="stream"
       data-testid="stream"
@@ -1450,7 +1487,7 @@ const {
 
     </div>
 
-    <div v-else ref="streamEl" class="raw-view" data-testid="stream" :style="{ zoom: streamZoom }" @scroll.passive="onStreamScroll">
+    <div v-else-if="mainTab === 'session'" ref="streamEl" class="raw-view" data-testid="stream" :style="{ zoom: streamZoom }" @scroll.passive="onStreamScroll">
       <div
         v-for="line in rawLines"
         :key="line.key"
@@ -1743,7 +1780,7 @@ const {
 
 
 .head {
-  padding: 14px 22px 12px;
+  padding: 20px 24px 16px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
   box-shadow: var(--hairline-shine);
@@ -1752,7 +1789,9 @@ const {
 .main-tabs {
   display: flex;
   gap: 2px;
-  padding: 0 16px;
+  padding: 0 20px;
+  flex-shrink: 0;
+  font-family: var(--sans);
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
   box-shadow: var(--hairline-shine);
@@ -1770,10 +1809,9 @@ const {
 }
 
 .mt {
-  padding: 9px 13px;
-  font-size: var(--fs-meta);
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
+  padding: 13px 12px;
+  font-size: var(--fs-ui);
+  font-weight: 500;
   color: var(--text-tab);
   cursor: pointer;
   display: flex;
@@ -1787,8 +1825,46 @@ const {
 }
 
 .mt.sel {
-  color: var(--text-strong);
+  color: var(--green);
   box-shadow: inset 0 -2px 0 var(--green);
+}
+
+.view-toolbar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 24px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg);
+}
+
+.view-label {
+  font-size: var(--fs-meta);
+  color: var(--text-faint);
+  font-weight: 500;
+}
+
+.segments.view-segments {
+  padding: 3px;
+  gap: 3px;
+  background: var(--bg-panel);
+  border-color: var(--border-soft);
+  border-radius: 9px;
+}
+
+.view-segments .seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border-radius: 6px;
+}
+
+.view-segments .seg.on {
+  background: color-mix(in srgb, var(--green) 12%, var(--bg-panel));
+  color: var(--green);
 }
 
 .mt-badge {
@@ -2130,7 +2206,7 @@ const {
 .head-meta {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 8px 14px;
   margin-top: 7px;
   font-size: var(--fs-meta);
   color: var(--text-meta);

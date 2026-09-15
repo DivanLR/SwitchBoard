@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8"><title>Terminal clipboard test</title></head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      import { createApp, h } from 'vue'
+      import TerminalPane from '../../src/renderer/components/TerminalPane.vue'
+      import { useTerminalStore } from '../../src/renderer/stores/terminal'
+      import '../../node_modules/@xterm/xterm/css/xterm.css'
+      import '../../src/renderer/styles.css'
+      const terminals = useTerminalStore()
+      window.switchboard.on('push.terminalData', data => terminals.applyData(data))
+      window.switchboard.on('push.terminalExit', data => terminals.applyExit(data))
+      createApp({ render: () => h(TerminalPane, {
+        id: 'native-test', cwd: '.', engine: 'codex', visible: true,
+      }) }).mount('#app')
+    </script>
+    <style>#app { display: flex; height: 100vh; }</style>
+  </body>
+</html>

@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { delimiter, join } from 'node:path'
 
-export interface CodexLaunch {
+interface CodexLaunch {
   command: string
   prefixArgs: string[]
   env: Record<string, string>

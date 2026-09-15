@@ -1,8 +1,8 @@
 import { reactive } from 'vue'
 
-export type ToastKind = 'success' | 'error' | 'warning' | 'info'
+type ToastKind = 'success' | 'error' | 'warning' | 'info'
 
-export interface Toast {
+interface Toast {
   id: number
   kind: ToastKind
   title: string

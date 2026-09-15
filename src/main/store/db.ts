@@ -2,7 +2,7 @@ import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 
-export interface AppStatement {
+interface AppStatement {
   all(...params: (SQLInputValue | object)[]): unknown[]
   get(...params: (SQLInputValue | object)[]): unknown
   run(...params: (SQLInputValue | object)[]): {

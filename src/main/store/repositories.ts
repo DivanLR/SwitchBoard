@@ -139,7 +139,7 @@ function toRequest(row: RequestRow): PermissionRequest {
   return { ...row, deliveryFailed: row.deliveryFailed === 1 }
 }
 
-export class ProjectsRepo {
+class ProjectsRepo {
   constructor(private db: AppDatabase) {}
 
   insert(input: {
@@ -256,7 +256,7 @@ export class ProjectsRepo {
   }
 }
 
-export class SessionsRepo {
+class SessionsRepo {
   constructor(private db: AppDatabase) {}
 
   insert(session: Session): void {
@@ -370,7 +370,7 @@ export class SessionsRepo {
 
 }
 
-export class EventsRepo {
+class EventsRepo {
   constructor(private db: AppDatabase) {}
 
   private pending: SessionEvent[] = []
@@ -470,7 +470,7 @@ export class EventsRepo {
   }
 }
 
-export class RequestsRepo {
+class RequestsRepo {
   constructor(private db: AppDatabase) {}
 
   insert(request: PermissionRequest): void {
@@ -531,7 +531,7 @@ export class RequestsRepo {
   }
 }
 
-export class StandingRulesRepo {
+class StandingRulesRepo {
   constructor(private db: AppDatabase) {}
 
   insert(input: {
@@ -636,7 +636,7 @@ export class RulePrefsRepo {
   }
 }
 
-export class SettingsRepo {
+class SettingsRepo {
   constructor(private db: AppDatabase) {}
 
   get(): Settings {
@@ -675,7 +675,7 @@ export class SettingsRepo {
   }
 }
 
-export class DraftsRepo {
+class DraftsRepo {
   constructor(private db: AppDatabase) {}
 
   insert(projectId: string, text: string): Draft {
@@ -798,7 +798,7 @@ export class ProjectCommandsRepo {
   }
 }
 
-export class McpScansRepo {
+class McpScansRepo {
   constructor(private db: AppDatabase) {}
 
   listForProject(projectId: string): McpScan[] {
@@ -897,7 +897,7 @@ function pruneToLast(
 
 const VERIFY_HISTORY = 20
 
-export class VerifyRunsRepo {
+class VerifyRunsRepo {
   constructor(private db: AppDatabase) {}
 
   start(input: {
@@ -1043,7 +1043,7 @@ function parseJson<T>(raw: string): T | null {
 
 const API_HISTORY = 20
 
-export class ApiRunsRepo {
+class ApiRunsRepo {
   constructor(private db: AppDatabase) {}
 
   reconcileRunning(note: string): number {
@@ -1215,7 +1215,7 @@ export class DiagramRequestsRepo {
   }
 }
 
-export class CustomSkillsRepo {
+class CustomSkillsRepo {
   constructor(private db: AppDatabase) {}
 
   list(): CustomSkill[] {

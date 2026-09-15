@@ -1,6 +1,6 @@
 import type { ApiCall, ApiEvalRun } from './api-endpoints'
 
-export interface ReportContext {
+interface ReportContext {
   projectName: string
   dbServers?: readonly string[]
 }

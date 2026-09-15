@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import type { DiagramEntry } from '@shared/domain'
 import { DIAGRAMS_DIR } from '@shared/diagram'
 
-export interface DiagramRequestInfo {
+interface DiagramRequestInfo {
   description: string | null
   sessionId: string | null
   plan: unknown

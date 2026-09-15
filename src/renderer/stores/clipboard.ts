@@ -9,6 +9,14 @@ const store = {
       return false
     }
   },
+
+  async read(): Promise<string> {
+    try {
+      return (await invoke('clipboard.read', undefined)).text
+    } catch {
+      return ''
+    }
+  },
 }
 
 export const useClipboardStore = (): typeof store => store

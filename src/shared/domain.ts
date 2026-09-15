@@ -23,7 +23,7 @@ export type RiskLevel = 'low' | 'medium' | 'high'
 
 export type RuleKind = 'risk' | 'swallow'
 
-export type PermissionRequestType = 'tool_permission' | 'plan_approval'
+type PermissionRequestType = 'tool_permission' | 'plan_approval'
 
 export type PermissionRequestStatus = 'pending' | 'approved' | 'denied' | 'expired' | 'rule_approved'
 
@@ -143,7 +143,7 @@ export interface Session {
   modelTotals?: Record<string, { tokens: number; costUsd: number }>
 }
 
-export interface AgentScopedPayload {
+interface AgentScopedPayload {
   agentId?: string
 }
 
@@ -215,11 +215,11 @@ export interface ResultPayload {
   durationMs: number
 }
 
-export interface RawOutputPayload extends AgentScopedPayload {
+interface RawOutputPayload extends AgentScopedPayload {
   text: string
 }
 
-export type InjectionSource = 'system_reminder' | 'command' | 'hook' | 'system' | 'context'
+type InjectionSource = 'system_reminder' | 'command' | 'hook' | 'system' | 'context'
 
 export interface InjectionPayload extends AgentScopedPayload {
   text: string
@@ -291,7 +291,7 @@ export interface DecisionRecord extends Omit<PermissionRequest, 'status' | 'reso
   resolvedAt: string
 }
 
-export type PermissionRuleMatcherKind = 'command_prefix' | 'path_glob' | 'tool_only'
+type PermissionRuleMatcherKind = 'command_prefix' | 'path_glob' | 'tool_only'
 
 export interface PermissionRuleMatcher {
   kind: PermissionRuleMatcherKind
@@ -396,12 +396,6 @@ export function modelPrice(id: string): string {
 }
 
 export type ModelMode = 'auto' | 'advisor' | 'orchestrator' | 'basic'
-
-export const PAIRED_MODEL_MODES: readonly ModelMode[] = ['auto', 'advisor', 'orchestrator']
-
-export function isBasicMode(mode: ModelMode | undefined): boolean {
-  return mode === 'basic'
-}
 
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
@@ -541,7 +535,7 @@ export interface EvalRun {
 
 export const EVAL_RELOOP_RATING = 3
 
-export type EvalStage = 'implement' | 'verify' | 'review' | 'done'
+type EvalStage = 'implement' | 'verify' | 'review' | 'done'
 
 export function evalStage(run: Pick<EvalRun, 'checkStatus' | 'verdict' | 'judge'>): EvalStage {
   if (run.verdict !== 'pending') return 'done'
@@ -613,7 +607,7 @@ export interface VerifyReport {
   endpoints: EndpointResult[]
 }
 
-export type VerifyStatus = 'running' | 'pass' | 'fail' | 'inconclusive'
+type VerifyStatus = 'running' | 'pass' | 'fail' | 'inconclusive'
 
 export interface VerifyRun {
   id: string
@@ -636,7 +630,7 @@ export function verifyVerdict(report: VerifyReport): Exclude<VerifyStatus, 'runn
   return executed.length > 0 || calls.length > 0 ? 'pass' : 'inconclusive'
 }
 
-export interface RunEstimate {
+interface RunEstimate {
   ms: number
   basis: string
   comparable: boolean
@@ -834,7 +828,7 @@ export interface DiagramEntry {
   bytes: number
 }
 
-export interface DiffLine {
+interface DiffLine {
   type: 'context' | 'add' | 'del'
   text: string
 }

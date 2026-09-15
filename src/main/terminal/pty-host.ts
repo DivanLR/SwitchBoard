@@ -3,7 +3,7 @@ import type { SessionEngine } from '@shared/domain'
 import { resolveClaudeExecutable } from '@main/sessions/claude-executable'
 import { codexInstalled } from '@main/sessions/codex-executable'
 
-export interface PtyCallbacks {
+interface PtyCallbacks {
   onData: (id: string, data: string) => void
   onExit: (id: string, exitCode: number) => void
 }
@@ -45,7 +45,7 @@ export class PtyHost {
   }): { scrollback: string; reused: boolean } {
     const existing = this.terminals.get(input.id)
     if (existing) {
-      existing.pty.resize(Math.max(2, input.cols), Math.max(2, input.rows))
+      this.resize(input.id, input.cols, input.rows)
       return { scrollback: existing.scrollback, reused: true }
     }
     const pty = spawn(defaultShell(), [], {
@@ -77,7 +77,10 @@ export class PtyHost {
   }
 
   resize(id: string, cols: number, rows: number): void {
-    this.terminals.get(id)?.pty.resize(Math.max(2, cols), Math.max(2, rows))
+    const pty = this.terminals.get(id)?.pty
+    const next = { cols: Math.max(2, cols), rows: Math.max(2, rows) }
+    if (!pty || (pty.cols === next.cols && pty.rows === next.rows)) return
+    pty.resize(next.cols, next.rows)
   }
 
   close(id: string): void {

@@ -17,8 +17,6 @@ import type {
   ProjectCommand,
   ProjectRef,
   QueuedTask,
-  RiskLevel,
-  RuleKind,
   SectionKind,
   Session,
   SessionEvent,
@@ -28,39 +26,13 @@ import type {
   SkillImportResult,
   SpecDetail,
   SpecKitState,
-  TranscriptSummary,
   VerifyRun,
 } from './domain'
 import type { AvailableSuites } from './test-catalog'
 import type { ApiEvalRun, ApiTarget, DiscoveredEndpoint } from './api-endpoints'
 import type { ArchifyOptions } from './diagram'
 
-export interface RiskRuleView {
-  id: string
-  builtin: boolean
-  label: string
-  toolMatcher: string
-  pattern: string | null
-  risk: RiskLevel
-  overridden: boolean
-  disabled: boolean
-}
-
-export interface SwallowRuleView {
-  id: string
-  builtin: boolean
-  eventKindMatcher: string
-  pattern: string
-  noiseKind: string
-  disabled: boolean
-}
-
-export interface RulesView {
-  risk: RiskRuleView[]
-  swallow: SwallowRuleView[]
-}
-
-export type IpcErrorCode =
+type IpcErrorCode =
   | 'NOT_FOUND'
   | 'ALREADY_ACTIVE'
   | 'SESSION_ENDED'
@@ -135,7 +107,7 @@ export interface Counters {
   tokensToday: number
 }
 
-export interface ProjectsSnapshot {
+interface ProjectsSnapshot {
   projects: ProjectListItem[]
   archived: Project[]
   counters: Counters
@@ -205,8 +177,7 @@ export interface InvokeMap {
   'sessions.promptHistory': { req: { projectId: string; limit?: number }; res: string[] }
   'sessions.rename': { req: { sessionId: string; label: string }; res: void }
   'clipboard.write': { req: { text: string }; res: void }
-  'transcripts.save': { req: { sessionId: string }; res: TranscriptSummary }
-  'transcripts.list': { req: Record<string, never>; res: TranscriptSummary[] }
+  'clipboard.read': { req: void; res: { text: string } }
   'projects.commands': { req: { projectId: string }; res: ProjectCommand[] }
   'skills.list': { req: void; res: CustomSkill[] }
   'skills.import': { req: { url: string }; res: SkillImportResult }
@@ -350,18 +321,6 @@ export interface InvokeMap {
   'rules.standing.restore': { req: { ruleId: string }; res: void }
   'rules.standing.add': { req: { projectId: string; pattern: string }; res: PermissionRule }
   'sessions.editQueued': { req: { sessionId: string; eventId: string; text: string }; res: void }
-  'rules.list': { req: void; res: RulesView }
-  'rules.setDisabled': { req: { id: string; kind: RuleKind; disabled: boolean }; res: RulesView }
-  'rules.setRisk': { req: { id: string; risk: RiskLevel | null }; res: RulesView }
-  'rules.addRisk': {
-    req: { toolMatcher: string; pattern: string | null; risk: RiskLevel }
-    res: RulesView
-  }
-  'rules.addSwallow': {
-    req: { eventKindMatcher: string; pattern: string; noiseKind: string }
-    res: RulesView
-  }
-  'rules.remove': { req: { id: string; kind: RuleKind }; res: RulesView }
   'settings.get': { req: void; res: Settings }
   'settings.set': { req: Partial<Settings>; res: Settings }
   'models.available': { req: void; res: AvailableModel[] }
@@ -390,7 +349,7 @@ export interface QueueChangedPush {
   items: QueuedTask[]
 }
 
-export interface ProjectCommandsPush {
+interface ProjectCommandsPush {
   projectId: string
   commands: ProjectCommand[]
 }
@@ -399,32 +358,32 @@ export type FocusRequestPush =
   | { target: 'inbox'; requestId: string }
   | { target: 'session'; sessionId: string; eventId?: string }
 
-export interface EvalsChangedPush {
+interface EvalsChangedPush {
   projectId: string
   runs: EvalRun[]
 }
 
-export interface VerifyChangedPush {
+interface VerifyChangedPush {
   projectId: string
   runs: VerifyRun[]
 }
 
-export interface DiagramsChangedPush {
+interface DiagramsChangedPush {
   projectId: string
   entries: DiagramEntry[]
 }
 
-export interface ApiChangedPush {
+interface ApiChangedPush {
   projectId: string
   runs: ApiEvalRun[]
 }
 
-export interface TerminalDataPush {
+interface TerminalDataPush {
   id: string
   data: string
 }
 
-export interface TerminalExitPush {
+interface TerminalExitPush {
   id: string
   exitCode: number
 }

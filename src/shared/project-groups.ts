@@ -1,6 +1,6 @@
 import type { ProjectGroup } from './domain'
 
-export interface GroupSection<T> {
+interface GroupSection<T> {
   group: ProjectGroup | null
   items: T[]
 }

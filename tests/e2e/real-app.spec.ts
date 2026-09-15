@@ -15,6 +15,7 @@ test.beforeAll(async () => {
       NODE_ENV: 'production',
       USERPROFILE: seed.userDataDir,
       HOME: seed.userDataDir,
+      APPDATA: seed.userDataDir,
     },
   })
   page = await app.firstWindow()
@@ -223,8 +224,9 @@ test('copying goes through the main process, so it works despite that', async ()
 
 test('clicking a code block in the real app says copied', async () => {
   await page.getByTestId('sidebar-project-sample-api').click()
-  await page.getByTestId('tab-session').click()
-  const pre = page.locator('pre.md-pre').first()
+  await page.getByTestId('tab-specs').click()
+  await page.getByTestId('part-spec').click()
+  const pre = page.getByTestId('spec-sections').locator('pre.md-pre').first()
   await expect(pre).toBeVisible()
 
   const label = (): Promise<string> =>
@@ -242,6 +244,7 @@ test('clicking a code block in the real app says copied', async () => {
 
 test('the Terminal tab runs a real shell and shows its output', async () => {
   await page.getByTestId('sidebar-project-sample-api').click()
+  await page.getByTestId('tab-session').click()
   await page.getByTestId('tab-terminal').click()
 
   const pane = page.getByTestId('terminal-pane')

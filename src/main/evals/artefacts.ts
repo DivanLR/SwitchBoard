@@ -1,6 +1,6 @@
 import type { Measured, SuiteResult, VerifyReport } from '@shared/domain'
 
-export interface TrxCounts {
+interface TrxCounts {
   total: number
   passed: number
   failed: number
@@ -29,7 +29,7 @@ export function parseCobertura(xml: string): number | null {
   return Math.round(value * 1000) / 10
 }
 
-export interface MutationCounts {
+interface MutationCounts {
   score: number
   detected: number
   valid: number
@@ -102,13 +102,13 @@ export function collectArtefacts(
   }
 }
 
-export interface Disagreement {
+interface Disagreement {
   about: string
   said: string
   measured: string
 }
 
-export interface Reconciled {
+interface Reconciled {
   report: VerifyReport
   disagreements: Disagreement[]
 }

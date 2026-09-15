@@ -221,7 +221,7 @@ const toolLabel = computed(() => {
     </div>
 
     <details v-else-if="injection" class="injection mono" data-testid="injection-event">
-      <summary class="injection-label">⧉ {{ injectionLabel }}</summary>
+      <summary class="injection-label" data-testid="injection-toggle">⧉ {{ injectionLabel }}</summary>
       <div class="injection-body">{{ injection.text }}</div>
     </details>
 

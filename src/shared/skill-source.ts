@@ -7,7 +7,7 @@ export interface SkillSource {
   path: string
 }
 
-export type SkillSourceResult =
+type SkillSourceResult =
   | { ok: true; source: SkillSource }
   | { ok: false; message: string }
 

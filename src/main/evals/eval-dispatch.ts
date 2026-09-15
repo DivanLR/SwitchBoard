@@ -1,7 +1,7 @@
 import type { EvalCheckStatus } from '@shared/domain'
 
-export const CHECK_MARKER = 'EVAL_CHECK'
-export const JUDGE_MARKER = 'EVAL_JUDGE'
+const CHECK_MARKER = 'EVAL_CHECK'
+const JUDGE_MARKER = 'EVAL_JUDGE'
 
 export function checkPrompt(acceptance: string, command: string): string {
   return (
@@ -39,7 +39,7 @@ export function judgePrompt(acceptance: string): string {
   )
 }
 
-export type EvalMarker =
+type EvalMarker =
   | { kind: 'check'; status: EvalCheckStatus }
   | { kind: 'judge'; verdict: string }
 

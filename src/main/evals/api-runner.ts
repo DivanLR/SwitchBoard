@@ -14,7 +14,7 @@ const READY_POLL_MS = 1_000
 const CALL_TIMEOUT_MS = 20_000
 const BODY_LIMIT = 2_000
 
-export interface ApiRunOutcome {
+interface ApiRunOutcome {
   calls: ApiCall[]
   launched: boolean
   note: string | null

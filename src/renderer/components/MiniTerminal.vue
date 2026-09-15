@@ -87,7 +87,7 @@ watch(lines, () => {
 .mt-line {
   white-space: pre-wrap;
   word-break: break-word;
-  color: var(--text-dim);
+  color: var(--text-body);
 }
 
 .mt-wait {

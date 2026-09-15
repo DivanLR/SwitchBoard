@@ -1,15 +1,15 @@
-export interface UsageLimit {
+interface UsageLimit {
   label: string
   pct: number
   resets: string
 }
 
-export interface UsageTop {
+interface UsageTop {
   label: string
   items: string[]
 }
 
-export interface UsageWindow {
+interface UsageWindow {
   title: string
   volume: string
   behaviors: string[]

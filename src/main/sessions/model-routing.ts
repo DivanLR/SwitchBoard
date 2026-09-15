@@ -26,7 +26,7 @@ export function nextStrongestModel(current: string | undefined): string | null {
   return DOWNGRADE[family] ?? null
 }
 
-export type Workload = 'plan' | 'advisor' | 'orchestrator'
+type Workload = 'plan' | 'advisor' | 'orchestrator'
 
 export function mainLoopModel(
   mode: ModelMode | undefined,

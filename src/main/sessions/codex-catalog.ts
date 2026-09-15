@@ -10,7 +10,7 @@ interface ReportedCodexModel {
   hidden?: boolean
 }
 
-export function toCodexModels(models: readonly ReportedCodexModel[]): AvailableModel[] {
+function toCodexModels(models: readonly ReportedCodexModel[]): AvailableModel[] {
   const byId = new Map<string, AvailableModel>()
   for (const model of models) {
     if (model.hidden === true) continue

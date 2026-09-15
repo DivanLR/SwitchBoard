@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, posix } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { CustomSkill, SkillImportResult } from '@shared/domain'
@@ -222,13 +222,4 @@ export async function importSkills(
     } satisfies IpcError
   }
   return { imported, skipped }
-}
-
-export async function readStagedDescription(stagingRoot: string, name: string): Promise<string | null> {
-  try {
-    const text = await readFile(join(stagingRoot, name, 'SKILL.md'), 'utf8')
-    return parseSkillFrontmatter(text)?.description ?? null
-  } catch {
-    return null
-  }
 }

@@ -12,7 +12,7 @@ import { firstJsonObject, markerTail, str } from './parse'
 
 export const VERIFY_MARKER = 'SWB_VERIFY'
 
-export const SUITE_MARKER = 'SWB_SUITE'
+const SUITE_MARKER = 'SWB_SUITE'
 
 export interface PlannedSuite {
   suite: TestSuite

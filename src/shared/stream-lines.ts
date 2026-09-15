@@ -32,7 +32,7 @@ const TOOL_ARG_FIELDS: Record<string, readonly string[]> = {
   Skill: ['skill'],
 }
 
-export function toolArgOf(toolName: string | undefined, inputPreview: string | undefined): string {
+function toolArgOf(toolName: string | undefined, inputPreview: string | undefined): string {
   const raw = inputPreview ?? ''
   if (!raw) return ''
   let parsed: unknown
@@ -102,7 +102,7 @@ export function rawLinesOf(event: SessionEvent): string[] {
   }
 }
 
-export type LineTone = 'prompt' | 'text' | 'tool' | 'result' | 'ok' | 'warn' | 'err' | 'inject'
+type LineTone = 'prompt' | 'text' | 'tool' | 'result' | 'ok' | 'warn' | 'err' | 'inject'
 
 function toneOf(event: SessionEvent, i: number): LineTone {
   switch (event.kind) {
@@ -138,7 +138,7 @@ function hhmm(iso: string): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-export interface RawLine {
+interface RawLine {
   key: string
   text: string
   stamp: string

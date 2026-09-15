@@ -248,7 +248,6 @@ export function installMockHost(scenario: MockScenario): void {
   }
 
   const sessions = new Map<string, MockSession>()
-  let transcripts: AnyRecord[] = []
   const projects = scenario.projects.map((p) => {
     let session: MockSession | null = null
     if (p.session) {
@@ -336,57 +335,6 @@ export function installMockHost(scenario: MockScenario): void {
       enabled: true,
     },
   ]
-  const rules: { risk: AnyRecord[]; swallow: AnyRecord[] } = {
-    risk: [
-      {
-        id: 'builtin:bash-destructive',
-        builtin: true,
-        label: 'Destructive shell commands',
-        toolMatcher: 'Bash',
-        pattern: '\\b(rm|rmdir|del)\\b',
-        risk: 'high',
-        overridden: false,
-        disabled: false,
-      },
-      {
-        id: 'builtin:tool-read',
-        builtin: true,
-        label: 'Read a file',
-        toolMatcher: 'Read',
-        pattern: null,
-        risk: 'low',
-        overridden: false,
-        disabled: false,
-      },
-    ],
-    swallow: [
-      {
-        id: 'builtin:build-output',
-        builtin: true,
-        eventKindMatcher: 'raw_output',
-        pattern: '(Compiling|Building)',
-        noiseKind: 'build output',
-        disabled: false,
-      },
-      {
-        id: 'builtin:progress',
-        builtin: true,
-        eventKindMatcher: 'raw_output',
-        pattern: '(Downloading|Installing)',
-        noiseKind: 'progress',
-        disabled: false,
-      },
-    ],
-  }
-
-  const rulesView = (): AnyRecord => ({
-    risk: rules.risk.map((r) => ({ ...r })),
-    swallow: rules.swallow.map((r) => ({ ...r })),
-  })
-
-  const findRule = (id: string, kind: string): AnyRecord | undefined =>
-    (kind === 'risk' ? rules.risk : rules.swallow).find((r) => r.id === id)
-
   let settings: AnyRecord = { ...(scenario.settings as unknown as AnyRecord) }
   const apiRunsByProject = new Map<string, AnyRecord[]>()
 
@@ -1019,32 +967,14 @@ export function installMockHost(scenario: MockScenario): void {
       } catch {
       }
     },
-    'transcripts.save': (req) => {
-      const sessionId = String(req.sessionId)
-      const session = sessions.get(sessionId)
-      if (!session) throw { code: 'NOT_FOUND', message: 'Session not found' }
-      const project = projects.find((p) => p.id === session.projectId)
-      const own = eventsBySession.get(sessionId) ?? []
-      const payloadOf = (e: AnyRecord): AnyRecord => (e.payload as AnyRecord | undefined) ?? {}
-      const prompts = own.filter((e) => e.kind === 'prompt' && !payloadOf(e).pending)
-      const replies = own.filter((e) => e.kind === 'assistant_text' || e.kind === 'summary')
-      const savedAt = now()
-      const summary = {
-        sessionId,
-        projectId: session.projectId,
-        projectName: project?.name ?? session.projectId,
-        savedAt,
-        expiresAt: new Date(Date.parse(savedAt) + 12 * 60 * 60 * 1000).toISOString(),
-        path: `/tmp/switchboard-transcripts/${sessionId}.md`,
-        prompts: prompts.length,
-        replies: replies.length,
-        lastPrompt: prompts.length > 0 ? String(payloadOf(prompts[prompts.length - 1]).text ?? '') : null,
-        digest: `Previous session on ${project?.name ?? session.projectId} (${sessionId}).`,
+    'clipboard.read': async () => {
+      if (clipboardFails) throw { code: 'INTERNAL', message: 'Clipboard unavailable.' }
+      try {
+        return { text: await navigator.clipboard.readText() }
+      } catch {
+        return { text: '' }
       }
-      transcripts = [summary, ...transcripts.filter((t) => t.sessionId !== sessionId)]
-      return { ...summary }
     },
-    'transcripts.list': () => transcripts.map((t) => ({ ...t })),
     'sessions.promptHistory': (req) => {
       const seen = new Set<string>()
       const out: string[] = []
@@ -1388,67 +1318,6 @@ export function installMockHost(scenario: MockScenario): void {
     },
     'inbox.history': (req) =>
       decisions.filter((d) => !req?.projectId || d.projectId === req.projectId),
-    'rules.list': () => rulesView(),
-    'rules.setDisabled': (req) => {
-      const rule = findRule(String(req.id), String(req.kind))
-      if (rule) rule.disabled = Boolean(req.disabled)
-      return rulesView()
-    },
-    'rules.setRisk': (req) => {
-      const rule = findRule(String(req.id), 'risk')
-      if (rule) {
-        rule.risk = req.risk === null ? rule.risk : String(req.risk)
-        rule.overridden = req.risk !== null
-      }
-      return rulesView()
-    },
-    'rules.addRisk': (req) => {
-      const toolMatcher = String(req.toolMatcher).trim()
-      if (!toolMatcher) throw { code: 'INVALID_PATH', message: 'Name a tool, or * for every tool' }
-      const pattern = req.pattern ? String(req.pattern).trim() : null
-      rules.risk.unshift({
-        id: nextId('rule'),
-        builtin: false,
-        label: `${toolMatcher}${pattern ? ` matching ${pattern}` : ''}`,
-        toolMatcher,
-        pattern,
-        risk: String(req.risk),
-        overridden: false,
-        disabled: false,
-      })
-      return rulesView()
-    },
-    'rules.addSwallow': (req) => {
-      const pattern = String(req.pattern).trim()
-      const noiseKind = String(req.noiseKind).trim()
-      if (!pattern) throw { code: 'INVALID_PATH', message: 'Enter a pattern' }
-      if (!noiseKind) {
-        throw { code: 'INVALID_PATH', message: 'Name what this hides, e.g. "build output"' }
-      }
-      rules.swallow.unshift({
-        id: nextId('rule'),
-        builtin: false,
-        eventKindMatcher: String(req.eventKindMatcher),
-        pattern,
-        noiseKind,
-        disabled: false,
-      })
-      return rulesView()
-    },
-    'rules.remove': (req) => {
-      const id = String(req.id)
-      const list = String(req.kind) === 'risk' ? rules.risk : rules.swallow
-      const at = list.findIndex((r) => r.id === id)
-      if (at !== -1) {
-        if (list[at].builtin) {
-          list[at].disabled = false
-          list[at].overridden = false
-        } else {
-          list.splice(at, 1)
-        }
-      }
-      return rulesView()
-    },
     'rules.standing.list': (req) =>
       standingRules.filter((r) => r.projectId === req.projectId && (req.includeRevoked || !r.revokedAt)),
     'rules.standing.revoke': (req) => {

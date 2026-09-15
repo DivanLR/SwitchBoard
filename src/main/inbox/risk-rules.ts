@@ -82,10 +82,6 @@ const DEFAULT_RULE_SEEDS: DefaultRuleSeed[] = [
   { id: 'tool-websearch', label: 'Search the web', toolMatcher: 'WebSearch', risk: 'high' },
 ]
 
-export function riskRuleLabel(id: string): string {
-  return DEFAULT_RULE_SEEDS.find((s) => `builtin:${s.id}` === id)?.label ?? ''
-}
-
 export function defaultRiskRules(): RiskClassificationRule[] {
   return DEFAULT_RULE_SEEDS.map((seed, index) => ({
     id: `builtin:${seed.id}`,

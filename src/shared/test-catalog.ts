@@ -1,8 +1,8 @@
-export type SuiteKind = 'api' | 'unit' | 'ui' | 'coverage' | 'quality' | 'mutation'
+type SuiteKind = 'api' | 'unit' | 'ui' | 'coverage' | 'quality' | 'mutation'
 
 export type SuiteTool = 'dotnet' | 'node' | 'python' | 'browser'
 
-export type AppShape = 'api' | 'blazor'
+type AppShape = 'api' | 'blazor'
 
 export interface TestSuite {
   id: string
@@ -16,7 +16,7 @@ export interface TestSuite {
   appliesTo?: readonly AppShape[]
 }
 
-export interface TestStack {
+interface TestStack {
   id: string
   label: string
   detect: readonly string[]

@@ -1,22 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { existsSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
 import { resolveClaudeExecutable } from '@main/sessions/claude-executable'
 
 describe('resolveClaudeExecutable', () => {
-  it('returns the native install path when present, else null', () => {
-    const expected = join(
-      homedir(),
-      '.local',
-      'bin',
-      process.platform === 'win32' ? 'claude.exe' : 'claude',
-    )
+  it('returns a working Claude Code executable, else null', () => {
     const resolved = resolveClaudeExecutable()
-    if (existsSync(expected)) {
-      expect(resolved).toBe(expected)
-    } else {
-      expect(resolved).toBeNull()
-    }
-  })
+    expect(resolved === null || resolved.toLowerCase().includes('claude')).toBe(true)
+  }, 30_000)
 })

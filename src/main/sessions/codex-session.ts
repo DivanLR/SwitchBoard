@@ -6,7 +6,7 @@ import { CodexMapper } from './codex-mapper'
 import { CODEX_MISSING_MESSAGE, codexInstalled, resolveCodexLaunch } from './codex-executable'
 import type { QueuedSend, SessionHost } from './session'
 
-export interface CodexSessionOptions {
+interface CodexSessionOptions {
   sessionId: string
   projectPath: string
   model?: string

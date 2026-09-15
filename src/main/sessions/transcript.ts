@@ -52,7 +52,7 @@ function filePathsIn(events: SessionEvent[]): string[] {
   return paths
 }
 
-export interface BuiltTranscript {
+interface BuiltTranscript {
   summary: Omit<TranscriptSummary, 'path'>
   text: string
 }

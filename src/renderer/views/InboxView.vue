@@ -518,7 +518,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   display: flex;
   align-items: center;
   border-bottom: 1px solid var(--border);
-  padding: 0 8px;
+  padding: 6px 12px 0;
 }
 
 .inbox-collapse {
@@ -546,11 +546,10 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
 }
 
 .tab {
-  padding: 11px 12px;
-  font-family: var(--mono);
-  font-size: var(--fs-meta);
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
+  padding: 14px 12px;
+  font-family: var(--sans);
+  font-size: var(--fs-ui);
+  font-weight: 500;
   color: var(--text-tab);
   cursor: pointer;
   display: flex;
@@ -563,7 +562,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
 }
 
 .tab.on {
-  color: var(--text-strong);
+  color: var(--green);
   box-shadow: inset 0 -2px 0 var(--green);
   cursor: default;
 }

@@ -1,4 +1,4 @@
-export interface SpecKitCommand {
+interface SpecKitCommand {
   command: string 
   label: string
   hint: string

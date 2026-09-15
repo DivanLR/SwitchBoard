@@ -2,7 +2,7 @@ import { computed, type ComputedRef } from 'vue'
 import { suiteById, VERIFY_GATES, type VerifyGate } from '@shared/test-catalog'
 import type { Measured, VerifyRun } from '@shared/domain'
 
-export interface GateFace {
+interface GateFace {
   status: 'pass' | 'fail' | 'warn' | 'none'
   value: string
   sub: string
@@ -11,7 +11,7 @@ export interface GateFace {
   accepted?: boolean
 }
 
-export type GateView = VerifyGate & GateFace
+type GateView = VerifyGate & GateFace
 
 export const unmeasured: Measured = { value: null, source: null }
 

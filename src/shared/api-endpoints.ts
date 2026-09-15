@@ -31,7 +31,7 @@ export interface ApiCall {
   detail: string | null
 }
 
-export type ApiRunStatus = 'running' | 'pass' | 'fail' | 'error'
+type ApiRunStatus = 'running' | 'pass' | 'fail' | 'error'
 
 export type ApiTarget = 'local' | 'qa'
 

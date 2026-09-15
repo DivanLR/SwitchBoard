@@ -21,7 +21,7 @@ interface CodexItem {
   [key: string]: unknown
 }
 
-export interface CodexEvent {
+interface CodexEvent {
   type?: string
   thread_id?: string
   item?: CodexItem

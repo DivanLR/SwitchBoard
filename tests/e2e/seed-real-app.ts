@@ -32,6 +32,23 @@ export function seedRealApp(): SeededApp {
       'app.Run();\n',
   )
   writeFileSync(join(projectPath, 'Controllers', 'PoliciesController.cs'), '// placeholder\n')
+  mkdirSync(join(projectPath, '.specify'), { recursive: true })
+  mkdirSync(join(projectPath, 'specs', '001-copy-check'), { recursive: true })
+  writeFileSync(
+    join(projectPath, 'specs', '001-copy-check', 'spec.md'),
+    [
+      '# Feature Specification: Copy check',
+      '',
+      '## Resolver',
+      '',
+      'Here is the resolver:',
+      '',
+      '```ts',
+      'const timeout = input.timeout ?? 5_000',
+      '```',
+      '',
+    ].join('\n'),
+  )
   execSync('git init', { cwd: projectPath, stdio: 'ignore' })
 
   const db = openDatabase(join(userDataDir, 'switchboard.db'))

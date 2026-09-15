@@ -361,7 +361,7 @@ export function sweepStaleVolumes(
   })
 }
 
-export interface Mount {
+interface Mount {
   host: string
   container: string
 }

@@ -54,7 +54,6 @@ import {
 } from './session-shaping'
 import {
   TRANSCRIPT_EVENT_CAP,
-  listTranscripts,
   transcriptContextAppend,
   transcriptFor,
   writeTranscript,
@@ -110,7 +109,7 @@ interface LiveEventEntry {
   persisted: boolean
 }
 
-export interface HostedEntry {
+interface HostedEntry {
   session: SessionHost
   row: Session
   projectPath: string
@@ -1551,10 +1550,6 @@ export class SessionManager {
     const project = this.repos.projects.byId(row.projectId)
     const events = this.repos.events.page(sessionId, undefined, TRANSCRIPT_EVENT_CAP)
     return writeTranscript(row, project?.name ?? row.projectId, events)
-  }
-
-  listTranscripts(): TranscriptSummary[] {
-    return listTranscripts()
   }
 
   private scheduleTranscript(sessionId: string): void {

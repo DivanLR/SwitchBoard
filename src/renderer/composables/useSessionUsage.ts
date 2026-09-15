@@ -8,7 +8,7 @@ export function formatTokens(n: number): string {
   return String(n)
 }
 
-export interface SessionUsageTotals {
+interface SessionUsageTotals {
   total: number
   cost: number
   top: { id: string; label: string; tokens: number }[]

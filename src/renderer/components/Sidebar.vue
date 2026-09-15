@@ -1033,8 +1033,8 @@ function restore(projectId: string): void {
   --add-h: 21px;
   --section-row-pad: 5px;
   --section-row-h: calc(var(--add-h) + 2 * var(--section-row-pad) + 1px);
-  width: 276px;
-  min-width: 276px;
+  width: 280px;
+  min-width: 280px;
   background: var(--bg-panel);
   box-shadow: var(--hairline-shine);
   border-right: 1px solid var(--border);
@@ -1048,7 +1048,7 @@ function restore(projectId: string): void {
 }
 
 .brand {
-  padding: 16px 12px 12px 16px;
+  padding: 22px 16px 20px;
 }
 
 .sidebar.collapsed .brand {
@@ -1081,6 +1081,7 @@ function restore(projectId: string): void {
   padding: 1px 6px;
   line-height: 1;
   border: 1px solid var(--border-card-alt);
+  border-radius: var(--rp);
 }
 
 .icon-btn[data-testid='theme-toggle']:hover,
@@ -1378,8 +1379,9 @@ function restore(projectId: string): void {
 
 .project {
   position: relative;
-  margin: 0 0 1px;
-  padding: 6px 13px;
+  margin: 3px 8px;
+  padding: 10px;
+  border-radius: var(--rc);
   background: transparent;
   cursor: pointer;
   transition: background 0.12s var(--ease);
@@ -1399,9 +1401,10 @@ function restore(projectId: string): void {
 .brace {
   position: absolute;
   right: 0;
-  top: 0;
-  bottom: 0;
-  width: 2px;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 3px;
   background: var(--idle);
   pointer-events: none;
   transition: background-color 0.12s var(--ease);
@@ -1420,7 +1423,8 @@ function restore(projectId: string): void {
   display: block;
   position: absolute;
   inset: 0;
-  background: var(--bg-active);
+  background: color-mix(in srgb, var(--green) 9%, var(--bg-panel));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 20%, transparent);
   border-radius: var(--rc);
 }
 

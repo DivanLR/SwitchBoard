@@ -21,11 +21,9 @@ import type {
   ProjectListItem,
   PushChannel,
   PushMap,
-  RulesView,
   WireResult,
 } from '@shared/ipc-types'
 import { INVOKE_CHANNEL, isIpcError, isIpcErrorCode } from '@shared/ipc-types'
-import { rulesView } from '@main/inbox/rule-prefs'
 import type { PtyHost } from '@main/terminal/pty-host'
 import type { Repositories } from '@main/store/repositories'
 import type { SessionManager } from '@main/sessions/session-manager'
@@ -60,15 +58,6 @@ import { check as checkForUpdates, installNow } from '@main/updater'
 
 const EVENT_FLUSH_INTERVAL_MS = 33 
 const COUNTER_DEBOUNCE_MS = 50
-
-function isValidRegExp(pattern: string): boolean {
-  try {
-    new RegExp(pattern)
-    return true
-  } catch {
-    return false
-  }
-}
 
 export class RendererPush {
   private eventBuffer: SessionEvent[] = []
@@ -271,11 +260,6 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       }
     })
 
-  const applyRules = (): RulesView => {
-    broker.rules.reload()
-    return rulesView(repos.rulePrefs.list())
-  }
-
   const handlers: Handlers = {
     'projects.list': () => ({
       projects: projectList(),
@@ -385,8 +369,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'clipboard.write': (req) => {
       clipboard.writeText(req.text)
     },
-    'transcripts.save': (req) => manager.saveTranscript(req.sessionId),
-    'transcripts.list': () => manager.listTranscripts(),
+    'clipboard.read': () => ({ text: clipboard.readText() }),
     'sessions.setPlanMode': (req) => {
       manager.setPlanMode(req.sessionId, req.enabled)
     },
@@ -917,63 +900,6 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     },
     'inbox.clearHistory': () => {
       repos.requests.clearHistory()
-    },
-    'rules.list': () => rulesView(repos.rulePrefs.list()),
-    'rules.setDisabled': (req) => {
-      repos.rulePrefs.setDisabled(req.id, req.kind, req.disabled)
-      return applyRules()
-    },
-    'rules.setRisk': (req) => {
-      repos.rulePrefs.setRisk(req.id, req.risk)
-      return applyRules()
-    },
-    'rules.addRisk': (req) => {
-      const toolMatcher = req.toolMatcher.trim()
-      if (!toolMatcher) {
-        throw { code: 'INVALID_PATH', message: 'Name a tool, or * for every tool' } satisfies IpcError
-      }
-      const pattern = req.pattern?.trim() || null
-      if (pattern !== null && !isValidRegExp(pattern)) {
-        throw { code: 'INVALID_PATH', message: 'That pattern is not a valid regular expression' } satisfies IpcError
-      }
-      repos.rulePrefs.addCustom(
-        'risk',
-        JSON.stringify({
-          scope: 'global',
-          position: 0,
-          toolMatcher,
-          inputMatcher: pattern ? { field: 'command', pattern } : null,
-          risk: req.risk,
-          builtin: false,
-        }),
-      )
-      return applyRules()
-    },
-    'rules.addSwallow': (req) => {
-      const pattern = req.pattern.trim()
-      const noiseKind = req.noiseKind.trim()
-      if (!pattern) throw { code: 'INVALID_PATH', message: 'Enter a pattern' } satisfies IpcError
-      if (!isValidRegExp(pattern)) {
-        throw { code: 'INVALID_PATH', message: 'That pattern is not a valid regular expression' } satisfies IpcError
-      }
-      if (!noiseKind) {
-        throw { code: 'INVALID_PATH', message: 'Name what this hides, e.g. "build output"' } satisfies IpcError
-      }
-      repos.rulePrefs.addCustom(
-        'swallow',
-        JSON.stringify({
-          position: 0,
-          eventKindMatcher: req.eventKindMatcher,
-          pattern,
-          noiseKind,
-          enabled: true,
-        }),
-      )
-      return applyRules()
-    },
-    'rules.remove': (req) => {
-      repos.rulePrefs.remove(req.id, req.kind)
-      return applyRules()
     },
     'rules.standing.list': (req) =>
       repos.standingRules.listForProject(req.projectId, req.includeRevoked ?? false),

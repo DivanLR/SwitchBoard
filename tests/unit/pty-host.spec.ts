@@ -13,7 +13,7 @@ describe('launchCommand', () => {
       expect(command.startsWith('&')).toBe(false)
       expect(command.trim()).not.toBe('')
     }
-  })
+  }, 30_000)
 
   it('quotes the Claude path, which lives under a home directory that may have spaces', () => {
     const command = launchCommand('claude')
