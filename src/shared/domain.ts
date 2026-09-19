@@ -442,6 +442,8 @@ export interface Settings {
   favouriteSkills: string[]
   mcpActiveServers: string[]
   sandboxMemory: string
+  flowConcurrency: number
+  flowWorktreeRoot: string
 }
 
 export interface McpScan {
@@ -487,6 +489,8 @@ export const DEFAULT_SETTINGS: Settings = {
   databaseMcpServers: [],
   mcpActiveServers: [],
   sandboxMemory: '6g',
+  flowConcurrency: 4,
+  flowWorktreeRoot: '',
   diagramEngine: 'diagram-design',
   favouriteSkills: [],
 }
@@ -628,6 +632,291 @@ export function verifyVerdict(report: VerifyReport): Exclude<VerifyStatus, 'runn
   const calls = report.endpoints.filter((e) => e.outcome === 'pass' || e.outcome === 'fail')
   if (executed.some((s) => s.status === 'fail') || calls.some((e) => e.outcome === 'fail')) return 'fail'
   return executed.length > 0 || calls.length > 0 ? 'pass' : 'inconclusive'
+}
+
+export type SecurityScope = 'project' | 'changes'
+
+export type SecurityRunStatus = 'running' | 'complete' | 'failed'
+
+export type SecurityVerdict = 'confirmed' | 'needs_validation' | 'rejected'
+
+export type SecuritySeverity = 'critical' | 'high' | 'medium' | 'low' | 'informational'
+
+export type SecurityUnitStatus =
+  | 'planned'
+  | 'not_applicable'
+  | 'out_of_scope'
+  | 'in_progress'
+  | 'covered'
+  | 'candidate'
+  | 'blocked'
+  | 'deferred'
+
+export const SECURITY_SEVERITIES: readonly SecuritySeverity[] = [
+  'critical',
+  'high',
+  'medium',
+  'low',
+  'informational',
+]
+
+export interface SecurityFinding {
+  fingerprint: string
+  verdict: SecurityVerdict
+  title: string
+  severity: SecuritySeverity | null
+  attackClass: string | null
+  file: string | null
+  line: number | null
+}
+
+export interface SecurityUnit {
+  coverageId: string
+  attackClass: string
+  subsystem: string | null
+  status: SecurityUnitStatus
+}
+
+export interface SecurityReport {
+  findings: SecurityFinding[]
+  units: SecurityUnit[]
+  artefacts: string[]
+}
+
+export type FlowRunStatus =
+  | 'scoping'
+  | 'crosscheck'
+  | 'awaiting_approval'
+  | 'publishing'
+  | 'publish_interrupted'
+  | 'ready'
+  | 'implementing'
+  | 'learning'
+  | 'done'
+  | 'failed'
+  | 'cancelled'
+
+export type FlowItemStatus =
+  | 'proposed'
+  | 'published'
+  | 'queued'
+  | 'preparing'
+  | 'implementing'
+  | 'tech_review'
+  | 'revising'
+  | 'raising_pr'
+  | 'pr_interrupted'
+  | 'pr_open'
+  | 'done'
+  | 'blocked'
+  | 'failed'
+  | 'cancelled'
+
+export type FlowEstimate = 's' | 'm' | 'l'
+
+export interface FlowFeature {
+  id: string
+  title: string
+  state: string | null
+  url: string | null
+}
+
+export interface ScopedItem {
+  localId: string
+  title: string
+  body: string
+  acceptance: string[]
+  estimate: FlowEstimate
+}
+
+export interface FlowItem {
+  id: string
+  runId: string
+  projectId: string
+  position: number
+  localId: string
+  title: string
+  body: string
+  acceptance: string[]
+  estimate: FlowEstimate
+  workItemId: string | null
+  workItemUrl: string | null
+  branch: string | null
+  worktreePath: string | null
+  sessionId: string | null
+  status: FlowItemStatus
+  attempts: number
+  prId: string | null
+  prUrl: string | null
+  note: string | null
+  startedAt: string | null
+  finishedAt: string | null
+}
+
+export type FlowLessonStatus = 'proposed' | 'accepted' | 'rejected'
+
+export interface FlowLessonEvidence {
+  prId: string | null
+  author: string | null
+  quote: string
+}
+
+export interface FlowLesson {
+  id: string
+  projectId: string
+  runId: string | null
+  ruleId: string
+  rule: string
+  section: string | null
+  evidence: FlowLessonEvidence[]
+  status: FlowLessonStatus
+  reason: string | null
+  createdAt: string
+  decidedAt: string | null
+}
+
+export function flowRuleId(rule: string): string {
+  const normalised = rule
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .replace(/[.;:,]+$/, '')
+  let hash = 5381
+  for (let i = 0; i < normalised.length; i += 1) {
+    hash = ((hash << 5) + hash + normalised.charCodeAt(i)) >>> 0
+  }
+  return hash.toString(36).padStart(7, '0')
+}
+
+export interface FlowRun {
+  id: string
+  projectId: string
+  featureId: string
+  featureTitle: string
+  status: FlowRunStatus
+  sessionId: string | null
+  risks: string[]
+  outOfScope: string[]
+  concurrency: number
+  baseBranch: string | null
+  worktreeRoot: string | null
+  crosscheckRound: number
+  concerns: string[]
+  note: string | null
+  startedAt: string
+  finishedAt: string | null
+}
+
+export function flowStage(
+  status: FlowRunStatus,
+): 'scoping' | 'crosscheck' | 'approve' | 'publishing' | 'ready' | 'learning' | 'closed' {
+  if (status === 'scoping') return 'scoping'
+  if (status === 'crosscheck') return 'crosscheck'
+  if (status === 'learning') return 'learning'
+  if (status === 'awaiting_approval') return 'approve'
+  if (status === 'publishing' || status === 'publish_interrupted') return 'publishing'
+  if (status === 'ready' || status === 'implementing') return 'ready'
+  return 'closed'
+}
+
+export interface SecurityRun {
+  id: string
+  projectId: string
+  sessionId: string | null
+  scope: SecurityScope
+  branch: string | null
+  status: SecurityRunStatus
+  report: SecurityReport | null
+  note: string | null
+  outputDir: string
+  startedAt: string
+  finishedAt: string | null
+}
+
+export interface SecurityClassScore {
+  attackClass: string
+  inScope: number
+  covered: number
+  worked: number
+  confirmed: number
+}
+
+export interface SecurityScores {
+  inScope: number
+  covered: number
+  coveragePct: number | null
+  unresolved: number
+  confirmed: number
+  needsValidation: number
+  rejected: number
+  disprovedPct: number | null
+  cleanPct: number | null
+  bySeverity: Record<SecuritySeverity, number>
+  byClass: SecurityClassScore[]
+}
+
+const OUT_OF_SCOPE_UNITS: ReadonlySet<SecurityUnitStatus> = new Set(['not_applicable', 'out_of_scope'])
+
+function pct(part: number, whole: number): number | null {
+  if (whole <= 0) return null
+  return Math.round((part / whole) * 1000) / 10
+}
+
+export function securityScores(report: SecurityReport): SecurityScores {
+  const inScopeUnits = report.units.filter((u) => !OUT_OF_SCOPE_UNITS.has(u.status))
+  const covered = inScopeUnits.filter((u) => u.status === 'covered').length
+  const bySeverity = Object.fromEntries(SECURITY_SEVERITIES.map((s) => [s, 0])) as Record<
+    SecuritySeverity,
+    number
+  >
+  let confirmed = 0
+  let needsValidation = 0
+  let rejected = 0
+  const confirmedClasses = new Set<string>()
+  for (const finding of report.findings) {
+    if (finding.verdict === 'confirmed') {
+      confirmed += 1
+      if (finding.severity) bySeverity[finding.severity] += 1
+      if (finding.attackClass) confirmedClasses.add(finding.attackClass)
+    } else if (finding.verdict === 'needs_validation') needsValidation += 1
+    else rejected += 1
+  }
+
+  const classes = new Map<string, SecurityClassScore>()
+  for (const unit of inScopeUnits) {
+    const score = classes.get(unit.attackClass) ?? {
+      attackClass: unit.attackClass,
+      inScope: 0,
+      covered: 0,
+      worked: 0,
+      confirmed: 0,
+    }
+    score.inScope += 1
+    if (unit.status === 'covered') score.covered += 1
+    if (unit.status === 'covered' || unit.status === 'candidate') score.worked += 1
+    classes.set(unit.attackClass, score)
+  }
+  for (const finding of report.findings) {
+    if (finding.verdict !== 'confirmed' || !finding.attackClass) continue
+    const score = classes.get(finding.attackClass)
+    if (score) score.confirmed += 1
+  }
+  const byClass = [...classes.values()].sort((a, b) => a.attackClass.localeCompare(b.attackClass))
+  const audited = byClass.filter((c) => c.worked > 0)
+
+  return {
+    inScope: inScopeUnits.length,
+    covered,
+    coveragePct: pct(covered, inScopeUnits.length),
+    unresolved: inScopeUnits.length - covered,
+    confirmed,
+    needsValidation,
+    rejected,
+    disprovedPct: pct(rejected, confirmed + needsValidation + rejected),
+    cleanPct: pct(audited.filter((c) => c.confirmed === 0).length, audited.length),
+    bySeverity,
+    byClass,
+  }
 }
 
 interface RunEstimate {
@@ -779,7 +1068,15 @@ export interface DiffListResult {
   files: DiffFileEntry[]
 }
 
-export type SectionKind = 'spec' | 'tests' | 'diff' | 'cleanup' | 'diagram' | 'skills'
+export type SectionKind =
+  | 'spec'
+  | 'tests'
+  | 'diff'
+  | 'cleanup'
+  | 'diagram'
+  | 'skills'
+  | 'security'
+  | 'flow'
 
 export function sessionName(
   sessionId: string,
@@ -816,6 +1113,8 @@ const SECTION_LABELS: Record<SectionKind, string> = {
   cleanup: 'Cleanup',
   diagram: 'Diagram',
   skills: 'Skills',
+  security: 'Security',
+  flow: 'Flow',
 }
 
 export interface DiagramEntry {

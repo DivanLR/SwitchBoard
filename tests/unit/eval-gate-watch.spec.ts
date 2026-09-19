@@ -17,6 +17,7 @@ function setup() {
     onQueueChanged: () => {},
     onEvalsChanged: (projectId) => changed.push(projectId),
     onVerifyChanged: () => {},
+    onSecurityChanged: () => {},
     onDiagramsChanged: () => {},
     onApiRequests: () => {},
     onApiChanged: () => {},

@@ -15,6 +15,7 @@ import { registerProject } from './projects/discovery'
 import { computeCounters, registerIpcHandlers, RendererPush } from './ipc/handlers'
 import { readDiagramList } from './diagrams/list'
 import { reconcileSkills, stagingSkillsRoot } from './skills/install'
+import { FlowSupervisor } from './flow/flow-supervisor'
 import { initUpdater } from './updater'
 import { completeApiRun } from './evals/api-runner'
 import { PtyHost } from './terminal/pty-host'
@@ -202,6 +203,11 @@ async function main(): Promise<void> {
       pusher.push('push.evalsChanged', { projectId, runs: repos.evals.listForProject(projectId) }),
     onVerifyChanged: (projectId) =>
       pusher.push('push.verifyChanged', { projectId, runs: repos.verifyRuns.listForProject(projectId) }),
+    onSecurityChanged: (projectId) =>
+      pusher.push('push.securityChanged', {
+        projectId,
+        runs: repos.securityRuns.listForProject(projectId),
+      }),
     onDiagramsChanged: (projectId) => {
       const project = repos.projects.byId(projectId)
       if (!project) return
@@ -277,13 +283,29 @@ async function main(): Promise<void> {
   }
   deepLinkIn(process.argv)
 
+  const flow = new FlowSupervisor(repos, manager, {
+    onFlowChanged: (projectId) =>
+      pusher.push('push.flowChanged', {
+        projectId,
+        runs: repos.flowRuns.listForProject(projectId),
+        items: repos.flowItems.listForProject(projectId),
+      }),
+  })
+  manager.setFlowHooks({
+    onMarker: (sessionId, marker) => flow.onFlowMarker(sessionId, marker),
+    onSessionEnded: (sessionId, reason) => flow.onSessionEnded(sessionId, reason),
+  })
+  flow.reconcileOnStartup()
+
   registerIpcHandlers({
     repos,
     manager,
     broker,
+    flow,
     getWindow: () => mainWindow,
     dbProjectId: dbProject.id,
     skillsStagingRoot: stagingSkillsRoot(app.getPath('userData')),
+    securityRoot: join(app.getPath('userData'), 'security-audits'),
     ptyHost,
   })
   void reconcileSkills(stagingSkillsRoot(app.getPath('userData')), repos.customSkills.list())

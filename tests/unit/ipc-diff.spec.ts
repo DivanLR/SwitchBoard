@@ -49,6 +49,7 @@ function setup() {
     onQueueChanged: () => {},
     onEvalsChanged: () => {},
     onVerifyChanged: () => {},
+    onSecurityChanged: () => {},
     onDiagramsChanged: () => {},
     onApiRequests: () => {},
     onApiChanged: () => {},
@@ -68,6 +69,8 @@ function setup() {
     getWindow: () => window as never,
     dbProjectId: 'db-project',
     skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),
+    securityRoot: join(tmpdir(), 'switchboard-test-security'),
+    flow: { reconcileOnStartup: () => {} } as never,
     ptyHost: { open: () => ({ scrollback: '', reused: false }), write: () => {}, resize: () => {}, close: () => {}, closeAll: () => {} } as unknown as PtyHost,
   })
 
@@ -151,6 +154,30 @@ describe('diff.file', () => {
     expect(result.ok).toBe(false)
     if (result.ok) return
     expect(result.error.code).toBe('NOT_LIVE')
+  })
+
+  it('returns the whole file, not just the changed hunks', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'diff-tab-ipc-'))
+    try {
+      execSync('git init', { cwd: dir, stdio: 'ignore' })
+      execSync('git config user.email t@t.t && git config user.name t', { cwd: dir, stdio: 'ignore' })
+      const original = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join('\n')
+      writeFileSync(join(dir, 'big.txt'), `${original}\n`)
+      execSync('git add big.txt && git commit -m one', { cwd: dir, stdio: 'ignore' })
+      writeFileSync(join(dir, 'big.txt'), `${original.replace('line 20', 'line 20 changed')}\n`)
+      const project = harness.repos.projects.insert({ name: 'a', path: dir, source: 'manual' })
+      harness.goLive(project.id, dir)
+
+      const result = await harness.call('diff.file', { projectId: project.id, path: 'big.txt' })
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      const lines = (result.value as { lines: { type: string; text: string }[] }).lines
+      expect(lines.map((l) => l.text)).toContain('line 1')
+      expect(lines.map((l) => l.text)).toContain('line 40')
+      expect(lines.filter((l) => l.type === 'add').map((l) => l.text)).toEqual(['line 20 changed'])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it('resolves to null for a path with no current change once the project is live', async () => {

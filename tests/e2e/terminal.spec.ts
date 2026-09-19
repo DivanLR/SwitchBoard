@@ -77,7 +77,7 @@ test('Terminal sits beside Clean and Raw, preserves drafts and keeps output aliv
   await expect(page.getByTestId('stream')).toBeVisible()
   await expect(page.getByTestId('composer-input')).toHaveValue('Keep my draft')
   await page.evaluate(() =>
-    window.__terminal.push('push.terminalData', { id: 'p-alpha', data: 'background output\r\n' }),
+    window.__terminal.push('push.terminalData', { id: 's-alpha', data: 'background output\r\n' }),
   )
   await page.getByTestId('tab-terminal').click()
   await expect(pane.locator('.xterm-rows')).toContainText('background output')
@@ -157,7 +157,7 @@ test('exit and repeated restart deliver output once', async ({ page }) => {
   await page.getByTestId('tab-terminal').click()
   for (let i = 0; i < 2; i++) {
     await page.evaluate(() =>
-      window.__terminal.push('push.terminalExit', { id: 'p-alpha', exitCode: 1 }),
+      window.__terminal.push('push.terminalExit', { id: 's-alpha', exitCode: 1 }),
     )
     await expect(page.getByTestId('terminal-exited')).toContainText('Shell exited (1)')
     await page.getByTestId('terminal-restart').click()
@@ -165,7 +165,7 @@ test('exit and repeated restart deliver output once', async ({ page }) => {
   }
   await page.evaluate(() =>
     window.__terminal.push('push.terminalData', {
-      id: 'p-alpha',
+      id: 's-alpha',
       data: 'unique output marker\r\n',
     }),
   )
@@ -191,7 +191,7 @@ test('startup failures are recoverable and projects do not open hidden terminals
   await expect(page.getByTestId('stream')).toBeVisible()
   expect(
     await page.evaluate(() =>
-      window.__terminal.calls.filter((c) => c.method === 'terminal.open' && c.req.id === 'p-beta'),
+      window.__terminal.calls.filter((c) => c.method === 'terminal.open' && c.req.id === 's-beta'),
     ),
   ).toHaveLength(0)
   await page.getByTestId('tab-terminal').click()
@@ -200,18 +200,61 @@ test('startup failures are recoverable and projects do not open hidden terminals
       page.evaluate(
         () =>
           window.__terminal.calls.filter(
-            (c) => c.method === 'terminal.open' && c.req.id === 'p-beta',
+            (c) => c.method === 'terminal.open' && c.req.id === 's-beta',
           ).length,
       ),
     )
     .toBe(1)
   await page.evaluate(() =>
     window.__terminal.push('push.terminalData', {
-      id: 'p-alpha',
+      id: 's-alpha',
       data: 'wrong project output\r\n',
     }),
   )
   await expect(page.getByTestId('terminal-pane')).not.toContainText('wrong project output')
+})
+
+test('the terminal is keyed by the session and follows + Session', async ({ page }) => {
+  await page.getByTestId('tab-terminal').click()
+  const pane = page.getByTestId('terminal-pane')
+  await expect(pane.getByTestId('terminal-title')).toHaveText('Shell')
+  await expect(pane.getByTestId('terminal-live-note')).toBeVisible()
+  const opens = () =>
+    page.evaluate(() =>
+      window.__terminal.calls
+        .filter((c) => c.method === 'terminal.open')
+        .map((c) => ({ id: c.req.id, engine: c.req.engine, resume: c.req.resumeSessionId ?? null })),
+    )
+  expect(await opens()).toEqual([{ id: 's-alpha', engine: 'shell', resume: null }])
+  await page.getByTestId('new-session').click()
+  await expect.poll(opens).toHaveLength(2)
+  const [, second] = await opens()
+  expect(second.id).not.toBe('s-alpha')
+  expect(second.engine).toBe('shell')
+  await expect(pane).toBeVisible()
+  await expect(page.getByTestId('stream')).toHaveCount(0)
+})
+
+test('Continue it here ends the SDK session and resumes the same conversation in the CLI', async ({
+  page,
+}) => {
+  await page.getByTestId('tab-terminal').click()
+  const pane = page.getByTestId('terminal-pane')
+  await pane.getByTestId('terminal-takeover').click()
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.__terminal.calls
+            .filter((c) => c.method === 'terminal.open')
+            .at(-1)?.req,
+      ),
+    )
+    .toMatchObject({ id: 's-alpha', engine: 'claude', resumeSessionId: 'sdk-s-alpha' })
+  await expect(pane.getByTestId('terminal-title')).toHaveText('Claude Code')
+  await expect(pane.getByTestId('terminal-takeover')).toHaveCount(0)
+  await page.getByTestId('view-clean').click()
+  await expect(page.getByTestId('ended-banner')).toBeVisible()
 })
 
 test('view tabs support arrow keys and retain the selected session view', async ({ page }) => {

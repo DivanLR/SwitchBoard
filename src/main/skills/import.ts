@@ -9,7 +9,7 @@ export { isSafeRepoPath, type SkillSource }
 
 const MAX_FILES = 400
 const MAX_TOTAL_BYTES = 20 * 1024 * 1024
-const MAX_FILE_BYTES = 2 * 1024 * 1024
+const MAX_FILE_BYTES = 10 * 1024 * 1024
 const FETCH_TIMEOUT_MS = 30_000
 const DOWNLOAD_ATTEMPTS = 3
 const RETRY_PAUSE_MS = 400
@@ -138,9 +138,11 @@ export async function importSkills(
   const tree = await readTree({ ...source, ref })
 
   const prefix = source.path === '' ? '' : `${source.path}/`
-  const inScope = tree.filter(
+  const blobs = tree.filter(
     (entry) => entry.type === 'blob' && entry.path.startsWith(prefix) && isSafeRepoPath(entry.path),
   )
+  const inScope = blobs.filter((entry) => (entry.size ?? 0) <= MAX_FILE_BYTES)
+  const oversized = blobs.filter((entry) => (entry.size ?? 0) > MAX_FILE_BYTES)
 
   const skillDirs = inScope
     .filter((entry) => posix.basename(entry.path) === 'SKILL.md')
@@ -212,6 +214,13 @@ export async function importSkills(
       enabled: true,
       fileCount: written,
       importedAt: new Date().toISOString(),
+    })
+  }
+
+  for (const entry of oversized) {
+    skipped.push({
+      name: entry.path,
+      reason: `${Math.round((entry.size ?? 0) / (1024 * 1024))} MB is over the ${MAX_FILE_BYTES / (1024 * 1024)} MB file limit; the rest of the skill came in.`,
     })
   }
 

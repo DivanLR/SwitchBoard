@@ -13,11 +13,19 @@ import Icon from '@renderer/components/Icon.vue'
 const props = defineProps<{
   id: string
   cwd: string
-  engine: SessionEngine | 'shell'
+  engine: SessionEngine
+  resumeSessionId: string | null
+  live: boolean
   visible: boolean
 }>()
+const emit = defineEmits<{ (e: 'takeover'): void }>()
 
 const terminals = useTerminalStore()
+const launchEngine = computed((): SessionEngine | 'shell' =>
+  props.resumeSessionId ? props.engine : 'shell',
+)
+const launched = ref<SessionEngine | 'shell'>('shell')
+const takingOver = ref(false)
 const settingsStore = useSettingsStore()
 const host = ref<HTMLDivElement | null>(null)
 const term = shallowRef<Terminal | null>(null)
@@ -135,14 +143,17 @@ async function attach(): Promise<void> {
     }),
   )
   try {
+    const engine = launchEngine.value
     const { scrollback } = await terminals.open({
       id,
       cwd: props.cwd,
       cols: instance.cols,
       rows: instance.rows,
-      engine: props.engine,
+      engine,
+      resumeSessionId: props.resumeSessionId ?? undefined,
     })
     if (token !== attachToken || term.value !== instance) return
+    launched.value = engine
     if (scrollback) instance.write(scrollback)
     for (const data of pending) instance.write(data)
     pending = null
@@ -257,10 +268,36 @@ watch(
 watch(
   () => props.id,
   async () => {
+    takingOver.value = false
     for (const stop of unsubscribes.splice(0)) stop()
     term.value?.reset()
     await attach()
   },
+)
+
+function takeover(): void {
+  takingOver.value = true
+  emit('takeover')
+}
+
+watch(
+  () => props.resumeSessionId,
+  (id) => {
+    if (!id || !takingOver.value) return
+    takingOver.value = false
+    void restart()
+  },
+)
+
+watch(
+  () => props.live,
+  (live) => {
+    if (live) takingOver.value = false
+  },
+)
+
+const canContinue = computed(
+  () => !props.live && !!props.resumeSessionId && launched.value === 'shell' && ready.value,
 )
 
 onBeforeUnmount(() => {
@@ -301,11 +338,34 @@ async function restart(): Promise<void> {
   <div class="terminal-pane" :class="{ full: isFullScreen }" data-testid="terminal-pane">
     <div class="terminal-bar mono">
       <Icon name="terminal" :size="15" />
-      <span class="tb-title">{{
-        engine === 'shell' ? 'Shell' : engine === 'codex' ? 'Codex CLI' : 'Claude Code'
+      <span class="tb-title" data-testid="terminal-title">{{
+        launched === 'shell' ? 'Shell' : launched === 'codex' ? 'Codex CLI' : 'Claude Code'
       }}</span>
       <span class="tb-path" :title="cwd">{{ cwd }}</span>
       <span class="tb-spacer"></span>
+      <template v-if="live">
+        <span class="tb-note" data-testid="terminal-live-note">Session running in Clean and Raw</span>
+        <button
+          type="button"
+          class="terminal-action"
+          data-testid="terminal-takeover"
+          :disabled="takingOver"
+          title="End the session in Clean and Raw and carry the same conversation on here, in the real CLI. Clean and Raw keep the history up to this point and offer Resume to take it back."
+          @click="takeover()"
+        >
+          {{ takingOver ? 'Handing over…' : 'Continue it here' }}
+        </button>
+      </template>
+      <button
+        v-else-if="canContinue"
+        type="button"
+        class="terminal-action"
+        data-testid="terminal-continue"
+        title="Open the ended session's conversation in this terminal with --resume."
+        @click="restart()"
+      >
+        Continue the ended session here
+      </button>
       <button
         type="button"
         class="terminal-action"
@@ -439,6 +499,11 @@ async function restart(): Promise<void> {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tb-note {
+  color: var(--text-faint);
   white-space: nowrap;
 }
 

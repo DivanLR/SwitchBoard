@@ -48,6 +48,7 @@ function setup() {
     onQueueChanged: () => {},
     onEvalsChanged: () => {},
     onVerifyChanged: () => {},
+    onSecurityChanged: () => {},
     onDiagramsChanged: () => {},
     onApiRequests: () => {},
     onApiChanged: () => {},
@@ -67,6 +68,8 @@ function setup() {
     getWindow: () => window as never,
     dbProjectId: 'db-project',
     skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),
+    securityRoot: join(tmpdir(), 'switchboard-test-security'),
+    flow: { reconcileOnStartup: () => {} } as never,
     ptyHost: { open: () => ({ scrollback: '', reused: false }), write: () => {}, resize: () => {}, close: () => {}, closeAll: () => {} } as unknown as PtyHost,
   })
 
@@ -225,6 +228,7 @@ describe('the sender-trust check', () => {
       onQueueChanged: () => {},
       onEvalsChanged: () => {},
       onVerifyChanged: () => {},
+      onSecurityChanged: () => {},
       onDiagramsChanged: () => {},
       onApiRequests: () => {},
     onApiChanged: () => {},
@@ -243,6 +247,8 @@ describe('the sender-trust check', () => {
       getWindow: () => null,
       dbProjectId: 'db-project',
       skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),
+      securityRoot: join(tmpdir(), 'switchboard-test-security'),
+      flow: { reconcileOnStartup: () => {} } as never,
       ptyHost: { open: () => ({ scrollback: '', reused: false }), write: () => {}, resize: () => {}, close: () => {}, closeAll: () => {} } as unknown as PtyHost,
     })
     const listener = registered.get(INVOKE_CHANNEL)!

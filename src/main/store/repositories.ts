@@ -22,6 +22,14 @@ import type {
   QueuedTask,
   SectionKind,
   Session,
+  FlowItem,
+  FlowLesson,
+  FlowLessonEvidence,
+  FlowRun,
+  ScopedItem,
+  SecurityReport,
+  SecurityRun,
+  SecurityScope,
   SuiteResult,
   SessionEndReason,
   SessionEngine,
@@ -884,7 +892,7 @@ export class EvalsRepo {
 
 function pruneToLast(
   db: AppDatabase,
-  table: 'verify_runs' | 'api_runs',
+  table: 'verify_runs' | 'api_runs' | 'security_runs' | 'flow_runs',
   projectId: string,
   keep: number,
 ): void {
@@ -1038,6 +1046,555 @@ function parseJson<T>(raw: string): T | null {
     return JSON.parse(raw) as T
   } catch {
     return null
+  }
+}
+
+const FLOW_HISTORY = 10
+
+class FlowRunsRepo {
+  constructor(private db: AppDatabase) {}
+
+  start(input: {
+    projectId: string
+    featureId: string
+    featureTitle: string
+    sessionId: string | null
+    concurrency: number
+  }): FlowRun {
+    const run: FlowRun = {
+      id: newId(),
+      projectId: input.projectId,
+      featureId: input.featureId,
+      featureTitle: input.featureTitle,
+      status: 'scoping',
+      sessionId: input.sessionId,
+      risks: [],
+      outOfScope: [],
+      concurrency: input.concurrency,
+      baseBranch: null,
+      worktreeRoot: null,
+      crosscheckRound: 0,
+      concerns: [],
+      note: null,
+      startedAt: nowIso(),
+      finishedAt: null,
+    }
+    this.db
+      .prepare(
+        `INSERT INTO flow_runs
+           (id, projectId, featureId, featureTitle, status, sessionId, risks, outOfScope,
+            concurrency, baseBranch, worktreeRoot, crosscheckRound, concerns, note, startedAt, finishedAt)
+         VALUES (?, ?, ?, ?, 'scoping', ?, '[]', '[]', ?, NULL, NULL, 0, '[]', NULL, ?, NULL)`,
+      )
+      .run(
+        run.id,
+        run.projectId,
+        run.featureId,
+        run.featureTitle,
+        run.sessionId,
+        run.concurrency,
+        run.startedAt,
+      )
+    pruneToLast(this.db, 'flow_runs', input.projectId, FLOW_HISTORY)
+    return run
+  }
+
+  listForProject(projectId: string): FlowRun[] {
+    return (
+      this.db
+        .prepare('SELECT * FROM flow_runs WHERE projectId = ? ORDER BY startedAt DESC, rowid DESC')
+        .all(projectId) as FlowRunRow[]
+    ).map(hydrateFlowRun)
+  }
+
+  byId(id: string): FlowRun | null {
+    const row = this.db.prepare('SELECT * FROM flow_runs WHERE id = ?').get(id) as
+      | FlowRunRow
+      | undefined
+    return row ? hydrateFlowRun(row) : null
+  }
+
+  bySessionId(sessionId: string): FlowRun | null {
+    const row = this.db.prepare('SELECT * FROM flow_runs WHERE sessionId = ?').get(sessionId) as
+      | FlowRunRow
+      | undefined
+    return row ? hydrateFlowRun(row) : null
+  }
+
+  openFor(projectId: string): FlowRun | null {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM flow_runs WHERE projectId = ?
+           AND status NOT IN ('done', 'failed', 'cancelled')
+         ORDER BY startedAt DESC, rowid DESC LIMIT 1`,
+      )
+      .get(projectId) as FlowRunRow | undefined
+    return row ? hydrateFlowRun(row) : null
+  }
+
+  update(
+    id: string,
+    patch: Partial<
+      Pick<
+        FlowRun,
+        | 'status'
+        | 'sessionId'
+        | 'risks'
+        | 'outOfScope'
+        | 'concurrency'
+        | 'baseBranch'
+        | 'worktreeRoot'
+        | 'crosscheckRound'
+        | 'concerns'
+        | 'note'
+        | 'finishedAt'
+      >
+    >,
+  ): void {
+    const columns = (
+      ['status', 'sessionId', 'concurrency', 'baseBranch', 'worktreeRoot', 'crosscheckRound', 'note', 'finishedAt'] as const
+    ).filter((key) => patch[key] !== undefined)
+    const json = (['risks', 'outOfScope', 'concerns'] as const).filter((key) => patch[key] !== undefined)
+    if (columns.length === 0 && json.length === 0) return
+    const sets = [...columns, ...json].map((key) => `${key} = ?`).join(', ')
+    const values = [
+      ...columns.map((key) => patch[key] ?? null),
+      ...json.map((key) => JSON.stringify(patch[key])),
+    ]
+    this.db.prepare(`UPDATE flow_runs SET ${sets} WHERE id = ?`).run(...values, id)
+  }
+
+  finish(id: string, status: FlowRun['status'], note: string | null): void {
+    this.db
+      .prepare('UPDATE flow_runs SET status = ?, note = ?, finishedAt = ? WHERE id = ?')
+      .run(status, note, nowIso(), id)
+  }
+
+  reconcileRunning(note: string): string[] {
+    const affected = this.db
+      .prepare(
+        `SELECT DISTINCT projectId FROM flow_runs
+         WHERE status IN ('scoping', 'publishing')`,
+      )
+      .all() as { projectId: string }[]
+    if (affected.length === 0) return []
+    this.db
+      .prepare(
+        `UPDATE flow_runs SET status = CASE status
+           WHEN 'publishing' THEN 'publish_interrupted' ELSE 'failed' END,
+           note = ?, finishedAt = CASE status WHEN 'publishing' THEN NULL ELSE ? END
+         WHERE status IN ('scoping', 'publishing')`,
+      )
+      .run(note, nowIso())
+    return affected.map((row) => row.projectId)
+  }
+}
+
+class FlowItemsRepo {
+  constructor(private db: AppDatabase) {}
+
+  replaceForRun(runId: string, projectId: string, items: readonly ScopedItem[]): FlowItem[] {
+    return transaction(this.db, () => {
+      this.db.prepare('DELETE FROM flow_items WHERE runId = ? AND status = ?').run(runId, 'proposed')
+      const insert = this.db.prepare(
+        `INSERT INTO flow_items
+           (id, runId, projectId, position, localId, title, body, acceptance, estimate, status, attempts)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'proposed', 0)`,
+      )
+      items.forEach((item, index) => {
+        insert.run(
+          newId(),
+          runId,
+          projectId,
+          index,
+          item.localId,
+          item.title,
+          item.body,
+          JSON.stringify(item.acceptance),
+          item.estimate,
+        )
+      })
+      return this.listForRun(runId)
+    })
+  }
+
+  listForRun(runId: string): FlowItem[] {
+    return (
+      this.db
+        .prepare('SELECT * FROM flow_items WHERE runId = ? ORDER BY position')
+        .all(runId) as FlowItemRow[]
+    ).map(hydrateFlowItem)
+  }
+
+  listForProject(projectId: string): FlowItem[] {
+    return (
+      this.db
+        .prepare('SELECT * FROM flow_items WHERE projectId = ? ORDER BY runId, position')
+        .all(projectId) as FlowItemRow[]
+    ).map(hydrateFlowItem)
+  }
+
+  byId(id: string): FlowItem | null {
+    const row = this.db.prepare('SELECT * FROM flow_items WHERE id = ?').get(id) as
+      | FlowItemRow
+      | undefined
+    return row ? hydrateFlowItem(row) : null
+  }
+
+  bySessionId(sessionId: string): FlowItem | null {
+    const row = this.db.prepare('SELECT * FROM flow_items WHERE sessionId = ?').get(sessionId) as
+      | FlowItemRow
+      | undefined
+    return row ? hydrateFlowItem(row) : null
+  }
+
+  countActive(runId: string): number {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM flow_items WHERE runId = ? AND status IN
+           ('preparing', 'implementing', 'tech_review', 'revising', 'raising_pr', 'pr_interrupted')`,
+      )
+      .get(runId) as { n: number }
+    return row.n
+  }
+
+  nextQueued(runId: string): FlowItem | null {
+    const row = this.db
+      .prepare("SELECT * FROM flow_items WHERE runId = ? AND status = 'queued' ORDER BY position LIMIT 1")
+      .get(runId) as FlowItemRow | undefined
+    return row ? hydrateFlowItem(row) : null
+  }
+
+  queuePublished(runId: string): number {
+    const result = this.db
+      .prepare("UPDATE flow_items SET status = 'queued' WHERE runId = ? AND status = 'published'")
+      .run(runId)
+    return Number(result.changes ?? 0)
+  }
+
+  byLocalId(runId: string, localId: string): FlowItem | null {
+    const row = this.db
+      .prepare('SELECT * FROM flow_items WHERE runId = ? AND localId = ?')
+      .get(runId, localId) as FlowItemRow | undefined
+    return row ? hydrateFlowItem(row) : null
+  }
+
+  update(
+    id: string,
+    patch: Partial<
+      Pick<
+        FlowItem,
+        | 'title'
+        | 'body'
+        | 'workItemId'
+        | 'workItemUrl'
+        | 'branch'
+        | 'worktreePath'
+        | 'sessionId'
+        | 'status'
+        | 'attempts'
+        | 'prId'
+        | 'prUrl'
+        | 'note'
+        | 'startedAt'
+        | 'finishedAt'
+      >
+    >,
+  ): void {
+    const columns = (
+      [
+        'title',
+        'body',
+        'workItemId',
+        'workItemUrl',
+        'branch',
+        'worktreePath',
+        'sessionId',
+        'status',
+        'attempts',
+        'prId',
+        'prUrl',
+        'note',
+        'startedAt',
+        'finishedAt',
+      ] as const
+    ).filter((key) => patch[key] !== undefined)
+    if (columns.length === 0) return
+    const sets = columns.map((key) => `${key} = ?`).join(', ')
+    this.db
+      .prepare(`UPDATE flow_items SET ${sets} WHERE id = ?`)
+      .run(...columns.map((key) => patch[key] ?? null), id)
+  }
+}
+
+interface FlowRunRow {
+  id: string
+  projectId: string
+  featureId: string
+  featureTitle: string
+  status: FlowRun['status']
+  sessionId: string | null
+  risks: string
+  outOfScope: string
+  concurrency: number
+  baseBranch: string | null
+  worktreeRoot: string | null
+  crosscheckRound: number
+  concerns: string
+  note: string | null
+  startedAt: string
+  finishedAt: string | null
+}
+
+interface FlowItemRow {
+  id: string
+  runId: string
+  projectId: string
+  position: number
+  localId: string
+  title: string
+  body: string
+  acceptance: string
+  estimate: FlowItem['estimate']
+  workItemId: string | null
+  workItemUrl: string | null
+  branch: string | null
+  worktreePath: string | null
+  sessionId: string | null
+  status: FlowItem['status']
+  attempts: number
+  prId: string | null
+  prUrl: string | null
+  note: string | null
+  startedAt: string | null
+  finishedAt: string | null
+}
+
+function hydrateFlowRun(row: FlowRunRow): FlowRun {
+  return {
+    ...row,
+    risks: parseJson<string[]>(row.risks) ?? [],
+    outOfScope: parseJson<string[]>(row.outOfScope) ?? [],
+    concerns: parseJson<string[]>(row.concerns) ?? [],
+  }
+}
+
+class FlowLessonsRepo {
+  constructor(private db: AppDatabase) {}
+
+  listForProject(projectId: string): FlowLesson[] {
+    return (
+      this.db
+        .prepare('SELECT * FROM flow_lessons WHERE projectId = ? ORDER BY createdAt DESC, rowid DESC')
+        .all(projectId) as FlowLessonRow[]
+    ).map(hydrateFlowLesson)
+  }
+
+  rejectedRules(projectId: string): string[] {
+    return (
+      this.db
+        .prepare("SELECT rule FROM flow_lessons WHERE projectId = ? AND status = 'rejected'")
+        .all(projectId) as { rule: string }[]
+    ).map((row) => row.rule)
+  }
+
+  propose(input: {
+    projectId: string
+    runId: string | null
+    ruleId: string
+    rule: string
+    section: string | null
+    evidence: FlowLessonEvidence[]
+  }): FlowLesson | null {
+    const existing = this.db
+      .prepare('SELECT * FROM flow_lessons WHERE projectId = ? AND ruleId = ?')
+      .get(input.projectId, input.ruleId) as FlowLessonRow | undefined
+    if (existing) return null
+    const lesson: FlowLesson = {
+      id: newId(),
+      projectId: input.projectId,
+      runId: input.runId,
+      ruleId: input.ruleId,
+      rule: input.rule,
+      section: input.section,
+      evidence: input.evidence,
+      status: 'proposed',
+      reason: null,
+      createdAt: nowIso(),
+      decidedAt: null,
+    }
+    this.db
+      .prepare(
+        `INSERT INTO flow_lessons
+           (id, projectId, runId, ruleId, rule, section, evidence, status, reason, createdAt, decidedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'proposed', NULL, ?, NULL)`,
+      )
+      .run(
+        lesson.id,
+        lesson.projectId,
+        lesson.runId,
+        lesson.ruleId,
+        lesson.rule,
+        lesson.section,
+        JSON.stringify(lesson.evidence),
+        lesson.createdAt,
+      )
+    return lesson
+  }
+
+  byId(id: string): FlowLesson | null {
+    const row = this.db.prepare('SELECT * FROM flow_lessons WHERE id = ?').get(id) as
+      | FlowLessonRow
+      | undefined
+    return row ? hydrateFlowLesson(row) : null
+  }
+
+  decide(id: string, status: 'accepted' | 'rejected', reason: string | null): void {
+    this.db
+      .prepare('UPDATE flow_lessons SET status = ?, reason = ?, decidedAt = ? WHERE id = ?')
+      .run(status, reason, nowIso(), id)
+  }
+}
+
+interface FlowLessonRow {
+  id: string
+  projectId: string
+  runId: string | null
+  ruleId: string
+  rule: string
+  section: string | null
+  evidence: string
+  status: FlowLesson['status']
+  reason: string | null
+  createdAt: string
+  decidedAt: string | null
+}
+
+function hydrateFlowLesson(row: FlowLessonRow): FlowLesson {
+  return {
+    ...row,
+    evidence: parseJson<FlowLessonEvidence[]>(row.evidence) ?? [],
+  }
+}
+
+function hydrateFlowItem(row: FlowItemRow): FlowItem {
+  return {
+    ...row,
+    acceptance: parseJson<string[]>(row.acceptance) ?? [],
+  }
+}
+
+const SECURITY_HISTORY = 20
+
+class SecurityRunsRepo {
+  constructor(private db: AppDatabase) {}
+
+  start(input: {
+    projectId: string
+    sessionId: string | null
+    scope: SecurityScope
+    branch: string | null
+    outputDir: string
+  }): SecurityRun {
+    const run: SecurityRun = {
+      id: newId(),
+      projectId: input.projectId,
+      sessionId: input.sessionId,
+      scope: input.scope,
+      branch: input.branch,
+      status: 'running',
+      report: null,
+      note: null,
+      outputDir: input.outputDir,
+      startedAt: nowIso(),
+      finishedAt: null,
+    }
+    this.db
+      .prepare(
+        `INSERT INTO security_runs
+           (id, projectId, sessionId, scope, branch, status, report, note, outputDir, startedAt, finishedAt)
+         VALUES (?, ?, ?, ?, ?, 'running', NULL, NULL, ?, ?, NULL)`,
+      )
+      .run(
+        run.id,
+        run.projectId,
+        run.sessionId,
+        run.scope,
+        run.branch,
+        run.outputDir,
+        run.startedAt,
+      )
+    pruneToLast(this.db, 'security_runs', input.projectId, SECURITY_HISTORY)
+    return run
+  }
+
+  listForProject(projectId: string): SecurityRun[] {
+    return (
+      this.db
+        .prepare(
+          'SELECT * FROM security_runs WHERE projectId = ? ORDER BY startedAt DESC, rowid DESC',
+        )
+        .all(projectId) as SecurityRunRow[]
+    ).map(hydrateSecurityRun)
+  }
+
+  byId(id: string): SecurityRun | null {
+    const row = this.db.prepare('SELECT * FROM security_runs WHERE id = ?').get(id) as
+      | SecurityRunRow
+      | undefined
+    return row ? hydrateSecurityRun(row) : null
+  }
+
+  runningFor(projectId: string): SecurityRun | null {
+    const row = this.db
+      .prepare(
+        "SELECT * FROM security_runs WHERE projectId = ? AND status = 'running' ORDER BY startedAt DESC, rowid DESC LIMIT 1",
+      )
+      .get(projectId) as SecurityRunRow | undefined
+    return row ? hydrateSecurityRun(row) : null
+  }
+
+  finish(
+    id: string,
+    status: SecurityRun['status'],
+    report: SecurityReport | null,
+    note: string | null,
+  ): void {
+    this.db
+      .prepare(
+        'UPDATE security_runs SET status = ?, report = ?, note = ?, finishedAt = ? WHERE id = ?',
+      )
+      .run(status, report ? JSON.stringify(report) : null, note, nowIso(), id)
+  }
+
+  reconcileRunning(note: string): number {
+    const result = this.db
+      .prepare(
+        "UPDATE security_runs SET status = 'failed', note = ?, finishedAt = ? WHERE status = 'running'",
+      )
+      .run(note, nowIso())
+    return Number(result.changes ?? 0)
+  }
+}
+
+interface SecurityRunRow {
+  id: string
+  projectId: string
+  sessionId: string | null
+  scope: SecurityScope
+  branch: string | null
+  status: SecurityRun['status']
+  report: string | null
+  note: string | null
+  outputDir: string
+  startedAt: string
+  finishedAt: string | null
+}
+
+function hydrateSecurityRun(row: SecurityRunRow): SecurityRun {
+  return {
+    ...row,
+    report: row.report ? parseJson<SecurityReport>(row.report) : null,
   }
 }
 
@@ -1278,6 +1835,10 @@ export interface Repositories {
   mcpScans: McpScansRepo
   evals: EvalsRepo
   verifyRuns: VerifyRunsRepo
+  securityRuns: SecurityRunsRepo
+  flowRuns: FlowRunsRepo
+  flowItems: FlowItemsRepo
+  flowLessons: FlowLessonsRepo
   apiRuns: ApiRunsRepo
   diagramRequests: DiagramRequestsRepo
   customSkills: CustomSkillsRepo
@@ -1299,6 +1860,10 @@ export function createRepositories(db: AppDatabase): Repositories {
     mcpScans: new McpScansRepo(db),
     evals: new EvalsRepo(db),
     verifyRuns: new VerifyRunsRepo(db),
+    securityRuns: new SecurityRunsRepo(db),
+    flowRuns: new FlowRunsRepo(db),
+    flowItems: new FlowItemsRepo(db),
+    flowLessons: new FlowLessonsRepo(db),
     apiRuns: new ApiRunsRepo(db),
     diagramRequests: new DiagramRequestsRepo(db),
     customSkills: new CustomSkillsRepo(db),

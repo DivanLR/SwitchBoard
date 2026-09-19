@@ -1,5 +1,5 @@
 import { clipboard, dialog, ipcMain, shell, type BrowserWindow } from 'electron'
-import type { Session, SessionEvent } from '@shared/domain'
+import type { FlowItem, FlowRun, Project, Session, SessionEvent } from '@shared/domain'
 import type { SectionKind } from '@shared/domain'
 import { canPassEval, isDangerousCommand, sessionName } from '@shared/domain'
 import {
@@ -53,6 +53,9 @@ import { installSpecKit, readSpecDetail, readSpecKitState } from '@main/specs/sp
 import { readDiffList, readFileDiff } from '@main/sessions/session-manager'
 import { readDiagramList } from '@main/diagrams/list'
 import { importSkills } from '@main/skills/import'
+import { isSafeSegment } from '@shared/skill-source'
+import { auditPrompt, SECURITY_SKILL_NAME } from '@main/security/audit-dispatch'
+import type { FlowSupervisor } from '@main/flow/flow-supervisor'
 import { disableSkill, enableSkill, removeSkill } from '@main/skills/install'
 import { check as checkForUpdates, installNow } from '@main/updater'
 
@@ -137,6 +140,8 @@ interface HandlerDeps {
   repos: Repositories
   manager: SessionManager
   skillsStagingRoot: string
+  securityRoot: string
+  flow: FlowSupervisor
   broker: PermissionBroker
   getWindow: () => BrowserWindow | null
   dbProjectId: string
@@ -212,7 +217,18 @@ const ALLOWED_PLUGINS: ReadonlySet<string> = new Set([
 ])
 
 export function registerIpcHandlers(deps: HandlerDeps): void {
-  const { repos, manager, broker, dbProjectId, skillsStagingRoot, ptyHost } = deps
+  const { repos, manager, broker, dbProjectId, skillsStagingRoot, securityRoot, ptyHost, flow } = deps
+
+  const requireProject = (projectId: string): Project => {
+    const project = repos.projects.byId(projectId)
+    if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
+    return project
+  }
+
+  const flowSnapshot = (projectId: string): { runs: FlowRun[]; items: FlowItem[] } => ({
+    runs: repos.flowRuns.listForProject(projectId),
+    items: repos.flowItems.listForProject(projectId),
+  })
 
   const frozenName = (session: Session, work: Parameters<typeof sessionName>[1]): string | null => {
     if (session.derivedName) return session.derivedName
@@ -738,6 +754,109 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'verify.cancel': async (req) => {
       await manager.cancelVerifyRun(req.runId)
       return repos.verifyRuns.listForProject(req.projectId)
+    },
+    'flow.list': (req) => flowSnapshot(req.projectId),
+    'flow.features': async (req) => {
+      requireProject(req.projectId)
+      return flow.features(req.projectId, req.query ?? '')
+    },
+    'flow.start': async (req) => {
+      requireProject(req.projectId)
+      const featureId = req.featureId.trim()
+      const featureTitle = req.featureTitle.trim()
+      if (!featureId || !featureTitle) {
+        throw { code: 'INVALID_PATH', message: 'Pick a Feature first.' } satisfies IpcError
+      }
+      const run = await flow.start({ projectId: req.projectId, featureId, featureTitle })
+      return { runId: run.id, ...flowSnapshot(req.projectId) }
+    },
+    'flow.saveItems': (req) => {
+      requireProject(req.projectId)
+      flow.saveItems(req.runId, req.items)
+      return flowSnapshot(req.projectId)
+    },
+    'flow.publish': async (req) => {
+      requireProject(req.projectId)
+      await flow.publish(req.runId)
+      return flowSnapshot(req.projectId)
+    },
+    'flow.startWork': async (req) => {
+      requireProject(req.projectId)
+      await flow.startWork(req.runId)
+      return flowSnapshot(req.projectId)
+    },
+    'flow.retryItem': async (req) => {
+      requireProject(req.projectId)
+      await flow.retryItem(req.itemId)
+      return flowSnapshot(req.projectId)
+    },
+    'flow.learn': async (req) => {
+      requireProject(req.projectId)
+      await flow.learn(req.runId)
+      return flowSnapshot(req.projectId)
+    },
+    'flow.lessons': (req) => repos.flowLessons.listForProject(req.projectId),
+    'flow.decideLesson': async (req) => {
+      requireProject(req.projectId)
+      const written = await flow.decideLesson(req.lessonId, req.accept, req.reason ?? null)
+      return { lessons: repos.flowLessons.listForProject(req.projectId), ...written }
+    },
+    'flow.cancel': async (req) => {
+      requireProject(req.projectId)
+      await flow.cancel(req.runId)
+      return flowSnapshot(req.projectId)
+    },
+    'security.list': (req) => repos.securityRuns.listForProject(req.projectId),
+    'security.start': async (req) => {
+      const project = repos.projects.byId(req.projectId)
+      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
+      if (repos.securityRuns.runningFor(req.projectId)) {
+        throw {
+          code: 'RULE_NOT_ALLOWED',
+          message: 'An audit is already running for this project. Wait for it, or stop it first.',
+        } satisfies IpcError
+      }
+      if (!repos.customSkills.byName(SECURITY_SKILL_NAME)?.enabled) {
+        throw {
+          code: 'NOT_FOUND',
+          message: 'Install the security-audit skill first, then run the audit.',
+        } satisfies IpcError
+      }
+      const session = await manager.backgroundSessionFor(req.projectId, 'security')
+      const outputDir = join(
+        securityRoot,
+        req.projectId,
+        `run-${new Date().toISOString().replace(/[:.]/g, '-')}`,
+      )
+      await mkdir(outputDir, { recursive: true })
+      const run = repos.securityRuns.start({
+        projectId: req.projectId,
+        sessionId: session.id,
+        scope: req.scope,
+        branch: session.branch ?? null,
+        outputDir,
+      })
+      manager.watchSecurityRun(session.id, run.id, outputDir)
+      manager.sendMessage(session.id, auditPrompt({ scope: req.scope, outputDir }))
+      return { sessionId: session.id, runs: repos.securityRuns.listForProject(req.projectId) }
+    },
+    'security.cancel': async (req) => {
+      await manager.cancelSecurityRun(req.runId)
+      return repos.securityRuns.listForProject(req.projectId)
+    },
+    'security.openReport': async (req) => {
+      const run = repos.securityRuns.byId(req.runId)
+      if (!run || run.projectId !== req.projectId) {
+        throw { code: 'NOT_FOUND', message: 'Run not found' } satisfies IpcError
+      }
+      if (!isSafeSegment(req.file) || !req.file.endsWith('.md')) {
+        throw { code: 'INVALID_PATH', message: 'That is not a report file' } satisfies IpcError
+      }
+      const target = join(run.outputDir, req.file)
+      if (!existsSync(target)) {
+        throw { code: 'NOT_FOUND', message: 'That report is no longer on disk' } satisfies IpcError
+      }
+      await shell.openPath(target)
     },
     'api.cancel': async (req) => {
       await manager.cancelApiRun(req.runId)

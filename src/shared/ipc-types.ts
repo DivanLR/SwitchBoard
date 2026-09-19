@@ -19,6 +19,13 @@ import type {
   QueuedTask,
   SectionKind,
   Session,
+  FlowFeature,
+  FlowItem,
+  FlowLesson,
+  FlowRun,
+  ScopedItem,
+  SecurityRun,
+  SecurityScope,
   SessionEvent,
   SessionEngine,
   SessionMode,
@@ -140,6 +147,7 @@ export interface InvokeMap {
       cols: number
       rows: number
       engine: SessionEngine | 'shell'
+      resumeSessionId?: string
     }
     res: { scrollback: string; reused: boolean }
   }
@@ -254,6 +262,48 @@ export interface InvokeMap {
     res: { sessionId: string; runs: VerifyRun[] }
   }
   'verify.cancel': { req: { projectId: string; runId: string }; res: VerifyRun[] }
+  'flow.list': { req: { projectId: string }; res: { runs: FlowRun[]; items: FlowItem[] } }
+  'flow.features': { req: { projectId: string; query?: string }; res: FlowFeature[] }
+  'flow.start': {
+    req: { projectId: string; featureId: string; featureTitle: string }
+    res: { runId: string; runs: FlowRun[]; items: FlowItem[] }
+  }
+  'flow.saveItems': {
+    req: { projectId: string; runId: string; items: ScopedItem[] }
+    res: { runs: FlowRun[]; items: FlowItem[] }
+  }
+  'flow.publish': {
+    req: { projectId: string; runId: string }
+    res: { runs: FlowRun[]; items: FlowItem[] }
+  }
+  'flow.startWork': {
+    req: { projectId: string; runId: string }
+    res: { runs: FlowRun[]; items: FlowItem[] }
+  }
+  'flow.retryItem': {
+    req: { projectId: string; itemId: string }
+    res: { runs: FlowRun[]; items: FlowItem[] }
+  }
+  'flow.learn': {
+    req: { projectId: string; runId: string }
+    res: { runs: FlowRun[]; items: FlowItem[] }
+  }
+  'flow.lessons': { req: { projectId: string }; res: FlowLesson[] }
+  'flow.decideLesson': {
+    req: { projectId: string; lessonId: string; accept: boolean; reason?: string }
+    res: { lessons: FlowLesson[]; appliedLines: number; path: string | null }
+  }
+  'flow.cancel': {
+    req: { projectId: string; runId: string }
+    res: { runs: FlowRun[]; items: FlowItem[] }
+  }
+  'security.list': { req: { projectId: string }; res: SecurityRun[] }
+  'security.start': {
+    req: { projectId: string; scope: SecurityScope }
+    res: { sessionId: string; runs: SecurityRun[] }
+  }
+  'security.cancel': { req: { projectId: string; runId: string }; res: SecurityRun[] }
+  'security.openReport': { req: { projectId: string; runId: string; file: string }; res: void }
   'api.endpoints': {
     req: { projectId: string }
     res: {
@@ -368,6 +418,17 @@ interface VerifyChangedPush {
   runs: VerifyRun[]
 }
 
+interface SecurityChangedPush {
+  projectId: string
+  runs: SecurityRun[]
+}
+
+interface FlowChangedPush {
+  projectId: string
+  runs: FlowRun[]
+  items: FlowItem[]
+}
+
 interface DiagramsChangedPush {
   projectId: string
   entries: DiagramEntry[]
@@ -396,6 +457,8 @@ export interface PushMap {
   'push.queueChanged': QueueChangedPush
   'push.evalsChanged': EvalsChangedPush
   'push.verifyChanged': VerifyChangedPush
+  'push.securityChanged': SecurityChangedPush
+  'push.flowChanged': FlowChangedPush
   'push.diagramsChanged': DiagramsChangedPush
   'push.apiChanged': ApiChangedPush
   'push.projectCommands': ProjectCommandsPush
@@ -415,6 +478,8 @@ const PUSH_CHANNEL_KEYS: Record<PushChannel, true> = {
   'push.queueChanged': true,
   'push.evalsChanged': true,
   'push.verifyChanged': true,
+  'push.securityChanged': true,
+  'push.flowChanged': true,
   'push.diagramsChanged': true,
   'push.apiChanged': true,
   'push.projectCommands': true,

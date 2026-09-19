@@ -49,12 +49,17 @@ function insertEvent(repos: ReturnType<typeof createRepositories>, sessionId: st
 }
 
 describe('runRetention', () => {
-  it('keeps events for the two most recent sessions per project and prunes the rest', () => {
+  it('keeps events for the recent sessions per project and prunes the rest', () => {
     const { db, repos } = makeDb()
     const project = repos.projects.insert({ name: 'a', path: 'C:\\a', source: 'manual' })
     const oldSession = insertSession(repos, project.id, '2026-07-01T10:00:00.000Z')
-    const previous = insertSession(repos, project.id, '2026-07-10T10:00:00.000Z')
-    const current = insertSession(repos, project.id, '2026-07-18T10:00:00.000Z')
+    // A flow run alone puts a dozen sessions on one project, so the kept window has to
+    // be filled before anything is pruned.
+    for (let n = 0; n < 12; n += 1) {
+      insertSession(repos, project.id, `2026-07-${String(5 + n).padStart(2, '0')}T10:00:00.000Z`)
+    }
+    const previous = insertSession(repos, project.id, '2026-07-20T10:00:00.000Z')
+    const current = insertSession(repos, project.id, '2026-07-21T10:00:00.000Z')
     insertEvent(repos, oldSession, 1)
     insertEvent(repos, oldSession, 2)
     insertEvent(repos, previous, 1)

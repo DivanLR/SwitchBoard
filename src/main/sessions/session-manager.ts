@@ -21,6 +21,7 @@ import type {
   QueuedTask,
   SectionKind,
   Session,
+  SessionEndReason,
   SessionEvent,
   SessionEngine,
   SessionMode,
@@ -58,6 +59,8 @@ import {
   transcriptFor,
   writeTranscript,
 } from './transcript'
+import { auditDone, readAuditReport } from '@main/security/audit-dispatch'
+import { parseFlowMarker, type FlowMarker } from '@main/flow/flow-markers'
 import { parseEvalMarker } from '@main/evals/eval-dispatch'
 import {
   parseSuiteProgress,
@@ -97,6 +100,7 @@ interface SessionManagerCallbacks {
   onQueueChanged: (projectId: string) => void
   onEvalsChanged: (projectId: string) => void
   onVerifyChanged: (projectId: string) => void
+  onSecurityChanged: (projectId: string) => void
   onDiagramsChanged: (projectId: string) => void
   onApiRequests: (projectId: string, runId: string, requests: ApiRequestPlan[]) => void
   onApiChanged: (projectId: string) => void
@@ -134,6 +138,8 @@ const CANCEL_NOTE = 'You stopped this run before it reported, so nothing it meas
 const MODELS_TTL_MS = 10 * 60_000
 
 const NEVER_REUSED: ReadonlySet<SectionKind> = new Set(['diagram', 'spec'])
+
+const WORKER_KINDS: ReadonlySet<SectionKind> = new Set(['diff'])
 
 const UPDATABLE_KINDS: ReadonlySet<EventKind> = new Set([
   'prompt',
@@ -294,6 +300,8 @@ export async function readDiffList(projectPath: string): Promise<DiffListResult>
   return { gitNotice: null, files }
 }
 
+const WHOLE_FILE_CONTEXT = 100_000
+
 function parseUnifiedDiff(diffText: string): FileDiffContent {
   if (/^Binary files /m.test(diffText)) return { binary: true, lines: [] }
   const lines: FileDiffContent['lines'] = []
@@ -347,7 +355,7 @@ export async function readFileDiff(projectPath: string, path: string): Promise<F
   try {
     ;({ stdout: diffOut } = await execFileAsync(
       'git',
-      ['-C', root, 'diff', '--', path],
+      ['-C', root, 'diff', `--unified=${WHOLE_FILE_CONTEXT}`, '--', path],
       GIT_EXEC_OPTS,
     ))
   } catch {
@@ -437,6 +445,7 @@ export class SessionManager {
       'The application closed before this run reported a result, so nothing it measured is known.'
     this.repos.verifyRuns.reconcileRunning(note)
     this.repos.apiRuns.reconcileRunning(note)
+    this.repos.securityRuns.reconcileRunning(note)
     sweepOrphanedContainers(leftOpen)
     sweepStaleVolumes((id) => this.repos.sessions.byId(id))
   }
@@ -494,6 +503,9 @@ export class SessionManager {
       background?: boolean
       nodeModulesVolumeKey?: string
       engine?: SessionEngine
+      workerMainLoop?: boolean
+      cwd?: string
+      effort?: EffortLevel
     },
   ): Promise<Session> {
     const project = this.repos.projects.byId(projectId)
@@ -509,6 +521,13 @@ export class SessionManager {
     const mode = requestedMode ?? project.defaultSessionMode
     const bypassPermissions = mode === 'bypass'
     const containerised = opts?.containerised === true || bypassPermissions
+    if (containerised && opts?.cwd) {
+      throw {
+        code: 'UNSUPPORTED',
+        message:
+          'A container session mounts the project folder itself, so it cannot run in a worktree. Untick the WSL box for this project, or choose a mode other than bypass.',
+      } satisfies IpcError
+    }
     if (containerised) this.refuseWhenContainersFull()
     const sessionId = newId()
     if (containerised) this.reservedContainerIds.add(sessionId)
@@ -543,6 +562,9 @@ export class SessionManager {
           background?: boolean
           nodeModulesVolumeKey?: string
           engine?: SessionEngine
+          workerMainLoop?: boolean
+          cwd?: string
+          effort?: EffortLevel
         }
       | undefined,
     engine: SessionEngine,
@@ -607,9 +629,11 @@ export class SessionManager {
     }
     this.repos.sessions.insert(row)
 
+    const workdir = opts?.cwd ?? project.path
+
     const entry: HostedEntry = {
       row,
-      projectPath: project.path,
+      projectPath: workdir,
       seq: this.repos.events.maxSeq(row.id),
       live: new Map(),
       containerised,
@@ -629,8 +653,9 @@ export class SessionManager {
     const schemaAppend = schemaDoc
       ? `## Database schema (from a previous MCP scan)\n\n${schemaDoc}`
       : null
+    const effort = opts?.effort ?? settings.effort
     const basic = settings.modelMode === 'basic'
-    const subagents = !basic && subagentsAllowed(settings.effort)
+    const subagents = !basic && subagentsAllowed(effort)
     const heavySubagents = subagents && settings.subagentEffort === 'max'
     row.heavySubagents = heavySubagents
     const heavyAppend = heavySubagentSystemPromptAppend(heavySubagents)
@@ -651,9 +676,9 @@ export class SessionManager {
         engine === 'codex'
           ? new CodexSession({
               sessionId: row.id,
-              projectPath: project.path,
+              projectPath: workdir,
               model: settings.codexModel || undefined,
-              effort: settings.effort,
+              effort,
               mode,
               resumeThreadId: resumeSdkSessionId,
               sink: this.makeSink(entry),
@@ -679,7 +704,7 @@ export class SessionManager {
             })
           : new HostedSession({
         sessionId: row.id,
-        projectPath: project.path,
+        projectPath: workdir,
         refDirs: project.refs.map((r) => r.path),
         sandboxMemory: settings.sandboxMemory,
         resumeSdkSessionId,
@@ -695,12 +720,15 @@ export class SessionManager {
             .filter((s): s is string => Boolean(s))
             .join('\n\n') || undefined,
         claudeExecutablePath: claudeExecutablePath ?? undefined,
-        mainModel: mainLoopModel(settings.modelMode, { intelligentModel, workerModel }),
+        mainModel: opts?.workerMainLoop
+          ? workerModel
+          : mainLoopModel(settings.modelMode, { intelligentModel, workerModel }),
+        workerMainLoop: opts?.workerMainLoop,
         strongModel: intelligentModel,
         workerModel,
         autoModelRouting: !basic && settings.autoModelRouting,
         modelMode: settings.modelMode,
-        effort: settings.effort,
+        effort,
         subagents,
         subagentEffort: settings.subagentEffort,
         resolveModels: () => this.resolveModelRouting(),
@@ -827,6 +855,16 @@ export class SessionManager {
     this.callbacks.onQueueChanged(projectId)
   }
 
+  markSection(sessionId: string, kind: SectionKind): void {
+    const entry = this.hosted.get(sessionId)
+    if (entry) entry.sectionKind = kind
+    this.repos.sessions.update(sessionId, { sectionKind: kind })
+  }
+
+  workdirFor(sessionId: string): string | undefined {
+    return this.hosted.get(sessionId)?.projectPath
+  }
+
   liveEntryForProject(projectId: string): HostedEntry | undefined {
     return [...this.hosted.values()].find((e) => e.row.projectId === projectId)
   }
@@ -907,11 +945,14 @@ export class SessionManager {
   }
 
   private async startBackground(projectId: string, kind: SectionKind): Promise<Session> {
-    const containerised = this.repos.projects.byId(projectId)?.useContainers === true
-    const session = await this.startSession(projectId, false, undefined, undefined, {
+    const project = this.repos.projects.byId(projectId)
+    const containerised = project?.useContainers === true
+    const mode = project?.defaultSessionMode === 'bypass' ? 'acceptEdits' : project?.defaultSessionMode
+    const session = await this.startSession(projectId, false, mode, undefined, {
       containerised,
       background: true,
       engine: 'claude',
+      workerMainLoop: WORKER_KINDS.has(kind),
     })
     const entry = this.hosted.get(session.id)
     if (entry) entry.sectionKind = kind
@@ -960,6 +1001,16 @@ export class SessionManager {
       entry.row.label = value
       this.pushStatus(entry)
     }
+  }
+
+  async cancelSecurityRun(runId: string): Promise<void> {
+    const run = this.repos.securityRuns.byId(runId)
+    if (!run) throw { code: 'NOT_FOUND', message: 'Run not found' } satisfies IpcError
+    if (run.status !== 'running') return
+    if (run.sessionId) await this.interruptSession(run.sessionId).catch(() => {})
+    this.securityWatch.delete(run.sessionId ?? '')
+    this.repos.securityRuns.finish(runId, 'failed', readAuditReport(run.outputDir), CANCEL_NOTE)
+    this.callbacks.onSecurityChanged(run.projectId)
   }
 
   async cancelVerifyRun(runId: string): Promise<void> {
@@ -1099,6 +1150,8 @@ export class SessionManager {
   private scanMarkers(entry: HostedEntry, kind: EventKind, payload: unknown): void {
     this.scanEvalMarker(entry, kind, payload)
     this.scanVerifyReport(entry, kind, payload)
+    this.scanSecurityReport(entry, kind, payload)
+    this.scanFlowMarker(entry, kind, payload)
     this.scanIsolatedSuiteReport(entry, kind, payload)
     this.scanApiRequests(entry, kind, payload)
     this.scanDiagramPlan(entry, kind, payload)
@@ -1113,6 +1166,90 @@ export class SessionManager {
     const file = this.repos.diagramRequests.latestFileFor(entry.row.projectId)
     if (!file) return
     this.repos.diagramRequests.notePlan(entry.row.projectId, file, plan)
+  }
+
+  private flowWatch = new Set<string>()
+
+  private flowHooks: {
+    onMarker: (sessionId: string, marker: FlowMarker) => void
+    onSessionEnded: (sessionId: string, reason: SessionEndReason | 'crashed') => void
+  } | null = null
+
+  setFlowHooks(hooks: {
+    onMarker: (sessionId: string, marker: FlowMarker) => void
+    onSessionEnded: (sessionId: string, reason: SessionEndReason | 'crashed') => void
+  }): void {
+    this.flowHooks = hooks
+  }
+
+  watchFlow(sessionId: string): void {
+    this.flowWatch.add(sessionId)
+  }
+
+  hasFlowWatch(sessionId: string): boolean {
+    return this.flowWatch.has(sessionId)
+  }
+
+  private scanFlowMarker(entry: HostedEntry, kind: EventKind, payload: unknown): void {
+    if (!this.flowWatch.has(entry.row.id) || !SessionManager.EVAL_SCAN_KINDS.has(kind)) return
+    const text = (payload as { text?: string }).text
+    if (!text) return
+    const marker = parseFlowMarker(text)
+    if (!marker) return
+    this.flowHooks?.onMarker(entry.row.id, marker)
+  }
+
+  private closeUnreportedFlow(entry: HostedEntry, reason: SessionEndReason | 'crashed'): void {
+    if (!this.flowWatch.delete(entry.row.id)) return
+    this.flowHooks?.onSessionEnded(entry.row.id, reason)
+  }
+
+  private securityWatch = new Map<string, { runId: string; outputDir: string }>()
+
+  watchSecurityRun(sessionId: string, runId: string, outputDir: string): void {
+    this.securityWatch.set(sessionId, { runId, outputDir })
+  }
+
+  private scanSecurityReport(entry: HostedEntry, kind: EventKind, payload: unknown): void {
+    const watch = this.securityWatch.get(entry.row.id)
+    if (!watch || !SessionManager.EVAL_SCAN_KINDS.has(kind)) return
+    const text = (payload as { text?: string }).text
+    if (!text || !auditDone(text)) return
+    this.securityWatch.delete(entry.row.id)
+    this.settleSecurityRun(watch.runId, watch.outputDir, entry.row.projectId)
+  }
+
+  private settleSecurityRun(runId: string, outputDir: string, projectId: string): void {
+    const report = readAuditReport(outputDir)
+    if (report) {
+      this.repos.securityRuns.finish(runId, 'complete', report, null)
+    } else {
+      this.repos.securityRuns.finish(
+        runId,
+        'failed',
+        null,
+        'The audit reported it was done, but no findings or coverage ledger was written where the run asked for them.',
+      )
+    }
+    this.callbacks.onSecurityChanged(projectId)
+  }
+
+  private closeUnreportedSecurity(entry: HostedEntry): void {
+    const watch = this.securityWatch.get(entry.row.id)
+    if (!watch) return
+    this.securityWatch.delete(entry.row.id)
+    const report = readAuditReport(watch.outputDir)
+    if (report) {
+      this.repos.securityRuns.finish(watch.runId, 'complete', report, 'The session ended before it said it was done, so this is what it had written.')
+    } else {
+      this.repos.securityRuns.finish(
+        watch.runId,
+        'failed',
+        null,
+        'The session ended before the audit wrote anything.',
+      )
+    }
+    this.callbacks.onSecurityChanged(entry.row.projectId)
   }
 
   private apiWatch = new Map<string, { runId: string }>()
@@ -1448,6 +1585,7 @@ export class SessionManager {
       this.closeUnreportedApi(entry)
       this.closeUnreportedEval(entry)
       this.closeUnreportedIsolatedSuite(entry)
+      this.closeUnreportedSecurity(entry)
     }
     entry.row.status = status
     entry.row.statusDetail = detail ?? null
@@ -1465,10 +1603,14 @@ export class SessionManager {
       this.verifyWatch.has(id) ||
       this.apiWatch.has(id) ||
       this.evalWatch.has(id) ||
-      this.diagramWatch.has(id)
+      this.diagramWatch.has(id) ||
+      this.securityWatch.has(id)
     ) {
       return
     }
+    // A flow session stays open for the supervisor's next step, and is closed by the
+    // supervisor rather than by the project queue.
+    if (this.flowWatch.has(id)) return
     if (this.repos.taskQueue.listForProject(entry.row.projectId).length > 0) return
     if (!this.hosted.has(id)) return
     this.completing.add(id)
@@ -1507,6 +1649,8 @@ export class SessionManager {
     this.closeUnreportedApi(entry)
     this.closeUnreportedEval(entry)
     this.closeUnreportedIsolatedSuite(entry)
+    this.closeUnreportedSecurity(entry)
+    this.closeUnreportedFlow(entry, reason === 'crashed' ? 'crashed' : (entry.row.endReason ?? 'completed'))
     if (this.diagramWatch.delete(entry.row.id)) {
       this.callbacks.onDiagramsChanged(entry.row.projectId)
     }

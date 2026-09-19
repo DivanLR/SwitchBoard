@@ -7,7 +7,9 @@ interface RetentionResult {
 }
 
 const DECISION_DAYS = 30
-const SESSIONS_PER_PROJECT = 2
+// A flow run puts a session on the project per work item, plus its own, so keeping
+// only the last two would delete a run's history while it was still going.
+const SESSIONS_PER_PROJECT = 12
 
 export function runRetention(
   db: AppDatabase,

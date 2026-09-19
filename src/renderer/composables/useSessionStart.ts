@@ -4,6 +4,7 @@ import type { Session, SessionEngine, SessionMode } from '@shared/domain'
 import { isIpcError, type ProjectListItem } from '@shared/ipc-types'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { useSettingsStore } from '@renderer/stores/settings'
+import { useTerminalStore } from '@renderer/stores/terminal'
 
 export function useSessionStart(opts: {
   project: MaybeRefOrGetter<ProjectListItem>
@@ -11,6 +12,7 @@ export function useSessionStart(opts: {
 }) {
   const projects = useProjectsStore()
   const settings = useSettingsStore()
+  const terminals = useTerminalStore()
   const project = (): ProjectListItem => toValue(opts.project)
   const endedSession = (): Session | null => toValue(opts.endedSession)
 
@@ -123,6 +125,8 @@ export function useSessionStart(opts: {
     startError.value = null
     modeOpen.value = false
     try {
+      const previous = endedSession()
+      if (wasResuming && previous) await terminals.close(previous.id).catch(() => {})
       const session = await projects.startSession(
         target,
         wasResuming,

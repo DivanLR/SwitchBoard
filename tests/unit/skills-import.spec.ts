@@ -142,8 +142,8 @@ describe('importSkills download policy', () => {
   const SOURCE = 'https://github.com/tt-a1i/archify/tree/main/archify'
   const TREE = {
     tree: [
-      { path: 'archify/SKILL.md', type: 'blob' },
-      { path: 'archify/bin/archify.mjs', type: 'blob' },
+      { path: 'archify/SKILL.md', type: 'blob', size: 64 },
+      { path: 'archify/bin/archify.mjs', type: 'blob', size: 64 },
     ],
   }
   const MANIFEST = '---\nname: archify\ndescription: Draws architecture.\n---\n'
@@ -189,6 +189,21 @@ describe('importSkills download policy', () => {
       })
       expect(calls.filter((url) => url.endsWith('archify.mjs'))).toHaveLength(1)
     } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('leaves an oversized asset behind instead of losing the whole skill', async () => {
+    TREE.tree.push({ path: 'archify/assets/music.mp3', type: 'blob', size: 20 * 1024 * 1024 })
+    const calls = stubGitHub(() => new Response('export const x = 1\n'))
+    const root = await mkdtemp(join(tmpdir(), 'sb-skills-'))
+    try {
+      const result = await importSkills(SOURCE, root, new Set())
+      expect(result.imported).toMatchObject([{ name: 'archify', fileCount: 2 }])
+      expect(result.skipped).toMatchObject([{ name: 'archify/assets/music.mp3' }])
+      expect(calls.some((url) => url.endsWith('music.mp3'))).toBe(false)
+    } finally {
+      TREE.tree.pop()
       await rm(root, { recursive: true, force: true })
     }
   })

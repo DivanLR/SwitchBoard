@@ -43,6 +43,7 @@ const store = {
     cols: number
     rows: number
     engine: SessionEngine | 'shell'
+    resumeSessionId?: string
   }): Promise<{ scrollback: string; reused: boolean }> {
     const result = await invoke('terminal.open', input)
     state.open.add(input.id)

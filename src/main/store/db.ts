@@ -454,6 +454,132 @@ const MIGRATIONS: Migration[] = [
       db.exec(`ALTER TABLE sessions ADD COLUMN engine TEXT NOT NULL DEFAULT 'claude';`)
     },
   },
+  {
+    name: '031-security-runs',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS security_runs (
+          id TEXT PRIMARY KEY,
+          projectId TEXT NOT NULL REFERENCES projects(id),
+          sessionId TEXT,
+          scope TEXT NOT NULL CHECK (scope IN ('project', 'changes')),
+          branch TEXT,
+          status TEXT NOT NULL CHECK (status IN ('running', 'complete', 'failed')),
+          report TEXT,
+          note TEXT,
+          outputDir TEXT NOT NULL,
+          startedAt TEXT NOT NULL,
+          finishedAt TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_security_runs_project
+          ON security_runs (projectId, startedAt DESC);
+      `)
+    },
+  },
+  {
+    name: '032-flow-runs',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS flow_runs (
+          id TEXT PRIMARY KEY,
+          projectId TEXT NOT NULL REFERENCES projects(id),
+          featureId TEXT NOT NULL,
+          featureTitle TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN (
+            'scoping', 'awaiting_approval', 'publishing', 'publish_interrupted',
+            'ready', 'implementing', 'learning', 'done', 'failed', 'cancelled')),
+          sessionId TEXT,
+          risks TEXT NOT NULL DEFAULT '[]',
+          outOfScope TEXT NOT NULL DEFAULT '[]',
+          note TEXT,
+          startedAt TEXT NOT NULL,
+          finishedAt TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_flow_runs_project
+          ON flow_runs (projectId, startedAt DESC);
+
+        CREATE TABLE IF NOT EXISTS flow_items (
+          id TEXT PRIMARY KEY,
+          runId TEXT NOT NULL REFERENCES flow_runs(id) ON DELETE CASCADE,
+          projectId TEXT NOT NULL REFERENCES projects(id),
+          position INTEGER NOT NULL,
+          localId TEXT NOT NULL,
+          title TEXT NOT NULL,
+          body TEXT NOT NULL,
+          acceptance TEXT NOT NULL DEFAULT '[]',
+          estimate TEXT NOT NULL DEFAULT 'm' CHECK (estimate IN ('s', 'm', 'l')),
+          workItemId TEXT,
+          workItemUrl TEXT,
+          branch TEXT,
+          worktreePath TEXT,
+          sessionId TEXT,
+          status TEXT NOT NULL CHECK (status IN (
+            'proposed', 'published', 'queued', 'preparing', 'implementing',
+            'tech_review', 'revising', 'raising_pr', 'pr_interrupted', 'pr_open',
+            'done', 'blocked', 'failed', 'cancelled')),
+          attempts INTEGER NOT NULL DEFAULT 0,
+          prId TEXT,
+          prUrl TEXT,
+          note TEXT,
+          startedAt TEXT,
+          finishedAt TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_flow_items_run ON flow_items (runId, position);
+        CREATE INDEX IF NOT EXISTS idx_flow_items_session
+          ON flow_items (sessionId) WHERE sessionId IS NOT NULL;
+      `)
+    },
+  },
+  {
+    name: '033-flow-run-work',
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE flow_runs ADD COLUMN concurrency INTEGER NOT NULL DEFAULT 4;
+        ALTER TABLE flow_runs ADD COLUMN baseBranch TEXT;
+        ALTER TABLE flow_runs ADD COLUMN worktreeRoot TEXT;
+      `)
+    },
+  },
+  {
+    name: '034-flow-crosscheck-and-lessons',
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE flow_runs ADD COLUMN crosscheckRound INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE flow_runs ADD COLUMN concerns TEXT NOT NULL DEFAULT '[]';
+
+        CREATE TEMP TABLE flow_status_carry AS SELECT id, status FROM flow_runs;
+        ALTER TABLE flow_runs DROP COLUMN status;
+        ALTER TABLE flow_runs ADD COLUMN status TEXT NOT NULL DEFAULT 'scoping'
+          CHECK (status IN (
+            'scoping', 'crosscheck', 'awaiting_approval', 'publishing', 'publish_interrupted',
+            'ready', 'implementing', 'learning', 'done', 'failed', 'cancelled'));
+        UPDATE flow_runs
+           SET status = COALESCE(
+             (SELECT status FROM flow_status_carry WHERE flow_status_carry.id = flow_runs.id),
+             'scoping'
+           );
+        DROP TABLE flow_status_carry;
+
+        CREATE TABLE IF NOT EXISTS flow_lessons (
+          id TEXT PRIMARY KEY,
+          projectId TEXT NOT NULL REFERENCES projects(id),
+          runId TEXT REFERENCES flow_runs(id) ON DELETE SET NULL,
+          ruleId TEXT NOT NULL,
+          rule TEXT NOT NULL,
+          section TEXT,
+          evidence TEXT NOT NULL DEFAULT '[]',
+          status TEXT NOT NULL CHECK (status IN ('proposed', 'accepted', 'rejected')),
+          reason TEXT,
+          createdAt TEXT NOT NULL,
+          decidedAt TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_flow_lessons_project
+          ON flow_lessons (projectId, createdAt DESC);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_flow_lessons_rule
+          ON flow_lessons (projectId, ruleId);
+      `)
+    },
+  },
 ]
 
 export function transaction<T>(db: AppDatabase, work: () => T): T {

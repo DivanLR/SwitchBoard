@@ -93,6 +93,7 @@ interface HostedSessionOptions {
   systemPromptAppend?: string
   claudeExecutablePath?: string
   mainModel?: string
+  workerMainLoop?: boolean
   workerModel?: string
   strongModel?: string
   autoModelRouting?: boolean
@@ -336,7 +337,9 @@ export class HostedSession implements SessionHost {
     if (!next) return
     this.options.effort = next.effort
     if (this.downgraded) return
-    this.options.mainModel = mainLoopModel(next.modelMode, next)
+    this.options.mainModel = this.options.workerMainLoop
+      ? next.workerModel
+      : mainLoopModel(next.modelMode, next)
     this.options.workerModel = next.workerModel
     this.options.modelMode = next.modelMode
     this.options.autoModelRouting = next.autoModelRouting

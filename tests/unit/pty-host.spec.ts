@@ -27,6 +27,20 @@ describe('launchCommand', () => {
     if (command === null) return
     expect(command).toBe('codex')
   })
+
+  it('continues a Claude conversation with --resume and ignores ids that are not plain tokens', () => {
+    expect(launchCommand('shell', 'abc-123')).toBeNull()
+    const command = launchCommand('claude', 'abc-123')
+    if (command !== null) expect(command.endsWith('" --resume abc-123')).toBe(true)
+    const unsafe = launchCommand('claude', 'abc; rm -rf /')
+    if (unsafe !== null) expect(unsafe).not.toContain('--resume')
+  })
+
+  it('continues a Codex thread with the resume subcommand', () => {
+    const command = launchCommand('codex', 'thread-1')
+    if (command === null) return
+    expect(command).toBe('codex resume thread-1')
+  })
 })
 
 describe('defaultShell', () => {

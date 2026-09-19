@@ -42,6 +42,8 @@ import DiffView from '@renderer/views/DiffView.vue'
 import DiagramsView from '@renderer/views/DiagramsView.vue'
 import TerminalPane from '@renderer/components/TerminalPane.vue'
 import SkillsView from '@renderer/views/SkillsView.vue'
+import SecurityView from '@renderer/views/SecurityView.vue'
+import FlowView from '@renderer/views/FlowView.vue'
 import SessionWaitOverlay from '@renderer/components/SessionWaitOverlay.vue'
 
 const props = defineProps<{ project: ProjectListItem }>()
@@ -82,10 +84,17 @@ function pillLabel(status: string): string {
 
 const terminalEverOpened = ref(false)
 const mainTab = ref<
-  'session' | 'terminal' | 'specs' | 'tests' | 'diff' | 'cleanup' | 'diagrams' | 'skills'
->(
-  'session',
-)
+  | 'session'
+  | 'terminal'
+  | 'specs'
+  | 'tests'
+  | 'diff'
+  | 'cleanup'
+  | 'diagrams'
+  | 'skills'
+  | 'security'
+  | 'flow'
+>('session')
 const specCount = computed(() => specs.stateFor(props.project.id).specs.length)
 const diffCount = computed(() => diff.resultFor(props.project.id).files.length)
 
@@ -138,6 +147,15 @@ const endedSession = computed(() =>
 const pendingCount = computed(
   () => inbox.pending.filter((p) => p.projectId === props.project.id).length,
 )
+
+const terminalSession = computed(() => liveSession.value ?? endedSession.value)
+
+const terminalResumeId = computed(() => {
+  const ended = endedSession.value
+  if (liveSession.value || !ended?.sdkSessionId) return null
+  if (ended.bypassPermissions || props.project.useContainers) return null
+  return ended.sdkSessionId
+})
 
 const now = useNow(1000)
 
@@ -1057,6 +1075,22 @@ const {
       >
         Skills
       </button>
+      <button
+        class="mt"
+        :class="{ sel: mainTab === 'security' }"
+        data-testid="tab-security"
+        @click="mainTab = 'security'"
+      >
+        Security
+      </button>
+      <button
+        class="mt"
+        :class="{ sel: mainTab === 'flow' }"
+        data-testid="tab-flow"
+        @click="mainTab = 'flow'"
+      >
+        Flow
+      </button>
     </div>
     <div v-if="!active.fullScreenSection && (mainTab === 'session' || mainTab === 'terminal')" class="view-toolbar">
       <span class="view-label">Workspace</span>
@@ -1109,10 +1143,13 @@ const {
     <TerminalPane
       v-if="terminalEverOpened"
       v-show="mainTab === 'terminal'"
-      :id="project.id"
+      :id="terminalSession?.id ?? project.id"
       :cwd="project.path"
-      :engine="liveSession?.engine ?? startEngine"
+      :engine="terminalSession?.engine ?? startEngine"
+      :resume-session-id="terminalResumeId"
+      :live="!!liveSession"
       :visible="mainTab === 'terminal'"
+      @takeover="stop()"
     />
 
     <SpecsView
@@ -1158,6 +1195,8 @@ const {
       @ran="(id: string) => (sectionSessionIds = { ...sectionSessionIds, skills: id })"
       @manage="emit('open-settings', 'skills')"
     />
+    <SecurityView v-else-if="mainTab === 'security'" :project-id="project.id" />
+    <FlowView v-else-if="mainTab === 'flow'" :project-id="project.id" />
 
     <div
       v-else-if="mainTab === 'session' && (active.view === 'clean' || selectedAgent)"

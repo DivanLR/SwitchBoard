@@ -23,12 +23,18 @@ export function defaultShell(): string {
   return process.env.SHELL ?? '/bin/bash'
 }
 
-export function launchCommand(engine: SessionEngine | 'shell'): string | null {
+const SAFE_SESSION_ID = /^[A-Za-z0-9_-]+$/
+
+export function launchCommand(engine: SessionEngine | 'shell', resumeSessionId?: string): string | null {
   if (engine === 'shell') return null
-  if (engine === 'codex') return codexInstalled() ? 'codex' : null
+  const resume = resumeSessionId && SAFE_SESSION_ID.test(resumeSessionId) ? resumeSessionId : null
+  if (engine === 'codex') {
+    if (!codexInstalled()) return null
+    return resume ? `codex resume ${resume}` : 'codex'
+  }
   const claude = resolveClaudeExecutable()
   if (!claude) return null
-  return `"${claude}"`
+  return resume ? `"${claude}" --resume ${resume}` : `"${claude}"`
 }
 
 export class PtyHost {
@@ -42,6 +48,7 @@ export class PtyHost {
     cols: number
     rows: number
     engine: SessionEngine | 'shell'
+    resumeSessionId?: string
   }): { scrollback: string; reused: boolean } {
     const existing = this.terminals.get(input.id)
     if (existing) {
@@ -67,7 +74,7 @@ export class PtyHost {
       this.terminals.delete(input.id)
       this.callbacks.onExit(input.id, exitCode)
     })
-    const command = launchCommand(input.engine)
+    const command = launchCommand(input.engine, input.resumeSessionId)
     if (command) pty.write(`${command}\r`)
     return { scrollback: '', reused: false }
   }

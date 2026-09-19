@@ -1,11 +1,17 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
-import type { DiffFileEntry } from '@shared/domain'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { modelLabel, type DiffFileEntry } from '@shared/domain'
 import { useDiffStore } from '@renderer/stores/diff'
+import { useSettingsStore } from '@renderer/stores/settings'
 import Icon from '@renderer/components/Icon.vue'
 
 const props = defineProps<{ projectId: string }>()
 const diff = useDiffStore()
+const settings = useSettingsStore()
+
+const workerLabel = computed(() =>
+  settings.settings ? modelLabel(settings.settings.workerModel) : 'the worker model',
+)
 
 const anchor = ref<number | null>(null)
 const head = ref<number | null>(null)
@@ -32,7 +38,14 @@ const isSelected = (i: number): boolean => {
   return r !== null && i >= r[0] && i <= r[1]
 }
 
+const dragging = ref(false)
+const dragged = ref(false)
+
 function pickLine(i: number, extend: boolean): void {
+  if (dragged.value) {
+    dragged.value = false
+    return
+  }
   if (extend && anchor.value !== null) {
     head.value = i
   } else {
@@ -43,7 +56,36 @@ function pickLine(i: number, extend: boolean): void {
   void nextTick(() => composer.value?.focus())
 }
 
+function startDrag(i: number, extend: boolean): void {
+  dragging.value = true
+  dragged.value = false
+  if (extend && anchor.value !== null) {
+    head.value = i
+    return
+  }
+  anchor.value = i
+  head.value = i
+}
+
+function dragOver(i: number): void {
+  if (!dragging.value || head.value === i) return
+  dragged.value = true
+  head.value = i
+  diff.applyError = null
+}
+
+function endDrag(): void {
+  if (!dragging.value) return
+  dragging.value = false
+  if (dragged.value) void nextTick(() => composer.value?.focus())
+}
+
+onMounted(() => window.addEventListener('mouseup', endDrag))
+onBeforeUnmount(() => window.removeEventListener('mouseup', endDrag))
+
 function clearSelection(): void {
+  dragging.value = false
+  dragged.value = false
   anchor.value = null
   head.value = null
   instruction.value = ''
@@ -235,7 +277,7 @@ const keyedLines = computed(() =>
         <div v-else-if="diff.fileDiff.binary" class="diff-empty mono faint" data-testid="diff-pane-binary">
           No text diff is available for this file.
         </div>
-        <div v-else class="diff-lines mono" data-testid="diff-pane-lines">
+        <div v-else class="diff-lines mono" :class="{ dragging }" data-testid="diff-pane-lines">
           <template v-for="row in keyedLines" :key="row.key">
           <button
             type="button"
@@ -243,7 +285,9 @@ const keyedLines = computed(() =>
             :class="[row.line.type, { picked: isSelected(row.i) }]"
             :data-testid="`diff-line-${row.i}`"
             :aria-pressed="isSelected(row.i)"
-            title="Click to comment on this line, shift-click to extend the selection"
+            title="Click to comment on this line, drag or shift-click to take several"
+            @mousedown="startDrag(row.i, $event.shiftKey)"
+            @mouseenter="dragOver(row.i)"
             @click="pickLine(row.i, $event.shiftKey)"
           >
             <span class="dl-comment" aria-hidden="true">
@@ -256,7 +300,7 @@ const keyedLines = computed(() =>
           </button>
 
           <div
-            v-if="range && row.i === range[1]"
+            v-if="range && row.i === range[1] && !dragging"
             class="dl-composer"
             data-testid="diff-comment"
           >
@@ -288,7 +332,7 @@ const keyedLines = computed(() =>
             {{ diff.applyError }}
           </div>
           <div class="dlc-foot">
-            <span class="dlc-note mono">applied by a container session</span>
+            <span class="dlc-note mono">applied by a worker session on {{ workerLabel }}</span>
             <button
               type="button"
               class="dlc-send"
@@ -475,6 +519,10 @@ const keyedLines = computed(() =>
 
 .diff-lines {
   padding: 6px 0;
+}
+
+.diff-lines.dragging {
+  user-select: none;
 }
 
 .diff-line {

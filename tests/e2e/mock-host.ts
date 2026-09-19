@@ -76,6 +76,27 @@ export interface MockDriver {
     result: { checkStatus?: string; judge?: string },
   ) => void
   reportVerifyResult: (projectId: string, status: string, report: unknown) => void
+  reportSecurityResult: (projectId: string, status: string, report: unknown) => void
+  setAdoFeatures: (features: { id: string; title: string; state?: string | null }[]) => void
+  setAdoConnected: (on: boolean) => void
+  setFlowDirty: (paths: string[]) => void
+  reportFlowLessons: (projectId: string, lessons: { rule: string; section?: string | null; quote: string }[]) => void
+  reportFlowItem: (projectId: string, localId: string, outcome: "pr_open" | "blocked" | "failed", detail?: { prId?: string; note?: string }) => void
+  reportFlowScope: (
+    projectId: string,
+    items: { localId: string; title: string; body?: string; acceptance?: string[] }[],
+    extras?: { risks?: string[]; outOfScope?: string[]; crosscheck?: boolean },
+  ) => void
+  reportFlowSignoff: (
+    projectId: string,
+    verdict: 'approve' | 'revise',
+    concerns: string[],
+  ) => void
+  reportFlowPublished: (
+    projectId: string,
+    created: { localId: string; workItemId: string }[],
+    failed?: { localId: string; why: string }[],
+  ) => void
   addDiagram: (projectId: string, entry: DiagramEntry) => void
   reportApiResult: (
     projectId: string,
@@ -104,6 +125,11 @@ export interface MockDriver {
     }[]
     planModeChanges: { sessionId: string; enabled: boolean }[]
     diagramOpens: { projectId: string; file: string }[]
+    reportOpens: { runId: string; file: string }[]
+    flowPublishes: { runId: string; count: number }[]
+    flowWorkStarts: string[]
+    flowRetries: string[]
+    flowLessonDecisions: { lessonId: string; accept: boolean }[]
     pluginInstalls: { marketplace: string; pkg: string }[]
     diffApplies: { projectId: string; path: string; lines: string[]; instruction: string }[]
   }
@@ -170,6 +196,7 @@ export function installMockHost(scenario: MockScenario): void {
   const diagramsByProject = new Map<string, DiagramEntry[]>()
   const diagramRequestedFiles = new Map<string, Set<string>>()
   const diagramOpens: { projectId: string; file: string }[] = []
+  const reportOpens: { runId: string; file: string }[] = []
   const pluginInstalls: { marketplace: string; pkg: string }[] = []
   const diffApplies: { projectId: string; path: string; lines: string[]; instruction: string }[] = []
   const DIAGRAMS_DIR = 'docs/diagrams'
@@ -433,6 +460,26 @@ export function installMockHost(scenario: MockScenario): void {
   const taskQueueByProject = new Map<string, AnyRecord[]>()
   const evalsByProject = new Map<string, AnyRecord[]>()
   const verifyByProject = new Map<string, AnyRecord[]>()
+  const securityByProject = new Map<string, AnyRecord[]>()
+  const flowRunsByProject = new Map<string, AnyRecord[]>()
+  const flowItemsByProject = new Map<string, AnyRecord[]>()
+  const flowPublishes: { runId: string; count: number }[] = []
+  const flowWorkStarts: string[] = []
+  const flowRetries: string[] = []
+  const flowLessonsByProject = new Map<string, AnyRecord[]>()
+  const flowLessonDecisions: { lessonId: string; accept: boolean }[] = []
+  let flowDirty: string[] = []
+  let adoFeatures: AnyRecord[] = []
+  let adoConnected = true
+
+  const flowSnapshot = (projectId: string): { runs: AnyRecord[]; items: AnyRecord[] } => ({
+    runs: [...(flowRunsByProject.get(projectId) ?? [])],
+    items: [...(flowItemsByProject.get(projectId) ?? [])],
+  })
+
+  const pushFlow = (projectId: string): void => {
+    push('push.flowChanged', { projectId, ...flowSnapshot(projectId) })
+  }
 
   function deliver(sessionId: string, text: string): void {
     sends.push({ sessionId, text })
@@ -1052,6 +1099,267 @@ export function installMockHost(scenario: MockScenario): void {
       evalsByProject.set(projectId, list)
       return [...list]
     },
+    'flow.list': (req) => flowSnapshot(String(req.projectId)),
+    'flow.features': async (req) => {
+      const projectId = String(req.projectId)
+      if (!adoConnected) {
+        throw {
+          code: 'NOT_LIVE',
+          message:
+            'The Azure DevOps MCP server is not connected for this session, so Flow cannot read or write the board. Check the ado server in your Claude Code configuration and try again.',
+        }
+      }
+      const session = await sectionSession(projectId, 'flow')
+      const text = `List the Features I could work on next in Azure DevOps.\n${String(req.query ?? '')}\nSWB_FLOW`
+      sends.push({ sessionId: session.id, text })
+      appendEvent(session.id, 'prompt', { text, pending: false })
+      return [...adoFeatures]
+    },
+    'flow.start': async (req) => {
+      const projectId = String(req.projectId)
+      const open = (flowRunsByProject.get(projectId) ?? []).find(
+        (run) => !['done', 'failed', 'cancelled'].includes(String(run.status)),
+      )
+      if (open) {
+        throw {
+          code: 'RULE_NOT_ALLOWED',
+          message: 'A flow is already open for this project. Finish or cancel it first.',
+        }
+      }
+      if (!adoConnected) {
+        throw {
+          code: 'NOT_LIVE',
+          message: 'The Azure DevOps MCP server is not connected for this session, so Flow cannot read or write the board.',
+        }
+      }
+      const session = await sectionSession(projectId, 'flow')
+      const text = `Scope Azure DevOps Feature ${String(req.featureId)} into Product Backlog Items.\nSWB_FLOW`
+      sends.push({ sessionId: session.id, text })
+      appendEvent(session.id, 'prompt', { text, pending: false })
+      const runs = flowRunsByProject.get(projectId) ?? []
+      const run = {
+        id: `flow-${runs.length + 1}`,
+        projectId,
+        featureId: String(req.featureId),
+        featureTitle: String(req.featureTitle),
+        status: 'scoping',
+        sessionId: session.id,
+        risks: [],
+        outOfScope: [],
+        concurrency: 4,
+        baseBranch: 'main',
+        worktreeRoot: null,
+        crosscheckRound: 0,
+        concerns: [],
+        note: null,
+        startedAt: new Date().toISOString(),
+        finishedAt: null,
+      }
+      runs.unshift(run)
+      flowRunsByProject.set(projectId, runs)
+      return { runId: run.id, ...flowSnapshot(projectId) }
+    },
+    'flow.saveItems': (req) => {
+      const projectId = String(req.projectId)
+      const runId = String(req.runId)
+      const kept = (flowItemsByProject.get(projectId) ?? []).filter(
+        (item) => item.runId !== runId || item.status !== 'proposed',
+      )
+      const incoming = (req.items ?? []) as AnyRecord[]
+      incoming.forEach((item, index) => {
+        kept.push({
+          id: `flow-item-${runId}-${index}`,
+          runId,
+          projectId,
+          position: index,
+          localId: String(item.localId),
+          title: String(item.title),
+          body: String(item.body ?? ''),
+          acceptance: (item.acceptance ?? []) as string[],
+          estimate: String(item.estimate ?? 'm'),
+          workItemId: null,
+          workItemUrl: null,
+          branch: null,
+          worktreePath: null,
+          sessionId: null,
+          status: 'proposed',
+          attempts: 0,
+          prId: null,
+          prUrl: null,
+          note: null,
+          startedAt: null,
+          finishedAt: null,
+        })
+      })
+      flowItemsByProject.set(projectId, kept)
+      return flowSnapshot(projectId)
+    },
+    'flow.publish': (req) => {
+      const projectId = String(req.projectId)
+      const runId = String(req.runId)
+      const runs = flowRunsByProject.get(projectId) ?? []
+      const at = runs.findIndex((run) => run.id === runId)
+      if (at < 0) throw { code: 'NOT_FOUND', message: 'Run not found' }
+      const proposed = (flowItemsByProject.get(projectId) ?? []).filter(
+        (item) => item.runId === runId && item.status === 'proposed',
+      )
+      if (proposed.length === 0) {
+        throw {
+          code: 'INVALID_PATH',
+          message: 'There is nothing to create: every item is already in Azure DevOps.',
+        }
+      }
+      flowPublishes.push({ runId, count: proposed.length })
+      runs[at] = { ...runs[at], status: 'publishing' }
+      flowRunsByProject.set(projectId, runs)
+      return flowSnapshot(projectId)
+    },
+    'flow.startWork': (req) => {
+      const projectId = String(req.projectId)
+      const runId = String(req.runId)
+      const runs = flowRunsByProject.get(projectId) ?? []
+      const at = runs.findIndex((run) => run.id === runId)
+      if (at < 0) throw { code: 'NOT_FOUND', message: 'Run not found' }
+      if (flowDirty.length > 0) {
+        throw {
+          code: 'CONFIRM_REQUIRED',
+          message: `The main checkout has ${flowDirty.length} uncommitted change${flowDirty.length === 1 ? '' : 's'}, and every work item branches from it. Commit or stash them first — Flow will not do that for you.`,
+        }
+      }
+      const items = (flowItemsByProject.get(projectId) ?? []).map((item) =>
+        item.runId === runId && item.status === 'published'
+          ? { ...item, status: 'implementing', attempts: 1, branch: `flow/${String(item.workItemId)}` }
+          : item,
+      )
+      if (!items.some((item) => item.runId === runId && item.status === 'implementing')) {
+        throw {
+          code: 'INVALID_PATH',
+          message: 'There is nothing to work on: no item reached Azure DevOps.',
+        }
+      }
+      flowItemsByProject.set(projectId, items)
+      runs[at] = { ...runs[at], status: 'implementing' }
+      flowRunsByProject.set(projectId, runs)
+      flowWorkStarts.push(runId)
+      return flowSnapshot(projectId)
+    },
+    'flow.retryItem': (req) => {
+      const projectId = String(req.projectId)
+      const items = (flowItemsByProject.get(projectId) ?? []).map((item) =>
+        item.id === String(req.itemId)
+          ? { ...item, status: 'queued', attempts: 0, note: null }
+          : item,
+      )
+      flowItemsByProject.set(projectId, items)
+      flowRetries.push(String(req.itemId))
+      return flowSnapshot(projectId)
+    },
+    'flow.learn': (req) => {
+      const projectId = String(req.projectId)
+      const runId = String(req.runId)
+      const runs = flowRunsByProject.get(projectId) ?? []
+      const at = runs.findIndex((run) => run.id === runId)
+      if (at < 0) throw { code: 'NOT_FOUND', message: 'Run not found' }
+      const items = (flowItemsByProject.get(projectId) ?? []).filter((item) => item.runId === runId)
+      if (!items.some((item) => item.prId)) {
+        throw {
+          code: 'INVALID_PATH',
+          message: 'No pull request was raised for this feature, so there are no comments to read.',
+        }
+      }
+      runs[at] = { ...runs[at], status: 'learning' }
+      flowRunsByProject.set(projectId, runs)
+      return flowSnapshot(projectId)
+    },
+    'flow.lessons': (req) => [...(flowLessonsByProject.get(String(req.projectId)) ?? [])],
+    'flow.decideLesson': (req) => {
+      const projectId = String(req.projectId)
+      const accept = req.accept === true
+      const lessons = (flowLessonsByProject.get(projectId) ?? []).map((lesson) =>
+        lesson.id === String(req.lessonId)
+          ? {
+              ...lesson,
+              status: accept ? 'accepted' : 'rejected',
+              reason: req.reason ?? null,
+              decidedAt: new Date().toISOString(),
+            }
+          : lesson,
+      )
+      flowLessonsByProject.set(projectId, lessons)
+      flowLessonDecisions.push({ lessonId: String(req.lessonId), accept })
+      return {
+        lessons: [...lessons],
+        appliedLines: accept ? 1 : 0,
+        path: accept ? 'C:\\work\\alpha\\CLAUDE.md' : null,
+      }
+    },
+    'flow.cancel': (req) => {
+      const projectId = String(req.projectId)
+      const runs = flowRunsByProject.get(projectId) ?? []
+      const at = runs.findIndex((run) => run.id === String(req.runId))
+      if (at < 0) throw { code: 'NOT_FOUND', message: 'Run not found' }
+      runs[at] = {
+        ...runs[at],
+        status: 'cancelled',
+        note: 'You stopped this flow.',
+        finishedAt: new Date().toISOString(),
+      }
+      flowRunsByProject.set(projectId, runs)
+      return flowSnapshot(projectId)
+    },
+    'security.list': (req) => [...(securityByProject.get(String(req.projectId)) ?? [])],
+    'security.start': async (req) => {
+      const projectId = String(req.projectId)
+      const scope = String(req.scope)
+      if ((securityByProject.get(projectId) ?? []).some((r) => r.status === 'running')) {
+        throw {
+          code: 'RULE_NOT_ALLOWED',
+          message: 'An audit is already running for this project. Wait for it, or stop it first.',
+        }
+      }
+      if (!customSkills.some((s) => s.name === 'security-audit' && s.enabled)) {
+        throw { code: 'NOT_FOUND', message: 'Install the security-audit skill first, then run the audit.' }
+      }
+      const session = await sectionSession(projectId, 'security')
+      const text = `Run a security audit of this repository with the security-audit skill, in full audit mode.\nScope: ${scope}\nSWB_SECURITY`
+      sends.push({ sessionId: session.id, text })
+      appendEvent(session.id, 'prompt', { text, pending: false })
+      const list = securityByProject.get(projectId) ?? []
+      list.unshift({
+        id: `security-${list.length + 1}`,
+        projectId,
+        sessionId: session.id,
+        scope,
+        branch: sessions.get(session.id)?.branch ?? null,
+        status: 'running',
+        report: null,
+        note: null,
+        outputDir: `C:\\\\audits\\\\${projectId}\\\\run-${list.length + 1}`,
+        startedAt: new Date().toISOString(),
+        finishedAt: null,
+      })
+      securityByProject.set(projectId, list)
+      return { sessionId: session.id, runs: [...list] }
+    },
+    'security.cancel': (req) => {
+      const projectId = String(req.projectId)
+      const list = securityByProject.get(projectId) ?? []
+      const at = list.findIndex((r) => r.id === req.runId)
+      if (at < 0) throw { code: 'NOT_FOUND', message: 'Run not found' }
+      if (list[at].status === 'running') {
+        list[at] = {
+          ...list[at],
+          status: 'failed',
+          note: 'You stopped this run before it reported, so nothing it measured is known.',
+          finishedAt: new Date().toISOString(),
+        }
+        securityByProject.set(projectId, list)
+      }
+      return [...list]
+    },
+    'security.openReport': (req) => {
+      reportOpens.push({ runId: String(req.runId), file: String(req.file) })
+    },
     'verify.list': (req) => [...(verifyByProject.get(String(req.projectId)) ?? [])],
     'verify.start': async (req) => {
       const projectId = String(req.projectId)
@@ -1518,6 +1826,148 @@ export function installMockHost(scenario: MockScenario): void {
       if (result.judge !== undefined) row.judge = result.judge
       push('push.evalsChanged', { projectId, runs: [...list] })
     },
+    setAdoFeatures: (features) => {
+      adoFeatures = features.map((feature) => ({
+        id: feature.id,
+        title: feature.title,
+        state: feature.state ?? 'Active',
+        url: null,
+      }))
+    },
+    setAdoConnected: (on) => {
+      adoConnected = on
+    },
+    setFlowDirty: (paths) => {
+      flowDirty = [...paths]
+    },
+    reportFlowLessons: (projectId, lessons) => {
+      const runs = flowRunsByProject.get(projectId) ?? []
+      const at = runs.findIndex((run) => run.status === "learning")
+      flowLessonsByProject.set(
+        projectId,
+        lessons.map((lesson, index) => ({
+          id: `lesson-${index + 1}`,
+          projectId,
+          runId: at >= 0 ? runs[at].id : null,
+          ruleId: `rule-${index + 1}`,
+          rule: lesson.rule,
+          section: lesson.section ?? null,
+          evidence: [{ prId: "312", author: "reviewer", quote: lesson.quote }],
+          status: "proposed",
+          reason: null,
+          createdAt: new Date().toISOString(),
+          decidedAt: null,
+        })),
+      )
+      if (at >= 0) {
+        runs[at] = { ...runs[at], status: "done", finishedAt: new Date().toISOString() }
+        flowRunsByProject.set(projectId, runs)
+      }
+      pushFlow(projectId)
+    },
+    reportFlowItem: (projectId, localId, outcome, detail) => {
+      const items = (flowItemsByProject.get(projectId) ?? []).map((item) =>
+        item.localId === localId
+          ? {
+              ...item,
+              status: outcome,
+              prId: detail?.prId ?? item.prId,
+              prUrl: detail?.prId ? `https://dev.azure.com/pr/${detail.prId}` : item.prUrl,
+              note: detail?.note ?? item.note,
+            }
+          : item,
+      )
+      flowItemsByProject.set(projectId, items)
+      pushFlow(projectId)
+    },
+    reportFlowScope: (projectId, items, extras) => {
+      const runs = flowRunsByProject.get(projectId) ?? []
+      const at = runs.findIndex((run) => run.status === 'scoping')
+      if (at < 0) return
+      const run = runs[at]
+      const kept = (flowItemsByProject.get(projectId) ?? []).filter((item) => item.runId !== run.id)
+      items.forEach((item, index) => {
+        kept.push({
+          id: `flow-item-${String(run.id)}-${index}`,
+          runId: run.id,
+          projectId,
+          position: index,
+          localId: item.localId,
+          title: item.title,
+          body: item.body ?? '',
+          acceptance: item.acceptance ?? [],
+          estimate: 'm',
+          workItemId: null,
+          workItemUrl: null,
+          branch: null,
+          worktreePath: null,
+          sessionId: null,
+          status: 'proposed',
+          attempts: 0,
+          prId: null,
+          prUrl: null,
+          note: null,
+          startedAt: null,
+          finishedAt: null,
+        })
+      })
+      flowItemsByProject.set(projectId, kept)
+      runs[at] = {
+        ...run,
+        status: extras?.crosscheck === false ? 'awaiting_approval' : 'crosscheck',
+        risks: extras?.risks ?? [],
+        outOfScope: extras?.outOfScope ?? [],
+      }
+      flowRunsByProject.set(projectId, runs)
+      pushFlow(projectId)
+    },
+    reportFlowSignoff: (projectId, verdict, concerns) => {
+      const runs = flowRunsByProject.get(projectId) ?? []
+      const at = runs.findIndex((run) => run.status === 'crosscheck')
+      if (at < 0) return
+      runs[at] = {
+        ...runs[at],
+        status: verdict === 'approve' ? 'awaiting_approval' : 'scoping',
+        concerns: [...concerns],
+        note:
+          verdict === 'approve' && concerns.length > 0 ? 'The reviewer approved it, with notes.' : null,
+      }
+      flowRunsByProject.set(projectId, runs)
+      pushFlow(projectId)
+    },
+    reportFlowPublished: (projectId, created, failed) => {
+      const runs = flowRunsByProject.get(projectId) ?? []
+      const at = runs.findIndex((run) => run.status === 'publishing')
+      if (at < 0) return
+      const run = runs[at]
+      const items = (flowItemsByProject.get(projectId) ?? []).map((item) => {
+        if (item.runId !== run.id) return item
+        const made = created.find((entry) => entry.localId === item.localId)
+        if (made) return { ...item, status: 'published', workItemId: made.workItemId }
+        const miss = (failed ?? []).find((entry) => entry.localId === item.localId)
+        return miss ? { ...item, status: 'failed', note: miss.why } : item
+      })
+      flowItemsByProject.set(projectId, items)
+      runs[at] = {
+        ...run,
+        status: 'ready',
+        note:
+          (failed ?? []).length > 0
+            ? `${(failed ?? []).length} item${(failed ?? []).length === 1 ? '' : 's'} could not be created.`
+            : null,
+      }
+      flowRunsByProject.set(projectId, runs)
+      pushFlow(projectId)
+    },
+    reportSecurityResult: (projectId, status, report) => {
+      const list = securityByProject.get(projectId) ?? []
+      const index = list.findIndex((r) => r.status === 'running')
+      const at = index >= 0 ? index : 0
+      if (!list[at]) return
+      list[at] = { ...list[at], status, report, finishedAt: new Date().toISOString() }
+      securityByProject.set(projectId, list)
+      push('push.securityChanged', { projectId, runs: [...list] })
+    },
     reportVerifyResult: (projectId, status, report) => {
       const list = verifyByProject.get(projectId) ?? []
       const index = list.findIndex((r) => r.status === 'running')
@@ -1575,6 +2025,11 @@ export function installMockHost(scenario: MockScenario): void {
       starts: [...starts],
       planModeChanges: [...planModeChanges],
       diagramOpens: [...diagramOpens],
+      reportOpens: [...reportOpens],
+      flowPublishes: [...flowPublishes],
+      flowWorkStarts: [...flowWorkStarts],
+      flowRetries: [...flowRetries],
+      flowLessonDecisions: [...flowLessonDecisions],
       pluginInstalls: [...pluginInstalls],
       diffApplies: [...diffApplies],
     }),

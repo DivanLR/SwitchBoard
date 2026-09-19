@@ -145,6 +145,26 @@ test('shift-click extends the selection over several lines, in order', async ({ 
     .toEqual(['-const timeout = 500', '+const timeout = 5000', ' return timeout'])
 })
 
+test('dragging across the lines highlights every line it passes', async ({ page }) => {
+  await openDiffWithLines(page)
+
+  const from = (await page.getByTestId('diff-line-1').boundingBox())!
+  const to = (await page.getByTestId('diff-line-3').boundingBox())!
+  await page.mouse.move(from.x + 40, from.y + from.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(to.x + 40, to.y + to.height / 2, { steps: 6 })
+  await page.mouse.up()
+
+  await expect(page.getByTestId('diff-comment-count')).toContainText('3 lines selected')
+
+  await page.getByTestId('diff-comment-input').fill('rework this block')
+  await page.getByTestId('diff-comment-send').click()
+
+  await expect
+    .poll(async () => (await page.evaluate(() => window.__mock.state().diffApplies)).at(-1)?.lines)
+    .toEqual(['-const timeout = 500', '+const timeout = 5000', ' return timeout'])
+})
+
 test('extending upwards selects the same region as extending down', async ({ page }) => {
   await openDiffWithLines(page)
 

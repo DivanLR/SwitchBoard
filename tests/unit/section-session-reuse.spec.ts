@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { DEFAULT_SETTINGS } from '@shared/domain'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -60,6 +61,7 @@ function setup() {
     onQueueChanged: () => {},
     onEvalsChanged: () => {},
     onVerifyChanged: () => {},
+    onSecurityChanged: () => {},
     onDiagramsChanged: () => {},
     onApiRequests: () => {},
     onApiChanged: () => {},
@@ -96,6 +98,62 @@ describe('the session a section dispatch lands in', () => {
     const spec = await manager.backgroundSessionFor(project.id, 'spec')
 
     expect(spec.id).not.toBe(cleanup.id)
+  })
+
+  it('leaves a bypass default behind, so a section session stays off the container', async () => {
+    const { repos, project, manager } = setup()
+    repos.projects.setSessionMode(project.id, 'bypass')
+
+    const session = await manager.backgroundSessionFor(project.id, 'diff')
+
+    expect(session.bypassPermissions).toBe(false)
+    const hosted = (manager as unknown as { hosted: Map<string, { containerised: boolean }> }).hosted
+    expect(hosted.get(session.id)?.containerised).toBe(false)
+  })
+
+  it('runs a diff comment on the worker model and leaves other sections on the main one', async () => {
+    const { project, manager } = setup()
+
+    const diff = await manager.backgroundSessionFor(project.id, 'diff')
+    const cleanup = await manager.backgroundSessionFor(project.id, 'cleanup')
+
+    const hosted = (
+      manager as unknown as {
+        hosted: Map<string, { session: { options: { mainModel?: string } } }>
+      }
+    ).hosted
+    expect(hosted.get(diff.id)?.session.options.mainModel).toBe(DEFAULT_SETTINGS.workerModel)
+    expect(hosted.get(cleanup.id)?.session.options.mainModel).toBe(DEFAULT_SETTINGS.intelligentModel)
+  })
+
+  it('runs a session in the worktree it is given, without moving the project', async () => {
+    const { repos, project, manager } = setup()
+    const worktree = mkdtempSync(join(tmpdir(), 'section-worktree-'))
+    dirs.push(worktree)
+
+    const session = await manager.startSession(project.id, false, undefined, undefined, {
+      background: true,
+      engine: 'claude',
+      cwd: worktree,
+    })
+
+    expect(manager.workdirFor(session.id)).toBe(worktree)
+    expect(repos.projects.byId(project.id)?.path).toBe(project.path)
+  })
+
+  it('refuses a container session in a worktree, because the container mounts the project', async () => {
+    const { project, manager } = setup()
+    const worktree = mkdtempSync(join(tmpdir(), 'section-worktree-b-'))
+    dirs.push(worktree)
+
+    await expect(
+      manager.startSession(project.id, false, undefined, undefined, {
+        background: true,
+        engine: 'claude',
+        containerised: true,
+        cwd: worktree,
+      }),
+    ).rejects.toMatchObject({ code: 'UNSUPPORTED' })
   })
 
   it('never crosses projects', async () => {
