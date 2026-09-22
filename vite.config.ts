@@ -15,7 +15,7 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5199,
+    port: Number(process.env.E2E_PORT ?? 5199),
     strictPort: true,
   },
 })
