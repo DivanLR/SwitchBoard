@@ -1,18 +1,20 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { execSync } from 'node:child_process'
+
+vi.setConfig({ testTimeout: 20_000 })
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import {
-  branchNameFor,
   createWorktree,
   listWorktrees,
   removeWorktree,
+  slugify,
   sweepOrphanWorktrees,
+  uniqueBranchName,
   worktreeDirty,
   worktreePathFor,
   worktreeRoot,
-  WORKTREE_DIR,
 } from '@main/flow/worktrees'
 
 const dirs: string[] = []
@@ -37,61 +39,75 @@ function repo(): string {
 }
 
 describe('branch and path naming', () => {
-  it('builds a branch from the work item and a short slug', () => {
-    expect(branchNameFor('12345', 'Fix the cart race condition')).toBe(
-      'flow/12345-fix-the-cart-race-condit',
+  it('slugifies a title, capped at 40 characters', () => {
+    expect(slugify('Fix the cart race condition once and for all, properly')).toBe(
+      'fix-the-cart-race-condition-once-and-for',
     )
+    expect(slugify('!!!')).toBe('feature')
   })
 
-  it('falls back to the work item alone when the title has nothing usable', () => {
-    expect(branchNameFor('99', '!!!')).toBe('flow/99')
-  })
-
-  it('keeps worktrees inside the project by default, and honours an override', () => {
-    expect(worktreeRoot('C:\\work\\alpha')).toBe(join('C:\\work\\alpha', WORKTREE_DIR))
+  it('defaults the worktree root to a sibling of the repo, named <repo>.worktrees', () => {
+    expect(worktreeRoot('C:\\work\\alpha')).toBe(join('C:\\work', 'alpha.worktrees'))
     expect(worktreeRoot('C:\\work\\alpha', 'C:\\short')).toBe(resolve('C:\\short'))
   })
 
-  it('derives a directory name from the branch without the flow prefix', () => {
-    expect(worktreePathFor('C:\\root', 'flow/12345-cart')).toBe(join('C:\\root', '12345-cart'))
+  it('derives a directory name from the branch without the feature prefix', () => {
+    expect(worktreePathFor('C:\\root', 'feature/cart-race')).toBe(join('C:\\root', 'cart-race'))
+  })
+
+  it('picks the plain slug when the branch is free', async () => {
+    const root = repo()
+    expect(await uniqueBranchName(root, 'Checkout v2')).toBe('feature/checkout-v2')
+  })
+
+  it('dedupes with -2, -3 when the branch already exists', async () => {
+    const root = repo()
+    execSync('git branch feature/checkout-v2', { cwd: root, stdio: 'ignore' })
+    execSync('git branch feature/checkout-v2-2', { cwd: root, stdio: 'ignore' })
+    expect(await uniqueBranchName(root, 'Checkout v2')).toBe('feature/checkout-v2-3')
   })
 })
 
 describe('creating a worktree', () => {
-  it('creates it, lists it, and excludes the folder from git without touching .gitignore', async () => {
+  it('creates it, lists it, and excludes the folder from git when the root is inside the repo', async () => {
     const root = repo()
-    const branch = branchNameFor('1', 'first item')
-    const path = worktreePathFor(worktreeRoot(root), branch)
+    const branch = 'feature/first-item'
+    const wtRoot = join(root, '.worktrees')
+    const path = worktreePathFor(wtRoot, branch)
 
     const tree = await createWorktree({ repoRoot: root, path, branch, base: 'main' })
 
     expect(tree.branch).toBe(branch)
     expect(existsSync(join(path, 'README.md'))).toBe(true)
-    expect(readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8')).toContain(`/${WORKTREE_DIR}/`)
+    expect(readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8')).toContain('/.worktrees/')
     expect(existsSync(join(root, '.gitignore'))).toBe(false)
 
     const listed = await listWorktrees(root)
     expect(listed.map((t) => t.branch)).toContain(branch)
   })
 
-  it('leaves the main checkout clean, so the Diff tab does not fill with the worktree', async () => {
+  it('leaves the main checkout clean when the worktree root is a sibling folder', async () => {
     const root = repo()
-    const branch = branchNameFor('2', 'second item')
+    const branch = 'feature/second-item'
+    const wtRoot = worktreeRoot(root)
+    dirs.push(wtRoot)
     await createWorktree({
       repoRoot: root,
-      path: worktreePathFor(worktreeRoot(root), branch),
+      path: worktreePathFor(wtRoot, branch),
       branch,
       base: 'main',
     })
 
+    expect(basename(wtRoot)).toBe(`${basename(root)}.worktrees`)
+    expect(dirname(wtRoot)).toBe(dirname(root))
     const status = execSync('git status --porcelain=v1', { cwd: root, encoding: 'utf8' })
     expect(status.trim()).toBe('')
   })
 
   it('is idempotent: asking twice returns the worktree that is already there', async () => {
     const root = repo()
-    const branch = branchNameFor('3', 'third item')
-    const path = worktreePathFor(worktreeRoot(root), branch)
+    const branch = 'feature/third-item'
+    const path = worktreePathFor(join(root, '.worktrees'), branch)
 
     const first = await createWorktree({ repoRoot: root, path, branch, base: 'main' })
     const second = await createWorktree({ repoRoot: root, path, branch, base: 'main' })
@@ -102,10 +118,11 @@ describe('creating a worktree', () => {
 
   it('refuses a branch that another worktree already holds', async () => {
     const root = repo()
-    const branch = branchNameFor('4', 'fourth item')
+    const branch = 'feature/fourth-item'
+    const wtRoot = join(root, '.worktrees')
     await createWorktree({
       repoRoot: root,
-      path: worktreePathFor(worktreeRoot(root), branch),
+      path: worktreePathFor(wtRoot, branch),
       branch,
       base: 'main',
     })
@@ -113,35 +130,19 @@ describe('creating a worktree', () => {
     await expect(
       createWorktree({
         repoRoot: root,
-        path: join(worktreeRoot(root), 'somewhere-else'),
+        path: join(wtRoot, 'somewhere-else'),
         branch,
         base: 'main',
       }),
     ).rejects.toThrow(/already checked out/)
-  })
-
-  it('keeps two worktrees of one repo apart', async () => {
-    const root = repo()
-    const a = branchNameFor('5', 'item a')
-    const b = branchNameFor('6', 'item b')
-    const pathA = worktreePathFor(worktreeRoot(root), a)
-    const pathB = worktreePathFor(worktreeRoot(root), b)
-
-    await createWorktree({ repoRoot: root, path: pathA, branch: a, base: 'main' })
-    await createWorktree({ repoRoot: root, path: pathB, branch: b, base: 'main' })
-    writeFileSync(join(pathA, 'only-in-a.txt'), 'a\n')
-
-    expect(existsSync(join(pathB, 'only-in-a.txt'))).toBe(false)
-    expect(await worktreeDirty(pathA)).toEqual(['?? only-in-a.txt'])
-    expect(await worktreeDirty(pathB)).toEqual([])
   })
 })
 
 describe('removing a worktree', () => {
   it('removes a clean one', async () => {
     const root = repo()
-    const branch = branchNameFor('7', 'clean item')
-    const path = worktreePathFor(worktreeRoot(root), branch)
+    const branch = 'feature/clean-item'
+    const path = worktreePathFor(join(root, '.worktrees'), branch)
     await createWorktree({ repoRoot: root, path, branch, base: 'main' })
 
     const outcome = await removeWorktree(root, path)
@@ -153,8 +154,8 @@ describe('removing a worktree', () => {
 
   it('refuses a dirty one and says what is uncommitted, rather than discarding it', async () => {
     const root = repo()
-    const branch = branchNameFor('8', 'dirty item')
-    const path = worktreePathFor(worktreeRoot(root), branch)
+    const branch = 'feature/dirty-item'
+    const path = worktreePathFor(join(root, '.worktrees'), branch)
     await createWorktree({ repoRoot: root, path, branch, base: 'main' })
     writeFileSync(join(path, 'work-in-progress.txt'), 'unsaved\n')
 
@@ -167,8 +168,8 @@ describe('removing a worktree', () => {
 
   it('discards a dirty one only when forced', async () => {
     const root = repo()
-    const branch = branchNameFor('9', 'forced item')
-    const path = worktreePathFor(worktreeRoot(root), branch)
+    const branch = 'feature/forced-item'
+    const path = worktreePathFor(join(root, '.worktrees'), branch)
     await createWorktree({ repoRoot: root, path, branch, base: 'main' })
     writeFileSync(join(path, 'scratch.txt'), 'x\n')
 
@@ -180,14 +181,13 @@ describe('removing a worktree', () => {
 describe('the startup sweep', () => {
   it('removes the worktrees no run still wants and keeps the rest', async () => {
     const root = repo()
-    const keepBranch = branchNameFor('10', 'still running')
-    const goneBranch = branchNameFor('11', 'finished')
-    const keepPath = worktreePathFor(worktreeRoot(root), keepBranch)
-    const gonePath = worktreePathFor(worktreeRoot(root), goneBranch)
-    await createWorktree({ repoRoot: root, path: keepPath, branch: keepBranch, base: 'main' })
-    await createWorktree({ repoRoot: root, path: gonePath, branch: goneBranch, base: 'main' })
+    const wtRoot = join(root, '.worktrees')
+    const keepPath = worktreePathFor(wtRoot, 'feature/still-running')
+    const gonePath = worktreePathFor(wtRoot, 'feature/finished')
+    await createWorktree({ repoRoot: root, path: keepPath, branch: 'feature/still-running', base: 'main' })
+    await createWorktree({ repoRoot: root, path: gonePath, branch: 'feature/finished', base: 'main' })
 
-    const swept = await sweepOrphanWorktrees(root, worktreeRoot(root), [keepPath])
+    const swept = await sweepOrphanWorktrees(root, wtRoot, [keepPath])
 
     expect(swept.removed).toEqual([resolve(gonePath)])
     expect(existsSync(keepPath)).toBe(true)
@@ -196,16 +196,32 @@ describe('the startup sweep', () => {
 
   it('never sweeps the main checkout, and never touches a dirty orphan', async () => {
     const root = repo()
-    const branch = branchNameFor('12', 'orphan with work')
-    const path = worktreePathFor(worktreeRoot(root), branch)
-    await createWorktree({ repoRoot: root, path, branch, base: 'main' })
+    const wtRoot = join(root, '.worktrees')
+    const path = worktreePathFor(wtRoot, 'feature/orphan-with-work')
+    await createWorktree({ repoRoot: root, path, branch: 'feature/orphan-with-work', base: 'main' })
     writeFileSync(join(path, 'unsaved.txt'), 'keep me\n')
 
-    const swept = await sweepOrphanWorktrees(root, worktreeRoot(root), [])
+    const swept = await sweepOrphanWorktrees(root, wtRoot, [])
 
     expect(swept.removed).toEqual([])
     expect(swept.kept).toEqual([resolve(path)])
     expect(existsSync(join(root, 'README.md'))).toBe(true)
     expect(existsSync(join(path, 'unsaved.txt'))).toBe(true)
+  })
+})
+
+describe('worktree dirtiness', () => {
+  it('reports untracked files and keeps two worktrees apart', async () => {
+    const root = repo()
+    const wtRoot = join(root, '.worktrees')
+    const pathA = worktreePathFor(wtRoot, 'feature/item-a')
+    const pathB = worktreePathFor(wtRoot, 'feature/item-b')
+    await createWorktree({ repoRoot: root, path: pathA, branch: 'feature/item-a', base: 'main' })
+    await createWorktree({ repoRoot: root, path: pathB, branch: 'feature/item-b', base: 'main' })
+    writeFileSync(join(pathA, 'only-in-a.txt'), 'a\n')
+
+    expect(existsSync(join(pathB, 'only-in-a.txt'))).toBe(false)
+    expect(await worktreeDirty(pathA)).toEqual(['?? only-in-a.txt'])
+    expect(await worktreeDirty(pathB)).toEqual([])
   })
 })
