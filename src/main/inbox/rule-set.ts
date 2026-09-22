@@ -1,26 +1,13 @@
 import type { RiskClassificationRule, SwallowRule } from '@shared/domain'
-import type { Repositories } from '@main/store/repositories'
-import { effectiveRiskRules, effectiveSwallowRules } from './rule-prefs'
+import { defaultRiskRules } from './risk-rules'
+import { defaultSwallowRules } from '@main/stream/swallow-rules'
 
 export class RuleSet {
-  private risk: RiskClassificationRule[] = []
-  private swallow: SwallowRule[] = []
-
-  constructor(private readonly repos: Repositories) {
-    this.reload()
-  }
-
-  reload(): void {
-    const prefs = this.repos.rulePrefs.list()
-    this.risk = [...effectiveRiskRules(prefs)].sort((a, b) => a.position - b.position)
-    this.swallow = effectiveSwallowRules(prefs)
-  }
-
   riskRules(): RiskClassificationRule[] {
-    return this.risk
+    return defaultRiskRules()
   }
 
   swallowRules(): SwallowRule[] {
-    return this.swallow
+    return defaultSwallowRules()
   }
 }

@@ -586,6 +586,18 @@ const MIGRATIONS: Migration[] = [
       db.exec(`ALTER TABLE flow_runs ADD COLUMN specSessionId TEXT;`)
     },
   },
+  {
+    name: '036-drop-unused-sections',
+    up: (db) => {
+      db.exec(`
+        DROP TABLE IF EXISTS eval_runs;
+        DROP TABLE IF EXISTS api_runs;
+        DROP TABLE IF EXISTS security_runs;
+        DROP TABLE IF EXISTS rule_prefs;
+        DROP TABLE IF EXISTS mcp_scans;
+      `)
+    },
+  },
 ]
 
 export function transaction<T>(db: AppDatabase, work: () => T): T {

@@ -312,7 +312,6 @@ export function installMockHost(scenario: MockScenario): void {
   const projectCommands = new Map<string, { name: string; description?: string }[]>()
   const specKitByProject = new Map<string, AnyRecord>()
   const mcpSchemaByProject = new Map<string, string>()
-  const mcpScans: { id: string; projectId: string; comboKey: string; servers: string[]; scannedAt: string }[] = []
   let availableModels: { id: string; label: string; description: string }[] = [
     { id: 'claude-fable-5', label: 'Fable', description: 'Most capable for the hardest tasks' },
     { id: 'claude-opus-5[1m]', label: 'Opus (1M context)', description: 'Best for everyday, complex tasks' },
@@ -801,19 +800,6 @@ export function installMockHost(scenario: MockScenario): void {
         ? `${String(req.projectId)}|${[...servers].sort().join(' + ')}`
         : String(req.projectId)
       return { content: mcpSchemaByProject.get(key) ?? null }
-    },
-    'mcp.scanHistory': (req) => mcpScans.filter((s) => s.projectId === String(req.projectId)),
-    'mcp.recordScan': (req) => {
-      const servers = [...(req.servers as string[])].sort()
-      const comboKey = servers.join(' + ')
-      if (!mcpSchemaByProject.has(`${String(req.projectId)}|${comboKey}`)) return null
-      let row = mcpScans.find((s) => s.projectId === String(req.projectId) && s.comboKey === comboKey)
-      if (!row) {
-        row = { id: `scan-${mcpScans.length + 1}`, projectId: String(req.projectId), comboKey, servers, scannedAt: '' }
-        mcpScans.unshift(row)
-      }
-      row.scannedAt = new Date().toISOString()
-      return row
     },
     'specs.runInSession': async (req) => {
       const projectId = String(req.projectId)

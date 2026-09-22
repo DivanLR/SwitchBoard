@@ -184,11 +184,12 @@ test('unticking a server drops it from the combination; each combo keeps its own
   await expect(page.getByTestId('mcp-scan')).toBeDisabled()
 })
 
-test('a finished scan lands in the combination history and can be re-activated', async ({
+test('a finished scan turns the combo label from never scanned to scanned', async ({
   page,
 }) => {
   await designateDbMcp(page)
   await page.locator(mcpRow).first().click()
+  await expect(page.getByTestId('mcp-combo-never')).toBeVisible()
 
   await page.evaluate(() =>
     window.__mock.setMcpSchema('p-db', '# scanned map\n', ['postgres — production']),
@@ -196,12 +197,5 @@ test('a finished scan lands in the combination history and can be re-activated',
   await page.getByTestId('mcp-scan').click()
   await page.evaluate(() => window.__mock.setStatus('s-db', 'done'))
 
-  await expect(page.getByTestId('mcp-combo-scanned')).toContainText('scanned')
-  await expect(page.getByTestId('mcp-history-postgres — production')).toBeVisible()
-
-  await page.getByTestId('mcp-chip-postgres — production').click()
-  await expect(page.getByTestId('mcp-combo-name')).toHaveCount(0)
-  await page.getByTestId('mcp-history-postgres — production').click()
-  await expect(page.getByTestId('mcp-combo-name')).toHaveText('postgres — production')
   await expect(page.getByTestId('mcp-combo-scanned')).toContainText('scanned')
 })

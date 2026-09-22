@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { relativeTime } from '@renderer/relative-time'
 import { mcpStatusColor } from '@renderer/project-accent'
 import { isIpcError, type ProjectListItem } from '@shared/ipc-types'
 import { agentIdOf } from '@shared/domain'
-import type { McpScan, QuestionPayload, SessionEvent } from '@shared/domain'
+import type { QuestionPayload, SessionEvent } from '@shared/domain'
 import { comboDocRelPath, comboKey } from '@shared/mcp-combo'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useProjectsStore } from '@renderer/stores/projects'
@@ -38,23 +37,7 @@ function toggleServer(name: string): void {
   settings.toggleMcpActiveServer(name)
 }
 
-const history = ref<McpScan[]>([])
-
-async function loadHistory(): Promise<void> {
-  history.value = await projects.mcpScanHistory(props.project.id)
-}
-watch(() => props.project.id, () => void loadHistory(), { immediate: true })
-
 const currentKey = computed(() => comboKey(activeServers.value))
-const currentScan = computed(
-  () => history.value.find((h) => h.comboKey === currentKey.value) ?? null,
-)
-
-function activateCombo(scan: McpScan): void {
-  settings.activateMcpCombo(scan.servers)
-}
-
-const ago = (iso: string): string => relativeTime(iso, Date.now())
 
 const liveSession = computed(() =>
   props.project.session && !props.project.session.endedAt ? props.project.session : null,
@@ -124,17 +107,9 @@ async function loadSchema(): Promise<void> {
 }
 watch([() => props.project.id, currentKey], () => void loadSchema(), { immediate: true })
 
-let scanningCombo: string[] = []
-
 watch(working, (now, was) => {
   if (was && !now) {
-    if (scanning.value) {
-      void projects.mcpRecordScan(props.project.id, scanningCombo).then((row) => {
-        if (!row) return 
-        scanning.value = false
-        void loadHistory()
-      })
-    }
+    scanning.value = false
     void loadSchema()
   }
 })
@@ -195,8 +170,7 @@ async function scan(): Promise<void> {
   if (!liveSession.value || activeServers.value.length === 0) return
   subtab.value = 'chat'
   scanning.value = true
-  scanningCombo = [...activeServers.value]
-  await active.send(scanPrompt(scanningCombo))
+  await active.send(scanPrompt(activeServers.value))
 }
 
 async function ask(): Promise<void> {
@@ -265,9 +239,7 @@ function answer(eventId: string, choice: string): void {
         </span>
         <template v-else>
           <span class="combo-name" data-testid="mcp-combo-name">{{ currentKey }}</span>
-          <span v-if="currentScan" class="combo-scanned" data-testid="mcp-combo-scanned">
-            scanned {{ ago(currentScan.scannedAt) }}
-          </span>
+          <span v-if="scanned" class="combo-scanned" data-testid="mcp-combo-scanned">scanned</span>
           <span v-else class="combo-never" data-testid="mcp-combo-never">never scanned</span>
           <button
             v-if="liveSession"
@@ -276,25 +248,10 @@ function answer(eventId: string, choice: string): void {
             :disabled="working"
             @click="scan()"
           >
-            <template v-if="currentScan"><Icon name="refresh" :size="11" /> Re-scan</template>
+            <template v-if="scanned"><Icon name="refresh" :size="11" /> Re-scan</template>
             <template v-else><Icon name="play" :size="11" /> Scan</template>
           </button>
         </template>
-      </div>
-      <div v-if="history.length > 0" class="combo-history" data-testid="mcp-history">
-        <span class="ch-label ui-kicker">SCANNED</span>
-        <button
-          v-for="h in history"
-          :key="h.id"
-          class="ch-chip ui-chip"
-          :class="{ cur: h.comboKey === currentKey, 'is-on': h.comboKey === currentKey }"
-          :data-testid="`mcp-history-${h.comboKey}`"
-          :title="`Scanned ${ago(h.scannedAt)} — click to make this the active combination`"
-          @click="activateCombo(h)"
-        >
-          {{ h.comboKey }}
-          <span class="ch-ago">{{ ago(h.scannedAt) }}</span>
-        </button>
       </div>
     </header>
     <div class="tabs ui-tabs">
@@ -345,7 +302,7 @@ function answer(eventId: string, choice: string): void {
         <div class="ui-empty-sub">
           Run a scan first — it walks the <span class="mono teal">{{ currentKey || 'active' }}</span>
           combination and writes its own schema map. Chatting then consults that map instead of
-          re-scanning, and every combination you scan is remembered above.
+          re-scanning.
         </div>
         <button
           class="btn-solid"
@@ -536,22 +493,6 @@ function answer(eventId: string, choice: string): void {
 
 .combo-never {
   color: var(--amber);
-}
-
-.combo-history {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.ch-chip.cur {
-  cursor: default;
-}
-
-.ch-ago {
-  color: var(--text-faint);
-  font-size: var(--fs-micro);
 }
 
 .tabs {

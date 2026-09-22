@@ -142,7 +142,7 @@ export class PermissionBroker {
     private manager: SessionManager,
     private callbacks: BrokerCallbacks,
   ) {
-    this.rules = new RuleSet(repos)
+    this.rules = new RuleSet()
   }
 
   async handle(context: CanUseToolContext): Promise<PermissionResult> {

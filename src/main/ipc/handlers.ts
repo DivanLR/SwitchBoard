@@ -41,8 +41,7 @@ import { join, resolve, sep } from 'node:path'
 import { detectStacks, stackById, stackEntries } from '@shared/test-catalog'
 import { evidencePrompt, planSuites, verifyPrompt } from '@main/evals/verify-dispatch'
 import { gitNotice, sandboxToolsFor } from '@main/sessions/wslc-sandbox'
-import { comboDocPath, readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
-import { comboKey } from '@shared/mcp-combo'
+import { readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
 import { installSpecKit, readSpecDetail, readSpecKitState } from '@main/specs/spec-kit'
 import { readDiffList, readFileDiff } from '@main/sessions/session-manager'
 import { readDiagramList } from '@main/diagrams/list'
@@ -529,20 +528,6 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         ? readComboDoc(project.path, req.servers)
         : readSchemaDoc(project.path)
       return { content }
-    },
-    'mcp.scanHistory': (req) => repos.mcpScans.listForProject(req.projectId),
-    'mcp.recordScan': async (req) => {
-      const project = repos.projects.byId(req.projectId)
-      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
-      if (!req.servers.length) return null
-      const docPath = comboDocPath(project.path, req.servers)
-      let scannedAt: string
-      try {
-        scannedAt = (await stat(docPath)).mtime.toISOString()
-      } catch {
-        return null
-      }
-      return repos.mcpScans.upsert(req.projectId, comboKey(req.servers), req.servers, scannedAt)
     },
     'specs.runInSession': async (req) => {
       const session = req.background

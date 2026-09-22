@@ -9,7 +9,6 @@ import type {
   EvidenceItem,
   EventKind,
   EventPayloadMap,
-  McpScan,
   PermissionRequest,
   PermissionRequestStatus,
   PermissionRule,
@@ -32,7 +31,6 @@ import type {
   SessionEvent,
   SessionMode,
   SessionStatus,
-  RiskLevel,
   Settings,
   VerifyReport,
   VerifyRun,
@@ -43,7 +41,6 @@ import {
   DEFAULT_SETTINGS,
   emptyVerifyReport,
 } from '@shared/domain'
-import type { RulePref, RuleKind } from '@main/inbox/rule-prefs'
 
 export function newId(): string {
   return randomUUID()
@@ -580,65 +577,6 @@ class StandingRulesRepo {
   }
 }
 
-export class RulePrefsRepo {
-  constructor(private db: AppDatabase) {}
-
-  list(): RulePref[] {
-    const rows = this.db
-      .prepare('SELECT id, kind, disabled, risk, body, position FROM rule_prefs')
-      .all() as (Omit<RulePref, 'disabled'> & { disabled: number })[]
-    return rows.map((r) => ({ ...r, disabled: r.disabled === 1 }))
-  }
-
-  setDisabled(id: string, kind: RuleKind, disabled: boolean): void {
-    this.db
-      .prepare(
-        `INSERT INTO rule_prefs (id, kind, disabled, risk, body, position, createdAt)
-         VALUES (?, ?, ?, NULL, NULL, NULL, ?)
-         ON CONFLICT (id, kind) DO UPDATE SET disabled = excluded.disabled`,
-      )
-      .run(id, kind, disabled ? 1 : 0, nowIso())
-  }
-
-  setRisk(id: string, risk: RiskLevel | null): void {
-    this.db
-      .prepare(
-        `INSERT INTO rule_prefs (id, kind, disabled, risk, body, position, createdAt)
-         VALUES (?, 'risk', 0, ?, NULL, NULL, ?)
-         ON CONFLICT (id, kind) DO UPDATE SET risk = excluded.risk`,
-      )
-      .run(id, risk, nowIso())
-  }
-
-  addCustom(kind: RuleKind, body: string): RulePref {
-    const next =
-      (
-        this.db
-          .prepare('SELECT COALESCE(MAX(position), -1) AS p FROM rule_prefs WHERE kind = ?')
-          .get(kind) as { p: number }
-      ).p + 1
-    const pref: RulePref = {
-      id: newId(),
-      kind,
-      disabled: false,
-      risk: null,
-      body,
-      position: next,
-    }
-    this.db
-      .prepare(
-        `INSERT INTO rule_prefs (id, kind, disabled, risk, body, position, createdAt)
-         VALUES (?, ?, 0, NULL, ?, ?, ?)`,
-      )
-      .run(pref.id, kind, body, next, nowIso())
-    return pref
-  }
-
-  remove(id: string, kind: RuleKind): void {
-    this.db.prepare('DELETE FROM rule_prefs WHERE id = ? AND kind = ?').run(id, kind)
-  }
-}
-
 class SettingsRepo {
   constructor(private db: AppDatabase) {}
 
@@ -803,31 +741,6 @@ export class ProjectCommandsRepo {
     return (JSON.parse(row.commands) as (string | ProjectCommand)[]).map((c) =>
       typeof c === 'string' ? { name: c } : c,
     )
-  }
-}
-
-class McpScansRepo {
-  constructor(private db: AppDatabase) {}
-
-  listForProject(projectId: string): McpScan[] {
-    const rows = this.db
-      .prepare('SELECT * FROM mcp_scans WHERE projectId = ? ORDER BY scannedAt DESC')
-      .all(projectId) as (Omit<McpScan, 'servers'> & { servers: string })[]
-    return rows.map((r) => ({ ...r, servers: JSON.parse(r.servers) as string[] }))
-  }
-
-  upsert(projectId: string, key: string, servers: string[], scannedAt = nowIso()): McpScan {
-    this.db
-      .prepare(
-        `INSERT INTO mcp_scans (id, projectId, comboKey, servers, scannedAt)
-         VALUES (@id, @projectId, @comboKey, @servers, @scannedAt)
-         ON CONFLICT(projectId, comboKey) DO UPDATE SET servers = @servers, scannedAt = @scannedAt`,
-      )
-      .run({ id: newId(), projectId, comboKey: key, servers: JSON.stringify(servers), scannedAt })
-    const row = this.db
-      .prepare('SELECT * FROM mcp_scans WHERE projectId = ? AND comboKey = ?')
-      .get(projectId, key) as Omit<McpScan, 'servers'> & { servers: string }
-    return { ...row, servers: JSON.parse(row.servers) as string[] }
   }
 }
 
@@ -1548,13 +1461,11 @@ export interface Repositories {
   events: EventsRepo
   requests: RequestsRepo
   standingRules: StandingRulesRepo
-  rulePrefs: RulePrefsRepo
   settings: SettingsRepo
   drafts: DraftsRepo
   commandHistory: CommandHistoryRepo
   projectCommands: ProjectCommandsRepo
   taskQueue: TaskQueueRepo
-  mcpScans: McpScansRepo
   verifyRuns: VerifyRunsRepo
   flowRuns: FlowRunsRepo
   flowItems: FlowItemsRepo
@@ -1570,13 +1481,11 @@ export function createRepositories(db: AppDatabase): Repositories {
     events: new EventsRepo(db),
     requests: new RequestsRepo(db),
     standingRules: new StandingRulesRepo(db),
-    rulePrefs: new RulePrefsRepo(db),
     settings: new SettingsRepo(db),
     drafts: new DraftsRepo(db),
     commandHistory: new CommandHistoryRepo(db),
     projectCommands: new ProjectCommandsRepo(db),
     taskQueue: new TaskQueueRepo(db),
-    mcpScans: new McpScansRepo(db),
     verifyRuns: new VerifyRunsRepo(db),
     flowRuns: new FlowRunsRepo(db),
     flowItems: new FlowItemsRepo(db),

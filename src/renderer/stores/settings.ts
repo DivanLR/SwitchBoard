@@ -33,12 +33,6 @@ const store = reactive({
     const next = current.includes(name) ? current.filter((n) => n !== name) : [...current, name]
     void this.save({ mcpActiveServers: next })
   },
-
-  activateMcpCombo(servers: readonly string[]): void {
-    if (!this.settings) return
-    const roster = new Set([...this.settings.databaseMcpServers, ...servers])
-    void this.save({ databaseMcpServers: [...roster], mcpActiveServers: [...servers] })
-  },
 })
 
 export const useSettingsStore = (): typeof store => store

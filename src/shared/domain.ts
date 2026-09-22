@@ -441,14 +441,6 @@ export interface Settings {
   flowWorktreeRoot: string
 }
 
-export interface McpScan {
-  id: string
-  projectId: string
-  comboKey: string
-  servers: string[]
-  scannedAt: string
-}
-
 export const DEFAULT_SETTINGS: Settings = {
   defaultView: 'clean',
   notificationsEnabled: true,

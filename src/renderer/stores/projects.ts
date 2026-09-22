@@ -1,6 +1,5 @@
 import { computed, reactive, toRefs } from 'vue'
 import type {
-  McpScan,
   Project,
   ProjectCommand,
   Session,
@@ -123,14 +122,6 @@ const store = reactive({
   async readMcpSchema(projectId: string, servers?: string[]): Promise<string | null> {
     const res = await invoke('mcp.readSchema', { projectId, servers })
     return res.content
-  },
-
-  async mcpScanHistory(projectId: string): Promise<McpScan[]> {
-    return invoke('mcp.scanHistory', { projectId })
-  },
-
-  async mcpRecordScan(projectId: string, servers: string[]): Promise<McpScan | null> {
-    return invoke('mcp.recordScan', { projectId, servers })
   },
 
   async archive(projectId: string): Promise<void> {
