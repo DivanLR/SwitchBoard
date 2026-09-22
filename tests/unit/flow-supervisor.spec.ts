@@ -68,7 +68,7 @@ describe('starting a flow', () => {
       false,
       'plan',
       undefined,
-      { background: true, engine: 'claude' },
+      { background: true },
     )
     expect(harness.watched).toEqual([run.sessionId])
     expect(harness.sent[0].text).toContain('4711')

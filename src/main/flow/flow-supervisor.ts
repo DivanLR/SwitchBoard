@@ -124,7 +124,6 @@ export class FlowSupervisor {
     }
     const session = await this.manager.startSession(input.projectId, false, 'plan', undefined, {
       background: true,
-      engine: 'claude',
     })
     await this.requireAdo(session.id)
     this.manager.markSection(session.id, 'flow')
@@ -188,7 +187,6 @@ export class FlowSupervisor {
       // is not a second opinion.
       const session = await this.manager.startSession(run.projectId, false, 'plan', undefined, {
         background: true,
-        engine: 'claude',
       })
       this.manager.markSection(session.id, 'flow')
       this.manager.renameSession(session.id, `Flow review: ${run.featureTitle}`.slice(0, 60))
@@ -250,7 +248,6 @@ export class FlowSupervisor {
     try {
       const session = await this.manager.startSession(run.projectId, false, 'plan', undefined, {
         background: true,
-        engine: 'claude',
       })
       this.manager.markSection(session.id, 'flow')
       this.manager.renameSession(session.id, `Flow rescope: ${run.featureTitle}`.slice(0, 60))
@@ -307,7 +304,6 @@ export class FlowSupervisor {
     }
     const session = await this.manager.startSession(run.projectId, false, 'plan', undefined, {
       background: true,
-      engine: 'claude',
     })
     await this.requireAdo(session.id)
     this.manager.markSection(session.id, 'flow')
@@ -453,7 +449,6 @@ export class FlowSupervisor {
     try {
       const session = await this.manager.startSession(run.projectId, false, 'acceptEdits', undefined, {
         background: true,
-        engine: 'claude',
         cwd: item.worktreePath,
         effort: 'max',
       })
@@ -483,7 +478,6 @@ export class FlowSupervisor {
     try {
       const session = await this.manager.startSession(run.projectId, false, 'acceptEdits', undefined, {
         background: true,
-        engine: 'claude',
         cwd: item.worktreePath,
       })
       await this.requireAdo(session.id)
@@ -715,7 +709,6 @@ export class FlowSupervisor {
     if (preferred && this.manager.workdirFor(preferred)) return { id: preferred }
     return this.manager.startSession(projectId, false, 'plan', undefined, {
       background: true,
-      engine: 'claude',
     })
   }
 

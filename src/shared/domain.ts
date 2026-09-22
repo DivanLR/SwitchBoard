@@ -31,10 +31,6 @@ export type DecisionOutcome = Exclude<PermissionRequestStatus, 'pending'>
 
 export type SessionMode = 'default' | 'dontAsk' | 'auto' | 'acceptEdits' | 'plan' | 'bypass'
 
-export type SessionEngine = 'claude' | 'codex'
-
-export const DEFAULT_SESSION_ENGINE: SessionEngine = 'claude'
-
 export const DEFAULT_SESSION_MODE: SessionMode = 'auto'
 
 export const SESSION_MODES: readonly {
@@ -115,7 +111,6 @@ export interface McpServer {
 export interface Session {
   id: string
   projectId: string
-  engine: SessionEngine
   sdkSessionId: string | null
   status: SessionStatus
   statusDetail: string | null
@@ -357,11 +352,6 @@ export interface AvailableModel {
   id: string
   label: string
   description: string
-  engine?: SessionEngine
-}
-
-export function engineOf(model: AvailableModel): SessionEngine {
-  return model.engine ?? 'claude'
 }
 
 const FAMILIES = ['fable', 'opus', 'sonnet', 'haiku'] as const
@@ -412,8 +402,6 @@ export interface Settings {
   workerModel: string
   autoModelRouting: boolean
   modelMode: ModelMode
-  defaultEngine: SessionEngine
-  codexModel: string
   effort: EffortLevel
   subagentEffort: EffortLevel
   summaries: boolean
@@ -448,8 +436,6 @@ export const DEFAULT_SETTINGS: Settings = {
   workerModel: 'claude-sonnet-5',
   autoModelRouting: true,
   modelMode: 'auto',
-  defaultEngine: DEFAULT_SESSION_ENGINE,
-  codexModel: '',
   effort: 'xhigh',
   subagentEffort: 'low',
   summaries: true,

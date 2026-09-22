@@ -2,9 +2,9 @@ import { _electron as electron, expect, test } from '@playwright/test'
 import { build } from 'esbuild'
 import { resolve } from 'node:path'
 
-test.skip(!process.env.TERMINAL_NATIVE, 'Opt-in test with the installed Codex CLI and native clipboard')
+test.skip(!process.env.TERMINAL_NATIVE, 'Opt-in test requiring a real Electron build and native clipboard')
 
-test('pastes native clipboard text into Codex without submitting a prompt', async () => {
+test('pastes native clipboard text into the terminal without submitting a prompt', async () => {
   const testInfo = test.info()
   const main = resolve('out/terminal-native-main.mjs')
   await build({
@@ -22,12 +22,11 @@ test('pastes native clipboard text into Codex without submitting a prompt', asyn
     const page = await app.firstWindow()
     const pane = page.getByTestId('terminal-pane')
     await expect(pane).toBeVisible()
-    await expect(pane.locator('.xterm-rows')).toContainText('Codex', { timeout: 30_000 })
-    await page.screenshot({ path: testInfo.outputPath('codex-before.png') })
+    await page.screenshot({ path: testInfo.outputPath('terminal-before.png') })
     await app.evaluate(({ clipboard }) => clipboard.writeText('SWITCHBOARD_CLIPBOARD_CHECK'))
     await pane.locator('.xterm-helper-textarea').press('Control+v')
     await expect(pane.locator('.xterm-rows')).toContainText('SWITCHBOARD_CLIPBOARD_CHECK', { timeout: 10_000 })
-    await page.screenshot({ path: testInfo.outputPath('codex-pasted.png') })
+    await page.screenshot({ path: testInfo.outputPath('terminal-pasted.png') })
   } finally {
     await app.evaluate(({ clipboard, nativeImage }, saved) => clipboard.write({ ...saved, image: nativeImage.createFromDataURL(saved.image) }), savedClipboard)
     await app.close()

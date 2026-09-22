@@ -3,7 +3,6 @@ import type {
   Project,
   ProjectCommand,
   Session,
-  SessionEngine,
   SessionMode,
 } from '@shared/domain'
 import type { Counters, ProjectListItem, SessionStatusPush } from '@shared/ipc-types'
@@ -170,7 +169,6 @@ const store = reactive({
     mode?: SessionMode,
     carryTranscriptFrom?: string,
     containerised?: boolean,
-    engine?: SessionEngine,
   ): Promise<Session> {
     state.starting = true
     try {
@@ -179,7 +177,6 @@ const store = reactive({
         resume,
         mode,
         carryTranscriptFrom,
-        engine,
         containerised:
           containerised ?? state.items.find((p) => p.id === projectId)?.useContainers ?? false,
       })

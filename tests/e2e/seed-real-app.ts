@@ -58,7 +58,6 @@ export function seedRealApp(): SeededApp {
   repos.sessions.insert({
     id: 'seeded-session',
     projectId: project.id,
-    engine: 'claude',
     sdkSessionId: null,
     status: 'done',
     statusDetail: null,

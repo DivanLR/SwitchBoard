@@ -13,7 +13,7 @@
       window.switchboard.on('push.terminalData', data => terminals.applyData(data))
       window.switchboard.on('push.terminalExit', data => terminals.applyExit(data))
       createApp({ render: () => h(TerminalPane, {
-        id: 'native-test', cwd: '.', engine: 'codex', visible: true,
+        id: 'native-test', cwd: '.', resumeSessionId: null, live: false, visible: true,
       }) }).mount('#app')
     </script>
     <style>#app { display: flex; height: 100vh; }</style>

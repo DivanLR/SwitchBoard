@@ -23,7 +23,6 @@ import type {
   Session,
   SessionEndReason,
   SessionEvent,
-  SessionEngine,
   SessionMode,
   SessionStatus,
   SuiteResult,
@@ -31,7 +30,6 @@ import type {
   VerifyReport,
 } from '@shared/domain'
 import {
-  DEFAULT_SESSION_ENGINE,
   SWALLOWABLE_KINDS,
   emptyVerifyReport,
   subagentsAllowed,
@@ -43,9 +41,6 @@ import { readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
 import { HostedSession, type PermissionGate, type SessionHost } from './session'
 import { switchboardMcp } from './inter-session'
 import { probeAvailableModels } from './model-catalog'
-import { CODEX_MISSING_MESSAGE, codexInstalled } from './codex-executable'
-import { probeCodexModels } from './codex-catalog'
-import { CodexSession } from './codex-session'
 import { foldModelTotals, type EventSink } from './message-mapper'
 import {
   heavySubagentSystemPromptAppend,
@@ -374,9 +369,6 @@ export class SessionManager {
   availableModels: AvailableModel[] = []
   private probingModels: Promise<AvailableModel[]> | null = null
   private modelsProbedAt = 0
-  private codexModels: AvailableModel[] = []
-  private probingCodexModels: Promise<AvailableModel[]> | null = null
-  private codexModelsProbedAt = 0
 
   constructor(
     private repos: Repositories,
@@ -384,22 +376,7 @@ export class SessionManager {
   ) {}
 
   async models(): Promise<AvailableModel[]> {
-    const [claude, codex] = await Promise.all([this.claudeModels(), this.codexModelList()])
-    return [...claude, ...codex]
-  }
-
-  private async codexModelList(): Promise<AvailableModel[]> {
-    const fresh = Date.now() - this.codexModelsProbedAt < MODELS_TTL_MS
-    if (fresh) return this.codexModels
-    this.probingCodexModels ??= probeCodexModels()
-    try {
-      const models = await this.probingCodexModels
-      this.codexModels = models
-      this.codexModelsProbedAt = Date.now()
-    } finally {
-      this.probingCodexModels = null
-    }
-    return this.codexModels
+    return this.claudeModels()
   }
 
   private async claudeModels(): Promise<AvailableModel[]> {
@@ -489,7 +466,6 @@ export class SessionManager {
       containerised?: boolean
       background?: boolean
       nodeModulesVolumeKey?: string
-      engine?: SessionEngine
       workerMainLoop?: boolean
       cwd?: string
       effort?: EffortLevel
@@ -497,14 +473,6 @@ export class SessionManager {
   ): Promise<Session> {
     const project = this.repos.projects.byId(projectId)
     if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
-    const engine = opts?.engine ?? this.repos.settings.get().defaultEngine ?? DEFAULT_SESSION_ENGINE
-    if (engine === 'codex' && (opts?.containerised === true || requestedMode === 'bypass')) {
-      throw {
-        code: 'UNSUPPORTED',
-        message:
-          'Codex sessions do not run in a container. Start this one on Claude, or choose a mode other than bypass.',
-      } satisfies IpcError
-    }
     const mode = requestedMode ?? project.defaultSessionMode
     const bypassPermissions = mode === 'bypass'
     const containerised = opts?.containerised === true || bypassPermissions
@@ -528,7 +496,6 @@ export class SessionManager {
         resume,
         carryTranscriptFrom,
         opts,
-        engine,
       )
     } finally {
       if (containerised) this.reservedContainerIds.delete(sessionId)
@@ -548,13 +515,11 @@ export class SessionManager {
           containerised?: boolean
           background?: boolean
           nodeModulesVolumeKey?: string
-          engine?: SessionEngine
           workerMainLoop?: boolean
           cwd?: string
           effort?: EffortLevel
         }
       | undefined,
-    engine: SessionEngine,
   ): Promise<Session> {
     const projectId = project.id
     if (containerised) {
@@ -568,17 +533,14 @@ export class SessionManager {
       }
     }
     const claudeExecutablePath = resolveClaudeExecutable()
-    if (!claudeExecutablePath && engine === 'claude') {
+    if (!claudeExecutablePath) {
       throw { code: 'NOT_FOUND', message: 'Claude Code was not found. Install it from https://claude.com/claude-code, then start a session.' } satisfies IpcError
-    }
-    if (engine === 'codex' && !codexInstalled()) {
-      throw { code: 'NOT_FOUND', message: CODEX_MISSING_MESSAGE } satisfies IpcError
     }
 
     let resumeSdkSessionId: string | undefined
     let resumeFromSessionId: string | undefined
     if (resume) {
-      const previous = this.repos.sessions.latestEndedForProject(projectId, engine)
+      const previous = this.repos.sessions.latestEndedForProject(projectId)
       resumeSdkSessionId = previous?.sdkSessionId ?? undefined
       resumeFromSessionId = previous?.id
     }
@@ -597,7 +559,6 @@ export class SessionManager {
     const row: Session = {
       id: sessionId,
       projectId,
-      engine,
       sdkSessionId: null,
       status: 'working',
       statusDetail: null,
@@ -659,37 +620,7 @@ export class SessionManager {
         )
       : null
     try {
-      entry.session =
-        engine === 'codex'
-          ? new CodexSession({
-              sessionId: row.id,
-              projectPath: workdir,
-              model: settings.codexModel || undefined,
-              effort,
-              mode,
-              resumeThreadId: resumeSdkSessionId,
-              sink: this.makeSink(entry),
-              onStatusChange: (status, detail) => this.handleStatusChange(entry, status, detail),
-              onSdkSessionId: (sdkSessionId) => {
-                entry.row.sdkSessionId = sdkSessionId
-                this.repos.sessions.update(row.id, { sdkSessionId })
-              },
-              onModel: (model) => {
-                entry.row.currentModel = model
-                this.pushStatus(entry)
-              },
-              onModelUsage: (modelUsage) => {
-                entry.row.modelTotals = foldModelTotals(entry.row.modelTotals ?? {}, modelUsage)
-                this.pushStatus(entry)
-              },
-              onTurnComplete: () => {
-                entry.ranATurn = true
-                this.observeBranch(entry)
-                this.maybeDrainQueue(entry.row.projectId)
-              },
-              onExit: (reason, detail) => this.handleExit(entry, reason, detail),
-            })
-          : new HostedSession({
+      entry.session = new HostedSession({
         sessionId: row.id,
         projectPath: workdir,
         refDirs: project.refs.map((r) => r.path),
@@ -938,7 +869,6 @@ export class SessionManager {
     const session = await this.startSession(projectId, false, mode, undefined, {
       containerised,
       background: true,
-      engine: 'claude',
       workerMainLoop: WORKER_KINDS.has(kind),
     })
     const entry = this.hosted.get(session.id)
@@ -1326,7 +1256,6 @@ export class SessionManager {
       session = await this.startSession(projectId, false, undefined, undefined, {
         containerised: true,
         background: true,
-        engine: 'claude',
         nodeModulesVolumeKey: runId,
       })
     } catch (error) {
@@ -1528,9 +1457,7 @@ export class SessionManager {
     this.revivedAt.set(projectId, Date.now())
     void (async () => {
       try {
-        const revived = await this.startSession(projectId, true, undefined, undefined, {
-          engine: entry.row.engine,
-        })
+        const revived = await this.startSession(projectId, true, undefined, undefined, {})
         this.sendMessage(
           revived.id,
           'Switchboard restarted this session: the previous process ended unexpectedly ' +

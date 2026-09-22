@@ -27,7 +27,6 @@ import type {
   ScopedItem,
   SuiteResult,
   SessionEndReason,
-  SessionEngine,
   SessionEvent,
   SessionMode,
   SessionStatus,
@@ -36,7 +35,6 @@ import type {
   VerifyRun,
 } from '@shared/domain'
 import {
-  DEFAULT_SESSION_ENGINE,
   DEFAULT_SESSION_MODE,
   DEFAULT_SETTINGS,
   emptyVerifyReport,
@@ -73,7 +71,6 @@ function toProject(row: ProjectRow): Project {
 interface SessionRow {
   id: string
   projectId: string
-  engine: SessionEngine | null
   sdkSessionId: string | null
   status: SessionStatus
   statusDetail: string | null
@@ -99,7 +96,6 @@ function toSession(row: SessionRow | undefined): Session | undefined {
   if (!row) return undefined
   return {
     ...row,
-    engine: row.engine ?? DEFAULT_SESSION_ENGINE,
     bypassPermissions: row.bypassPermissions === 1,
     planMode: row.planMode === 1,
   }
@@ -262,13 +258,12 @@ class SessionsRepo {
   insert(session: Session): void {
     this.db
       .prepare(
-        `INSERT INTO sessions (id, projectId, engine, sdkSessionId, status, statusDetail, branch, diffAdds, diffDels, usageUtilization, usageResetsAt, usageLimitType, startedAt, endedAt, endReason, bypassPermissions, planMode)
-         VALUES (@id, @projectId, @engine, @sdkSessionId, @status, @statusDetail, @branch, @diffAdds, @diffDels, @usageUtilization, @usageResetsAt, @usageLimitType, @startedAt, @endedAt, @endReason, @bypassPermissions, @planMode)`,
+        `INSERT INTO sessions (id, projectId, sdkSessionId, status, statusDetail, branch, diffAdds, diffDels, usageUtilization, usageResetsAt, usageLimitType, startedAt, endedAt, endReason, bypassPermissions, planMode)
+         VALUES (@id, @projectId, @sdkSessionId, @status, @statusDetail, @branch, @diffAdds, @diffDels, @usageUtilization, @usageResetsAt, @usageLimitType, @startedAt, @endedAt, @endReason, @bypassPermissions, @planMode)`,
       )
       .run({
         id: session.id,
         projectId: session.projectId,
-        engine: session.engine ?? DEFAULT_SESSION_ENGINE,
         sdkSessionId: session.sdkSessionId,
         status: session.status,
         statusDetail: session.statusDetail,
@@ -336,18 +331,12 @@ class SessionsRepo {
     )
   }
 
-  latestEndedForProject(projectId: string, engine?: SessionEngine): Session | undefined {
-    const row = engine
-      ? this.db
-          .prepare(
-            'SELECT * FROM sessions WHERE projectId = ? AND endedAt IS NOT NULL AND COALESCE(engine, ?) = ? ORDER BY startedAt DESC LIMIT 1',
-          )
-          .get(projectId, DEFAULT_SESSION_ENGINE, engine)
-      : this.db
-          .prepare(
-            'SELECT * FROM sessions WHERE projectId = ? AND endedAt IS NOT NULL ORDER BY startedAt DESC LIMIT 1',
-          )
-          .get(projectId)
+  latestEndedForProject(projectId: string): Session | undefined {
+    const row = this.db
+      .prepare(
+        'SELECT * FROM sessions WHERE projectId = ? AND endedAt IS NOT NULL ORDER BY startedAt DESC LIMIT 1',
+      )
+      .get(projectId)
     return toSession(row as SessionRow | undefined)
   }
 

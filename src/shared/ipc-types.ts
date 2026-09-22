@@ -21,7 +21,6 @@ import type {
   FlowRun,
   ScopedItem,
   SessionEvent,
-  SessionEngine,
   SessionMode,
   Settings,
   SkillImportResult,
@@ -139,7 +138,7 @@ export interface InvokeMap {
       cwd: string
       cols: number
       rows: number
-      engine: SessionEngine | 'shell'
+      engine: 'claude' | 'shell'
       resumeSessionId?: string
     }
     res: { scrollback: string; reused: boolean }
@@ -153,7 +152,6 @@ export interface InvokeMap {
       resume?: boolean
       mode?: SessionMode
       containerised?: boolean
-      engine?: SessionEngine
       carryTranscriptFrom?: string
     }
     res: Session

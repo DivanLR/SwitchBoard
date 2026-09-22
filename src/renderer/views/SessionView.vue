@@ -345,7 +345,6 @@ sessionStart = useSessionStart({
 })
 const {
   startMode,
-  startEngine,
   modeOpen,
   resumeSession,
   runInContainer,
@@ -1156,7 +1155,6 @@ const {
       v-show="mainTab === 'terminal' && terminalMode === 'shell'"
       :id="terminalSession?.id ?? project.id"
       :cwd="project.path"
-      :engine="terminalSession?.engine ?? startEngine"
       :resume-session-id="terminalResumeId"
       :live="!!liveSession"
       :visible="mainTab === 'terminal' && terminalMode === 'shell'"
@@ -1226,40 +1224,6 @@ const {
             <span v-if="endedSession.statusDetail" class="faint"> — {{ endedSession.statusDetail }}</span>
           </div>
           <div class="ended-actions">
-            <div
-              class="segments"
-              data-testid="start-engine"
-              role="radiogroup"
-              aria-label="Engine"
-            >
-              <button
-                type="button"
-                class="seg"
-                :class="{ on: startEngine === 'claude' }"
-                data-testid="start-engine-claude"
-                role="radio"
-                :aria-checked="startEngine === 'claude'"
-                :disabled="busy"
-                title="Claude Code: the permission inbox, plan mode, containers and subagent pairing."
-                @click="startEngine = 'claude'"
-              >
-                Claude
-              </button>
-              <button
-                type="button"
-                class="seg"
-                :class="{ on: startEngine === 'codex' }"
-                data-testid="start-engine-codex"
-                role="radio"
-                :aria-checked="startEngine === 'codex'"
-                :disabled="busy"
-                title="OpenAI Codex CLI. No permission inbox, no plan mode and no container — Codex decides inside its own sandbox, and the mode below chooses which sandbox."
-                @click="startEngine = 'codex'"
-              >
-                Codex
-              </button>
-            </div>
-
             <div class="mode-pick">
               <button
                 type="button"
@@ -1322,7 +1286,7 @@ const {
               <span :class="{ faint: !canResume }">Resume session</span>
             </span>
 
-            <span v-if="startEngine === 'claude'" class="bypass-inline">
+            <span class="bypass-inline">
               <button
                 class="switch"
                 :class="{ on: containerOn }"

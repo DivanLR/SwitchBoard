@@ -1,7 +1,5 @@
 import { spawn, type IPty } from '@lydell/node-pty'
-import type { SessionEngine } from '@shared/domain'
 import { resolveClaudeExecutable } from '@main/sessions/claude-executable'
-import { codexInstalled } from '@main/sessions/codex-executable'
 
 interface PtyCallbacks {
   onData: (id: string, data: string) => void
@@ -25,13 +23,9 @@ export function defaultShell(): string {
 
 const SAFE_SESSION_ID = /^[A-Za-z0-9_-]+$/
 
-export function launchCommand(engine: SessionEngine | 'shell', resumeSessionId?: string): string | null {
+export function launchCommand(engine: 'claude' | 'shell', resumeSessionId?: string): string | null {
   if (engine === 'shell') return null
   const resume = resumeSessionId && SAFE_SESSION_ID.test(resumeSessionId) ? resumeSessionId : null
-  if (engine === 'codex') {
-    if (!codexInstalled()) return null
-    return resume ? `codex resume ${resume}` : 'codex'
-  }
   const claude = resolveClaudeExecutable()
   if (!claude) return null
   return resume ? `"${claude}" --resume ${resume}` : `"${claude}"`
@@ -47,7 +41,7 @@ export class PtyHost {
     cwd: string
     cols: number
     rows: number
-    engine: SessionEngine | 'shell'
+    engine: 'claude' | 'shell'
     resumeSessionId?: string
   }): { scrollback: string; reused: boolean } {
     const existing = this.terminals.get(input.id)

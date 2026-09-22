@@ -94,7 +94,6 @@ describe('repointProject', () => {
   const liveSession = (projectId: string): Session => ({
     id: `s-${projectId}`,
     projectId,
-    engine: 'claude',
     sdkSessionId: null,
     status: 'working',
     statusDetail: null,

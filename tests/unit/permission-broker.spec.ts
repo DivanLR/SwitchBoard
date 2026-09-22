@@ -58,7 +58,6 @@ function makeHarness(): Harness {
   repos.sessions.insert({
     id: sessionId,
     projectId: project.id,
-    engine: 'claude' as const,
     sdkSessionId: null,
     status: 'working',
     statusDetail: null,

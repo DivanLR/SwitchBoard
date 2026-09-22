@@ -128,7 +128,6 @@ describe('the session a section dispatch lands in', () => {
 
     const session = await manager.startSession(project.id, false, undefined, undefined, {
       background: true,
-      engine: 'claude',
       cwd: worktree,
     })
 
@@ -144,7 +143,6 @@ describe('the session a section dispatch lands in', () => {
     await expect(
       manager.startSession(project.id, false, undefined, undefined, {
         background: true,
-        engine: 'claude',
         containerised: true,
         cwd: worktree,
       }),

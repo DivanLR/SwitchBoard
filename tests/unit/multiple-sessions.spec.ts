@@ -14,7 +14,6 @@ function sessionRow(projectId: string, startedAt: string): Session {
   return {
     id: newId(),
     projectId,
-    engine: 'claude',
     sdkSessionId: null,
     status: 'working',
     statusDetail: null,

@@ -1,9 +1,8 @@
 import { computed, onUnmounted, ref, toValue, watch, type MaybeRefOrGetter } from 'vue'
-import { DEFAULT_SESSION_ENGINE, DEFAULT_SESSION_MODE, SESSION_MODES } from '@shared/domain'
-import type { Session, SessionEngine, SessionMode } from '@shared/domain'
+import { DEFAULT_SESSION_MODE, SESSION_MODES } from '@shared/domain'
+import type { Session, SessionMode } from '@shared/domain'
 import { isIpcError, type ProjectListItem } from '@shared/ipc-types'
 import { useProjectsStore } from '@renderer/stores/projects'
-import { useSettingsStore } from '@renderer/stores/settings'
 import { useTerminalStore } from '@renderer/stores/terminal'
 
 export function useSessionStart(opts: {
@@ -11,7 +10,6 @@ export function useSessionStart(opts: {
   endedSession: MaybeRefOrGetter<Session | null>
 }) {
   const projects = useProjectsStore()
-  const settings = useSettingsStore()
   const terminals = useTerminalStore()
   const project = (): ProjectListItem => toValue(opts.project)
   const endedSession = (): Session | null => toValue(opts.endedSession)
@@ -27,30 +25,16 @@ export function useSessionStart(opts: {
       void projects.setUseContainers(project().id, on)
     },
   })
-  const startEngine = ref<SessionEngine>(
-    settings.settings?.defaultEngine ?? DEFAULT_SESSION_ENGINE,
-  )
-  const containerForced = computed(
-    () => startMode.value === 'bypass' && startEngine.value === 'claude',
-  )
-  const containerOn = computed(
-    () => startEngine.value === 'claude' && (containerForced.value || runInContainer.value),
-  )
-  const engineModes = computed(() =>
-    startEngine.value === 'codex' ? SESSION_MODES.filter((m) => m.value !== 'bypass') : SESSION_MODES,
-  )
+  const containerForced = computed(() => startMode.value === 'bypass')
+  const containerOn = computed(() => containerForced.value || runInContainer.value)
   const startError = ref<string | null>(null)
 
-  const canResume = computed(() => {
-    const previous = endedSession()
-    if (!previous?.sdkSessionId) return false
-    return (previous.engine ?? DEFAULT_SESSION_ENGINE) === startEngine.value
-  })
+  const canResume = computed(() => !!endedSession()?.sdkSessionId)
 
   const modeChoices = computed(() => {
-    if (!resumeSession.value) return engineModes.value
+    if (!resumeSession.value) return SESSION_MODES
     const wasBypass = endedSession()?.bypassPermissions === true
-    return engineModes.value.filter((m) => (m.value === 'bypass') === wasBypass)
+    return SESSION_MODES.filter((m) => (m.value === 'bypass') === wasBypass)
   })
 
   const startModeLabel = computed(
@@ -66,7 +50,6 @@ export function useSessionStart(opts: {
     modeOpen.value = false
     resumeSession.value = false
     startMode.value = project().defaultSessionMode ?? DEFAULT_SESSION_MODE
-    startEngine.value = settings.settings?.defaultEngine ?? DEFAULT_SESSION_ENGINE
   }
 
   watch(
@@ -79,7 +62,6 @@ export function useSessionStart(opts: {
         : previous?.planMode
           ? 'plan'
           : (project().defaultSessionMode ?? DEFAULT_SESSION_MODE)
-      startEngine.value = previous?.engine ?? settings.settings?.defaultEngine ?? DEFAULT_SESSION_ENGINE
     },
     { immediate: true },
   )
@@ -133,7 +115,6 @@ export function useSessionStart(opts: {
         startMode.value,
         undefined,
         containerOn.value,
-        startEngine.value,
       )
       watchForImmediateCrash(target, session.id, wasResuming)
     } catch (e) {
@@ -149,7 +130,6 @@ export function useSessionStart(opts: {
 
   return {
     startMode,
-    startEngine,
     modeOpen,
     resumeSession,
     runInContainer,
