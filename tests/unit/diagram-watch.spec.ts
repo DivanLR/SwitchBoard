@@ -54,12 +54,9 @@ function setup() {
     onCountersChanged: () => {},
     onSessionExit: () => {},
     onQueueChanged: () => {},
-    onEvalsChanged: () => {},
     onVerifyChanged: () => {},
     onSecurityChanged: () => {},
     onDiagramsChanged: (projectId) => changed.push(projectId),
-    onApiRequests: () => {},
-    onApiChanged: () => {},
     onProjectCommands: () => {},
     gate: (() => {}) as never,
   })

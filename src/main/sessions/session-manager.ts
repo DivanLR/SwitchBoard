@@ -61,7 +61,6 @@ import {
 } from './transcript'
 import { auditDone, readAuditReport } from '@main/security/audit-dispatch'
 import { parseFlowMarker, type FlowMarker } from '@main/flow/flow-markers'
-import { parseEvalMarker } from '@main/evals/eval-dispatch'
 import {
   parseSuiteProgress,
   parseVerifyReport,
@@ -72,8 +71,6 @@ import {
 import { parseDiagramPlan } from '@shared/diagram'
 import { reconcile } from '@main/evals/artefacts'
 import { scanArtefacts } from '@main/evals/artefact-scan'
-import { parseApiRequests } from '@main/evals/api-dispatch'
-import type { ApiRequestPlan } from '@shared/api-endpoints'
 import type { SandboxEnv, TestSuite } from '@shared/test-catalog'
 import { mainLoopModel } from './model-routing'
 import { resolveClaudeExecutable } from './claude-executable'
@@ -98,12 +95,9 @@ interface SessionManagerCallbacks {
   onCountersChanged: () => void
   onSessionExit: (sessionId: string) => void
   onQueueChanged: (projectId: string) => void
-  onEvalsChanged: (projectId: string) => void
   onVerifyChanged: (projectId: string) => void
   onSecurityChanged: (projectId: string) => void
   onDiagramsChanged: (projectId: string) => void
-  onApiRequests: (projectId: string, runId: string, requests: ApiRequestPlan[]) => void
-  onApiChanged: (projectId: string) => void
   onProjectCommands: (projectId: string, commands: ProjectCommand[]) => void
   gate: PermissionGate
 }
@@ -444,7 +438,6 @@ export class SessionManager {
     const note =
       'The application closed before this run reported a result, so nothing it measured is known.'
     this.repos.verifyRuns.reconcileRunning(note)
-    this.repos.apiRuns.reconcileRunning(note)
     this.repos.securityRuns.reconcileRunning(note)
     sweepOrphanedContainers(leftOpen)
     sweepStaleVolumes((id) => this.repos.sessions.byId(id))
@@ -470,9 +463,6 @@ export class SessionManager {
       'This run went quiet for long enough that its session is presumed dead, so nothing it measured is known.'
     for (const projectId of this.repos.verifyRuns.reconcileStale(deadline, note)) {
       this.callbacks.onVerifyChanged(projectId)
-    }
-    for (const projectId of this.repos.apiRuns.reconcileStale(deadline, note)) {
-      this.callbacks.onApiChanged(projectId)
     }
   }
 
@@ -1029,16 +1019,6 @@ export class SessionManager {
     this.callbacks.onVerifyChanged(run.projectId)
   }
 
-  async cancelApiRun(runId: string): Promise<void> {
-    const run = this.repos.apiRuns.byId(runId)
-    if (!run) throw { code: 'NOT_FOUND', message: 'Run not found' } satisfies IpcError
-    if (run.status !== 'running') return
-    if (run.sessionId) await this.interruptSession(run.sessionId).catch(() => {})
-    this.apiWatch.delete(run.sessionId ?? '')
-    this.repos.apiRuns.finish(runId, 'error', run.calls, CANCEL_NOTE, run.launched)
-    this.callbacks.onApiChanged(run.projectId)
-  }
-
   async stopSession(sessionId: string, note?: string): Promise<void> {
     const entry = this.requireLive(sessionId)
     if (note) entry.row.statusDetail = note
@@ -1098,32 +1078,7 @@ export class SessionManager {
     return wanted.filter((name) => live.includes(name))
   }
 
-  private evalWatch = new Map<string, { evalId: string; kind: 'check' | 'judge' }>()
-
-  watchEvalMarker(sessionId: string, evalId: string, kind: 'check' | 'judge'): void {
-    this.evalWatch.set(sessionId, { evalId, kind })
-  }
-
-  private static readonly EVAL_SCAN_KINDS = new Set<EventKind>(['assistant_text', 'summary', 'result'])
-
-  private closeUnreportedEval(entry: HostedEntry): void {
-    this.evalWatch.delete(entry.row.id)
-  }
-
-  private scanEvalMarker(entry: HostedEntry, kind: EventKind, payload: unknown): void {
-    const watch = this.evalWatch.get(entry.row.id)
-    if (!watch || !SessionManager.EVAL_SCAN_KINDS.has(kind)) return
-    const text = (payload as { text?: string }).text
-    if (!text) return
-    const marker = parseEvalMarker(text)
-    if (!marker || marker.kind !== watch.kind) return
-    this.evalWatch.delete(entry.row.id)
-    this.repos.evals.update(
-      watch.evalId,
-      marker.kind === 'check' ? { checkStatus: marker.status } : { judge: marker.verdict },
-    )
-    this.callbacks.onEvalsChanged(entry.row.projectId)
-  }
+  private static readonly TEXT_SCAN_KINDS = new Set<EventKind>(['assistant_text', 'summary', 'result'])
 
   private verifyWatch = new Map<
     string,
@@ -1148,17 +1103,15 @@ export class SessionManager {
   }
 
   private scanMarkers(entry: HostedEntry, kind: EventKind, payload: unknown): void {
-    this.scanEvalMarker(entry, kind, payload)
     this.scanVerifyReport(entry, kind, payload)
     this.scanSecurityReport(entry, kind, payload)
     this.scanFlowMarker(entry, kind, payload)
     this.scanIsolatedSuiteReport(entry, kind, payload)
-    this.scanApiRequests(entry, kind, payload)
     this.scanDiagramPlan(entry, kind, payload)
   }
 
   private scanDiagramPlan(entry: HostedEntry, kind: EventKind, payload: unknown): void {
-    if (!SessionManager.EVAL_SCAN_KINDS.has(kind)) return
+    if (!SessionManager.TEXT_SCAN_KINDS.has(kind)) return
     const text = (payload as { text?: string }).text
     if (!text) return
     const plan = parseDiagramPlan(text)
@@ -1191,7 +1144,7 @@ export class SessionManager {
   }
 
   private scanFlowMarker(entry: HostedEntry, kind: EventKind, payload: unknown): void {
-    if (!this.flowWatch.has(entry.row.id) || !SessionManager.EVAL_SCAN_KINDS.has(kind)) return
+    if (!this.flowWatch.has(entry.row.id) || !SessionManager.TEXT_SCAN_KINDS.has(kind)) return
     const text = (payload as { text?: string }).text
     if (!text) return
     const marker = parseFlowMarker(text)
@@ -1212,7 +1165,7 @@ export class SessionManager {
 
   private scanSecurityReport(entry: HostedEntry, kind: EventKind, payload: unknown): void {
     const watch = this.securityWatch.get(entry.row.id)
-    if (!watch || !SessionManager.EVAL_SCAN_KINDS.has(kind)) return
+    if (!watch || !SessionManager.TEXT_SCAN_KINDS.has(kind)) return
     const text = (payload as { text?: string }).text
     if (!text || !auditDone(text)) return
     this.securityWatch.delete(entry.row.id)
@@ -1252,39 +1205,15 @@ export class SessionManager {
     this.callbacks.onSecurityChanged(entry.row.projectId)
   }
 
-  private apiWatch = new Map<string, { runId: string }>()
-
-  watchApiRequests(sessionId: string, runId: string): void {
-    this.apiWatch.set(sessionId, { runId })
-  }
-
   private diagramWatch = new Map<string, { file: string | null }>()
 
   watchDiagram(sessionId: string, file?: string): void {
     this.diagramWatch.set(sessionId, { file: file ?? null })
   }
 
-  private scanApiRequests(entry: HostedEntry, kind: EventKind, payload: unknown): void {
-    const watch = this.apiWatch.get(entry.row.id)
-    if (!watch || !SessionManager.EVAL_SCAN_KINDS.has(kind)) return
-    const text = (payload as { text?: string }).text
-    if (!text) return
-    const requests = parseApiRequests(text)
-    if (!requests) return
-    this.apiWatch.delete(entry.row.id)
-    this.callbacks.onApiRequests(entry.row.projectId, watch.runId, requests)
-  }
-
-  private closeUnreportedApi(entry: HostedEntry): void {
-    const watch = this.apiWatch.get(entry.row.id)
-    if (!watch) return
-    this.apiWatch.delete(entry.row.id)
-    this.callbacks.onApiRequests(entry.row.projectId, watch.runId, [])
-  }
-
   private scanVerifyReport(entry: HostedEntry, kind: EventKind, payload: unknown): void {
     const watch = this.verifyWatch.get(entry.row.id)
-    if (!watch || !SessionManager.EVAL_SCAN_KINDS.has(kind)) return
+    if (!watch || !SessionManager.TEXT_SCAN_KINDS.has(kind)) return
     const text = (payload as { text?: string }).text
     if (!text) return
     const progress = parseSuiteProgress(text)
@@ -1355,7 +1284,7 @@ export class SessionManager {
 
   private scanIsolatedSuiteReport(entry: HostedEntry, kind: EventKind, payload: unknown): void {
     const watch = this.isolatedSuiteWatch.get(entry.row.id)
-    if (!watch || !SessionManager.EVAL_SCAN_KINDS.has(kind)) return
+    if (!watch || !SessionManager.TEXT_SCAN_KINDS.has(kind)) return
     const text = (payload as { text?: string }).text
     if (!text) return
     const report = parseVerifyReport(text)
@@ -1582,8 +1511,6 @@ export class SessionManager {
     if (!this.hosted.has(entry.row.id)) return
     if (status === 'done' || status === 'error') {
       this.closeUnreportedVerify(entry)
-      this.closeUnreportedApi(entry)
-      this.closeUnreportedEval(entry)
       this.closeUnreportedIsolatedSuite(entry)
       this.closeUnreportedSecurity(entry)
     }
@@ -1601,8 +1528,6 @@ export class SessionManager {
     const id = entry.row.id
     if (
       this.verifyWatch.has(id) ||
-      this.apiWatch.has(id) ||
-      this.evalWatch.has(id) ||
       this.diagramWatch.has(id) ||
       this.securityWatch.has(id)
     ) {
@@ -1646,8 +1571,6 @@ export class SessionManager {
     if (reason === 'stopped' && this.completing.delete(entry.row.id)) reason = 'completed'
     if (!this.hosted.has(entry.row.id)) return
     this.closeUnreportedVerify(entry)
-    this.closeUnreportedApi(entry)
-    this.closeUnreportedEval(entry)
     this.closeUnreportedIsolatedSuite(entry)
     this.closeUnreportedSecurity(entry)
     this.closeUnreportedFlow(entry, reason === 'crashed' ? 'crashed' : (entry.row.endReason ?? 'completed'))

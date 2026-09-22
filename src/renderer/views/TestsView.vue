@@ -12,65 +12,43 @@ import {
   type TestSuite,
 } from '@shared/test-catalog'
 import { estimateRunMs, humanDuration, type SuiteResult, type VerifyRun } from '@shared/domain'
-import { type ApiExpect } from '@shared/api-endpoints'
-import { useEvalsStore } from '@renderer/stores/evals'
 import { useVerifyStore } from '@renderer/stores/verify'
-import { useApiStore } from '@renderer/stores/api'
 import { useProjectsStore } from '@renderer/stores/projects'
 import MiniTerminal from '@renderer/components/MiniTerminal.vue'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
-import { useApiEvalSet } from '@renderer/composables/useApiEvalSet'
 import { pct, round, sourceOf, unmeasured, useVerifyGates } from '@renderer/composables/useVerifyGates'
-import EvalsView from '@renderer/views/EvalsView.vue'
 import Icon from '@renderer/components/Icon.vue'
 
 const props = defineProps<{ projectId: string; projectName: string; branch?: string | null }>()
 
-const emit = defineEmits<{
-  (e: 'ran'): void
-  (e: 'run', text: string): void
-}>()
-
 const settingsStore = useSettingsStore()
 const projectsStore = useProjectsStore()
-const evals = useEvalsStore()
 const verify = useVerifyStore()
-const api = useApiStore()
 
-type SubTab = 'api' | 'coverage' | 'quality' | 'evidence' | 'qa' | 'skill'
-const subTab = ref<SubTab>('qa')
+type SubTab = 'coverage' | 'quality' | 'evidence' | 'skill'
+const subTab = ref<SubTab>('evidence')
 const selected = ref<string[] | null>(null)
 
 let stopPush: (() => void) | null = null
-let stopApiPush: (() => void) | null = null
 onMounted(() => {
-  void evals.load(props.projectId)
   void verify.load(props.projectId)
-  void api.load(props.projectId)
   stopPush = window.switchboard.on('push.verifyChanged', (push) => {
     verify.applyPush(push.projectId, push.runs)
-  })
-  stopApiPush = window.switchboard.on('push.apiChanged', (push) => {
-    api.applyPush(push.projectId, push.runs)
   })
 })
 onUnmounted(() => {
   stopPush?.()
-  stopApiPush?.()
 })
 watch(
   () => props.projectId,
   (id) => {
     selected.value = null
-    picked.value = []
-    void evals.load(id)
     void verify.load(id)
-    void api.load(id)
   },
 )
 
-const detected = computed(() => evals.suitesFor(props.projectId))
+const detected = computed(() => verify.suitesFor(props.projectId))
 const chosenId = computed(() => settingsStore.settings?.projectTestStacks?.[props.projectId])
 const stack = computed(() => stackById(chosenId.value))
 const latest = computed(() => verify.latestFor(props.projectId))
@@ -251,20 +229,11 @@ onUnmounted(() => {
 })
 
 const SUB_TABS: { id: SubTab; label: string; built: boolean }[] = [
-  { id: 'api', label: 'API', built: true },
   { id: 'evidence', label: 'Results', built: true },
   { id: 'coverage', label: 'Coverage', built: true },
   { id: 'quality', label: 'Quality', built: true },
-  { id: 'qa', label: 'Manual QA', built: true },
   { id: 'skill', label: 'Skill', built: false },
 ]
-
-const subTabs = computed(() =>
-  SUB_TABS.map((t) => ({
-    ...t,
-    badge: t.id === 'qa' ? evals.listFor(props.projectId).filter((r) => r.verdict === 'pending').length : 0,
-  })),
-)
 
 async function runVerify(): Promise<void> {
   if (!stack.value || (selected.value ?? []).length === 0) return
@@ -281,42 +250,6 @@ async function captureEvidence(): Promise<void> {
 
 async function cancelVerify(): Promise<void> {
   if (latest.value) await verify.cancel(props.projectId, latest.value.id)
-}
-
-async function cancelApi(): Promise<void> {
-  if (apiRun.value) await api.cancel(props.projectId, apiRun.value.id)
-}
-
-const {
-  picked,
-  search,
-  baseUrlField,
-  startCmdField,
-  qaUrlField,
-  qaHeadersField,
-  apiTarget,
-  apiRun,
-  apiRunning,
-  apiScan,
-  apiShortlist,
-  apiMatches,
-  apiFoundCount,
-  apiHostLine,
-  apiQaLine,
-  qaReady,
-  isPicked,
-  togglePick,
-  saveApiHost,
-  runApi,
-  writeApiReport,
-  apiSummary,
-} = useApiEvalSet(() => props.projectId)
-
-function expectWords(e: ApiExpect): string {
-  const parts = [e.status !== null ? `status ${e.status}` : 'any 2xx']
-  if (e.minItems !== null) parts.push(`at least ${e.minItems} items`)
-  if (e.mustContain) parts.push(`body contains "${e.mustContain}"`)
-  return parts.join(' · ')
 }
 
 const report = computed(() => latest.value?.report ?? null)
@@ -410,12 +343,6 @@ const verifyEstimateLine = computed(() => {
   if (!estimate) return null
   const lead = running.value ? 'expected' : 'usually takes'
   return `${lead} ~${humanDuration(estimate.ms)} · ${estimate.basis}`
-})
-
-const apiEstimateLine = computed(() => {
-  const estimate = estimateRunMs(api.runsFor(props.projectId))
-  if (!estimate) return null
-  return `${apiRunning.value ? 'expected' : 'usually takes'} ~${humanDuration(estimate.ms)} · ${estimate.basis}`
 })
 
 function statusWord(run: VerifyRun): string {
@@ -677,7 +604,7 @@ function statusWord(run: VerifyRun): string {
 
       <div class="ui-tabs sub-tabs" role="tablist">
         <button
-          v-for="t in subTabs"
+          v-for="t in SUB_TABS"
           :key="t.id"
           class="ui-tab st"
           :class="{ sel: subTab === t.id, 'is-selected': subTab === t.id, dev: !t.built }"
@@ -687,236 +614,11 @@ function statusWord(run: VerifyRun): string {
           @click="subTab = t.id"
         >
           {{ t.label }}
-          <span v-if="t.badge > 0" class="badge-count st-badge">{{ t.badge }}</span>
           <span v-if="!t.built" class="dev-dot" title="In development"><Icon name="circle" :size="11" /></span>
         </button>
       </div>
 
-      <EvalsView
-        v-if="subTab === 'qa'"
-        :project-id="projectId"
-        :project-name="projectName"
-        @ran="emit('ran')"
-        @run="(text) => emit('run', text)"
-      />
-
-      <div v-else-if="subTab === 'api'" class="panel" data-testid="tests-panel-api">
-        <div class="ui-card-head panel-head">
-          <span class="ui-title">API eval set</span>
-          <span class="ui-meta panel-meta">{{ apiSummary }}</span>
-          <span v-if="apiRun" class="pill verdict" :class="apiRun.status">{{ apiRun.status }}</span>
-        </div>
-        <p class="quiet">
-          The app sends these requests itself and decides pass or fail from the status and body that
-          came back. The session is asked for one thing: identifiers that really exist.
-        </p>
-
-        <MiniTerminal
-          v-if="apiRunning && apiRun?.sessionId"
-          :session-id="apiRun.sessionId"
-          label="gathering data"
-        />
-
-        <div class="host">
-          <label class="host-field">
-            <span class="host-lbl">base URL</span>
-            <input
-              v-model="baseUrlField"
-              class="host-in mono"
-              placeholder="http://localhost:5057"
-              data-testid="tests-api-base"
-            />
-          </label>
-          <label class="host-field">
-            <span class="host-lbl">start command</span>
-            <input
-              v-model="startCmdField"
-              class="host-in mono"
-              placeholder="dotnet run --project ..."
-              data-testid="tests-api-start"
-            />
-          </label>
-        </div>
-        <div class="host">
-          <label class="host-field">
-            <span class="host-lbl">QA URL</span>
-            <input
-              v-model="qaUrlField"
-              class="host-in mono"
-              placeholder="https://qa.example.com"
-              data-testid="tests-api-qa"
-            />
-          </label>
-          <label class="host-field">
-            <span class="host-lbl">QA headers</span>
-            <input
-              v-model="qaHeadersField"
-              class="host-in mono"
-              placeholder="x-api-key: ${QA_API_KEY}"
-              data-testid="tests-api-qa-headers"
-            />
-          </label>
-          <button class="btn-quiet" data-testid="tests-api-save-host" @click="saveApiHost()">Save</button>
-        </div>
-        <div class="host-from mono" data-testid="tests-api-host-from">{{ apiHostLine }}</div>
-        <div class="host-from mono" data-testid="tests-api-qa-from">{{ apiQaLine }}</div>
-
-        <div class="sec">LAST TESTED</div>
-        <p v-if="apiShortlist.length === 0" class="ui-empty-line">
-          No endpoint found in this project's source{{
-            apiScan ? ` (${apiScan.filesRead} files scanned)` : ''
-          }}. Search below, or add a .http file the scan can read.
-        </p>
-        <div class="suites">
-          <button
-            v-for="(e, i) in apiShortlist"
-            :key="`${e.method} ${e.template}`"
-            class="chip"
-            :class="{ on: isPicked(e), 'is-on': isPicked(e) }"
-            :data-testid="`tests-api-recent-${i}`"
-            @click="togglePick(e)"
-          >
-            <span class="ep-method mono">{{ e.method }}</span>
-            <span class="mono">{{ e.template }}</span>
-          </button>
-        </div>
-
-        <div class="sec">
-          SEARCH · <span class="mono">{{ apiFoundCount }}</span> FOUND{{
-            apiScan?.truncated ? ' (SCAN LIMIT REACHED)' : ''
-          }}
-        </div>
-        <input
-          v-model="search"
-          class="host-in mono search"
-          placeholder="filter by path, method or file"
-          data-testid="tests-api-search"
-        />
-        <button
-          v-for="(e, i) in apiMatches"
-          :key="`${e.method} ${e.template}`"
-          type="button"
-          class="ui-row row pick"
-          :class="{ on: isPicked(e), 'is-selected': isPicked(e) }"
-          :data-testid="`tests-api-endpoint-${i}`"
-          role="checkbox"
-          :aria-checked="isPicked(e)"
-          :aria-label="`${e.method} ${e.template}`"
-          @click="togglePick(e)"
-        >
-          <span class="row-status mono" :class="isPicked(e) ? 'pass' : ''">
-            <Icon :name="isPicked(e) ? 'check' : 'plus'" :size="12" />
-          </span>
-          <span class="ep-method mono">{{ e.method }}</span>
-          <span class="row-name mono">{{ e.template }}</span>
-          <span class="row-detail mono">{{ e.source }}</span>
-        </button>
-
-        <div class="ui-toolbar">
-          <span class="lbl">{{ picked.length }} selected</span>
-          <button
-            class="chip"
-            :class="{ on: apiTarget === 'local', 'is-on': apiTarget === 'local' }"
-            data-testid="tests-api-target-local"
-            title="The API on this machine — started for you if nothing answers"
-            @click="apiTarget = 'local'"
-          >
-            Local
-          </button>
-          <button
-            class="chip"
-            :class="{ on: apiTarget === 'qa', 'is-on': apiTarget === 'qa', dev: !qaReady }"
-            :disabled="!qaReady"
-            :title="
-              qaReady
-                ? 'The deployed QA environment — never started, never stopped, reads only'
-                : 'Set a QA URL above to run against a deployed environment'
-            "
-            data-testid="tests-api-target-qa"
-            @click="apiTarget = 'qa'"
-          >
-            QA
-          </button>
-          <span v-if="apiEstimateLine" class="lbl mono" data-testid="tests-api-estimate">
-            {{ apiEstimateLine }}
-          </span>
-          <span class="spacer"></span>
-          <button
-            v-if="apiRunning && apiRun"
-            class="btn-quiet"
-            data-testid="tests-api-cancel"
-            title="Stop the session's current turn and close this run. Calls the app has already started sending finish on their own."
-            @click="cancelApi()"
-          >
-            Cancel
-          </button>
-          <button
-            class="run"
-            :disabled="api.starting || apiRunning || picked.length === 0"
-            data-testid="tests-api-run"
-            @click="runApi()"
-          >
-            <template v-if="apiRunning"><Icon name="dot" :size="8" /> Running…</template>
-            <template v-else
-              ><Icon name="play" :size="12" /> Run against {{ apiTarget === 'qa' ? 'QA' : 'local' }}</template
-            >
-          </button>
-        </div>
-        <div v-if="api.error" class="ui-err" data-testid="tests-api-error">{{ api.error }}</div>
-
-        <div class="ui-toolbar">
-          <span class="sec">EVAL SET</span>
-          <span class="spacer"></span>
-          <button
-            class="btn-quiet"
-            :disabled="!apiRun || apiRunning"
-            data-testid="tests-api-report"
-            title="Write the full test report for this run into .switchboard/reports"
-            @click="writeApiReport()"
-          >
-            Write test report
-          </button>
-        </div>
-        <p v-if="api.reportPath" class="note" data-testid="tests-api-report-path">
-          Report written to <span class="mono">{{ api.reportPath }}</span>
-        </p>
-        <p v-if="apiRun?.note" class="note" data-testid="tests-api-note">{{ apiRun.note }}</p>
-        <p v-if="!apiRun" class="ui-empty-line">
-          Nothing called yet. Pick endpoints above and run - every result below is a request this app
-          sent and a status it received.
-        </p>
-        <p v-else-if="apiRunning" class="ui-empty-line">
-          Waiting for request data from the session, then the app makes the calls.
-        </p>
-        <div
-          v-for="(c, i) in apiRun?.calls ?? []"
-          :key="`${c.request.method} ${c.request.path} ${i}`"
-          class="ui-card ep"
-          :data-testid="`tests-api-call-${i}`"
-        >
-          <div class="ep-head">
-            <span class="ep-verdict" :class="c.outcome">{{ c.outcome.replace('_', ' ') }}</span>
-            <span class="ep-method mono">{{ c.request.method }}</span>
-            <span class="ep-path mono">{{ c.request.path }}</span>
-            <span class="ep-status mono" :class="statusClass(c.status)">{{ c.status ?? '—' }}</span>
-            <span class="ep-ms mono">{{ c.ms === null ? '—' : `${c.ms} ms` }}</span>
-          </div>
-          <div class="ep-line mono">
-            <span class="ep-label">checked</span>{{ expectWords(c.request.expect) }}
-          </div>
-          <div v-if="c.detail" class="ep-detail">{{ c.detail }}</div>
-          <div v-if="c.request.note" class="ep-line mono">
-            <span class="ep-label">proves</span>{{ c.request.note }}
-          </div>
-          <div v-if="c.request.dataSource || c.request.dataQuery" class="ep-line mono">
-            <span class="ep-label">data</span>
-            {{ [c.request.dataSource, c.request.dataQuery].filter(Boolean).join(' · ') }}
-          </div>
-          <div v-if="c.body" class="ep-body mono">{{ c.body }}</div>
-        </div>
-      </div>
-
-      <div v-else-if="subTab === 'evidence'" class="panel" data-testid="tests-panel-evidence">
+      <div v-if="subTab === 'evidence'" class="panel" data-testid="tests-panel-evidence">
         <div class="ui-card-head panel-head">
           <span class="ui-title">Results</span>
           <span class="ui-meta panel-meta">{{ runSummary }}</span>
@@ -1485,14 +1187,6 @@ function statusWord(run: VerifyRun): string {
   color: var(--text-ghost);
 }
 
-.st-badge {
-  font-size: var(--fs-micro);
-  color: var(--green-ink);
-  background: var(--green);
-  border-radius: var(--rp);
-  padding: 0 5px;
-}
-
 .dev-dot {
   font-size: var(--fs-micro);
   color: var(--amber);
@@ -1537,64 +1231,6 @@ function statusWord(run: VerifyRun): string {
   font-size: var(--fs-meta);
   color: var(--text-mid);
   margin-bottom: 10px;
-}
-
-.host {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.host-field {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  flex: 1 1 220px;
-}
-
-.host-lbl {
-  font-size: var(--fs-micro);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-ghost);
-}
-
-.host-in {
-  padding: 5px 8px;
-  font-size: var(--fs-meta);
-  color: var(--text-body);
-  background: transparent;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--rc);
-}
-
-.host-in:focus {
-  outline: none;
-  border-color: var(--green);
-}
-
-.search {
-  width: 100%;
-  margin-bottom: 6px;
-}
-
-.host-from {
-  margin-top: 5px;
-  font-size: var(--fs-micro);
-  color: var(--text-ghost);
-}
-
-.row.pick {
-  cursor: pointer;
-}
-
-.row.pick:hover {
-  background: color-mix(in srgb, var(--green) 6%, transparent);
-}
-
-.row.pick.on {
-  background: color-mix(in srgb, var(--green) 10%, transparent);
 }
 
 .row {

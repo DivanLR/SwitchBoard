@@ -71,11 +71,6 @@ export interface MockDriver {
   askQuestion: (sessionId: string, text: string, options: string[]) => string
   completeTurn: (sessionId: string, costUsd?: number) => void
   setStatus: (sessionId: string, status: string) => void
-  reportEvalResult: (
-    projectId: string,
-    id: string,
-    result: { checkStatus?: string; judge?: string },
-  ) => void
   reportVerifyResult: (projectId: string, status: string, report: unknown) => void
   reportSecurityResult: (projectId: string, status: string, report: unknown) => void
   setAdoFeatures: (features: { id: string; title: string; state?: string | null }[]) => void
@@ -99,12 +94,6 @@ export interface MockDriver {
     failed?: { localId: string; why: string }[],
   ) => void
   addDiagram: (projectId: string, entry: DiagramEntry) => void
-  reportApiResult: (
-    projectId: string,
-    status: string,
-    calls: unknown[],
-    note?: string | null,
-  ) => void
   startFlood: (intervalMs: number, perTick: number) => void
   stopFlood: () => void
   setSkillImport: (skills: CustomSkill[]) => void
@@ -364,7 +353,6 @@ export function installMockHost(scenario: MockScenario): void {
     },
   ]
   let settings: AnyRecord = { ...(scenario.settings as unknown as AnyRecord) }
-  const apiRunsByProject = new Map<string, AnyRecord[]>()
 
   const listeners = new Map<string, Set<(payload: unknown) => void>>()
   function push(channel: string, payload: unknown): void {
@@ -459,7 +447,6 @@ export function installMockHost(scenario: MockScenario): void {
   const decisionLog: { requestId: string; decision: string }[] = []
   const queuedBySession = new Map<string, { eventId: string; text: string }[]>()
   const taskQueueByProject = new Map<string, AnyRecord[]>()
-  const evalsByProject = new Map<string, AnyRecord[]>()
   const verifyByProject = new Map<string, AnyRecord[]>()
   const securityByProject = new Map<string, AnyRecord[]>()
   const flowRunsByProject = new Map<string, AnyRecord[]>()
@@ -1036,70 +1023,6 @@ export function installMockHost(scenario: MockScenario): void {
       }
       return out
     },
-    'evals.list': (req) => [...(evalsByProject.get(String(req.projectId)) ?? [])],
-    'evals.add': (req) => {
-      const projectId = String(req.projectId)
-      const acceptance = String(req.acceptance).trim()
-      if (!acceptance) throw { code: 'INVALID_PATH', message: 'Write what is observably true when it works.' }
-      const list = evalsByProject.get(projectId) ?? []
-      list.unshift({
-        id: nextId('eval'),
-        projectId,
-        acceptance,
-        checkCmd: String(req.checkCmd ?? '').trim() || null,
-        checkStatus: 'not_run',
-        verdict: 'pending',
-        rating: null,
-        note: null,
-        attempts: 1,
-        judge: null,
-        createdAt: now(),
-      })
-      evalsByProject.set(projectId, list)
-      return [...list]
-    },
-    'evals.record': (req) => {
-      const projectId = String(req.projectId)
-      const list = evalsByProject.get(projectId) ?? []
-      const row = list.find((r) => r.id === req.id)
-      if (!row) throw { code: 'NOT_FOUND', message: 'That acceptance line no longer exists.' }
-      if (req.verdict === 'pass' && row.checkCmd && row.checkStatus !== 'pass') {
-        throw { code: 'CONFIRM_REQUIRED', message: 'The check has not passed yet.' }
-      }
-      for (const key of ['checkStatus', 'verdict', 'rating', 'note', 'attempts'] as const) {
-        if (req[key] !== undefined) row[key] = req[key] as never
-      }
-      return [...list]
-    },
-    'evals.suites': () =>
-      (scenario.suites ?? []).map((stack) => ({ ...stack, suites: [...stack.suites] })),
-    'evals.dispatch': async (req) => {
-      const projectId = String(req.projectId)
-      const list = evalsByProject.get(projectId) ?? []
-      const row = list.find((r) => r.id === req.id)
-      if (!row) throw { code: 'NOT_FOUND', message: 'That acceptance line no longer exists.' }
-      if (req.kind === 'check' && !row.checkCmd) {
-        throw { code: 'INVALID_PATH', message: 'This line has no check — use the manual pass.' }
-      }
-      const text =
-        req.kind === 'check'
-          ? `Verify this acceptance line: "${row.acceptance}"\nRun exactly: ${row.checkCmd}\nEVAL_CHECK`
-          : req.kind === 'attempts'
-            ? `Acceptance line: "${row.acceptance}"\nProduce ${row.attempts} INDEPENDENT attempts, git worktree each`
-            : `Judge the current diff against this acceptance line: "${row.acceptance}"\nEVAL_JUDGE`
-      if (req.kind === 'check') row.checkStatus = 'not_run'
-      if (req.kind === 'judge') row.judge = null
-      const session = await sectionSession(projectId, 'tests')
-      sends.push({ sessionId: session.id, text })
-      appendEvent(session.id, 'prompt', { text, pending: false })
-      return { sessionId: session.id, runs: [...list] }
-    },
-    'evals.remove': (req) => {
-      const projectId = String(req.projectId)
-      const list = (evalsByProject.get(projectId) ?? []).filter((r) => r.id !== req.id)
-      evalsByProject.set(projectId, list)
-      return [...list]
-    },
     'flow.list': (req) => flowSnapshot(String(req.projectId)),
     'flow.features': async (req) => {
       const projectId = String(req.projectId)
@@ -1391,6 +1314,8 @@ export function installMockHost(scenario: MockScenario): void {
       reportOpens.push({ runId: String(req.runId), file: String(req.file) })
     },
     'verify.list': (req) => [...(verifyByProject.get(String(req.projectId)) ?? [])],
+    'verify.suites': () =>
+      (scenario.suites ?? []).map((stack) => ({ ...stack, suites: [...stack.suites] })),
     'verify.start': async (req) => {
       const projectId = String(req.projectId)
       const suiteIds = (req.suiteIds ?? []) as string[]
@@ -1444,99 +1369,6 @@ export function installMockHost(scenario: MockScenario): void {
         verifyByProject.set(projectId, list)
       }
       return [...list]
-    },
-    'api.endpoints': () => ({
-      endpoints: [
-        { method: 'GET', template: '/api/customers', source: 'Api/CustomersController.cs:12' },
-        { method: 'GET', template: '/api/customers/{id}', source: 'Api/CustomersController.cs:20' },
-        { method: 'POST', template: '/api/customers/search', source: 'Api/CustomersController.cs:31' },
-      ],
-      recent: [{ method: 'GET', template: '/api/customers/{id}' }],
-      filesRead: 42,
-      truncated: false,
-      host: {
-        baseUrl: 'http://localhost:5057',
-        startCmd: 'dotnet run --project "src/Sample.Api"',
-        from: 'src/Sample.Api/Properties/launchSettings.json (profile https)',
-        error: null,
-      },
-    }),
-    'api.runs': (req) => [...(apiRunsByProject.get(String(req.projectId)) ?? [])],
-    'api.cancel': (req) => {
-      const projectId = String(req.projectId)
-      const runs = apiRunsByProject.get(projectId) ?? []
-      const at = runs.findIndex((r) => r.id === req.runId)
-      if (at < 0) throw { code: 'NOT_FOUND', message: 'Run not found' }
-      if (runs[at].status === 'running') {
-        runs[at] = {
-          ...runs[at],
-          status: 'error',
-          note: 'You stopped this run before it reported, so nothing it measured is known.',
-          finishedAt: new Date().toISOString(),
-        }
-        apiRunsByProject.set(projectId, runs)
-      }
-      return [...runs]
-    },
-    'api.report': (req) => {
-      const runs = apiRunsByProject.get(String(req.projectId)) ?? []
-      const run = req.runId ? runs.find((r) => r.id === req.runId) : runs[0]
-      if (!run) {
-        throw {
-          code: 'NOT_FOUND',
-          message: 'Run an API eval set first — a report is written from a run.',
-        }
-      }
-      if (run.status === 'running') {
-        throw {
-          code: 'INVALID_PATH',
-          message: 'That run is still going. Its report is written once the calls are in.',
-        }
-      }
-      return { path: `C:\\mock\\.switchboard\\reports\\api-${run.id}.md` }
-    },
-    'api.start': async (req) => {
-      const projectId = String(req.projectId)
-      const endpoints = (req.endpoints ?? []) as { method: string; template: string }[]
-      if (endpoints.length === 0) {
-        throw { code: 'INVALID_PATH', message: 'Choose at least one endpoint to test.' }
-      }
-      const session = await sectionSession(projectId, 'tests')
-      const result = { sessionId: session.id }
-      const text = `Produce the request data for an automated API test.\n${endpoints
-        .map((e) => `- ${e.method} ${e.template}`)
-        .join('\n')}\nSWB_APIDATA`
-      sends.push({ sessionId: session.id, text })
-      appendEvent(session.id, 'prompt', { text, pending: false })
-      const list = apiRunsByProject.get(projectId) ?? []
-      list.unshift({
-        id: `api-${list.length + 1}`,
-        projectId,
-        baseUrl: 'http://localhost:5057',
-        launched: false,
-        sessionId: result.sessionId,
-        status: 'running',
-        note: null,
-        calls: [],
-        startedAt: new Date().toISOString(),
-        finishedAt: null,
-      })
-      apiRunsByProject.set(projectId, list)
-      return { sessionId: result.sessionId, runs: [...list] }
-    },
-    'api.setHost': (req) => {
-      const base = { ...((settings.projectApiBase ?? {}) as AnyRecord) }
-      const start = { ...((settings.projectApiStart ?? {}) as AnyRecord) }
-      if (req.baseUrl !== undefined) {
-        if (String(req.baseUrl).trim()) base[String(req.projectId)] = String(req.baseUrl).trim()
-        else delete base[String(req.projectId)]
-      }
-      if (req.startCmd !== undefined) {
-        if (String(req.startCmd).trim()) start[String(req.projectId)] = String(req.startCmd).trim()
-        else delete start[String(req.projectId)]
-      }
-      settings = { ...settings, projectApiBase: base, projectApiStart: start }
-      return { ...settings }
     },
     'queue.list': (req) => [...(taskQueueByProject.get(String(req.projectId)) ?? [])],
     'queue.add': (req) => {
@@ -1849,14 +1681,6 @@ export function installMockHost(scenario: MockScenario): void {
       if (!hadComposerQueue && session) maybeDrainQueue(session.projectId)
     },
     setStatus: (sessionId, status) => setStatus(sessionId, status),
-    reportEvalResult: (projectId, id, result) => {
-      const list = evalsByProject.get(projectId) ?? []
-      const row = list.find((r) => r.id === id)
-      if (!row) return
-      if (result.checkStatus !== undefined) row.checkStatus = result.checkStatus
-      if (result.judge !== undefined) row.judge = result.judge
-      push('push.evalsChanged', { projectId, runs: [...list] })
-    },
     setAdoFeatures: (features) => {
       adoFeatures = features.map((feature) => ({
         id: feature.id,
@@ -2012,21 +1836,6 @@ export function installMockHost(scenario: MockScenario): void {
       const list = diagramsByProject.get(projectId) ?? []
       list.push({ ...entry })
       diagramsByProject.set(projectId, list)
-    },
-    reportApiResult: (projectId, status, calls, note) => {
-      const list = apiRunsByProject.get(projectId) ?? []
-      const index = list.findIndex((r) => r.status === 'running')
-      const at = index >= 0 ? index : 0
-      if (!list[at]) return
-      list[at] = {
-        ...list[at],
-        status,
-        calls,
-        note: note ?? null,
-        finishedAt: new Date().toISOString(),
-      }
-      apiRunsByProject.set(projectId, list)
-      push('push.apiChanged', { projectId, runs: [...list] })
     },
     startFlood: (intervalMs, perTick) => {
       const ids = [...sessions.keys()]

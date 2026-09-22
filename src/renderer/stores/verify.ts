@@ -1,5 +1,6 @@
 import { reactive } from 'vue'
 import type { VerifyRun } from '@shared/domain'
+import type { AvailableSuites } from '@shared/test-catalog'
 import { errorMessage, invoke } from '@renderer/ipc'
 import { useProjectsStore } from '@renderer/stores/projects'
 
@@ -11,6 +12,7 @@ let requestToken = 0
 
 const store = reactive({
   byProject: {} as Record<string, VerifyRun[]>,
+  suitesByProject: {} as Record<string, AvailableSuites[]>,
   error: null as string | null,
   starting: false,
 
@@ -22,11 +24,19 @@ const store = reactive({
     return this.listFor(projectId)[0] ?? null
   },
 
+  suitesFor(projectId: string): AvailableSuites[] {
+    return this.suitesByProject[projectId] ?? []
+  },
+
   async load(projectId: string): Promise<void> {
     const token = ++requestToken
-    const runs = await invoke('verify.list', { projectId })
+    const [runs, suites] = await Promise.all([
+      invoke('verify.list', { projectId }),
+      invoke('verify.suites', { projectId }),
+    ])
     if (token !== requestToken) return
     this.byProject[projectId] = runs
+    this.suitesByProject[projectId] = suites
   },
 
   applyPush(projectId: string, runs: VerifyRun[]): void {

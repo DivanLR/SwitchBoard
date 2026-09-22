@@ -428,10 +428,6 @@ export interface Settings {
   projectTestSelection: Record<string, string[]>
   projectIsolatedRuns: Record<string, boolean>
   projectAcceptedGates: Record<string, string[]>
-  projectApiBase: Record<string, string>
-  projectApiStart: Record<string, string>
-  projectApiQa: Record<string, string>
-  projectApiQaHeaders: Record<string, string>
   autoApproveLow: boolean
   autoApproveMedium: boolean
   projectGroups: ProjectGroup[]
@@ -477,10 +473,6 @@ export const DEFAULT_SETTINGS: Settings = {
   projectTestSelection: {},
   projectIsolatedRuns: {},
   projectAcceptedGates: {},
-  projectApiBase: {},
-  projectApiStart: {},
-  projectApiQa: {},
-  projectApiQaHeaders: {},
   autoApproveLow: false,
   autoApproveMedium: false,
   projectGroups: [],
@@ -518,38 +510,6 @@ export interface Draft {
   projectId: string
   text: string
   createdAt: string
-}
-
-export type EvalCheckStatus = 'not_run' | 'pass' | 'fail' | 'inconclusive'
-export type EvalVerdict = 'pending' | 'pass' | 'fail'
-
-export interface EvalRun {
-  id: string
-  projectId: string
-  acceptance: string
-  checkCmd: string | null
-  checkStatus: EvalCheckStatus
-  verdict: EvalVerdict
-  rating: number | null
-  note: string | null
-  attempts: number
-  judge: string | null
-  createdAt: string
-}
-
-export const EVAL_RELOOP_RATING = 3
-
-type EvalStage = 'implement' | 'verify' | 'review' | 'done'
-
-export function evalStage(run: Pick<EvalRun, 'checkStatus' | 'verdict' | 'judge'>): EvalStage {
-  if (run.verdict !== 'pending') return 'done'
-  if (run.judge) return 'review'
-  if (run.checkStatus !== 'not_run') return 'verify'
-  return 'implement'
-}
-
-export function canPassEval(run: Pick<EvalRun, 'checkCmd' | 'checkStatus'>): boolean {
-  return !run.checkCmd || run.checkStatus === 'pass'
 }
 
 export interface Measured {
@@ -1083,7 +1043,6 @@ export function sessionName(
   sessionId: string,
   work: {
     verifyRunSessionIds?: readonly string[]
-    apiRunSessionIds?: readonly string[]
     diagrams?: readonly { sessionId: string | null; description: string }[]
     kinds?: Readonly<Record<string, SectionKind>>
     suites?: Readonly<Record<string, string>>
@@ -1103,7 +1062,6 @@ export function sessionName(
   if (kind && suite) return `${SECTION_LABELS[kind]}: ${suite}${done ? ' - Complete' : ''}`
   if (kind) return `${SECTION_LABELS[kind]}${on}`
   if (work.verifyRunSessionIds?.includes(sessionId)) return `Tests${on}`
-  if (work.apiRunSessionIds?.includes(sessionId)) return `API${on}`
   return null
 }
 

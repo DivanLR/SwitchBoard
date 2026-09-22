@@ -6,7 +6,6 @@ import type {
   DecisionOutcome,
   DecisionRecord,
   Draft,
-  EvalRun,
   EvidenceItem,
   EventKind,
   EventPayloadMap,
@@ -47,7 +46,6 @@ import {
   DEFAULT_SETTINGS,
   emptyVerifyReport,
 } from '@shared/domain'
-import type { ApiCall, ApiEvalRun, ApiTarget } from '@shared/api-endpoints'
 import type { RulePref, RuleKind } from '@main/inbox/rule-prefs'
 
 export function newId(): string {
@@ -831,68 +829,9 @@ class McpScansRepo {
   }
 }
 
-export class EvalsRepo {
-  constructor(private db: AppDatabase) {}
-
-  listForProject(projectId: string): EvalRun[] {
-    return this.db
-      .prepare('SELECT * FROM eval_runs WHERE projectId = ? ORDER BY createdAt DESC, rowid DESC')
-      .all(projectId) as EvalRun[]
-  }
-
-  add(projectId: string, acceptance: string, checkCmd?: string | null): EvalRun {
-    const run: EvalRun = {
-      id: newId(),
-      projectId,
-      acceptance: acceptance.trim(),
-      checkCmd: checkCmd?.trim() || null,
-      checkStatus: 'not_run',
-      verdict: 'pending',
-      rating: null,
-      note: null,
-      attempts: 1,
-      judge: null,
-      createdAt: nowIso(),
-    }
-    this.db
-      .prepare(
-        `INSERT INTO eval_runs
-           (id, projectId, acceptance, checkCmd, checkStatus, verdict, rating, note, attempts, judge, createdAt)
-         VALUES (@id, @projectId, @acceptance, @checkCmd, @checkStatus, @verdict, @rating, @note, @attempts, @judge, @createdAt)`,
-      )
-      .run(run)
-    return run
-  }
-
-  byId(id: string): EvalRun | null {
-    return (this.db.prepare('SELECT * FROM eval_runs WHERE id = ?').get(id) as EvalRun) ?? null
-  }
-
-  update(
-    id: string,
-    patch: Partial<
-      Pick<EvalRun, 'checkCmd' | 'checkStatus' | 'verdict' | 'rating' | 'note' | 'attempts' | 'judge'>
-    >,
-  ): EvalRun | null {
-    const columns = (
-      ['checkCmd', 'checkStatus', 'verdict', 'rating', 'note', 'attempts', 'judge'] as const
-    ).filter((key) => patch[key] !== undefined)
-    if (columns.length > 0) {
-      this.db
-        .prepare(`UPDATE eval_runs SET ${columns.map((c) => `${c} = @${c}`).join(', ')} WHERE id = @id`)
-        .run({ id, ...Object.fromEntries(columns.map((c) => [c, patch[c] ?? null])) })
-    }
-    return (this.db.prepare('SELECT * FROM eval_runs WHERE id = ?').get(id) as EvalRun) ?? null
-  }
-
-  remove(id: string): void {
-    this.db.prepare('DELETE FROM eval_runs WHERE id = ?').run(id)
-  }
-}
-
 function pruneToLast(
   db: AppDatabase,
-  table: 'verify_runs' | 'api_runs' | 'security_runs' | 'flow_runs',
+  table: 'verify_runs' | 'security_runs' | 'flow_runs',
   projectId: string,
   keep: number,
 ): void {
@@ -1611,116 +1550,6 @@ function hydrateSecurityRun(row: SecurityRunRow): SecurityRun {
   }
 }
 
-const API_HISTORY = 20
-
-class ApiRunsRepo {
-  constructor(private db: AppDatabase) {}
-
-  reconcileRunning(note: string): number {
-    const result = this.db
-      .prepare(
-        "UPDATE api_runs SET status = 'error', note = ?, finishedAt = ? WHERE status = 'running'",
-      )
-      .run(note, nowIso())
-    return Number(result.changes ?? 0)
-  }
-
-  reconcileStale(deadlineIso: string, note: string): string[] {
-    const affected = this.db
-      .prepare("SELECT DISTINCT projectId FROM api_runs WHERE status = 'running' AND startedAt < ?")
-      .all(deadlineIso) as { projectId: string }[]
-    if (affected.length === 0) return []
-    this.db
-      .prepare(
-        "UPDATE api_runs SET status = 'error', note = ?, finishedAt = ? WHERE status = 'running' AND startedAt < ?",
-      )
-      .run(note, nowIso(), deadlineIso)
-    return affected.map((row) => row.projectId)
-  }
-
-  start(input: {
-    projectId: string
-    baseUrl: string
-    target: ApiTarget
-    sessionId: string | null
-  }): ApiEvalRun {
-    const run: ApiEvalRun = {
-      id: newId(),
-      projectId: input.projectId,
-      baseUrl: input.baseUrl,
-      target: input.target,
-      launched: false,
-      sessionId: input.sessionId,
-      status: 'running',
-      note: null,
-      calls: [],
-      startedAt: nowIso(),
-      finishedAt: null,
-    }
-    this.db
-      .prepare(
-        `INSERT INTO api_runs
-           (id, projectId, baseUrl, target, launched, sessionId, status, note, calls, startedAt, finishedAt)
-         VALUES (?, ?, ?, ?, 0, ?, 'running', NULL, '[]', ?, NULL)`,
-      )
-      .run(run.id, run.projectId, run.baseUrl, run.target, run.sessionId, run.startedAt)
-    pruneToLast(this.db, 'api_runs', input.projectId, API_HISTORY)
-    return run
-  }
-
-  listForProject(projectId: string): ApiEvalRun[] {
-    return (
-      this.db
-        .prepare('SELECT * FROM api_runs WHERE projectId = ? ORDER BY startedAt DESC, rowid DESC')
-        .all(projectId) as ApiRunRow[]
-    ).map(hydrateApiRun)
-  }
-
-  byId(id: string): ApiEvalRun | null {
-    const row = this.db.prepare('SELECT * FROM api_runs WHERE id = ?').get(id) as
-      | ApiRunRow
-      | undefined
-    return row ? hydrateApiRun(row) : null
-  }
-
-  finish(
-    id: string,
-    status: ApiEvalRun['status'],
-    calls: ApiCall[],
-    note: string | null,
-    launched: boolean,
-  ): void {
-    this.db
-      .prepare(
-        'UPDATE api_runs SET status = ?, calls = ?, note = ?, launched = ?, finishedAt = ? WHERE id = ?',
-      )
-      .run(status, JSON.stringify(calls), note, launched ? 1 : 0, nowIso(), id)
-  }
-}
-
-interface ApiRunRow {
-  id: string
-  projectId: string
-  baseUrl: string
-  target: string | null
-  launched: number
-  sessionId: string | null
-  status: ApiEvalRun['status']
-  note: string | null
-  calls: string
-  startedAt: string
-  finishedAt: string | null
-}
-
-function hydrateApiRun(row: ApiRunRow): ApiEvalRun {
-  return {
-    ...row,
-    target: row.target === 'qa' ? 'qa' : 'local',
-    launched: row.launched === 1,
-    calls: parseJson<ApiCall[]>(row.calls) ?? [],
-  }
-}
-
 export class DiagramRequestsRepo {
   constructor(private db: AppDatabase) {}
 
@@ -1846,13 +1675,11 @@ export interface Repositories {
   projectCommands: ProjectCommandsRepo
   taskQueue: TaskQueueRepo
   mcpScans: McpScansRepo
-  evals: EvalsRepo
   verifyRuns: VerifyRunsRepo
   securityRuns: SecurityRunsRepo
   flowRuns: FlowRunsRepo
   flowItems: FlowItemsRepo
   flowLessons: FlowLessonsRepo
-  apiRuns: ApiRunsRepo
   diagramRequests: DiagramRequestsRepo
   customSkills: CustomSkillsRepo
 }
@@ -1871,13 +1698,11 @@ export function createRepositories(db: AppDatabase): Repositories {
     projectCommands: new ProjectCommandsRepo(db),
     taskQueue: new TaskQueueRepo(db),
     mcpScans: new McpScansRepo(db),
-    evals: new EvalsRepo(db),
     verifyRuns: new VerifyRunsRepo(db),
     securityRuns: new SecurityRunsRepo(db),
     flowRuns: new FlowRunsRepo(db),
     flowItems: new FlowItemsRepo(db),
     flowLessons: new FlowLessonsRepo(db),
-    apiRuns: new ApiRunsRepo(db),
     diagramRequests: new DiagramRequestsRepo(db),
     customSkills: new CustomSkillsRepo(db),
   }

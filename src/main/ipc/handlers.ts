@@ -1,7 +1,7 @@
 import { clipboard, dialog, ipcMain, shell, type BrowserWindow } from 'electron'
 import type { FlowItem, FlowRun, Project, Session, SessionEvent } from '@shared/domain'
 import type { SectionKind } from '@shared/domain'
-import { canPassEval, isDangerousCommand, sessionName } from '@shared/domain'
+import { isDangerousCommand, sessionName } from '@shared/domain'
 import {
   DIAGRAM_FILE_PICKS,
   DIAGRAM_PLUGIN,
@@ -37,15 +37,10 @@ import {
   suggestProjects,
 } from '@main/projects/discovery'
 import { existsSync, readdirSync } from 'node:fs'
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, stat } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import { detectStacks, stackById, stackEntries } from '@shared/test-catalog'
-import { attemptsPrompt, checkPrompt, judgePrompt } from '@main/evals/eval-dispatch'
 import { evidencePrompt, planSuites, verifyPrompt } from '@main/evals/verify-dispatch'
-import { apiDataPrompt } from '@main/evals/api-dispatch'
-import { resolveApiHost, scanProjectEndpoints } from '@main/evals/api-scan'
-import { recentEndpoints } from '@shared/api-endpoints'
-import { apiReportFileName, apiReportMarkdown } from '@shared/api-report'
 import { gitNotice, sandboxToolsFor } from '@main/sessions/wslc-sandbox'
 import { comboDocPath, readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
 import { comboKey } from '@shared/mcp-combo'
@@ -249,10 +244,6 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       const rows = live.length > 0 ? live : latest ? [latest] : []
       const work = {
         verifyRunSessionIds: repos.verifyRuns
-          .listForProject(project.id)
-          .map((r) => r.sessionId)
-          .filter((id): id is string => !!id),
-        apiRunSessionIds: repos.apiRuns
           .listForProject(project.id)
           .map((r) => r.sessionId)
           .filter((id): id is string => !!id),
@@ -597,44 +588,8 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       manager.sendMessage(session.id, req.text)
       return { sessionId: session.id }
     },
-    'evals.list': (req) => repos.evals.listForProject(req.projectId),
-    'evals.add': (req) => {
-      const acceptance = req.acceptance.trim()
-      if (!acceptance) throw { code: 'INVALID_PATH', message: 'Write what is observably true when it works.' } satisfies IpcError
-      repos.evals.add(req.projectId, acceptance, req.checkCmd)
-      return repos.evals.listForProject(req.projectId)
-    },
-    'evals.record': (req) => {
-      if (req.rating != null && (req.rating < 1 || req.rating > 5)) {
-        throw { code: 'INVALID_PATH', message: 'A rating is 1 to 5.' } satisfies IpcError
-      }
-      if (req.attempts != null && (req.attempts < 1 || req.attempts > 5)) {
-        throw { code: 'INVALID_PATH', message: 'Attempts are 1 to 5.' } satisfies IpcError
-      }
-      if (req.verdict === 'pass') {
-        const current = repos.evals.byId(req.id)
-        if (current && !canPassEval(current)) {
-          throw {
-            code: 'CONFIRM_REQUIRED',
-            message: 'The check has not passed yet — run it, or mark this line failed.',
-          } satisfies IpcError
-        }
-      }
-      const updated = repos.evals.update(req.id, {
-        checkStatus: req.checkStatus,
-        verdict: req.verdict,
-        rating: req.rating,
-        note: req.note,
-        attempts: req.attempts,
-      })
-      if (!updated) throw { code: 'NOT_FOUND', message: 'That acceptance line no longer exists.' } satisfies IpcError
-      return repos.evals.listForProject(req.projectId)
-    },
-    'evals.remove': (req) => {
-      repos.evals.remove(req.id)
-      return repos.evals.listForProject(req.projectId)
-    },
-    'evals.suites': async (req) => {
+    'verify.list': (req) => repos.verifyRuns.listForProject(req.projectId),
+    'verify.suites': async (req) => {
       const project = repos.projects.byId(req.projectId)
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
       try {
@@ -664,26 +619,6 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         return []
       }
     },
-    'evals.dispatch': async (req) => {
-      const run = repos.evals.byId(req.id)
-      if (!run) throw { code: 'NOT_FOUND', message: 'That acceptance line no longer exists.' } satisfies IpcError
-      if (req.kind === 'check' && !run.checkCmd) {
-        throw { code: 'INVALID_PATH', message: 'This line has no check — use the manual pass.' } satisfies IpcError
-      }
-      const text =
-        req.kind === 'check'
-          ? checkPrompt(run.acceptance, run.checkCmd as string)
-          : req.kind === 'attempts'
-            ? attemptsPrompt(run.acceptance, run.checkCmd, run.attempts)
-            : judgePrompt(run.acceptance)
-      const session = await manager.backgroundSessionFor(req.projectId, 'tests')
-      if (req.kind === 'check') repos.evals.update(req.id, { checkStatus: 'not_run' })
-      if (req.kind === 'judge') repos.evals.update(req.id, { judge: null })
-      if (req.kind !== 'attempts') manager.watchEvalMarker(session.id, req.id, req.kind)
-      manager.sendMessage(session.id, text)
-      return { sessionId: session.id, runs: repos.evals.listForProject(req.projectId) }
-    },
-    'verify.list': (req) => repos.verifyRuns.listForProject(req.projectId),
     'verify.start': async (req) => {
       const stack = stackById(req.stackId)
       if (!stack) throw { code: 'NOT_FOUND', message: 'Unknown stack.' } satisfies IpcError
@@ -742,13 +677,8 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       const ran = run.sessionId ? repos.sessions.byId(run.sessionId) : undefined
       const session =
         ran && !ran.endedAt ? ran : await manager.backgroundSessionFor(req.projectId, 'tests')
-      const hints = repos.evals
-        .listForProject(req.projectId)
-        .filter((line) => line.verdict === 'pending')
-        .slice(0, 5)
-        .map((line) => line.acceptance)
       manager.watchVerifyReport(session.id, run.id, 'evidence')
-      manager.sendMessage(session.id, evidencePrompt(hints, session.bypassPermissions === true))
+      manager.sendMessage(session.id, evidencePrompt([], session.bypassPermissions === true))
       return { sessionId: session.id, runs: repos.verifyRuns.listForProject(req.projectId) }
     },
     'verify.cancel': async (req) => {
@@ -862,139 +792,6 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         throw { code: 'NOT_FOUND', message: 'That report is no longer on disk' } satisfies IpcError
       }
       await shell.openPath(target)
-    },
-    'api.cancel': async (req) => {
-      await manager.cancelApiRun(req.runId)
-      return repos.apiRuns.listForProject(req.projectId)
-    },
-    'api.endpoints': async (req) => {
-      const project = repos.projects.byId(req.projectId)
-      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
-      const scan = await scanProjectEndpoints(project.path)
-      const settings = repos.settings.get()
-      const host = await resolveApiHost(project.path, {
-        baseUrl: settings.projectApiBase[req.projectId],
-        startCmd: settings.projectApiStart[req.projectId],
-      })
-      const qaUrl = settings.projectApiQa[req.projectId] ?? null
-      const qaHeaders = settings.projectApiQaHeaders[req.projectId] ?? null
-      const qa = qaUrl
-        ? await resolveApiHost(project.path, {
-            target: 'qa',
-            qaBaseUrl: qaUrl,
-            qaHeaders: qaHeaders ?? undefined,
-          })
-        : null
-      return {
-        endpoints: scan.endpoints,
-        recent: recentEndpoints(repos.apiRuns.listForProject(req.projectId)),
-        filesRead: scan.filesRead,
-        truncated: scan.truncated,
-        host:
-          'error' in host
-            ? { baseUrl: null, startCmd: null, from: null, error: host.error }
-            : { baseUrl: host.baseUrl, startCmd: host.startCmd, from: host.from, error: null },
-        qa: {
-          baseUrl: qaUrl,
-          headers: qaHeaders,
-          error: qa && 'error' in qa ? qa.error : null,
-        },
-      }
-    },
-    'api.runs': (req) => repos.apiRuns.listForProject(req.projectId),
-    'api.start': async (req) => {
-      const project = repos.projects.byId(req.projectId)
-      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
-      if (req.endpoints.length === 0) {
-        throw { code: 'INVALID_PATH', message: 'Choose at least one endpoint to test.' } satisfies IpcError
-      }
-      const settings = repos.settings.get()
-      const target = req.target ?? 'local'
-      const host = await resolveApiHost(project.path, {
-        target,
-        baseUrl: settings.projectApiBase[req.projectId],
-        startCmd: settings.projectApiStart[req.projectId],
-        qaBaseUrl: settings.projectApiQa[req.projectId],
-        qaHeaders: settings.projectApiQaHeaders[req.projectId],
-      })
-      if ('error' in host) throw { code: 'INVALID_PATH', message: host.error } satisfies IpcError
-      const session = await manager.backgroundSessionFor(req.projectId, 'tests')
-      const run = repos.apiRuns.start({
-        projectId: req.projectId,
-        baseUrl: host.baseUrl,
-        target: host.target,
-        sessionId: session.id,
-      })
-      manager.watchApiRequests(session.id, run.id)
-      const dbServers = await manager.connectedMcpServers(
-        session.id,
-        settings.databaseMcpServers ?? [],
-      )
-      manager.sendMessage(
-        session.id,
-        apiDataPrompt(req.endpoints, dbServers, { target: host.target, baseUrl: host.baseUrl }),
-      )
-      return { sessionId: session.id, runs: repos.apiRuns.listForProject(req.projectId) }
-    },
-    'api.setHost': (req) => {
-      const settings = repos.settings.get()
-      const base = { ...settings.projectApiBase }
-      const start = { ...settings.projectApiStart }
-      const qa = { ...settings.projectApiQa }
-      const qaHeaders = { ...settings.projectApiQaHeaders }
-      if (req.baseUrl !== undefined) {
-        if (req.baseUrl.trim()) base[req.projectId] = req.baseUrl.trim()
-        else delete base[req.projectId]
-      }
-      if (req.startCmd !== undefined) {
-        if (req.startCmd.trim()) start[req.projectId] = req.startCmd.trim()
-        else delete start[req.projectId]
-      }
-      if (req.qaBaseUrl !== undefined) {
-        if (req.qaBaseUrl.trim()) qa[req.projectId] = req.qaBaseUrl.trim()
-        else delete qa[req.projectId]
-      }
-      if (req.qaHeaders !== undefined) {
-        if (req.qaHeaders.trim()) qaHeaders[req.projectId] = req.qaHeaders.trim()
-        else delete qaHeaders[req.projectId]
-      }
-      return repos.settings.set({
-        projectApiBase: base,
-        projectApiStart: start,
-        projectApiQa: qa,
-        projectApiQaHeaders: qaHeaders,
-      })
-    },
-    'api.report': async (req) => {
-      const project = repos.projects.byId(req.projectId)
-      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
-      const run = req.runId
-        ? repos.apiRuns.byId(req.runId)
-        : (repos.apiRuns.listForProject(req.projectId)[0] ?? null)
-      if (!run) {
-        throw {
-          code: 'NOT_FOUND',
-          message: 'Run an API eval set first — a report is written from a run.',
-        } satisfies IpcError
-      }
-      if (run.status === 'running') {
-        throw {
-          code: 'INVALID_PATH',
-          message: 'That run is still going. Its report is written once the calls are in.',
-        } satisfies IpcError
-      }
-      const dir = join(project.path, '.switchboard', 'reports')
-      await mkdir(dir, { recursive: true })
-      const path = join(dir, apiReportFileName(run))
-      await writeFile(
-        path,
-        apiReportMarkdown(run, {
-          projectName: project.name,
-          dbServers: repos.settings.get().databaseMcpServers ?? [],
-        }),
-        'utf8',
-      )
-      return { path }
     },
     'queue.list': (req) => manager.listQueue(req.projectId),
     'queue.add': (req) => {

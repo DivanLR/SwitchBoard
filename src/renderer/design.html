@@ -38,11 +38,11 @@
       diagrams, cleanup commands, a queue, and an inbox holding all three risk
       tiers at once.
 
-      Runs cannot simply be handed to the driver: reportVerifyResult and
-      reportApiResult finish a run that is already in flight, exactly as the main
-      process does. So this seed calls the real IPC methods through the mock's own
-      window.switchboard to start them, then reports the result. That is also why
-      the script is a module with top-level await.
+      Runs cannot simply be handed to the driver: reportVerifyResult finishes a
+      run that is already in flight, exactly as the main process does. So this
+      seed calls the real IPC methods through the mock's own window.switchboard
+      to start them, then reports the result. That is also why the script is a
+      module with top-level await.
 
       Project names here are deliberately generic. This page is committed, and a
       styling fixture is no place for the names of real client repositories.
@@ -471,19 +471,6 @@
         ],
       })
 
-      // ---- MANUAL QA ---------------------------------------------------------
-      const qa = await window.switchboard.invoke('evals.add', {
-        projectId: 'p-alpha',
-        text: 'An empty cart shows the placeholder and its catalogue link works',
-      })
-      await window.switchboard.invoke('evals.add', {
-        projectId: 'p-alpha',
-        text: 'Clearing a full cart does not flash the old items',
-      })
-      if (qa?.ok !== false && qa?.data?.id) {
-        m.reportEvalResult('p-alpha', qa.data.id, { checkStatus: 'pass', judge: 'pass' })
-      }
-
       // ---- A FINISHED VERIFICATION RUN --------------------------------------
       // Started through the real IPC method because reportVerifyResult finishes a
       // run already in flight, exactly as the main process does. This also creates
@@ -568,53 +555,6 @@
           },
         ],
       })
-
-      // ---- A FINISHED API EVAL SET ------------------------------------------
-      await window.switchboard.invoke('api.start', {
-        projectId: 'p-alpha',
-        endpoints: [
-          { method: 'GET', template: '/api/v1/cart/{id}' },
-          { method: 'POST', template: '/api/v1/cart/{id}/clear' },
-        ],
-        target: 'local',
-      })
-      m.reportApiResult(
-        'p-alpha',
-        'fail',
-        [
-          {
-            request: {
-              method: 'GET',
-              path: '/api/v1/cart/C-4417',
-              expect: { status: 200, minItems: null, mustContain: 'placeholder' },
-              note: 'an emptied cart reports the placeholder flag',
-              dataSource: 'postgres — production',
-              dataQuery: "select id from carts where item_count = 0 limit 1",
-            },
-            status: 200,
-            ms: 84,
-            outcome: 'pass',
-            detail: 'body carried placeholder: true',
-            body: '{"id":"C-4417","items":[],"placeholder":true}',
-          },
-          {
-            request: {
-              method: 'POST',
-              path: '/api/v1/cart/C-9910/clear',
-              expect: { status: 204, minItems: null, mustContain: null },
-              note: 'clearing a full cart answers no content',
-              dataSource: 'postgres — production',
-              dataQuery: "select id from carts where item_count > 0 limit 1",
-            },
-            status: 500,
-            ms: 612,
-            outcome: 'fail',
-            detail: 'answered 500; the reducer null path is reachable from the API',
-            body: '{"error":"cannot read properties of null"}',
-          },
-        ],
-        'One of two calls failed. The failure is the same null return the spec is about.',
-      )
 
       import('./main.ts')
     </script>

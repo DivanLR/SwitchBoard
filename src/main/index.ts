@@ -17,7 +17,6 @@ import { readDiagramList } from './diagrams/list'
 import { reconcileSkills, stagingSkillsRoot } from './skills/install'
 import { FlowSupervisor } from './flow/flow-supervisor'
 import { initUpdater } from './updater'
-import { completeApiRun } from './evals/api-runner'
 import { PtyHost } from './terminal/pty-host'
 
 const TRAY_ICON_DATA_URL =
@@ -199,8 +198,6 @@ async function main(): Promise<void> {
     onSessionExit: (sessionId) => broker?.expireForSession(sessionId),
     onQueueChanged: (projectId) =>
       pusher.push('push.queueChanged', { projectId, items: repos.taskQueue.listForProject(projectId) }),
-    onEvalsChanged: (projectId) =>
-      pusher.push('push.evalsChanged', { projectId, runs: repos.evals.listForProject(projectId) }),
     onVerifyChanged: (projectId) =>
       pusher.push('push.verifyChanged', { projectId, runs: repos.verifyRuns.listForProject(projectId) }),
     onSecurityChanged: (projectId) =>
@@ -215,16 +212,6 @@ async function main(): Promise<void> {
         .then((entries) => pusher.push('push.diagramsChanged', { projectId, entries }))
         .catch(() => {})
     },
-    onApiRequests: (projectId, runId, requests) =>
-      void completeApiRun({
-        repos,
-        projectId,
-        runId,
-        requests,
-        changed: (id) => pusher.push('push.apiChanged', { projectId: id, runs: repos.apiRuns.listForProject(id) }),
-      }),
-    onApiChanged: (projectId) =>
-      pusher.push('push.apiChanged', { projectId, runs: repos.apiRuns.listForProject(projectId) }),
     onProjectCommands: (projectId, commands) => pusher.push('push.projectCommands', { projectId, commands }),
     gate: (context) => {
       if (!broker) throw new Error('Broker not initialised')

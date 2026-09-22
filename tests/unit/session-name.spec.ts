@@ -6,12 +6,6 @@ describe('sessionName', () => {
     expect(sessionName('s1', { verifyRunSessionIds: ['s1'] }, 'main')).toBe('Tests - main')
   })
 
-  it('names an API run the same way', () => {
-    expect(sessionName('s1', { apiRunSessionIds: ['s1'] }, 'release/DL/Fixes')).toBe(
-      'API - release/DL/Fixes',
-    )
-  })
-
   it('names the section alone when the branch is unknown', () => {
     expect(sessionName('s1', { verifyRunSessionIds: ['s1'] })).toBe('Tests')
     expect(sessionName('s1', { verifyRunSessionIds: ['s1'] }, null)).toBe('Tests')
@@ -44,7 +38,7 @@ describe('sessionName', () => {
 
   it('leaves a conversation unnamed, because there is no such fact about it', () => {
     expect(sessionName('s1', {})).toBeNull()
-    expect(sessionName('s1', { verifyRunSessionIds: ['other'], apiRunSessionIds: ['other'] })).toBeNull()
+    expect(sessionName('s1', { verifyRunSessionIds: ['other'] })).toBeNull()
   })
 
   it('never confuses one session with another project’s work', () => {

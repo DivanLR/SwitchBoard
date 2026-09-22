@@ -347,7 +347,7 @@ export function defaultSelection(suites: readonly TestSuite[], sandbox: SandboxE
 export interface VerifyGate {
   id: 'unit' | 'integration' | 'architecture' | 'mutation' | 'coverage' | 'quality-service'
   name: string
-  panel: 'qa' | 'coverage' | 'quality' | 'evidence'
+  panel: 'coverage' | 'quality' | 'evidence'
   target: string
 }
 

@@ -5,9 +5,6 @@ import type {
   DiagramEntry,
   DiffListResult,
   Draft,
-  EvalCheckStatus,
-  EvalRun,
-  EvalVerdict,
   FileDiffContent,
   McpScan,
   PermissionRequest,
@@ -36,7 +33,6 @@ import type {
   VerifyRun,
 } from './domain'
 import type { AvailableSuites } from './test-catalog'
-import type { ApiEvalRun, ApiTarget, DiscoveredEndpoint } from './api-endpoints'
 import type { ArchifyOptions } from './diagram'
 
 type IpcErrorCode =
@@ -227,27 +223,8 @@ export interface InvokeMap {
     }
     res: { sessionId: string }
   }
-  'evals.list': { req: { projectId: string }; res: EvalRun[] }
-  'evals.add': { req: { projectId: string; acceptance: string; checkCmd?: string }; res: EvalRun[] }
-  'evals.record': {
-    req: {
-      projectId: string
-      id: string
-      checkStatus?: EvalCheckStatus
-      verdict?: EvalVerdict
-      rating?: number | null
-      note?: string | null
-      attempts?: number
-    }
-    res: EvalRun[]
-  }
-  'evals.remove': { req: { projectId: string; id: string }; res: EvalRun[] }
-  'evals.suites': { req: { projectId: string }; res: AvailableSuites[] }
-  'evals.dispatch': {
-    req: { projectId: string; id: string; kind: 'check' | 'attempts' | 'judge' }
-    res: { sessionId: string; runs: EvalRun[] }
-  }
   'verify.list': { req: { projectId: string }; res: VerifyRun[] }
+  'verify.suites': { req: { projectId: string }; res: AvailableSuites[] }
   'verify.start': {
     req: {
       projectId: string
@@ -308,41 +285,6 @@ export interface InvokeMap {
   }
   'security.cancel': { req: { projectId: string; runId: string }; res: SecurityRun[] }
   'security.openReport': { req: { projectId: string; runId: string; file: string }; res: void }
-  'api.endpoints': {
-    req: { projectId: string }
-    res: {
-      endpoints: DiscoveredEndpoint[]
-      recent: { method: string; template: string }[]
-      filesRead: number
-      truncated: boolean
-      host: { baseUrl: string | null; startCmd: string | null; from: string | null; error: string | null }
-      qa: { baseUrl: string | null; headers: string | null; error: string | null }
-    }
-  }
-  'api.runs': { req: { projectId: string }; res: ApiEvalRun[] }
-  'api.start': {
-    req: {
-      projectId: string
-      endpoints: { method: string; template: string }[]
-      target?: ApiTarget
-    }
-    res: { sessionId: string; runs: ApiEvalRun[] }
-  }
-  'api.cancel': { req: { projectId: string; runId: string }; res: ApiEvalRun[] }
-  'api.setHost': {
-    req: {
-      projectId: string
-      baseUrl?: string
-      startCmd?: string
-      qaBaseUrl?: string
-      qaHeaders?: string
-    }
-    res: Settings
-  }
-  'api.report': {
-    req: { projectId: string; runId?: string }
-    res: { path: string }
-  }
   'queue.list': { req: { projectId: string }; res: QueuedTask[] }
   'queue.add': { req: { projectId: string; text: string }; res: QueuedTask[] }
   'queue.edit': { req: { projectId: string; id: string; text: string }; res: QueuedTask[] }
@@ -412,11 +354,6 @@ export type FocusRequestPush =
   | { target: 'inbox'; requestId: string }
   | { target: 'session'; sessionId: string; eventId?: string }
 
-interface EvalsChangedPush {
-  projectId: string
-  runs: EvalRun[]
-}
-
 interface VerifyChangedPush {
   projectId: string
   runs: VerifyRun[]
@@ -438,11 +375,6 @@ interface DiagramsChangedPush {
   entries: DiagramEntry[]
 }
 
-interface ApiChangedPush {
-  projectId: string
-  runs: ApiEvalRun[]
-}
-
 interface TerminalDataPush {
   id: string
   data: string
@@ -459,12 +391,10 @@ export interface PushMap {
   'push.counters': Counters
   'push.inboxChanged': InboxChangedPush
   'push.queueChanged': QueueChangedPush
-  'push.evalsChanged': EvalsChangedPush
   'push.verifyChanged': VerifyChangedPush
   'push.securityChanged': SecurityChangedPush
   'push.flowChanged': FlowChangedPush
   'push.diagramsChanged': DiagramsChangedPush
-  'push.apiChanged': ApiChangedPush
   'push.projectCommands': ProjectCommandsPush
   'push.focusRequest': FocusRequestPush
   'push.updateStatus': UpdateStatus
@@ -480,12 +410,10 @@ const PUSH_CHANNEL_KEYS: Record<PushChannel, true> = {
   'push.counters': true,
   'push.inboxChanged': true,
   'push.queueChanged': true,
-  'push.evalsChanged': true,
   'push.verifyChanged': true,
   'push.securityChanged': true,
   'push.flowChanged': true,
   'push.diagramsChanged': true,
-  'push.apiChanged': true,
   'push.projectCommands': true,
   'push.focusRequest': true,
   'push.updateStatus': true,

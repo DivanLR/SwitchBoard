@@ -17,12 +17,9 @@ function setup() {
     onCountersChanged: () => {},
     onSessionExit: () => {},
     onQueueChanged: () => {},
-    onEvalsChanged: () => {},
     onVerifyChanged: (projectId) => changed.push(projectId),
     onSecurityChanged: () => {},
     onDiagramsChanged: () => {},
-    onApiRequests: () => {},
-    onApiChanged: () => {},
     onProjectCommands: () => {},
     gate: (async () => ({ behavior: 'allow', updatedInput: {} })) as never,
   })
@@ -254,18 +251,6 @@ describe('startup reconciliation of orphaned runs (FR-022)', () => {
     expect(after?.note).toBe('one suite failed')
   })
 
-  it('closes an orphaned API eval run too, in that table’s own terminal word', () => {
-    const { repos, manager, projectId } = setup()
-    const run = repos.apiRuns.start({
-      projectId,
-      baseUrl: 'http://localhost:5000',
-      target: 'local',
-      sessionId: 'gone',
-    })
-    expect(repos.apiRuns.byId(run.id)?.status).toBe('running')
-    manager.reconcileOnStartup()
-    expect(repos.apiRuns.byId(run.id)?.status).toBe('error')
-  })
 })
 
 describe('a second pass started before the first reported', () => {

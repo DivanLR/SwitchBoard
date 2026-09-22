@@ -70,12 +70,9 @@ function setup() {
     onCountersChanged: () => {},
     onSessionExit: () => {},
     onQueueChanged: () => {},
-    onEvalsChanged: () => {},
     onVerifyChanged: () => {},
     onSecurityChanged: () => {},
     onDiagramsChanged: () => {},
-    onApiRequests: () => {},
-    onApiChanged: () => {},
     onProjectCommands: () => {},
     gate: (async () => ({ behavior: 'allow', updatedInput: {} })) as never,
   })

@@ -610,12 +610,6 @@ function onSetTarget(label: string): void {
 
 const sectionSessionIds = ref<Partial<Record<SectionKind, string>>>({})
 
-function runInSection(text: string, kind: SectionKind): void {
-  void specs.runInSession(props.project.id, text, true, false, kind).then((id) => {
-    sectionSessionIds.value = { ...sectionSessionIds.value, [kind]: id }
-  })
-}
-
 function runPluginCommand(text: string, kind: SectionKind, watchDiagrams = false): void {
   void specs.runInSession(props.project.id, text, true, watchDiagrams, kind).then((id) => {
     sectionSessionIds.value = { ...sectionSessionIds.value, [kind]: id }
@@ -1215,8 +1209,6 @@ const {
       :project-id="project.id"
       :project-name="project.name"
       :branch="liveSession?.branch ?? endedSession?.branch ?? null"
-      @run="(text: string) => runInSection(text, 'tests')"
-      @ran="onRanInSection"
     />
     <DiffView v-else-if="mainTab === 'diff'" :project-id="project.id" />
     <CleanupView
