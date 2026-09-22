@@ -22,11 +22,12 @@ import type {
   QueuedTask,
   SectionKind,
   Session,
-  FlowItem,
-  FlowLesson,
-  FlowLessonEvidence,
   FlowRun,
-  ScopedItem,
+  FlowSource,
+  FlowStage,
+  FlowStageRecord,
+  FlowStageReport,
+  FlowStageStatus,
   SecurityReport,
   SecurityRun,
   SecurityScope,
@@ -46,6 +47,7 @@ import {
   DEFAULT_SESSION_MODE,
   DEFAULT_SETTINGS,
   emptyVerifyReport,
+  FLOW_STAGES,
 } from '@shared/domain'
 import type { ApiCall, ApiEvalRun, ApiTarget } from '@shared/api-endpoints'
 import type { RulePref, RuleKind } from '@main/inbox/rule-prefs'
@@ -896,9 +898,10 @@ function pruneToLast(
   projectId: string,
   keep: number,
 ): void {
+  const orderColumn = table === 'flow_runs' ? 'createdAt' : 'startedAt'
   db.prepare(
     `DELETE FROM ${table} WHERE projectId = ? AND id NOT IN (
-       SELECT id FROM ${table} WHERE projectId = ? ORDER BY startedAt DESC, rowid DESC LIMIT ?
+       SELECT id FROM ${table} WHERE projectId = ? ORDER BY ${orderColumn} DESC, rowid DESC LIMIT ?
      )`,
   ).run(projectId, projectId, keep)
 }
@@ -1049,52 +1052,72 @@ function parseJson<T>(raw: string): T | null {
   }
 }
 
-const FLOW_HISTORY = 10
+const FLOW_HISTORY = 20
 
 class FlowRunsRepo {
   constructor(private db: AppDatabase) {}
 
   start(input: {
     projectId: string
-    featureId: string
-    featureTitle: string
-    sessionId: string | null
-    concurrency: number
+    title: string
+    source: FlowSource
+    sourceRef: string | null
+    sourceUrl: string | null
+    description: string
+    stacks: readonly string[]
+    stage: FlowStage
+    autopilot: boolean
+    autoShip: boolean
+    baseBranch: string | null
   }): FlowRun {
+    const now = nowIso()
     const run: FlowRun = {
       id: newId(),
       projectId: input.projectId,
-      featureId: input.featureId,
-      featureTitle: input.featureTitle,
-      status: 'scoping',
-      sessionId: input.sessionId,
-      risks: [],
-      outOfScope: [],
-      concurrency: input.concurrency,
-      baseBranch: null,
-      worktreeRoot: null,
-      crosscheckRound: 0,
-      concerns: [],
-      specSessionId: null,
+      title: input.title,
+      source: input.source,
+      sourceRef: input.sourceRef,
+      sourceUrl: input.sourceUrl,
+      description: input.description,
+      stacks: [...input.stacks],
+      stage: input.stage,
+      status: 'running',
+      autopilot: input.autopilot,
+      autoShip: input.autoShip,
+      baseBranch: input.baseBranch,
+      branch: null,
+      worktreePath: null,
+      specDir: null,
+      prUrl: null,
+      prId: null,
       note: null,
-      startedAt: nowIso(),
+      createdAt: now,
+      updatedAt: now,
       finishedAt: null,
     }
     this.db
       .prepare(
         `INSERT INTO flow_runs
-           (id, projectId, featureId, featureTitle, status, sessionId, risks, outOfScope,
-            concurrency, baseBranch, worktreeRoot, crosscheckRound, concerns, specSessionId, note, startedAt, finishedAt)
-         VALUES (?, ?, ?, ?, 'scoping', ?, '[]', '[]', ?, NULL, NULL, 0, '[]', NULL, NULL, ?, NULL)`,
+           (id, projectId, title, source, sourceRef, sourceUrl, description, stacks, stage, status,
+            autopilot, autoShip, baseBranch, branch, worktreePath, specDir, prUrl, prId, note,
+            createdAt, updatedAt, finishedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, NULL)`,
       )
       .run(
         run.id,
         run.projectId,
-        run.featureId,
-        run.featureTitle,
-        run.sessionId,
-        run.concurrency,
-        run.startedAt,
+        run.title,
+        run.source,
+        run.sourceRef,
+        run.sourceUrl,
+        run.description,
+        JSON.stringify(run.stacks),
+        run.stage,
+        run.autopilot ? 1 : 0,
+        run.autoShip ? 1 : 0,
+        run.baseBranch,
+        run.createdAt,
+        run.updatedAt,
       )
     pruneToLast(this.db, 'flow_runs', input.projectId, FLOW_HISTORY)
     return run
@@ -1103,7 +1126,7 @@ class FlowRunsRepo {
   listForProject(projectId: string): FlowRun[] {
     return (
       this.db
-        .prepare('SELECT * FROM flow_runs WHERE projectId = ? ORDER BY startedAt DESC, rowid DESC')
+        .prepare('SELECT * FROM flow_runs WHERE projectId = ? ORDER BY createdAt DESC, rowid DESC')
         .all(projectId) as FlowRunRow[]
     ).map(hydrateFlowRun)
   }
@@ -1116,20 +1139,13 @@ class FlowRunsRepo {
   }
 
   bySessionId(sessionId: string): FlowRun | null {
-    const row = this.db.prepare('SELECT * FROM flow_runs WHERE sessionId = ?').get(sessionId) as
-      | FlowRunRow
-      | undefined
-    return row ? hydrateFlowRun(row) : null
-  }
-
-  openFor(projectId: string): FlowRun | null {
     const row = this.db
       .prepare(
-        `SELECT * FROM flow_runs WHERE projectId = ?
-           AND status NOT IN ('done', 'failed', 'cancelled')
-         ORDER BY startedAt DESC, rowid DESC LIMIT 1`,
+        `SELECT flow_runs.* FROM flow_runs
+           JOIN flow_stages ON flow_stages.runId = flow_runs.id
+         WHERE flow_stages.sessionId = ?`,
       )
-      .get(projectId) as FlowRunRow | undefined
+      .get(sessionId) as FlowRunRow | undefined
     return row ? hydrateFlowRun(row) : null
   }
 
@@ -1138,16 +1154,16 @@ class FlowRunsRepo {
     patch: Partial<
       Pick<
         FlowRun,
+        | 'stage'
         | 'status'
-        | 'sessionId'
-        | 'risks'
-        | 'outOfScope'
-        | 'concurrency'
+        | 'autopilot'
+        | 'autoShip'
         | 'baseBranch'
-        | 'worktreeRoot'
-        | 'crosscheckRound'
-        | 'concerns'
-        | 'specSessionId'
+        | 'branch'
+        | 'worktreePath'
+        | 'specDir'
+        | 'prUrl'
+        | 'prId'
         | 'note'
         | 'finishedAt'
       >
@@ -1155,230 +1171,168 @@ class FlowRunsRepo {
   ): void {
     const columns = (
       [
+        'stage',
         'status',
-        'sessionId',
-        'concurrency',
         'baseBranch',
-        'worktreeRoot',
-        'crosscheckRound',
-        'specSessionId',
+        'branch',
+        'worktreePath',
+        'specDir',
+        'prUrl',
+        'prId',
         'note',
         'finishedAt',
       ] as const
     ).filter((key) => patch[key] !== undefined)
-    const json = (['risks', 'outOfScope', 'concerns'] as const).filter((key) => patch[key] !== undefined)
-    if (columns.length === 0 && json.length === 0) return
-    const sets = [...columns, ...json].map((key) => `${key} = ?`).join(', ')
+    const bools = (['autopilot', 'autoShip'] as const).filter((key) => patch[key] !== undefined)
+    if (columns.length === 0 && bools.length === 0) return
+    const sets = [...columns, ...bools, 'updatedAt'].map((key) => `${key} = ?`).join(', ')
     const values = [
       ...columns.map((key) => patch[key] ?? null),
-      ...json.map((key) => JSON.stringify(patch[key])),
+      ...bools.map((key) => (patch[key] ? 1 : 0)),
+      nowIso(),
     ]
     this.db.prepare(`UPDATE flow_runs SET ${sets} WHERE id = ?`).run(...values, id)
   }
 
   finish(id: string, status: FlowRun['status'], note: string | null): void {
+    const now = nowIso()
     this.db
-      .prepare('UPDATE flow_runs SET status = ?, note = ?, finishedAt = ? WHERE id = ?')
-      .run(status, note, nowIso(), id)
+      .prepare('UPDATE flow_runs SET status = ?, note = ?, updatedAt = ?, finishedAt = ? WHERE id = ?')
+      .run(status, note, now, now, id)
   }
 
   reconcileRunning(note: string): string[] {
-    const affected = this.db
+    const stuck = this.db
       .prepare(
-        `SELECT DISTINCT projectId FROM flow_runs
-         WHERE status IN ('scoping', 'publishing')`,
+        `SELECT DISTINCT flow_runs.projectId AS projectId, flow_runs.id AS runId
+           FROM flow_stages JOIN flow_runs ON flow_runs.id = flow_stages.runId
+         WHERE flow_stages.status = 'running'`,
       )
-      .all() as { projectId: string }[]
-    if (affected.length === 0) return []
+      .all() as { projectId: string; runId: string }[]
+    if (stuck.length === 0) return []
+    const now = nowIso()
     this.db
       .prepare(
-        `UPDATE flow_runs SET status = CASE status
-           WHEN 'publishing' THEN 'publish_interrupted' ELSE 'failed' END,
-           note = ?, finishedAt = CASE status WHEN 'publishing' THEN NULL ELSE ? END
-         WHERE status IN ('scoping', 'publishing')`,
+        `UPDATE flow_stages SET status = 'failed', summary = ?, finishedAt = ?
+         WHERE status = 'running'`,
       )
-      .run(note, nowIso())
-    return affected.map((row) => row.projectId)
+      .run(note, now)
+    for (const { runId } of stuck) {
+      this.db
+        .prepare(`UPDATE flow_runs SET status = 'waiting', updatedAt = ? WHERE id = ?`)
+        .run(now, runId)
+    }
+    return [...new Set(stuck.map((row) => row.projectId))]
   }
 }
 
-class FlowItemsRepo {
+class FlowStagesRepo {
   constructor(private db: AppDatabase) {}
 
-  replaceForRun(runId: string, projectId: string, items: readonly ScopedItem[]): FlowItem[] {
-    return transaction(this.db, () => {
-      this.db.prepare('DELETE FROM flow_items WHERE runId = ? AND status = ?').run(runId, 'proposed')
-      const insert = this.db.prepare(
-        `INSERT INTO flow_items
-           (id, runId, projectId, position, localId, title, body, acceptance, estimate, status, attempts)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'proposed', 0)`,
-      )
-      items.forEach((item, index) => {
-        insert.run(
-          newId(),
-          runId,
-          projectId,
-          index,
-          item.localId,
-          item.title,
-          item.body,
-          JSON.stringify(item.acceptance),
-          item.estimate,
+  ensureAll(runId: string): FlowStageRecord[] {
+    const insert = this.db.prepare(
+      `INSERT OR IGNORE INTO flow_stages (runId, stage, status, attempts) VALUES (?, ?, 'pending', 0)`,
+    )
+    for (const stage of FLOW_STAGES) insert.run(runId, stage)
+    return this.listForRun(runId)
+  }
+
+  listForRun(runId: string): FlowStageRecord[] {
+    const rows = this.db
+      .prepare('SELECT * FROM flow_stages WHERE runId = ?')
+      .all(runId) as FlowStageRow[]
+    const byStage = new Map(rows.map((row) => [row.stage, hydrateFlowStage(row)]))
+    return FLOW_STAGES.map((stage) => byStage.get(stage)).filter(
+      (record): record is FlowStageRecord => record !== undefined,
+    )
+  }
+
+  listForProject(projectId: string): FlowStageRecord[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT flow_stages.* FROM flow_stages
+             JOIN flow_runs ON flow_runs.id = flow_stages.runId
+           WHERE flow_runs.projectId = ?`,
         )
-      })
-      return this.listForRun(runId)
-    })
+        .all(projectId) as FlowStageRow[]
+    ).map(hydrateFlowStage)
   }
 
-  listForRun(runId: string): FlowItem[] {
-    return (
-      this.db
-        .prepare('SELECT * FROM flow_items WHERE runId = ? ORDER BY position')
-        .all(runId) as FlowItemRow[]
-    ).map(hydrateFlowItem)
-  }
-
-  listForProject(projectId: string): FlowItem[] {
-    return (
-      this.db
-        .prepare('SELECT * FROM flow_items WHERE projectId = ? ORDER BY runId, position')
-        .all(projectId) as FlowItemRow[]
-    ).map(hydrateFlowItem)
-  }
-
-  byId(id: string): FlowItem | null {
-    const row = this.db.prepare('SELECT * FROM flow_items WHERE id = ?').get(id) as
-      | FlowItemRow
-      | undefined
-    return row ? hydrateFlowItem(row) : null
-  }
-
-  bySessionId(sessionId: string): FlowItem | null {
-    const row = this.db.prepare('SELECT * FROM flow_items WHERE sessionId = ?').get(sessionId) as
-      | FlowItemRow
-      | undefined
-    return row ? hydrateFlowItem(row) : null
-  }
-
-  countActive(runId: string): number {
+  get(runId: string, stage: FlowStage): FlowStageRecord | null {
     const row = this.db
-      .prepare(
-        `SELECT COUNT(*) AS n FROM flow_items WHERE runId = ? AND status IN
-           ('preparing', 'implementing', 'tech_review', 'revising', 'raising_pr', 'pr_interrupted')`,
-      )
-      .get(runId) as { n: number }
-    return row.n
+      .prepare('SELECT * FROM flow_stages WHERE runId = ? AND stage = ?')
+      .get(runId, stage) as FlowStageRow | undefined
+    return row ? hydrateFlowStage(row) : null
   }
 
-  nextQueued(runId: string): FlowItem | null {
+  bySessionId(sessionId: string): FlowStageRecord | null {
     const row = this.db
-      .prepare("SELECT * FROM flow_items WHERE runId = ? AND status = 'queued' ORDER BY position LIMIT 1")
-      .get(runId) as FlowItemRow | undefined
-    return row ? hydrateFlowItem(row) : null
-  }
-
-  queuePublished(runId: string): number {
-    const result = this.db
-      .prepare("UPDATE flow_items SET status = 'queued' WHERE runId = ? AND status = 'published'")
-      .run(runId)
-    return Number(result.changes ?? 0)
-  }
-
-  byLocalId(runId: string, localId: string): FlowItem | null {
-    const row = this.db
-      .prepare('SELECT * FROM flow_items WHERE runId = ? AND localId = ?')
-      .get(runId, localId) as FlowItemRow | undefined
-    return row ? hydrateFlowItem(row) : null
+      .prepare('SELECT * FROM flow_stages WHERE sessionId = ?')
+      .get(sessionId) as FlowStageRow | undefined
+    return row ? hydrateFlowStage(row) : null
   }
 
   update(
-    id: string,
+    runId: string,
+    stage: FlowStage,
     patch: Partial<
       Pick<
-        FlowItem,
-        | 'title'
-        | 'body'
-        | 'workItemId'
-        | 'workItemUrl'
-        | 'branch'
-        | 'worktreePath'
-        | 'sessionId'
-        | 'status'
-        | 'attempts'
-        | 'prId'
-        | 'prUrl'
-        | 'note'
-        | 'startedAt'
-        | 'finishedAt'
+        FlowStageRecord,
+        'status' | 'sessionId' | 'attempts' | 'summary' | 'report' | 'feedback' | 'startedAt' | 'finishedAt'
       >
     >,
   ): void {
     const columns = (
-      [
-        'title',
-        'body',
-        'workItemId',
-        'workItemUrl',
-        'branch',
-        'worktreePath',
-        'sessionId',
-        'status',
-        'attempts',
-        'prId',
-        'prUrl',
-        'note',
-        'startedAt',
-        'finishedAt',
-      ] as const
+      ['status', 'sessionId', 'attempts', 'summary', 'feedback', 'startedAt', 'finishedAt'] as const
     ).filter((key) => patch[key] !== undefined)
-    if (columns.length === 0) return
-    const sets = columns.map((key) => `${key} = ?`).join(', ')
+    const hasReport = patch.report !== undefined
+    if (columns.length === 0 && !hasReport) return
+    const sets = [...columns, ...(hasReport ? ['report'] : [])].map((key) => `${key} = ?`).join(', ')
+    const values = [
+      ...columns.map((key) => patch[key] ?? null),
+      ...(hasReport ? [patch.report ? JSON.stringify(patch.report) : null] : []),
+    ]
     this.db
-      .prepare(`UPDATE flow_items SET ${sets} WHERE id = ?`)
-      .run(...columns.map((key) => patch[key] ?? null), id)
+      .prepare(`UPDATE flow_stages SET ${sets} WHERE runId = ? AND stage = ?`)
+      .run(...values, runId, stage)
   }
 }
 
 interface FlowRunRow {
   id: string
   projectId: string
-  featureId: string
-  featureTitle: string
+  title: string
+  source: FlowSource
+  sourceRef: string | null
+  sourceUrl: string | null
+  description: string
+  stacks: string
+  stage: FlowStage
   status: FlowRun['status']
-  sessionId: string | null
-  risks: string
-  outOfScope: string
-  concurrency: number
+  autopilot: number
+  autoShip: number
   baseBranch: string | null
-  worktreeRoot: string | null
-  crosscheckRound: number
-  concerns: string
-  specSessionId: string | null
+  branch: string | null
+  worktreePath: string | null
+  specDir: string | null
+  prUrl: string | null
+  prId: string | null
   note: string | null
-  startedAt: string
+  createdAt: string
+  updatedAt: string
   finishedAt: string | null
 }
 
-interface FlowItemRow {
-  id: string
+interface FlowStageRow {
   runId: string
-  projectId: string
-  position: number
-  localId: string
-  title: string
-  body: string
-  acceptance: string
-  estimate: FlowItem['estimate']
-  workItemId: string | null
-  workItemUrl: string | null
-  branch: string | null
-  worktreePath: string | null
+  stage: FlowStage
+  status: FlowStageStatus
   sessionId: string | null
-  status: FlowItem['status']
   attempts: number
-  prId: string | null
-  prUrl: string | null
-  note: string | null
+  summary: string | null
+  report: string | null
+  feedback: string | null
   startedAt: string | null
   finishedAt: string | null
 }
@@ -1386,114 +1340,16 @@ interface FlowItemRow {
 function hydrateFlowRun(row: FlowRunRow): FlowRun {
   return {
     ...row,
-    risks: parseJson<string[]>(row.risks) ?? [],
-    outOfScope: parseJson<string[]>(row.outOfScope) ?? [],
-    concerns: parseJson<string[]>(row.concerns) ?? [],
+    stacks: parseJson<string[]>(row.stacks) ?? [],
+    autopilot: row.autopilot === 1,
+    autoShip: row.autoShip === 1,
   }
 }
 
-class FlowLessonsRepo {
-  constructor(private db: AppDatabase) {}
-
-  listForProject(projectId: string): FlowLesson[] {
-    return (
-      this.db
-        .prepare('SELECT * FROM flow_lessons WHERE projectId = ? ORDER BY createdAt DESC, rowid DESC')
-        .all(projectId) as FlowLessonRow[]
-    ).map(hydrateFlowLesson)
-  }
-
-  rejectedRules(projectId: string): string[] {
-    return (
-      this.db
-        .prepare("SELECT rule FROM flow_lessons WHERE projectId = ? AND status = 'rejected'")
-        .all(projectId) as { rule: string }[]
-    ).map((row) => row.rule)
-  }
-
-  propose(input: {
-    projectId: string
-    runId: string | null
-    ruleId: string
-    rule: string
-    section: string | null
-    evidence: FlowLessonEvidence[]
-  }): FlowLesson | null {
-    const existing = this.db
-      .prepare('SELECT * FROM flow_lessons WHERE projectId = ? AND ruleId = ?')
-      .get(input.projectId, input.ruleId) as FlowLessonRow | undefined
-    if (existing) return null
-    const lesson: FlowLesson = {
-      id: newId(),
-      projectId: input.projectId,
-      runId: input.runId,
-      ruleId: input.ruleId,
-      rule: input.rule,
-      section: input.section,
-      evidence: input.evidence,
-      status: 'proposed',
-      reason: null,
-      createdAt: nowIso(),
-      decidedAt: null,
-    }
-    this.db
-      .prepare(
-        `INSERT INTO flow_lessons
-           (id, projectId, runId, ruleId, rule, section, evidence, status, reason, createdAt, decidedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'proposed', NULL, ?, NULL)`,
-      )
-      .run(
-        lesson.id,
-        lesson.projectId,
-        lesson.runId,
-        lesson.ruleId,
-        lesson.rule,
-        lesson.section,
-        JSON.stringify(lesson.evidence),
-        lesson.createdAt,
-      )
-    return lesson
-  }
-
-  byId(id: string): FlowLesson | null {
-    const row = this.db.prepare('SELECT * FROM flow_lessons WHERE id = ?').get(id) as
-      | FlowLessonRow
-      | undefined
-    return row ? hydrateFlowLesson(row) : null
-  }
-
-  decide(id: string, status: 'accepted' | 'rejected', reason: string | null): void {
-    this.db
-      .prepare('UPDATE flow_lessons SET status = ?, reason = ?, decidedAt = ? WHERE id = ?')
-      .run(status, reason, nowIso(), id)
-  }
-}
-
-interface FlowLessonRow {
-  id: string
-  projectId: string
-  runId: string | null
-  ruleId: string
-  rule: string
-  section: string | null
-  evidence: string
-  status: FlowLesson['status']
-  reason: string | null
-  createdAt: string
-  decidedAt: string | null
-}
-
-function hydrateFlowLesson(row: FlowLessonRow): FlowLesson {
+function hydrateFlowStage(row: FlowStageRow): FlowStageRecord {
   return {
     ...row,
-    evidence: parseJson<FlowLessonEvidence[]>(row.evidence) ?? [],
-  }
-}
-
-function hydrateFlowItem(row: FlowItemRow): FlowItem {
-  return {
-    ...row,
-    acceptance: parseJson<string[]>(row.acceptance) ?? [],
+    report: row.report ? parseJson<FlowStageReport>(row.report) : null,
   }
 }
 
@@ -1850,8 +1706,7 @@ export interface Repositories {
   verifyRuns: VerifyRunsRepo
   securityRuns: SecurityRunsRepo
   flowRuns: FlowRunsRepo
-  flowItems: FlowItemsRepo
-  flowLessons: FlowLessonsRepo
+  flowStages: FlowStagesRepo
   apiRuns: ApiRunsRepo
   diagramRequests: DiagramRequestsRepo
   customSkills: CustomSkillsRepo
@@ -1875,8 +1730,7 @@ export function createRepositories(db: AppDatabase): Repositories {
     verifyRuns: new VerifyRunsRepo(db),
     securityRuns: new SecurityRunsRepo(db),
     flowRuns: new FlowRunsRepo(db),
-    flowItems: new FlowItemsRepo(db),
-    flowLessons: new FlowLessonsRepo(db),
+    flowStages: new FlowStagesRepo(db),
     apiRuns: new ApiRunsRepo(db),
     diagramRequests: new DiagramRequestsRepo(db),
     customSkills: new CustomSkillsRepo(db),

@@ -442,7 +442,6 @@ export interface Settings {
   favouriteSkills: string[]
   mcpActiveServers: string[]
   sandboxMemory: string
-  flowConcurrency: number
   flowWorktreeRoot: string
 }
 
@@ -489,7 +488,6 @@ export const DEFAULT_SETTINGS: Settings = {
   databaseMcpServers: [],
   mcpActiveServers: [],
   sandboxMemory: '6g',
-  flowConcurrency: 4,
   flowWorktreeRoot: '',
   diagramEngine: 'diagram-design',
   favouriteSkills: [],
@@ -683,36 +681,25 @@ export interface SecurityReport {
   artefacts: string[]
 }
 
-export type FlowRunStatus =
-  | 'scoping'
-  | 'crosscheck'
-  | 'awaiting_approval'
-  | 'publishing'
-  | 'publish_interrupted'
-  | 'ready'
-  | 'implementing'
-  | 'learning'
-  | 'done'
-  | 'failed'
-  | 'cancelled'
+export type FlowSource = 'ado' | 'text' | 'spec'
 
-export type FlowItemStatus =
-  | 'proposed'
-  | 'published'
-  | 'queued'
-  | 'preparing'
-  | 'implementing'
-  | 'tech_review'
-  | 'revising'
-  | 'raising_pr'
-  | 'pr_interrupted'
-  | 'pr_open'
-  | 'done'
-  | 'blocked'
-  | 'failed'
-  | 'cancelled'
+export type FlowStage = 'spec' | 'plan' | 'build' | 'clean' | 'test' | 'review' | 'ship'
 
-export type FlowEstimate = 's' | 'm' | 'l'
+export const FLOW_STAGES: readonly FlowStage[] = ['spec', 'plan', 'build', 'clean', 'test', 'review', 'ship']
+
+export const FLOW_STAGE_LABELS: Readonly<Record<FlowStage, string>> = {
+  spec: 'Spec',
+  plan: 'Plan',
+  build: 'Build',
+  clean: 'Clean',
+  test: 'Test',
+  review: 'Review',
+  ship: 'Ship',
+}
+
+export type FlowStageStatus = 'pending' | 'running' | 'review' | 'approved' | 'skipped' | 'failed'
+
+export type FlowRunStatus = 'running' | 'waiting' | 'done' | 'failed' | 'cancelled'
 
 export interface FlowFeature {
   id: string
@@ -721,103 +708,75 @@ export interface FlowFeature {
   url: string | null
 }
 
-export interface ScopedItem {
-  localId: string
-  title: string
-  body: string
-  acceptance: string[]
-  estimate: FlowEstimate
+export type FlowReviewSeverity = 'must_fix' | 'should_fix' | 'nit'
+
+export interface FlowReviewFinding {
+  severity: FlowReviewSeverity
+  file: string | null
+  line: number | null
+  what: string
 }
 
-export interface FlowItem {
-  id: string
-  runId: string
-  projectId: string
-  position: number
-  localId: string
-  title: string
-  body: string
-  acceptance: string[]
-  estimate: FlowEstimate
-  workItemId: string | null
-  workItemUrl: string | null
-  branch: string | null
-  worktreePath: string | null
-  sessionId: string | null
-  status: FlowItemStatus
-  attempts: number
-  prId: string | null
+export interface FlowStageReport {
+  tasksDone: number | null
+  tasksTotal: number | null
+  verdict: 'ready' | 'needs_fixes' | null
+  findings: FlowReviewFinding[]
+  unmet: string[]
   prUrl: string | null
-  note: string | null
+  prId: string | null
+  verify: VerifyReport | null
+}
+
+export function emptyFlowStageReport(): FlowStageReport {
+  return {
+    tasksDone: null,
+    tasksTotal: null,
+    verdict: null,
+    findings: [],
+    unmet: [],
+    prUrl: null,
+    prId: null,
+    verify: null,
+  }
+}
+
+export interface FlowStageRecord {
+  runId: string
+  stage: FlowStage
+  status: FlowStageStatus
+  sessionId: string | null
+  attempts: number
+  summary: string | null
+  report: FlowStageReport | null
+  feedback: string | null
   startedAt: string | null
   finishedAt: string | null
-}
-
-export type FlowLessonStatus = 'proposed' | 'accepted' | 'rejected'
-
-export interface FlowLessonEvidence {
-  prId: string | null
-  author: string | null
-  quote: string
-}
-
-export interface FlowLesson {
-  id: string
-  projectId: string
-  runId: string | null
-  ruleId: string
-  rule: string
-  section: string | null
-  evidence: FlowLessonEvidence[]
-  status: FlowLessonStatus
-  reason: string | null
-  createdAt: string
-  decidedAt: string | null
-}
-
-export function flowRuleId(rule: string): string {
-  const normalised = rule
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .replace(/[.;:,]+$/, '')
-  let hash = 5381
-  for (let i = 0; i < normalised.length; i += 1) {
-    hash = ((hash << 5) + hash + normalised.charCodeAt(i)) >>> 0
-  }
-  return hash.toString(36).padStart(7, '0')
 }
 
 export interface FlowRun {
   id: string
   projectId: string
-  featureId: string
-  featureTitle: string
+  title: string
+  source: FlowSource
+  sourceRef: string | null
+  sourceUrl: string | null
+  description: string
+  stacks: string[]
+  stage: FlowStage
   status: FlowRunStatus
-  sessionId: string | null
-  risks: string[]
-  outOfScope: string[]
-  concurrency: number
+  autopilot: boolean
+  autoShip: boolean
   baseBranch: string | null
-  worktreeRoot: string | null
-  crosscheckRound: number
-  concerns: string[]
-  specSessionId: string | null
+  branch: string | null
+  worktreePath: string | null
+  specDir: string | null
+  prUrl: string | null
+  prId: string | null
   note: string | null
-  startedAt: string
+  createdAt: string
+  updatedAt: string
   finishedAt: string | null
-}
-
-export function flowStage(
-  status: FlowRunStatus,
-): 'scoping' | 'crosscheck' | 'approve' | 'publishing' | 'ready' | 'learning' | 'closed' {
-  if (status === 'scoping') return 'scoping'
-  if (status === 'crosscheck') return 'crosscheck'
-  if (status === 'learning') return 'learning'
-  if (status === 'awaiting_approval') return 'approve'
-  if (status === 'publishing' || status === 'publish_interrupted') return 'publishing'
-  if (status === 'ready' || status === 'implementing') return 'ready'
-  return 'closed'
 }
 
 export interface SecurityRun {
