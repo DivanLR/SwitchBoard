@@ -882,7 +882,6 @@ export type SectionKind =
   | 'spec'
   | 'tests'
   | 'diff'
-  | 'cleanup'
   | 'diagram'
   | 'flow'
 
@@ -916,7 +915,6 @@ const SECTION_LABELS: Record<SectionKind, string> = {
   spec: 'Specs',
   tests: 'Tests',
   diff: 'Diff',
-  cleanup: 'Cleanup',
   diagram: 'Diagram',
   flow: 'Flow',
 }

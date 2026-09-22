@@ -35,8 +35,8 @@
       So every surface here is populated: six projects across every lane state,
       a session stream carrying each event kind, specs with phases, a finished
       verification run filling all six gates, a working-tree diff across folders,
-      diagrams, cleanup commands, a queue, and an inbox holding all three risk
-      tiers at once.
+      diagrams, project commands for the suggestion dropdown, a queue, and an
+      inbox holding all three risk tiers at once.
 
       Runs cannot simply be handed to the driver: reportVerifyResult finishes a
       run that is already in flight, exactly as the main process does. So this
@@ -346,9 +346,9 @@
         },
       })
 
-      // ---- CLEANUP -----------------------------------------------------------
-      // Namespaced exactly as a session reports plugin commands, which is what makes
-      // the groups read as installed and each row as runnable.
+      // ---- PROJECT COMMANDS ----------------------------------------------------
+      // Namespaced exactly as a session reports plugin commands, which is what feeds
+      // the composer's slash-command suggestion dropdown.
       m.setCommands('p-alpha', [
         { name: 'dotnet-claude-kit:de-sloppify', description: 'Formatting, dead code, warnings' },
         { name: 'dotnet-claude-kit:code-review', description: 'Multi-dimensional review' },

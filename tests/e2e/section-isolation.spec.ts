@@ -12,7 +12,7 @@ async function sends(page: import('@playwright/test').Page) {
   return page.evaluate(() => window.__mock.state().sends)
 }
 
-test('a cleanup command and a diagram never share a session, nor take the chat one', async ({
+test('a verify run and a diagram never share a session, nor take the chat one', async ({
   page,
 }) => {
   await page.getByTestId('composer-input').fill('what does this project do?')
@@ -21,10 +21,11 @@ test('a cleanup command and a diagram never share a session, nor take the chat o
   const chat = (await sends(page)).at(-1)?.sessionId
   expect(chat).toBe('s-alpha')
 
-  await page.getByTestId('tab-cleanup').click()
-  await page.getByTestId('cleanup-cmd-de-sloppify').click()
-  await expect.poll(async () => (await sends(page)).some((s) => s.text === '/de-sloppify')).toBe(true)
-  const cleanup = (await sends(page)).find((s) => s.text === '/de-sloppify')?.sessionId
+  await page.getByTestId('tab-tests').click()
+  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-run').click()
+  await expect.poll(async () => (await sends(page)).length).toBeGreaterThan(1)
+  const verify = (await sends(page)).at(-1)?.sessionId
 
   await page.getByTestId('tab-diagrams').click()
   await page.getByTestId('diagram-input').fill('Auth flow for login')
@@ -32,9 +33,9 @@ test('a cleanup command and a diagram never share a session, nor take the chat o
   await expect.poll(async () => (await sends(page)).length).toBeGreaterThan(2)
   const diagram = (await sends(page)).at(-1)?.sessionId
 
-  expect(cleanup).toBeTruthy()
+  expect(verify).toBeTruthy()
   expect(diagram).toBeTruthy()
-  expect(new Set([chat, cleanup, diagram]).size).toBe(3)
+  expect(new Set([chat, verify, diagram]).size).toBe(3)
 })
 
 test('a second diagram takes a session of its own, unlike a second test run', async ({ page }) => {

@@ -6,7 +6,7 @@ import { detectStacks } from '../../src/shared/test-catalog'
 test.skip(!process.env.SHOTS, 'design screenshots; set SHOTS=1 to capture')
 
 const OUT = process.env.SHOTS_OUT ?? '.impeccable/shots/ui'
-const TABS = ['session', 'specs', 'tests', 'diff', 'cleanup', 'diagrams', 'skills', 'security'] as const
+const TABS = ['session', 'specs', 'tests', 'diff', 'diagrams'] as const
 
 function scenario(): MockScenario {
   const base = twoProjectScenario()

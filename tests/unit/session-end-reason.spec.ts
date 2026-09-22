@@ -95,7 +95,7 @@ describe('a session that ends says why', () => {
       handleStatusChange: (entry: unknown, status: string) => void
       hosted: Map<string, unknown>
     }
-    const session = await inner.startBackground(project.id, 'cleanup')
+    const session = await inner.startBackground(project.id, 'flow')
 
     finishTurn(manager, session.id)
     inner.handleStatusChange(inner.hosted.get(session.id), 'done')
@@ -106,7 +106,7 @@ describe('a session that ends says why', () => {
     const row = repos.sessions.byId(session.id)
     expect(row?.endReason).toBe('completed')
     expect(row?.statusDetail).toMatch(/closed itself when that work finished/)
-    expect(row?.sectionKind).toBe('cleanup')
+    expect(row?.sectionKind).toBe('flow')
   })
 
   it('says so when the last run never closed the session at all', () => {

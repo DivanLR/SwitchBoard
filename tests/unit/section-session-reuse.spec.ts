@@ -80,19 +80,19 @@ describe('the session a section dispatch lands in', () => {
   it('still reuses a live session for the kinds that share one', async () => {
     const { project, manager } = setup()
 
-    const first = await manager.backgroundSessionFor(project.id, 'cleanup')
-    const second = await manager.backgroundSessionFor(project.id, 'cleanup')
+    const first = await manager.backgroundSessionFor(project.id, 'flow')
+    const second = await manager.backgroundSessionFor(project.id, 'flow')
 
     expect(second.id).toBe(first.id)
   })
 
-  it('never crosses kinds, so a spec command cannot land in the cleanup session', async () => {
+  it('never crosses kinds, so a spec command cannot land in the flow session', async () => {
     const { project, manager } = setup()
 
-    const cleanup = await manager.backgroundSessionFor(project.id, 'cleanup')
+    const flow = await manager.backgroundSessionFor(project.id, 'flow')
     const spec = await manager.backgroundSessionFor(project.id, 'spec')
 
-    expect(spec.id).not.toBe(cleanup.id)
+    expect(spec.id).not.toBe(flow.id)
   })
 
   it('leaves a bypass default behind, so a section session stays off the container', async () => {
@@ -110,7 +110,7 @@ describe('the session a section dispatch lands in', () => {
     const { project, manager } = setup()
 
     const diff = await manager.backgroundSessionFor(project.id, 'diff')
-    const cleanup = await manager.backgroundSessionFor(project.id, 'cleanup')
+    const flow = await manager.backgroundSessionFor(project.id, 'flow')
 
     const hosted = (
       manager as unknown as {
@@ -118,7 +118,7 @@ describe('the session a section dispatch lands in', () => {
       }
     ).hosted
     expect(hosted.get(diff.id)?.session.options.mainModel).toBe(DEFAULT_SETTINGS.workerModel)
-    expect(hosted.get(cleanup.id)?.session.options.mainModel).toBe(DEFAULT_SETTINGS.intelligentModel)
+    expect(hosted.get(flow.id)?.session.options.mainModel).toBe(DEFAULT_SETTINGS.intelligentModel)
   })
 
   it('runs a session in the worktree it is given, without moving the project', async () => {
@@ -157,8 +157,8 @@ describe('the session a section dispatch lands in', () => {
     dirs.push(dir)
     const other = repos.projects.insert({ name: 'b', path: dir, source: 'manual' })
 
-    const mine = await manager.backgroundSessionFor(project.id, 'cleanup')
-    const theirs = await manager.backgroundSessionFor(other.id, 'cleanup')
+    const mine = await manager.backgroundSessionFor(project.id, 'flow')
+    const theirs = await manager.backgroundSessionFor(other.id, 'flow')
 
     expect(theirs.id).not.toBe(mine.id)
   })

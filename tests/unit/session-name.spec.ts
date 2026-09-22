@@ -59,14 +59,14 @@ describe('sessionName', () => {
   })
 
   it('names a section that leaves no run row behind', () => {
-    expect(sessionName('s1', { kinds: { s1: 'cleanup' } }, 'main')).toBe('Cleanup - main')
+    expect(sessionName('s1', { kinds: { s1: 'flow' } }, 'main')).toBe('Flow - main')
     expect(sessionName('s1', { kinds: { s1: 'diff' } })).toBe('Diff')
     expect(sessionName('s1', { kinds: { s1: 'spec' } }, 'main')).toBe('Specs - main')
   })
 
   it('prefers the live kind over a stale run row', () => {
-    expect(sessionName('s1', { kinds: { s1: 'cleanup' }, verifyRunSessionIds: ['s1'] })).toBe(
-      'Cleanup',
+    expect(sessionName('s1', { kinds: { s1: 'flow' }, verifyRunSessionIds: ['s1'] })).toBe(
+      'Flow',
     )
   })
 

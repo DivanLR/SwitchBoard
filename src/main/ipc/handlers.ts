@@ -11,7 +11,6 @@ import {
   diagramPrompt,
   isDiagramFilePick,
 } from '@shared/diagram'
-import { CLEANUP_GROUPS } from '@shared/command-catalog'
 import { applyToRegionPrompt } from '@shared/diff-apply'
 import type {
   Counters,
@@ -204,7 +203,6 @@ async function preReadStackEntries(root: string): Promise<Map<string, string[]>>
 }
 
 const ALLOWED_PLUGINS: ReadonlySet<string> = new Set([
-  ...CLEANUP_GROUPS.map((group) => `${group.marketplace}|${group.pkg}`),
   `${DIAGRAM_PLUGIN.marketplace}|${DIAGRAM_PLUGIN.pkg}`,
 ])
 

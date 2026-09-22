@@ -16,7 +16,6 @@ import {
 import type { ComputedRef, Ref } from 'vue'
 import { agentIdOf } from '@shared/domain'
 import type { SectionKind, SessionEvent } from '@shared/domain'
-import type { CleanupGroup } from '@shared/command-catalog'
 import { DIAGRAM_PLUGIN } from '@shared/diagram'
 import { activeAgents } from '@shared/agents'
 import { parseInlineQuestion } from '@shared/inline-question'
@@ -45,7 +44,6 @@ import QuestionEvent from '@renderer/components/QuestionEvent.vue'
 import Icon from '@renderer/components/Icon.vue'
 import EffortBar from '@renderer/components/EffortBar.vue'
 import SpecsView from '@renderer/views/SpecsView.vue'
-import CleanupView from '@renderer/views/CleanupView.vue'
 import TestsView from '@renderer/views/TestsView.vue'
 import DiffView from '@renderer/views/DiffView.vue'
 import DiagramsView from '@renderer/views/DiagramsView.vue'
@@ -98,7 +96,6 @@ const mainTab = ref<
   | 'specs'
   | 'tests'
   | 'diff'
-  | 'cleanup'
   | 'diagrams'
 >('session')
 const specCount = computed(() => specs.stateFor(props.project.id).specs.length)
@@ -637,9 +634,6 @@ async function installPlugin(marketplace: string, pkg: string): Promise<void> {
   }
 }
 
-const installCleanup = (group: CleanupGroup): Promise<void> =>
-  installPlugin(group.marketplace, group.pkg)
-
 const installDiagramPlugin = (): Promise<void> =>
   installPlugin(DIAGRAM_PLUGIN.marketplace, DIAGRAM_PLUGIN.pkg)
 
@@ -1089,14 +1083,6 @@ const {
       </button>
       <button
         class="ui-tab"
-        :class="{ sel: mainTab === 'cleanup', 'is-selected': mainTab === 'cleanup' }"
-        data-testid="tab-cleanup"
-        @click="mainTab = 'cleanup'"
-      >
-        Cleanup
-      </button>
-      <button
-        class="ui-tab"
         :class="{ sel: mainTab === 'diagrams', 'is-selected': mainTab === 'diagrams' }"
         data-testid="tab-diagrams"
         @click="mainTab = 'diagrams'"
@@ -1191,16 +1177,6 @@ const {
       :branch="liveSession?.branch ?? endedSession?.branch ?? null"
     />
     <DiffView v-else-if="mainTab === 'diff'" :project-id="project.id" />
-    <CleanupView
-      v-else-if="mainTab === 'cleanup'"
-      :project-name="project.name"
-      :available="availableCommandNames"
-      :session-id="sectionSessionIds.cleanup ?? null"
-      :installing="installing !== null"
-      :install-error="installError"
-      @run="(text: string) => runPluginCommand(text, 'cleanup')"
-      @install="installCleanup"
-    />
     <DiagramsView
       v-else-if="mainTab === 'diagrams'"
       :project-id="project.id"
