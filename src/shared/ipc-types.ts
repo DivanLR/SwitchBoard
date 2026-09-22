@@ -183,9 +183,6 @@ export interface InvokeMap {
   'projects.commands': { req: { projectId: string }; res: ProjectCommand[] }
   'skills.list': { req: void; res: CustomSkill[] }
   'skills.import': { req: { url: string }; res: SkillImportResult }
-  'skills.setEnabled': { req: { name: string; enabled: boolean }; res: CustomSkill[] }
-  'skills.remove': { req: { name: string }; res: CustomSkill[] }
-  'skills.run': { req: { projectId: string; name: string; argument?: string }; res: { sessionId: string } }
   'specs.state': { req: { projectId: string }; res: SpecKitState }
   'specs.detail': { req: { projectId: string; specId: string }; res: SpecDetail | null }
   'specs.install': { req: { projectId: string }; res: SpecKitState }

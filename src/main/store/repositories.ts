@@ -663,6 +663,11 @@ class SettingsRepo {
     delete stored.planModel
     delete stored.workModel
     delete stored.dailySpendLimit
+    delete stored.projectApiBase
+    delete stored.projectApiStart
+    delete stored.projectApiQa
+    delete stored.projectApiQaHeaders
+    delete stored.favouriteSkills
     return { ...DEFAULT_SETTINGS, ...stored }
   }
 
@@ -1534,14 +1539,6 @@ class CustomSkillsRepo {
     this.db
       .prepare('UPDATE custom_skills SET enabled = ? WHERE name = ?')
       .run(enabled ? 1 : 0, name)
-  }
-
-  remove(name: string): void {
-    this.db.prepare('DELETE FROM custom_skills WHERE name = ?').run(name)
-  }
-
-  byName(name: string): CustomSkill | undefined {
-    return this.list().find((skill) => skill.name === name)
   }
 }
 

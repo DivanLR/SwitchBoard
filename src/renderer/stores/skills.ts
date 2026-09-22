@@ -39,9 +39,7 @@ const store = reactive({
       if (n > 0) {
         toasts.success(
           `Imported ${n} skill${n === 1 ? '' : 's'}`,
-          result.skipped.length > 0
-            ? `${result.skipped.length} skipped — see the list below.`
-            : 'They are switched on and ready in the Skills tab.',
+          result.skipped.length > 0 ? `${result.skipped.length} skipped.` : "It's ready to use.",
         )
       }
       return result.imported.length > 0
@@ -51,35 +49,6 @@ const store = reactive({
       return false
     } finally {
       state.importing = false
-    }
-  },
-
-  async setEnabled(name: string, on: boolean): Promise<void> {
-    state.error = null
-    try {
-      state.items = await invoke('skills.setEnabled', { name, enabled: on })
-    } catch (e) {
-      state.error = errorMessage(e)
-    }
-  },
-
-  async remove(name: string): Promise<void> {
-    state.error = null
-    try {
-      state.items = await invoke('skills.remove', { name })
-    } catch (e) {
-      state.error = errorMessage(e)
-    }
-  },
-
-  async run(projectId: string, name: string, argument?: string): Promise<string | null> {
-    state.error = null
-    try {
-      const { sessionId } = await invoke('skills.run', { projectId, name, argument })
-      return sessionId
-    } catch (e) {
-      state.error = errorMessage(e)
-      return null
     }
   },
 })

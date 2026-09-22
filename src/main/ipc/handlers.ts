@@ -49,7 +49,7 @@ import { readDiffList, readFileDiff } from '@main/sessions/session-manager'
 import { readDiagramList } from '@main/diagrams/list'
 import { importSkills } from '@main/skills/import'
 import type { FlowSupervisor } from '@main/flow/flow-supervisor'
-import { disableSkill, enableSkill, removeSkill } from '@main/skills/install'
+import { enableSkill } from '@main/skills/install'
 import { check as checkForUpdates, installNow } from '@main/updater'
 
 const EVENT_FLUSH_INTERVAL_MS = 33 
@@ -421,36 +421,6 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       }
       await manager.reloadPlugins()
       return result
-    },
-    'skills.setEnabled': async (req) => {
-      if (!repos.customSkills.byName(req.name)) {
-        throw { code: 'NOT_FOUND', message: 'No such skill.' } satisfies IpcError
-      }
-      if (req.enabled) await enableSkill(skillsStagingRoot, req.name)
-      else await disableSkill(req.name)
-      repos.customSkills.setEnabled(req.name, req.enabled)
-      await manager.reloadPlugins()
-      return repos.customSkills.list()
-    },
-    'skills.remove': async (req) => {
-      await removeSkill(skillsStagingRoot, req.name)
-      repos.customSkills.remove(req.name)
-      await manager.reloadPlugins()
-      return repos.customSkills.list()
-    },
-    'skills.run': async (req) => {
-      const skill = repos.customSkills.byName(req.name)
-      if (!skill) throw { code: 'NOT_FOUND', message: 'No such skill.' } satisfies IpcError
-      if (!skill.enabled) {
-        throw {
-          code: 'RULE_NOT_ALLOWED',
-          message: 'That skill is switched off. Turn it on in Settings, then run it.',
-        } satisfies IpcError
-      }
-      const session = await manager.backgroundSessionFor(req.projectId, 'skills')
-      const argument = req.argument?.trim()
-      manager.sendMessage(session.id, argument ? `/${skill.name} ${argument}` : `/${skill.name}`)
-      return { sessionId: session.id }
     },
     'specs.state': (req) => {
       const project = repos.projects.byId(req.projectId)

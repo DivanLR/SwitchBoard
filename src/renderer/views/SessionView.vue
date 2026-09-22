@@ -50,12 +50,11 @@ import TestsView from '@renderer/views/TestsView.vue'
 import DiffView from '@renderer/views/DiffView.vue'
 import DiagramsView from '@renderer/views/DiagramsView.vue'
 import TerminalPane from '@renderer/components/TerminalPane.vue'
-import SkillsView from '@renderer/views/SkillsView.vue'
 import ConversationTerminal from '@renderer/components/ConversationTerminal.vue'
 import SessionWaitOverlay from '@renderer/components/SessionWaitOverlay.vue'
 
 const props = defineProps<{ project: ProjectListItem }>()
-const emit = defineEmits<{ (e: 'open-settings', tab: 'skills'): void; (e: 'open-flow'): void }>()
+const emit = defineEmits<{ (e: 'open-flow'): void }>()
 
 const projects = useProjectsStore()
 const active = useActiveSessionStore()
@@ -101,7 +100,6 @@ const mainTab = ref<
   | 'diff'
   | 'cleanup'
   | 'diagrams'
-  | 'skills'
 >('session')
 const specCount = computed(() => specs.stateFor(props.project.id).specs.length)
 const diffCount = computed(() => diff.resultFor(props.project.id).files.length)
@@ -1105,14 +1103,6 @@ const {
       >
         Diagrams
       </button>
-      <button
-        class="ui-tab"
-        :class="{ sel: mainTab === 'skills', 'is-selected': mainTab === 'skills' }"
-        data-testid="tab-skills"
-        @click="mainTab = 'skills'"
-      >
-        Skills
-      </button>
     </div>
     <div v-if="!active.fullScreenSection && (mainTab === 'session' || mainTab === 'terminal')" class="view-toolbar ui-toolbar">
       <span class="view-label">Workspace</span>
@@ -1220,14 +1210,6 @@ const {
       :install-error="installError"
       @install="installDiagramPlugin"
       @run="runDiagramCommand"
-    />
-    <SkillsView
-      v-else-if="mainTab === 'skills'"
-      :project-id="project.id"
-      :project-name="project.name"
-      :session-id="sectionSessionIds.skills ?? null"
-      @ran="(id: string) => (sectionSessionIds = { ...sectionSessionIds, skills: id })"
-      @manage="emit('open-settings', 'skills')"
     />
     <div
       v-else-if="mainTab === 'session' && (active.view === 'clean' || selectedAgent)"

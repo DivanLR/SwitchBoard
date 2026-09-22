@@ -435,7 +435,6 @@ export interface Settings {
   disabledCommands: Record<string, string[]>
   databaseMcpServers: string[]
   diagramEngine: 'diagram-design' | 'archify'
-  favouriteSkills: string[]
   mcpActiveServers: string[]
   sandboxMemory: string
   flowConcurrency: number
@@ -484,7 +483,6 @@ export const DEFAULT_SETTINGS: Settings = {
   flowConcurrency: 4,
   flowWorktreeRoot: '',
   diagramEngine: 'diagram-design',
-  favouriteSkills: [],
 }
 
 export interface TranscriptSummary {
@@ -886,7 +884,6 @@ export type SectionKind =
   | 'diff'
   | 'cleanup'
   | 'diagram'
-  | 'skills'
   | 'flow'
 
 export function sessionName(
@@ -921,7 +918,6 @@ const SECTION_LABELS: Record<SectionKind, string> = {
   diff: 'Diff',
   cleanup: 'Cleanup',
   diagram: 'Diagram',
-  skills: 'Skills',
   flow: 'Flow',
 }
 

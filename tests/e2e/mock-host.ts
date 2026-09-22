@@ -612,34 +612,6 @@ export function installMockHost(scenario: MockScenario): void {
       customSkills.push(...imported.map((s) => ({ ...s, sourceUrl: url, enabled: true })))
       return { imported: customSkills.filter((c) => imported.some((i) => i.name === c.name)), skipped }
     },
-    'skills.setEnabled': (req) => {
-      const skill = customSkills.find((s) => s.name === String(req.name))
-      if (!skill) throw { code: 'NOT_FOUND', message: 'No such skill.' }
-      skill.enabled = req.enabled === true
-      return [...customSkills]
-    },
-    'skills.remove': (req) => {
-      const at = customSkills.findIndex((s) => s.name === String(req.name))
-      if (at >= 0) customSkills.splice(at, 1)
-      return [...customSkills]
-    },
-    'skills.run': async (req) => {
-      const skill = customSkills.find((s) => s.name === String(req.name))
-      if (!skill) throw { code: 'NOT_FOUND', message: 'No such skill.' }
-      if (!skill.enabled) {
-        throw {
-          code: 'RULE_NOT_ALLOWED',
-          message: 'That skill is switched off. Turn it on in Settings, then run it.',
-        }
-      }
-      const projectId = String(req.projectId)
-      const session = await sectionSession(projectId, 'skills')
-      const argument = typeof req.argument === 'string' ? req.argument.trim() : ''
-      const text = argument ? `/${skill.name} ${argument}` : `/${skill.name}`
-      sends.push({ sessionId: session.id, text })
-      appendEvent(session.id, 'prompt', { text, pending: false })
-      return { sessionId: session.id }
-    },
     'projects.setUseContainers': (req) => {
       const project = projects.find((p) => p.id === req.projectId)
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }

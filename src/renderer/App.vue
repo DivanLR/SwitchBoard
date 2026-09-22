@@ -33,9 +33,9 @@ const updates = useUpdatesStore()
 const showRegistration = ref(false)
 const showSettings = ref(false)
 const showFlow = ref(false)
-const settingsTab = ref<'models' | 'proj' | 'allowed' | 'skills' | 'term' | 'gen'>('models')
+const settingsTab = ref<'models' | 'proj' | 'allowed' | 'term' | 'gen'>('models')
 
-function openSettings(tab: 'models' | 'proj' | 'allowed' | 'skills' | 'term' | 'gen' = 'models'): void {
+function openSettings(tab: 'models' | 'proj' | 'allowed' | 'term' | 'gen' = 'models'): void {
   settingsTab.value = tab
   showSettings.value = true
 }
@@ -199,7 +199,6 @@ const dbProject = computed(() => projects.dbProject)
         <SessionView
           v-else-if="selectedProject"
           :project="selectedProject"
-          @open-settings="openSettings"
           @open-flow="showFlow = true"
         />
         <div v-else class="no-project ui-empty">

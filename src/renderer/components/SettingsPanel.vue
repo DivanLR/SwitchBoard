@@ -3,80 +3,36 @@ import { useTemplateRef, computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useModal } from '@renderer/composables/useModal'
 import { MATCHER_KIND_LABEL, useAllowedRules } from '@renderer/composables/useAllowedRules'
 import type {
-  CustomSkill,
   ModelChoice,
   SessionEngine,
   SessionMode,
   Settings,
 } from '@shared/domain'
 import { engineOf, modelLabel, modelPrice, SESSION_MODES } from '@shared/domain'
-import { readSkillSource, skillSourceLabel } from '@shared/skill-source'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { useUpdatesStore } from '@renderer/stores/updates'
-import { useSkillsStore } from '@renderer/stores/skills'
 import Icon from '@renderer/components/Icon.vue'
 import EffortBar from '@renderer/components/EffortBar.vue'
 
-const props = defineProps<{ initialTab?: 'models' | 'proj' | 'allowed' | 'skills' | 'term' | 'gen' }>()
+const props = defineProps<{ initialTab?: 'models' | 'proj' | 'allowed' | 'term' | 'gen' }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 const dialogEl = useTemplateRef<HTMLElement>('dialog')
 useModal(dialogEl, () => emit('close'))
 const store = useSettingsStore()
-const skills = useSkillsStore()
 
-const skillUrl = ref('')
-
-const skillSource = computed(() => (skillUrl.value.trim() === '' ? null : readSkillSource(skillUrl.value)))
-
-const skillSourceParts = computed(() => {
-  const parsed = skillSource.value
-  if (!parsed?.ok) return null
-  const { owner, repo, ref: gitRef, path } = parsed.source
-  return [
-    { label: 'repository', value: `${owner}/${repo}` },
-    { label: 'branch', value: gitRef ?? 'default branch' },
-    { label: 'folder', value: path === '' ? 'whole repository' : path },
-  ]
-})
-
-async function importSkills(): Promise<void> {
-  const url = skillUrl.value.trim()
-  if (!url || skills.importing || skillSource.value?.ok !== true) return
-  if (await skills.import(url)) skillUrl.value = ''
-}
-
-const skillsBySource = computed<{ url: string; label: string; items: CustomSkill[] }[]>(() => {
-  const groups = new Map<string, CustomSkill[]>()
-  for (const skill of skills.items) {
-    const list = groups.get(skill.sourceUrl)
-    if (list) list.push(skill)
-    else groups.set(skill.sourceUrl, [skill])
-  }
-  return [...groups].map(([url, items]) => {
-    const parsed = readSkillSource(url)
-    return { url, label: parsed.ok ? skillSourceLabel(parsed.source) : url, items }
-  })
-})
-
-async function setGroupEnabled(items: CustomSkill[], on: boolean): Promise<void> {
-  for (const skill of items) {
-    if (skill.enabled !== on) await skills.setEnabled(skill.name, on)
-  }
-}
 const projects = useProjectsStore()
 const updates = useUpdatesStore()
 const settings = computed(() => store.settings)
 
-type Tab = 'models' | 'proj' | 'mcp' | 'allowed' | 'skills' | 'term' | 'gen'
+type Tab = 'models' | 'proj' | 'mcp' | 'allowed' | 'term' | 'gen'
 const tab = ref<Tab>(props.initialTab ?? 'models')
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'models', label: 'Models', icon: 'spark' },
   { id: 'proj', label: 'This project', icon: 'folder' },
   { id: 'mcp', label: 'MCP', icon: 'database' },
   { id: 'allowed', label: 'Allowed list', icon: 'square-check' },
-  { id: 'skills', label: 'Skills', icon: 'spark' },
   { id: 'term', label: 'Terminals', icon: 'terminal' },
   { id: 'gen', label: 'General', icon: 'settings' },
 ]
@@ -147,7 +103,6 @@ onMounted(() => {
   void store.load()
   projId.value = projects.selectedProjectId
   void store.loadAvailableModels()
-  void skills.load()
 })
 
 function save(patch: Partial<Settings>): void {
@@ -734,149 +689,6 @@ const updateLine = computed(() => {
               <button class="btn-quiet" data-testid="allowed-add-btn" @click="addAllowedCommand">
                 Allow
               </button>
-            </div>
-          </template>
-
-          <template v-else-if="tab === 'skills'">
-            <div class="ui-kicker group-label">IMPORT FROM GITHUB</div>
-            <div class="group-desc">
-              Paste a repository, or a folder inside one, and every skill under it is imported.
-              Skills are user-level: switching one on makes it available to every project and
-              every session, in the Skills tab and to the conversation alike.
-            </div>
-
-            <div class="add-cmd-row">
-              <input
-                v-model="skillUrl"
-                class="add-cmd-input mono"
-                :class="{ bad: skillSource?.ok === false }"
-                data-testid="skills-url-input"
-                placeholder="https://github.com/owner/repo/tree/main/skills"
-                :disabled="skills.importing"
-                :aria-invalid="skillSource?.ok === false ? 'true' : 'false'"
-                :aria-describedby="skillSource ? 'skills-url-reading' : undefined"
-                @keydown.enter="importSkills"
-              />
-              <button
-                class="btn-quiet"
-                data-testid="skills-import-btn"
-                :disabled="skills.importing || skillSource?.ok !== true"
-                @click="importSkills"
-              >
-                {{ skills.importing ? 'Importing…' : 'Import' }}
-              </button>
-            </div>
-
-            <div v-if="skillSource" id="skills-url-reading" class="skill-reading" aria-live="polite">
-              <div
-                v-if="skillSourceParts"
-                class="skill-reading-parts"
-                data-testid="skills-url-reading"
-              >
-                <span v-for="part in skillSourceParts" :key="part.label" class="skill-part">
-                  <span class="skill-part-label mono">{{ part.label }}</span>
-                  <span class="skill-part-value mono">{{ part.value }}</span>
-                </span>
-              </div>
-              <div v-else class="skill-reading-bad" data-testid="skills-url-problem">
-                <Icon name="warning" :size="11" />
-                {{ skillSource.ok === false ? skillSource.message : '' }}
-              </div>
-            </div>
-
-            <div class="group-desc skills-caution">
-              <Icon name="warning" :size="11" /> A skill is a set of instructions a session will
-              follow. Import from repositories you trust, and read a skill before switching it on.
-            </div>
-
-            <div v-if="skills.error" class="skills-err" data-testid="skills-settings-error">
-              {{ skills.error }}
-            </div>
-            <div
-              v-if="skills.lastImport && skills.lastImport.skipped.length > 0"
-              class="skills-skipped"
-              data-testid="skills-skipped"
-            >
-              <div class="skipped-head mono">
-                Skipped {{ skills.lastImport.skipped.length }} of
-                {{ skills.lastImport.skipped.length + skills.lastImport.imported.length }}
-              </div>
-              <div v-for="s in skills.lastImport.skipped" :key="s.name" class="skipped-one">
-                <span class="skipped-name mono">{{ s.name }}</span>
-                <span class="skipped-why">{{ s.reason }}</span>
-              </div>
-            </div>
-
-            <div class="ui-kicker group-label" style="margin-top: 12px">IMPORTED SKILLS</div>
-            <div v-if="skills.items.length === 0" class="group-desc" data-testid="skills-none">
-              None yet.
-            </div>
-
-            <div
-              v-for="group in skillsBySource"
-              :key="group.url"
-              class="skill-group"
-              :data-testid="`skill-group-${group.label}`"
-            >
-              <div class="skill-group-head">
-                <span class="skill-group-name mono">{{ group.label }}</span>
-                <span class="skill-group-count mono">
-                  {{ group.items.filter((s) => s.enabled).length }}/{{ group.items.length }} on
-                </span>
-                <button
-                  v-if="group.items.length > 1"
-                  class="skill-group-all"
-                  :data-testid="`skill-group-all-${group.label}`"
-                  :title="`Switch every skill from ${group.label} on or off`"
-                  @click="setGroupEnabled(group.items, !group.items.every((s) => s.enabled))"
-                >
-                  {{ group.items.every((s) => s.enabled) ? 'all off' : 'all on' }}
-                </button>
-              </div>
-
-              <div
-                v-for="skill in group.items"
-                :key="skill.name"
-                class="ui-card setting-row is-actionable"
-                :data-testid="`skill-row-${skill.name}`"
-              >
-                <div class="sr-text">
-                  <div class="sr-label mono">/{{ skill.name }}</div>
-                  <div class="sr-desc">
-                    {{ skill.description || 'No description in its SKILL.md.' }}
-                  </div>
-                  <div class="sr-desc skills-origin mono">
-                    {{ skill.sourcePath || 'repository root' }} · {{ skill.fileCount }} file{{
-                      skill.fileCount === 1 ? '' : 's'
-                    }}
-                  </div>
-                </div>
-                <div class="skills-actions">
-                  <button
-                    class="switch"
-                    :class="{ on: skill.enabled }"
-                    role="switch"
-                    :aria-checked="skill.enabled"
-                    :data-testid="`skill-toggle-${skill.name}`"
-                    :title="
-                      skill.enabled
-                        ? 'On: every session can use this skill. Turning it off removes it from ~/.claude/skills.'
-                        : 'Off: no session can see this skill. Turning it on copies it into ~/.claude/skills.'
-                    "
-                    @click="skills.setEnabled(skill.name, !skill.enabled)"
-                  >
-                    <span class="knob"></span>
-                  </button>
-                  <button
-                    class="skills-remove"
-                    :data-testid="`skill-remove-${skill.name}`"
-                    title="Remove this skill and delete its files"
-                    @click="skills.remove(skill.name)"
-                  >
-                    <Icon name="trash" :size="12" />
-                  </button>
-                </div>
-              </div>
             </div>
           </template>
 

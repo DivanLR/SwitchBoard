@@ -62,7 +62,3 @@ export function readSkillSource(input: string): SkillSourceResult {
 export function isSafeSegment(value: string): boolean {
   return SEGMENT.test(value)
 }
-
-export function skillSourceLabel(source: SkillSource): string {
-  return `${source.owner}/${source.repo}`
-}
