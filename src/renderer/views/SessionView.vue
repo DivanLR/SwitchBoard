@@ -51,7 +51,6 @@ import DiffView from '@renderer/views/DiffView.vue'
 import DiagramsView from '@renderer/views/DiagramsView.vue'
 import TerminalPane from '@renderer/components/TerminalPane.vue'
 import SkillsView from '@renderer/views/SkillsView.vue'
-import SecurityView from '@renderer/views/SecurityView.vue'
 import ConversationTerminal from '@renderer/components/ConversationTerminal.vue'
 import SessionWaitOverlay from '@renderer/components/SessionWaitOverlay.vue'
 
@@ -103,7 +102,6 @@ const mainTab = ref<
   | 'cleanup'
   | 'diagrams'
   | 'skills'
-  | 'security'
 >('session')
 const specCount = computed(() => specs.stateFor(props.project.id).specs.length)
 const diffCount = computed(() => diff.resultFor(props.project.id).files.length)
@@ -1115,14 +1113,6 @@ const {
       >
         Skills
       </button>
-      <button
-        class="ui-tab"
-        :class="{ sel: mainTab === 'security', 'is-selected': mainTab === 'security' }"
-        data-testid="tab-security"
-        @click="mainTab = 'security'"
-      >
-        Security
-      </button>
     </div>
     <div v-if="!active.fullScreenSection && (mainTab === 'session' || mainTab === 'terminal')" class="view-toolbar ui-toolbar">
       <span class="view-label">Workspace</span>
@@ -1239,8 +1229,6 @@ const {
       @ran="(id: string) => (sectionSessionIds = { ...sectionSessionIds, skills: id })"
       @manage="emit('open-settings', 'skills')"
     />
-    <SecurityView v-else-if="mainTab === 'security'" :project-id="project.id" />
-
     <div
       v-else-if="mainTab === 'session' && (active.view === 'clean' || selectedAgent)"
       ref="streamEl"

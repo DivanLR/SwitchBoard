@@ -59,7 +59,6 @@ import {
   transcriptFor,
   writeTranscript,
 } from './transcript'
-import { auditDone, readAuditReport } from '@main/security/audit-dispatch'
 import { parseFlowMarker, type FlowMarker } from '@main/flow/flow-markers'
 import {
   parseSuiteProgress,
@@ -96,7 +95,6 @@ interface SessionManagerCallbacks {
   onSessionExit: (sessionId: string) => void
   onQueueChanged: (projectId: string) => void
   onVerifyChanged: (projectId: string) => void
-  onSecurityChanged: (projectId: string) => void
   onDiagramsChanged: (projectId: string) => void
   onProjectCommands: (projectId: string, commands: ProjectCommand[]) => void
   gate: PermissionGate
@@ -438,7 +436,6 @@ export class SessionManager {
     const note =
       'The application closed before this run reported a result, so nothing it measured is known.'
     this.repos.verifyRuns.reconcileRunning(note)
-    this.repos.securityRuns.reconcileRunning(note)
     sweepOrphanedContainers(leftOpen)
     sweepStaleVolumes((id) => this.repos.sessions.byId(id))
   }
@@ -993,16 +990,6 @@ export class SessionManager {
     }
   }
 
-  async cancelSecurityRun(runId: string): Promise<void> {
-    const run = this.repos.securityRuns.byId(runId)
-    if (!run) throw { code: 'NOT_FOUND', message: 'Run not found' } satisfies IpcError
-    if (run.status !== 'running') return
-    if (run.sessionId) await this.interruptSession(run.sessionId).catch(() => {})
-    this.securityWatch.delete(run.sessionId ?? '')
-    this.repos.securityRuns.finish(runId, 'failed', readAuditReport(run.outputDir), CANCEL_NOTE)
-    this.callbacks.onSecurityChanged(run.projectId)
-  }
-
   async cancelVerifyRun(runId: string): Promise<void> {
     const run = this.repos.verifyRuns.byId(runId)
     if (!run) throw { code: 'NOT_FOUND', message: 'Run not found' } satisfies IpcError
@@ -1104,7 +1091,6 @@ export class SessionManager {
 
   private scanMarkers(entry: HostedEntry, kind: EventKind, payload: unknown): void {
     this.scanVerifyReport(entry, kind, payload)
-    this.scanSecurityReport(entry, kind, payload)
     this.scanFlowMarker(entry, kind, payload)
     this.scanIsolatedSuiteReport(entry, kind, payload)
     this.scanDiagramPlan(entry, kind, payload)
@@ -1155,54 +1141,6 @@ export class SessionManager {
   private closeUnreportedFlow(entry: HostedEntry, reason: SessionEndReason | 'crashed'): void {
     if (!this.flowWatch.delete(entry.row.id)) return
     this.flowHooks?.onSessionEnded(entry.row.id, reason)
-  }
-
-  private securityWatch = new Map<string, { runId: string; outputDir: string }>()
-
-  watchSecurityRun(sessionId: string, runId: string, outputDir: string): void {
-    this.securityWatch.set(sessionId, { runId, outputDir })
-  }
-
-  private scanSecurityReport(entry: HostedEntry, kind: EventKind, payload: unknown): void {
-    const watch = this.securityWatch.get(entry.row.id)
-    if (!watch || !SessionManager.TEXT_SCAN_KINDS.has(kind)) return
-    const text = (payload as { text?: string }).text
-    if (!text || !auditDone(text)) return
-    this.securityWatch.delete(entry.row.id)
-    this.settleSecurityRun(watch.runId, watch.outputDir, entry.row.projectId)
-  }
-
-  private settleSecurityRun(runId: string, outputDir: string, projectId: string): void {
-    const report = readAuditReport(outputDir)
-    if (report) {
-      this.repos.securityRuns.finish(runId, 'complete', report, null)
-    } else {
-      this.repos.securityRuns.finish(
-        runId,
-        'failed',
-        null,
-        'The audit reported it was done, but no findings or coverage ledger was written where the run asked for them.',
-      )
-    }
-    this.callbacks.onSecurityChanged(projectId)
-  }
-
-  private closeUnreportedSecurity(entry: HostedEntry): void {
-    const watch = this.securityWatch.get(entry.row.id)
-    if (!watch) return
-    this.securityWatch.delete(entry.row.id)
-    const report = readAuditReport(watch.outputDir)
-    if (report) {
-      this.repos.securityRuns.finish(watch.runId, 'complete', report, 'The session ended before it said it was done, so this is what it had written.')
-    } else {
-      this.repos.securityRuns.finish(
-        watch.runId,
-        'failed',
-        null,
-        'The session ended before the audit wrote anything.',
-      )
-    }
-    this.callbacks.onSecurityChanged(entry.row.projectId)
   }
 
   private diagramWatch = new Map<string, { file: string | null }>()
@@ -1512,7 +1450,6 @@ export class SessionManager {
     if (status === 'done' || status === 'error') {
       this.closeUnreportedVerify(entry)
       this.closeUnreportedIsolatedSuite(entry)
-      this.closeUnreportedSecurity(entry)
     }
     entry.row.status = status
     entry.row.statusDetail = detail ?? null
@@ -1526,11 +1463,7 @@ export class SessionManager {
     if (!entry.background) return
     if (!entry.ranATurn) return
     const id = entry.row.id
-    if (
-      this.verifyWatch.has(id) ||
-      this.diagramWatch.has(id) ||
-      this.securityWatch.has(id)
-    ) {
+    if (this.verifyWatch.has(id) || this.diagramWatch.has(id)) {
       return
     }
     // A flow session stays open for the supervisor's next step, and is closed by the
@@ -1572,7 +1505,6 @@ export class SessionManager {
     if (!this.hosted.has(entry.row.id)) return
     this.closeUnreportedVerify(entry)
     this.closeUnreportedIsolatedSuite(entry)
-    this.closeUnreportedSecurity(entry)
     this.closeUnreportedFlow(entry, reason === 'crashed' ? 'crashed' : (entry.row.endReason ?? 'completed'))
     if (this.diagramWatch.delete(entry.row.id)) {
       this.callbacks.onDiagramsChanged(entry.row.projectId)

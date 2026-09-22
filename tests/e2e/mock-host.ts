@@ -72,7 +72,6 @@ export interface MockDriver {
   completeTurn: (sessionId: string, costUsd?: number) => void
   setStatus: (sessionId: string, status: string) => void
   reportVerifyResult: (projectId: string, status: string, report: unknown) => void
-  reportSecurityResult: (projectId: string, status: string, report: unknown) => void
   setAdoFeatures: (features: { id: string; title: string; state?: string | null }[]) => void
   setAdoConnected: (on: boolean) => void
   setFlowDirty: (paths: string[]) => void
@@ -115,7 +114,6 @@ export interface MockDriver {
     }[]
     planModeChanges: { sessionId: string; enabled: boolean }[]
     diagramOpens: { projectId: string; file: string }[]
-    reportOpens: { runId: string; file: string }[]
     flowPublishes: { runId: string; count: number }[]
     flowWorkStarts: string[]
     flowRetries: string[]
@@ -186,7 +184,6 @@ export function installMockHost(scenario: MockScenario): void {
   const diagramsByProject = new Map<string, DiagramEntry[]>()
   const diagramRequestedFiles = new Map<string, Set<string>>()
   const diagramOpens: { projectId: string; file: string }[] = []
-  const reportOpens: { runId: string; file: string }[] = []
   const pluginInstalls: { marketplace: string; pkg: string }[] = []
   const diffApplies: { projectId: string; path: string; lines: string[]; instruction: string }[] = []
   const DIAGRAMS_DIR = 'docs/diagrams'
@@ -448,7 +445,6 @@ export function installMockHost(scenario: MockScenario): void {
   const queuedBySession = new Map<string, { eventId: string; text: string }[]>()
   const taskQueueByProject = new Map<string, AnyRecord[]>()
   const verifyByProject = new Map<string, AnyRecord[]>()
-  const securityByProject = new Map<string, AnyRecord[]>()
   const flowRunsByProject = new Map<string, AnyRecord[]>()
   const flowItemsByProject = new Map<string, AnyRecord[]>()
   const flowPublishes: { runId: string; count: number }[] = []
@@ -1260,59 +1256,6 @@ export function installMockHost(scenario: MockScenario): void {
       flowRunsByProject.set(projectId, runs)
       return flowSnapshot(projectId)
     },
-    'security.list': (req) => [...(securityByProject.get(String(req.projectId)) ?? [])],
-    'security.start': async (req) => {
-      const projectId = String(req.projectId)
-      const scope = String(req.scope)
-      if ((securityByProject.get(projectId) ?? []).some((r) => r.status === 'running')) {
-        throw {
-          code: 'RULE_NOT_ALLOWED',
-          message: 'An audit is already running for this project. Wait for it, or stop it first.',
-        }
-      }
-      if (!customSkills.some((s) => s.name === 'security-audit' && s.enabled)) {
-        throw { code: 'NOT_FOUND', message: 'Install the security-audit skill first, then run the audit.' }
-      }
-      const session = await sectionSession(projectId, 'security')
-      const text = `Run a security audit of this repository with the security-audit skill, in full audit mode.\nScope: ${scope}\nSWB_SECURITY`
-      sends.push({ sessionId: session.id, text })
-      appendEvent(session.id, 'prompt', { text, pending: false })
-      const list = securityByProject.get(projectId) ?? []
-      list.unshift({
-        id: `security-${list.length + 1}`,
-        projectId,
-        sessionId: session.id,
-        scope,
-        branch: sessions.get(session.id)?.branch ?? null,
-        status: 'running',
-        report: null,
-        note: null,
-        outputDir: `C:\\\\audits\\\\${projectId}\\\\run-${list.length + 1}`,
-        startedAt: new Date().toISOString(),
-        finishedAt: null,
-      })
-      securityByProject.set(projectId, list)
-      return { sessionId: session.id, runs: [...list] }
-    },
-    'security.cancel': (req) => {
-      const projectId = String(req.projectId)
-      const list = securityByProject.get(projectId) ?? []
-      const at = list.findIndex((r) => r.id === req.runId)
-      if (at < 0) throw { code: 'NOT_FOUND', message: 'Run not found' }
-      if (list[at].status === 'running') {
-        list[at] = {
-          ...list[at],
-          status: 'failed',
-          note: 'You stopped this run before it reported, so nothing it measured is known.',
-          finishedAt: new Date().toISOString(),
-        }
-        securityByProject.set(projectId, list)
-      }
-      return [...list]
-    },
-    'security.openReport': (req) => {
-      reportOpens.push({ runId: String(req.runId), file: String(req.file) })
-    },
     'verify.list': (req) => [...(verifyByProject.get(String(req.projectId)) ?? [])],
     'verify.suites': () =>
       (scenario.suites ?? []).map((stack) => ({ ...stack, suites: [...stack.suites] })),
@@ -1814,15 +1757,6 @@ export function installMockHost(scenario: MockScenario): void {
       flowRunsByProject.set(projectId, runs)
       pushFlow(projectId)
     },
-    reportSecurityResult: (projectId, status, report) => {
-      const list = securityByProject.get(projectId) ?? []
-      const index = list.findIndex((r) => r.status === 'running')
-      const at = index >= 0 ? index : 0
-      if (!list[at]) return
-      list[at] = { ...list[at], status, report, finishedAt: new Date().toISOString() }
-      securityByProject.set(projectId, list)
-      push('push.securityChanged', { projectId, runs: [...list] })
-    },
     reportVerifyResult: (projectId, status, report) => {
       const list = verifyByProject.get(projectId) ?? []
       const index = list.findIndex((r) => r.status === 'running')
@@ -1865,7 +1799,6 @@ export function installMockHost(scenario: MockScenario): void {
       starts: [...starts],
       planModeChanges: [...planModeChanges],
       diagramOpens: [...diagramOpens],
-      reportOpens: [...reportOpens],
       flowPublishes: [...flowPublishes],
       flowWorkStarts: [...flowWorkStarts],
       flowRetries: [...flowRetries],

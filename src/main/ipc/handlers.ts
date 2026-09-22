@@ -37,7 +37,7 @@ import {
   suggestProjects,
 } from '@main/projects/discovery'
 import { existsSync, readdirSync } from 'node:fs'
-import { mkdir, readdir, readFile, stat } from 'node:fs/promises'
+import { readdir, readFile, stat } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import { detectStacks, stackById, stackEntries } from '@shared/test-catalog'
 import { evidencePrompt, planSuites, verifyPrompt } from '@main/evals/verify-dispatch'
@@ -48,8 +48,6 @@ import { installSpecKit, readSpecDetail, readSpecKitState } from '@main/specs/sp
 import { readDiffList, readFileDiff } from '@main/sessions/session-manager'
 import { readDiagramList } from '@main/diagrams/list'
 import { importSkills } from '@main/skills/import'
-import { isSafeSegment } from '@shared/skill-source'
-import { auditPrompt, SECURITY_SKILL_NAME } from '@main/security/audit-dispatch'
 import type { FlowSupervisor } from '@main/flow/flow-supervisor'
 import { disableSkill, enableSkill, removeSkill } from '@main/skills/install'
 import { check as checkForUpdates, installNow } from '@main/updater'
@@ -135,7 +133,6 @@ interface HandlerDeps {
   repos: Repositories
   manager: SessionManager
   skillsStagingRoot: string
-  securityRoot: string
   flow: FlowSupervisor
   broker: PermissionBroker
   getWindow: () => BrowserWindow | null
@@ -212,7 +209,7 @@ const ALLOWED_PLUGINS: ReadonlySet<string> = new Set([
 ])
 
 export function registerIpcHandlers(deps: HandlerDeps): void {
-  const { repos, manager, broker, dbProjectId, skillsStagingRoot, securityRoot, ptyHost, flow } = deps
+  const { repos, manager, broker, dbProjectId, skillsStagingRoot, ptyHost, flow } = deps
 
   const requireProject = (projectId: string): Project => {
     const project = repos.projects.byId(projectId)
@@ -740,58 +737,6 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       requireProject(req.projectId)
       await flow.cancel(req.runId)
       return flowSnapshot(req.projectId)
-    },
-    'security.list': (req) => repos.securityRuns.listForProject(req.projectId),
-    'security.start': async (req) => {
-      const project = repos.projects.byId(req.projectId)
-      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
-      if (repos.securityRuns.runningFor(req.projectId)) {
-        throw {
-          code: 'RULE_NOT_ALLOWED',
-          message: 'An audit is already running for this project. Wait for it, or stop it first.',
-        } satisfies IpcError
-      }
-      if (!repos.customSkills.byName(SECURITY_SKILL_NAME)?.enabled) {
-        throw {
-          code: 'NOT_FOUND',
-          message: 'Install the security-audit skill first, then run the audit.',
-        } satisfies IpcError
-      }
-      const session = await manager.backgroundSessionFor(req.projectId, 'security')
-      const outputDir = join(
-        securityRoot,
-        req.projectId,
-        `run-${new Date().toISOString().replace(/[:.]/g, '-')}`,
-      )
-      await mkdir(outputDir, { recursive: true })
-      const run = repos.securityRuns.start({
-        projectId: req.projectId,
-        sessionId: session.id,
-        scope: req.scope,
-        branch: session.branch ?? null,
-        outputDir,
-      })
-      manager.watchSecurityRun(session.id, run.id, outputDir)
-      manager.sendMessage(session.id, auditPrompt({ scope: req.scope, outputDir }))
-      return { sessionId: session.id, runs: repos.securityRuns.listForProject(req.projectId) }
-    },
-    'security.cancel': async (req) => {
-      await manager.cancelSecurityRun(req.runId)
-      return repos.securityRuns.listForProject(req.projectId)
-    },
-    'security.openReport': async (req) => {
-      const run = repos.securityRuns.byId(req.runId)
-      if (!run || run.projectId !== req.projectId) {
-        throw { code: 'NOT_FOUND', message: 'Run not found' } satisfies IpcError
-      }
-      if (!isSafeSegment(req.file) || !req.file.endsWith('.md')) {
-        throw { code: 'INVALID_PATH', message: 'That is not a report file' } satisfies IpcError
-      }
-      const target = join(run.outputDir, req.file)
-      if (!existsSync(target)) {
-        throw { code: 'NOT_FOUND', message: 'That report is no longer on disk' } satisfies IpcError
-      }
-      await shell.openPath(target)
     },
     'queue.list': (req) => manager.listQueue(req.projectId),
     'queue.add': (req) => {

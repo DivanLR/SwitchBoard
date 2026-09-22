@@ -200,11 +200,6 @@ async function main(): Promise<void> {
       pusher.push('push.queueChanged', { projectId, items: repos.taskQueue.listForProject(projectId) }),
     onVerifyChanged: (projectId) =>
       pusher.push('push.verifyChanged', { projectId, runs: repos.verifyRuns.listForProject(projectId) }),
-    onSecurityChanged: (projectId) =>
-      pusher.push('push.securityChanged', {
-        projectId,
-        runs: repos.securityRuns.listForProject(projectId),
-      }),
     onDiagramsChanged: (projectId) => {
       const project = repos.projects.byId(projectId)
       if (!project) return
@@ -292,7 +287,6 @@ async function main(): Promise<void> {
     getWindow: () => mainWindow,
     dbProjectId: dbProject.id,
     skillsStagingRoot: stagingSkillsRoot(app.getPath('userData')),
-    securityRoot: join(app.getPath('userData'), 'security-audits'),
     ptyHost,
   })
   void reconcileSkills(stagingSkillsRoot(app.getPath('userData')), repos.customSkills.list())

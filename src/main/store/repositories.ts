@@ -26,9 +26,6 @@ import type {
   FlowLessonEvidence,
   FlowRun,
   ScopedItem,
-  SecurityReport,
-  SecurityRun,
-  SecurityScope,
   SuiteResult,
   SessionEndReason,
   SessionEngine,
@@ -831,7 +828,7 @@ class McpScansRepo {
 
 function pruneToLast(
   db: AppDatabase,
-  table: 'verify_runs' | 'security_runs' | 'flow_runs',
+  table: 'verify_runs' | 'flow_runs',
   projectId: string,
   keep: number,
 ): void {
@@ -1436,120 +1433,6 @@ function hydrateFlowItem(row: FlowItemRow): FlowItem {
   }
 }
 
-const SECURITY_HISTORY = 20
-
-class SecurityRunsRepo {
-  constructor(private db: AppDatabase) {}
-
-  start(input: {
-    projectId: string
-    sessionId: string | null
-    scope: SecurityScope
-    branch: string | null
-    outputDir: string
-  }): SecurityRun {
-    const run: SecurityRun = {
-      id: newId(),
-      projectId: input.projectId,
-      sessionId: input.sessionId,
-      scope: input.scope,
-      branch: input.branch,
-      status: 'running',
-      report: null,
-      note: null,
-      outputDir: input.outputDir,
-      startedAt: nowIso(),
-      finishedAt: null,
-    }
-    this.db
-      .prepare(
-        `INSERT INTO security_runs
-           (id, projectId, sessionId, scope, branch, status, report, note, outputDir, startedAt, finishedAt)
-         VALUES (?, ?, ?, ?, ?, 'running', NULL, NULL, ?, ?, NULL)`,
-      )
-      .run(
-        run.id,
-        run.projectId,
-        run.sessionId,
-        run.scope,
-        run.branch,
-        run.outputDir,
-        run.startedAt,
-      )
-    pruneToLast(this.db, 'security_runs', input.projectId, SECURITY_HISTORY)
-    return run
-  }
-
-  listForProject(projectId: string): SecurityRun[] {
-    return (
-      this.db
-        .prepare(
-          'SELECT * FROM security_runs WHERE projectId = ? ORDER BY startedAt DESC, rowid DESC',
-        )
-        .all(projectId) as SecurityRunRow[]
-    ).map(hydrateSecurityRun)
-  }
-
-  byId(id: string): SecurityRun | null {
-    const row = this.db.prepare('SELECT * FROM security_runs WHERE id = ?').get(id) as
-      | SecurityRunRow
-      | undefined
-    return row ? hydrateSecurityRun(row) : null
-  }
-
-  runningFor(projectId: string): SecurityRun | null {
-    const row = this.db
-      .prepare(
-        "SELECT * FROM security_runs WHERE projectId = ? AND status = 'running' ORDER BY startedAt DESC, rowid DESC LIMIT 1",
-      )
-      .get(projectId) as SecurityRunRow | undefined
-    return row ? hydrateSecurityRun(row) : null
-  }
-
-  finish(
-    id: string,
-    status: SecurityRun['status'],
-    report: SecurityReport | null,
-    note: string | null,
-  ): void {
-    this.db
-      .prepare(
-        'UPDATE security_runs SET status = ?, report = ?, note = ?, finishedAt = ? WHERE id = ?',
-      )
-      .run(status, report ? JSON.stringify(report) : null, note, nowIso(), id)
-  }
-
-  reconcileRunning(note: string): number {
-    const result = this.db
-      .prepare(
-        "UPDATE security_runs SET status = 'failed', note = ?, finishedAt = ? WHERE status = 'running'",
-      )
-      .run(note, nowIso())
-    return Number(result.changes ?? 0)
-  }
-}
-
-interface SecurityRunRow {
-  id: string
-  projectId: string
-  sessionId: string | null
-  scope: SecurityScope
-  branch: string | null
-  status: SecurityRun['status']
-  report: string | null
-  note: string | null
-  outputDir: string
-  startedAt: string
-  finishedAt: string | null
-}
-
-function hydrateSecurityRun(row: SecurityRunRow): SecurityRun {
-  return {
-    ...row,
-    report: row.report ? parseJson<SecurityReport>(row.report) : null,
-  }
-}
-
 export class DiagramRequestsRepo {
   constructor(private db: AppDatabase) {}
 
@@ -1676,7 +1559,6 @@ export interface Repositories {
   taskQueue: TaskQueueRepo
   mcpScans: McpScansRepo
   verifyRuns: VerifyRunsRepo
-  securityRuns: SecurityRunsRepo
   flowRuns: FlowRunsRepo
   flowItems: FlowItemsRepo
   flowLessons: FlowLessonsRepo
@@ -1699,7 +1581,6 @@ export function createRepositories(db: AppDatabase): Repositories {
     taskQueue: new TaskQueueRepo(db),
     mcpScans: new McpScansRepo(db),
     verifyRuns: new VerifyRunsRepo(db),
-    securityRuns: new SecurityRunsRepo(db),
     flowRuns: new FlowRunsRepo(db),
     flowItems: new FlowItemsRepo(db),
     flowLessons: new FlowLessonsRepo(db),

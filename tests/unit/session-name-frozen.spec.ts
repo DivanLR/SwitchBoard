@@ -70,9 +70,7 @@ function setup() {
     onCountersChanged: () => {},
     onSessionExit: () => {},
     onQueueChanged: () => {},
-    onVerifyChanged: () => {},
-    onSecurityChanged: () => {},
-    onDiagramsChanged: () => {},
+    onVerifyChanged: () => {},    onDiagramsChanged: () => {},
     onProjectCommands: () => {},
     gate: (async () => ({ behavior: 'allow', updatedInput: {} })) as never,
   })
@@ -88,9 +86,7 @@ function setup() {
     broker,
     getWindow: () => window as never,
     dbProjectId: 'db-project',
-    skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),
-    securityRoot: join(tmpdir(), 'switchboard-test-security'),
-    flow: { reconcileOnStartup: () => {} } as never,
+    skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),    flow: { reconcileOnStartup: () => {} } as never,
     ptyHost: { open: () => ({ scrollback: '', reused: false }), write: () => {}, resize: () => {}, close: () => {}, closeAll: () => {} } as unknown as PtyHost,
   })
   const listener = registered.get(INVOKE_CHANNEL)

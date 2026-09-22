@@ -21,8 +21,6 @@ import type {
   FlowLesson,
   FlowRun,
   ScopedItem,
-  SecurityRun,
-  SecurityScope,
   SessionEvent,
   SessionEngine,
   SessionMode,
@@ -278,13 +276,6 @@ export interface InvokeMap {
     req: { projectId: string; runId: string }
     res: { runs: FlowRun[]; items: FlowItem[] }
   }
-  'security.list': { req: { projectId: string }; res: SecurityRun[] }
-  'security.start': {
-    req: { projectId: string; scope: SecurityScope }
-    res: { sessionId: string; runs: SecurityRun[] }
-  }
-  'security.cancel': { req: { projectId: string; runId: string }; res: SecurityRun[] }
-  'security.openReport': { req: { projectId: string; runId: string; file: string }; res: void }
   'queue.list': { req: { projectId: string }; res: QueuedTask[] }
   'queue.add': { req: { projectId: string; text: string }; res: QueuedTask[] }
   'queue.edit': { req: { projectId: string; id: string; text: string }; res: QueuedTask[] }
@@ -359,11 +350,6 @@ interface VerifyChangedPush {
   runs: VerifyRun[]
 }
 
-interface SecurityChangedPush {
-  projectId: string
-  runs: SecurityRun[]
-}
-
 interface FlowChangedPush {
   projectId: string
   runs: FlowRun[]
@@ -392,7 +378,6 @@ export interface PushMap {
   'push.inboxChanged': InboxChangedPush
   'push.queueChanged': QueueChangedPush
   'push.verifyChanged': VerifyChangedPush
-  'push.securityChanged': SecurityChangedPush
   'push.flowChanged': FlowChangedPush
   'push.diagramsChanged': DiagramsChangedPush
   'push.projectCommands': ProjectCommandsPush
@@ -411,7 +396,6 @@ const PUSH_CHANNEL_KEYS: Record<PushChannel, true> = {
   'push.inboxChanged': true,
   'push.queueChanged': true,
   'push.verifyChanged': true,
-  'push.securityChanged': true,
   'push.flowChanged': true,
   'push.diagramsChanged': true,
   'push.projectCommands': true,
