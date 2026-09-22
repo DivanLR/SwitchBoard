@@ -454,8 +454,8 @@ function restore(projectId: string): void {
   <aside class="sidebar" :class="{ collapsed }">
     <div class="brand">
       <div class="brand-top">
-        <div class="logo mono">
-          <span style="color: var(--green)"><Icon name="grid" :size="collapsed ? 18 : 14" /></span><span v-if="!collapsed"> switchboard</span>
+        <div class="logo">
+          <span class="icon-accent"><Icon name="grid" :size="collapsed ? 18 : 14" /></span><span v-if="!collapsed"> switchboard</span>
         </div>
         <span class="spacer"></span>
         <button
@@ -508,7 +508,7 @@ function restore(projectId: string): void {
 
       <div class="section-row">
         <template v-if="!collapsed">
-          <span class="section-label mono">PROJECTS</span>
+          <span class="section-label">PROJECTS</span>
           <span class="section-count mono" data-testid="project-count">{{ filtered.length }}</span>
         </template>
         <span class="spacer"></span>
@@ -561,7 +561,7 @@ function restore(projectId: string): void {
             @keydown.esc="renamingGroupId = null"
             @blur="commitGroupRename"
           />
-          <span v-else class="group-name mono">{{ section.name }}</span>
+          <span v-else class="group-name">{{ section.name }}</span>
           <span
             v-if="section.pending > 0"
             class="badge-count"
@@ -663,7 +663,7 @@ function restore(projectId: string): void {
                 @keydown.esc="renamingId = null"
                 @blur="commitRename"
               />
-              <span v-else class="name mono">{{ item.name }}</span>
+              <span v-else class="name">{{ item.name }}</span>
               <span
                 v-if="(pendingByProject[item.id] ?? 0) > 0"
                 class="badge-count"
@@ -788,7 +788,7 @@ function restore(projectId: string): void {
           @click="archivedFolded = !archivedFolded"
         >
           <span class="group-caret mono"><Icon :name="archivedFolded ? 'chevron-right' : 'chevron-down'" :size="8" /></span>
-          <span class="group-name mono">Archived</span>
+          <span class="group-name">Archived</span>
           <span class="group-count mono" data-testid="group-count-archived">{{ projects.archived.length }}</span>
         </div>
         <template v-if="!archivedFolded">
@@ -801,7 +801,7 @@ function restore(projectId: string): void {
           >
             <div class="content">
               <div class="row">
-                <span class="name mono">{{ item.name }}</span>
+                <span class="name">{{ item.name }}</span>
                 <button
                   class="restore mono"
                   :data-testid="`restore-project-${item.name}`"
@@ -819,12 +819,12 @@ function restore(projectId: string): void {
 
     <template v-if="dbServers.length > 0 && dbProject">
       <div v-if="!collapsed" class="section-row mcp-section">
-        <span class="section-label mono">MCP</span>
+        <span class="section-label">MCP</span>
       </div>
       <div
         v-for="s in dbServers"
         :key="s"
-        class="mcp-item"
+        class="mcp-item ui-card"
         :class="{ open: activeSession.mcpOpen }"
         :title="`${s} — ${mcpStatusOf(s)} · part of the combined MCP chat`"
         :data-testid="`mcp-server-${s}`"
@@ -861,7 +861,7 @@ function restore(projectId: string): void {
         @keydown.space.prevent="emit('open-settings')"
       >
         <span class="gear mono" aria-hidden="true"><Icon name="settings" /></span>
-        <span class="settings-label mono">Settings</span>
+        <span class="settings-label">Settings</span>
         <span class="model-summary mono" data-testid="model-summary">{{ modelSummary }}</span>
       </div>
     </div>
@@ -881,7 +881,7 @@ function restore(projectId: string): void {
     </div>
   </aside>
 
-  <div v-if="ctx" class="ctx-catcher" @click="closeCtx" @contextmenu.prevent="closeCtx">
+  <div v-if="ctx" class="ctx-catcher" data-testid="project-ctx-catcher" @click="closeCtx" @contextmenu.prevent="closeCtx">
     <div
       class="ctx-menu"
       data-testid="project-ctx-menu"
@@ -889,39 +889,39 @@ function restore(projectId: string): void {
       @click.stop
     >
       <div class="ctx-name mono">{{ ctx.name }}</div>
-      <button class="ctx-item mono" data-testid="ctx-rename" @click="startRename">
-        <span style="color: var(--green)"><Icon name="pencil" /></span>Rename
+      <button class="ctx-item" data-testid="ctx-rename" @click="startRename">
+        <span class="icon-accent"><Icon name="pencil" /></span>Rename
       </button>
-      <button class="ctx-item mono" data-testid="ctx-move-up" @click="ctxMove(-1)">
+      <button class="ctx-item" data-testid="ctx-move-up" @click="ctxMove(-1)">
         <span><Icon name="arrow-up" /></span>Move up
       </button>
-      <button class="ctx-item mono" data-testid="ctx-move-down" @click="ctxMove(1)">
+      <button class="ctx-item" data-testid="ctx-move-down" @click="ctxMove(1)">
         <span><Icon name="arrow-down" /></span>Move down
       </button>
       <template v-if="ctx.kind === 'project'">
-        <button class="ctx-item mono" data-testid="ctx-new-session" @click="ctxNewSession">
-          <span style="color: var(--green)"><Icon name="plus" /></span>New session here
+        <button class="ctx-item" data-testid="ctx-new-session" @click="ctxNewSession">
+          <span class="icon-accent"><Icon name="plus" /></span>New session here
         </button>
         <button
           v-if="ctxLiveSessions.length > 1"
-          class="ctx-item mono"
+          class="ctx-item"
           data-testid="ctx-end-all"
           @click="ctxEndAll"
         >
-          <span style="color: var(--red)"><Icon name="stop" /></span>End all {{ ctxLiveSessions.length }} sessions
+          <span class="icon-danger"><Icon name="stop" /></span>End all {{ ctxLiveSessions.length }} sessions
         </button>
         <div class="ctx-sep"></div>
-        <button class="ctx-item mono" data-testid="ctx-repoint" @click="startRepoint">
-          <span style="color: var(--green)"><Icon name="swap" /></span>Change folder…
+        <button class="ctx-item" data-testid="ctx-repoint" @click="startRepoint">
+          <span class="icon-accent"><Icon name="swap" /></span>Change folder…
         </button>
         <div class="ctx-sep"></div>
-        <button class="ctx-item mono" data-testid="ctx-new-group" @click="ctxNewGroup">
-          <span style="color: var(--green)"><Icon name="grid" /></span>New group with this
+        <button class="ctx-item" data-testid="ctx-new-group" @click="ctxNewGroup">
+          <span class="icon-accent"><Icon name="grid" /></span>New group with this
         </button>
         <button
           v-for="g in groups"
           :key="g.id"
-          class="ctx-item mono"
+          class="ctx-item"
           :data-testid="`ctx-move-to-${g.name}`"
           @click="ctxAssign(g.id)"
         >
@@ -929,20 +929,20 @@ function restore(projectId: string): void {
         </button>
         <button
           v-if="groupOf[ctx.id]"
-          class="ctx-item mono"
+          class="ctx-item"
           data-testid="ctx-move-to-ungrouped"
           @click="ctxAssign(null)"
         >
           <span><Icon name="arrow-right" /></span>Move out of group
         </button>
         <div class="ctx-sep"></div>
-        <button class="ctx-item mono" data-testid="ctx-remove" @click="ctxDelete">
+        <button class="ctx-item" data-testid="ctx-remove" @click="ctxDelete">
           <span><Icon name="folder" /></span>Archive
         </button>
       </template>
       <button
         v-else
-        class="ctx-item mono danger"
+        class="ctx-item danger"
         data-testid="ctx-remove-group"
         @click="ctxRemoveGroup"
       >
@@ -951,7 +951,7 @@ function restore(projectId: string): void {
     </div>
   </div>
 
-  <div v-if="repointTarget" class="overlay" @click.self="cancelRepoint">
+  <div v-if="repointTarget" class="overlay" data-testid="repoint-overlay" @click.self="cancelRepoint">
     <div
       class="dialog remove-dialog"
       data-testid="repoint-dialog"
@@ -960,7 +960,7 @@ function restore(projectId: string): void {
       aria-labelledby="repoint-dialog-title"
     >
       <div class="rd-icon" aria-hidden="true"><Icon name="swap" :size="18" /></div>
-      <div id="repoint-dialog-title" class="rd-title mono">
+      <div id="repoint-dialog-title" class="rd-title">
         Change folder for {{ repointTarget.name }}
       </div>
       <div class="rd-body">
@@ -975,7 +975,7 @@ function restore(projectId: string): void {
           Sessions, history, and folder access move to the new folder. The name stays
           {{ repointTarget.name }}.
         </p>
-        <p v-if="repointError" class="rd-error mono" data-testid="repoint-error">
+        <p v-if="repointError" class="rd-error" data-testid="repoint-error">
           {{ repointError }}
         </p>
       </div>
@@ -995,7 +995,7 @@ function restore(projectId: string): void {
     </div>
   </div>
 
-  <div v-if="confirmRemove" class="overlay" @click.self="cancelRemove">
+  <div v-if="confirmRemove" class="overlay" data-testid="remove-overlay" @click.self="cancelRemove">
     <div
       class="dialog remove-dialog"
       data-testid="remove-dialog"
@@ -1004,14 +1004,14 @@ function restore(projectId: string): void {
       aria-labelledby="remove-dialog-title"
     >
       <div class="rd-icon" aria-hidden="true"><Icon name="folder" :size="18" /></div>
-      <div id="remove-dialog-title" class="rd-title mono">Archive {{ confirmRemove.name }}?</div>
+      <div id="remove-dialog-title" class="rd-title">Archive {{ confirmRemove.name }}?</div>
       <div class="rd-body">
         <div class="rd-path faint mono">{{ confirmRemove.path }}</div>
         <p class="rd-note dim">
           It moves to the Archived section at the foot of the list, and can be restored from
           there. Sessions, settings, files and git history are untouched.
         </p>
-        <p v-if="removeError" class="rd-error mono" data-testid="remove-error">{{ removeError }}</p>
+        <p v-if="removeError" class="rd-error" data-testid="remove-error">{{ removeError }}</p>
       </div>
       <div class="rd-actions">
         <button
@@ -1134,7 +1134,6 @@ function restore(projectId: string): void {
   font-size: var(--fs-micro);
   background: color-mix(in srgb, var(--amber) 15%, transparent);
   border-color: color-mix(in srgb, var(--amber) 40%, transparent);
-  border-radius: 0;
   padding: 0 4px;
   line-height: 12px;
 }
@@ -1163,6 +1162,14 @@ function restore(projectId: string): void {
   font-weight: var(--w-em);
   color: var(--text-bright);
   letter-spacing: 0.02em;
+}
+
+.icon-accent {
+  color: var(--green);
+}
+
+.icon-danger {
+  color: var(--red);
 }
 
 .filter-wrap {
@@ -1403,7 +1410,7 @@ function restore(projectId: string): void {
   right: 0;
   top: 10px;
   bottom: 10px;
-  width: 3px;
+  width: 2px;
   border-radius: 3px;
   background: var(--idle);
   pointer-events: none;
@@ -1878,13 +1885,9 @@ function restore(projectId: string): void {
 .mcp-item {
   position: relative;
   margin: 4px 8px 0;
-  padding: 8px 10px;
   display: flex;
   align-items: center;
   gap: 9px;
-  border: 1px solid var(--border-card-alt);
-  background: var(--bg-card-alt);
-  border-radius: var(--rc);
   cursor: pointer;
   user-select: none;
 }
@@ -1929,7 +1932,7 @@ function restore(projectId: string): void {
   right: 3px;
   top: 7px;
   bottom: 7px;
-  width: 3px;
+  width: 2px;
   background: var(--teal);
 }
 
@@ -1938,7 +1941,7 @@ function restore(projectId: string): void {
   min-width: 180px;
   background: var(--bg-panel-2);
   border: 1px solid var(--border-strong);
-  border-radius: var(--rc);
+  border-radius: var(--r-panel);
   overflow: hidden;
   box-shadow: var(--shadow-menu);
   animation: sbIn 0.12s var(--ease);

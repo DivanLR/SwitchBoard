@@ -208,16 +208,20 @@ const keyedLines = computed(() =>
 
 <template>
   <div class="diff-view" data-testid="diff-view">
-    <div v-if="notLive" class="diff-empty mono faint" data-testid="diff-not-live">
+    <div v-if="notLive" class="diff-empty ui-empty-line" data-testid="diff-not-live">
       Start a session for this project to review its changes.
     </div>
-    <div v-else-if="result.gitNotice" class="diff-empty mono faint" data-testid="diff-git-notice">
+    <div v-else-if="result.gitNotice" class="diff-empty ui-empty-line" data-testid="diff-git-notice">
       {{ result.gitNotice }}
     </div>
-    <div v-else-if="files.length === 0" class="diff-empty mono faint" data-testid="diff-no-changes">
+    <div v-else-if="files.length === 0" class="diff-empty ui-empty-line" data-testid="diff-no-changes">
       No changes in the working tree.
     </div>
     <div v-else class="diff-body">
+      <div class="ui-head" data-testid="diff-summary">
+        <div class="ui-meaning">{{ files.length }} file{{ files.length === 1 ? '' : 's' }} changed</div>
+      </div>
+      <div class="diff-panes">
       <div class="diff-files" aria-label="Changed files" data-testid="diff-file-list">
         <div v-for="g in visibleGroups" :key="g.dir" class="diff-group">
           <button
@@ -233,7 +237,7 @@ const keyedLines = computed(() =>
             <span class="dfo-caret" aria-hidden="true">
               <Icon :name="folded.has(g.dir) ? 'chevron-right' : 'chevron-down'" :size="12" />
             </span>
-            <span class="dfo-path mono">{{ g.label }}</span>
+            <span class="dfo-path">{{ g.label }}</span>
             <span class="dfo-count mono" aria-hidden="true">{{ g.total }}</span>
             <span class="dfo-counts mono" aria-hidden="true">{{ countLabel(g.added, g.removed) }}</span>
           </button>
@@ -242,9 +246,9 @@ const keyedLines = computed(() =>
               v-for="f in g.files"
               :key="f.path"
               type="button"
-              class="diff-file-row"
+              class="diff-file-row ui-row"
               :style="{ paddingLeft: `${10 + (g.depth + 1) * 12}px` }"
-              :class="{ sel: diff.selectedPath === f.path }"
+              :class="{ sel: diff.selectedPath === f.path, 'is-selected': diff.selectedPath === f.path }"
               :aria-pressed="diff.selectedPath === f.path"
               :aria-label="`${f.status} ${f.path}, ${countLabel(f.addedLines, f.removedLines)}`"
               :data-testid="`diff-file-${f.path}`"
@@ -260,21 +264,21 @@ const keyedLines = computed(() =>
         </div>
       </div>
       <div class="diff-pane" data-testid="diff-pane">
-        <div v-if="!diff.selectedPath" class="diff-empty mono faint" data-testid="diff-pane-empty">
+        <div v-if="!diff.selectedPath" class="diff-empty ui-empty-line" data-testid="diff-pane-empty">
           Select a file to see its diff.
         </div>
         <div
           v-else-if="diff.fileLoading"
-          class="diff-empty mono faint"
+          class="diff-empty ui-empty-line"
           role="status"
           data-testid="diff-pane-loading"
         >
           Loading…
         </div>
-        <div v-else-if="!diff.fileDiff" class="diff-empty mono faint" data-testid="diff-pane-gone">
+        <div v-else-if="!diff.fileDiff" class="diff-empty ui-empty-line" data-testid="diff-pane-gone">
           This file no longer has a change to show.
         </div>
-        <div v-else-if="diff.fileDiff.binary" class="diff-empty mono faint" data-testid="diff-pane-binary">
+        <div v-else-if="diff.fileDiff.binary" class="diff-empty ui-empty-line" data-testid="diff-pane-binary">
           No text diff is available for this file.
         </div>
         <div v-else class="diff-lines mono" :class="{ dragging }" data-testid="diff-pane-lines">
@@ -304,9 +308,9 @@ const keyedLines = computed(() =>
             class="dl-composer"
             data-testid="diff-comment"
           >
-          <div class="dlc-head mono">
+          <div class="dlc-head">
             <span data-testid="diff-comment-count">
-              {{ selectedLines.length }} line{{ selectedLines.length === 1 ? '' : 's' }} selected
+              <span class="mono">{{ selectedLines.length }}</span> line{{ selectedLines.length === 1 ? '' : 's' }} selected
             </span>
             <button
               type="button"
@@ -328,11 +332,11 @@ const keyedLines = computed(() =>
             @keydown.enter.exact.prevent="sendInstruction()"
             @keydown.esc="clearSelection()"
           ></textarea>
-          <div v-if="diff.applyError" class="dlc-err" data-testid="diff-comment-error">
+          <div v-if="diff.applyError" class="ui-err" data-testid="diff-comment-error">
             {{ diff.applyError }}
           </div>
           <div class="dlc-foot">
-            <span class="dlc-note mono">applied by a worker session on {{ workerLabel }}</span>
+            <span class="dlc-note">applied by a worker session on {{ workerLabel }}</span>
             <button
               type="button"
               class="dlc-send"
@@ -346,6 +350,7 @@ const keyedLines = computed(() =>
           </div>
           </template>
         </div>
+      </div>
       </div>
     </div>
   </div>
@@ -363,12 +368,22 @@ const keyedLines = computed(() =>
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 40px 22px;
-  font-size: var(--fs-ui);
   text-align: center;
 }
 
+.ui-head {
+  padding: var(--sp-4) var(--sp-6) 0;
+}
+
 .diff-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.diff-panes {
   flex: 1;
   display: flex;
   min-width: 0;
@@ -427,9 +442,9 @@ const keyedLines = computed(() =>
 .dfo-path {
   flex: 1;
   min-width: 0;
-  font-size: var(--fs-micro);
-  letter-spacing: var(--track-label);
-  color: var(--text-meta);
+  font-size: var(--fs-ui);
+  font-weight: var(--w-em);
+  color: var(--text-bright);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -448,23 +463,11 @@ const keyedLines = computed(() =>
 }
 
 .diff-file-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
   margin-left: 8px;
-  border-radius: var(--rc);
-  text-align: left;
-  cursor: pointer;
-}
-
-.diff-file-row:hover {
-  background: var(--bg-hover);
 }
 
 .diff-file-row.sel {
   background: color-mix(in srgb, var(--green) 12%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 35%, transparent);
 }
 
 .dfr-status {
@@ -587,7 +590,7 @@ const keyedLines = computed(() =>
   background: var(--bg-card);
   border: 1px solid var(--border-strong);
   border-radius: var(--rc);
-  box-shadow: var(--shadow-dd);
+  box-shadow: var(--elev);
 }
 
 .dlc-head {
@@ -625,11 +628,6 @@ const keyedLines = computed(() =>
 .dlc-input:focus {
   outline: none;
   border-color: var(--green);
-}
-
-.dlc-err {
-  font-size: var(--fs-micro);
-  color: var(--red);
 }
 
 .dlc-foot {

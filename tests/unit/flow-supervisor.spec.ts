@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FlowMarker } from '@main/flow/flow-markers'
 
@@ -292,5 +295,60 @@ describe('restart', () => {
     const after = harness.repos.flowRuns.byId(run.id)
     expect(after?.status).toBe('publish_interrupted')
     expect(after?.finishedAt).toBeNull()
+  })
+})
+
+describe('the feature spec', () => {
+  it('needs approved items and Spec Kit, then sends /speckit-specify to the spec session once', async () => {
+    const harness = setup()
+    const backgroundSessionFor = vi.fn(async () => ({ id: 'spec-1' }))
+    Object.assign(harness.manager, { backgroundSessionFor })
+    const dir = mkdtempSync(join(tmpdir(), 'swb-spec-'))
+    try {
+      const project = harness.repos.projects.insert({ name: 'kit', path: dir, source: 'manual' })
+      const run = harness.repos.flowRuns.start({
+        projectId: project.id,
+        featureId: '4711',
+        featureTitle: 'Checkout v2',
+        sessionId: null,
+        concurrency: 4,
+      })
+
+      await expect(harness.flow.writeSpec(run.id)).rejects.toMatchObject({ code: 'INVALID_PATH' })
+
+      harness.repos.flowItems.replaceForRun(run.id, project.id, [
+        {
+          localId: 'cart',
+          title: 'Version the cart',
+          body: 'Reconcile by version.\nA late response never wins.',
+          acceptance: ['Two adds keep both'],
+          estimate: 'm',
+        },
+      ])
+      await expect(harness.flow.writeSpec(run.id)).rejects.toMatchObject({ code: 'UNSUPPORTED' })
+      expect(backgroundSessionFor).not.toHaveBeenCalled()
+
+      mkdirSync(join(dir, '.specify'))
+      const after = await harness.flow.writeSpec(run.id)
+      expect(after.specSessionId).toBe('spec-1')
+      expect(backgroundSessionFor).toHaveBeenCalledWith(project.id, 'spec')
+      const sent = harness.sent.at(-1)
+      expect(sent?.sessionId).toBe('spec-1')
+      expect(sent?.text.startsWith('/speckit-specify Feature 4711: Checkout v2')).toBe(true)
+      expect(sent?.text).toContain('- Version the cart: Reconcile by version. A late response never wins.')
+      expect(sent?.text).toContain('    - Two adds keep both')
+      expect(harness.watched).not.toContain('spec-1')
+      expect(harness.changed).toContain(project.id)
+
+      Object.assign(harness.manager, { workdirFor: (id: string) => (id === 'spec-1' ? dir : undefined) })
+      await expect(harness.flow.writeSpec(run.id)).rejects.toMatchObject({ code: 'RULE_NOT_ALLOWED' })
+      expect(backgroundSessionFor).toHaveBeenCalledTimes(1)
+
+      Object.assign(harness.manager, { workdirFor: () => undefined })
+      backgroundSessionFor.mockResolvedValueOnce({ id: 'spec-2' })
+      expect((await harness.flow.writeSpec(run.id)).specSessionId).toBe('spec-2')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

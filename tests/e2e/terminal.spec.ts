@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { installMockHost, twoProjectScenario } from './mock-host'
 
 declare global {
@@ -59,6 +59,13 @@ test.beforeEach(async ({ page }) => {
   await page.getByTestId('sidebar-project-alpha').click()
 })
 
+async function openShell(page: Page): Promise<void> {
+  await page.getByTestId('tab-terminal').click()
+  await expect(page.getByTestId('conversation-terminal')).toBeVisible()
+  await page.getByTestId('conversation-terminal-shell').click()
+  await expect(page.getByTestId('terminal-pane')).toBeVisible()
+}
+
 test('Terminal sits beside Clean and Raw, preserves drafts and keeps output alive across views', async ({
   page,
 }) => {
@@ -66,6 +73,8 @@ test('Terminal sits beside Clean and Raw, preserves drafts and keeps output aliv
   await expect(toggle.getByRole('tab')).toHaveText(['Clean', 'Raw', 'Terminal'])
   await page.getByTestId('composer-input').fill('Keep my draft')
   await toggle.getByRole('tab', { name: 'Terminal' }).click()
+  await expect(page.getByTestId('conversation-terminal')).toBeVisible()
+  await page.getByTestId('conversation-terminal-shell').click()
   const pane = page.getByTestId('terminal-pane')
   await expect(pane).toBeVisible()
   await expect(page.getByTestId('stream')).toHaveCount(0)
@@ -91,7 +100,7 @@ test('Terminal sits beside Clean and Raw, preserves drafts and keeps output aliv
 })
 
 test('keyboard input, paste, resize and full screen use the terminal bridge', async ({ page }) => {
-  await page.getByTestId('tab-terminal').click()
+  await openShell(page)
   const pane = page.getByTestId('terminal-pane')
   const input = pane.locator('.xterm-helper-textarea')
   await expect(input).toBeFocused()
@@ -131,7 +140,7 @@ test('keyboard input, paste, resize and full screen use the terminal bridge', as
 
 for (const shortcut of ['Control+v', 'Control+Shift+v', 'Shift+Insert']) {
   test(`${shortcut} pastes clipboard text exactly once into the terminal`, async ({ page }) => {
-    await page.getByTestId('tab-terminal').click()
+    await openShell(page)
     const input = page.getByTestId('terminal-pane').locator('.xterm-helper-textarea')
     await expect(input).toBeFocused()
     await page.evaluate(() =>
@@ -154,7 +163,7 @@ for (const shortcut of ['Control+v', 'Control+Shift+v', 'Shift+Insert']) {
 }
 
 test('exit and repeated restart deliver output once', async ({ page }) => {
-  await page.getByTestId('tab-terminal').click()
+  await openShell(page)
   for (let i = 0; i < 2; i++) {
     await page.evaluate(() =>
       window.__terminal.push('push.terminalExit', { id: 's-alpha', exitCode: 1 }),
@@ -180,7 +189,7 @@ test('startup failures are recoverable and projects do not open hidden terminals
   await page.evaluate(() => {
     window.__terminal.failOpen = true
   })
-  await page.getByTestId('tab-terminal').click()
+  await openShell(page)
   await expect(page.getByTestId('terminal-error')).toContainText('Shell could not start')
   await page.evaluate(() => {
     window.__terminal.failOpen = false
@@ -194,7 +203,7 @@ test('startup failures are recoverable and projects do not open hidden terminals
       window.__terminal.calls.filter((c) => c.method === 'terminal.open' && c.req.id === 's-beta'),
     ),
   ).toHaveLength(0)
-  await page.getByTestId('tab-terminal').click()
+  await openShell(page)
   await expect
     .poll(() =>
       page.evaluate(
@@ -215,7 +224,7 @@ test('startup failures are recoverable and projects do not open hidden terminals
 })
 
 test('the terminal is keyed by the session and follows + Session', async ({ page }) => {
-  await page.getByTestId('tab-terminal').click()
+  await openShell(page)
   const pane = page.getByTestId('terminal-pane')
   await expect(pane.getByTestId('terminal-title')).toHaveText('Shell')
   await expect(pane.getByTestId('terminal-live-note')).toBeVisible()
@@ -238,7 +247,7 @@ test('the terminal is keyed by the session and follows + Session', async ({ page
 test('Continue it here ends the SDK session and resumes the same conversation in the CLI', async ({
   page,
 }) => {
-  await page.getByTestId('tab-terminal').click()
+  await openShell(page)
   const pane = page.getByTestId('terminal-pane')
   await pane.getByTestId('terminal-takeover').click()
   await expect
@@ -262,11 +271,11 @@ test('view tabs support arrow keys and retain the selected session view', async 
   await page.keyboard.press('ArrowRight')
   await expect(page.getByTestId('view-raw')).toHaveAttribute('aria-selected', 'true')
   await page.keyboard.press('ArrowRight')
-  await expect(page.getByTestId('terminal-pane')).toBeVisible()
+  await expect(page.getByTestId('conversation-terminal')).toBeVisible()
   await page.getByTestId('tab-terminal').focus()
   await page.keyboard.press('Home')
   await expect(page.getByTestId('view-clean')).toBeFocused()
-  await expect(page.getByTestId('terminal-pane')).toBeHidden()
+  await expect(page.getByTestId('conversation-terminal')).toBeHidden()
   await page.getByTestId('tab-diff').click()
   await page.getByTestId('tab-session').click()
   await expect(page.getByTestId('view-clean')).toHaveAttribute('aria-selected', 'true')
@@ -276,7 +285,7 @@ test('terminal fits the workspace in light and dark themes at the minimum window
   page,
 }, testInfo) => {
   await page.setViewportSize({ width: 1080, height: 620 })
-  await page.getByTestId('tab-terminal').click()
+  await openShell(page)
   const pane = page.getByTestId('terminal-pane')
   for (const theme of ['light', 'dark']) {
     const toggle = page.getByTestId('theme-toggle')
@@ -294,4 +303,91 @@ test('terminal fits the workspace in light and dark themes at the minimum window
       animations: 'disabled',
     })
   }
+})
+
+test('the Terminal view is the same conversation, typed text goes to the session, and Shell is one click further', async ({
+  page,
+}) => {
+  await page.evaluate(() =>
+    window.__mock.emitEvent('s-alpha', 'assistant_text', { text: 'Same conversation here.', partial: false }),
+  )
+  await page.getByTestId('tab-terminal').click()
+  const conv = page.getByTestId('conversation-terminal')
+  await expect(conv).toBeVisible()
+  await expect(page.getByTestId('terminal-pane')).toHaveCount(0)
+  await expect(conv.locator('.xterm-rows')).toContainText('Same conversation here.')
+  const input = conv.locator('.xterm-helper-textarea')
+  await input.focus()
+  await input.pressSequentially('hello from the terminal')
+  await input.press('Enter')
+  await expect
+    .poll(() => page.evaluate(() => window.__mock.state().sends.at(-1)))
+    .toMatchObject({ sessionId: 's-alpha', text: 'hello from the terminal' })
+  expect(await page.evaluate(() => window.__terminal.calls.filter((c) => c.method === 'terminal.open').length)).toBe(0)
+  await page.getByTestId('conversation-terminal-shell').click()
+  await expect(page.getByTestId('terminal-pane')).toBeVisible()
+  await expect(conv).toBeHidden()
+  await page.getByTestId('terminal-chat').click()
+  await expect(conv).toBeVisible()
+  await expect(page.getByTestId('terminal-pane')).toBeHidden()
+  await page.getByTestId('view-clean').click()
+  await expect(page.getByTestId('stream-event-assistant_text').last()).toContainText('Same conversation here.')
+})
+
+test('sending from the Terminal view leaves an unsent composer draft alone', async ({ page }) => {
+  await page.getByTestId('composer-input').fill('a draft I have not sent')
+  await page.getByTestId('tab-terminal').click()
+  const input = page.getByTestId('conversation-terminal').locator('.xterm-helper-textarea')
+  await input.focus()
+  await input.pressSequentially('run the tests')
+  await input.press('Enter')
+  await expect
+    .poll(() => page.evaluate(() => window.__mock.state().sends.at(-1)))
+    .toMatchObject({ sessionId: 's-alpha', text: 'run the tests' })
+  await page.getByTestId('view-clean').click()
+  await expect(page.getByTestId('composer-input')).toHaveValue('a draft I have not sent')
+})
+
+test('Escape in the Terminal view neither sends, clears nor interrupts', async ({ page }) => {
+  await page.getByTestId('tab-terminal').click()
+  const conv = page.getByTestId('conversation-terminal')
+  const input = conv.locator('.xterm-helper-textarea')
+  await input.focus()
+  await input.pressSequentially('draft not yet sent')
+  await input.press('Escape')
+  expect(await page.evaluate(() => window.__mock.state().sends)).toEqual([])
+  expect(await page.evaluate(() => window.__mock.state().interrupts)).toEqual([])
+  await input.press('Enter')
+  await expect
+    .poll(() => page.evaluate(() => window.__mock.state().sends.at(-1)))
+    .toMatchObject({ sessionId: 's-alpha', text: 'draft not yet sent' })
+})
+
+test('streamed assistant text grows in place in the Terminal view', async ({ page }) => {
+  await page.getByTestId('tab-terminal').click()
+  const rows = page.getByTestId('conversation-terminal').locator('.xterm-rows')
+  const id = await page.evaluate(() =>
+    window.__mock.emitEvent('s-alpha', 'assistant_text', { text: 'Reading the', partial: true }),
+  )
+  await expect(rows).toContainText('Reading the')
+  await page.evaluate(
+    (eventId) =>
+      window.__mock.updateEvent('s-alpha', eventId, {
+        text: 'Reading the repository first.',
+        partial: true,
+      }),
+    id,
+  )
+  await expect(rows).toContainText('Reading the repository first.')
+  expect((await rows.innerText()).match(/Reading the/g)).toHaveLength(1)
+})
+
+test('the Shell choice belongs to one project, so another project opens on the conversation', async ({
+  page,
+}) => {
+  await openShell(page)
+  await page.getByTestId('sidebar-project-beta').click()
+  await page.getByTestId('tab-terminal').click()
+  await expect(page.getByTestId('conversation-terminal')).toBeVisible()
+  await expect(page.getByTestId('terminal-pane')).toHaveCount(0)
 })

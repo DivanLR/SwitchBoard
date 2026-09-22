@@ -68,7 +68,7 @@ const ICONS: Record<string, string> = {
   grid-template-columns: auto 1fr auto;
   align-items: start;
   gap: 10px;
-  padding: 11px 12px 13px;
+  padding: var(--pad-card);
   overflow: hidden;
   pointer-events: auto;
   background: var(--surface-overlay);

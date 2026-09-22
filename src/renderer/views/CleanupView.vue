@@ -58,8 +58,8 @@ function run(command: string): void {
         <span class="group-name mono">{{ g.source }}</span>
         <span class="group-tag">{{ g.tag }}</span>
         <span class="spacer"></span>
-        <span v-if="isInstalled(g)" class="badge installed"><Icon name="check" :size="11" /> Installed</span>
-        <span v-else class="badge missing"><Icon name="circle" :size="11" /> Not installed</span>
+        <span v-if="isInstalled(g)" class="pill working"><Icon name="check" :size="11" /> Installed</span>
+        <span v-else class="pill done"><Icon name="circle" :size="11" /> Not installed</span>
       </div>
       <div class="group-blurb">{{ g.blurb }}</div>
 
@@ -67,7 +67,7 @@ function run(command: string): void {
         <button
           v-for="c in g.commands"
           :key="c.command"
-          class="cmd-row"
+          class="ui-row cmd-row"
           :data-testid="`cleanup-cmd-${c.command}`"
           :disabled="!isAvailable(c)"
           :title="
@@ -77,16 +77,16 @@ function run(command: string): void {
           "
           @click="run(c.command)"
         >
-          <span class="cmd-name mono">{{ c.label }}</span>
-          <span class="cmd-desc">{{ c.hint }}</span>
-          <span class="cmd-run">
+          <span class="ui-name cmd-name mono">{{ c.label }}</span>
+          <span class="ui-desc">{{ c.hint }}</span>
+          <span class="ui-action cmd-run">
             <template v-if="isAvailable(c)">Run <Icon name="arrow-right" :size="11" /></template>
             <template v-else>Not available</template>
           </span>
         </button>
       </div>
 
-      <div v-else class="install-card">
+      <div v-else class="ui-card install-card">
         <div class="install-text">
           <div class="install-title">Not installed in this project — add it to run these commands</div>
           <div class="install-cmds mono">{{ g.marketplace }} · {{ g.pkg }}</div>
@@ -95,7 +95,7 @@ function run(command: string): void {
           </div>
         </div>
         <button
-          class="install-btn"
+          class="btn-solid"
           :data-testid="`cleanup-install-${g.source}`"
           :disabled="installing"
           @click="emit('install', g)"
@@ -105,6 +105,8 @@ function run(command: string): void {
         </button>
       </div>
     </div>
+
+    <div v-if="groups.length === 0" class="ui-empty-line">No cleanup commands available for this project.</div>
 
     <MiniTerminal v-if="sessionId" :session-id="sessionId" label="running" />
   </div>
@@ -154,25 +156,6 @@ function run(command: string): void {
   color: var(--text-faint);
 }
 
-.badge {
-  font-size: var(--fs-micro);
-  border-radius: var(--rp);
-  padding: 1px 9px;
-  white-space: nowrap;
-}
-
-.badge.installed {
-  color: var(--green);
-  background: color-mix(in srgb, var(--green) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--green) 32%, transparent);
-}
-
-.badge.missing {
-  color: var(--amber);
-  background: color-mix(in srgb, var(--amber) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
-}
-
 .group-blurb {
   font-size: var(--fs-meta);
   color: var(--text-tab);
@@ -187,46 +170,13 @@ function run(command: string): void {
   gap: 7px;
 }
 
-.cmd-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 13px;
-  background: var(--bg-card);
-  box-shadow: var(--elev);
-  border: 1px solid var(--border-card);
-  border-radius: var(--rc);
-  cursor: pointer;
-  text-align: left;
-}
-
-.cmd-row:hover:not(:disabled) {
-  border-color: var(--green);
-}
-
-.cmd-row:disabled {
-  cursor: default;
-  opacity: 0.55;
-}
-
 .cmd-name {
-  flex-shrink: 0;
-  font-family: var(--mono);
-  font-size: var(--fs-meta);
   color: var(--green);
+  font-size: var(--fs-meta);
   white-space: nowrap;
 }
 
-.cmd-desc {
-  flex: 1;
-  min-width: 0;
-  font-size: var(--fs-meta);
-  color: var(--text-mid);
-  text-wrap: pretty;
-}
-
 .cmd-run {
-  flex-shrink: 0;
   font-size: var(--fs-micro);
   color: var(--text-faint);
   white-space: nowrap;
@@ -236,11 +186,8 @@ function run(command: string): void {
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 13px 15px;
-  background: var(--bg-card);
-  box-shadow: var(--elev);
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--rc);
+  border-style: dashed;
+  border-color: var(--border-strong);
 }
 
 .install-text {
@@ -269,20 +216,8 @@ function run(command: string): void {
   text-overflow: ellipsis;
 }
 
-.install-btn {
+.install-card .btn-solid {
   flex-shrink: 0;
   white-space: nowrap;
-  background: var(--green);
-  color: var(--green-ink);
-  font-weight: var(--w-em);
-  font-size: var(--fs-meta);
-  padding: 8px 15px;
-  border-radius: var(--rc);
-  cursor: pointer;
-  user-select: none;
-}
-
-.install-btn:hover {
-  background: var(--green-hover);
 }
 </style>

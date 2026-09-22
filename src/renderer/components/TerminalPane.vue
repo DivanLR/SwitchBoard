@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import { Terminal, type ITheme } from '@xterm/xterm'
+import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import type { SessionEngine, Settings } from '@shared/domain'
+import type { SessionEngine } from '@shared/domain'
 import { useTerminalStore } from '@renderer/stores/terminal'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useClipboardStore } from '@renderer/stores/clipboard'
 import { errorMessage } from '@renderer/ipc'
+import { xtermFontFamily, xtermFontSize, xtermTheme } from '@renderer/composables/xtermTheme'
 import Icon from '@renderer/components/Icon.vue'
 
 const props = defineProps<{
@@ -18,7 +19,7 @@ const props = defineProps<{
   live: boolean
   visible: boolean
 }>()
-const emit = defineEmits<{ (e: 'takeover'): void }>()
+const emit = defineEmits<{ (e: 'takeover'): void; (e: 'chat'): void }>()
 
 const terminals = useTerminalStore()
 const launchEngine = computed((): SessionEngine | 'shell' =>
@@ -39,38 +40,10 @@ let resizeObserver: ResizeObserver | null = null
 let themeObserver: MutationObserver | null = null
 let attachToken = 0
 
-function themeColors(): ITheme {
-  const style = getComputedStyle(document.documentElement)
-  const token = (name: string): string => style.getPropertyValue(name).trim()
-  return {
-    background: token('--bg-code'),
-    foreground: token('--text-body'),
-    cursor: token('--green'),
-    cursorAccent: token('--bg-code'),
-    selectionBackground: token('--bg-hover'),
-    black: token('--term-black'),
-    red: token('--term-red'),
-    green: token('--term-green'),
-    yellow: token('--term-yellow'),
-    blue: token('--term-blue'),
-    magenta: token('--term-magenta'),
-    cyan: token('--term-cyan'),
-    white: token('--term-white'),
-    brightBlack: token('--term-bright-black'),
-    brightRed: token('--term-bright-red'),
-    brightGreen: token('--term-bright-green'),
-    brightYellow: token('--term-bright-yellow'),
-    brightBlue: token('--term-bright-blue'),
-    brightMagenta: token('--term-bright-magenta'),
-    brightCyan: token('--term-bright-cyan'),
-    brightWhite: token('--term-bright-white'),
-  }
-}
-
-const FONT_SCALE: Record<Settings['fontSize'], number> = { sm: 11, md: 12, lg: 13.5 }
+const themeColors = xtermTheme
 
 function fontSize(): number {
-  return FONT_SCALE[settingsStore.settings?.fontSize ?? 'md']
+  return xtermFontSize(settingsStore.settings?.fontSize)
 }
 
 const activeSession = useActiveSessionStore()
@@ -167,7 +140,7 @@ async function attach(): Promise<void> {
 
 onMounted(async () => {
   const instance = new Terminal({
-    fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--mono').trim(),
+    fontFamily: xtermFontFamily(),
     fontSize: fontSize(),
     convertEol: false,
     cursorBlink: true,
@@ -336,75 +309,90 @@ async function restart(): Promise<void> {
 
 <template>
   <div class="terminal-pane" :class="{ full: isFullScreen }" data-testid="terminal-pane">
-    <div class="terminal-bar mono">
-      <Icon name="terminal" :size="15" />
-      <span class="tb-title" data-testid="terminal-title">{{
-        launched === 'shell' ? 'Shell' : launched === 'codex' ? 'Codex CLI' : 'Claude Code'
-      }}</span>
-      <span class="tb-path" :title="cwd">{{ cwd }}</span>
-      <span class="tb-spacer"></span>
-      <template v-if="live">
-        <span class="tb-note" data-testid="terminal-live-note">Session running in Clean and Raw</span>
+    <div class="terminal-bar ui-head">
+      <div class="ui-meaning tb-meaning">
+        <Icon name="terminal" :size="15" />
+        <span class="tb-title" data-testid="terminal-title">{{
+          launched === 'shell' ? 'Shell' : launched === 'codex' ? 'Codex CLI' : 'Claude Code'
+        }}</span>
+        <span class="tb-path mono" :title="cwd">{{ cwd }}</span>
+      </div>
+      <div class="ui-controls">
         <button
           type="button"
-          class="terminal-action"
-          data-testid="terminal-takeover"
-          :disabled="takingOver"
-          title="End the session in Clean and Raw and carry the same conversation on here, in the real CLI. Clean and Raw keep the history up to this point and offer Resume to take it back."
-          @click="takeover()"
+          class="btn-quiet"
+          data-testid="terminal-chat"
+          title="Back to the conversation, drawn as a terminal"
+          @click="emit('chat')"
         >
-          {{ takingOver ? 'Handing over…' : 'Continue it here' }}
+          Conversation
         </button>
-      </template>
-      <button
-        v-else-if="canContinue"
-        type="button"
-        class="terminal-action"
-        data-testid="terminal-continue"
-        title="Open the ended session's conversation in this terminal with --resume."
-        @click="restart()"
-      >
-        Continue the ended session here
-      </button>
-      <button
-        type="button"
-        class="terminal-action"
-        title="Copy selected terminal text"
-        @click="copySelection()"
-      >
-        Copy
-      </button>
-      <button
-        type="button"
-        class="terminal-action"
-        :disabled="!ready"
-        title="Paste clipboard text (Ctrl+V or Ctrl+Shift+V)"
-        @click="pasteIntoTerminal()"
-      >
-        Paste
-      </button>
-      <button
-        type="button"
-        class="terminal-action"
-        title="Clear the visible terminal scrollback"
-        @click="term?.clear()"
-      >
-        Clear
-      </button>
-      <button
-        type="button"
-        class="terminal-action"
-        data-testid="terminal-full-screen"
-        :aria-pressed="isFullScreen ? 'true' : 'false'"
-        :title="
-          isFullScreen
-            ? 'Give the sidebar and inbox back (or press Escape)'
-            : 'Hide the sidebar, inbox and header, and give the terminal the whole window'
-        "
-        @click="toggleFullScreen"
-      >
-        {{ isFullScreen ? 'Exit full screen' : 'Full screen' }}
-      </button>
+        <template v-if="live">
+          <span class="tb-note" data-testid="terminal-live-note">Session running in Clean and Raw</span>
+          <button
+            type="button"
+            class="btn-quiet"
+            data-testid="terminal-takeover"
+            :disabled="takingOver"
+            title="End the session in Clean and Raw and carry the same conversation on here, in the real CLI. Clean and Raw keep the history up to this point and offer Resume to take it back."
+            @click="takeover()"
+          >
+            {{ takingOver ? 'Handing over…' : 'Continue it here' }}
+          </button>
+        </template>
+        <button
+          v-else-if="canContinue"
+          type="button"
+          class="btn-quiet"
+          data-testid="terminal-continue"
+          title="Open the ended session's conversation in this terminal with --resume."
+          @click="restart()"
+        >
+          Continue the ended session here
+        </button>
+        <button
+          type="button"
+          class="btn-quiet"
+          data-testid="terminal-copy"
+          title="Copy selected terminal text"
+          @click="copySelection()"
+        >
+          Copy
+        </button>
+        <button
+          type="button"
+          class="btn-quiet"
+          data-testid="terminal-paste"
+          :disabled="!ready"
+          title="Paste clipboard text (Ctrl+V or Ctrl+Shift+V)"
+          @click="pasteIntoTerminal()"
+        >
+          Paste
+        </button>
+        <button
+          type="button"
+          class="btn-quiet"
+          data-testid="terminal-clear"
+          title="Clear the visible terminal scrollback"
+          @click="term?.clear()"
+        >
+          Clear
+        </button>
+        <button
+          type="button"
+          class="btn-quiet"
+          data-testid="terminal-full-screen"
+          :aria-pressed="isFullScreen ? 'true' : 'false'"
+          :title="
+            isFullScreen
+              ? 'Give the sidebar and inbox back (or press Escape)'
+              : 'Hide the sidebar, inbox and header, and give the terminal the whole window'
+          "
+          @click="toggleFullScreen"
+        >
+          {{ isFullScreen ? 'Exit full screen' : 'Full screen' }}
+        </button>
+      </div>
     </div>
     <div
       ref="host"
@@ -412,19 +400,25 @@ async function restart(): Promise<void> {
       aria-label="Interactive terminal"
       @contextmenu.prevent="onContextMenu()"
     ></div>
-    <div v-if="connecting" class="terminal-exit mono" role="status">Connecting to terminal…</div>
+    <div v-if="connecting" class="ui-empty-line" role="status">Connecting to terminal…</div>
     <div
       v-if="failure"
-      class="terminal-exit terminal-error"
+      class="ui-err-banner"
       role="alert"
       data-testid="terminal-error"
     >
-      <span>{{ failure }}</span>
-      <button type="button" class="btn-quiet" :disabled="connecting" @click="restart()">
+      <span class="err-text">{{ failure }}</span>
+      <button
+        type="button"
+        class="btn-quiet"
+        data-testid="terminal-retry"
+        :disabled="connecting"
+        @click="restart()"
+      >
         Retry
       </button>
     </div>
-    <div v-if="exited !== null" class="terminal-exit mono" data-testid="terminal-exited">
+    <div v-if="exited !== null" class="ui-empty-line term-exit-line" data-testid="terminal-exited">
       Shell exited ({{ exited }}).
       <button
         type="button"
@@ -436,8 +430,8 @@ async function restart(): Promise<void> {
         Start a new one
       </button>
     </div>
-    <div class="terminal-footer mono">
-      <span class="terminal-state" :class="{ connected: ready }">{{
+    <div class="terminal-footer ui-footer">
+      <span class="pill" :class="{ connected: ready, working: ready }">{{
         connecting
           ? 'Connecting'
           : failure
@@ -477,19 +471,21 @@ async function restart(): Promise<void> {
 }
 
 .terminal-bar {
+  padding: 10px 12px;
+  flex-shrink: 0;
+  margin-bottom: 0;
+  background: var(--bg-card-alt);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.tb-meaning {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
-  flex-shrink: 0;
-  flex-wrap: wrap;
-  background: var(--bg-card-alt);
-  border-bottom: 1px solid var(--border-soft);
-  font-size: var(--fs-micro);
-  color: var(--text-ghost);
 }
 
 .tb-title {
+  flex-shrink: 0;
   color: var(--text-strong);
   white-space: nowrap;
 }
@@ -504,51 +500,20 @@ async function restart(): Promise<void> {
 
 .tb-note {
   color: var(--text-faint);
+  font-size: var(--fs-meta);
   white-space: nowrap;
-}
-
-.terminal-action {
-  padding: 4px 6px;
-  border-radius: var(--rp);
-  white-space: nowrap;
-}
-
-.terminal-action:hover:not(:disabled) {
-  color: var(--text-bright);
-  background: var(--bg-hover);
-}
-
-.terminal-action:disabled {
-  opacity: 0.45;
-  cursor: default;
 }
 
 .terminal-footer {
-  display: flex;
   justify-content: space-between;
-  gap: 12px;
-  padding: 8px 12px;
-  border-top: 1px solid var(--border-soft);
   font-size: var(--fs-micro);
   color: var(--text-faint);
-}
-
-.terminal-state {
-  flex-shrink: 0;
-}
-
-.terminal-state.connected {
-  color: var(--green);
 }
 
 .tb-hint {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.tb-spacer {
-  flex: 1;
 }
 
 .terminal-host {
@@ -558,17 +523,14 @@ async function restart(): Promise<void> {
   overflow: hidden;
 }
 
-.terminal-exit {
+.term-exit-line {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  font-size: var(--fs-meta);
-  color: var(--text-ghost);
+  gap: var(--sp-2);
+  flex-wrap: wrap;
 }
 
-.terminal-error {
-  color: var(--red);
+.err-text {
   overflow-wrap: anywhere;
 }
 </style>

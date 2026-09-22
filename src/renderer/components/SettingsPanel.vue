@@ -339,10 +339,10 @@ const updateLine = computed(() => {
       tabindex="-1" data-testid="settings-panel">
       <div class="s-head">
         <Icon name="settings" class="gear" />
-        <span class="s-title mono">Settings</span>
+        <span class="s-title">Settings</span>
         <span class="spacer"></span>
         <button
-          class="s-x mono"
+          class="s-x"
           data-testid="settings-close"
           aria-label="Close settings"
           @click="emit('close')"
@@ -362,7 +362,7 @@ const updateLine = computed(() => {
             @click="tab = t.id"
           >
             <Icon :name="t.icon" class="rt-icon" />
-            <span class="rt-label mono">{{ t.label }}</span>
+            <span class="rt-label">{{ t.label }}</span>
           </button>
           <span class="spacer"></span>
           <div v-if="settings" class="rail-foot mono">
@@ -373,7 +373,7 @@ const updateLine = computed(() => {
         <div v-if="settings" class="s-body">
           <template v-if="tab === 'models'">
             <div class="group">
-              <div class="group-label mono">MODE</div>
+              <div class="ui-kicker group-label">MODE</div>
               <div class="group-desc">
                 How the strong and cheap models pair up on work. Auto picks per message from the
                 workload; both patterns keep most tokens on the cheaper model.
@@ -382,14 +382,14 @@ const updateLine = computed(() => {
                 <button
                   v-for="m in MODE_CHOICES"
                   :key="m.id"
-                  class="card-opt"
-                  :class="{ sel: (settings?.modelMode ?? 'auto') === m.id }"
+                  class="ui-card card-opt is-actionable"
+                  :class="{ sel: (settings?.modelMode ?? 'auto') === m.id, 'is-selected': (settings?.modelMode ?? 'auto') === m.id }"
                   :data-testid="`mode-${m.id}`"
                   @click="save({ modelMode: m.id })"
                 >
                   <span class="opt-dot" :class="{ on: (settings?.modelMode ?? 'auto') === m.id }"></span>
                   <div class="opt-body">
-                    <div class="opt-name mono">{{ m.label }}</div>
+                    <div class="opt-name">{{ m.label }}</div>
                     <div class="opt-sub">{{ m.desc }}</div>
                   </div>
                 </button>
@@ -397,14 +397,14 @@ const updateLine = computed(() => {
             </div>
 
             <div v-for="section in MODEL_SECTIONS" :key="section.key" class="group">
-              <div class="group-label mono">{{ section.label }}</div>
+              <div class="ui-kicker group-label">{{ section.label }}</div>
               <div class="group-desc">{{ section.desc }}</div>
               <div class="cards">
                 <button
                   v-for="m in modelChoices"
                   :key="m.id"
-                  class="card-opt"
-                  :class="{ sel: settings[section.key] === m.id }"
+                  class="ui-card card-opt is-actionable"
+                  :class="{ sel: settings[section.key] === m.id, 'is-selected': settings[section.key] === m.id }"
                   :data-testid="`${section.testid}-${m.id}`"
                   @click="setModel(section.key, m.id)"
                 >
@@ -419,7 +419,7 @@ const updateLine = computed(() => {
             </div>
 
             <div class="group">
-              <div class="group-label mono">ENGINE FOR NEW SESSIONS</div>
+              <div class="ui-kicker group-label">ENGINE FOR NEW SESSIONS</div>
               <div class="group-desc">
                 Which CLI a new session starts on. A Codex session has no permission inbox, no plan
                 mode and no container: Codex decides inside its own sandbox, and the session's mode
@@ -429,14 +429,14 @@ const updateLine = computed(() => {
                 <button
                   v-for="e in ENGINE_CHOICES"
                   :key="e.id"
-                  class="card-opt"
-                  :class="{ sel: settings.defaultEngine === e.id }"
+                  class="ui-card card-opt is-actionable"
+                  :class="{ sel: settings.defaultEngine === e.id, 'is-selected': settings.defaultEngine === e.id }"
                   :data-testid="`default-engine-${e.id}`"
                   @click="save({ defaultEngine: e.id })"
                 >
                   <span class="opt-dot" :class="{ on: settings.defaultEngine === e.id }"></span>
                   <div class="opt-body">
-                    <div class="opt-name mono">{{ e.label }}</div>
+                    <div class="opt-name">{{ e.label }}</div>
                     <div class="opt-sub">{{ e.desc }}</div>
                   </div>
                 </button>
@@ -444,7 +444,7 @@ const updateLine = computed(() => {
             </div>
 
             <div class="group">
-              <div class="group-label mono">CODEX MODEL</div>
+              <div class="ui-kicker group-label">CODEX MODEL</div>
               <div class="group-desc">
                 The model Codex sessions run, read from the Codex CLI itself.
                 <template v-if="codexModels.length === 0">
@@ -457,8 +457,8 @@ const updateLine = computed(() => {
                 <button
                   v-for="m in codexChoices"
                   :key="m.id || 'cli-default'"
-                  class="card-opt"
-                  :class="{ sel: settings.codexModel === m.id }"
+                  class="ui-card card-opt is-actionable"
+                  :class="{ sel: settings.codexModel === m.id, 'is-selected': settings.codexModel === m.id }"
                   :data-testid="`codex-model-${m.id || 'default'}`"
                   @click="save({ codexModel: m.id })"
                 >
@@ -471,7 +471,7 @@ const updateLine = computed(() => {
               </div>
             </div>
 
-            <div class="setting-row">
+            <div class="ui-card setting-row is-actionable">
               <div class="sr-text">
                 <div class="sr-label">Pair models by message</div>
                 <div class="sr-desc">
@@ -492,17 +492,17 @@ const updateLine = computed(() => {
               </button>
             </div>
 
-            <div class="note">
+            <div class="ui-card">
               These apply to every project. New sessions pick them up immediately; running sessions
               switch on their next turn. Override per project in the "This project" tab.
             </div>
           </template>
 
           <template v-else-if="tab === 'proj'">
-            <div v-if="!proj" class="note">No projects yet — add one from the sidebar first.</div>
+            <div v-if="!proj" class="ui-card">No projects yet — add one from the sidebar first.</div>
             <template v-else>
-              <div class="proj-card">
-                <div class="group-label mono">PROJECT</div>
+              <div class="ui-card proj-card">
+                <div class="ui-kicker group-label">PROJECT</div>
                 <div class="dd-wrap">
                   <button
                     class="dd"
@@ -513,14 +513,14 @@ const updateLine = computed(() => {
                     @click="openProjDd"
                   >
                     <span class="dd-dot"></span>
-                    <span class="dd-name mono">{{ proj.name }}</span>
+                    <span class="dd-name">{{ proj.name }}</span>
                     <Icon name="chevron-down" class="dd-arrow" :class="{ open: projDd }" :size="11" />
                   </button>
-                  <div v-if="projDd" class="dd-list">
+                  <div v-if="projDd" class="suggest-list dd-list">
                     <input
                       ref="projFilterEl"
                       v-model="projFilter"
-                      class="dd-search mono"
+                      class="dd-search"
                       data-testid="proj-settings-search"
                       placeholder="Filter projects…"
                       role="combobox"
@@ -536,7 +536,7 @@ const updateLine = computed(() => {
                         v-for="(p, i) in projMatches"
                         :id="`proj-dd-${p.id}`"
                         :key="p.id"
-                        class="dd-item"
+                        class="suggest-item dd-item"
                         :class="{ sel: p.id === proj.id, active: i === projActive }"
                         role="option"
                         :aria-selected="p.id === proj.id"
@@ -547,11 +547,11 @@ const updateLine = computed(() => {
                         <span class="dd-check">
                           <Icon v-if="p.id === proj.id" name="check" :size="11" />
                         </span>
-                        <span class="mono">{{ p.name }}</span>
+                        <span>{{ p.name }}</span>
                       </button>
                       <div
                         v-if="projMatches.length === 0"
-                        class="dd-empty mono"
+                        class="dd-empty"
                         data-testid="proj-settings-empty"
                       >
                         No project matches “{{ projFilter }}”.
@@ -560,12 +560,12 @@ const updateLine = computed(() => {
                   </div>
                 </div>
                 <div class="proj-note">
-                  Everything below applies only to <span class="mono proj-name">{{ proj.name }}</span>
+                  Everything below applies only to <span class="proj-name">{{ proj.name }}</span>
                 </div>
               </div>
 
               <div class="group">
-                <div class="group-label mono">SESSION TYPE</div>
+                <div class="ui-kicker group-label">SESSION TYPE</div>
                 <div class="group-desc">
                   What this project's sessions may do without asking. Applies to the next session
                   it starts, not one already running.
@@ -574,14 +574,14 @@ const updateLine = computed(() => {
                   <button
                     v-for="m in SESSION_MODES"
                     :key="m.value"
-                    class="card-opt"
-                    :class="{ sel: proj.defaultSessionMode === m.value }"
+                    class="ui-card card-opt is-actionable"
+                    :class="{ sel: proj.defaultSessionMode === m.value, 'is-selected': proj.defaultSessionMode === m.value }"
                     :data-testid="`proj-session-mode-${m.value}`"
                     @click="saveSessionMode(m.value)"
                   >
                     <span class="opt-dot" :class="{ on: proj.defaultSessionMode === m.value }"></span>
                     <div class="opt-body">
-                      <div class="opt-name mono">{{ m.label }}</div>
+                      <div class="opt-name">{{ m.label }}</div>
                       <div class="opt-sub">{{ m.detail }}</div>
                     </div>
                     <span class="opt-price mono">
@@ -596,7 +596,7 @@ const updateLine = computed(() => {
           </template>
 
           <template v-else-if="tab === 'mcp'">
-            <div class="group-label mono">MCP SERVERS</div>
+            <div class="ui-kicker group-label">MCP SERVERS</div>
             <div class="group-desc">
               Sessions expose every configured MCP server. Select the ones to combine into a single
               chat — they show in the sidebar MCP section and are used together in the schema scan
@@ -606,8 +606,8 @@ const updateLine = computed(() => {
               <button
                 v-for="name in mcpServerNames"
                 :key="name"
-                class="card-opt mcp-opt"
-                :class="{ sel: isDbMcp(name) }"
+                class="ui-card card-opt mcp-opt is-actionable"
+                :class="{ sel: isDbMcp(name), 'is-selected': isDbMcp(name) }"
                 :data-testid="`db-mcp-${name}`"
                 @click="toggleDatabaseMcp(name)"
               >
@@ -623,7 +623,7 @@ const updateLine = computed(() => {
                 </div>
               </button>
             </div>
-            <div v-if="mcpServerNames.length === 0" class="note">
+            <div v-if="mcpServerNames.length === 0" class="ui-card">
               No MCP servers reported yet — start a session and its servers appear here to choose
               from. You can also type the exact server name below.
             </div>
@@ -636,7 +636,7 @@ const updateLine = computed(() => {
                 placeholder="Or type the server name exactly — e.g. postgres"
                 @keydown.enter="addDatabaseMcp"
               />
-              <button class="add-cmd-btn mono" data-testid="db-mcp-set" @click="addDatabaseMcp">Add</button>
+              <button class="btn-quiet" data-testid="db-mcp-set" @click="addDatabaseMcp">Add</button>
             </div>
             <div class="group-desc" style="margin-top: 12px">
               {{ mcpSelSummary }}
@@ -644,12 +644,12 @@ const updateLine = computed(() => {
           </template>
 
           <template v-else-if="tab === 'allowed'">
-            <div class="group-label mono">AUTO-APPROVE BY RISK</div>
+            <div class="ui-kicker group-label">AUTO-APPROVE BY RISK</div>
             <div class="group-desc">
               Requests at these risk levels are approved automatically and land in history as
               rule-approved. High risk always asks.
             </div>
-            <div class="setting-row">
+            <div class="ui-card setting-row is-actionable">
               <div class="sr-text">
                 <div class="sr-label">Low risk</div>
                 <div class="sr-desc">Read-only inspection — file reads, git status, listings</div>
@@ -665,7 +665,7 @@ const updateLine = computed(() => {
                 <span class="knob"></span>
               </button>
             </div>
-            <div class="setting-row">
+            <div class="ui-card setting-row is-actionable">
               <div class="sr-text">
                 <div class="sr-label">Medium risk</div>
                 <div class="sr-desc">Routine changes — file edits, package installs, builds</div>
@@ -682,31 +682,31 @@ const updateLine = computed(() => {
               </button>
             </div>
 
-            <div class="group-label mono" style="margin-top: 8px">ALLOWED COMMANDS</div>
+            <div class="ui-kicker group-label" style="margin-top: 8px">ALLOWED COMMANDS</div>
             <div class="group-desc">
               Standing rules for
-              <span class="mono proj-name">{{ proj?.name ?? 'this project' }}</span> — created from
+              <span class="proj-name">{{ proj?.name ?? 'this project' }}</span> — created from
               history (right-click a command) or added here. Auto approves without asking; Ask
               restores the inbox prompt.
             </div>
             <div class="cards" data-testid="allowed-rules">
-              <div v-for="r in allowedRules" :key="r.id" class="card-opt static">
+              <div v-for="r in allowedRules" :key="r.id" class="ui-card card-opt static">
                 <div class="opt-body">
                   <div class="opt-name mono">{{ r.matcher.value ?? r.toolName }}</div>
                   <div class="opt-sub">{{ MATCHER_KIND_LABEL[r.matcher.kind] }}</div>
                 </div>
-                <div class="seg mono">
+                <div class="ui-segments">
                   <button
-                    class="seg-opt"
-                    :class="{ on: r.revokedAt !== null }"
+                    class="ui-seg"
+                    :class="{ on: r.revokedAt !== null, 'is-on': r.revokedAt !== null }"
                     :data-testid="`rule-ask-${r.id}`"
                     @click="setRuleMode(r, 'ask')"
                   >
                     Ask
                   </button>
                   <button
-                    class="seg-opt seg-auto"
-                    :class="{ on: r.revokedAt === null }"
+                    class="ui-seg seg-auto"
+                    :class="{ on: r.revokedAt === null, 'is-on': r.revokedAt === null }"
                     :data-testid="`rule-auto-${r.id}`"
                     @click="setRuleMode(r, 'auto')"
                   >
@@ -714,12 +714,12 @@ const updateLine = computed(() => {
                   </button>
                 </div>
               </div>
-              <div class="card-opt static">
+              <div class="ui-card card-opt static">
                 <div class="opt-body">
                   <div class="opt-name mono">rm · sudo · git push</div>
                   <div class="opt-sub">Destructive or irreversible — can never be auto-approved</div>
                 </div>
-                <span class="lock-chip mono">Always ask</span>
+                <span class="chip-risk high">Always ask</span>
               </div>
             </div>
             <div class="add-cmd">
@@ -731,14 +731,14 @@ const updateLine = computed(() => {
                 placeholder="Add a command — e.g. make build"
                 @keydown.enter="addAllowedCommand"
               />
-              <button class="add-cmd-btn mono" data-testid="allowed-add-btn" @click="addAllowedCommand">
+              <button class="btn-quiet" data-testid="allowed-add-btn" @click="addAllowedCommand">
                 Allow
               </button>
             </div>
           </template>
 
           <template v-else-if="tab === 'skills'">
-            <div class="group-label mono">IMPORT FROM GITHUB</div>
+            <div class="ui-kicker group-label">IMPORT FROM GITHUB</div>
             <div class="group-desc">
               Paste a repository, or a folder inside one, and every skill under it is imported.
               Skills are user-level: switching one on makes it available to every project and
@@ -758,7 +758,7 @@ const updateLine = computed(() => {
                 @keydown.enter="importSkills"
               />
               <button
-                class="add-cmd-btn mono"
+                class="btn-quiet"
                 data-testid="skills-import-btn"
                 :disabled="skills.importing || skillSource?.ok !== true"
                 @click="importSkills"
@@ -807,7 +807,7 @@ const updateLine = computed(() => {
               </div>
             </div>
 
-            <div class="group-label mono" style="margin-top: 12px">IMPORTED SKILLS</div>
+            <div class="ui-kicker group-label" style="margin-top: 12px">IMPORTED SKILLS</div>
             <div v-if="skills.items.length === 0" class="group-desc" data-testid="skills-none">
               None yet.
             </div>
@@ -825,7 +825,7 @@ const updateLine = computed(() => {
                 </span>
                 <button
                   v-if="group.items.length > 1"
-                  class="skill-group-all mono"
+                  class="skill-group-all"
                   :data-testid="`skill-group-all-${group.label}`"
                   :title="`Switch every skill from ${group.label} on or off`"
                   @click="setGroupEnabled(group.items, !group.items.every((s) => s.enabled))"
@@ -837,7 +837,7 @@ const updateLine = computed(() => {
               <div
                 v-for="skill in group.items"
                 :key="skill.name"
-                class="setting-row"
+                class="ui-card setting-row is-actionable"
                 :data-testid="`skill-row-${skill.name}`"
               >
                 <div class="sr-text">
@@ -881,20 +881,20 @@ const updateLine = computed(() => {
           </template>
 
           <template v-else-if="tab === 'term'">
-            <div class="group-label mono">OUTPUT</div>
+            <div class="ui-kicker group-label">OUTPUT</div>
             <div class="group-desc">How each session's output looks and behaves.</div>
 
-            <div class="setting-row">
+            <div class="ui-card setting-row is-actionable">
               <div class="sr-text">
                 <div class="sr-label">Font size</div>
                 <div class="sr-desc">Text size in the Clean and Raw views</div>
               </div>
-              <div class="seg mono">
+              <div class="ui-segments">
                 <button
                   v-for="[v, label] in FONT_SIZES"
                   :key="v"
-                  class="seg-opt"
-                  :class="{ on: settings.fontSize === v }"
+                  class="ui-seg"
+                  :class="{ on: settings.fontSize === v, 'is-on': settings.fontSize === v }"
                   :data-testid="`setting-font-${v}`"
                   @click="save({ fontSize: v })"
                 >
@@ -903,23 +903,23 @@ const updateLine = computed(() => {
               </div>
             </div>
 
-            <div class="setting-row">
+            <div class="ui-card setting-row is-actionable">
               <div class="sr-text">
                 <div class="sr-label">Default view</div>
                 <div class="sr-desc">What a session opens in — Clean summaries or the raw terminal</div>
               </div>
-              <div class="seg mono">
+              <div class="ui-segments">
                 <button
-                  class="seg-opt"
-                  :class="{ on: settings.defaultView === 'clean' }"
+                  class="ui-seg"
+                  :class="{ on: settings.defaultView === 'clean', 'is-on': settings.defaultView === 'clean' }"
                   data-testid="setting-view-clean"
                   @click="save({ defaultView: 'clean' })"
                 >
                   Clean
                 </button>
                 <button
-                  class="seg-opt"
-                  :class="{ on: settings.defaultView === 'raw' }"
+                  class="ui-seg"
+                  :class="{ on: settings.defaultView === 'raw', 'is-on': settings.defaultView === 'raw' }"
                   data-testid="setting-view-raw"
                   @click="save({ defaultView: 'raw' })"
                 >
@@ -928,7 +928,7 @@ const updateLine = computed(() => {
               </div>
             </div>
 
-            <div class="setting-row">
+            <div class="ui-card setting-row is-actionable">
               <div class="sr-text">
                 <div class="sr-label">Show tool activity in Clean view</div>
                 <div class="sr-desc">
@@ -948,7 +948,7 @@ const updateLine = computed(() => {
               </button>
             </div>
 
-            <div class="setting-row">
+            <div class="ui-card setting-row is-actionable">
               <div class="sr-text">
                 <div class="sr-label">Show injected context in Clean view</div>
                 <div class="sr-desc">
@@ -969,7 +969,7 @@ const updateLine = computed(() => {
               </button>
             </div>
 
-            <div class="setting-row">
+            <div class="ui-card setting-row is-actionable">
               <div class="sr-text">
                 <div class="sr-label">Session timer</div>
                 <div class="sr-desc">
@@ -988,7 +988,7 @@ const updateLine = computed(() => {
               </button>
             </div>
 
-            <div class="setting-row">
+            <div class="ui-card setting-row is-actionable">
               <div class="sr-text">
                 <div class="sr-label">Timestamps</div>
                 <div class="sr-desc">Show the time next to every event in the Clean view</div>
@@ -1005,7 +1005,7 @@ const updateLine = computed(() => {
               </button>
             </div>
 
-            <div class="setting-row">
+            <div class="ui-card setting-row is-actionable">
               <div class="sr-text">
                 <div class="sr-label">Follow output</div>
                 <div class="sr-desc">Keep the view pinned to the newest line while Claude works</div>
@@ -1022,7 +1022,7 @@ const updateLine = computed(() => {
               </button>
             </div>
 
-            <div class="setting-row">
+            <div class="ui-card setting-row is-actionable">
               <div class="sr-text">
                 <div class="sr-label">Turn summaries</div>
                 <div class="sr-desc">
@@ -1043,7 +1043,7 @@ const updateLine = computed(() => {
               </button>
             </div>
 
-            <div class="setting-row">
+            <div class="ui-card setting-row is-actionable">
               <div class="sr-text">
                 <div class="sr-label">Effort</div>
                 <div class="sr-desc">
@@ -1065,7 +1065,7 @@ const updateLine = computed(() => {
               />
             </div>
 
-            <div class="setting-row">
+            <div class="ui-card setting-row is-actionable">
               <div class="sr-text">
                 <div class="sr-label">Subagent effort</div>
                 <div class="sr-desc">
@@ -1088,14 +1088,14 @@ const updateLine = computed(() => {
               />
             </div>
 
-            <div class="group-label mono" style="margin-top: 8px">BYPASS SANDBOX</div>
+            <div class="ui-kicker group-label" style="margin-top: 8px">BYPASS SANDBOX</div>
             <div class="group-desc">
               Bypass sessions run in a WSL container capped at this much memory, so one
               hungry build stops alone instead of killing every session (exit 137). A size
               such as <span class="mono">6g</span> or <span class="mono">12g</span>, or
               <span class="mono">0</span> for no cap. Applies from the next bypass session.
             </div>
-            <div class="setting-row">
+            <div class="ui-card setting-row is-actionable">
               <div class="sr-text">
                 <div class="sr-label">Sandbox memory</div>
                 <div class="sr-desc">
@@ -1114,9 +1114,9 @@ const updateLine = computed(() => {
           </template>
 
           <template v-else>
-            <div class="group-label mono">NOTIFICATIONS</div>
+            <div class="ui-kicker group-label">NOTIFICATIONS</div>
             <div class="group-desc">How Switchboard gets your attention.</div>
-            <div class="setting-row">
+            <div class="ui-card setting-row is-actionable">
               <div class="sr-text">
                 <div class="sr-label">Desktop notifications</div>
                 <div class="sr-desc">
@@ -1136,12 +1136,16 @@ const updateLine = computed(() => {
               </button>
             </div>
 
-            <div class="group-label mono" style="margin-top: 8px">APP UPDATES</div>
+            <div class="ui-kicker group-label" style="margin-top: 8px">APP UPDATES</div>
             <div class="group-desc">
               New versions are published to GitHub releases. Switchboard checks for a newer release
               and, when one exists, opens its download page so you can run the installer.
             </div>
-            <div class="update-status mono" data-testid="update-status">{{ updateLine }}</div>
+            <div
+              class="update-status"
+              :class="updates.status.state === 'error' ? 'ui-err' : 'ui-card'"
+              data-testid="update-status"
+            >{{ updateLine }}</div>
             <div class="update-actions">
               <button
                 class="btn-quiet"
@@ -1161,7 +1165,7 @@ const updateLine = computed(() => {
               </button>
             </div>
 
-            <div class="note" style="margin-top: 8px">
+            <div class="ui-card" style="margin-top: 8px">
               Raw output is kept for the current and previous session per project; decision history
               for 30 days. All data stays on this machine.
             </div>
@@ -1169,7 +1173,7 @@ const updateLine = computed(() => {
         </div>
       </div>
 
-      <div class="s-foot mono">
+      <div class="s-foot">
         <span>Changes apply immediately</span>
         <span class="spacer"></span>
         <button class="btn-solid" data-testid="settings-done" @click="emit('close')">Done</button>
@@ -1298,7 +1302,7 @@ html.sb-light .overlay {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
-  padding: 18px 20px;
+  padding: var(--sp-6) var(--sp-6) var(--sp-7);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -1312,15 +1316,12 @@ html.sb-light .overlay {
 }
 
 .group-label {
-  font-size: var(--fs-micro);
-  letter-spacing: var(--track-label);
-  color: var(--text-faint);
   margin-bottom: 4px;
 }
 
 .group-desc {
-  font-size: var(--fs-ui);
-  color: var(--text-meta);
+  font: 400 var(--fs-ui) / 1.5 var(--sans);
+  color: var(--text-mid);
   margin-bottom: 10px;
   text-wrap: pretty;
 }
@@ -1335,26 +1336,7 @@ html.sb-light .overlay {
   display: flex;
   align-items: center;
   gap: 11px;
-  padding: var(--pad-card);
-  background: var(--bg-hover);
-  box-shadow: var(--elev);
-  border: 1px solid var(--border-card);
-  border-radius: var(--rc);
-  cursor: pointer;
   text-align: left;
-}
-
-.card-opt:hover:not(.static) {
-  border-color: var(--green);
-}
-
-.card-opt.sel {
-  background: color-mix(in srgb, var(--green) 6%, transparent);
-  border-color: color-mix(in srgb, var(--green) 40%, transparent);
-}
-
-.card-opt.static {
-  cursor: default;
 }
 
 .card-opt.static .opt-name {
@@ -1371,7 +1353,7 @@ html.sb-light .overlay {
   min-width: 8px;
   height: 8px;
   border-radius: var(--rp);
-  border: 1.5px solid var(--border-strong);
+  border: 1px solid var(--border-strong);
 }
 
 .opt-dot.on {
@@ -1411,7 +1393,7 @@ html.sb-light .overlay {
   width: 18px;
   height: 18px;
   border-radius: var(--rc);
-  border: 1.5px solid var(--border-strong);
+  border: 1px solid var(--border-strong);
   color: var(--green-ink);
   display: flex;
   align-items: center;
@@ -1431,16 +1413,6 @@ html.sb-light .overlay {
 .mcp-opt {
   padding: 11px 13px;
   gap: 12px;
-}
-
-.lock-chip {
-  font-size: var(--fs-micro);
-  color: var(--red);
-  border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
-  border-radius: var(--rc);
-  padding: 2px 9px;
-  white-space: nowrap;
-  flex-shrink: 0;
 }
 
 .add-cmd {
@@ -1478,27 +1450,7 @@ html.sb-light .overlay {
   border-radius: var(--rc);
 }
 
-.add-cmd-btn {
-  flex-shrink: 0;
-  color: var(--text-mid);
-  border: 1px solid var(--border-strong);
-  font-size: var(--fs-meta);
-  padding: 5px 12px;
-  border-radius: var(--rc);
-  cursor: pointer;
-  background: transparent;
-}
-
-.add-cmd-btn:hover {
-  border-color: var(--green);
-  color: var(--text-strong);
-}
-
 .proj-card {
-  padding: 11px 12px;
-  background: var(--bg-card);
-  border: 1px solid color-mix(in srgb, var(--green) 18%, transparent);
-  border-radius: var(--rc);
   margin-bottom: 10px;
 }
 
@@ -1565,16 +1517,10 @@ html.sb-light .overlay {
 }
 
 .dd-list {
-  position: absolute;
   top: calc(100% + 6px);
-  left: 0;
-  right: 0;
-  background: var(--surface-overlay);
-  border: 1px solid var(--border-card);
-  border-radius: var(--r-panel);
+  bottom: auto;
+  padding: 0;
   overflow: hidden;
-  z-index: 10;
-  box-shadow: var(--shadow-overlay);
   animation: ddIn 160ms var(--ease-overlay);
 }
 
@@ -1622,13 +1568,6 @@ html.sb-light .overlay {
   align-items: center;
   gap: 9px;
   width: 100%;
-  padding: 8px 10px;
-  border-radius: var(--r-row);
-  cursor: pointer;
-  font-size: var(--fs-ui);
-  color: var(--text-mid);
-  background: transparent;
-  text-align: left;
 }
 
 .dd-item:hover {
@@ -1661,11 +1600,6 @@ html.sb-light .overlay {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: var(--pad-card);
-  background: var(--bg-hover);
-  box-shadow: var(--elev);
-  border: 1px solid var(--border-card);
-  border-radius: var(--rc);
 }
 
 .sr-text {
@@ -1694,53 +1628,12 @@ html.sb-light .overlay {
   color: var(--text-body);
 }
 
-.seg {
-  display: flex;
-  flex-shrink: 0;
-  border: 1px solid var(--border-seg);
-  border-radius: var(--rp);
-  overflow: hidden;
-}
-
-.seg-opt {
-  padding: 5px 12px;
-  font-size: var(--fs-meta);
-  color: var(--text-tab);
-  cursor: pointer;
-  background: transparent;
-}
-
-.seg-opt:hover {
-  color: var(--text-body);
-}
-
-.seg-opt.on {
-  background: color-mix(in srgb, var(--green) 24%, transparent);
-  color: var(--text-strong);
-}
-
-.seg-auto.on {
+.seg-auto.is-on {
   background: color-mix(in srgb, var(--green) 15%, transparent);
   color: var(--green);
 }
 
-.note {
-  padding: 10px 13px;
-  background: var(--bg-card);
-  border: 1px solid color-mix(in srgb, var(--green) 18%, transparent);
-  border-radius: var(--rc);
-  font-size: var(--fs-meta);
-  line-height: 1.55;
-  color: var(--text-meta);
-}
-
 .update-status {
-  font-size: var(--fs-ui);
-  color: var(--text-body);
-  padding: 10px 13px;
-  background: var(--bg-card);
-  border: 1px solid color-mix(in srgb, var(--green) 18%, transparent);
-  border-radius: var(--rc);
   margin-bottom: 12px;
 }
 
@@ -1910,9 +1803,5 @@ html.sb-light .overlay {
 
 .skills-remove:hover {
   color: var(--red);
-}
-.dd-item.active {
-  background: color-mix(in srgb, var(--green) 12%, transparent);
-  color: var(--text-strong);
 }
 </style>

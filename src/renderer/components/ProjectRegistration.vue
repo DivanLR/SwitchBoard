@@ -74,7 +74,7 @@ async function startSession(): Promise<void> {
 </script>
 
 <template>
-  <div class="overlay" @click.self="emit('close')">
+  <div class="overlay" data-testid="registration-overlay" @click.self="emit('close')">
     <div
       ref="dialog"
       class="dialog reg"
@@ -83,14 +83,14 @@ async function startSession(): Promise<void> {
       aria-label="New session"
       tabindex="-1" data-testid="registration-dialog">
       <div class="reg-head">
-        <div class="title mono"><Icon name="plus" style="color: var(--green)" /> New session</div>
+        <div class="title"><Icon name="plus" style="color: var(--green)" /> New session</div>
         <p class="sub">Point Claude Code at a folder and it shows up in the sidebar.</p>
       </div>
 
       <div class="reg-body">
-      <p v-if="error" class="error mono" data-testid="registration-error">{{ error }}</p>
+      <p v-if="error" class="ui-err" data-testid="registration-error">{{ error }}</p>
 
-      <div class="section-label mono">FOLDER</div>
+      <div class="ui-kicker section-label">FOLDER</div>
       <div class="folder-row">
         <input
           v-model="folder"
@@ -102,7 +102,7 @@ async function startSession(): Promise<void> {
         />
         <button
           type="button"
-          class="btn-outline mono"
+          class="btn-outline"
           data-testid="browse-folder"
           :disabled="busy"
           @click="browseFolder"
@@ -114,29 +114,29 @@ async function startSession(): Promise<void> {
         Session name: <span class="name-val">{{ sessionName }}</span>
       </div>
 
-      <div class="access-card">
-        <div class="access-label mono">FOLDER ACCESS — DEFAULT</div>
-        <div class="access mono">
-          <div class="access-row">
+      <div class="ui-card access-card">
+        <div class="access-label">FOLDER ACCESS — DEFAULT</div>
+        <div class="access">
+          <div class="ui-row access-row">
             <Icon name="check" class="ok" /> Read — everything inside this folder, no asking
           </div>
-          <div class="access-row">
+          <div class="ui-row access-row">
             <Icon name="check" class="ok" /> Write — create and edit files inside this folder, no asking
           </div>
-          <div class="access-row">
+          <div class="ui-row access-row">
             <span class="ask">?</span> Anything outside the folder, shell commands, and deletes
             still ask first
           </div>
         </div>
       </div>
 
-      <div class="section-label mono">SESSION TYPE</div>
-      <div class="mode-list">
+      <div class="ui-kicker section-label">SESSION TYPE</div>
+      <div class="ui-card mode-list">
         <label
           v-for="m in SESSION_MODES"
           :key="m.value"
-          class="mode-row"
-          :class="{ on: mode === m.value, danger: m.value === 'bypass' }"
+          class="ui-row mode-row"
+          :class="{ on: mode === m.value, 'is-selected': mode === m.value, danger: m.value === 'bypass' }"
         >
           <input
             v-model="mode"
@@ -152,7 +152,7 @@ async function startSession(): Promise<void> {
           </span>
         </label>
       </div>
-      <div v-if="mode === 'bypass'" class="bypass-warn" data-testid="bypass-warning">
+      <div v-if="mode === 'bypass'" class="ui-err-banner is-warn" data-testid="bypass-warning">
         <Icon name="warning" :size="12" /> Nothing will ask for approval — only use this in
         throwaway or fully trusted folders.
       </div>
@@ -187,9 +187,6 @@ async function startSession(): Promise<void> {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  padding: 22px;
-  border-radius: var(--rc);
-  box-shadow: var(--shadow-dlg);
 }
 
 .reg-head {
@@ -200,8 +197,8 @@ async function startSession(): Promise<void> {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  margin: 0 -22px;
-  padding: 0 22px;
+  margin: 0 calc(-1 * var(--pad-dialog));
+  padding: 0 var(--pad-dialog);
 }
 
 
@@ -218,9 +215,6 @@ async function startSession(): Promise<void> {
 }
 
 .section-label {
-  font-size: var(--fs-micro);
-  letter-spacing: var(--track-label);
-  color: var(--text-faint);
   margin: 18px 0 6px;
 }
 
@@ -257,10 +251,7 @@ async function startSession(): Promise<void> {
 
 .access-card {
   margin-top: 16px;
-  padding: var(--pad-card);
-  background: var(--bg-card);
-  border: 1px solid color-mix(in srgb, var(--green) 18%, transparent);
-  border-radius: var(--rc);
+  border-color: color-mix(in srgb, var(--green) 18%, transparent);
 }
 
 .access-label {
@@ -279,9 +270,14 @@ async function startSession(): Promise<void> {
 }
 
 .access-row {
-  display: flex;
   align-items: baseline;
   gap: 9px;
+  padding: 0;
+  min-height: auto;
+}
+
+.access-row:hover {
+  background: none;
 }
 
 .access-row .ok,
@@ -309,30 +305,18 @@ async function startSession(): Promise<void> {
 .mode-list {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--border-card);
-  border-radius: var(--rc);
-  background: var(--bg-card);
   overflow: hidden;
+  padding: 0;
 }
 
 .mode-row {
-  display: flex;
   align-items: flex-start;
-  gap: 10px;
   padding: var(--pad-card);
   cursor: pointer;
 }
 
 .mode-row + .mode-row {
   border-top: 1px solid var(--border-soft);
-}
-
-.mode-row:hover {
-  background: var(--bg-hover);
-}
-
-.mode-row.on {
-  background: var(--bg-active);
 }
 
 .mode-input {
@@ -390,32 +374,11 @@ async function startSession(): Promise<void> {
   line-height: 1.5;
 }
 
-.bypass-warn {
-  margin-top: 8px;
-  padding: 8px 10px;
-  font-size: var(--fs-meta);
-  line-height: 1.5;
-  color: var(--red-hover);
-  border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
-  background: color-mix(in srgb, var(--red) 6%, transparent);
-  border-radius: var(--rc);
-}
-
-html.sb-light .bypass-warn {
-  color: var(--red);
-}
-
 .actions {
   flex-shrink: 0;
   display: flex;
   gap: 8px;
   padding-top: 14px;
   border-top: 1px solid var(--border);
-}
-
-.error {
-  color: var(--red);
-  font-size: var(--fs-ui);
-  margin: 8px 0 0;
 }
 </style>

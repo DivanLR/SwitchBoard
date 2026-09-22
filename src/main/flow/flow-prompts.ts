@@ -251,3 +251,25 @@ export function publishPrompt(input: { run: FlowRun; items: readonly FlowItem[] 
     ),
   ].join('\n')
 }
+
+export function specDescription(input: { run: FlowRun; items: readonly FlowItem[] }): string {
+  const flat = (text: string): string => text.replace(/\n/g, ' ')
+  const items = input.items.map((item) => {
+    const acceptance = item.acceptance.map((line) => `    - ${flat(line)}`)
+    return [`- ${flat(item.title)}: ${flat(item.body)}`, ...acceptance].join('\n')
+  })
+  return [
+    `Feature ${input.run.featureId}: ${flat(input.run.featureTitle)}`,
+    '',
+    'Scope, one line per backlog item with its acceptance beneath:',
+    ...items,
+    input.run.risks.length > 0
+      ? `\nRisks:\n${input.run.risks.map((risk) => `- ${flat(risk)}`).join('\n')}`
+      : '',
+    input.run.outOfScope.length > 0
+      ? `\nOut of scope:\n${input.run.outOfScope.map((line) => `- ${flat(line)}`).join('\n')}`
+      : '',
+  ]
+    .filter((line) => line !== '')
+    .join('\n')
+}

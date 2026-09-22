@@ -104,61 +104,63 @@ async function install(): Promise<void> {
 
 <template>
   <div class="sec-view" data-testid="security-view">
-    <div class="sec-bar">
-      <div class="segments mono" role="group" aria-label="Audit scope">
-        <button
-          type="button"
-          class="seg"
-          :class="{ on: scope === 'project' }"
-          data-testid="security-scope-project"
-          :aria-pressed="scope === 'project'"
-          @click="scope = 'project'"
-        >
-          Whole project
-        </button>
-        <button
-          type="button"
-          class="seg"
-          :class="{ on: scope === 'changes' }"
-          data-testid="security-scope-changes"
-          :aria-pressed="scope === 'changes'"
-          @click="scope = 'changes'"
-        >
-          Pending changes
-        </button>
-      </div>
-      <button
-        v-if="!running"
-        type="button"
-        class="btn-solid"
-        data-testid="security-run"
-        :disabled="!installed || security.starting"
-        @click="run()"
-      >
-        {{ security.starting ? 'Starting…' : 'Run audit' }}
-      </button>
-      <button
-        v-else
-        type="button"
-        class="btn-outline"
-        data-testid="security-stop"
-        @click="security.cancel(projectId, running.id)"
-      >
-        Stop
-      </button>
-      <span v-if="running" class="sec-note mono" data-testid="security-running">
+    <div class="ui-head">
+      <span v-if="running" class="ui-meaning" data-testid="security-running">
         auditing the {{ scopeLabel(running.scope) }} — the run reports here when it finishes
       </span>
-      <span v-else-if="singleAgent" class="sec-note mono" data-testid="security-single-agent">
+      <span v-else-if="singleAgent" class="ui-meaning" data-testid="security-single-agent">
         subagents are off at this effort, so the audit hunts single-agent and covers less
       </span>
+      <div class="ui-controls">
+        <div class="ui-segments" role="group" aria-label="Audit scope">
+          <button
+            type="button"
+            class="ui-seg"
+            :class="{ on: scope === 'project', 'is-on': scope === 'project' }"
+            data-testid="security-scope-project"
+            :aria-pressed="scope === 'project'"
+            @click="scope = 'project'"
+          >
+            Whole project
+          </button>
+          <button
+            type="button"
+            class="ui-seg"
+            :class="{ on: scope === 'changes', 'is-on': scope === 'changes' }"
+            data-testid="security-scope-changes"
+            :aria-pressed="scope === 'changes'"
+            @click="scope = 'changes'"
+          >
+            Pending changes
+          </button>
+        </div>
+        <button
+          v-if="!running"
+          type="button"
+          class="btn-solid"
+          data-testid="security-run"
+          :disabled="!installed || security.starting"
+          @click="run()"
+        >
+          {{ security.starting ? 'Starting…' : 'Run audit' }}
+        </button>
+        <button
+          v-else
+          type="button"
+          class="btn-outline"
+          data-testid="security-stop"
+          @click="security.cancel(projectId, running.id)"
+        >
+          Stop
+        </button>
+      </div>
     </div>
 
-    <div v-if="security.error" class="sec-err mono" data-testid="security-error">
+    <div v-if="security.error" class="ui-err" data-testid="security-error">
       {{ security.error }}
     </div>
 
-    <div v-if="!installed" class="sec-install" data-testid="security-install">
+    <div v-if="!installed" class="sec-install ui-card" data-testid="security-install">
       <div class="si-title">The audit runs on Cloudflare's security-audit skill</div>
       <p class="si-body">
         It maps the trust boundaries, assigns hunters by coverage unit, then has a second agent try
@@ -176,7 +178,7 @@ async function install(): Promise<void> {
       </button>
     </div>
 
-    <div v-else-if="runs.length === 0" class="sec-empty mono faint" data-testid="security-empty">
+    <div v-else-if="runs.length === 0" class="ui-empty-line" data-testid="security-empty">
       No audit has run for this project yet.
     </div>
 
@@ -186,59 +188,63 @@ async function install(): Promise<void> {
           v-for="r in runs"
           :key="r.id"
           type="button"
-          class="sec-run"
-          :class="{ sel: selected?.id === r.id }"
+          class="sec-run ui-row"
+          :class="{ sel: selected?.id === r.id, 'is-selected': selected?.id === r.id }"
           :data-testid="`security-run-${r.id}`"
           @click="selectedId = r.id"
         >
           <span class="sr-when mono">{{ when(r.startedAt) }}</span>
-          <span class="sr-scope mono">{{ scopeLabel(r.scope) }}</span>
-          <span class="sr-status mono" :class="r.status">{{ r.status }}</span>
+          <span class="sr-scope">{{ scopeLabel(r.scope) }}</span>
+          <span class="sr-status" :class="r.status">{{ r.status }}</span>
         </button>
       </div>
 
       <div class="sec-report">
-        <div v-if="selected && selected.status === 'running'" class="sec-empty mono faint">
+        <div
+          v-if="selected && selected.status === 'running'"
+          class="ui-empty-line"
+          data-testid="security-still-running"
+        >
           This audit is still running.
         </div>
-        <div v-else-if="selected && !selected.report" class="sec-empty mono faint" data-testid="security-no-report">
+        <div v-else-if="selected && !selected.report" class="ui-empty-line" data-testid="security-no-report">
           {{ selected.note ?? 'This run wrote no findings.' }}
         </div>
         <template v-else-if="scores">
           <div class="sec-tiles" data-testid="security-tiles">
-            <div class="tile">
+            <div class="tile ui-card">
               <span class="tile-value" data-testid="security-coverage">{{ pctLabel(scores.coveragePct) }}</span>
-              <span class="tile-label mono">coverage units audited</span>
-              <span class="tile-sub mono">{{ scores.covered }} of {{ scores.inScope }}</span>
+              <span class="tile-label">coverage units audited</span>
+              <span class="tile-sub">{{ scores.covered }} of {{ scores.inScope }}</span>
             </div>
-            <div class="tile">
+            <div class="tile ui-card">
               <span class="tile-value" data-testid="security-clean">{{ pctLabel(scores.cleanPct) }}</span>
-              <span class="tile-label mono">audited classes with nothing confirmed</span>
+              <span class="tile-label">audited classes with nothing confirmed</span>
             </div>
-            <div class="tile">
+            <div class="tile ui-card">
               <span class="tile-value" data-testid="security-confirmed">{{ scores.confirmed }}</span>
-              <span class="tile-label mono">confirmed</span>
-              <span class="tile-sub mono">{{ scores.needsValidation }} need validation</span>
+              <span class="tile-label">confirmed</span>
+              <span class="tile-sub">{{ scores.needsValidation }} need validation</span>
             </div>
-            <div class="tile">
+            <div class="tile ui-card">
               <span class="tile-value" data-testid="security-disproved">{{ pctLabel(scores.disprovedPct) }}</span>
-              <span class="tile-label mono">candidates disproved</span>
-              <span class="tile-sub mono">{{ scores.rejected }} rejected</span>
+              <span class="tile-label">candidates disproved</span>
+              <span class="tile-sub">{{ scores.rejected }} rejected</span>
             </div>
           </div>
 
           <div class="sec-chart" data-testid="security-severity">
-            <div class="sc-title mono">Confirmed by severity</div>
+            <div class="sc-title">Confirmed by severity</div>
             <div v-for="row in severityRows" :key="row.severity" class="sc-row">
-              <span class="sc-key mono">{{ row.severity }}</span>
+              <span class="sc-key">{{ row.severity }}</span>
               <span class="sc-track"><span class="sc-fill" :class="row.severity" :style="{ width: row.width }"></span></span>
               <span class="sc-num mono">{{ row.count }}</span>
             </div>
           </div>
 
           <div class="sec-chart" data-testid="security-classes">
-            <div class="sc-title mono">Coverage by attack class</div>
-            <div v-if="classRows.length === 0" class="sc-none mono faint">
+            <div class="sc-title">Coverage by attack class</div>
+            <div v-if="classRows.length === 0" class="ui-empty-line">
               This run recorded no coverage units.
             </div>
             <div v-for="row in classRows" :key="row.attackClass" class="sc-row">
@@ -250,14 +256,14 @@ async function install(): Promise<void> {
           </div>
 
           <div class="sec-findings" data-testid="security-findings">
-            <div class="sc-title mono">Findings</div>
-            <div v-if="findings.length === 0" class="sc-none mono faint">
+            <div class="sc-title">Findings</div>
+            <div v-if="findings.length === 0" class="ui-empty-line">
               Nothing confirmed, and nothing left open.
             </div>
             <div
               v-for="finding in findings"
               :key="finding.fingerprint"
-              class="sf-row"
+              class="sf-row ui-row"
               :data-testid="`security-finding-${finding.fingerprint}`"
             >
               <span class="chip-risk" :class="finding.verdict === 'confirmed' ? 'high' : 'medium'">
@@ -300,49 +306,7 @@ async function install(): Promise<void> {
   gap: 14px;
 }
 
-.sec-bar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.segments {
-  display: flex;
-  border: 1px solid var(--border-seg);
-  border-radius: var(--rc);
-  overflow: hidden;
-}
-
-.seg {
-  padding: 4px 12px;
-  font-size: var(--fs-meta);
-  color: var(--text-tab);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-}
-
-.seg.on {
-  color: var(--text-bright);
-  background: var(--bg-seg);
-}
-
-.sec-note,
-.sec-err {
-  font-size: var(--fs-meta);
-  color: var(--text-meta);
-}
-
-.sec-err {
-  color: var(--red);
-}
-
 .sec-install {
-  border: 1px solid var(--border-card);
-  border-radius: var(--rc-card);
-  background: var(--bg-card);
-  padding: 16px;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -356,14 +320,9 @@ async function install(): Promise<void> {
 }
 
 .si-body {
-  font-size: var(--fs-meta);
+  font-size: var(--fs-body);
   color: var(--text-mid);
   line-height: 1.55;
-}
-
-.sec-empty {
-  padding: 30px 0;
-  font-size: var(--fs-ui);
 }
 
 .sec-body {
@@ -381,24 +340,14 @@ async function install(): Promise<void> {
 }
 
 .sec-run {
-  display: flex;
   flex-direction: column;
+  align-items: stretch;
   gap: 2px;
-  padding: 7px 9px;
   border: 1px solid transparent;
-  border-radius: var(--rc);
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-}
-
-.sec-run:hover {
-  background: var(--bg-hover);
 }
 
 .sec-run.sel {
   border-color: var(--border-card);
-  background: var(--bg-card);
 }
 
 .sr-when {
@@ -439,10 +388,6 @@ async function install(): Promise<void> {
 }
 
 .tile {
-  border: 1px solid var(--border-card);
-  border-radius: var(--rc-card);
-  background: var(--bg-card);
-  padding: 12px 14px;
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -471,10 +416,6 @@ async function install(): Promise<void> {
   color: var(--text-label);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-}
-
-.sc-none {
-  font-size: var(--fs-meta);
 }
 
 .sc-row {
@@ -533,11 +474,14 @@ async function install(): Promise<void> {
 }
 
 .sf-row {
-  display: flex;
   align-items: baseline;
-  gap: 10px;
   padding: 6px 0;
   border-bottom: 1px solid var(--border-soft);
+  border-radius: 0;
+}
+
+.sf-row:hover {
+  background: transparent;
 }
 
 .sf-title {

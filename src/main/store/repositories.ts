@@ -1075,6 +1075,7 @@ class FlowRunsRepo {
       worktreeRoot: null,
       crosscheckRound: 0,
       concerns: [],
+      specSessionId: null,
       note: null,
       startedAt: nowIso(),
       finishedAt: null,
@@ -1083,8 +1084,8 @@ class FlowRunsRepo {
       .prepare(
         `INSERT INTO flow_runs
            (id, projectId, featureId, featureTitle, status, sessionId, risks, outOfScope,
-            concurrency, baseBranch, worktreeRoot, crosscheckRound, concerns, note, startedAt, finishedAt)
-         VALUES (?, ?, ?, ?, 'scoping', ?, '[]', '[]', ?, NULL, NULL, 0, '[]', NULL, ?, NULL)`,
+            concurrency, baseBranch, worktreeRoot, crosscheckRound, concerns, specSessionId, note, startedAt, finishedAt)
+         VALUES (?, ?, ?, ?, 'scoping', ?, '[]', '[]', ?, NULL, NULL, 0, '[]', NULL, NULL, ?, NULL)`,
       )
       .run(
         run.id,
@@ -1146,13 +1147,24 @@ class FlowRunsRepo {
         | 'worktreeRoot'
         | 'crosscheckRound'
         | 'concerns'
+        | 'specSessionId'
         | 'note'
         | 'finishedAt'
       >
     >,
   ): void {
     const columns = (
-      ['status', 'sessionId', 'concurrency', 'baseBranch', 'worktreeRoot', 'crosscheckRound', 'note', 'finishedAt'] as const
+      [
+        'status',
+        'sessionId',
+        'concurrency',
+        'baseBranch',
+        'worktreeRoot',
+        'crosscheckRound',
+        'specSessionId',
+        'note',
+        'finishedAt',
+      ] as const
     ).filter((key) => patch[key] !== undefined)
     const json = (['risks', 'outOfScope', 'concerns'] as const).filter((key) => patch[key] !== undefined)
     if (columns.length === 0 && json.length === 0) return
@@ -1341,6 +1353,7 @@ interface FlowRunRow {
   worktreeRoot: string | null
   crosscheckRound: number
   concerns: string
+  specSessionId: string | null
   note: string | null
   startedAt: string
   finishedAt: string | null

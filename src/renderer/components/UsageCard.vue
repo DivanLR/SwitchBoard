@@ -7,27 +7,34 @@ defineProps<{ report: UsageReport }>()
 function barColor(pct: number): string {
   return pct > 85 ? 'var(--red)' : pct > 60 ? 'var(--amber)' : 'var(--green)'
 }
+
+function volumeParts(volume: string): { text: string; num: boolean }[] {
+  return volume
+    .split(/(\d[\d,]*)/)
+    .filter(Boolean)
+    .map((text) => ({ text, num: /^\d/.test(text) }))
+}
 </script>
 
 <template>
-  <div class="usage-card" data-testid="usage-card">
-    <div class="uc-label mono"><Icon name="spark" :size="11" /> USAGE</div>
+  <div class="ui-card usage-card" data-testid="usage-card">
+    <div class="ui-kicker uc-label"><Icon name="spark" :size="11" /> USAGE</div>
 
     <div v-for="l in report.limits" :key="l.label" class="uc-meter" data-testid="usage-meter">
-      <span class="uc-meter-label mono">{{ l.label }}</span>
+      <span class="uc-meter-label">{{ l.label }}</span>
       <span class="uc-meter-pct mono" :style="{ color: barColor(l.pct) }">{{ l.pct }}%</span>
       <div class="uc-bar">
         <div class="uc-fill" :style="{ width: `${l.pct}%`, background: barColor(l.pct) }"></div>
       </div>
-      <span class="uc-meter-resets mono">resets {{ l.resets }}</span>
+      <span class="uc-meter-resets">resets <span class="mono">{{ l.resets }}</span></span>
     </div>
 
     <div v-if="report.notes.length" class="uc-notes">{{ report.notes.join(' ') }}</div>
 
     <div v-for="w in report.windows" :key="w.title" class="uc-window" data-testid="usage-window">
-      <div class="uc-win-head mono">
+      <div class="uc-win-head">
         <span class="uc-win-title">{{ w.title.toUpperCase() }}</span>
-        <span class="uc-win-volume">{{ w.volume }}</span>
+        <span class="uc-win-volume"><template v-for="(p, i) in volumeParts(w.volume)" :key="i"><span v-if="p.num" class="mono">{{ p.text }}</span><template v-else>{{ p.text }}</template></template></span>
       </div>
       <ul class="uc-list">
         <li v-for="b in w.behaviors" :key="b">{{ b }}</li>
@@ -44,19 +51,10 @@ function barColor(pct: number): string {
 
 <style scoped>
 .usage-card {
-  border: 1px solid var(--border-card-alt);
-  background: var(--bg-card);
-  border-radius: var(--rc);
-  padding: var(--pad-card);
   margin-bottom: 13px;
 }
 
 .uc-label {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: var(--fs-micro);
-  letter-spacing: var(--track-label);
   color: var(--green);
   margin-bottom: 9px;
 }

@@ -294,33 +294,33 @@ const partTabs: { id: Part; label: string }[] = [
 
 <template>
   <div class="specs" data-testid="specs-view">
-    <div v-if="!state.installed" class="not-installed" data-testid="specs-not-installed">
-      <div class="ni-icon"><Icon name="diamond" :size="18" /></div>
-      <div class="ni-title">Spec Kit is not set up in this project</div>
-      <div class="ni-sub">
+    <div v-if="!state.installed" class="ui-empty" data-testid="specs-not-installed">
+      <div class="ui-empty-icon"><Icon name="diamond" :size="18" /></div>
+      <div class="ui-empty-title">Spec Kit is not set up in this project</div>
+      <div class="ui-empty-sub ni-sub">
         GitHub Spec Kit adds a spec-driven workflow (<span class="mono">/speckit.specify</span>,
         <span class="mono">/speckit.plan</span>, <span class="mono">/speckit.tasks</span>,
         <span class="mono">/speckit.implement</span>). It installs into this project only — nothing
         global.
       </div>
       <button
-        class="btn-solid ni-btn"
+        class="btn-solid"
         data-testid="specs-install"
         :disabled="specs.installing"
         @click="specs.install(props.projectId)"
       >
         {{ specs.installing ? 'Installing…' : 'Install Spec Kit in this project' }}
       </button>
-      <div v-if="specs.installError" class="ni-error mono" data-testid="specs-install-error">
+      <div v-if="specs.installError" class="ui-err ni-error" data-testid="specs-install-error">
         {{ specs.installError }}
       </div>
     </div>
 
-    <div v-else-if="state.specs.length === 0" class="not-installed" data-testid="specs-empty">
-      <div class="ni-icon"><Icon name="diamond" :size="18" /></div>
-      <div class="ni-title">No specs in this project</div>
+    <div v-else-if="state.specs.length === 0" class="ui-empty" data-testid="specs-empty">
+      <div class="ui-empty-icon"><Icon name="diamond" :size="18" /></div>
+      <div class="ui-empty-title">No specs in this project</div>
       <template v-if="commandLabel">
-        <div class="ni-sub" data-testid="specs-scaffolding">
+        <div class="ui-empty-sub" data-testid="specs-scaffolding">
           {{ commandLabel }}. It appears here when it lands.
         </div>
         <div
@@ -333,11 +333,11 @@ const partTabs: { id: Part; label: string }[] = [
         </div>
       </template>
       <template v-else>
-        <div class="ni-sub">
+        <div class="ui-empty-sub ni-sub">
           Describe a feature and <span class="mono">/speckit.specify</span> scaffolds a spec for it.
         </div>
         <button
-          class="btn-solid ni-btn"
+          class="btn-solid"
           :class="controlPhase(NEW_SPEC_KEY)"
           :disabled="!!controlPhase(NEW_SPEC_KEY)"
           data-testid="specs-new-empty"
@@ -350,19 +350,19 @@ const partTabs: { id: Part; label: string }[] = [
     </div>
 
     <div v-else class="has-specs">
-      <div class="chips">
+      <div class="ui-toolbar">
         <button
           v-for="s in state.specs"
           :key="s.id"
-          class="chip mono"
-          :class="{ sel: s.id === specs.selectedSpecId }"
+          class="ui-chip mono"
+          :class="{ sel: s.id === specs.selectedSpecId, 'is-on': s.id === specs.selectedSpecId }"
           :data-testid="`spec-chip-${s.id}`"
           @click="specs.selectSpec(props.projectId, s.id)"
         >
           <span class="chip-dot" :style="{ color: statusDot(s.status) }"><Icon name="dot" :size="8" /></span>{{ s.id }}
         </button>
         <button
-          class="chip chip-new mono"
+          class="ui-chip chip-new"
           :class="controlPhase(NEW_SPEC_KEY)"
           :disabled="!!controlPhase(NEW_SPEC_KEY)"
           data-testid="spec-new"
@@ -371,7 +371,7 @@ const partTabs: { id: Part; label: string }[] = [
           <Icon :name="controlIcon(NEW_SPEC_KEY, 'plus')" :size="11" />
           {{ controlText(NEW_SPEC_KEY, 'New spec') }}
         </button>
-        <span v-if="commandLabel" class="chip-scaffolding mono" data-testid="specs-scaffolding">
+        <span v-if="commandLabel" class="ui-chip chip-scaffolding" data-testid="specs-scaffolding">
           <Icon name="dot" :size="8" /> {{ commandLabel }}…
         </span>
       </div>
@@ -381,15 +381,15 @@ const partTabs: { id: Part; label: string }[] = [
       </div>
 
       <template v-if="detail">
-        <div class="spec-card">
+        <div class="ui-card">
           <div class="sc-head">
-            <span class="sc-title mono">{{ detail.title }}</span>
-            <span class="sc-status mono" :class="detail.status">{{
+            <span class="sc-title">{{ detail.title }}</span>
+            <span class="sc-status" :class="detail.status">{{
               statusLabel[detail.status]
             }}</span>
             <span class="spacer"></span>
             <button
-              class="sc-listen mono"
+              class="sc-listen"
               :class="{ on: speaking }"
               data-testid="spec-listen"
               :title="speaking ? 'Stop reading' : 'Read this spec aloud'"
@@ -403,7 +403,7 @@ const partTabs: { id: Part; label: string }[] = [
           <div class="sc-progress-row">
             <button
               v-if="detail.status !== 'complete' && !running && detail.tasksTotal > 0"
-              class="impl-btn mono"
+              class="impl-btn"
               :class="controlPhase(IMPLEMENT_KEY)"
               :disabled="!!controlPhase(IMPLEMENT_KEY)"
               data-testid="start-implementation"
@@ -412,10 +412,10 @@ const partTabs: { id: Part; label: string }[] = [
               <Icon :name="controlIcon(IMPLEMENT_KEY, 'play')" :size="12" />
               {{ controlText(IMPLEMENT_KEY, 'Start implementation') }}
             </button>
-            <span v-if="running" class="impl-running mono" data-testid="implementing">
+            <span v-if="running" class="impl-running" data-testid="implementing">
               <Icon name="dot" :size="8" /> Implementing…
             </span>
-            <span v-if="detail.status === 'complete'" class="mono" style="font-size: var(--fs-meta); color: var(--green)">
+            <span v-if="detail.status === 'complete'" style="font-size: var(--fs-meta); color: var(--green)">
               <Icon name="check" :size="12" /> All tasks complete
             </span>
             <span class="sc-progress-label mono">{{ detail.tasksDone }}/{{ detail.tasksTotal }} tasks</span>
@@ -424,12 +424,15 @@ const partTabs: { id: Part; label: string }[] = [
           <div class="sc-bar"><div class="sc-fill" :style="{ '--fill': progressPct / 100 }"></div></div>
         </div>
 
-        <div class="part-tabs mono">
+        <div class="ui-tabs" role="tablist" aria-label="Spec sections">
           <button
             v-for="t in partTabs"
             :key="t.id"
-            class="pt"
-            :class="{ sel: part === t.id }"
+            type="button"
+            class="ui-tab"
+            :class="{ sel: part === t.id, 'is-selected': part === t.id }"
+            role="tab"
+            :aria-selected="part === t.id"
             :data-testid="`part-${t.id}`"
             @click="part = t.id"
           >
@@ -441,14 +444,14 @@ const partTabs: { id: Part; label: string }[] = [
         </div>
 
         <div v-if="part === 'spec' || part === 'plan'" class="sections" data-testid="spec-sections">
-          <div v-if="docSections.length === 0" class="muted">
+          <div v-if="docSections.length === 0" class="ui-empty-line">
             No {{ part }}.md content parsed.
           </div>
-          <div v-for="sec in docSections" :key="sec.title" class="section">
+          <div v-for="sec in docSections" :key="sec.title" class="ui-card">
             <div class="sec-head">
               <span class="sec-title mono">## {{ sec.title }}</span>
               <button
-                class="sec-refine mono"
+                class="sec-refine"
                 :data-testid="`refine-${sec.title}`"
                 @click="setTarget(`${detail.id}/${part}.md · ${sec.title}`)"
               >
@@ -460,15 +463,15 @@ const partTabs: { id: Part; label: string }[] = [
         </div>
 
         <div v-else-if="part === 'clarify'" data-testid="spec-clarify">
-          <div v-if="openQs.length === 0 && closedQs.length === 0" class="muted">
+          <div v-if="openQs.length === 0 && closedQs.length === 0" class="ui-empty-line">
             No clarifications yet — the spec has no
             <span class="mono" style="color: var(--text-meta)">[NEEDS CLARIFICATION]</span>
             markers.
           </div>
 
-          <div v-if="openQs.length > 0" class="q-label open mono">OPEN · {{ openQs.length }}</div>
+          <div v-if="openQs.length > 0" class="ui-kicker q-label open">OPEN · {{ openQs.length }}</div>
           <div class="q-list">
-            <div v-for="qq in openQs" :key="qq.q" class="q-card open">
+            <div v-for="qq in openQs" :key="qq.q" class="ui-card q-card open">
               <div class="q-tags">
                 <span class="q-tag mono">[NEEDS CLARIFICATION]</span>
                 <span class="q-id mono">{{ qq.id }}</span>
@@ -486,18 +489,18 @@ const partTabs: { id: Part; label: string }[] = [
             </div>
           </div>
 
-          <div v-if="closedQs.length > 0" class="q-label resolved mono">
+          <div v-if="closedQs.length > 0" class="ui-kicker q-label resolved">
             RESOLVED · {{ closedQs.length }}
           </div>
           <div class="q-list">
             <div
               v-for="(c, i) in closedQs"
               :key="`${c.question}:${c.answer}`"
-              class="q-card resolved"
+              class="ui-card q-card resolved"
               data-testid="resolved-clarification"
             >
               <div class="q-tags">
-                <span class="q-tag resolved mono">RESOLVED</span>
+                <span class="q-tag resolved">RESOLVED</span>
                 <span class="q-id mono">Q{{ openQs.length + i + 1 }}</span>
               </div>
               <div class="q-text dim">{{ c.question }}</div>
@@ -508,12 +511,12 @@ const partTabs: { id: Part; label: string }[] = [
 
         <div v-else-if="part === 'cmds'" data-testid="speckit-commands">
           <template v-if="suggested">
-            <div class="cmd-label next mono">SUGGESTED NEXT</div>
+            <div class="ui-kicker cmd-label next">SUGGESTED NEXT</div>
             <div class="suggested" data-testid="suggested-next">
               <span class="sug-cmd mono">{{ suggested.label }}</span>
               <span class="sug-why">{{ suggested.why }}</span>
               <button
-                class="sug-run mono"
+                class="sug-run"
                 :class="controlPhase(suggested.command)"
                 :disabled="!!controlPhase(suggested.command)"
                 data-testid="suggested-run"
@@ -524,13 +527,13 @@ const partTabs: { id: Part; label: string }[] = [
               </button>
             </div>
           </template>
-          <div class="cmd-label all mono">ALL COMMANDS</div>
+          <div class="ui-kicker cmd-label all">ALL COMMANDS</div>
           <div class="cmd-hint">Re-run any stage — output streams into the Session tab.</div>
           <div class="cmd-grid">
             <button
               v-for="c in SPEC_KIT_COMMANDS"
               :key="c.command"
-              class="cmd-card"
+              class="ui-card cmd-card"
               :class="controlPhase(c.command)"
               :disabled="!!controlPhase(c.command)"
               :data-testid="`speckit-cmd-${c.command}`"
@@ -539,7 +542,7 @@ const partTabs: { id: Part; label: string }[] = [
               <div class="cmd-row">
                 <span class="cmd-name mono">{{ c.label }}</span>
                 <span class="spacer"></span>
-                <span class="cmd-run mono">
+                <span class="cmd-run">
                   <Icon :name="controlIcon(c.command, 'play')" :size="11" />
                   {{ controlText(c.command, 'Run') }}
                 </span>
@@ -550,7 +553,7 @@ const partTabs: { id: Part; label: string }[] = [
         </div>
 
         <div v-else data-testid="spec-tasks">
-          <div v-if="detail.phases.length === 0" class="muted">
+          <div v-if="detail.phases.length === 0" class="ui-empty-line">
             No tasks.md yet. Run <span class="mono">/speckit.tasks</span> to generate the task
             list.
           </div>
@@ -571,6 +574,7 @@ const partTabs: { id: Part; label: string }[] = [
                   class="step-btn"
                   :aria-current="phaseState(phase) === 'active' ? 'step' : undefined"
                   :title="`${phase.label} — ${phaseCount(phase)} tasks done`"
+                  :data-testid="`step-btn-${phase.label}`"
                   @click="goToPhase(phase.label)"
                 >
                   <span class="step-dot" aria-hidden="true">
@@ -593,14 +597,14 @@ const partTabs: { id: Part; label: string }[] = [
             :data-phase="phase.label"
           >
             <div class="phase-header">
-              <span class="phase-label mono">{{ phase.label }}</span>
-              <span class="phase-count mono">{{ phaseCount(phase) }}</span>
+              <span class="phase-label">{{ phase.label }}</span>
+              <span class="phase-count">{{ phaseCount(phase) }}</span>
               <span class="spacer"></span>
-              <span v-if="phaseRunning(phase)" class="phase-running mono"><Icon name="dot" :size="8" /> Running…</span>
-              <span v-else-if="phaseDone(phase)" class="phase-done mono"><Icon name="check" :size="11" /> Done</span>
+              <span v-if="phaseRunning(phase)" class="phase-running"><Icon name="dot" :size="8" /> Running…</span>
+              <span v-else-if="phaseDone(phase)" class="phase-done"><Icon name="check" :size="11" /> Done</span>
               <button
                 v-else-if="!running || controlPhase(phaseKey(phase.label))"
-                class="phase-start mono"
+                class="phase-start"
                 :class="controlPhase(phaseKey(phase.label))"
                 :disabled="!!controlPhase(phaseKey(phase.label))"
                 :data-testid="`start-phase-${phase.label}`"
@@ -615,7 +619,7 @@ const partTabs: { id: Part; label: string }[] = [
               <div
                 v-for="task in phase.tasks"
                 :key="phase.label + task.id + task.label"
-                class="task-row"
+                class="ui-row"
                 :data-testid="task.done ? 'task-done' : 'task-todo'"
               >
                 <span v-if="task.done" class="task-check mono"><Icon name="check" /></span>
@@ -652,14 +656,14 @@ const partTabs: { id: Part; label: string }[] = [
         aria-modal="true"
         aria-labelledby="new-spec-title"
       >
-        <div id="new-spec-title" class="ns-title mono">New spec</div>
+        <div id="new-spec-title" class="ns-title">New spec</div>
         <div class="ns-sub">
           Describe the feature in a sentence — <span class="mono">/speckit.specify</span> scaffolds it
           in the background.
         </div>
         <textarea
           v-model="newSpecDesc"
-          class="ns-input mono"
+          class="ns-input"
           data-testid="new-spec-input"
           rows="3"
           autofocus
@@ -690,41 +694,11 @@ const partTabs: { id: Part; label: string }[] = [
   padding: 18px 22px;
 }
 
-.not-installed {
-  max-width: 520px;
-  margin: 56px auto 0;
-  text-align: center;
-}
-
-.ni-icon {
-  color: var(--text-faint);
-}
-
-.ni-title {
-  font-size: var(--fs-body);
-  color: var(--text-mid);
-  margin-top: 10px;
-}
-
-.ni-sub {
-  font-size: var(--fs-ui);
-  color: var(--text-faint);
-  margin-top: 5px;
-  line-height: 1.6;
-}
-
 .ni-sub .mono {
   color: var(--text-meta);
 }
 
-.ni-btn {
-  margin-top: 18px;
-}
-
 .ni-error {
-  margin-top: 12px;
-  font-size: var(--fs-meta);
-  color: var(--red);
   white-space: pre-wrap;
   text-align: left;
 }
@@ -739,37 +713,6 @@ const partTabs: { id: Part; label: string }[] = [
   max-width: 78ch;
 }
 
-.chips {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 18px;
-}
-
-.chip {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--fs-meta);
-  color: var(--text-meta);
-  background: var(--bg-card);
-  border: 1px solid var(--surface-line);
-  border-radius: var(--rp);
-  padding: 6px 12px;
-  cursor: pointer;
-}
-
-.chip:hover {
-  border-color: var(--border-strong);
-  color: var(--text-body);
-}
-
-.chip.sel {
-  color: var(--text-bright);
-  background: var(--surface-hover);
-  border-color: var(--surface-hover-line);
-}
-
 .chip-new {
   border-style: dashed;
   color: var(--text-faint);
@@ -779,13 +722,6 @@ const partTabs: { id: Part; label: string }[] = [
 .chip-new:hover {
   color: var(--green);
   border-color: var(--green);
-}
-
-.spec-card {
-  background: var(--bg-card);
-  border: 1px solid var(--surface-line);
-  border-radius: var(--rc);
-  padding: 16px 18px;
 }
 
 .sc-head {
@@ -973,33 +909,8 @@ const partTabs: { id: Part; label: string }[] = [
   transition: transform 0.3s var(--ease);
 }
 
-.part-tabs {
-  display: flex;
-  gap: 2px;
+.ui-tabs {
   margin: 18px 0 10px;
-  border-bottom: 1px solid var(--border);
-}
-
-.pt {
-  padding: 8px 13px;
-  font-size: var(--fs-meta);
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
-  color: var(--text-tab);
-  cursor: pointer;
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  background: transparent;
-}
-
-.pt:hover {
-  color: var(--text-body);
-}
-
-.pt.sel {
-  color: var(--text-strong);
-  box-shadow: inset 0 -2px 0 var(--green);
 }
 
 .pt-badge {
@@ -1016,13 +927,6 @@ const partTabs: { id: Part; label: string }[] = [
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
-
-.section {
-  padding: var(--pad-card);
-  background: var(--bg-card);
-  border: 1px solid var(--border-card-alt);
-  border-radius: var(--rc);
 }
 
 .sec-head {
@@ -1063,8 +967,6 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .q-label {
-  font-size: var(--fs-micro);
-  letter-spacing: 0.15em;
   margin: 0 2px 8px;
 }
 
@@ -1081,11 +983,6 @@ const partTabs: { id: Part; label: string }[] = [
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
-
-.q-card {
-  padding: var(--pad-card);
-  border-radius: var(--rc);
 }
 
 .q-card.open {
@@ -1106,7 +1003,7 @@ const partTabs: { id: Part; label: string }[] = [
 
 .q-tag {
   font-size: var(--fs-micro);
-  letter-spacing: 0.1em;
+  letter-spacing: var(--track-label);
   color: var(--amber);
 }
 
@@ -1160,8 +1057,6 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .cmd-label {
-  font-size: var(--fs-micro);
-  letter-spacing: 0.15em;
   margin: 0 2px 8px;
 }
 
@@ -1170,7 +1065,6 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .cmd-label.all {
-  color: var(--text-faint);
   margin: 20px 2px 4px;
 }
 
@@ -1228,10 +1122,6 @@ const partTabs: { id: Part; label: string }[] = [
 }
 
 .cmd-card {
-  padding: var(--pad-card);
-  background: var(--bg-card);
-  border: 1px solid var(--surface-line);
-  border-radius: var(--rc);
   cursor: pointer;
   user-select: none;
   text-align: left;
@@ -1326,16 +1216,6 @@ const partTabs: { id: Part; label: string }[] = [
   gap: 5px;
 }
 
-.task-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: var(--pad-card);
-  background: var(--bg-card);
-  border: 1px solid var(--border-card-alt);
-  border-radius: var(--rc);
-}
-
 .task-check {
   font-size: var(--fs-ui);
   color: var(--green);
@@ -1382,12 +1262,6 @@ const partTabs: { id: Part; label: string }[] = [
   color: var(--green);
 }
 
-.muted {
-  font-size: var(--fs-ui);
-  color: var(--text-faint);
-  padding: 4px 2px 14px;
-  line-height: 1.6;
-}
 .stepper {
   position: relative;
   margin: 0 0 18px;
@@ -1406,7 +1280,7 @@ const partTabs: { id: Part; label: string }[] = [
   height: 2px;
   margin: 0;
   background: var(--border);
-  border-radius: 2px;
+  border-radius: var(--rp);
   overflow: hidden;
 }
 

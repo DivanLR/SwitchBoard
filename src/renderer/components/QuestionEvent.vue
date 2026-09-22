@@ -42,14 +42,14 @@ function cleanLabel(label: string): string {
 </script>
 
 <template>
-  <div class="question" data-testid="question-event">
-    <div class="q-label mono">? QUESTION</div>
+  <div class="ui-card is-warn" data-testid="question-event">
+    <div class="ui-kicker card-label warn-label"><Icon name="comment" :size="11" /> QUESTION</div>
     <div class="q-text">{{ payload.text }}</div>
     <div v-if="options.length > 0" class="chips">
       <button
         v-for="option in options"
         :key="option.label"
-        class="chip mono"
+        class="chip"
         :class="{ chosen: payload.answered && payload.answer === option.label, recommended: option.recommended }"
         :disabled="payload.answered"
         :data-testid="`question-option-${option.display}`"
@@ -63,7 +63,7 @@ function cleanLabel(label: string): string {
         <input
           v-if="addingCustom"
           v-model="customText"
-          class="custom-input mono"
+          class="custom-input"
           data-testid="question-custom-input"
           autofocus
           placeholder="Type your own answer…"
@@ -73,7 +73,7 @@ function cleanLabel(label: string): string {
         />
         <button
           v-else
-          class="chip chip-other mono"
+          class="chip chip-other"
           data-testid="question-custom"
           @click="addingCustom = true"
         >
@@ -82,26 +82,23 @@ function cleanLabel(label: string): string {
       </template>
     </div>
     <div v-else class="open-hint">Answer through the composer below.</div>
-    <div v-if="payload.answered" class="answered mono" data-testid="question-answered">
+    <div v-if="payload.answered" class="answered" data-testid="question-answered">
 <Icon name="check" :size="12" /> Answered: {{ cleanLabel(payload.answer ?? '') }}
     </div>
   </div>
 </template>
 
 <style scoped>
-.question {
-  border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
-  background: color-mix(in srgb, var(--amber) 4%, transparent);
-  border-radius: var(--rc);
-  padding: 11px 13px;
+.ui-card {
   margin-bottom: 13px;
 }
 
-.q-label {
-  font-size: var(--fs-micro);
-  letter-spacing: 0.13em;
-  color: var(--amber);
+.card-label {
   margin-bottom: 6px;
+}
+
+.warn-label {
+  color: var(--amber);
 }
 
 .q-text {
@@ -121,7 +118,6 @@ function cleanLabel(label: string): string {
 .chip {
   font-size: var(--fs-meta);
   color: var(--text-body);
-  background: color-mix(in srgb, var(--green) 10%, transparent);
   border: 1px solid var(--border-strong);
   border-radius: var(--rc);
   padding: 5px 11px;
@@ -143,14 +139,16 @@ function cleanLabel(label: string): string {
   opacity: 0.6;
 }
 
+.chip.recommended {
+  border-color: var(--green);
+  background: color-mix(in srgb, var(--green) 6%, transparent);
+}
+
 .chip.chosen {
   border-color: var(--green);
   color: var(--green);
+  background: color-mix(in srgb, var(--green) 10%, transparent);
   opacity: 1;
-}
-
-.chip.recommended {
-  border-color: var(--green);
 }
 
 .rec-badge {

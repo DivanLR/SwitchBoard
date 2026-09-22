@@ -340,11 +340,11 @@ watch(
 <template>
   <div class="dgm" data-testid="diagrams-view">
     <div class="rail">
-      <div class="engine" data-testid="diagram-engine">
+      <div class="engine ui-segments" data-testid="diagram-engine">
         <button
           type="button"
-          class="eng"
-          :class="{ on: !onArchify }"
+          class="ui-seg"
+          :class="{ on: !onArchify, 'is-on': !onArchify }"
           data-testid="diagram-engine-diagram-design"
           :aria-pressed="!onArchify"
           title="The diagram-design plugin: describe a drawing and it draws it."
@@ -354,8 +354,8 @@ watch(
         </button>
         <button
           type="button"
-          class="eng"
-          :class="{ on: onArchify }"
+          class="ui-seg"
+          :class="{ on: onArchify, 'is-on': onArchify }"
           data-testid="diagram-engine-archify"
           :aria-pressed="onArchify"
           title="The archify skill: author typed JSON, validate it against a schema, then deliver."
@@ -377,7 +377,7 @@ watch(
         </template>
       </div>
 
-      <div v-if="!installed" class="install-card">
+      <div v-if="!installed" class="install-card ui-card">
         <div class="install-text">
           <div class="install-title">
             <template v-if="onArchify">
@@ -393,7 +393,7 @@ watch(
           </div>
           <div
             v-if="onArchify ? skills.error : installError"
-            class="install-error"
+            class="install-error ui-err"
             data-testid="diagrams-install-error"
           >
             {{ onArchify ? skills.error : props.installError }}
@@ -550,8 +550,8 @@ watch(
             v-for="t in ARCHIFY_TYPES"
             :key="t.type"
             type="button"
-            class="ab-chip"
-            :class="{ on: archify.type === t.type }"
+            class="ui-chip"
+            :class="{ on: archify.type === t.type, 'is-on': archify.type === t.type }"
             :data-testid="`archify-type-${t.type}`"
             :aria-pressed="archify.type === t.type"
             :title="t.hint"
@@ -564,8 +564,8 @@ watch(
           <span class="ab-label">quality</span>
           <button
             type="button"
-            class="ab-chip"
-            :class="{ on: archify.quality === 'showcase' }"
+            class="ui-chip"
+            :class="{ on: archify.quality === 'showcase', 'is-on': archify.quality === 'showcase' }"
             data-testid="archify-quality-showcase"
             :aria-pressed="archify.quality === 'showcase'"
             title="archify's own authoring default: all nine artifact checks, no warnings."
@@ -575,8 +575,8 @@ watch(
           </button>
           <button
             type="button"
-            class="ab-chip"
-            :class="{ on: archify.quality === 'standard' }"
+            class="ui-chip"
+            :class="{ on: archify.quality === 'standard', 'is-on': archify.quality === 'standard' }"
             data-testid="archify-quality-standard"
             :aria-pressed="archify.quality === 'standard'"
             title="For a deliberately dense map, where the showcase budget would cut too much."
@@ -587,8 +587,8 @@ watch(
           <span class="ab-gap"></span>
           <button
             type="button"
-            class="ab-chip"
-            :class="{ on: archify.motion }"
+            class="ui-chip"
+            :class="{ on: archify.motion, 'is-on': archify.motion }"
             data-testid="archify-motion"
             role="switch"
             :aria-checked="archify.motion"
@@ -603,7 +603,7 @@ watch(
           <button
             v-if="!archify.reference"
             type="button"
-            class="ab-chip"
+            class="ui-chip"
             data-testid="archify-reference-pick"
             :disabled="diagrams.generating"
             title="Pick a file for archify to draw from: an existing .drawio or .mmd, a photograph of a whiteboard, a spec, a README. It reads the file and carries over what is actually in it."
@@ -617,7 +617,7 @@ watch(
             }}</span>
             <button
               type="button"
-              class="ab-chip"
+              class="ui-chip"
               data-testid="archify-reference-clear"
               :title="`Drawing from ${archify.reference}. Clear it to describe a diagram from scratch instead.`"
               @click="archify.reference = undefined"
@@ -635,8 +635,8 @@ watch(
         </div>
       </div>
 
-      <div v-if="pickedCommand" class="cmd-hint mono" data-testid="diagram-command-hint">
-        <span class="ch-args">{{ pickedCommand.argumentHint }}</span>
+      <div v-if="pickedCommand" class="cmd-hint" data-testid="diagram-command-hint">
+        <span class="ch-args mono">{{ pickedCommand.argumentHint }}</span>
         <span class="ch-desc">{{ pickedCommand.description }}</span>
         <span v-if="commandTakesFileOnly" class="ch-note">
           Takes a file. To draw something new, clear this and describe it instead.
@@ -656,28 +656,33 @@ watch(
           <span class="mono">archify validate</span> or <span class="mono">archify deliver</span>.
         </span>
       </div>
-      <div v-if="menuOpen" class="cmd-scrim" @click="menuOpen = false"></div>
-      <div v-if="diagrams.error" class="err" data-testid="diagram-error">{{ diagrams.error }}</div>
+      <div
+        v-if="menuOpen"
+        class="cmd-scrim"
+        data-testid="diagram-command-scrim"
+        @click="menuOpen = false"
+      ></div>
+      <div v-if="diagrams.error" class="err ui-err" data-testid="diagram-error">{{ diagrams.error }}</div>
 
       <MiniTerminal v-if="props.sessionId && !pending" :session-id="props.sessionId" label="running" />
 
       <div
         v-if="diagrams.generating && !pending"
-        class="row pending"
+        class="row pending ui-card is-warn"
         data-testid="diagram-starting"
         :aria-busy="true"
       >
         <div class="row-head">
-          <span class="file mono">{{ description.trim() || 'diagram' }}</span>
-          <span class="when mono">starting…</span>
+          <span class="file">{{ description.trim() || 'diagram' }}</span>
+          <span class="when">starting…</span>
         </div>
         <div class="desc">Starting the container session that will draw this.</div>
       </div>
 
-      <div v-if="pending" class="row pending" data-testid="diagram-pending" :aria-busy="true">
+      <div v-if="pending" class="row pending ui-card is-warn" data-testid="diagram-pending" :aria-busy="true">
         <div class="row-head">
           <span class="file mono">{{ pending.file }}</span>
-          <span class="when mono">drawing…</span>
+          <span class="when">drawing…</span>
         </div>
         <div class="desc">{{ pending.description }}</div>
         <ol v-if="onArchify" class="steps" data-testid="archify-steps">
@@ -695,7 +700,7 @@ watch(
         <MiniTerminal :session-id="pending.sessionId" label="drawing" />
       </div>
 
-      <div v-if="list.length === 0 && !pending" class="empty" data-testid="diagrams-empty">
+      <div v-if="list.length === 0 && !pending" class="empty ui-empty-line" data-testid="diagrams-empty">
         No diagrams yet. Generated diagrams are written to <span class="mono">{{ DIAGRAMS_DIR }}</span> in
         this project.
       </div>
@@ -708,8 +713,8 @@ watch(
           v-for="d in list"
           :key="d.file"
           type="button"
-          class="trow"
-          :class="{ on: d.file === selected }"
+          class="trow ui-row"
+          :class="{ on: d.file === selected, 'is-selected': d.file === selected }"
           :data-testid="`diagram-row-${d.file}`"
           :title="`${d.file} — double-click to open in your browser`"
           @click="diagrams.select(projectId, d.file)"
@@ -732,34 +737,34 @@ watch(
             :title="selectedEntry?.file ?? 'diagram'"
             :srcdoc="selectedHtml"
           ></iframe>
-          <div v-else class="frame-wait mono">reading…</div>
+          <div v-else class="frame-wait">reading…</div>
         </div>
         <div class="foot">
           <div class="foot-text">
             <span class="fn mono">{{ selectedEntry?.file ?? '—' }}</span>
             <div v-if="selectedEntry?.description" class="desc">{{ selectedEntry.description }}</div>
             <div v-if="selectedEntry?.plan" class="plan" data-testid="diagram-plan">
-              <span v-if="selectedEntry.plan.type" class="pl mono" data-testid="diagram-plan-type">
+              <span v-if="selectedEntry.plan.type" class="pl mono ui-chip" data-testid="diagram-plan-type">
                 <span class="pk">type</span>{{ selectedEntry.plan.type }}
               </span>
-              <span v-if="selectedEntry.plan.pattern" class="pl mono" data-testid="diagram-plan-pattern">
+              <span v-if="selectedEntry.plan.pattern" class="pl mono ui-chip" data-testid="diagram-plan-pattern">
                 <span class="pk">pattern</span>{{ selectedEntry.plan.pattern }}
               </span>
-              <span v-if="selectedEntry.plan.size" class="pl mono" data-testid="diagram-plan-size">
+              <span v-if="selectedEntry.plan.size" class="pl mono ui-chip" data-testid="diagram-plan-size">
                 <span class="pk">size</span>{{ selectedEntry.plan.size }}
               </span>
               <span
                 v-for="cut in selectedEntry.plan.cuts"
                 :key="cut"
-                class="pl cut mono"
+                class="pl cut mono ui-chip"
                 data-testid="diagram-plan-cut"
               >
                 <span class="pk">cut</span>{{ cut }}
               </span>
             </div>
           </div>
-          <span v-if="selectedEntry?.sessionId" class="chip mono" :title="selectedEntry.sessionId">
-            session {{ selectedEntry.sessionId.slice(0, 8) }}
+          <span v-if="selectedEntry?.sessionId" class="chip ui-chip" :title="selectedEntry.sessionId">
+            session <span class="mono">{{ selectedEntry.sessionId.slice(0, 8) }}</span>
           </span>
           <button v-if="selected" class="act" :data-testid="`diagram-open-${selected}`" @click="diagrams.open(projectId, selected)">
             <Icon name="external" :size="12" /> Open in browser
@@ -833,20 +838,7 @@ watch(
 }
 
 .trow {
-  width: 100%;
-  border: 0;
   border-bottom: 1px solid var(--border-soft);
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-}
-
-.trow:hover {
-  background: var(--bg-hover);
-}
-
-.trow.on {
-  background: var(--bg-active);
 }
 
 .trow .nm {
@@ -910,35 +902,7 @@ watch(
 }
 
 .engine {
-  flex: none;
-  display: inline-flex;
   align-self: flex-start;
-  gap: 2px;
-  padding: 2px;
-  background: var(--bg-seg);
-  border: 1px solid var(--border-seg);
-  border-radius: var(--rp);
-}
-
-.eng {
-  padding: 3px 11px;
-  font-family: var(--mono);
-  font-size: var(--fs-micro);
-  color: var(--text-tab);
-  background: none;
-  border: none;
-  border-radius: var(--rp);
-  cursor: pointer;
-}
-
-.eng:hover {
-  color: var(--text-strong);
-}
-
-.eng.on {
-  color: var(--text-strong);
-  background: var(--bg-card);
-  box-shadow: var(--elev);
 }
 
 .archify-bar {
@@ -965,7 +929,7 @@ watch(
   align-items: center;
   gap: 8px;
   min-width: 0;
-  font-family: var(--mono);
+  font-family: var(--sans);
   font-size: var(--fs-micro);
   letter-spacing: var(--track-label);
   text-transform: uppercase;
@@ -981,36 +945,6 @@ watch(
 
 .ab-gap {
   flex: 1;
-}
-
-.ab-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 4px;
-  font-size: var(--fs-micro);
-  color: var(--text-mid);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--rp);
-  cursor: pointer;
-}
-
-.ab-chip:hover {
-  color: var(--text-bright);
-  border-color: var(--border-strong);
-}
-
-.ab-chip.on {
-  color: var(--green);
-  background: transparent;
-  border-color: var(--green);
-  font-weight: var(--w-em);
-}
-
-.ab-chip:disabled {
-  opacity: 0.45;
-  cursor: default;
 }
 
 .ab-ref {
@@ -1069,9 +1003,7 @@ watch(
   padding: 6px 9px;
   margin-bottom: 6px;
   background: var(--bg-hover);
-  box-shadow: var(--elev);
   border: 1px dashed var(--border-strong);
-  border-radius: var(--rc);
 }
 
 .install-text {
@@ -1188,8 +1120,15 @@ watch(
   padding: 4px;
   background: var(--bg-panel-2);
   border: 1px solid var(--border-card);
-  border-radius: var(--rc);
-  box-shadow: var(--elev);
+  border-radius: var(--r-panel);
+  box-shadow: var(--shadow-overlay);
+  animation: paletteIn var(--dur-panel-in) var(--ease-overlay);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cmd-menu {
+    animation: none;
+  }
 }
 
 .cmd-group + .cmd-group {
@@ -1198,7 +1137,7 @@ watch(
 
 .cmd-group-label {
   padding: 5px 9px 3px;
-  font-family: var(--mono);
+  font-family: var(--sans);
   font-size: var(--fs-micro);
   letter-spacing: var(--track-label);
   text-transform: uppercase;
@@ -1268,7 +1207,6 @@ watch(
   align-items: center;
   gap: 4px;
   padding: 2px 7px;
-  font-family: var(--sans);
   font-size: var(--fs-micro);
   color: var(--text-mid);
   background: transparent;
@@ -1298,14 +1236,7 @@ watch(
 }
 
 .pl {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 2px 6px;
-  font-size: var(--fs-micro);
-  color: var(--text-body);
-  border: 1px solid var(--border-card-alt);
-  border-radius: var(--rp);
+  font-family: var(--mono);
 }
 
 .pk {
@@ -1350,35 +1281,18 @@ watch(
 .err {
   max-width: 840px;
   margin-bottom: 8px;
-  font-size: var(--fs-meta);
-  color: var(--red);
 }
 
 .install-error {
   margin-top: 6px;
-  font-size: var(--fs-meta);
-  color: var(--red);
 }
 
 .empty {
-  max-width: 840px;
-  font-size: var(--fs-ui);
-  color: var(--text-faint);
   text-wrap: pretty;
 }
 
 .row {
-  padding: 6px 9px;
   margin-bottom: 5px;
-  background: var(--bg-hover);
-  box-shadow: var(--elev);
-  border: 1px solid var(--border-card);
-  border-radius: var(--rc);
-}
-
-.row.pending {
-  border-style: dashed;
-  opacity: 0.8;
 }
 
 .frame-wait {
@@ -1428,12 +1342,6 @@ watch(
 
 .chip {
   flex-shrink: 0;
-  font-size: var(--fs-micro);
-  border-radius: var(--rp);
-  padding: 1px 9px;
-  white-space: nowrap;
-  color: var(--text-faint);
-  border: 1px solid var(--border-strong);
 }
 
 .act {

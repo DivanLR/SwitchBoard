@@ -96,6 +96,11 @@ async function learn(): Promise<void> {
   await flow.learn(props.projectId, run.value.id)
 }
 
+async function writeSpec(): Promise<void> {
+  if (!run.value) return
+  await flow.writeSpec(props.projectId, run.value.id)
+}
+
 async function startWork(): Promise<void> {
   if (!run.value) return
   await flow.startWork(props.projectId, run.value.id)
@@ -114,12 +119,12 @@ async function cancel(): Promise<void> {
 
 <template>
   <div class="flow-view" data-testid="flow-view">
-    <div class="flow-rail mono" data-testid="flow-stage-rail">
+    <div class="ui-tabs" data-testid="flow-stage-rail">
       <span
         v-for="s in STAGES"
         :key="s.key"
-        class="fr-step"
-        :class="{ on: stage === s.key }"
+        class="ui-tab"
+        :class="{ on: stage === s.key, 'is-selected': stage === s.key }"
         :data-testid="`flow-stage-${s.key}`"
       >
         {{ s.label }}
@@ -128,7 +133,7 @@ async function cancel(): Promise<void> {
       <button
         v-if="run && !run.finishedAt"
         type="button"
-        class="btn-quiet mono"
+        class="btn-quiet"
         data-testid="flow-cancel"
         @click="cancel()"
       >
@@ -136,13 +141,13 @@ async function cancel(): Promise<void> {
       </button>
     </div>
 
-    <div v-if="flow.error" class="flow-err mono" data-testid="flow-error">{{ flow.error }}</div>
+    <div v-if="flow.error" class="ui-err" data-testid="flow-error">{{ flow.error }}</div>
 
     <div v-if="!run" class="flow-pick" data-testid="flow-pick">
-      <div class="fp-search">
+      <div class="ui-toolbar">
         <input
           v-model="query"
-          class="fp-input mono"
+          class="fp-input"
           data-testid="flow-feature-search"
           placeholder="Search Azure DevOps Features, or leave blank for the most recent"
           @keydown.enter="search()"
@@ -157,12 +162,12 @@ async function cancel(): Promise<void> {
           {{ flow.searching ? 'Asking DevOps…' : 'Find features' }}
         </button>
       </div>
-      <div v-if="flow.searching" class="flow-note mono faint" data-testid="flow-features-searching">
+      <div v-if="flow.searching" class="flow-note faint" data-testid="flow-features-searching">
         A session is reading the board through the DevOps MCP server.
       </div>
       <div
         v-else-if="flow.features.length === 0"
-        class="flow-note mono faint"
+        class="flow-note faint"
         data-testid="flow-features-empty"
       >
         {{ flow.featuresNote ?? 'No features loaded yet.' }}
@@ -172,14 +177,14 @@ async function cancel(): Promise<void> {
           v-for="feature in flow.features"
           :key="feature.id"
           type="button"
-          class="fp-row"
+          class="ui-row"
           :data-testid="`flow-feature-${feature.id}`"
           :disabled="flow.busy === 'start'"
           @click="start(feature)"
         >
           <span class="fp-id mono">{{ feature.id }}</span>
           <span class="fp-title">{{ feature.title }}</span>
-          <span v-if="feature.state" class="pill mono">{{ feature.state }}</span>
+          <span v-if="feature.state" class="pill">{{ feature.state }}</span>
         </button>
       </div>
     </div>
@@ -188,17 +193,17 @@ async function cancel(): Promise<void> {
       <div class="fr-head">
         <span class="frh-id mono">{{ run.featureId }}</span>
         <span class="frh-title">{{ run.featureTitle }}</span>
-        <span class="pill mono" :class="run.status" data-testid="flow-run-status">{{ run.status }}</span>
+        <span class="pill" :class="run.status" data-testid="flow-run-status">{{ run.status }}</span>
       </div>
-      <div v-if="run.note" class="flow-note mono" data-testid="flow-run-note">{{ run.note }}</div>
+      <div v-if="run.note" class="flow-note" data-testid="flow-run-note">{{ run.note }}</div>
 
       <div v-if="run.concerns.length > 0" class="flow-concerns" data-testid="flow-concerns">
-        <div class="fa-title mono">What the reviewer said</div>
+        <div class="ui-kicker">What the reviewer said</div>
         <ul><li v-for="concern in run.concerns" :key="concern">{{ concern }}</li></ul>
       </div>
 
       <div v-if="stage === 'scoping' || stage === 'crosscheck'" class="flow-scoping" data-testid="flow-scoping">
-        <div class="flow-note mono faint">
+        <div class="flow-note faint">
           {{
             stage === 'crosscheck'
               ? 'A second session is reviewing the breakdown. It did not write it, and it can change nothing.'
@@ -213,7 +218,7 @@ async function cancel(): Promise<void> {
           <div
             v-for="item in items"
             :key="item.id"
-            class="fi-card"
+            class="ui-card flow-card"
             :data-testid="`flow-item-${item.localId}`"
           >
             <div class="fi-head">
@@ -227,7 +232,7 @@ async function cancel(): Promise<void> {
               </span>
               <span
                 v-if="item.attempts > 1"
-                class="fi-wid mono"
+                class="ui-chip"
                 :data-testid="`flow-item-${item.localId}-attempts`"
                 :title="`Restarted ${item.attempts - 1} time(s)`"
               >
@@ -235,22 +240,22 @@ async function cancel(): Promise<void> {
               </span>
               <a
                 v-if="item.prUrl"
-                class="fi-wid mono"
+                class="ui-chip"
                 :href="item.prUrl"
                 :data-testid="`flow-item-${item.localId}-pr`"
               >
-                PR #{{ item.prId }}
+                PR #<span class="mono">{{ item.prId }}</span>
               </a>
               <span
                 v-else-if="item.prId"
-                class="fi-wid mono"
+                class="ui-chip"
                 :data-testid="`flow-item-${item.localId}-pr`"
               >
-                PR #{{ item.prId }}
+                PR #<span class="mono">{{ item.prId }}</span>
               </span>
               <span
                 v-else-if="item.status === 'pr_open'"
-                class="fi-wid mono faint"
+                class="fi-wid-text faint"
                 :data-testid="`flow-item-${item.localId}-nopr`"
               >
                 no pull request
@@ -258,16 +263,16 @@ async function cancel(): Promise<void> {
               <button
                 v-if="FAILED_STATUSES.has(item.status)"
                 type="button"
-                class="btn-quiet mono"
+                class="btn-quiet"
                 :data-testid="`flow-item-${item.localId}-retry`"
                 @click="retry(item)"
               >
                 Retry
               </button>
-              <span v-if="item.workItemId" class="fi-wid mono" :data-testid="`flow-item-${item.localId}-wid`">
-                #{{ item.workItemId }}
+              <span v-if="item.workItemId" class="ui-chip" :data-testid="`flow-item-${item.localId}-wid`">
+                <span class="mono">#{{ item.workItemId }}</span>
               </span>
-              <span v-else class="fi-wid mono faint" :data-testid="`flow-item-${item.localId}-nowid`">
+              <span v-else class="fi-wid-text faint" :data-testid="`flow-item-${item.localId}-nowid`">
                 not in DevOps yet
               </span>
               <button
@@ -285,23 +290,47 @@ async function cancel(): Promise<void> {
             <ul v-if="item.acceptance.length > 0" class="fi-acceptance">
               <li v-for="line in item.acceptance" :key="line">{{ line }}</li>
             </ul>
-            <div v-if="item.note" class="fi-note mono">{{ item.note }}</div>
+            <div v-if="item.note" class="fi-note">{{ item.note }}</div>
           </div>
         </div>
 
         <div v-if="run.risks.length > 0 || run.outOfScope.length > 0" class="flow-asides">
           <div v-if="run.risks.length > 0" data-testid="flow-risks">
-            <div class="fa-title mono">Risks</div>
+            <div class="ui-kicker">Risks</div>
             <ul><li v-for="risk in run.risks" :key="risk">{{ risk }}</li></ul>
           </div>
           <div v-if="run.outOfScope.length > 0" data-testid="flow-out-of-scope">
-            <div class="fa-title mono">Left out</div>
+            <div class="ui-kicker">Left out</div>
             <ul><li v-for="line in run.outOfScope" :key="line">{{ line }}</li></ul>
           </div>
         </div>
 
-        <div v-if="stage === 'ready' && flow.counts.prOpen > 0" class="flow-foot" data-testid="flow-learn-foot">
-          <span class="flow-note mono">
+        <div class="ui-footer flow-foot" data-testid="flow-spec-foot">
+          <span class="flow-foot-note">
+            {{
+              run.specSessionId
+                ? 'The feature spec is being written. It lands in specs/ and shows in the Specs tab.'
+                : 'One spec for the whole feature, written from these items by Spec Kit.'
+            }}
+          </span>
+          <button
+            type="button"
+            class="btn-outline"
+            data-testid="flow-spec"
+            :disabled="flow.busy === 'spec'"
+            @click="writeSpec()"
+          >
+            {{ flow.busy === 'spec' ? 'Sending…' : run.specSessionId ? 'Write it again' : 'Write the feature spec' }}
+          </button>
+        </div>
+        <MiniTerminal
+          v-if="run.specSessionId"
+          :session-id="run.specSessionId"
+          data-testid="flow-spec-session"
+        />
+
+        <div v-if="stage === 'ready' && flow.counts.prOpen > 0" class="ui-footer flow-foot" data-testid="flow-learn-foot">
+          <span class="flow-foot-note">
             {{ flow.counts.prOpen }} pull request{{ flow.counts.prOpen === 1 ? '' : 's' }} open. Once
             you have reviewed them, Flow can read your comments and propose standards.
           </span>
@@ -316,8 +345,8 @@ async function cancel(): Promise<void> {
           </button>
         </div>
 
-        <div v-if="stage === 'ready'" class="flow-foot" data-testid="flow-work-foot">
-          <span class="flow-note mono" data-testid="flow-work-counts">
+        <div v-if="stage === 'ready'" class="ui-footer flow-foot" data-testid="flow-work-foot">
+          <span class="flow-foot-note" data-testid="flow-work-counts">
             {{ flow.counts.published }} waiting, {{ flow.counts.working }} running,
             {{ flow.counts.prOpen }} with a PR, {{ flow.counts.blocked + flow.counts.failed }} stuck
           </span>
@@ -332,9 +361,9 @@ async function cancel(): Promise<void> {
           </button>
         </div>
 
-        <div v-if="stage === 'approve' || stage === 'publishing'" class="flow-foot">
-          <span class="flow-note mono">
-            {{ flow.counts.proposed }} to create under feature {{ run.featureId }},
+        <div v-if="stage === 'approve' || stage === 'publishing'" class="ui-footer flow-foot">
+          <span class="flow-foot-note">
+            {{ flow.counts.proposed }} to create under feature <span class="mono">{{ run.featureId }}</span>,
             {{ flow.counts.published }} already there.
           </span>
           <button
@@ -355,27 +384,27 @@ async function cancel(): Promise<void> {
         </div>
       </template>
 
-      <div v-else class="flow-note mono faint" data-testid="flow-no-items">
+      <div v-else class="flow-note faint" data-testid="flow-no-items">
         This run has no items.
       </div>
 
       <div v-if="flow.pendingLessons.length > 0" class="flow-lessons" data-testid="flow-lessons">
-        <div class="fa-title mono">Proposed standards</div>
-        <div class="flow-note mono faint">
+        <div class="ui-kicker">Proposed standards</div>
+        <div class="flow-note faint">
           Each one is written into this project's CLAUDE.md only when you accept it. A rule you
           reject is never proposed again.
         </div>
         <div
           v-for="lesson in flow.pendingLessons"
           :key="lesson.id"
-          class="fl-card"
+          class="ui-card flow-card"
           :data-testid="`flow-lesson-${lesson.id}`"
         >
           <div class="fl-rule">{{ lesson.rule }}</div>
           <div v-if="lesson.section" class="fl-where mono">under {{ lesson.section }}</div>
           <blockquote v-for="(cited, at) in lesson.evidence" :key="at" class="fl-quote">
             “{{ cited.quote }}”
-            <span v-if="cited.author" class="mono faint"> — {{ cited.author }}</span>
+            <span v-if="cited.author" class="faint"> — {{ cited.author }}</span>
           </blockquote>
           <div class="fl-actions">
             <button
@@ -398,7 +427,7 @@ async function cancel(): Promise<void> {
             </button>
           </div>
         </div>
-        <div v-if="flow.lastWrite" class="flow-note mono" data-testid="flow-lesson-written">
+        <div v-if="flow.lastWrite" class="flow-note" data-testid="flow-lesson-written">
           {{ flow.lastWrite }}
         </div>
       </div>
@@ -417,37 +446,13 @@ async function cancel(): Promise<void> {
   gap: 14px;
 }
 
-.flow-rail {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  font-size: var(--fs-micro);
-  color: var(--text-meta);
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 10px;
-}
-
-.fr-step.on {
-  color: var(--green);
-}
-
 .fr-spacer {
   flex: 1;
-}
-
-.flow-err {
-  font-size: var(--fs-meta);
-  color: var(--red);
 }
 
 .flow-note {
   font-size: var(--fs-meta);
   color: var(--text-meta);
-}
-
-.fp-search {
-  display: flex;
-  gap: 10px;
 }
 
 .fp-input {
@@ -465,23 +470,6 @@ async function cancel(): Promise<void> {
   flex-direction: column;
   gap: 4px;
   margin-top: 12px;
-}
-
-.fp-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 10px;
-  text-align: left;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--rc);
-  cursor: pointer;
-}
-
-.fp-row:hover {
-  background: var(--bg-hover);
-  border-color: var(--border-card);
 }
 
 .fp-id {
@@ -527,11 +515,7 @@ async function cancel(): Promise<void> {
   gap: 8px;
 }
 
-.fi-card {
-  border: 1px solid var(--border-card);
-  border-radius: var(--rc-card);
-  background: var(--bg-card);
-  padding: 10px 12px;
+.flow-card {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -549,9 +533,8 @@ async function cancel(): Promise<void> {
   color: var(--text-strong);
 }
 
-.fi-wid {
+.fi-wid-text {
   font-size: var(--fs-micro);
-  color: var(--text-meta);
 }
 
 .fi-body {
@@ -584,12 +567,6 @@ async function cancel(): Promise<void> {
   padding-left: 18px;
 }
 
-.fa-title {
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-label);
-}
-
 .flow-concerns {
   font-size: var(--fs-micro);
   color: var(--text-meta);
@@ -606,16 +583,6 @@ async function cancel(): Promise<void> {
   gap: 8px;
   border-top: 1px solid var(--border);
   padding-top: 12px;
-}
-
-.fl-card {
-  border: 1px solid var(--border-card);
-  border-radius: var(--rc-card);
-  background: var(--bg-card);
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
 }
 
 .fl-rule {
@@ -642,11 +609,12 @@ async function cancel(): Promise<void> {
 }
 
 .flow-foot {
-  display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
+  padding: var(--sp-3) 0;
+}
+
+.flow-foot-note {
+  font: 400 var(--fs-ui) / 1.5 var(--sans);
+  color: var(--text-mid);
 }
 </style>

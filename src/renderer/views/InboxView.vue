@@ -155,6 +155,10 @@ async function alwaysAllowSimilar(item: PermissionRequest): Promise<void> {
   await loadCoveredBases()
 }
 
+const HCTX_MENU_MAX_WIDTH = 330
+const HCTX_MENU_MARGIN = 15
+const HCTX_MENU_EST_HEIGHT = 130
+
 function openHistCtxAt(h: DecisionRecord, x: number, y: number): void {
   const base = baseCmd(h.detail)
   const eligible =
@@ -166,8 +170,8 @@ function openHistCtxAt(h: DecisionRecord, x: number, y: number): void {
     id: h.id,
     detail: h.detail,
     allowBase: eligible ? base || null : null,
-    x: Math.min(x, window.innerWidth - 345),
-    y: Math.min(y, window.innerHeight - 130),
+    x: Math.min(x, window.innerWidth - HCTX_MENU_MAX_WIDTH - HCTX_MENU_MARGIN),
+    y: Math.min(y, window.innerHeight - HCTX_MENU_EST_HEIGHT),
   }
 }
 
@@ -214,11 +218,11 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
 
 <template>
   <aside class="inbox" data-testid="inbox-view">
-    <div class="tabs" role="tablist" aria-label="Inbox and history">
+    <div class="tabs ui-tabs" role="tablist" aria-label="Inbox and history">
       <button
         type="button"
-        class="tab"
-        :class="{ on: tab === 'inbox' }"
+        class="ui-tab"
+        :class="{ on: tab === 'inbox', 'is-selected': tab === 'inbox' }"
         data-testid="inbox-tab-pending"
         role="tab"
         :aria-selected="tab === 'inbox'"
@@ -231,8 +235,8 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
       </button>
       <button
         type="button"
-        class="tab"
-        :class="{ on: tab === 'history' }"
+        class="ui-tab"
+        :class="{ on: tab === 'history', 'is-selected': tab === 'history' }"
         data-testid="inbox-tab-history"
         role="tab"
         :aria-selected="tab === 'history'"
@@ -260,18 +264,25 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
       </button>
     </div>
 
-    <div v-if="inbox.undeliverableNotice" class="notice" data-testid="undeliverable-notice">
-      {{ inbox.undeliverableNotice }}
-      <button class="notice-dismiss" data-testid="notice-dismiss" @click="inbox.dismissNotice()">
-        Dismiss
-      </button>
+    <div
+      v-if="inbox.undeliverableNotice"
+      class="notice ui-err-banner is-warn"
+      role="alert"
+      data-testid="undeliverable-notice"
+    >
+      <div class="notice-body">
+        {{ inbox.undeliverableNotice }}
+        <button class="notice-dismiss link-green" data-testid="notice-dismiss" @click="inbox.dismissNotice()">
+          Dismiss
+        </button>
+      </div>
     </div>
 
-    <div v-if="tab === 'inbox'" class="body" aria-live="polite" aria-relevant="additions">
-      <div v-if="inbox.groups.length === 0" class="empty" data-testid="inbox-zero">
-        <Icon name="check" class="empty-icon" :size="18" />
-        <div class="empty-title">Inbox zero</div>
-        <div class="empty-sub">New permission requests from any project land here.</div>
+    <div v-if="tab === 'inbox'" class="ui-body" aria-live="polite" aria-relevant="additions">
+      <div v-if="inbox.groups.length === 0" class="ui-empty" data-testid="inbox-zero">
+        <Icon name="check" class="empty-icon ui-empty-icon" :size="18" />
+        <div class="ui-empty-title">Inbox zero</div>
+        <div class="ui-empty-sub">New permission requests from any project land here.</div>
       </div>
 
       <div
@@ -280,23 +291,23 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
         class="group"
         :data-testid="`inbox-group-${projectName(group.projectId)}`"
       >
-        <div class="group-head">
+        <div class="group-head ui-card-head">
           <span class="group-dot"></span>
-          <span class="group-name mono">{{ projectName(group.projectId) }}</span>
-          <span class="group-count mono">· {{ group.items.length }} pending</span>
+          <span class="ui-kicker">{{ projectName(group.projectId) }}</span>
+          <span class="badge-count">{{ group.items.length }} pending</span>
           <span class="spacer"></span>
           <template v-if="approveAllConfirmId === group.projectId">
             <span class="approve-all-warn" data-testid="approve-all-warn">
               Includes {{ groupHighRiskCount(group.items) }} high-risk. Sure?
             </span>
             <button
-              class="link-armed"
+              class="link-armed btn-quiet"
               data-testid="approve-all-confirm"
               @click="approveAll(group)"
             >
               Approve all
             </button>
-            <button class="link-quiet" data-testid="approve-all-cancel" @click="approveAllConfirmId = null">
+            <button class="link-green" data-testid="approve-all-cancel" @click="approveAllConfirmId = null">
               Cancel
             </button>
           </template>
@@ -314,7 +325,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
         <div
           v-for="item in group.items"
           :key="item.id"
-          class="item"
+          class="item ui-card"
           data-testid="inbox-item"
           :data-request-id="item.id"
         >
@@ -358,7 +369,9 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
               <button class="btn-armed" data-testid="confirm-high-risk" @click="approve(item)">
                 Confirm high-risk
               </button>
-              <button class="btn-outline" @click="confirmingId = null">Back</button>
+              <button class="btn-outline" data-testid="confirm-high-risk-back" @click="confirmingId = null">
+                Back
+              </button>
             </template>
             <template v-else-if="alwaysConfirmId === item.id">
               <button
@@ -369,7 +382,9 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
               >
                 Confirm — always allow {{ toolShortName(item) }}
               </button>
-              <button class="btn-outline" @click="alwaysConfirmId = null">Back</button>
+              <button class="btn-outline" data-testid="confirm-always-allow-back" @click="alwaysConfirmId = null">
+                Back
+              </button>
             </template>
             <template v-else>
               <button class="btn-solid" data-testid="approve-btn" @click="approve(item)">Approve</button>
@@ -395,28 +410,30 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
       </div>
     </div>
 
-    <div v-else class="body history">
+    <div v-else class="ui-body">
       <div class="hist-header">
-        <span class="hist-count mono" data-testid="history-count">
+        <span class="hist-count" data-testid="history-count">
           DECISIONS · {{ inbox.history.length }}
         </span>
         <span class="spacer"></span>
         <button
           v-if="inbox.history.length > 0"
-          class="hist-clear mono"
+          class="hist-clear btn-quiet"
           data-testid="history-clear"
           @click="inbox.clearHistory()"
         >
           <Icon name="close" class="hist-clear-x" :size="11" />Clear history
         </button>
       </div>
-      <div v-if="inbox.history.length === 0" class="hist-empty">
-        History cleared.<br />New approvals and denials will land here.
+      <div v-if="inbox.history.length === 0" class="ui-empty">
+        <Icon name="clock" class="ui-empty-icon" :size="18" />
+        <div class="ui-empty-title">History cleared</div>
+        <div class="ui-empty-sub">New approvals and denials will land here.</div>
       </div>
       <div
         v-for="h in inbox.history"
         :key="h.id"
-        class="hist-row"
+        class="hist-row ui-row"
         :class="{ open: expandedHistory.has(h.id) }"
         data-testid="history-item"
         title="Right-click, or press the Menu key, for options"
@@ -474,6 +491,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
       <div
         v-if="histCtx"
         class="ctx-catcher"
+        data-testid="hist-ctx-catcher"
         @click="histCtx = null"
         @contextmenu.prevent="histCtx = null"
       >
@@ -486,14 +504,14 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
           <div class="hctx-detail mono">{{ histCtx.detail }}</div>
           <button
             v-if="histCtx.allowBase"
-            class="hctx-item mono"
+            class="hctx-item"
             data-testid="hist-ctx-allow"
             @click="allowFromHist"
           >
             <Icon name="check" style="color: var(--green)" :size="12" />
             <span>Always allow <span class="hctx-base">{{ histCtx.allowBase }}</span> commands</span>
           </button>
-          <button class="hctx-item mono danger" data-testid="hist-ctx-remove" @click="removeHist">
+          <button class="hctx-item danger" data-testid="hist-ctx-remove" @click="removeHist">
             <Icon name="close" :size="12" />
             <span>Remove this entry</span>
           </button>
@@ -515,9 +533,7 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
 }
 
 .tabs {
-  display: flex;
   align-items: center;
-  border-bottom: 1px solid var(--border);
   padding: 6px 12px 0;
 }
 
@@ -545,81 +561,27 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   display: block;
 }
 
-.tab {
-  padding: 14px 12px;
-  font-family: var(--sans);
-  font-size: var(--fs-ui);
-  font-weight: 500;
-  color: var(--text-tab);
-  cursor: pointer;
-  display: flex;
-  gap: 7px;
-  align-items: center;
-}
-
-.tab:hover {
-  color: var(--text-body);
-}
-
-.tab.on {
-  color: var(--green);
-  box-shadow: inset 0 -2px 0 var(--green);
-  cursor: default;
-}
-
-.tab .badge-count {
+.ui-tab .badge-count {
   line-height: 15px;
 }
 
 .notice {
   margin: 10px 12px 0;
-  padding: 8px 10px;
-  border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
-  border-radius: var(--rc);
-  color: var(--amber);
-  font-size: var(--fs-micro);
-  line-height: 1.5;
+}
+
+.notice-body {
+  flex: 1;
+  min-width: 0;
 }
 
 .notice-dismiss {
   display: block;
   margin-top: 5px;
   color: var(--amber);
-  font-family: var(--sans);
-  font-size: var(--fs-micro);
-  text-decoration: underline;
-}
-
-.body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 12px;
-}
-
-.body.history {
-  padding: 8px 14px;
-}
-
-.empty {
-  padding: 48px 16px;
-  text-align: center;
 }
 
 .empty-icon {
   color: var(--green);
-}
-
-.empty-title {
-  font-size: var(--fs-body);
-  color: var(--text-mid);
-  margin-top: 10px;
-}
-
-.empty-sub {
-  font-size: var(--fs-meta);
-  color: var(--text-faint);
-  margin-top: 4px;
-  line-height: 1.5;
 }
 
 .group {
@@ -627,20 +589,8 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
 }
 
 .group-head {
-  display: flex;
   align-items: center;
-  gap: 7px;
   margin: 0 2px 8px;
-}
-
-.group-name {
-  font-size: var(--fs-meta);
-  color: var(--text-body);
-}
-
-.group-count {
-  font-size: var(--fs-micro);
-  color: var(--text-faint);
 }
 
 .group-dot {
@@ -658,16 +608,6 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   color: var(--amber);
 }
 
-.link-armed,
-.link-quiet {
-  font-family: var(--sans);
-  font-size: var(--fs-micro);
-  cursor: pointer;
-  background: transparent;
-  border: none;
-  padding: 0;
-}
-
 .link-green {
   font-family: var(--sans);
 }
@@ -677,23 +617,16 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
   font-weight: var(--w-em);
 }
 
-.link-quiet {
-  color: var(--text-faint);
-}
-
-.link-armed:hover,
-.link-quiet:hover {
-  text-decoration: underline;
+.link-armed:hover {
+  border-color: color-mix(in srgb, var(--amber) 55%, transparent);
+  color: var(--amber);
 }
 
 .item {
   background: var(--bg-hover);
-  border: 1px solid var(--border-card-alt);
-  border-radius: var(--rc);
-  padding: var(--pad-card);
+  border-color: var(--border-card-alt);
   margin-bottom: 8px;
   animation: sbIn 0.25s var(--ease);
-  box-shadow: var(--elev);
 }
 
 .item-head {
@@ -857,14 +790,6 @@ html.sb-light .detail-box {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: var(--fs-micro);
-  color: var(--text-body);
-  background: var(--bg-hover);
-  box-shadow: var(--elev);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--rc);
-  padding: 4px 11px;
-  user-select: none;
 }
 
 .hist-clear-x {
@@ -875,14 +800,6 @@ html.sb-light .detail-box {
   color: var(--text-strong);
   border-color: color-mix(in srgb, var(--red) 60%, transparent);
   background: color-mix(in srgb, var(--red) 10%, transparent);
-}
-
-.hist-empty {
-  padding: 36px 16px;
-  text-align: center;
-  font-size: var(--fs-meta);
-  line-height: 1.6;
-  color: var(--text-faint);
 }
 
 .hctx-menu {
@@ -928,12 +845,21 @@ html.sb-light .detail-box {
 
 .hctx-base {
   color: var(--green);
+  font-family: var(--mono);
 }
 
 .hist-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
   padding: 9px 2px;
   border-bottom: 1px solid var(--border-hist);
+  border-radius: 0;
   cursor: pointer;
+}
+
+.hist-row:hover {
+  background: transparent;
 }
 
 .hist-head {

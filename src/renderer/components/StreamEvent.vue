@@ -125,12 +125,22 @@ const markerLabel = computed(() => {
   return actionVerb((m as PermissionMarkerPayload).toolName)
 })
 
+function bashDescription(inputPreview: string | undefined | null): string | null {
+  const match = /"description"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(inputPreview ?? '')
+  return match ? match[1].replace(/\\(["\\/])/g, '$1') : null
+}
+
+const toolLabelIsCommand = computed(() => {
+  const t = tool.value
+  return Boolean(t && t.toolName === 'Bash' && bashDescription(t.inputPreview))
+})
+
 const toolLabel = computed(() => {
   const t = tool.value
   if (!t) return ''
   if (t.toolName === 'Bash') {
-    const match = /"description"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(t.inputPreview ?? '')
-    if (match) return match[1].replace(/\\(["\\/])/g, '$1')
+    const desc = bashDescription(t.inputPreview)
+    if (desc) return desc
   }
   return actionVerb(t.toolName)
 })
@@ -164,8 +174,8 @@ const toolLabel = computed(() => {
         {{ prompt.text }}
       </button>
       <span v-else class="prompt-text">{{ prompt.text }}</span>
-      <span v-if="prompt.pending" class="pending mono" data-testid="prompt-pending"> queued </span>
-      <span v-else-if="prompt.withdrawn" class="withdrawn mono" data-testid="prompt-withdrawn">
+      <span v-if="prompt.pending" class="ui-chip pending" data-testid="prompt-pending"> queued </span>
+      <span v-else-if="prompt.withdrawn" class="ui-chip withdrawn" data-testid="prompt-withdrawn">
         withdrawn
       </span>
     </div>
@@ -174,23 +184,25 @@ const toolLabel = computed(() => {
 
     <div v-else-if="assistant" class="assistant">
       <MarkdownText :text="assistant.text" />
-      <span v-if="assistant.partial" class="blink" style="color: var(--green)">▊</span>
+      <span v-if="assistant.partial" class="blink partial-caret">▊</span>
     </div>
 
-    <div v-else-if="summary" class="summary-card">
-      <div class="card-label mono"><span style="color: var(--green)"><Icon name="spark" :size="12" /></span> SUMMARY</div>
+    <div v-else-if="summary" class="ui-card">
+      <div class="ui-kicker card-label"><span class="icon-accent"><Icon name="spark" :size="12" /></span> SUMMARY</div>
       <div class="card-body"><MarkdownText :text="summary.text" /></div>
     </div>
 
-    <div v-else-if="tool" class="tool mono">
+    <div v-else-if="tool" class="mono-line">
       <div :class="{ 'tool-error': tool.isError }">
-        <Icon name="dot" :size="8" /> {{ toolLabel }}<span v-if="tool.isError" class="tool-failed"> · failed</span>
+        <Icon name="dot" :size="8" />
+        <span :class="{ 'tool-verb': !toolLabelIsCommand }">{{ toolLabel }}</span
+        ><span v-if="tool.isError" class="tool-failed"> · failed</span>
       </div>
     </div>
 
     <div
       v-else-if="marker"
-      class="marker mono"
+      class="marker"
       :data-testid="kind === 'plan_marker' ? 'plan-marker' : 'permission-marker'"
     >
       <span class="chip-marker" :class="markerStatus ?? ''">
@@ -203,7 +215,7 @@ const toolLabel = computed(() => {
       <span class="marker-title">{{ markerLabel }}</span>
       <button
         v-if="markerStatus === 'pending'"
-        class="review-link mono"
+        class="link-green"
         data-testid="review-in-inbox"
         @click="emit('open-inbox', marker.requestId)"
       >
@@ -211,12 +223,12 @@ const toolLabel = computed(() => {
       </button>
     </div>
 
-    <div v-else-if="errorPayload" class="error-card" data-testid="error-event">
-      <div class="card-label mono error-label"><Icon name="cross" :size="12" /> ERROR</div>
+    <div v-else-if="errorPayload" class="ui-card is-danger" data-testid="error-event">
+      <div class="ui-kicker card-label error-label"><Icon name="cross" :size="12" /> ERROR</div>
       <div class="error-body mono">{{ errorPayload.text }}</div>
     </div>
 
-    <div v-else-if="result" class="done mono" data-testid="result-event">
+    <div v-else-if="result" class="done" data-testid="result-event">
       <Icon name="check" :size="12" /> {{ resultLabel(result) }}
     </div>
 
@@ -225,7 +237,7 @@ const toolLabel = computed(() => {
       <div class="injection-body">{{ injection.text }}</div>
     </details>
 
-    <div v-else class="raw mono">{{ rawText }}</div>
+    <div v-else class="mono-line">{{ rawText }}</div>
   </div>
 </template>
 
@@ -259,10 +271,6 @@ const toolLabel = computed(() => {
   border-radius: var(--rc);
 }
 
-html.sb-light .prompt {
-  background: color-mix(in srgb, var(--green) 6%, transparent);
-}
-
 .caret {
   color: var(--green);
   font-weight: var(--w-em);
@@ -276,11 +284,8 @@ html.sb-light .prompt {
 }
 
 .pending {
-  font-size: var(--fs-micro);
   color: var(--amber);
-  border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
-  border-radius: var(--rc);
-  padding: 0 6px;
+  border-color: color-mix(in srgb, var(--amber) 40%, transparent);
 }
 
 .prompt-editable {
@@ -320,11 +325,8 @@ html.sb-light .prompt {
 }
 
 .withdrawn {
-  font-size: var(--fs-micro);
   color: var(--text-ghost);
-  border: 1px solid var(--border);
-  border-radius: var(--rc);
-  padding: 0 6px;
+  border-color: var(--border);
 }
 
 .assistant {
@@ -333,20 +335,16 @@ html.sb-light .prompt {
   color: var(--text-body);
 }
 
-
-.summary-card {
-  background: var(--bg-hover);
-  border: 1px solid var(--border-card-alt);
-  border-radius: var(--rc);
-  padding: 11px 13px;
-  box-shadow: var(--elev);
+.partial-caret {
+  color: var(--green);
 }
 
 .card-label {
-  font-size: var(--fs-micro);
-  letter-spacing: 0.13em;
-  color: var(--text-on-wash);
   margin-bottom: 6px;
+}
+
+.icon-accent {
+  color: var(--green);
 }
 
 .card-body {
@@ -355,7 +353,7 @@ html.sb-light .prompt {
   color: var(--text-body);
 }
 
-.tool {
+.mono-line {
   font-family: var(--mono);
   font-size: var(--fs-meta);
   line-height: 1.7;
@@ -364,12 +362,17 @@ html.sb-light .prompt {
   word-break: break-word;
 }
 
+.tool-verb {
+  font-family: var(--sans);
+}
+
 .tool-error {
   color: var(--red);
 }
 
 .tool-failed {
   color: var(--red);
+  font-family: var(--sans);
 }
 
 .marker {
@@ -382,22 +385,6 @@ html.sb-light .prompt {
 
 .marker-title {
   color: var(--text-mid);
-}
-
-.review-link {
-  color: var(--green);
-  font-size: var(--fs-meta);
-}
-
-.review-link:hover {
-  text-decoration: underline;
-}
-
-.error-card {
-  border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
-  background: color-mix(in srgb, var(--red) 5%, transparent);
-  border-radius: var(--rc);
-  padding: 11px 13px;
 }
 
 .error-label {
@@ -437,15 +424,6 @@ html.sb-light .prompt {
 
 .injection-body {
   margin-top: 4px;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.raw {
-  font-family: var(--mono);
-  font-size: var(--fs-meta);
-  line-height: 1.7;
-  color: var(--text-noise);
   white-space: pre-wrap;
   word-break: break-word;
 }

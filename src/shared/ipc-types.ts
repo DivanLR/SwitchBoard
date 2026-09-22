@@ -288,6 +288,10 @@ export interface InvokeMap {
     req: { projectId: string; runId: string }
     res: { runs: FlowRun[]; items: FlowItem[] }
   }
+  'flow.spec': {
+    req: { projectId: string; runId: string }
+    res: { runs: FlowRun[]; items: FlowItem[] }
+  }
   'flow.lessons': { req: { projectId: string }; res: FlowLesson[] }
   'flow.decideLesson': {
     req: { projectId: string; lessonId: string; accept: boolean; reason?: string }

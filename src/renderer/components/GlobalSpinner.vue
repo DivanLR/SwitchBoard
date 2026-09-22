@@ -44,7 +44,7 @@ onUnmounted(() => {
 <template>
   <transition name="spin-fade">
     <div v-if="visible" class="global-spinner" data-testid="global-spinner" aria-label="Loading">
-      <span class="gs-ring"></span>
+      <span class="ui-spinner gs-ring"></span>
     </div>
   </transition>
 </template>
@@ -63,23 +63,13 @@ onUnmounted(() => {
   border-radius: var(--rp);
   background: var(--bg-panel);
   border: 1px solid var(--border-strong);
-  box-shadow: var(--shadow-dd);
+  box-shadow: var(--shadow-toast);
   pointer-events: none;
 }
 
 .gs-ring {
   width: 15px;
   height: 15px;
-  border-radius: 50%;
-  border: 2px solid var(--border-strong);
-  border-top-color: var(--green);
-  animation: gs-spin 0.7s linear infinite;
-}
-
-@keyframes gs-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .spin-fade-enter-active,

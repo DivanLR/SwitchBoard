@@ -22,13 +22,21 @@ function textOf(event: SessionEvent): string {
 
 <template>
   <div class="swallowed" data-testid="swallowed-block">
-    <div class="toggle mono" @click="expanded = !expanded">
+    <div
+      class="toggle"
+      role="button"
+      tabindex="0"
+      data-testid="swallowed-toggle"
+      @click="expanded = !expanded"
+      @keydown.enter.prevent="expanded = !expanded"
+      @keydown.space.prevent="expanded = !expanded"
+    >
       <Icon :name="expanded ? 'chevron-down' : 'chevron-right'" :size="11" /> Worked quietly for a bit ·
       {{ noiseKind }}
     </div>
     <div v-if="expanded" class="box">
       <div v-for="event in visibleEvents" :key="event.id" class="line mono">{{ textOf(event) }}</div>
-      <div v-if="overCap" class="more mono" data-testid="swallowed-open-raw" @click="emit('open-raw')">
+      <div v-if="overCap" class="more" data-testid="swallowed-open-raw" @click="emit('open-raw')">
         … {{ events.length - EXPAND_CAP }} more lines in Raw view
       </div>
     </div>
@@ -51,9 +59,14 @@ function textOf(event: SessionEvent): string {
   color: var(--text-mid);
 }
 
+.toggle:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--green);
+}
+
 .box {
-  background: color-mix(in srgb, var(--bg-code) 50%, transparent);
-  border: 1px solid var(--border-code);
+  background: var(--bg-code);
+  border: 1px solid var(--border-card);
   border-radius: var(--rc);
   padding: 9px 12px;
   margin-top: 6px;
@@ -64,7 +77,7 @@ function textOf(event: SessionEvent): string {
 .line {
   font-family: var(--mono);
   font-size: var(--fs-meta);
-  line-height: 1.7;
+  line-height: 1.45;
   color: var(--text-noise);
   white-space: pre-wrap;
   word-break: break-word;

@@ -3,7 +3,16 @@ const composerDrafts = new Map<string, string>()
 </script>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, onWatcherCleanup, ref, watch } from 'vue'
+import {
+  computed,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  onWatcherCleanup,
+  ref,
+  useTemplateRef,
+  watch,
+} from 'vue'
 import type { ComputedRef, Ref } from 'vue'
 import { agentIdOf } from '@shared/domain'
 import type { SectionKind, SessionEvent } from '@shared/domain'
@@ -43,11 +52,11 @@ import DiagramsView from '@renderer/views/DiagramsView.vue'
 import TerminalPane from '@renderer/components/TerminalPane.vue'
 import SkillsView from '@renderer/views/SkillsView.vue'
 import SecurityView from '@renderer/views/SecurityView.vue'
-import FlowView from '@renderer/views/FlowView.vue'
+import ConversationTerminal from '@renderer/components/ConversationTerminal.vue'
 import SessionWaitOverlay from '@renderer/components/SessionWaitOverlay.vue'
 
 const props = defineProps<{ project: ProjectListItem }>()
-const emit = defineEmits<{ (e: 'open-settings', tab: 'skills'): void }>()
+const emit = defineEmits<{ (e: 'open-settings', tab: 'skills'): void; (e: 'open-flow'): void }>()
 
 const projects = useProjectsStore()
 const active = useActiveSessionStore()
@@ -83,6 +92,8 @@ function pillLabel(status: string): string {
 }
 
 const terminalEverOpened = ref(false)
+const terminalMode = ref<'chat' | 'shell'>('chat')
+const shellEverOpened = ref(false)
 const mainTab = ref<
   | 'session'
   | 'terminal'
@@ -93,7 +104,6 @@ const mainTab = ref<
   | 'diagrams'
   | 'skills'
   | 'security'
-  | 'flow'
 >('session')
 const specCount = computed(() => specs.stateFor(props.project.id).specs.length)
 const diffCount = computed(() => diff.resultFor(props.project.id).files.length)
@@ -304,6 +314,8 @@ watch(
     restoredDraft.value = null
     mainTab.value = 'session'
     terminalEverOpened.value = false
+    shellEverOpened.value = false
+    terminalMode.value = 'chat'
     editTarget.value = null
     sessionStart?.reset()
     cancelStop()
@@ -478,6 +490,25 @@ function openTerminal(): void {
   mainTab.value = 'terminal'
 }
 
+
+function openShell(): void {
+  shellEverOpened.value = true
+  terminalMode.value = 'shell'
+}
+
+const convTerm = useTemplateRef<InstanceType<typeof ConversationTerminal>>('convTerm')
+
+async function sendFromTerminal(text: string): Promise<void> {
+  busy.value = true
+  let delivered = false
+  try {
+    delivered = await deliver(text)
+  } finally {
+    busy.value = false
+    if (!delivered) convTerm.value?.restore(text)
+  }
+}
+
 function onViewKeydown(event: KeyboardEvent): void {
   const views = ['clean', 'raw', 'terminal'] as const
   const current = mainTab.value === 'terminal' ? 'terminal' : active.view
@@ -639,19 +670,25 @@ async function send(): Promise<void> {
       )
       return
     }
-    if (!liveSession.value) return
-    const agent = selectedAgent.value
-    const refs = props.project.refs
-    const withRefs =
-      refs.length > 0 ? `${text}\n\n${refs.map((r) => `@${r.path}`).join('\n')}` : text
-    if (agent) await active.send(`[to ${agent.name}] ${withRefs}`, agent.id)
-    else await active.send(withRefs)
-    composer.value = ''
-    recordSent(text)
-    scrollToBottom()
+    if (await deliver(text)) composer.value = ''
   } finally {
     busy.value = false
   }
+}
+
+// The one path a message takes to the live session, from the composer or the
+// Terminal view alike, so agent addressing and @refs cannot drift between them.
+async function deliver(text: string): Promise<boolean> {
+  if (!liveSession.value) return false
+  const agent = selectedAgent.value
+  const refs = props.project.refs
+  const withRefs =
+    refs.length > 0 ? `${text}\n\n${refs.map((r) => `@${r.path}`).join('\n')}` : text
+  if (agent) await active.send(`[to ${agent.name}] ${withRefs}`, agent.id)
+  else await active.send(withRefs)
+  recordSent(text)
+  scrollToBottom()
+  return true
 }
 
 async function enqueue(): Promise<void> {
@@ -773,9 +810,9 @@ const {
   >
     <header v-if="!active.fullScreenSection" class="head">
       <div class="head-row">
-        <div class="ident">
+        <div class="ident ui-chip">
           <span class="h-dot" :style="{ background: headerColor }"></span>
-          <span class="h-name mono" data-testid="session-project-name">{{ project.name }}</span>
+          <span class="h-name" data-testid="session-project-name">{{ project.name }}</span>
           <span class="h-path code" data-testid="session-project-path">{{ project.path }}</span>
         </div>
         <span class="spacer"></span>
@@ -864,7 +901,7 @@ const {
         <span v-else-if="endedSession" class="pill ended">Ended</span>
 
         <button
-          class="ctl mono"
+          class="ctl"
           data-testid="new-session"
           title="Start another session in this project, on its own defaults"
           :disabled="projects.starting"
@@ -873,8 +910,16 @@ const {
           + Session
         </button>
         <button
+          class="ctl"
+          data-testid="open-flow"
+          title="Take an Azure DevOps feature from scoping to pull requests"
+          @click="emit('open-flow')"
+        >
+          Flow
+        </button>
+        <button
           v-if="liveSession?.status === 'working'"
-          class="stop-btn mono"
+          class="stop-btn"
           data-testid="stop-session"
           aria-label="Interrupt the current turn"
           title="Interrupt the current turn (Ctrl+C)"
@@ -884,7 +929,7 @@ const {
         </button>
         <button
           v-if="liveSession"
-          class="ctl mono"
+          class="ctl"
           data-testid="end-session"
           title="End the session (resumable later)"
           :disabled="ending"
@@ -900,14 +945,14 @@ const {
           ring-testid="ending-bar"
         />
       </div>
-      <div class="head-meta mono">
-        <div class="name-block">
+      <div class="head-meta">
+        <div class="name-block ui-chip">
           <span class="name-cap" aria-hidden="true">session</span>
           <input
             v-if="nameDraft !== null"
             ref="nameInputEl"
             v-model="nameDraft"
-            class="name-input mono"
+            class="name-input"
             data-testid="session-name-input"
             maxlength="60"
             placeholder="Name this session"
@@ -925,9 +970,9 @@ const {
             {{ (liveSession ?? endedSession)?.name ?? 'Name this session' }}
           </button>
         </div>
-        <div class="run-block">
+        <div class="run-block ui-chip">
           <span class="run-cap" aria-hidden="true">run</span>
-          <label class="wsl-check mono" data-testid="project-containers">
+          <label class="wsl-check" data-testid="project-containers">
             <input
               type="checkbox"
               data-testid="project-containers-input"
@@ -942,7 +987,7 @@ const {
             Run in Container
           </label>
         </div>
-        <span style="white-space: nowrap"><Icon name="branch" :size="12" /> {{ liveSession?.branch ?? endedSession?.branch ?? '—' }}</span>
+        <span style="white-space: nowrap"><Icon name="branch" :size="12" /> <span class="mono">{{ liveSession?.branch ?? endedSession?.branch ?? '—' }}</span></span>
         <span
           v-if="currentModelLabel"
           data-testid="session-model"
@@ -952,7 +997,7 @@ const {
         </span>
         <span
           v-if="liveSession?.currentMode"
-          class="mode-chip"
+          class="ui-chip"
           data-testid="session-mode"
           :title="
             liveSession.currentMode === 'advisor'
@@ -966,6 +1011,7 @@ const {
         <span
           v-if="liveSession && liveSession.diffAdds != null"
           data-testid="diff-stats"
+          class="mono"
           style="white-space: nowrap"
         >
           <span style="color: var(--green)">+{{ liveSession.diffAdds }}</span>
@@ -975,7 +1021,7 @@ const {
           v-if="sessionTimer && showTimer"
           style="color: var(--text-faint); white-space: nowrap"
         >
-          session <span style="color: var(--text-meta)">{{ sessionTimer }}</span>
+          session <span class="mono" style="color: var(--text-meta)">{{ sessionTimer }}</span>
         </span>
         <span
           v-if="cacheHitPct != null"
@@ -984,11 +1030,11 @@ const {
           title="Prompt-cache hit rate for the latest turn (cached prefix reused vs. re-billed)"
         >
           cache
-          <span :style="{ color: cacheColor }">{{ cacheHitPct }}%</span>
+          <span class="mono" :style="{ color: cacheColor }">{{ cacheHitPct }}%</span>
         </span>
         <button
           v-if="sessionUsage"
-          class="usage-widget mono"
+          class="usage-widget ui-chip"
           data-testid="session-model-usage"
           title="Session usage by model — click for the full /usage picture"
           @click="openFullUsage()"
@@ -1010,8 +1056,8 @@ const {
       </div>
     </header>
 
-    <div v-if="dragKind" class="drop-overlay mono" data-testid="drop-overlay">
-      <div class="drop-box">
+    <div v-if="dragKind" class="drop-overlay overlay" data-testid="drop-overlay">
+      <div class="drop-box dialog">
         <div class="drop-title">
           <template v-if="dragKind === 'project'"><Icon name="external" :size="14" /> Reference this project</template>
           <template v-else>@ Reference file path</template>
@@ -1026,76 +1072,68 @@ const {
       </div>
     </div>
 
-    <div v-if="!active.fullScreenSection" class="main-tabs mono">
+    <div v-if="!active.fullScreenSection" class="main-tabs ui-tabs">
       <button
-        class="mt"
-        :class="{ sel: mainTab === 'session' || mainTab === 'terminal' }"
+        class="ui-tab"
+        :class="{ sel: mainTab === 'session' || mainTab === 'terminal', 'is-selected': mainTab === 'session' || mainTab === 'terminal' }"
         data-testid="tab-session"
         @click="mainTab = 'session'"
       >
         Session
       </button>
-      <button class="mt" :class="{ sel: mainTab === 'specs' }" data-testid="tab-specs" @click="mainTab = 'specs'">
+      <button class="ui-tab" :class="{ sel: mainTab === 'specs', 'is-selected': mainTab === 'specs' }" data-testid="tab-specs" @click="mainTab = 'specs'">
         Specs
         <span v-if="specCount > 0" class="mt-badge">{{ specCount }}</span>
       </button>
       <button
-        class="mt"
-        :class="{ sel: mainTab === 'tests' }"
+        class="ui-tab"
+        :class="{ sel: mainTab === 'tests', 'is-selected': mainTab === 'tests' }"
         data-testid="tab-tests"
         @click="mainTab = 'tests'"
       >
         Tests
       </button>
-      <button class="mt" :class="{ sel: mainTab === 'diff' }" data-testid="tab-diff" @click="mainTab = 'diff'">
+      <button class="ui-tab" :class="{ sel: mainTab === 'diff', 'is-selected': mainTab === 'diff' }" data-testid="tab-diff" @click="mainTab = 'diff'">
         Diff
         <span v-if="diffCount > 0" class="mt-badge">{{ diffCount }}</span>
       </button>
       <button
-        class="mt"
-        :class="{ sel: mainTab === 'cleanup' }"
+        class="ui-tab"
+        :class="{ sel: mainTab === 'cleanup', 'is-selected': mainTab === 'cleanup' }"
         data-testid="tab-cleanup"
         @click="mainTab = 'cleanup'"
       >
         Cleanup
       </button>
       <button
-        class="mt"
-        :class="{ sel: mainTab === 'diagrams' }"
+        class="ui-tab"
+        :class="{ sel: mainTab === 'diagrams', 'is-selected': mainTab === 'diagrams' }"
         data-testid="tab-diagrams"
         @click="mainTab = 'diagrams'"
       >
         Diagrams
       </button>
       <button
-        class="mt"
-        :class="{ sel: mainTab === 'skills' }"
+        class="ui-tab"
+        :class="{ sel: mainTab === 'skills', 'is-selected': mainTab === 'skills' }"
         data-testid="tab-skills"
         @click="mainTab = 'skills'"
       >
         Skills
       </button>
       <button
-        class="mt"
-        :class="{ sel: mainTab === 'security' }"
+        class="ui-tab"
+        :class="{ sel: mainTab === 'security', 'is-selected': mainTab === 'security' }"
         data-testid="tab-security"
         @click="mainTab = 'security'"
       >
         Security
       </button>
-      <button
-        class="mt"
-        :class="{ sel: mainTab === 'flow' }"
-        data-testid="tab-flow"
-        @click="mainTab = 'flow'"
-      >
-        Flow
-      </button>
     </div>
-    <div v-if="!active.fullScreenSection && (mainTab === 'session' || mainTab === 'terminal')" class="view-toolbar">
+    <div v-if="!active.fullScreenSection && (mainTab === 'session' || mainTab === 'terminal')" class="view-toolbar ui-toolbar">
       <span class="view-label">Workspace</span>
       <div
-        class="segments view-segments"
+        class="segments view-segments ui-segments"
         data-testid="view-toggle"
         role="tablist"
         aria-label="Stream view"
@@ -1103,8 +1141,8 @@ const {
       >
         <button
           type="button"
-          class="seg"
-          :class="{ on: mainTab === 'session' && active.view === 'clean' }"
+          class="seg ui-seg"
+          :class="{ on: mainTab === 'session' && active.view === 'clean', 'is-on': mainTab === 'session' && active.view === 'clean' }"
           data-testid="view-clean"
           role="tab"
           :aria-selected="mainTab === 'session' && active.view === 'clean'"
@@ -1115,8 +1153,8 @@ const {
         </button>
         <button
           type="button"
-          class="seg"
-          :class="{ on: mainTab === 'session' && active.view === 'raw' }"
+          class="seg ui-seg"
+          :class="{ on: mainTab === 'session' && active.view === 'raw', 'is-on': mainTab === 'session' && active.view === 'raw' }"
           data-testid="view-raw"
           role="tab"
           :aria-selected="mainTab === 'session' && active.view === 'raw'"
@@ -1127,8 +1165,8 @@ const {
         </button>
         <button
           type="button"
-          class="seg"
-          :class="{ on: mainTab === 'terminal' }"
+          class="seg ui-seg"
+          :class="{ on: mainTab === 'terminal', 'is-on': mainTab === 'terminal' }"
           data-testid="tab-terminal"
           role="tab"
           :aria-selected="mainTab === 'terminal'"
@@ -1140,16 +1178,30 @@ const {
       </div>
     </div>
 
-    <TerminalPane
+    <ConversationTerminal
       v-if="terminalEverOpened"
-      v-show="mainTab === 'terminal'"
+      v-show="mainTab === 'terminal' && terminalMode === 'chat'"
+      ref="convTerm"
+      :lines="rawLines"
+      :session-key="terminalSession?.id ?? project.id"
+      :live="!!liveSession"
+      :visible="mainTab === 'terminal' && terminalMode === 'chat'"
+      :sending="busy"
+      @send="sendFromTerminal"
+      @interrupt="interrupt()"
+      @shell="openShell()"
+    />
+    <TerminalPane
+      v-if="shellEverOpened"
+      v-show="mainTab === 'terminal' && terminalMode === 'shell'"
       :id="terminalSession?.id ?? project.id"
       :cwd="project.path"
       :engine="terminalSession?.engine ?? startEngine"
       :resume-session-id="terminalResumeId"
       :live="!!liveSession"
-      :visible="mainTab === 'terminal'"
+      :visible="mainTab === 'terminal' && terminalMode === 'shell'"
       @takeover="stop()"
+      @chat="terminalMode = 'chat'"
     />
 
     <SpecsView
@@ -1196,7 +1248,6 @@ const {
       @manage="emit('open-settings', 'skills')"
     />
     <SecurityView v-else-if="mainTab === 'security'" :project-id="project.id" />
-    <FlowView v-else-if="mainTab === 'flow'" :project-id="project.id" />
 
     <div
       v-else-if="mainTab === 'session' && (active.view === 'clean' || selectedAgent)"
@@ -1208,7 +1259,7 @@ const {
     >
 
       <div class="stream-inner">
-        <div v-if="selectedAgent" class="agent-banner mono" data-testid="agent-banner">
+        <div v-if="selectedAgent" class="agent-banner" data-testid="agent-banner">
           <button
             type="button"
             class="ab-back"
@@ -1221,24 +1272,24 @@ const {
           <span class="ab-sep">│</span>
           <span class="ab-dot"><Icon name="dot" :size="8" /></span>
           <span class="ab-name">{{ selectedAgent.task || selectedAgent.name }}</span>
-          <span class="ab-chip">subagent</span>
+          <span class="ab-chip ui-chip">subagent</span>
           <span class="spacer"></span>
         </div>
 
         <div v-if="!liveSession && !endedSession" class="stream-empty">
-          <div class="mono faint" data-testid="no-session-hint">
+          <div class="faint" data-testid="no-session-hint">
             No session yet — press + in the sidebar and point New session at this folder.
           </div>
         </div>
 
-        <div v-if="endedSession" class="ended" data-testid="ended-banner">
-          <div class="ended-line mono">
+        <div v-if="endedSession" class="ended ui-card" data-testid="ended-banner">
+          <div class="ended-line">
             Session ended <span class="faint">({{ endedSession.endReason ?? 'unknown' }})</span>
             <span v-if="endedSession.statusDetail" class="faint"> — {{ endedSession.statusDetail }}</span>
           </div>
           <div class="ended-actions">
             <div
-              class="segments mono"
+              class="segments"
               data-testid="start-engine"
               role="radiogroup"
               aria-label="Engine"
@@ -1284,7 +1335,7 @@ const {
                 @click="modeOpen = !modeOpen"
               >
                 <span class="mode-dd-eyebrow">Mode</span>
-                <span class="mode-dd-name mono">{{ startModeLabel }}</span>
+                <span class="mode-dd-name">{{ startModeLabel }}</span>
                 <span class="mode-dd-arrow" aria-hidden="true">
                   <Icon :name="modeOpen ? 'chevron-up' : 'chevron-down'" :size="10" />
                 </span>
@@ -1302,7 +1353,7 @@ const {
                   :title="m.detail"
                   @click="((startMode = m.value), (modeOpen = false))"
                 >
-                  <span class="mode-item-name mono">{{ m.label }}</span>
+                  <span class="mode-item-name">{{ m.label }}</span>
                   <span class="mode-item-detail">{{ m.detail }}</span>
                 </button>
                 <div v-if="resumeSession" class="mode-note">
@@ -1364,7 +1415,7 @@ const {
           >
             <Icon name="warning" :size="12" /> Nothing will ask for approval — only use this in throwaway or fully trusted folders.
           </div>
-          <div v-if="startError" class="mono" style="color: var(--red)" data-testid="start-error">
+          <div v-if="startError" class="ui-err" data-testid="start-error">
             <Icon name="cross" :size="12" /> {{ startError }}
           </div>
         </div>
@@ -1372,7 +1423,7 @@ const {
         <button
           v-if="renderStart > 0 || deriveWindow < active.events.length || active.hasMoreHistory"
           type="button"
-          class="load-earlier mono"
+          class="load-earlier"
           data-testid="show-earlier"
           @click="showEarlier()"
         >
@@ -1412,12 +1463,12 @@ const {
           @answer="onInlineAnswer"
         />
 
-        <div v-if="selectedAgent" class="live mono" data-testid="live-line">
+        <div v-if="selectedAgent" class="live" data-testid="live-line">
           <span class="blink" style="color: var(--green)">▊</span>
           {{ selectedAgent.task || selectedAgent.label }}
         </div>
 
-        <div v-else-if="workingAgents.length > 1" class="agents mono" data-testid="agent-list">
+        <div v-else-if="workingAgents.length > 1" class="agents ui-card is-warn" data-testid="agent-list">
           <div class="agents-head">
             <span class="agents-label"><Icon name="fork" :size="12" /> AGENTS</span>
             <span class="agents-count">{{ workingAgents.length }} working in parallel</span>
@@ -1436,7 +1487,7 @@ const {
               v-for="agent in shownAgents"
               :key="agent.id"
               type="button"
-              class="agent-row"
+              class="agent-row ui-row"
               data-testid="agent-row"
               :aria-label="`Open ${agent.name}'s chat`"
               @click="active.selectAgent(agent.id)"
@@ -1450,7 +1501,11 @@ const {
               v-if="!agentsExpanded && workingAgents.length > SHOW_LIMIT"
               class="agents-more"
               data-testid="agents-more"
+              role="button"
+              tabindex="0"
               @click="agentsExpanded = true"
+              @keydown.enter="agentsExpanded = true"
+              @keydown.space.prevent="agentsExpanded = true"
             >
               <Icon name="plus" :size="11" /> {{ workingAgents.length - SHOW_LIMIT }} more
             </div>
@@ -1459,7 +1514,7 @@ const {
 
         <div
           v-else-if="liveSession?.status === 'working'"
-          class="live mono"
+          class="live"
           data-testid="live-line"
           role="status"
         >
@@ -1468,7 +1523,7 @@ const {
         </div>
         <div
           v-else-if="liveSession?.status === 'needs_you'"
-          class="live live-blocked mono"
+          class="live live-blocked"
           data-testid="live-line"
           role="alert"
         >
@@ -1478,7 +1533,7 @@ const {
 
         <div
           v-if="backgroundTasks.length > 0"
-          class="agents bg-tasks mono"
+          class="agents bg-tasks ui-card is-danger"
           data-testid="bg-task-list"
         >
           <div class="agents-head">
@@ -1506,7 +1561,7 @@ const {
             <div
               v-for="task in shownTasks"
               :key="task.taskId"
-              class="agent-row bg-row"
+              class="agent-row bg-row ui-row"
               data-testid="bg-task-row"
             >
               <span class="agent-dot bg"><Icon name="clock" :size="8" /></span>
@@ -1516,7 +1571,11 @@ const {
               v-if="!tasksExpanded && backgroundTasks.length > SHOW_LIMIT"
               class="agents-more"
               data-testid="bg-task-more"
+              role="button"
+              tabindex="0"
               @click="tasksExpanded = true"
+              @keydown.enter="tasksExpanded = true"
+              @keydown.space.prevent="tasksExpanded = true"
             >
               <Icon name="plus" :size="11" /> {{ backgroundTasks.length - SHOW_LIMIT }} more
             </div>
@@ -1559,17 +1618,17 @@ const {
       >
         <Icon name="arrow-down" :size="14" />
       </button>
-      <div class="refs-row mono" data-testid="refs-row">
+      <div class="refs-row" data-testid="refs-row">
         <span class="refs-label">REFS</span>
         <span
           v-for="r in project.refs"
           :key="r.path"
-          class="ref-chip"
+          class="ref-chip ui-chip"
           :title="r.path"
           :data-testid="`ref-chip-${r.label}`"
         >
           <span class="ref-ico"><Icon name="external" :size="12" /></span>
-          <span class="ref-name">{{ r.label }}</span>
+          <span class="ref-name mono">{{ r.label }}</span>
           <button
             class="ref-x"
             :data-testid="`ref-remove-${r.label}`"
@@ -1602,18 +1661,18 @@ const {
         <span v-if="refError" class="ref-error" data-testid="ref-error">{{ refError }}</span>
       </div>
       <div v-if="queuedTasks.length > 0" class="queue" data-testid="task-queue">
-        <span class="queue-label mono">UP NEXT</span>
+        <span class="queue-label">UP NEXT</span>
         <span
           v-for="(task, index) in queuedTasks"
           :key="task.id"
-          class="queue-chip mono"
+          class="queue-chip"
           :data-testid="`queue-item-${index}`"
         >
           <span class="queue-num">{{ index + 1 }}</span>
           <input
             v-if="editingQueued === task.id"
             v-model="queuedDraft"
-            class="queue-edit mono"
+            class="queue-edit"
             :data-testid="`queue-edit-${index}`"
             :aria-label="`Edit queued task ${index + 1}`"
             @keydown.enter.prevent="saveQueued()"
@@ -1641,14 +1700,14 @@ const {
         </span>
         <span class="queue-note">Runs automatically when the current goal finishes</span>
       </div>
-      <div v-if="queuedEditError" class="queued-edit-error mono" data-testid="queued-edit-error">
+      <div v-if="queuedEditError" class="queued-edit-error" data-testid="queued-edit-error">
         {{ queuedEditError }}
       </div>
       <div v-if="restoredDraft !== null && composer === restoredDraft" class="draft-float" data-testid="draft-note">
         Restored draft from the previous run — send to deliver it.
       </div>
 
-      <div v-if="stopConfirm" class="stop-confirm mono" data-testid="stop-confirm">
+      <div v-if="stopConfirm" class="stop-confirm" data-testid="stop-confirm">
         <span class="sc-text"><Icon name="stop" :size="12" /> Ctrl+C again to stop the chat — are you sure?</span>
         <button class="sc-stop" data-testid="stop-confirm-yes" @click="confirmStop()">Stop</button>
         <button class="sc-cancel" data-testid="stop-confirm-no" @click="cancelStop()">Cancel</button>
@@ -1659,11 +1718,11 @@ const {
         <span v-else class="caret mono"><Icon name="chevron-right" :size="14" /></span>
         <span
           v-if="editTarget"
-          class="target-chip mono"
+          class="target-chip ui-chip is-on"
           data-testid="composer-target"
           title="Spec edit target — your message rewrites this file"
         >
-          <Icon name="arrow-right" :size="11" /> {{ editTarget }}
+          <Icon name="arrow-right" :size="11" /> <span class="mono">{{ editTarget }}</span>
           <button
             class="target-x"
             data-testid="composer-target-clear"
@@ -1727,10 +1786,10 @@ const {
             @scroll="onComposerScroll"
           ></textarea>
         </div>
-        <span class="to-inline mono" data-testid="composer-to">to {{ sendTo }}</span>
+        <span class="to-inline" data-testid="composer-to">to {{ sendTo }}</span>
         <button
           v-if="!editTarget"
-          class="queue-btn mono"
+          class="queue-btn"
           data-testid="composer-queue"
           title="Add to the queue — runs after the current goal finishes"
           :disabled="composerEmpty"
@@ -1739,7 +1798,7 @@ const {
           <Icon name="plus" :size="11" /> Queue
         </button>
         <button
-          class="send-btn mono"
+          class="send-btn"
           data-testid="composer-send"
           :disabled="composerDead || busy || composerEmpty"
           @click="send()"
@@ -1826,54 +1885,17 @@ const {
 }
 
 .main-tabs {
-  display: flex;
-  gap: 2px;
   padding: 0 20px;
   flex-shrink: 0;
-  font-family: var(--sans);
-  border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
   box-shadow: var(--hairline-shine);
   min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.main-tabs::-webkit-scrollbar {
-  display: none;
-}
-
-.mt {
-  flex: none;
-}
-
-.mt {
-  padding: 13px 12px;
-  font-size: var(--fs-ui);
-  font-weight: 500;
-  color: var(--text-tab);
-  cursor: pointer;
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  background: transparent;
-}
-
-.mt:hover {
-  color: var(--text-body);
-}
-
-.mt.sel {
-  color: var(--green);
-  box-shadow: inset 0 -2px 0 var(--green);
 }
 
 .view-toolbar {
-  display: flex;
   flex-shrink: 0;
-  align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  margin-bottom: 0;
   padding: 10px 24px;
   border-bottom: 1px solid var(--border-soft);
   background: var(--bg);
@@ -1885,23 +1907,15 @@ const {
   font-weight: 500;
 }
 
-.segments.view-segments {
+.segments.view-segments.ui-segments {
   padding: 3px;
   gap: 3px;
   background: var(--bg-panel);
   border-color: var(--border-soft);
-  border-radius: 9px;
+  border-radius: var(--rc);
 }
 
-.view-segments .seg {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 6px 12px;
-  border-radius: 6px;
-}
-
-.view-segments .seg.on {
+.view-segments .ui-seg.on {
   background: color-mix(in srgb, var(--green) 12%, var(--bg-panel));
   color: var(--green);
 }
@@ -2031,7 +2045,7 @@ const {
 }
 
 .name-btn {
-  font-family: var(--mono);
+  font-family: var(--sans);
   font-size: var(--fs-meta);
   color: var(--text-body);
   border-bottom: 1px dashed transparent;
@@ -2048,7 +2062,7 @@ const {
 }
 
 .name-input {
-  font-family: var(--mono);
+  font-family: var(--sans);
   font-size: var(--fs-meta);
   color: var(--text-strong);
   background: var(--bg-panel);
@@ -2153,15 +2167,6 @@ const {
 }
 
 .ref-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: var(--fs-micro);
-  color: var(--text-body);
-  background: var(--bg-hover);
-  border: 1px solid var(--border-card-alt);
-  border-radius: var(--rc);
-  padding: 3px 9px;
   box-shadow: var(--elev);
   pointer-events: auto;
 }
@@ -2219,16 +2224,16 @@ const {
   position: absolute;
   inset: 8px;
   z-index: 40;
-  border: 1px dashed var(--green);
-  background: color-mix(in srgb, var(--surface-sunken) 88%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
+  background: color-mix(in srgb, var(--surface-sunken) 88%, transparent);
   pointer-events: none;
 }
 
 .drop-box {
   text-align: center;
+  border: 1px dashed var(--green);
 }
 
 .drop-title {
@@ -2259,41 +2264,21 @@ const {
   white-space: nowrap;
 }
 
-.mode-chip {
-  font-size: var(--fs-micro);
-  color: var(--blue);
-  border: 1px solid color-mix(in srgb, var(--blue) 35%, transparent);
-  border-radius: var(--rp);
-  padding: 1px 8px;
-  white-space: nowrap;
-}
-
 .usage-widget {
-  display: inline-flex;
-  align-items: center;
   gap: 9px;
   font-size: var(--fs-micro);
   color: var(--text-meta);
-  border: 1px solid var(--border-seg);
-  border-radius: var(--rp);
-  padding: 2px 10px;
-  cursor: pointer;
-  background: transparent;
-  white-space: nowrap;
-}
-
-.usage-widget:hover {
-  color: var(--text-body);
-  border-color: var(--border-strong);
 }
 
 .uw-total {
   color: var(--text-body);
   font-weight: var(--w-em);
+  font-family: var(--mono);
 }
 
 .uw-cost {
   color: var(--text-faint);
+  font-family: var(--mono);
 }
 
 .uw-model {
@@ -2302,6 +2287,7 @@ const {
 
 .uw-model-tok {
   color: var(--green);
+  font-family: var(--mono);
 }
 
 .stream-empty {
@@ -2314,10 +2300,6 @@ const {
 
 
 .stream-inner > .ended {
-  background: var(--bg-card);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--rc);
-  padding: 11px 13px;
   margin-bottom: 13px;
 }
 
@@ -2576,19 +2558,10 @@ html.sb-light .bypass-warn {
 }
 
 .ab-chip {
-  font-size: var(--fs-micro);
-  color: var(--text-faint);
-  border: 1px solid var(--border-seg);
-  border-radius: var(--rp);
-  padding: 1px 7px;
   white-space: nowrap;
 }
 
 .agents {
-  border: 1px solid color-mix(in srgb, var(--green) 18%, transparent);
-  background: color-mix(in srgb, var(--surface-inset) 55%, transparent);
-  border-radius: var(--rc);
-  padding: 11px 13px;
   margin-top: 6px;
 }
 
@@ -2649,10 +2622,6 @@ html.sb-light .bypass-warn {
   animation: sbFade 1.6s var(--ease) infinite;
 }
 
-.bg-row {
-  cursor: default;
-}
-
 .agents-rows {
   display: flex;
   flex-direction: column;
@@ -2660,18 +2629,10 @@ html.sb-light .bypass-warn {
 }
 
 .agent-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
   margin: 0 -6px;
-  padding: 4px 6px;
-  text-align: left;
-  cursor: pointer;
 }
 
 .agent-row:hover {
-  background: var(--bg-hover);
   box-shadow: var(--elev);
 }
 
@@ -2849,15 +2810,6 @@ html.sb-light .bypass-warn {
 
 .target-chip {
   flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: var(--fs-micro);
-  color: var(--green);
-  background: color-mix(in srgb, var(--green) 7%, transparent);
-  border: 1px solid color-mix(in srgb, var(--green) 35%, transparent);
-  border-radius: var(--rc);
-  padding: 3px 9px;
   white-space: nowrap;
 }
 
@@ -2873,30 +2825,16 @@ html.sb-light .bypass-warn {
 
 
 .ident {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 9px;
   min-width: 0;
-  padding: 4px 10px;
-  background: var(--bg-card-alt);
-  border: 1px solid var(--border-card-alt);
-  border-radius: var(--rc);
 }
 
 .ident .h-dot {
-  align-self: center;
   border-radius: var(--rp);
 }
 
 .name-block,
 .run-block {
-  display: inline-flex;
-  align-items: center;
   min-width: 0;
-  padding: 3px 10px;
-  background: var(--bg-card-alt);
-  border: 1px solid var(--border-card-alt);
-  border-radius: var(--rc);
 }
 
 .run-block {
@@ -2918,7 +2856,7 @@ html.sb-light .bypass-warn {
 .run-cap {
   flex: none;
   margin-right: 7px;
-  font-family: var(--mono);
+  font-family: var(--sans);
   font-size: var(--fs-micro);
   letter-spacing: var(--track-label);
   text-transform: uppercase;
@@ -2945,9 +2883,7 @@ html.sb-light .bypass-warn {
   width: 100%;
   max-width: var(--end-card-w);
   margin-inline: auto;
-  padding: 20px 22px;
   background: var(--bg-panel);
-  box-shadow: var(--elev);
 }
 
 .session-view.is-ended .ended-actions {

@@ -160,6 +160,14 @@ const store = reactive({
     })
   },
 
+  async writeSpec(projectId: string, runId: string): Promise<boolean> {
+    return this.act('spec', async () => {
+      const snapshot = await invoke('flow.spec', { projectId, runId })
+      state.runsByProject[projectId] = snapshot.runs
+      state.itemsByProject[projectId] = snapshot.items
+    })
+  },
+
   async decideLesson(
     projectId: string,
     lessonId: string,

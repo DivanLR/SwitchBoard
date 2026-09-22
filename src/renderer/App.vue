@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useInboxStore } from '@renderer/stores/inbox'
@@ -15,6 +15,7 @@ import McpView from '@renderer/views/McpView.vue'
 import InboxView from '@renderer/views/InboxView.vue'
 import ProjectRegistration from '@renderer/components/ProjectRegistration.vue'
 import SettingsPanel from '@renderer/components/SettingsPanel.vue'
+import FlowPopup from '@renderer/components/FlowPopup.vue'
 import GlobalSpinner from '@renderer/components/GlobalSpinner.vue'
 import ToastHost from '@renderer/components/ToastHost.vue'
 import SessionWaitOverlay from '@renderer/components/SessionWaitOverlay.vue'
@@ -31,6 +32,7 @@ const updates = useUpdatesStore()
 
 const showRegistration = ref(false)
 const showSettings = ref(false)
+const showFlow = ref(false)
 const settingsTab = ref<'models' | 'proj' | 'allowed' | 'skills' | 'term' | 'gen'>('models')
 
 function openSettings(tab: 'models' | 'proj' | 'allowed' | 'skills' | 'term' | 'gen' = 'models'): void {
@@ -122,12 +124,17 @@ onUnmounted(() => {
 })
 
 const selectedProject = computed(() => projects.selected)
+// Flow belongs to the project it was opened for. A selection change from anywhere
+// (a notification click, a focus request) closes it rather than retargeting it.
+watch(selectedProject, (next, prev) => {
+  if (showFlow.value && prev && next?.id !== prev.id) showFlow.value = false
+})
 const dbProject = computed(() => projects.dbProject)
 </script>
 
 <template>
   <div v-if="bridgeMissing" class="bridge-missing">
-    <div class="mono" style="font-size: var(--fs-head); font-weight: var(--w-em)">
+    <div class="logo">
       <span style="color: var(--green)"><Icon name="grid" :size="18" /></span> switchboard
     </div>
     <p class="dim">
@@ -161,7 +168,7 @@ const dbProject = computed(() => projects.dbProject)
       </span>
       <button
         v-if="updates.available"
-        class="ub-install"
+        class="btn-solid"
         data-testid="update-banner-install"
         @click="updates.install()"
       >
@@ -193,9 +200,12 @@ const dbProject = computed(() => projects.dbProject)
           v-else-if="selectedProject"
           :project="selectedProject"
           @open-settings="openSettings"
+          @open-flow="showFlow = true"
         />
-        <div v-else class="no-project">
-          <div class="mono faint" style="font-size: var(--fs-ui)">no project selected</div>
+        <div v-else class="no-project ui-empty">
+          <div class="ui-empty-icon"><Icon name="folder" :size="24" /></div>
+          <div class="ui-empty-title">No project selected</div>
+          <div class="ui-empty-sub">Choose a project from the sidebar, or add a new one.</div>
           <button class="btn-solid" data-testid="add-project-empty" @click="showRegistration = true">
             add a project
           </button>
@@ -219,7 +229,6 @@ const dbProject = computed(() => projects.dbProject)
       >
         <button
           class="inbox-peek"
-          :class="{ glow: inbox.pendingCount > 0 }"
           data-testid="inbox-peek"
           :title="inbox.pendingCount > 0 ? `${inbox.pendingCount} waiting — open inbox` : 'Open inbox'"
           @click="setInboxCollapsed(false)"
@@ -227,7 +236,7 @@ const dbProject = computed(() => projects.dbProject)
           <span v-if="inbox.pendingCount > 0" data-testid="inbox-peek-count">{{ inbox.pendingCount }}</span>
           <span v-else class="inbox-peek-icon"><Icon name="chevron-left" :size="12" /></span>
         </button>
-        <span class="inbox-rail-label mono">INBOX</span>
+        <span class="inbox-rail-label">INBOX</span>
       </div>
     </div>
 
@@ -235,6 +244,12 @@ const dbProject = computed(() => projects.dbProject)
 
     <ProjectRegistration v-if="showRegistration" @close="showRegistration = false" />
     <SettingsPanel v-if="showSettings" :initial-tab="settingsTab" @close="showSettings = false" />
+    <FlowPopup
+      v-if="showFlow && selectedProject"
+      :project-id="selectedProject.id"
+      :project-name="selectedProject.name"
+      @close="showFlow = false"
+    />
 
     <SessionWaitOverlay
       v-if="projects.starting"
@@ -281,17 +296,6 @@ const dbProject = computed(() => projects.dbProject)
   flex: 1;
 }
 
-.ub-install {
-  background: var(--green);
-  color: var(--green-ink);
-  font-weight: var(--w-em);
-  font-size: var(--fs-meta);
-  font-family: var(--sans);
-  padding: 4px 12px;
-  border-radius: var(--rc);
-  cursor: pointer;
-}
-
 .ub-dismiss {
   color: var(--text-tab);
   font-size: var(--fs-ui);
@@ -335,7 +339,7 @@ const dbProject = computed(() => projects.dbProject)
   border: 1px solid var(--border-strong);
   background: transparent;
   color: var(--text-tab);
-  font-family: var(--mono);
+  font-family: var(--sans);
   font-size: var(--fs-ui);
   cursor: pointer;
 }
@@ -345,30 +349,12 @@ const dbProject = computed(() => projects.dbProject)
   border-color: var(--border-seg);
 }
 
-.inbox-peek.glow {
-  color: var(--amber-ink);
-  background: var(--amber);
-  border-color: var(--amber);
-  font-weight: var(--w-em);
-  animation: inboxPeekGlow 1.8s ease-in-out infinite;
-}
-
 .inbox-rail-label {
   writing-mode: vertical-rl;
   font-size: var(--fs-micro);
   letter-spacing: 0.18em;
   color: var(--text-faint);
   user-select: none;
-}
-
-@keyframes inboxPeekGlow {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--amber) 55%, transparent);
-  }
-  50% {
-    box-shadow: 0 0 10px 3px color-mix(in srgb, var(--amber) 75%, transparent);
-  }
 }
 
 .main {
@@ -414,11 +400,6 @@ const dbProject = computed(() => projects.dbProject)
 
 .no-project {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
 }
 
 .bridge-missing {
@@ -428,5 +409,12 @@ const dbProject = computed(() => projects.dbProject)
   align-items: center;
   justify-content: center;
   gap: 10px;
+}
+
+.logo {
+  font-size: var(--fs-body);
+  font-weight: var(--w-em);
+  color: var(--text-bright);
+  letter-spacing: 0.02em;
 }
 </style>

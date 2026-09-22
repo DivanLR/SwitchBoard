@@ -19,15 +19,15 @@ const anyWorking = computed(() =>
 </script>
 
 <template>
-  <div class="statusbar mono" data-testid="statusbar">
+  <div class="statusbar" data-testid="statusbar">
     <span class="sb-stat" data-testid="counter-running">
-      <span class="sb-dot" style="background: var(--running)"></span>
+      <span class="sb-dot running"></span>
       <span class="sb-label">run</span>
       <span class="sb-val" data-testid="counter-running-value">{{ projects.counters.running }}</span>
     </span>
 
     <span class="sb-stat" data-testid="counter-needsyou">
-      <span class="sb-dot" style="background: var(--amber)"></span>
+      <span class="sb-dot amber"></span>
       <span class="sb-label">wait</span>
       <span class="sb-val amber" data-testid="counter-needsyou-value">
         {{ projects.counters.needsYou }}
@@ -65,7 +65,7 @@ const anyWorking = computed(() =>
   align-items: center;
   gap: 14px;
   height: 25px;
-  padding: 0 14px 0 18px;
+  padding: 0 var(--sp-4) 0 var(--sp-6);
   border-top: 1px solid var(--border);
   background: var(--bg-sticky);
   font-size: var(--fs-micro);
@@ -86,6 +86,7 @@ const anyWorking = computed(() =>
 }
 
 .sb-val {
+  font-family: var(--mono);
   color: var(--text-strong);
 }
 
@@ -97,6 +98,14 @@ const anyWorking = computed(() =>
   width: 6px;
   height: 6px;
   border-radius: var(--sq);
+}
+
+.sb-dot.running {
+  background: var(--running);
+}
+
+.sb-dot.amber {
+  background: var(--amber);
 }
 
 .sb-rule {
@@ -112,7 +121,7 @@ const anyWorking = computed(() =>
 .sb-hint {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--sp-1);
   color: var(--text-ghost);
 }
 

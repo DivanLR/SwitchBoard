@@ -43,7 +43,7 @@ watch(lines, () => {
 
 <template>
   <div class="mini-term" data-testid="mini-terminal">
-    <div v-if="label" class="mt-label mono">{{ label }}</div>
+    <div v-if="label" class="mt-label">{{ label }}</div>
     <div ref="boxEl" class="mt-box mono" role="log" aria-live="polite">
       <div v-if="lines.length === 0" class="mt-wait" data-testid="mini-terminal-empty">
         waiting for output…
@@ -92,5 +92,6 @@ watch(lines, () => {
 
 .mt-wait {
   color: var(--text-faint);
+  font-family: var(--sans);
 }
 </style>

@@ -90,7 +90,7 @@ const shortDate = (iso: string): string =>
 </script>
 
 <template>
-  <div class="evals" data-testid="evals-view">
+  <div class="ui-body" data-testid="evals-view">
     <div class="intro">
       One observable line per small change — implement (one run, or several isolated attempts), let
       the check report, judge it, then record a verdict and a rating. A pass needs the check to have
@@ -123,18 +123,18 @@ const shortDate = (iso: string): string =>
         <Icon :name="showSuites ? 'chevron-down' : 'chevron-right'" :size="12" /> From a suite
       </button>
     </div>
-    <div v-if="evals.error" class="err" data-testid="eval-error">{{ evals.error }}</div>
+    <div v-if="evals.error" class="ui-err" data-testid="eval-error">{{ evals.error }}</div>
 
     <div v-if="showSuites" class="suites" data-testid="eval-suites">
-      <div v-if="suites.length === 0" class="empty">
+      <div v-if="suites.length === 0" class="ui-empty-line">
         No known stack detected in this project's root — write the check by hand above.
       </div>
       <div v-for="stack in suites" :key="stack.stackId" class="stack">
-        <div class="stack-head mono">{{ stack.stackLabel }}</div>
+        <div class="ui-kicker">{{ stack.stackLabel }}</div>
         <button
           v-for="s in stack.suites"
           :key="s.id"
-          class="suite-row"
+          class="ui-row suite-row"
           :data-testid="`eval-suite-${s.id}`"
           @click="addFromSuite(s)"
         >
@@ -145,8 +145,8 @@ const shortDate = (iso: string): string =>
       </div>
     </div>
 
-    <div class="summary mono">
-      <span data-testid="eval-count">{{ runs.length }} line{{ runs.length === 1 ? '' : 's' }}</span>
+    <div class="summary">
+      <span data-testid="eval-count"><span class="mono">{{ runs.length }}</span> line{{ runs.length === 1 ? '' : 's' }}</span>
       <span
         v-if="runs.length > 0"
         class="rate"
@@ -159,19 +159,18 @@ const shortDate = (iso: string): string =>
         "
       >
         · acceptance
-        <template v-if="passRate != null">{{ passRate }}%</template>
-        <template v-else>—</template>
+        <span class="mono"><template v-if="passRate != null">{{ passRate }}%</template><template v-else>—</template></span>
       </span>
-      <span v-if="meanRating != null" data-testid="eval-mean">· mean rating {{ meanRating }}/5</span>
+      <span v-if="meanRating != null" data-testid="eval-mean">· mean rating <span class="mono">{{ meanRating }}/5</span></span>
     </div>
 
-    <div v-if="runs.length === 0" class="empty">
+    <div v-if="runs.length === 0" class="ui-empty-line">
       Nothing recorded yet. Write the line first, then the check that fails.
     </div>
 
-    <div v-for="run in runs" :key="run.id" class="row" :data-testid="`eval-row-${run.id}`">
-      <div class="row-head">
-        <span class="stage" :class="evalStage(run)" :data-testid="`eval-stage-${run.id}`">
+    <div v-for="run in runs" :key="run.id" class="ui-card" :data-testid="`eval-row-${run.id}`">
+      <div class="ui-card-head">
+        <span class="chip-risk" :class="evalStage(run)" :data-testid="`eval-stage-${run.id}`">
           {{ evalStage(run) }}
         </span>
         <span class="acc">{{ run.acceptance }}</span>
@@ -182,14 +181,18 @@ const shortDate = (iso: string): string =>
       </div>
 
       <div class="row-meta">
-        <span class="chip" :class="run.checkStatus" :data-testid="`eval-check-status-${run.id}`">
+        <span
+          class="ui-chip"
+          :class="[run.checkStatus, { 'is-on': run.checkStatus === 'pass', 'is-danger': run.checkStatus === 'fail' }]"
+          :data-testid="`eval-check-status-${run.id}`"
+        >
           {{ run.checkStatus === 'not_run' ? 'check not run' : `check ${run.checkStatus}` }}
         </span>
-        <span v-if="run.attempts > 1" class="chip" :data-testid="`eval-attempts-chip-${run.id}`">
+        <span v-if="run.attempts > 1" class="ui-chip" :data-testid="`eval-attempts-chip-${run.id}`">
           {{ run.attempts }} attempts
         </span>
         <span v-if="run.checkCmd" class="cmd mono">{{ run.checkCmd }}</span>
-        <span v-else class="cmd mono none">no check — the manual pass is the check</span>
+        <span v-else class="cmd none">no check — the manual pass is the check</span>
       </div>
 
       <div v-if="run.judge" class="judge" :data-testid="`eval-judge-${run.id}`">
@@ -216,17 +219,19 @@ const shortDate = (iso: string): string =>
         </button>
         <span class="sep"></span>
         <span class="lbl">attempts</span>
-        <button
-          v-for="n in 3"
-          :key="n"
-          class="act sm"
-          :class="{ on: run.attempts === n }"
-          :data-testid="`eval-attempts-${run.id}-${n}`"
-          :title="n === 1 ? 'One straight run' : `${n} isolated attempts, keep the winner`"
-          @click="evals.record(projectId, run.id, { attempts: n })"
-        >
-          {{ n }}
-        </button>
+        <div class="ui-segments">
+          <button
+            v-for="n in 3"
+            :key="n"
+            class="ui-seg"
+            :class="{ on: run.attempts === n, 'is-on': run.attempts === n }"
+            :data-testid="`eval-attempts-${run.id}-${n}`"
+            :title="n === 1 ? 'One straight run' : `${n} isolated attempts, keep the winner`"
+            @click="evals.record(projectId, run.id, { attempts: n })"
+          >
+            {{ n }}
+          </button>
+        </div>
       </div>
 
       <div class="row-verdict">
@@ -291,14 +296,11 @@ const shortDate = (iso: string): string =>
   color: var(--amber);
 }
 
-.evals {
-  flex: 1;
-  overflow-y: auto;
-  padding: 18px 22px 52px;
+.ui-body {
+  max-width: 840px;
 }
 
 .intro {
-  max-width: 840px;
   font-size: var(--fs-ui);
   line-height: 1.6;
   color: var(--text-mid);
@@ -317,7 +319,6 @@ const shortDate = (iso: string): string =>
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  max-width: 840px;
   margin-bottom: 8px;
 }
 
@@ -354,20 +355,16 @@ const shortDate = (iso: string): string =>
 }
 
 .add-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: default;
   box-shadow: none;
 }
 
-.err {
-  max-width: 840px;
+.ui-err {
   margin-bottom: 8px;
-  font-size: var(--fs-meta);
-  color: var(--red);
 }
 
 .summary {
-  max-width: 840px;
   display: flex;
   gap: 8px;
   margin-bottom: 12px;
@@ -375,26 +372,8 @@ const shortDate = (iso: string): string =>
   color: var(--text-faint);
 }
 
-.empty {
-  max-width: 840px;
-  font-size: var(--fs-ui);
-  color: var(--text-faint);
-}
-
-.row {
-  max-width: 840px;
-  padding: var(--pad-card);
+.ui-card {
   margin-bottom: 9px;
-  background: var(--bg-hover);
-  box-shadow: var(--elev);
-  border: 1px solid var(--border-card);
-  border-radius: var(--rc);
-}
-
-.row-head {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
 }
 
 .acc {
@@ -429,39 +408,24 @@ const shortDate = (iso: string): string =>
   margin-top: 7px;
 }
 
-.chip {
-  flex-shrink: 0;
-  font-size: var(--fs-micro);
-  border-radius: var(--rp);
-  padding: 1px 9px;
-  white-space: nowrap;
-  color: var(--text-faint);
-  border: 1px solid var(--border-strong);
-}
-
-.stage {
-  flex-shrink: 0;
-  font-family: var(--mono);
-  font-size: var(--fs-micro);
+.chip-risk {
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  border-radius: var(--rp);
-  padding: 2px 8px;
   color: var(--text-faint);
   border: 1px solid var(--border-strong);
 }
 
-.stage.verify {
+.chip-risk.verify {
   color: var(--blue);
   border-color: color-mix(in srgb, var(--blue) 40%, transparent);
 }
 
-.stage.review {
+.chip-risk.review {
   color: var(--amber);
   border-color: color-mix(in srgb, var(--amber) 50%, transparent);
 }
 
-.stage.done {
+.chip-risk.done {
   color: var(--green);
   border-color: color-mix(in srgb, var(--green) 32%, transparent);
 }
@@ -489,7 +453,6 @@ const shortDate = (iso: string): string =>
 }
 
 .suites {
-  max-width: 840px;
   margin-bottom: 14px;
 }
 
@@ -497,36 +460,26 @@ const shortDate = (iso: string): string =>
   margin-bottom: 10px;
 }
 
-.stack-head {
-  font-size: var(--fs-micro);
-  color: var(--text-faint);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+.ui-kicker {
   margin-bottom: 5px;
 }
 
-.suite-row {
-  display: flex;
-  align-items: center;
+.ui-row.suite-row {
   gap: 10px;
-  width: 100%;
   padding: 7px 11px;
   margin-bottom: 5px;
-  text-align: left;
-  background: var(--bg-hover);
+  background: var(--bg-card);
   border: 1px solid var(--border-card);
   border-radius: var(--rc);
-  cursor: pointer;
 }
 
-.suite-row:hover {
+.ui-row.suite-row:hover {
   border-color: var(--green);
 }
 
 .suite-kind {
   flex-shrink: 0;
   width: 62px;
-  font-family: var(--mono);
   font-size: var(--fs-micro);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -560,18 +513,6 @@ const shortDate = (iso: string): string =>
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.chip.pass {
-  color: var(--green);
-  background: color-mix(in srgb, var(--green) 10%, transparent);
-  border-color: color-mix(in srgb, var(--green) 32%, transparent);
-}
-
-.chip.fail {
-  color: var(--red);
-  background: color-mix(in srgb, var(--red) 10%, transparent);
-  border-color: color-mix(in srgb, var(--red) 32%, transparent);
 }
 
 .cmd {

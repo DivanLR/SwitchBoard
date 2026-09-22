@@ -250,7 +250,7 @@ depth, motion and behaviour.
 ### Cards / Containers
 - **Corner Style:** 3px radius.
 - **Background:** the card tier (`--bg-card`), one step lighter than the panel it sits on (dark) or pure white on a cool-grey ground (light).
-- **Shadow Strategy:** none; flat, per Elevation & Depth.
+- **Shadow Strategy:** `--elev` only. In the dark world that is the 1px inset hairline; in the light world it resolves to a soft two-layer drop (`0 1px 2px` and `0 2px 8px` at 4 to 5 percent), because a white card on a near-white canvas is separated by its shadow first. Real blurred shadows beyond that stay with the overlay tier.
 - **Border:** 1px, `--border-card`.
 - **Internal Padding:** `--pad-card` (10px vertical, 13px horizontal).
 
@@ -261,7 +261,11 @@ depth, motion and behaviour.
 
 ### Navigation
 - **Sidebar rows:** system-UI face, mono only for names/paths where alignment matters; a status "fold mark" glyph substitutes for a coloured dot; rows expand to show a branch/timer line when selected or still running.
-- **Tabs (`.pt`):** selected tab takes a 2px inset bottom rule in trace-green (`box-shadow: inset 0 -2px 0 var(--green)`), not a border property, so it does not shift layout.
+- **Tabs (`.ui-tabs` / `.ui-tab`):** one tab component at every depth (the main Session row, Specs parts, Tests sub tabs, Inbox, MCP). The selected tab takes green text and a 1px inset bottom rule in trace-green (`box-shadow: inset 0 -1px 0 var(--green)`), not a border property, so it does not shift layout. The 2px rule earlier builds drew is the carried-over defect named under Don'ts; it is gone.
+
+### Shared page primitives (added 2026-09-22)
+
+Every section, popup body and side panel follows one skeleton, built from the `ui-` classes at the end of `styles.css` and nothing else: `.ui-head` (a one-line `.ui-meaning` sentence on the left, up to three `.ui-controls` on the right), an optional `.ui-toolbar`, an optional `.ui-tabs` strip, then the `.ui-body` canvas holding `.ui-card`s (with `.ui-card-head`, `.ui-title`, `.ui-meta`), `.ui-row`s (`.ui-name`, `.ui-desc`, `.ui-action`), a `.ui-empty` state or `.ui-empty-line`, and `.ui-err` or `.ui-err-banner`; `.ui-footer` closes a section that has a persistent bottom affordance. `.ui-segments`/`.ui-seg` is the segmented control, `.ui-chip` the neutral non-status tag (status stays with `.pill`, `.chip-risk`, `.chip-marker`). Controls share one 27px height. The primitives add no token; they only spend the existing ones. A slot with nothing to show is omitted, never rendered empty.
 
 ## Do's and Don'ts
 

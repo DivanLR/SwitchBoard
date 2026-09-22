@@ -246,6 +246,8 @@ test('the Terminal tab runs a real shell and shows its output', async () => {
   await page.getByTestId('sidebar-project-sample-api').click()
   await page.getByTestId('tab-session').click()
   await page.getByTestId('tab-terminal').click()
+  await expect(page.getByTestId('conversation-terminal')).toBeVisible()
+  await page.getByTestId('conversation-terminal-shell').click()
 
   const pane = page.getByTestId('terminal-pane')
   await expect(pane).toBeVisible()

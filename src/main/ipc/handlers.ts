@@ -795,6 +795,11 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       await flow.learn(req.runId)
       return flowSnapshot(req.projectId)
     },
+    'flow.spec': async (req) => {
+      requireProject(req.projectId)
+      await flow.writeSpec(req.runId)
+      return flowSnapshot(req.projectId)
+    },
     'flow.lessons': (req) => repos.flowLessons.listForProject(req.projectId),
     'flow.decideLesson': async (req) => {
       requireProject(req.projectId)

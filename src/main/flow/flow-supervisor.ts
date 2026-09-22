@@ -12,8 +12,10 @@ import {
   publishPrompt,
   reviseScopePrompt,
   scopePrompt,
+  specDescription,
 } from './flow-prompts'
 import { appendRule } from './claude-md'
+import { isSpecKitInstalled } from '@main/specs/spec-kit'
 import { branchNameFor, createWorktree, currentBranch, worktreeDirty, worktreePathFor, worktreeRoot } from './worktrees'
 import type { FlowMarker } from './flow-markers'
 
@@ -262,6 +264,36 @@ export class FlowSupervisor {
       })
       this.callbacks.onFlowChanged(run.projectId)
     }
+  }
+
+  async writeSpec(runId: string): Promise<FlowRun> {
+    const run = this.requireRun(runId)
+    const items = this.repos.flowItems.listForRun(runId)
+    if (items.length === 0) {
+      throw {
+        code: 'INVALID_PATH',
+        message: 'Approve a breakdown first. The spec is written from the items.',
+      } satisfies IpcError
+    }
+    const project = this.repos.projects.byId(run.projectId)
+    if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
+    if (!(await isSpecKitInstalled(project.path))) {
+      throw {
+        code: 'UNSUPPORTED',
+        message: 'Install Spec Kit from the Specs tab first.',
+      } satisfies IpcError
+    }
+    if (run.specSessionId && this.manager.workdirFor(run.specSessionId)) {
+      throw {
+        code: 'RULE_NOT_ALLOWED',
+        message: 'The spec is already being written. Wait for that session to finish.',
+      } satisfies IpcError
+    }
+    const session = await this.manager.backgroundSessionFor(run.projectId, 'spec')
+    this.repos.flowRuns.update(runId, { specSessionId: session.id })
+    this.manager.sendMessage(session.id, `/speckit-specify ${specDescription({ run, items })}`)
+    this.callbacks.onFlowChanged(run.projectId)
+    return this.requireRun(runId)
   }
 
   async learn(runId: string): Promise<FlowRun> {

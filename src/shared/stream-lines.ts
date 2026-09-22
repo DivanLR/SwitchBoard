@@ -102,7 +102,7 @@ export function rawLinesOf(event: SessionEvent): string[] {
   }
 }
 
-type LineTone = 'prompt' | 'text' | 'tool' | 'result' | 'ok' | 'warn' | 'err' | 'inject'
+export type LineTone = 'prompt' | 'text' | 'tool' | 'result' | 'ok' | 'warn' | 'err' | 'inject'
 
 function toneOf(event: SessionEvent, i: number): LineTone {
   switch (event.kind) {
@@ -138,7 +138,7 @@ function hhmm(iso: string): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-interface RawLine {
+export interface RawLine {
   key: string
   text: string
   stamp: string

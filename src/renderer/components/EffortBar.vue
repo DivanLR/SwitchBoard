@@ -21,7 +21,7 @@ function onInput(event: Event): void {
 </script>
 
 <template>
-  <label class="effort mono" :class="{ max: modelValue === 'max' }" :title="title">
+  <label class="effort pill" :class="{ max: modelValue === 'max' }" :title="title">
     <Icon v-if="icon" :name="icon" :size="12" />
     <span class="effort-label">{{ label }}</span>
     <input
@@ -42,15 +42,9 @@ function onInput(event: Event): void {
 
 <style scoped>
 .effort {
-  display: inline-flex;
-  align-items: center;
   gap: 6px;
-  flex-shrink: 0;
-  font-size: var(--fs-meta);
   color: var(--text-tab);
-  padding: 2px 10px;
   border: 1px solid var(--border-strong);
-  border-radius: var(--rp);
   cursor: pointer;
 }
 

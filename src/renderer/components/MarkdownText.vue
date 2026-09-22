@@ -122,7 +122,7 @@ onUnmounted(() => {
 .md :deep(pre.md-pre) {
   background: var(--surface-code);
   border: 1px solid var(--border-code);
-  border-radius: var(--r-panel);
+  border-radius: var(--rc);
   padding: 32px 14px 14px;
   margin: 0 0 10px;
   overflow-x: auto;
@@ -144,7 +144,7 @@ onUnmounted(() => {
     radial-gradient(circle 4px at 46px 13px, var(--text-ghost) 96%, transparent 100%),
     var(--bg-chip);
   border-bottom: 1px solid var(--border-code);
-  border-radius: var(--r-panel) var(--r-panel) 0 0;
+  border-radius: var(--rc) var(--rc) 0 0;
   opacity: 0.75;
   pointer-events: none;
 }
@@ -156,7 +156,7 @@ onUnmounted(() => {
   right: 10px;
   font-family: var(--mono);
   font-size: var(--fs-micro);
-  letter-spacing: 0.06em;
+  letter-spacing: var(--track-label);
   color: var(--text-ghost);
   opacity: 0.85;
   transition: opacity 0.12s var(--ease), color 0.12s var(--ease);
@@ -223,9 +223,8 @@ html.sb-light .md :deep(pre.md-pre)::before {
 
 .md :deep(.md-table th) {
   text-align: left;
-  font-family: var(--mono);
   font-size: var(--fs-micro);
-  letter-spacing: 0.06em;
+  letter-spacing: var(--track-label);
   text-transform: uppercase;
   color: var(--text-meta);
   background: var(--bg-chip);

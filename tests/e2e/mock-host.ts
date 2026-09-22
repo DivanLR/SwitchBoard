@@ -43,6 +43,7 @@ export interface MockDriver {
   setNextFilePick: (path: string | null) => void
   emitEvent: (sessionId: string, kind: string, payload: Record<string, unknown>) => string
   updateEvent: (sessionId: string, eventId: string, payload: Record<string, unknown>) => void
+  focusSession: (sessionId: string) => void
   setCommands: (
     projectId: string,
     commands: (string | { name: string; description?: string })[],
@@ -1151,6 +1152,7 @@ export function installMockHost(scenario: MockScenario): void {
         worktreeRoot: null,
         crosscheckRound: 0,
         concerns: [],
+        specSessionId: null,
         note: null,
         startedAt: new Date().toISOString(),
         finishedAt: null,
@@ -1268,6 +1270,34 @@ export function installMockHost(scenario: MockScenario): void {
         }
       }
       runs[at] = { ...runs[at], status: 'learning' }
+      flowRunsByProject.set(projectId, runs)
+      return flowSnapshot(projectId)
+    },
+    'flow.spec': async (req) => {
+      const projectId = String(req.projectId)
+      const runId = String(req.runId)
+      const runs = flowRunsByProject.get(projectId) ?? []
+      const at = runs.findIndex((run) => run.id === runId)
+      if (at < 0) throw { code: 'NOT_FOUND', message: 'Run not found' }
+      const items = (flowItemsByProject.get(projectId) ?? []).filter((item) => item.runId === runId)
+      if (items.length === 0) {
+        throw { code: 'INVALID_PATH', message: 'Approve a breakdown first. The spec is written from the items.' }
+      }
+      if (!(specKitByProject.get(projectId) as { installed?: boolean } | undefined)?.installed) {
+        throw { code: 'UNSUPPORTED', message: 'Install Spec Kit from the Specs tab first.' }
+      }
+      const writing = runs[at].specSessionId ? sessions.get(String(runs[at].specSessionId)) : undefined
+      if (writing && !writing.endedAt) {
+        throw {
+          code: 'RULE_NOT_ALLOWED',
+          message: 'The spec is already being written. Wait for that session to finish.',
+        }
+      }
+      const session = await sectionSession(projectId, 'spec')
+      const text = `/speckit-specify Feature ${String(runs[at].featureId)}: ${String(runs[at].featureTitle)}`
+      sends.push({ sessionId: session.id, text })
+      appendEvent(session.id, 'prompt', { text, pending: false })
+      runs[at] = { ...runs[at], specSessionId: session.id }
       flowRunsByProject.set(projectId, runs)
       return flowSnapshot(projectId)
     },
@@ -1705,6 +1735,7 @@ export function installMockHost(scenario: MockScenario): void {
     },
     emitEvent: (sessionId, kind, payload) => String(appendEvent(sessionId, kind, payload).id),
     updateEvent: (sessionId, eventId, payload) => updateEvent(sessionId, eventId, payload),
+    focusSession: (sessionId) => push('push.focusRequest', { target: 'session', sessionId }),
     setCommands: (projectId, commands) => {
       const shaped = commands.map((c) => (typeof c === 'string' ? { name: c } : c))
       projectCommands.set(projectId, shaped)

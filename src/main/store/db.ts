@@ -580,6 +580,12 @@ const MIGRATIONS: Migration[] = [
       `)
     },
   },
+  {
+    name: '035-flow-spec-session',
+    up: (db) => {
+      db.exec(`ALTER TABLE flow_runs ADD COLUMN specSessionId TEXT;`)
+    },
+  },
 ]
 
 export function transaction<T>(db: AppDatabase, work: () => T): T {

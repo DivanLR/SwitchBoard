@@ -802,6 +802,7 @@ export interface FlowRun {
   worktreeRoot: string | null
   crosscheckRound: number
   concerns: string[]
+  specSessionId: string | null
   note: string | null
   startedAt: string
   finishedAt: string | null

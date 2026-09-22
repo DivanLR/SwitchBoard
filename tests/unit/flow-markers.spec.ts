@@ -129,6 +129,7 @@ describe('the prompts', () => {
         worktreeRoot: null,
         crosscheckRound: 0,
         concerns: [],
+        specSessionId: null,
         note: null,
         startedAt: '2026-09-17T00:00:00.000Z',
         finishedAt: null,

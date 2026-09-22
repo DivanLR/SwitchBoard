@@ -222,10 +222,12 @@ function answer(eventId: string, choice: string): void {
 <template>
   <div class="mcp-view" data-testid="mcp-view">
     <header class="head">
-      <div class="head-row">
-        <span class="db-ico"><Icon name="database" /></span>
-        <span class="db-name mono">MCP chat</span>
-        <span class="db-sub mono">{{ project.name }}</span>
+      <div class="head-row ui-head">
+        <div class="ui-card-head">
+          <span class="db-ico"><Icon name="database" /></span>
+          <span class="ui-title">MCP chat</span>
+          <span class="db-sub">{{ project.name }}</span>
+        </div>
         <span class="spacer"></span>
         <button
           v-if="working"
@@ -237,12 +239,12 @@ function answer(eventId: string, choice: string): void {
           <Icon name="stop" />
         </button>
       </div>
-      <div v-if="serverRows.length > 0" class="mcp-servers mono" data-testid="mcp-servers">
+      <div v-if="serverRows.length > 0" class="mcp-servers" data-testid="mcp-servers">
         <button
           v-for="s in serverRows"
           :key="s.name"
-          class="mcp-chip"
-          :class="{ on: s.on }"
+          class="mcp-chip ui-chip"
+          :class="{ on: s.on, 'is-on': s.on }"
           role="switch"
           :aria-checked="s.on"
           :data-testid="`mcp-chip-${s.name}`"
@@ -253,11 +255,11 @@ function answer(eventId: string, choice: string): void {
           <span class="mcp-chip-dot" :style="{ background: mcpStatusColor(s.status) }"></span>{{ s.name }}
         </button>
       </div>
-      <div v-else class="mcp-servers mono">
+      <div v-else class="mcp-servers">
         <span class="combo-hint">No servers on this view yet — add them in Settings → MCP.</span>
       </div>
 
-      <div class="combo-row mono" data-testid="mcp-combo">
+      <div class="combo-row ui-toolbar" data-testid="mcp-combo">
         <span v-if="activeServers.length === 0" class="combo-hint">
           Tick the servers you want to chat to — each combination keeps its own scan.
         </span>
@@ -269,7 +271,7 @@ function answer(eventId: string, choice: string): void {
           <span v-else class="combo-never" data-testid="mcp-combo-never">never scanned</span>
           <button
             v-if="liveSession"
-            class="rescan mono"
+            class="btn-quiet"
             data-testid="mcp-combo-scan"
             :disabled="working"
             @click="scan()"
@@ -279,13 +281,13 @@ function answer(eventId: string, choice: string): void {
           </button>
         </template>
       </div>
-      <div v-if="history.length > 0" class="combo-history mono" data-testid="mcp-history">
-        <span class="ch-label">SCANNED</span>
+      <div v-if="history.length > 0" class="combo-history" data-testid="mcp-history">
+        <span class="ch-label ui-kicker">SCANNED</span>
         <button
           v-for="h in history"
           :key="h.id"
-          class="ch-chip"
-          :class="{ cur: h.comboKey === currentKey }"
+          class="ch-chip ui-chip"
+          :class="{ cur: h.comboKey === currentKey, 'is-on': h.comboKey === currentKey }"
           :data-testid="`mcp-history-${h.comboKey}`"
           :title="`Scanned ${ago(h.scannedAt)} — click to make this the active combination`"
           @click="activateCombo(h)"
@@ -295,14 +297,19 @@ function answer(eventId: string, choice: string): void {
         </button>
       </div>
     </header>
-    <div class="tabs mono">
-      <button class="tab" :class="{ sel: subtab === 'chat' }" data-testid="mcp-tab-chat" @click="subtab = 'chat'">
+    <div class="tabs ui-tabs">
+      <button
+        class="tab ui-tab"
+        :class="{ sel: subtab === 'chat', 'is-selected': subtab === 'chat' }"
+        data-testid="mcp-tab-chat"
+        @click="subtab = 'chat'"
+      >
         Chat
       </button>
       <button
         v-if="scanned"
-        class="tab"
-        :class="{ sel: subtab === 'md' }"
+        class="tab ui-tab"
+        :class="{ sel: subtab === 'md', 'is-selected': subtab === 'md' }"
         data-testid="mcp-tab-md"
         @click="subtab = 'md'"
       >
@@ -311,7 +318,7 @@ function answer(eventId: string, choice: string): void {
       <span class="spacer"></span>
       <button
         v-if="scanned && subtab === 'chat'"
-        class="rescan mono"
+        class="btn-quiet"
         data-testid="mcp-rescan"
         :disabled="!liveSession || working || activeServers.length === 0"
         @click="scan()"
@@ -320,11 +327,11 @@ function answer(eventId: string, choice: string): void {
       </button>
     </div>
 
-    <div v-if="showEmpty" class="empty" data-testid="mcp-empty">
-      <div class="empty-ico"><Icon name="database" :size="18" /></div>
+    <div v-if="showEmpty" class="empty ui-empty" data-testid="mcp-empty">
+      <div class="empty-ico ui-empty-icon"><Icon name="database" :size="18" /></div>
       <template v-if="!liveSession">
-        <div class="empty-title">Start the MCP session</div>
-        <div class="empty-sub">
+        <div class="ui-empty-title">Start the MCP session</div>
+        <div class="ui-empty-sub">
           Opens a Claude Code session for <span class="mono teal">{{ project.name }}</span> with your
           MCP servers. Then scan them to build <span class="mono teal">db-schema.md</span> and chat
           across them.
@@ -334,8 +341,8 @@ function answer(eventId: string, choice: string): void {
         </button>
       </template>
       <template v-else>
-        <div class="empty-title">No schema map yet</div>
-        <div class="empty-sub">
+        <div class="ui-empty-title">No schema map yet</div>
+        <div class="ui-empty-sub">
           Run a scan first — it walks the <span class="mono teal">{{ currentKey || 'active' }}</span>
           combination and writes its own schema map. Chatting then consults that map instead of
           re-scanning, and every combination you scan is remembered above.
@@ -350,15 +357,15 @@ function answer(eventId: string, choice: string): void {
           <Icon name="play" :size="12" /> Scan combination
         </button>
       </template>
-      <div v-if="sessionError" class="empty-hint mono">{{ sessionError }}</div>
+      <div v-if="sessionError" class="ui-err" data-testid="mcp-session-error">{{ sessionError }}</div>
     </div>
 
     <div v-else-if="subtab === 'md'" class="doc" data-testid="mcp-doc">
-      <div class="doc-head mono">
+      <div class="doc-head ui-card-head">
         <span class="doc-title mono">db-schema.md</span>
         <span class="faint">from the MCP scan</span>
         <span class="spacer"></span>
-        <button class="rescan mono" data-testid="mcp-doc-rescan" :disabled="!liveSession || working || activeServers.length === 0" @click="scan()">
+        <button class="btn-quiet" data-testid="mcp-doc-rescan" :disabled="!liveSession || working || activeServers.length === 0" @click="scan()">
           <Icon name="refresh" :size="11" /> Re-scan
         </button>
       </div>
@@ -369,13 +376,13 @@ function answer(eventId: string, choice: string): void {
       <div class="stream-inner">
         <div
           v-if="scanning"
-          class="scan-banner mono"
+          class="scan-banner"
           data-testid="mcp-scanning"
           role="status"
           aria-live="polite"
         >
           <span class="blink teal">▊</span> Scanning your MCP servers — walking their structure,
-          then writing db-schema.md…
+          then writing <span class="mono">db-schema.md</span>…
         </div>
         <template v-for="event in dbEvents" :key="event.id">
           <QuestionEvent
@@ -386,7 +393,7 @@ function answer(eventId: string, choice: string): void {
           />
           <StreamEvent v-else :event="event" />
         </template>
-        <div v-if="working && !scanning" class="live mono">
+        <div v-if="working && !scanning" class="live">
           <span class="blink teal">▊</span> Querying your MCP servers…
         </div>
       </div>
@@ -433,9 +440,9 @@ function answer(eventId: string, choice: string): void {
             @scroll="onComposerScroll"
           ></textarea>
         </div>
-        <span class="to mono">to MCP</span>
+        <span class="to">to MCP</span>
         <button
-          class="send-btn mono"
+          class="send-btn"
           data-testid="mcp-send"
           :disabled="sendDisabled"
           @click="ask()"
@@ -456,7 +463,10 @@ function answer(eventId: string, choice: string): void {
 }
 
 .head {
-  padding: 14px 18px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 18px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
   box-shadow: var(--hairline-shine);
@@ -467,17 +477,15 @@ function answer(eventId: string, choice: string): void {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  padding-bottom: 12px;
+  margin-bottom: 0;
+}
+
+.head-row .ui-card-head {
+  margin-bottom: 0;
 }
 
 .db-ico {
   color: var(--teal);
-}
-
-.db-name {
-  font-size: var(--fs-title);
-  font-weight: var(--w-em);
-  color: var(--text-bright);
 }
 
 .db-sub {
@@ -489,32 +497,10 @@ function answer(eventId: string, choice: string): void {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  padding-bottom: 12px;
 }
 
 .mcp-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--fs-micro);
-  color: var(--text-tab);
   padding: 3px 11px;
-  border: 1px solid var(--border-seg);
-  border-radius: var(--rp);
-  background: transparent;
-  cursor: pointer;
-}
-
-.mcp-chip:hover {
-  color: var(--text-body);
-  border-color: var(--border-strong);
-}
-
-.mcp-chip.on {
-  color: var(--text-bright);
-  font-weight: var(--w-em);
-  background: var(--bg-hover);
-  border-color: var(--border-strong);
 }
 
 .mcp-tick {
@@ -531,8 +517,8 @@ function answer(eventId: string, choice: string): void {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding-bottom: 10px;
   font-size: var(--fs-meta);
+  margin-bottom: 0;
 }
 
 .combo-hint {
@@ -557,36 +543,9 @@ function answer(eventId: string, choice: string): void {
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
-  padding-bottom: 12px;
-}
-
-.ch-label {
-  font-size: var(--fs-micro);
-  letter-spacing: 0.14em;
-  color: var(--text-faint);
-}
-
-.ch-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--fs-micro);
-  color: var(--text-tab);
-  border: 1px solid var(--border-seg);
-  border-radius: var(--rp);
-  padding: 2px 10px;
-  background: transparent;
-  cursor: pointer;
-}
-
-.ch-chip:hover {
-  color: var(--text-body);
-  border-color: var(--border-strong);
 }
 
 .ch-chip.cur {
-  color: var(--teal);
-  border-color: var(--teal);
   cursor: default;
 }
 
@@ -596,83 +555,18 @@ function answer(eventId: string, choice: string): void {
 }
 
 .tabs {
-  display: flex;
   align-items: center;
-  gap: 2px;
   padding: 0 16px;
-  border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
   box-shadow: var(--hairline-shine);
 }
 
-.tab {
-  padding: 9px 13px;
-  font-size: var(--fs-meta);
-  color: var(--text-tab);
-  cursor: pointer;
-  background: transparent;
-}
-
-.tab:hover {
-  color: var(--text-body);
-}
-
-.tab.sel {
-  color: var(--text-strong);
-  box-shadow: inset 0 -2px 0 var(--teal);
-}
-
-.rescan {
-  font-size: var(--fs-micro);
-  color: var(--text-mid);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--rc);
-  padding: 3px 10px;
-  align-self: center;
-}
-
-.rescan:hover:not(:disabled) {
-  color: var(--text-strong);
-  border-color: var(--border-seg);
-}
-
-.rescan:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
 .empty {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 24px;
-  gap: 10px;
 }
 
 .empty-ico {
   color: var(--teal);
-}
-
-.empty-title {
-  font-size: var(--fs-title);
-  font-weight: var(--w-em);
-  color: var(--text-bright);
-}
-
-.empty-sub {
-  max-width: 460px;
-  font-size: var(--fs-ui);
-  line-height: 1.6;
-  color: var(--text-meta);
-  text-wrap: pretty;
-}
-
-.empty-hint {
-  font-size: var(--fs-meta);
-  color: var(--amber);
 }
 
 .teal {
@@ -710,6 +604,11 @@ function answer(eventId: string, choice: string): void {
 .doc-head .faint {
   font-size: var(--fs-micro);
   color: var(--text-faint);
+  font-family: var(--sans);
+}
+
+.suggest-desc {
+  font-family: var(--sans);
 }
 
 .caret {

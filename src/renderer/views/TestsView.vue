@@ -434,13 +434,13 @@ function statusWord(run: VerifyRun): string {
       <button
         v-for="s in TEST_STACKS"
         :key="s.id"
-        class="stack-row"
+        class="ui-card is-actionable stack-row"
         :data-testid="`tests-stack-${s.id}`"
         @click="chooseStack(s.id)"
       >
         <span class="stack-name">{{ s.label }}</span>
-        <span class="stack-sub mono">{{ s.suites.map((x) => x.label).join(' · ') }}</span>
-        <span v-if="detected.some((d) => d.stackId === s.id)" class="det mono">DETECTED</span>
+        <span class="stack-sub">{{ s.suites.map((x) => x.label).join(' · ') }}</span>
+        <span v-if="detected.some((d) => d.stackId === s.id)" class="badge-count det">DETECTED</span>
       </button>
     </template>
 
@@ -448,7 +448,7 @@ function statusWord(run: VerifyRun): string {
       <div class="prof">
         <div class="prof-head">
           <span class="prof-name">{{ profileName }}</span>
-          <span class="prof-sub mono" data-testid="tests-suite-count">
+          <span class="prof-sub" data-testid="tests-suite-count">
             {{ (selected ?? []).length }} of {{ suites.length }} suites
           </span>
           <span class="spacer"></span>
@@ -467,25 +467,26 @@ function statusWord(run: VerifyRun): string {
           </button>
           <button class="link" data-testid="tests-change-stack" @click="chooseStack('')">change stack</button>
         </div>
-        <div class="prof-meta mono">
-          {{ branch ? `on ${branch}` : 'no branch' }} · verification runs through the session, never as
-          its own process
+        <div class="prof-meta">
+          <span v-if="branch">on <span class="mono">{{ branch }}</span></span
+          ><span v-else>no branch</span> · verification runs through the session, never as its own
+          process
         </div>
 
         <div
           v-if="latest"
-          class="prof-meta mono"
+          class="prof-meta"
           data-testid="tests-run-state"
           role="status"
         >
-          {{ running ? 'Running…' : `Last run ${statusWord(latest)}` }} · {{ runSummary }}
+          {{ running ? 'Running…' : `Last run ${statusWord(latest)}` }} · <span class="mono">{{ runSummary }}</span>
         </div>
 
         <MiniTerminal v-if="running && latest?.sessionId" :session-id="latest.sessionId" label="verifying" />
 
-        <div v-if="verifyEstimateLine" class="prof-meta mono" data-testid="tests-estimate">
-          {{ verifyEstimateLine
-          }}<span v-if="verifyEstimate && !verifyEstimate.comparable"> — treat it loosely</span>
+        <div v-if="verifyEstimateLine" class="prof-meta" data-testid="tests-estimate">
+          <span class="mono">{{ verifyEstimateLine }}</span
+          ><span v-if="verifyEstimate && !verifyEstimate.comparable"> — treat it loosely</span>
         </div>
 
         <div class="suites" data-testid="tests-suites">
@@ -495,6 +496,7 @@ function statusWord(run: VerifyRun): string {
               :class="[
                 {
                   on: isSelected(row.suite),
+                  'is-on': isSelected(row.suite),
                   dev: !!blockedReason(row.suite),
                   'q-surface': isQueuedRetry(row),
                 },
@@ -503,6 +505,8 @@ function statusWord(run: VerifyRun): string {
               :disabled="!!blockedReason(row.suite)"
               :title="chipTitle(row)"
               :data-testid="`tests-suite-${row.suite.id}`"
+              role="switch"
+              :aria-checked="isSelected(row.suite)"
               @click="toggleSuite(row.suite)"
             >
               <span
@@ -528,12 +532,14 @@ function statusWord(run: VerifyRun): string {
                 <template v-else>–</template>
               </span>
               {{ row.suite.label }}
-              <span v-if="blockedReason(row.suite)" class="dev-tag">{{ blockedReason(row.suite) }}</span>
-              <span v-else-if="row.suite.heavy" class="heavy-tag mono">slow</span>
-              <span v-if="commandOverrides[row.suite.id]" class="heavy-tag mono">edited</span>
+              <span v-if="blockedReason(row.suite)" class="chip-risk medium dev-tag">{{
+                blockedReason(row.suite)
+              }}</span>
+              <span v-else-if="row.suite.heavy" class="chip-risk low heavy-tag">slow</span>
+              <span v-if="commandOverrides[row.suite.id]" class="chip-risk low heavy-tag">edited</span>
             </button>
             <button
-              class="chip cmd-edit mono"
+              class="chip cmd-edit"
               :data-testid="`tests-suite-edit-${row.suite.id}`"
               :title="`Edit the command for ${row.suite.label}`"
               @click="editCommand(row.suite)"
@@ -552,15 +558,15 @@ function statusWord(run: VerifyRun): string {
             @keydown.esc="editingCommand = null"
             @blur="saveCommand(suites.find((s) => s.id === editingCommand)!)"
           />
-          <span class="lbl mono">empty restores the default</span>
+          <span class="lbl">empty restores the default</span>
         </div>
 
-        <div class="targets">
+        <div class="ui-toolbar">
           <span class="lbl">verify</span>
-          <button class="chip on" data-testid="tests-target-tree">Working tree</button>
+          <span class="chip on is-on" data-testid="tests-target-tree">Working tree</span>
           <span class="spacer"></span>
           <button
-            class="chip"
+            class="btn-quiet"
             :disabled="!latest || running"
             data-testid="tests-evidence"
             title="Execute the changed code and attach what it actually produced"
@@ -570,14 +576,14 @@ function statusWord(run: VerifyRun): string {
           </button>
           <button
             v-if="running && latest"
-            class="chip"
+            class="btn-quiet"
             data-testid="tests-cancel"
             title="Stop the session's current turn and close this run. It stops whatever the session is doing, not only the tests."
             @click="cancelVerify()"
           >
             Cancel
           </button>
-          <span class="iso-inline mono">
+          <span class="iso-inline">
             <button
               class="switch"
               :class="{ on: isolated }"
@@ -602,11 +608,11 @@ function statusWord(run: VerifyRun): string {
             <template v-else><Icon name="play" :size="12" /> Run verification</template>
           </button>
         </div>
-        <div v-if="verify.error" class="err" data-testid="tests-error">{{ verify.error }}</div>
+        <div v-if="verify.error" class="ui-err" data-testid="tests-error">{{ verify.error }}</div>
       </div>
 
       <div class="score-row">
-        <span class="score-label mono">QUALITY</span>
+        <span class="score-label">QUALITY</span>
         <span
           class="score-val"
           :class="score ? (score.pct === 100 ? 'good' : score.pct >= 60 ? 'ok' : 'bad') : 'none'"
@@ -633,16 +639,16 @@ function statusWord(run: VerifyRun): string {
       <div class="gates" data-testid="tests-gates">
         <div v-for="g in gates" :key="g.id" class="gate-cell">
           <button
-            class="gate"
+            class="ui-card is-actionable gate"
             :class="[g.status, { accepted: g.accepted }]"
             :data-testid="`tests-gate-${g.id}`"
             :title="`Target: ${g.target}`"
             @click="subTab = g.panel"
           >
-            <span class="gate-name mono">{{ g.name }}</span>
+            <span class="gate-name">{{ g.name }}</span>
             <span
               v-if="g.verified"
-              class="gate-verified mono"
+              class="gate-verified"
               :data-testid="`tests-gate-verified-${g.id}`"
               title="Read from the test runner's own report file, not from what the session said"
               >checked</span
@@ -653,7 +659,7 @@ function statusWord(run: VerifyRun): string {
           </button>
           <button
             v-if="g.acceptable"
-            class="gate-accept mono"
+            class="gate-accept"
             :class="{ on: g.accepted }"
             :data-testid="`tests-gate-accept-${g.id}`"
             :aria-pressed="g.accepted ? 'true' : 'false'"
@@ -669,17 +675,19 @@ function statusWord(run: VerifyRun): string {
         </div>
       </div>
 
-      <div class="sub-tabs mono">
+      <div class="ui-tabs sub-tabs" role="tablist">
         <button
           v-for="t in subTabs"
           :key="t.id"
-          class="st"
-          :class="{ sel: subTab === t.id, dev: !t.built }"
+          class="ui-tab st"
+          :class="{ sel: subTab === t.id, 'is-selected': subTab === t.id, dev: !t.built }"
+          role="tab"
+          :aria-selected="subTab === t.id"
           :data-testid="`tests-sub-${t.id}`"
           @click="subTab = t.id"
         >
           {{ t.label }}
-          <span v-if="t.badge > 0" class="st-badge">{{ t.badge }}</span>
+          <span v-if="t.badge > 0" class="badge-count st-badge">{{ t.badge }}</span>
           <span v-if="!t.built" class="dev-dot" title="In development"><Icon name="circle" :size="11" /></span>
         </button>
       </div>
@@ -693,10 +701,10 @@ function statusWord(run: VerifyRun): string {
       />
 
       <div v-else-if="subTab === 'api'" class="panel" data-testid="tests-panel-api">
-        <div class="panel-head">
-          <span class="panel-title">API eval set</span>
-          <span class="panel-meta mono">{{ apiSummary }}</span>
-          <span v-if="apiRun" class="verdict mono" :class="apiRun.status">{{ apiRun.status }}</span>
+        <div class="ui-card-head panel-head">
+          <span class="ui-title">API eval set</span>
+          <span class="ui-meta panel-meta">{{ apiSummary }}</span>
+          <span v-if="apiRun" class="pill verdict" :class="apiRun.status">{{ apiRun.status }}</span>
         </div>
         <p class="quiet">
           The app sends these requests itself and decides pass or fail from the status and body that
@@ -711,7 +719,7 @@ function statusWord(run: VerifyRun): string {
 
         <div class="host">
           <label class="host-field">
-            <span class="host-lbl mono">base URL</span>
+            <span class="host-lbl">base URL</span>
             <input
               v-model="baseUrlField"
               class="host-in mono"
@@ -720,7 +728,7 @@ function statusWord(run: VerifyRun): string {
             />
           </label>
           <label class="host-field">
-            <span class="host-lbl mono">start command</span>
+            <span class="host-lbl">start command</span>
             <input
               v-model="startCmdField"
               class="host-in mono"
@@ -731,7 +739,7 @@ function statusWord(run: VerifyRun): string {
         </div>
         <div class="host">
           <label class="host-field">
-            <span class="host-lbl mono">QA URL</span>
+            <span class="host-lbl">QA URL</span>
             <input
               v-model="qaUrlField"
               class="host-in mono"
@@ -740,7 +748,7 @@ function statusWord(run: VerifyRun): string {
             />
           </label>
           <label class="host-field">
-            <span class="host-lbl mono">QA headers</span>
+            <span class="host-lbl">QA headers</span>
             <input
               v-model="qaHeadersField"
               class="host-in mono"
@@ -748,13 +756,13 @@ function statusWord(run: VerifyRun): string {
               data-testid="tests-api-qa-headers"
             />
           </label>
-          <button class="chip" data-testid="tests-api-save-host" @click="saveApiHost()">Save</button>
+          <button class="btn-quiet" data-testid="tests-api-save-host" @click="saveApiHost()">Save</button>
         </div>
         <div class="host-from mono" data-testid="tests-api-host-from">{{ apiHostLine }}</div>
         <div class="host-from mono" data-testid="tests-api-qa-from">{{ apiQaLine }}</div>
 
-        <div class="sec mono">LAST TESTED</div>
-        <p v-if="apiShortlist.length === 0" class="empty">
+        <div class="sec">LAST TESTED</div>
+        <p v-if="apiShortlist.length === 0" class="ui-empty-line">
           No endpoint found in this project's source{{
             apiScan ? ` (${apiScan.filesRead} files scanned)` : ''
           }}. Search below, or add a .http file the scan can read.
@@ -764,7 +772,7 @@ function statusWord(run: VerifyRun): string {
             v-for="(e, i) in apiShortlist"
             :key="`${e.method} ${e.template}`"
             class="chip"
-            :class="{ on: isPicked(e) }"
+            :class="{ on: isPicked(e), 'is-on': isPicked(e) }"
             :data-testid="`tests-api-recent-${i}`"
             @click="togglePick(e)"
           >
@@ -773,8 +781,10 @@ function statusWord(run: VerifyRun): string {
           </button>
         </div>
 
-        <div class="sec mono">
-          SEARCH · {{ apiFoundCount }} FOUND{{ apiScan?.truncated ? ' (SCAN LIMIT REACHED)' : '' }}
+        <div class="sec">
+          SEARCH · <span class="mono">{{ apiFoundCount }}</span> FOUND{{
+            apiScan?.truncated ? ' (SCAN LIMIT REACHED)' : ''
+          }}
         </div>
         <input
           v-model="search"
@@ -786,8 +796,8 @@ function statusWord(run: VerifyRun): string {
           v-for="(e, i) in apiMatches"
           :key="`${e.method} ${e.template}`"
           type="button"
-          class="row pick"
-          :class="{ on: isPicked(e) }"
+          class="ui-row row pick"
+          :class="{ on: isPicked(e), 'is-selected': isPicked(e) }"
           :data-testid="`tests-api-endpoint-${i}`"
           role="checkbox"
           :aria-checked="isPicked(e)"
@@ -802,11 +812,11 @@ function statusWord(run: VerifyRun): string {
           <span class="row-detail mono">{{ e.source }}</span>
         </button>
 
-        <div class="targets">
+        <div class="ui-toolbar">
           <span class="lbl">{{ picked.length }} selected</span>
           <button
             class="chip"
-            :class="{ on: apiTarget === 'local' }"
+            :class="{ on: apiTarget === 'local', 'is-on': apiTarget === 'local' }"
             data-testid="tests-api-target-local"
             title="The API on this machine — started for you if nothing answers"
             @click="apiTarget = 'local'"
@@ -815,7 +825,7 @@ function statusWord(run: VerifyRun): string {
           </button>
           <button
             class="chip"
-            :class="{ on: apiTarget === 'qa', dev: !qaReady }"
+            :class="{ on: apiTarget === 'qa', 'is-on': apiTarget === 'qa', dev: !qaReady }"
             :disabled="!qaReady"
             :title="
               qaReady
@@ -833,7 +843,7 @@ function statusWord(run: VerifyRun): string {
           <span class="spacer"></span>
           <button
             v-if="apiRunning && apiRun"
-            class="chip"
+            class="btn-quiet"
             data-testid="tests-api-cancel"
             title="Stop the session's current turn and close this run. Calls the app has already started sending finish on their own."
             @click="cancelApi()"
@@ -852,13 +862,13 @@ function statusWord(run: VerifyRun): string {
             >
           </button>
         </div>
-        <div v-if="api.error" class="err" data-testid="tests-api-error">{{ api.error }}</div>
+        <div v-if="api.error" class="ui-err" data-testid="tests-api-error">{{ api.error }}</div>
 
-        <div class="targets">
-          <span class="sec mono">EVAL SET</span>
+        <div class="ui-toolbar">
+          <span class="sec">EVAL SET</span>
           <span class="spacer"></span>
           <button
-            class="chip"
+            class="btn-quiet"
             :disabled="!apiRun || apiRunning"
             data-testid="tests-api-report"
             title="Write the full test report for this run into .switchboard/reports"
@@ -867,25 +877,25 @@ function statusWord(run: VerifyRun): string {
             Write test report
           </button>
         </div>
-        <p v-if="api.reportPath" class="note mono" data-testid="tests-api-report-path">
-          Report written to {{ api.reportPath }}
+        <p v-if="api.reportPath" class="note" data-testid="tests-api-report-path">
+          Report written to <span class="mono">{{ api.reportPath }}</span>
         </p>
         <p v-if="apiRun?.note" class="note" data-testid="tests-api-note">{{ apiRun.note }}</p>
-        <p v-if="!apiRun" class="empty">
+        <p v-if="!apiRun" class="ui-empty-line">
           Nothing called yet. Pick endpoints above and run - every result below is a request this app
           sent and a status it received.
         </p>
-        <p v-else-if="apiRunning" class="empty">
+        <p v-else-if="apiRunning" class="ui-empty-line">
           Waiting for request data from the session, then the app makes the calls.
         </p>
         <div
           v-for="(c, i) in apiRun?.calls ?? []"
           :key="`${c.request.method} ${c.request.path} ${i}`"
-          class="ep"
+          class="ui-card ep"
           :data-testid="`tests-api-call-${i}`"
         >
           <div class="ep-head">
-            <span class="ep-verdict mono" :class="c.outcome">{{ c.outcome.replace('_', ' ') }}</span>
+            <span class="ep-verdict" :class="c.outcome">{{ c.outcome.replace('_', ' ') }}</span>
             <span class="ep-method mono">{{ c.request.method }}</span>
             <span class="ep-path mono">{{ c.request.path }}</span>
             <span class="ep-status mono" :class="statusClass(c.status)">{{ c.status ?? '—' }}</span>
@@ -907,35 +917,35 @@ function statusWord(run: VerifyRun): string {
       </div>
 
       <div v-else-if="subTab === 'evidence'" class="panel" data-testid="tests-panel-evidence">
-        <div class="panel-head">
-          <span class="panel-title">Results</span>
-          <span class="panel-meta mono">{{ runSummary }}</span>
-          <span v-if="latest" class="verdict mono" :class="latest.status">{{ statusWord(latest) }}</span>
+        <div class="ui-card-head panel-head">
+          <span class="ui-title">Results</span>
+          <span class="ui-meta panel-meta">{{ runSummary }}</span>
+          <span v-if="latest" class="pill verdict" :class="latest.status">{{ statusWord(latest) }}</span>
         </div>
         <p v-if="latest?.note" class="note" data-testid="tests-run-note">{{ latest.note }}</p>
-        <p v-if="!latest" class="empty">
+        <p v-if="!latest" class="ui-empty-line">
           Nothing has run yet. Pick the suites above and run a verification pass — the session
           executes them and reports what happened.
         </p>
 
-        <div v-for="r in results" :key="r.id" class="row" :data-testid="`tests-result-${r.id}`">
-          <span class="row-status mono" :class="r.status">{{ r.status.replace('_', ' ') }}</span>
+        <div v-for="r in results" :key="r.id" class="ui-row row" :data-testid="`tests-result-${r.id}`">
+          <span class="row-status" :class="r.status">{{ r.status.replace('_', ' ') }}</span>
           <span class="row-name">{{ r.label }}</span>
           <span class="row-detail mono">{{ r.detail }}</span>
         </div>
 
-        <div v-if="latest" class="sec mono">REAL ENDPOINTS, REAL DATA</div>
-        <p v-if="latest && endpoints.length === 0" class="empty" data-testid="tests-endpoints-empty">
+        <div v-if="latest" class="sec">REAL ENDPOINTS, REAL DATA</div>
+        <p v-if="latest && endpoints.length === 0" class="ui-empty-line" data-testid="tests-endpoints-empty">
           {{ endpointsEmpty }}
         </p>
         <div
           v-for="(e, i) in endpoints"
           :key="`${e.method} ${e.path} ${i}`"
-          class="ep"
+          class="ui-card ep"
           :data-testid="`tests-endpoint-${i}`"
         >
           <div class="ep-head">
-            <span class="ep-verdict mono" :class="e.outcome">{{ e.outcome.replace('_', ' ') }}</span>
+            <span class="ep-verdict" :class="e.outcome">{{ e.outcome.replace('_', ' ') }}</span>
             <span class="ep-method mono">{{ e.method }}</span>
             <span class="ep-path mono">{{ e.path }}</span>
             <span class="ep-status mono" :class="statusClass(e.status)">{{ e.status ?? '—' }}</span>
@@ -951,18 +961,18 @@ function statusWord(run: VerifyRun): string {
           <div v-if="e.response" class="ep-body mono">{{ e.response }}</div>
         </div>
 
-        <div class="sec mono">ACTUAL RUNS AGAINST THE BUILD</div>
-        <p v-if="evidence.length === 0" class="empty">
+        <div class="sec">ACTUAL RUNS AGAINST THE BUILD</div>
+        <p v-if="evidence.length === 0" class="ui-empty-line">
           No evidence captured. "Capture evidence" executes the changed code and records the real
           inputs and the real results — nothing here is ever written from reading the code.
         </p>
         <div
           v-for="(e, i) in evidence"
           :key="`${e.kind}:${e.what}`"
-          class="ev"
+          class="ui-card ev"
           :data-testid="`tests-evidence-${i}`"
         >
-          <span class="ev-kind mono">{{ e.kind }}</span>
+          <span class="ev-kind">{{ e.kind }}</span>
           <div class="ev-body">
             <div class="ev-what">{{ e.what }}</div>
             <div class="ev-result mono">{{ e.result }}</div>
@@ -972,91 +982,91 @@ function statusWord(run: VerifyRun): string {
       </div>
 
       <div v-else-if="subTab === 'coverage'" class="panel" data-testid="tests-panel-coverage">
-        <div class="panel-head">
-          <span class="panel-title">Coverage</span>
-          <span class="panel-meta mono">{{ runSummary }}</span>
+        <div class="ui-card-head panel-head">
+          <span class="ui-title">Coverage</span>
+          <span class="ui-meta panel-meta">{{ runSummary }}</span>
         </div>
         <div class="figs">
-          <div class="fig" data-testid="tests-coverage-line">
-            <span class="fig-name mono">LINE</span>
+          <div class="ui-card fig" data-testid="tests-coverage-line">
+            <span class="fig-name">LINE</span>
             <span class="fig-value">{{ pct(report?.coverage.line ?? unmeasured) }}</span>
             <span class="fig-src mono">{{ sourceOf(report?.coverage.line ?? unmeasured) }}</span>
           </div>
-          <div class="fig" data-testid="tests-coverage-changed">
-            <span class="fig-name mono">CHANGED LINES</span>
+          <div class="ui-card fig" data-testid="tests-coverage-changed">
+            <span class="fig-name">CHANGED LINES</span>
             <span class="fig-value">{{ pct(report?.coverage.changed ?? unmeasured) }}</span>
             <span class="fig-src mono">{{ sourceOf(report?.coverage.changed ?? unmeasured) }}</span>
           </div>
         </div>
-        <div class="sec mono">FILES YOU TOUCHED</div>
-        <p v-if="!report?.coverage.files.length" class="empty">
+        <div class="sec">FILES YOU TOUCHED</div>
+        <p v-if="!report?.coverage.files.length" class="ui-empty-line">
           No per-file coverage in this run. Include a coverage suite above, and the report the run
           produces fills this in.
         </p>
-        <div v-for="f in report?.coverage.files ?? []" :key="f.path" class="row">
+        <div v-for="f in report?.coverage.files ?? []" :key="f.path" class="ui-row row">
           <span class="row-status mono" :class="f.pct >= 80 ? 'pass' : 'warn'">{{ round(f.pct) }}%</span>
           <span class="row-name mono">{{ f.path }}</span>
         </div>
       </div>
 
       <div v-else-if="subTab === 'quality'" class="panel" data-testid="tests-panel-quality">
-        <div class="panel-head">
-          <span class="panel-title">Quality</span>
-          <span class="panel-meta mono">{{ runSummary }}</span>
+        <div class="ui-card-head panel-head">
+          <span class="ui-title">Quality</span>
+          <span class="ui-meta panel-meta">{{ runSummary }}</span>
         </div>
         <div class="figs">
-          <div class="fig" data-testid="tests-quality-gate">
-            <span class="fig-name mono">QUALITY GATE</span>
+          <div class="ui-card fig" data-testid="tests-quality-gate">
+            <span class="fig-name">QUALITY GATE</span>
             <span class="fig-value">{{ qualityGateLabel }}</span>
             <span class="fig-src mono">{{ report?.quality.gateSource ?? 'no quality service reported' }}</span>
           </div>
-          <div class="fig" data-testid="tests-quality-duplication">
-            <span class="fig-name mono">DUPLICATION</span>
+          <div class="ui-card fig" data-testid="tests-quality-duplication">
+            <span class="fig-name">DUPLICATION</span>
             <span class="fig-value">{{ pct(report?.quality.duplication ?? unmeasured) }}</span>
             <span class="fig-src mono">{{ sourceOf(report?.quality.duplication ?? unmeasured) }}</span>
           </div>
-          <div class="fig" data-testid="tests-quality-debt">
-            <span class="fig-name mono">DEBT</span>
+          <div class="ui-card fig" data-testid="tests-quality-debt">
+            <span class="fig-name">DEBT</span>
             <span class="fig-value">{{ report?.quality.debt ?? '—' }}</span>
             <span class="fig-src mono">{{ qualityDebtSource }}</span>
           </div>
-          <div class="fig" data-testid="tests-quality-mutation">
-            <span class="fig-name mono">MUTATION</span>
+          <div class="ui-card fig" data-testid="tests-quality-mutation">
+            <span class="fig-name">MUTATION</span>
             <span class="fig-value">{{ pct(report?.quality.mutation ?? unmeasured) }}</span>
             <span class="fig-src mono">{{ sourceOf(report?.quality.mutation ?? unmeasured) }}</span>
           </div>
         </div>
 
-        <div class="sec mono">ARCHITECTURE</div>
-        <p v-if="!report?.quality.findings.length" class="empty">
+        <div class="sec">ARCHITECTURE</div>
+        <p v-if="!report?.quality.findings.length" class="ui-empty-line">
           {{
             report?.quality.archViolations.value === 0
               ? 'No rule violations reported by the architecture suite.'
               : 'No architecture findings in this run — include an architecture suite to get them.'
           }}
         </p>
-        <div v-for="f in report?.quality.findings ?? []" :key="f" class="row">
-          <span class="row-status mono fail">rule</span>
+        <div v-for="f in report?.quality.findings ?? []" :key="f" class="ui-row row">
+          <span class="row-status fail">rule</span>
           <span class="row-name">{{ f }}</span>
         </div>
 
-        <div class="sec mono">
-          SURVIVING MUTANTS<template v-if="mutationCounts"> · {{ mutationCounts }}</template>
+        <div class="sec">
+          SURVIVING MUTANTS<span v-if="mutationCounts" class="mono"> · {{ mutationCounts }}</span>
         </div>
-        <p v-if="!report?.quality.survivors.length" class="empty">
+        <p v-if="!report?.quality.survivors.length" class="ui-empty-line">
           No surviving mutants reported. Mutation testing is a slow suite — tick it above to include
           it in a run.
         </p>
-        <div v-for="s in report?.quality.survivors ?? []" :key="s" class="row">
-          <span class="row-status mono warn">survived</span>
+        <div v-for="s in report?.quality.survivors ?? []" :key="s" class="ui-row row">
+          <span class="row-status warn">survived</span>
           <span class="row-name mono">{{ s }}</span>
         </div>
       </div>
 
-      <div v-else class="dev-panel" data-testid="tests-dev-skill">
+      <div v-else class="ui-card dev-panel" data-testid="tests-dev-skill">
         <div class="dev-badge">in development</div>
         <div class="dev-title">Verify skill</div>
-        <div class="dev-sections mono">
+        <div class="dev-sections">
           <span class="dev-section">TEST SKILL</span>
           <span class="dev-section">WHAT A FULL RUN EXECUTES</span>
           <span class="dev-section">GET IT IN FRONT OF YOU</span>
@@ -1144,18 +1154,8 @@ function statusWord(run: VerifyRun): string {
   align-items: flex-start;
   gap: 12px;
   width: 100%;
-  padding: 10px 13px;
   margin-bottom: 6px;
   text-align: left;
-  background: var(--bg-card);
-  box-shadow: var(--elev);
-  border: 1px solid var(--border-card);
-  border-radius: var(--rc);
-  cursor: pointer;
-}
-
-.stack-row:hover {
-  border-color: var(--green);
 }
 
 .stack-name {
@@ -1228,13 +1228,6 @@ function statusWord(run: VerifyRun): string {
   margin-top: 11px;
 }
 
-.targets {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin-top: 9px;
-}
-
 .lbl {
   font-size: var(--fs-micro);
   color: var(--text-faint);
@@ -1266,6 +1259,14 @@ function statusWord(run: VerifyRun): string {
   color: var(--green);
   border-color: color-mix(in srgb, var(--green) 50%, transparent);
   background: color-mix(in srgb, var(--green) 10%, transparent);
+}
+
+[data-testid='tests-target-tree'] {
+  cursor: default;
+}
+
+.chip.on[data-testid='tests-target-tree']:hover {
+  border-color: color-mix(in srgb, var(--green) 50%, transparent);
 }
 
 .suite-mark {
@@ -1316,11 +1317,6 @@ function statusWord(run: VerifyRun): string {
   font-weight: var(--w-em);
 }
 
-.heavy-tag {
-  font-size: var(--fs-micro);
-  color: var(--text-ghost);
-}
-
 .cmd-edit {
   padding: 4px 7px;
   margin-left: -4px;
@@ -1368,12 +1364,6 @@ function statusWord(run: VerifyRun): string {
   cursor: not-allowed;
 }
 
-.err {
-  margin-top: 8px;
-  font-size: var(--fs-meta);
-  color: var(--red);
-}
-
 .gates {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
@@ -1392,17 +1382,7 @@ function statusWord(run: VerifyRun): string {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 9px 11px;
   text-align: left;
-  background: var(--bg-card);
-  box-shadow: var(--elev);
-  border: 1px solid var(--border-card);
-  border-radius: var(--rc);
-  cursor: pointer;
-}
-
-.gate:hover {
-  border-color: var(--green);
 }
 
 .gate-name {
@@ -1493,39 +1473,12 @@ function statusWord(run: VerifyRun): string {
 }
 
 .dev-tag {
-  font-size: var(--fs-micro);
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--amber);
 }
 
 .sub-tabs {
-  display: flex;
-  gap: 2px;
-  border-bottom: 1px solid var(--border);
   margin-bottom: 14px;
-}
-
-.st {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 12px;
-  font-size: var(--fs-meta);
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
-  color: var(--text-tab);
-  border-bottom: 2px solid transparent;
-  cursor: pointer;
-}
-
-.st:hover {
-  color: var(--text-body);
-}
-
-.st.sel {
-  color: var(--text-bright);
-  border-bottom-color: var(--green);
 }
 
 .st.dev {
@@ -1548,31 +1501,14 @@ function statusWord(run: VerifyRun): string {
 .panel {
 }
 
-.panel-head {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.panel-title {
-  font-size: var(--fs-body);
-  color: var(--text-bright);
-}
-
 .panel-meta {
   flex: 1;
   min-width: 0;
-  font-size: var(--fs-micro);
-  color: var(--text-faint);
 }
 
 .verdict {
-  font-size: var(--fs-micro);
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  border-radius: var(--rp);
-  padding: 1px 9px;
   border: 1px solid var(--border-strong);
   color: var(--text-mid);
 }
@@ -1661,26 +1597,11 @@ function statusWord(run: VerifyRun): string {
   background: color-mix(in srgb, var(--green) 10%, transparent);
 }
 
-.empty {
-  max-width: 620px;
-  font-size: var(--fs-ui);
-  line-height: 1.6;
-  color: var(--text-faint);
-  margin-bottom: 10px;
-  text-wrap: pretty;
-}
-
 .row {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
   width: 100%;
+  align-items: baseline;
   text-align: left;
-  padding: var(--pad-card);
   margin-bottom: 4px;
-  background: var(--bg-hover);
-  border: 1px solid var(--border-card);
-  border-radius: var(--rc);
 }
 
 .row-status {
@@ -1740,10 +1661,6 @@ function statusWord(run: VerifyRun): string {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 9px 11px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-card);
-  border-radius: var(--rc);
 }
 
 .fig-name {
@@ -1768,11 +1685,7 @@ function statusWord(run: VerifyRun): string {
 .ev {
   display: flex;
   gap: 10px;
-  padding: 8px 10px;
   margin-bottom: 5px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-card);
-  border-radius: var(--rc);
 }
 
 .ev-kind {
@@ -1809,11 +1722,7 @@ function statusWord(run: VerifyRun): string {
 }
 
 .ep {
-  padding: 8px 10px;
   margin-bottom: 5px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-card);
-  border-radius: var(--rc);
 }
 
 .ep-head {
@@ -1919,10 +1828,8 @@ function statusWord(run: VerifyRun): string {
 .dev-panel {
   position: relative;
   max-width: 840px;
-  padding: 15px 17px;
-  background: var(--bg-hover);
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--rc);
+  border-style: dashed;
+  border-color: var(--border-strong);
   opacity: 0.72;
 }
 
@@ -1930,7 +1837,6 @@ function statusWord(run: VerifyRun): string {
   position: absolute;
   top: 13px;
   right: 15px;
-  font-family: var(--mono);
   font-size: var(--fs-micro);
   text-transform: uppercase;
   letter-spacing: 0.06em;
