@@ -72,11 +72,11 @@ function setup() {
 }
 
 describe('the session a section dispatch lands in', () => {
-  it('gives every Spec Kit command a session of its own', async () => {
+  it('gives every diagram command a session of its own', async () => {
     const { project, manager } = setup()
 
-    const first = await manager.backgroundSessionFor(project.id, 'spec')
-    const second = await manager.backgroundSessionFor(project.id, 'spec')
+    const first = await manager.backgroundSessionFor(project.id, 'diagram')
+    const second = await manager.backgroundSessionFor(project.id, 'diagram')
 
     expect(first.id).toBeTruthy()
     expect(second.id).not.toBe(first.id)
@@ -91,13 +91,13 @@ describe('the session a section dispatch lands in', () => {
     expect(second.id).toBe(first.id)
   })
 
-  it('never crosses kinds, so a spec command cannot land in the cleanup session', async () => {
+  it('never crosses kinds, so a diagram command cannot land in the cleanup session', async () => {
     const { project, manager } = setup()
 
     const cleanup = await manager.backgroundSessionFor(project.id, 'cleanup')
-    const spec = await manager.backgroundSessionFor(project.id, 'spec')
+    const diagram = await manager.backgroundSessionFor(project.id, 'diagram')
 
-    expect(spec.id).not.toBe(cleanup.id)
+    expect(diagram.id).not.toBe(cleanup.id)
   })
 
   it('leaves a bypass default behind, so a section session stays off the container', async () => {

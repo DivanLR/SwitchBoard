@@ -1,5 +1,5 @@
 import { computed, reactive, toRefs } from 'vue'
-import type { FlowFeature, FlowRun, FlowStage, FlowStageRecord } from '@shared/domain'
+import type { FlowFeature, FlowRun, FlowStackId, FlowStage, FlowStageRecord } from '@shared/domain'
 import type { FlowArtefactKind, FlowStartSource } from '@shared/ipc-types'
 import { errorMessage, invoke } from '@renderer/ipc'
 import { useProjectsStore } from '@renderer/stores/projects'
@@ -14,6 +14,7 @@ const state = reactive({
   featuresNote: null as string | null,
   searching: false,
   existingSpecs: [] as { id: string; title: string }[],
+  detectedStacks: [] as FlowStackId[],
   busy: null as string | null,
   error: null as string | null,
 })
@@ -71,6 +72,10 @@ const store = reactive({
 
   async loadExistingSpecs(projectId: string): Promise<void> {
     state.existingSpecs = await invoke('flow.existingSpecs', { projectId })
+  },
+
+  async detectStacks(projectId: string): Promise<void> {
+    state.detectedStacks = await invoke('flow.detectStacks', { projectId }).catch(() => [])
   },
 
   async start(

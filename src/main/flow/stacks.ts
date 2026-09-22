@@ -1,5 +1,6 @@
 import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
+import type { FlowStackId } from '@shared/domain'
 
 const SKIP_DIRS: ReadonlySet<string> = new Set(['node_modules', 'bin', 'obj', '.git', '.worktrees'])
 
@@ -24,8 +25,6 @@ async function walk(dir: string, depth: number, onEntry: (name: string) => void)
   }
   await Promise.all(nested)
 }
-
-export type FlowStackId = 'dotnet' | 'angular'
 
 export async function detectFlowStacks(projectPath: string): Promise<FlowStackId[]> {
   let dotnet = false

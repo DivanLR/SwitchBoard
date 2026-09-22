@@ -130,7 +130,7 @@ describe('a diagram in flight keeps its session open', () => {
 
   it('gives every section kind its own session, and reuses within a kind', async () => {
     const { project, manager } = setup()
-    const kinds = ['spec', 'tests', 'diff', 'cleanup'] as const
+    const kinds = ['skills', 'tests', 'diff', 'cleanup'] as const
     const ids = new Set<string>()
     for (const kind of kinds) ids.add((await manager.backgroundSessionFor(project.id, kind)).id)
     expect(ids.size).toBe(kinds.length)
@@ -141,7 +141,7 @@ describe('a diagram in flight keeps its session open', () => {
   it('runs a section natively until the project asks for containers', async () => {
     const { project, repos, manager } = setup()
     const inner = manager as unknown as { hosted: Map<string, { containerised: boolean }> }
-    const native = await manager.backgroundSessionFor(project.id, 'spec')
+    const native = await manager.backgroundSessionFor(project.id, 'skills')
     expect(inner.hosted.get(native.id)?.containerised).toBe(false)
 
     repos.projects.setUseContainers(project.id, true)

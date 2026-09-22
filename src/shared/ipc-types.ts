@@ -21,6 +21,7 @@ import type {
   Session,
   FlowFeature,
   FlowRun,
+  FlowStackId,
   FlowStage,
   FlowStageRecord,
   SecurityRun,
@@ -30,8 +31,6 @@ import type {
   SessionMode,
   Settings,
   SkillImportResult,
-  SpecDetail,
-  SpecKitState,
   SpecSummary,
   VerifyRun,
 } from './domain'
@@ -204,9 +203,6 @@ export interface InvokeMap {
   'skills.setEnabled': { req: { name: string; enabled: boolean }; res: CustomSkill[] }
   'skills.remove': { req: { name: string }; res: CustomSkill[] }
   'skills.run': { req: { projectId: string; name: string; argument?: string }; res: { sessionId: string } }
-  'specs.state': { req: { projectId: string }; res: SpecKitState }
-  'specs.detail': { req: { projectId: string; specId: string }; res: SpecDetail | null }
-  'specs.install': { req: { projectId: string }; res: SpecKitState }
   'diff.list': { req: { projectId: string }; res: DiffListResult }
   'diff.file': { req: { projectId: string; path: string }; res: FileDiffContent | null }
   'diff.apply': {
@@ -234,7 +230,7 @@ export interface InvokeMap {
       projectId: string
       text: string
       background?: boolean
-      kind?: SectionKind
+      kind: SectionKind
       watchDiagrams?: boolean
     }
     res: { sessionId: string }
@@ -277,6 +273,7 @@ export interface InvokeMap {
   'flow.list': { req: { projectId: string }; res: FlowSnapshot }
   'flow.features': { req: { projectId: string; query?: string }; res: FlowFeature[] }
   'flow.existingSpecs': { req: { projectId: string }; res: SpecSummary[] }
+  'flow.detectStacks': { req: { projectId: string }; res: FlowStackId[] }
   'flow.start': {
     req: {
       projectId: string

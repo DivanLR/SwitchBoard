@@ -11,8 +11,6 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 const dialogEl = useTemplateRef<HTMLElement>('dialog')
 useModal(dialogEl, () => emit('close'))
 
-// The overlay covers the inbox, and Flow's own sessions are what raise requests
-// there, so the count for this project is shown here and closes the popup on click.
 const inbox = useInboxStore()
 const waiting = computed(
   () => inbox.pending.filter((item) => item.projectId === props.projectId).length,
@@ -66,8 +64,9 @@ const waiting = computed(
 .flow-dialog {
   display: flex;
   flex-direction: column;
-  width: min(1240px, 94vw);
-  height: min(900px, 92vh);
+  width: 96vw;
+  height: 92vh;
+  max-width: 1680px;
   padding: 0;
   overflow: hidden;
 }

@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { FLOW_STAGES, FLOW_STAGE_LABELS, type FlowFeature, type FlowStage } from '@shared/domain'
+import { FLOW_STACK_LABELS, type FlowFeature, type FlowStage } from '@shared/domain'
 import type { FlowStartSource } from '@shared/ipc-types'
 import { useFlowStore } from '@renderer/stores/flow'
-import Icon from '@renderer/components/Icon.vue'
-import MiniTerminal from '@renderer/components/MiniTerminal.vue'
+import FlowStageRail from '@renderer/components/flow/FlowStageRail.vue'
+import FlowStageDetail from '@renderer/components/flow/FlowStageDetail.vue'
 
 const props = defineProps<{ projectId: string }>()
 const flow = useFlowStore()
@@ -20,8 +20,6 @@ const specId = ref('')
 const baseBranch = ref('')
 const autopilot = ref(false)
 const autoShip = ref(false)
-const feedback = ref('')
-const artefactContent = ref<string | null>(null)
 const removeConfirm = ref(false)
 
 let stopPush: (() => void) | null = null
@@ -49,20 +47,12 @@ const currentStage = computed(
 
 watch(run, (next) => {
   selectedStage.value = next?.stage ?? null
-  artefactContent.value = null
   removeConfirm.value = false
 })
 
 function selectRun(id: string): void {
   selectedRunId.value = id
   creating.value = false
-}
-
-function statusChip(status: string): string {
-  if (status === 'failed') return 'high'
-  if (status === 'approved' || status === 'skipped') return 'low'
-  if (status === 'review') return 'medium'
-  return 'medium'
 }
 
 async function search(): Promise<void> {
@@ -77,10 +67,7 @@ async function pickAdoFeature(feature: FlowFeature): Promise<void> {
     autoShip.value && autopilot.value,
     baseBranch.value || undefined,
   )
-  if (id) {
-    selectRun(id)
-    creating.value = false
-  }
+  if (id) selectRun(id)
 }
 
 async function startFromText(): Promise<void> {
@@ -94,7 +81,6 @@ async function startFromText(): Promise<void> {
   )
   if (id) {
     selectRun(id)
-    creating.value = false
     textTitle.value = ''
     textDescription.value = ''
   }
@@ -108,10 +94,7 @@ async function startFromSpec(): Promise<void> {
     autoShip.value && autopilot.value,
     baseBranch.value || undefined,
   )
-  if (id) {
-    selectRun(id)
-    creating.value = false
-  }
+  if (id) selectRun(id)
 }
 
 function openCreate(): void {
@@ -120,17 +103,8 @@ function openCreate(): void {
   query.value = ''
   void flow.searchFeatures(props.projectId, '')
   void flow.loadExistingSpecs(props.projectId)
+  void flow.detectStacks(props.projectId)
 }
-
-async function loadArtefact(): Promise<void> {
-  if (!run.value || !currentStage.value) return
-  const result = await flow.artefact(run.value.id, currentStage.value.stage)
-  artefactContent.value = result?.content ?? null
-}
-
-watch(currentStage, () => {
-  artefactContent.value = null
-})
 
 async function removeWorktree(): Promise<void> {
   if (!run.value) return
@@ -140,12 +114,6 @@ async function removeWorktree(): Promise<void> {
   }
   removeConfirm.value = false
   await flow.removeWorktree(run.value.id, true)
-}
-
-async function sendRevise(): Promise<void> {
-  if (!run.value || !feedback.value.trim()) return
-  await flow.revise(run.value.id, feedback.value.trim())
-  feedback.value = ''
 }
 </script>
 
@@ -171,7 +139,7 @@ async function sendRevise(): Promise<void> {
           @click="selectRun(item.id)"
         >
           <span class="fr-title">{{ item.title }}</span>
-          <span class="ui-chip">{{ FLOW_STAGE_LABELS[item.stage] }}</span>
+          <span class="ui-chip">{{ item.stage }}</span>
           <span class="pill" :class="item.status">{{ item.status }}</span>
         </button>
         <div v-if="flow.runs.length === 0 && !creating" class="ui-empty-sub" data-testid="flow-no-runs">
@@ -276,6 +244,19 @@ async function sendRevise(): Promise<void> {
           </div>
 
           <div class="flow-create-opts">
+            <div class="flow-stacks" data-testid="flow-stack-chips">
+              <span
+                v-for="stackId in flow.detectedStacks"
+                :key="stackId"
+                class="ui-chip"
+                :data-testid="`flow-stack-${stackId}`"
+              >
+                {{ FLOW_STACK_LABELS[stackId] }}
+              </span>
+              <span v-if="flow.detectedStacks.length === 0" class="ui-empty-sub" data-testid="flow-stack-none">
+                No .NET or Angular project detected here.
+              </span>
+            </div>
             <input v-model="baseBranch" class="fp-input" data-testid="flow-base-branch" placeholder="Base branch (optional)" />
             <label class="ui-row flow-switch-row">
               <span>Autopilot — run every stage without stopping for approval</span>
@@ -292,138 +273,20 @@ async function sendRevise(): Promise<void> {
           </div>
         </div>
 
-        <div v-else-if="run" class="flow-run" data-testid="flow-run">
+        <div v-else-if="run" class="flow-run" data-testid="flow-run" :data-run-id="run.id">
           <div class="fr-head">
             <span class="frh-title">{{ run.title }}</span>
             <span class="ui-chip mono">{{ run.branch ?? '—' }}</span>
             <span class="ui-chip mono">base {{ run.baseBranch ?? '—' }}</span>
+            <span v-for="stackId in run.stacks" :key="stackId" class="ui-chip">{{ FLOW_STACK_LABELS[stackId as keyof typeof FLOW_STACK_LABELS] ?? stackId }}</span>
             <span class="pill" :class="run.status" data-testid="flow-run-status">{{ run.status }}</span>
           </div>
+          <div v-if="run.worktreePath" class="flow-note mono" data-testid="flow-run-worktree">{{ run.worktreePath }}</div>
           <div v-if="run.note" class="flow-note" data-testid="flow-run-note">{{ run.note }}</div>
 
-          <div class="ui-tabs flow-stage-rail" data-testid="flow-stage-rail">
-            <button
-              v-for="s in FLOW_STAGES"
-              :key="s"
-              type="button"
-              class="ui-tab"
-              :class="{ on: s === (selectedStage ?? run.stage) }"
-              :data-testid="`flow-stage-${s}`"
-              @click="selectedStage = s"
-            >
-              <Icon
-                :name="
-                  stages.find((row) => row.stage === s)?.status === 'failed'
-                    ? 'close'
-                    : stages.find((row) => row.stage === s)?.status === 'approved'
-                      ? 'check'
-                      : 'minus'
-                "
-                :size="10"
-              />
-              {{ FLOW_STAGE_LABELS[s] }}
-              <span class="fsr-status">{{ stages.find((row) => row.stage === s)?.status ?? 'pending' }}</span>
-            </button>
-          </div>
+          <FlowStageRail :stages="stages" :selected="selectedStage ?? run.stage" @select="(s) => (selectedStage = s)" />
 
-          <div v-if="currentStage" class="ui-card flow-stage-card" data-testid="flow-stage-detail">
-            <div class="fi-head">
-              <span class="chip-risk" :class="statusChip(currentStage.status)">{{ currentStage.status }}</span>
-              <span v-if="currentStage.attempts > 1" class="ui-chip">{{ currentStage.attempts }} attempts</span>
-            </div>
-            <div v-if="currentStage.summary" class="fi-body">{{ currentStage.summary }}</div>
-            <div v-if="currentStage.report?.verdict" class="ui-chip">verdict: {{ currentStage.report.verdict }}</div>
-            <ul v-if="currentStage.report?.findings?.length" class="fi-acceptance" data-testid="flow-findings">
-              <li v-for="(finding, at) in currentStage.report.findings" :key="at">
-                [{{ finding.severity }}] {{ finding.what }}{{ finding.file ? ` (${finding.file})` : '' }}
-              </li>
-            </ul>
-            <ul v-if="currentStage.report?.unmet?.length" class="fi-acceptance" data-testid="flow-unmet">
-              <li v-for="line in currentStage.report.unmet" :key="line">{{ line }}</li>
-            </ul>
-            <a v-if="currentStage.report?.prUrl" :href="currentStage.report.prUrl" class="ui-chip" data-testid="flow-pr-link">
-              PR {{ currentStage.report.prId }}
-            </a>
-
-            <MiniTerminal
-              v-if="currentStage.status === 'running' && currentStage.sessionId"
-              :session-id="currentStage.sessionId"
-              data-testid="flow-stage-session"
-            />
-
-            <div class="ui-toolbar">
-              <button type="button" class="btn-outline" data-testid="flow-artefact-load" @click="loadArtefact()">
-                View artefact
-              </button>
-            </div>
-            <pre v-if="artefactContent" class="flow-artefact" data-testid="flow-artefact-content">{{ artefactContent }}</pre>
-
-            <div class="flow-actions">
-              <button
-                v-if="currentStage.status === 'review' && currentStage.stage !== 'ship'"
-                type="button"
-                class="btn-solid"
-                data-testid="flow-approve"
-                :disabled="flow.busy === 'approve'"
-                @click="flow.approve(run.id)"
-              >
-                Approve
-              </button>
-              <button
-                v-if="currentStage.status === 'failed'"
-                type="button"
-                class="btn-outline"
-                data-testid="flow-retry"
-                :disabled="flow.busy === 'retry'"
-                @click="flow.retry(run.id)"
-              >
-                Retry
-              </button>
-              <button
-                v-if="currentStage.status !== 'approved' && currentStage.status !== 'skipped'"
-                type="button"
-                class="btn-quiet"
-                data-testid="flow-skip"
-                :disabled="flow.busy === 'skip'"
-                @click="flow.skip(run.id)"
-              >
-                Skip
-              </button>
-              <button
-                v-if="currentStage.stage === 'review' && currentStage.status === 'review' && currentStage.report?.verdict === 'needs_fixes'"
-                type="button"
-                class="btn-outline"
-                data-testid="flow-fix"
-                :disabled="flow.busy === 'fix'"
-                @click="flow.fix(run.id)"
-              >
-                Fix findings
-              </button>
-              <button
-                v-if="currentStage.stage === 'ship' && (currentStage.status === 'pending' || currentStage.status === 'failed')"
-                type="button"
-                class="btn-solid"
-                data-testid="flow-ship"
-                @click="flow.ship(run.id)"
-              >
-                Raise pull request
-              </button>
-              <button
-                v-if="run.status !== 'done' && run.status !== 'cancelled'"
-                type="button"
-                class="btn-quiet"
-                data-testid="flow-cancel"
-                @click="flow.cancel(run.id)"
-              >
-                Cancel
-              </button>
-            </div>
-
-            <div v-if="currentStage.status === 'review'" class="flow-revise">
-              <input v-model="feedback" class="fp-input" data-testid="flow-feedback" placeholder="Revise per this feedback…" />
-              <button type="button" class="btn-quiet" data-testid="flow-revise" @click="sendRevise()">Revise</button>
-            </div>
-          </div>
+          <FlowStageDetail v-if="currentStage" :run="run" :stage="currentStage" />
 
           <div class="ui-toolbar flow-foot">
             <label class="ui-row flow-switch-row">
@@ -471,7 +334,7 @@ async function sendRevise(): Promise<void> {
 }
 
 .flow-runs {
-  width: 260px;
+  width: 280px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -531,6 +394,12 @@ async function sendRevise(): Promise<void> {
   border-top: 1px solid var(--border);
 }
 
+.flow-stacks {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .flow-switch-row {
   justify-content: space-between;
   font-size: var(--fs-meta);
@@ -547,68 +416,12 @@ async function sendRevise(): Promise<void> {
   display: flex;
   align-items: baseline;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .frh-title {
   font-size: var(--fs-ui);
   color: var(--text-strong);
-}
-
-.flow-stage-rail {
-  flex-wrap: wrap;
-}
-
-.fsr-status {
-  font-size: var(--fs-micro);
-  color: var(--text-meta);
-}
-
-.flow-stage-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.fi-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.fi-body {
-  font-size: var(--fs-meta);
-  color: var(--text-mid);
-  line-height: 1.5;
-}
-
-.fi-acceptance {
-  margin: 0;
-  padding-left: 18px;
-  font-size: var(--fs-micro);
-  color: var(--text-meta);
-}
-
-.flow-artefact {
-  max-height: 320px;
-  overflow: auto;
-  padding: 10px;
-  background: var(--bg-code);
-  border: 1px solid var(--border-code);
-  border-radius: var(--rc);
-  font-family: var(--mono);
-  font-size: var(--fs-micro);
-  white-space: pre-wrap;
-}
-
-.flow-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.flow-revise {
-  display: flex;
-  gap: 8px;
 }
 
 .flow-foot {

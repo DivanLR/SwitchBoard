@@ -85,6 +85,10 @@ export interface MockDriver {
     stage: string,
     patch: { status?: string; summary?: string; report?: Record<string, unknown> },
   ) => void
+  askFlowQuestion: (runId: string, text: string, options: string[]) => string
+  reportFlowVerify: (runId: string, report: Record<string, unknown> | null) => void
+  reportFlowShip: (runId: string, prUrl: string, prId: string) => void
+  setFlowStacks: (projectId: string, stacks: string[]) => void
   addDiagram: (projectId: string, entry: DiagramEntry) => void
   reportApiResult: (
     projectId: string,
@@ -447,10 +451,16 @@ export function installMockHost(scenario: MockScenario): void {
   const securityByProject = new Map<string, AnyRecord[]>()
   const flowRunsByProject = new Map<string, AnyRecord[]>()
   const flowStagesByRun = new Map<string, AnyRecord[]>()
+  const flowStacksByProject = new Map<string, string[]>()
   let adoFeatures: AnyRecord[] = []
   let adoConnected = true
 
   const FLOW_STAGE_ORDER = ['spec', 'plan', 'build', 'clean', 'test', 'review', 'ship'] as const
+  const MAX_FLOW_FIX_ROUNDS = 2
+
+  function emptyFlowReport(): AnyRecord {
+    return { tasksDone: null, tasksTotal: null, verdict: null, findings: [], unmet: [], prUrl: null, prId: null, verify: null }
+  }
 
   const flowSnapshot = (projectId: string): { runs: AnyRecord[]; stages: AnyRecord[] } => {
     const runs = flowRunsByProject.get(projectId) ?? []
@@ -476,34 +486,101 @@ export function installMockHost(scenario: MockScenario): void {
     return (flowStagesByRun.get(runId) ?? []).find((row) => row.stage === stage)
   }
 
-  function beginFlowStage(projectId: string, run: AnyRecord, stage: string): void {
-    void sectionSession(projectId, 'flow').then((session) => {
-      const row = flowStage(String(run.id), stage)
-      if (row) {
-        row.status = 'running'
-        row.sessionId = session.id
-        row.attempts = Number(row.attempts ?? 0) + 1
-      }
-      run.stage = stage
-      run.status = 'running'
+  function updateRun(runId: string, patch: AnyRecord): AnyRecord | undefined {
+    for (const runs of flowRunsByProject.values()) {
+      const at = runs.findIndex((run) => run.id === runId)
+      if (at === -1) continue
+      runs[at] = { ...runs[at], ...patch }
+      return runs[at]
+    }
+    return undefined
+  }
+
+  function updateStage(runId: string, stage: string, patch: AnyRecord): AnyRecord | undefined {
+    const list = flowStagesByRun.get(runId)
+    if (!list) return undefined
+    const at = list.findIndex((row) => row.stage === stage)
+    if (at === -1) return undefined
+    list[at] = { ...list[at], ...patch }
+    return list[at]
+  }
+
+  async function freshFlowSession(projectId: string): Promise<MockSession> {
+    return (await invokeHandlers['sessions.start']({ projectId })) as MockSession
+  }
+
+  async function flowSessionFor(runId: string, stage: string): Promise<MockSession> {
+    const row = flowStage(runId, stage)
+    const sessionId = row?.sessionId as string | undefined
+    const existing = sessionId ? sessions.get(sessionId) : undefined
+    if (existing && !existing.endedAt) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      return existing
+    }
+    const run = flowRun(runId)
+    return freshFlowSession(String(run?.projectId))
+  }
+
+  function beginFlowStage(projectId: string, runId: string, stage: string): void {
+    void freshFlowSession(projectId).then((session) => {
+      const row = flowStage(runId, stage)
+      updateStage(runId, stage, {
+        status: 'running',
+        sessionId: session.id,
+        attempts: Number(row?.attempts ?? 0) + 1,
+        feedback: null,
+      })
+      updateRun(runId, { stage, status: 'running' })
       deliver(session.id, `Working on the ${stage} stage.\nSWB_FLOW`)
       pushFlow(projectId)
     })
   }
 
-  function advanceFlow(projectId: string, run: AnyRecord): void {
+  function continueFlowStage(runId: string, stage: string, text: string): void {
+    void flowSessionFor(runId, stage).then((session) => {
+      const row = flowStage(runId, stage)
+      updateStage(runId, stage, { status: 'running', sessionId: session.id, attempts: Number(row?.attempts ?? 0) + 1 })
+      updateRun(runId, { status: 'running' })
+      deliver(session.id, text)
+      const run = flowRun(runId)
+      if (run) pushFlow(run.projectId as string)
+    })
+  }
+
+  function advanceFlow(projectId: string, runId: string): void {
+    const run = flowRun(runId)
+    if (!run) return
     const index = FLOW_STAGE_ORDER.indexOf(run.stage as (typeof FLOW_STAGE_ORDER)[number])
     const next = FLOW_STAGE_ORDER[index + 1]
     if (!next) {
-      run.status = 'done'
-      run.finishedAt = new Date().toISOString()
+      updateRun(runId, { status: 'done', finishedAt: new Date().toISOString() })
       pushFlow(projectId)
       return
     }
-    run.stage = next
-    run.status = 'waiting'
+    updateRun(runId, { stage: next, status: 'waiting' })
     pushFlow(projectId)
-    if (next !== 'ship' || (run.autopilot && run.autoShip)) beginFlowStage(projectId, run, next)
+    if (next !== 'ship' || (run.autopilot && run.autoShip)) beginFlowStage(projectId, runId, next)
+  }
+
+  function approveFlow(runId: string): void {
+    const run = flowRun(runId)
+    if (!run) return
+    updateStage(runId, run.stage as string, { status: 'approved' })
+    advanceFlow(run.projectId as string, runId)
+  }
+
+  function maybeAutopilotAdvance(runId: string, stage: string): void {
+    const run = flowRun(runId)
+    if (!run?.autopilot) return
+    const row = flowStage(runId, stage)
+    if (!row || row.status !== 'review') return
+    if (stage === 'review' && (row.report as AnyRecord | undefined)?.verdict === 'needs_fixes') {
+      if (Number(row.attempts ?? 0) <= MAX_FLOW_FIX_ROUNDS) {
+        continueFlowStage(runId, 'review', 'Fix every must_fix finding and every unmet acceptance criterion above, keep tests green, commit.\nSWB_FLOW')
+      }
+      return
+    }
+    approveFlow(runId)
   }
 
   function deliver(sessionId: string, text: string): void {
@@ -570,7 +647,7 @@ export function installMockHost(scenario: MockScenario): void {
   let startDelayMs = 250
 
   const sectionSessions = new Map<string, MockSession>()
-  const neverReused: ReadonlySet<SectionKind> = new Set(['diagram', 'spec'])
+  const neverReused: ReadonlySet<SectionKind> = new Set(['diagram'])
   async function sectionSession(projectId: string, kind: SectionKind): Promise<MockSession> {
     const key = `${projectId}|${kind}`
     const live = neverReused.has(kind) ? undefined : sectionSessions.get(key)
@@ -757,14 +834,6 @@ export function installMockHost(scenario: MockScenario): void {
       if (project) project.archivedAt = null
     },
     'projects.commands': (req) => projectCommands.get(String(req.projectId)) ?? [],
-    'specs.state': (req) =>
-      specKitByProject.get(String(req.projectId)) ?? { installed: false, specs: [] },
-    'specs.detail': (req) => {
-      const state = specKitByProject.get(String(req.projectId)) as
-        | { details?: Record<string, AnyRecord> }
-        | undefined
-      return state?.details?.[String(req.specId)] ?? null
-    },
     'diff.list': (req) => {
       const project = projects.find((p) => p.id === req.projectId)
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
@@ -856,14 +925,6 @@ export function installMockHost(scenario: MockScenario): void {
     'diagrams.read': (req) => ({
       html: `<!doctype html><title>${String(req.file)}</title><body><svg role="img" aria-label="${String(req.file)}"><text x="4" y="16">${String(req.file)}</text></svg></body>`,
     }),
-    'specs.install': (req) => {
-      const installed = {
-        installed: true,
-        specs: [{ id: '001-example', title: 'Example', status: 'draft', tasksTotal: 0, tasksDone: 0 }],
-      }
-      specKitByProject.set(String(req.projectId), installed)
-      return installed
-    },
     'mcp.readSchema': (req) => {
       const servers = req.servers as string[] | undefined
       const key = servers?.length
@@ -887,7 +948,7 @@ export function installMockHost(scenario: MockScenario): void {
     'specs.runInSession': async (req) => {
       const projectId = String(req.projectId)
       let session = req.background
-        ? await sectionSession(projectId, (req.kind as SectionKind) ?? 'spec')
+        ? await sectionSession(projectId, req.kind as SectionKind)
         : [...sessions.values()].find((s) => s.projectId === projectId && !s.endedAt)
       if (!session) session = (await invokeHandlers['sessions.start']({ projectId })) as MockSession
       sends.push({ sessionId: session.id, text: String(req.text) })
@@ -1144,6 +1205,7 @@ export function installMockHost(scenario: MockScenario): void {
       const state = specKitByProject.get(String(req.projectId)) as { specs?: AnyRecord[] } | undefined
       return (state?.specs ?? []).map((spec) => ({ id: spec.id, title: spec.title }))
     },
+    'flow.detectStacks': (req) => [...(flowStacksByProject.get(String(req.projectId)) ?? ['dotnet'])],
     'flow.start': async (req) => {
       const projectId = String(req.projectId)
       const source = req.source as AnyRecord
@@ -1152,6 +1214,10 @@ export function installMockHost(scenario: MockScenario): void {
           code: 'NOT_LIVE',
           message: 'The Azure DevOps MCP server is not connected for this session, so Flow cannot read or write the board.',
         }
+      }
+      const stacks = [...(flowStacksByProject.get(projectId) ?? ['dotnet'])]
+      if (stacks.length === 0) {
+        throw { code: 'UNSUPPORTED', message: 'Flow supports .NET and Angular projects.' }
       }
       const runs = flowRunsByProject.get(projectId) ?? []
       const id = `flow-${runs.length + 1}`
@@ -1169,7 +1235,7 @@ export function installMockHost(scenario: MockScenario): void {
         sourceRef: source.kind === 'ado' ? String(source.featureId) : source.kind === 'spec' ? String(source.specId) : null,
         sourceUrl: source.kind === 'ado' ? (source.url ?? null) : null,
         description: source.kind === 'text' ? String(source.description ?? '') : '',
-        stacks: ['dotnet'],
+        stacks,
         stage: 'spec',
         status: 'running',
         autopilot: req.autopilot === true,
@@ -1202,93 +1268,114 @@ export function installMockHost(scenario: MockScenario): void {
           finishedAt: null,
         })),
       )
-      beginFlowStage(projectId, run, 'spec')
+      beginFlowStage(projectId, id, 'spec')
       return { runId: id, ...flowSnapshot(projectId) }
     },
     'flow.approve': (req) => {
-      const run = flowRun(String(req.runId))
+      const runId = String(req.runId)
+      const run = flowRun(runId)
       if (!run) throw { code: 'NOT_FOUND', message: 'Run not found' }
-      const stage = flowStage(run.id as string, run.stage as string)
+      const stage = flowStage(runId, run.stage as string)
       if (!stage || stage.status !== 'review') {
         throw { code: 'RULE_NOT_ALLOWED', message: 'This stage is not waiting for approval.' }
       }
-      stage.status = 'approved'
-      advanceFlow(run.projectId as string, run)
+      approveFlow(runId)
       return flowSnapshot(run.projectId as string)
     },
     'flow.retry': (req) => {
-      const run = flowRun(String(req.runId))
+      const runId = String(req.runId)
+      const run = flowRun(runId)
       if (!run) throw { code: 'NOT_FOUND', message: 'Run not found' }
-      beginFlowStage(run.projectId as string, run, run.stage as string)
+      beginFlowStage(run.projectId as string, runId, run.stage as string)
       return flowSnapshot(run.projectId as string)
     },
     'flow.skip': (req) => {
-      const run = flowRun(String(req.runId))
+      const runId = String(req.runId)
+      const run = flowRun(runId)
       if (!run) throw { code: 'NOT_FOUND', message: 'Run not found' }
-      const stage = flowStage(run.id as string, run.stage as string)
-      if (stage) {
-        stage.status = 'skipped'
-        stage.finishedAt = new Date().toISOString()
-      }
+      updateStage(runId, run.stage as string, { status: 'skipped', finishedAt: new Date().toISOString() })
       if (run.stage === 'ship') {
-        run.status = 'done'
-        run.finishedAt = new Date().toISOString()
+        updateRun(runId, { status: 'done', finishedAt: new Date().toISOString() })
         pushFlow(run.projectId as string)
       } else {
-        advanceFlow(run.projectId as string, run)
+        advanceFlow(run.projectId as string, runId)
       }
       return flowSnapshot(run.projectId as string)
     },
     'flow.fix': (req) => {
-      const run = flowRun(String(req.runId))
+      const runId = String(req.runId)
+      const run = flowRun(runId)
       if (!run || run.stage !== 'review') {
         throw { code: 'RULE_NOT_ALLOWED', message: 'Fix only applies to the review stage.' }
       }
-      beginFlowStage(run.projectId as string, run, 'review')
+      continueFlowStage(runId, 'review', 'Fix every must_fix finding and every unmet acceptance criterion above, keep tests green, commit.\nSWB_FLOW')
       return flowSnapshot(run.projectId as string)
     },
     'flow.ship': (req) => {
-      const run = flowRun(String(req.runId))
+      const runId = String(req.runId)
+      const run = flowRun(runId)
       if (!run || run.stage !== 'ship') {
         throw { code: 'RULE_NOT_ALLOWED', message: 'This run has not reached the ship stage yet.' }
       }
-      beginFlowStage(run.projectId as string, run, 'ship')
+      beginFlowStage(run.projectId as string, runId, 'ship')
       return flowSnapshot(run.projectId as string)
     },
     'flow.cancel': (req) => {
-      const run = flowRun(String(req.runId))
+      const runId = String(req.runId)
+      const run = flowRun(runId)
       if (!run) throw { code: 'NOT_FOUND', message: 'Run not found' }
-      run.status = 'cancelled'
-      run.note = 'You stopped this flow.'
-      run.finishedAt = new Date().toISOString()
+      const stage = flowStage(runId, run.stage as string)
+      if (stage?.status === 'running' && stage.sessionId) {
+        interrupts.push(String(stage.sessionId))
+        setStatus(String(stage.sessionId), 'done')
+        updateStage(runId, run.stage as string, { status: 'failed', summary: 'Cancelled.', finishedAt: new Date().toISOString() })
+      }
+      updateRun(runId, { status: 'cancelled', note: 'You stopped this flow.', finishedAt: new Date().toISOString() })
+      pushFlow(run.projectId as string)
       return flowSnapshot(run.projectId as string)
     },
     'flow.revise': (req) => {
-      const run = flowRun(String(req.runId))
+      const runId = String(req.runId)
+      const run = flowRun(runId)
       if (!run) throw { code: 'NOT_FOUND', message: 'Run not found' }
-      const stage = flowStage(run.id as string, run.stage as string)
-      if (stage) stage.feedback = String(req.feedback)
-      beginFlowStage(run.projectId as string, run, run.stage as string)
+      const feedback = String(req.feedback)
+      updateStage(runId, run.stage as string, { feedback })
+      continueFlowStage(runId, run.stage as string, `Revise per this feedback: ${feedback}\nSWB_FLOW`)
       return flowSnapshot(run.projectId as string)
     },
     'flow.setAutopilot': (req) => {
-      const run = flowRun(String(req.runId))
+      const runId = String(req.runId)
+      const run = flowRun(runId)
       if (!run) throw { code: 'NOT_FOUND', message: 'Run not found' }
-      run.autopilot = req.autopilot === true
+      updateRun(runId, { autopilot: req.autopilot === true })
       return flowSnapshot(run.projectId as string)
     },
     'flow.removeWorktree': (req) => {
-      const run = flowRun(String(req.runId))
+      const runId = String(req.runId)
+      const run = flowRun(runId)
       if (!run) throw { code: 'NOT_FOUND', message: 'Run not found' }
-      run.worktreePath = null
+      updateRun(runId, { worktreePath: null })
       return flowSnapshot(run.projectId as string)
     },
     'flow.artefact': (req) => {
       const run = flowRun(String(req.runId))
       if (!run) return null
-      const stage = flowStage(run.id as string, String(req.stage))
-      if (String(req.stage) === 'test') return { path: null, content: JSON.stringify(stage?.report ?? {}) }
-      return { path: `${String(run.specDir ?? 'specs/mock')}/spec.md`, content: '# Mock spec\n' }
+      const stageName = String(req.stage)
+      const kind = String(req.kind ?? (stageName === 'spec' ? 'spec' : stageName === 'test' ? 'report' : 'tasks'))
+      if (kind === 'report') {
+        const stage = flowStage(run.id as string, stageName)
+        return { path: null, content: JSON.stringify(stage?.report ?? {}, null, 2) }
+      }
+      const specDir = String(run.specDir ?? 'specs/mock')
+      if (kind === 'spec') return { path: `${specDir}/spec.md`, content: `# ${String(run.title)}\n\n## Summary\nMock spec body.\n` }
+      if (kind === 'plan') return { path: `${specDir}/plan.md`, content: '# Plan\n\n## Approach\nMock plan body.\n' }
+      if (kind === 'tasks') {
+        return {
+          path: `${specDir}/tasks.md`,
+          content: '## Phase 1\n- [x] T001 Scaffold the slice\n- [ ] T002 Wire the endpoint\n- [ ] T003 Write tests\n',
+        }
+      }
+      return null
     },
     'security.list': (req) => [...(securityByProject.get(String(req.projectId)) ?? [])],
     'security.start': async (req) => {
@@ -1825,14 +1912,63 @@ export function installMockHost(scenario: MockScenario): void {
       const run = flowRun(runId)
       const row = flowStage(runId, stage)
       if (!run || !row) return
-      if (patch.status !== undefined) row.status = patch.status
-      if (patch.summary !== undefined) row.summary = patch.summary
-      if (patch.report !== undefined) row.report = patch.report
+      const stagePatch: AnyRecord = {}
+      if (patch.status !== undefined) stagePatch.status = patch.status
+      if (patch.summary !== undefined) stagePatch.summary = patch.summary
+      if (patch.report !== undefined) stagePatch.report = patch.report
       if (patch.status === 'review' || patch.status === 'failed') {
-        row.finishedAt = new Date().toISOString()
-        run.status = 'waiting'
+        stagePatch.finishedAt = new Date().toISOString()
+        updateRun(runId, { status: 'waiting' })
       }
+      updateStage(runId, stage, stagePatch)
       pushFlow(run.projectId as string)
+      if (patch.status === 'review') maybeAutopilotAdvance(runId, stage)
+    },
+    askFlowQuestion: (runId, text, options) => {
+      const run = flowRun(runId)
+      if (!run) throw new Error('Run not found')
+      const row = flowStage(runId, run.stage as string)
+      const sessionId = row?.sessionId as string | undefined
+      if (!sessionId) throw new Error('That stage has no live session')
+      const event = appendEvent(sessionId, 'question', {
+        text,
+        options: options.map((label) => ({ label })),
+        answered: false,
+      })
+      setStatus(sessionId, 'needs_you')
+      return String(event.id)
+    },
+    reportFlowVerify: (runId, report) => {
+      const run = flowRun(runId)
+      const row = flowStage(runId, 'test')
+      if (!run || !row) return
+      const suites = (report as { suites?: { status: string }[] } | null)?.suites ?? []
+      const failed = suites.some((s) => s.status === 'fail')
+      updateStage(runId, 'test', {
+        status: failed ? 'failed' : 'review',
+        report: { ...emptyFlowReport(), verify: report },
+        finishedAt: new Date().toISOString(),
+      })
+      updateRun(runId, { status: 'waiting' })
+      pushFlow(run.projectId as string)
+      if (!failed) maybeAutopilotAdvance(runId, 'test')
+    },
+    reportFlowShip: (runId, prUrl, prId) => {
+      const run = flowRun(runId)
+      const row = flowStage(runId, 'ship')
+      if (!run || !row) return
+      updateStage(runId, 'ship', {
+        status: 'review',
+        summary: 'Pull request opened.',
+        report: { ...emptyFlowReport(), prUrl, prId },
+        finishedAt: new Date().toISOString(),
+      })
+      updateRun(runId, { prUrl, prId, status: 'waiting' })
+      pushFlow(run.projectId as string)
+      maybeAutopilotAdvance(runId, 'ship')
+    },
+    setFlowStacks: (projectId, stacks) => {
+      flowStacksByProject.set(projectId, stacks)
     },
     reportSecurityResult: (projectId, status, report) => {
       const list = securityByProject.get(projectId) ?? []

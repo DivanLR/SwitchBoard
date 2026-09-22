@@ -681,6 +681,13 @@ export interface SecurityReport {
   artefacts: string[]
 }
 
+export type FlowStackId = 'dotnet' | 'angular'
+
+export const FLOW_STACK_LABELS: Readonly<Record<FlowStackId, string>> = {
+  dotnet: '.NET',
+  angular: 'Angular',
+}
+
 export type FlowSource = 'ado' | 'text' | 'spec'
 
 export type FlowStage = 'spec' | 'plan' | 'build' | 'clean' | 'test' | 'review' | 'ship'
@@ -1029,7 +1036,6 @@ export interface DiffListResult {
 }
 
 export type SectionKind =
-  | 'spec'
   | 'tests'
   | 'diff'
   | 'cleanup'
@@ -1067,7 +1073,6 @@ export function sessionName(
 }
 
 const SECTION_LABELS: Record<SectionKind, string> = {
-  spec: 'Specs',
   tests: 'Tests',
   diff: 'Diff',
   cleanup: 'Cleanup',

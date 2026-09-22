@@ -137,7 +137,7 @@ const CANCEL_NOTE = 'You stopped this run before it reported, so nothing it meas
 
 const MODELS_TTL_MS = 10 * 60_000
 
-const NEVER_REUSED: ReadonlySet<SectionKind> = new Set(['diagram', 'spec'])
+const NEVER_REUSED: ReadonlySet<SectionKind> = new Set(['diagram'])
 
 const WORKER_KINDS: ReadonlySet<SectionKind> = new Set(['diff'])
 
@@ -1619,8 +1619,6 @@ export class SessionManager {
     ) {
       return
     }
-    // A flow session stays open for the supervisor's next step, and is closed by the
-    // supervisor rather than by the project queue.
     if (this.flowWatch.has(id)) return
     if (this.repos.taskQueue.listForProject(entry.row.projectId).length > 0) return
     if (!this.hosted.has(id)) return

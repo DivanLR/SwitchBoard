@@ -50,13 +50,13 @@ import { apiReportFileName, apiReportMarkdown } from '@shared/api-report'
 import { gitNotice, sandboxToolsFor } from '@main/sessions/wslc-sandbox'
 import { comboDocPath, readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
 import { comboKey } from '@shared/mcp-combo'
-import { installSpecKit, readSpecDetail, readSpecKitState } from '@main/specs/spec-kit'
 import { readDiffList, readFileDiff } from '@main/sessions/session-manager'
 import { readDiagramList } from '@main/diagrams/list'
 import { importSkills } from '@main/skills/import'
 import { isSafeSegment } from '@shared/skill-source'
 import { auditPrompt, SECURITY_SKILL_NAME } from '@main/security/audit-dispatch'
 import type { FlowSupervisor } from '@main/flow/flow-supervisor'
+import { detectFlowStacks } from '@main/flow/stacks'
 import { disableSkill, enableSkill, removeSkill } from '@main/skills/install'
 import { check as checkForUpdates, installNow } from '@main/updater'
 
@@ -471,22 +471,6 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       manager.sendMessage(session.id, argument ? `/${skill.name} ${argument}` : `/${skill.name}`)
       return { sessionId: session.id }
     },
-    'specs.state': (req) => {
-      const project = repos.projects.byId(req.projectId)
-      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
-      return readSpecKitState(project.path)
-    },
-    'specs.detail': (req) => {
-      const project = repos.projects.byId(req.projectId)
-      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
-      return readSpecDetail(project.path, req.specId)
-    },
-    'specs.install': async (req) => {
-      const project = repos.projects.byId(req.projectId)
-      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
-      await installSpecKit(project.path)
-      return readSpecKitState(project.path)
-    },
     'diff.list': (req) => {
       const project = repos.projects.byId(req.projectId)
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
@@ -597,7 +581,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     },
     'specs.runInSession': async (req) => {
       const session = req.background
-        ? await manager.backgroundSessionFor(req.projectId, req.kind ?? 'spec')
+        ? await manager.backgroundSessionFor(req.projectId, req.kind)
         : (repos.sessions.activeForProject(req.projectId) ??
           (await manager.startSession(req.projectId)))
       if (req.watchDiagrams) manager.watchDiagram(session.id)
@@ -770,6 +754,10 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'flow.existingSpecs': async (req) => {
       requireProject(req.projectId)
       return flow.existingSpecs(req.projectId)
+    },
+    'flow.detectStacks': async (req) => {
+      const project = requireProject(req.projectId)
+      return detectFlowStacks(project.path)
     },
     'flow.start': async (req) => {
       requireProject(req.projectId)

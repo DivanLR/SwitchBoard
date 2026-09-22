@@ -1,6 +1,4 @@
-import { execFile } from 'node:child_process'
 import { readdir, readFile, stat } from 'node:fs/promises'
-import { promisify } from 'node:util'
 import { join } from 'node:path'
 import type {
   ResolvedClarification,
@@ -12,10 +10,6 @@ import type {
   SpecSummary,
   SpecTask,
 } from '@shared/domain'
-
-const execFileAsync = promisify(execFile)
-
-const SPEC_KIT_GIT = 'git+https://github.com/github/spec-kit.git'
 
 function specsDir(projectPath: string): string {
   return join(projectPath, 'specs')
@@ -205,34 +199,5 @@ export async function readSpecDetail(projectPath: string, id: string): Promise<S
     phases,
     clarifications: parseClarifications(specMd),
     resolvedClarifications: parseResolvedClarifications(specMd),
-  }
-}
-
-export async function installSpecKit(projectPath: string): Promise<void> {
-  const script = process.platform === 'win32' ? 'ps' : 'sh'
-  try {
-    await execFileAsync(
-      'uvx',
-      [
-        '--from',
-        SPEC_KIT_GIT,
-        'specify',
-        'init',
-        '--here',
-        '--force',
-        '--integration',
-        'claude',
-        '--script',
-        script,
-        '--ignore-agent-tools',
-      ],
-      { cwd: projectPath, timeout: 180_000, windowsHide: true, shell: process.platform === 'win32' },
-    )
-  } catch (error) {
-    const e = error as { stderr?: string; message?: string }
-    throw new Error(e.stderr?.trim() || e.message || 'Spec Kit init failed', { cause: error })
-  }
-  if (!(await isSpecKitInstalled(projectPath))) {
-    throw new Error('Spec Kit init completed but .specify/ was not created')
   }
 }
