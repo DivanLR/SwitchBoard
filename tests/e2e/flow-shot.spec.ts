@@ -1,6 +1,14 @@
 import { expect, test } from '@playwright/test'
 import { installMockHost, twoProjectScenario } from './mock-host'
 
+interface LegacyFlowMock {
+  reportFlowScope: (...args: unknown[]) => unknown
+  reportFlowSignoff: (...args: unknown[]) => unknown
+  reportFlowPublished: (...args: unknown[]) => unknown
+  reportFlowItem: (...args: unknown[]) => unknown
+  reportFlowLessons: (...args: unknown[]) => unknown
+}
+
 const OUT = '.impeccable/shots'
 
 const FEATURES = [
@@ -32,6 +40,7 @@ const ITEMS = [
 test.use({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 2 })
 
 test('flow tab shots', async ({ page }) => {
+  test.skip(true, 'F2 rewrites this against the new stage-based Flow backend and UI.')
   await page.addInitScript(() => localStorage.setItem('sb-theme', 'dark'))
   await page.addInitScript(installMockHost, twoProjectScenario())
   await page.goto('/')
@@ -44,12 +53,12 @@ test('flow tab shots', async ({ page }) => {
   await page.screenshot({ path: `${OUT}/flow-pick.png` })
 
   await page.getByTestId('flow-feature-4711').click()
-  await page.evaluate((items) => window.__mock.reportFlowScope('p-alpha', items), ITEMS)
+  await page.evaluate((items) => (window.__mock as unknown as LegacyFlowMock).reportFlowScope('p-alpha', items), ITEMS)
   await page.getByTestId('flow-run-status').waitFor()
   await page.screenshot({ path: `${OUT}/flow-crosscheck.png` })
 
   await page.evaluate(() =>
-    window.__mock.reportFlowSignoff('p-alpha', 'approve', [
+    (window.__mock as unknown as LegacyFlowMock).reportFlowSignoff('p-alpha', 'approve', [
       'the telemetry item leans on a metrics view that may not exist yet',
     ]),
   )
@@ -59,7 +68,7 @@ test('flow tab shots', async ({ page }) => {
   await page.getByTestId('flow-publish').click()
   await page.getByTestId('flow-publish').click()
   await page.evaluate(() =>
-    window.__mock.reportFlowPublished('p-alpha', [
+    (window.__mock as unknown as LegacyFlowMock).reportFlowPublished('p-alpha', [
       { localId: 'cart-race', workItemId: '5001' },
       { localId: 'cart-tests', workItemId: '5002' },
       { localId: 'cart-telemetry', workItemId: '5003' },
@@ -67,10 +76,10 @@ test('flow tab shots', async ({ page }) => {
   )
   await page.getByTestId('flow-start-work').click()
   await page.evaluate(() =>
-    window.__mock.reportFlowItem('p-alpha', 'cart-race', 'pr_open', { prId: '312' }),
+    (window.__mock as unknown as LegacyFlowMock).reportFlowItem('p-alpha', 'cart-race', 'pr_open', { prId: '312' }),
   )
   await page.evaluate(() =>
-    window.__mock.reportFlowItem('p-alpha', 'cart-telemetry', 'blocked', {
+    (window.__mock as unknown as LegacyFlowMock).reportFlowItem('p-alpha', 'cart-telemetry', 'blocked', {
       note: 'the metrics view the acceptance names does not exist in this repository',
     }),
   )
@@ -79,7 +88,7 @@ test('flow tab shots', async ({ page }) => {
 
   await page.getByTestId('flow-learn').click()
   await page.evaluate(() =>
-    window.__mock.reportFlowLessons('p-alpha', [
+    (window.__mock as unknown as LegacyFlowMock).reportFlowLessons('p-alpha', [
       {
         rule: 'Name the work item in every commit message.',
         section: null,
