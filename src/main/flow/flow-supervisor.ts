@@ -1,39 +1,60 @@
-import type { FlowFeature, FlowItem, FlowRun, ScopedItem, SessionEndReason } from '@shared/domain'
-import { flowRuleId } from '@shared/domain'
-import type { IpcError } from '@shared/ipc-types'
+import { existsSync } from 'node:fs'
+import { cp, readFile, readdir } from 'node:fs/promises'
+import { join } from 'node:path'
+import type {
+  FlowRun,
+  FlowStage,
+  FlowStageReport,
+  Project,
+  SessionEndReason,
+  SpecSummary,
+  VerifyReport,
+} from '@shared/domain'
+import { FLOW_STAGE_LABELS, FLOW_STAGES, emptyFlowStageReport, verifyVerdict } from '@shared/domain'
+import type { FlowArtefactKind, FlowStartSource, IpcError } from '@shared/ipc-types'
 import { nowIso, type Repositories } from '@main/store/repositories'
 import type { SessionManager } from '@main/sessions/session-manager'
 import {
-  crosscheckPrompt,
+  ANALYZE_PROMPT,
+  TASKS_PROMPT,
+  buildHandshake,
+  buildSteps,
+  cleanHandshake,
+  cleanSteps,
+  clarifyPrompt,
+  fixFindingsPrompt,
+  planHandshake,
+  planPrompt,
+  reviewHandshake,
+  reviewSteps,
+  revisePrompt,
+  shipPrompt,
+  specHandshake,
+  specifyPrompt,
+  testWritePrompt,
   featuresPrompt,
-  implementPrompt,
-  lessonsPrompt,
-  prPrompt,
-  publishPrompt,
-  reviseScopePrompt,
-  scopePrompt,
-  specDescription,
 } from './flow-prompts'
-import { appendRule } from './claude-md'
-import { isSpecKitInstalled } from '@main/specs/spec-kit'
-import { branchNameFor, createWorktree, currentBranch, worktreeDirty, worktreePathFor, worktreeRoot } from './worktrees'
-import type { FlowMarker } from './flow-markers'
+import type { FlowMarker, FlowStageMarker } from './flow-markers'
+import { artefactRelPath, defaultArtefactKind, resolveArtefactPath } from './artefacts'
+import { detectFlowStacks } from './stacks'
+import { isSpecKitInstalled, readSpecKitState } from '@main/specs/spec-kit'
+import { defaultSelection, stackById } from '@shared/test-catalog'
+import { planSuites, verifyPrompt as buildVerifyPrompt, type PlannedSuite } from '@main/evals/verify-dispatch'
+import {
+  createWorktree,
+  currentBranch,
+  removeWorktree,
+  uniqueBranchName,
+  worktreePathFor,
+  worktreeRoot,
+} from './worktrees'
+import type { FlowFeature } from '@shared/domain'
 
 export const ADO_SERVER = 'ado'
 
 const ADO_WAIT_MS = 30_000
 
-export const MAX_ITEM_ATTEMPTS = 3
-
-export const FLOW_BACKOFF_MS = [5_000, 30_000, 120_000] as const
-
-export const MAX_CROSSCHECK_ROUNDS = 2
-
-const SCOPE_LOST =
-  'The scoping session ended without handing back a breakdown. Nothing was written to Azure DevOps.'
-
-const PUBLISH_LOST =
-  'The publishing session ended before it reported. Work items may or may not have been created, so check the Feature in Azure DevOps before retrying.'
+const MAX_FIX_ROUNDS = 2
 
 interface FlowCallbacks {
   onFlowChanged: (projectId: string) => void
@@ -46,17 +67,29 @@ type FeaturesWaiter = {
 }
 
 export interface FlowGit {
-  create: (input: { repoRoot: string; path: string; branch: string; base: string }) => Promise<unknown>
-  dirty: (path: string) => Promise<string[]>
-  branch: (path: string) => Promise<string>
-  root: (projectPath: string, override?: string | null) => string
+  create: typeof createWorktree
+  remove: typeof removeWorktree
+  branch: typeof currentBranch
+  root: typeof worktreeRoot
+  uniqueBranch: typeof uniqueBranchName
 }
 
 const defaultGit: FlowGit = {
   create: createWorktree,
-  dirty: worktreeDirty,
+  remove: removeWorktree,
   branch: currentBranch,
   root: worktreeRoot,
+  uniqueBranch: uniqueBranchName,
+}
+
+const ARTEFACT_NAME: Record<FlowStage, string> = {
+  spec: 'the spec',
+  plan: 'the plan',
+  build: 'the implementation',
+  clean: 'the cleanup',
+  test: 'the tests',
+  review: 'the review',
+  ship: 'the pull request',
 }
 
 function errorText(error: unknown): string {
@@ -65,10 +98,15 @@ function errorText(error: unknown): string {
   return typeof message === 'string' ? message : String(error)
 }
 
+interface StagePlan {
+  steps: string[]
+  handshake: string | null
+}
+
 export class FlowSupervisor {
   private featuresWaiters = new Map<string, FeaturesWaiter>()
-  private backoffTimers = new Map<string, ReturnType<typeof setTimeout>>()
-  private pumping = new Set<string>()
+  private sessionStage = new Map<string, { runId: string; stage: FlowStage }>()
+  private pending = new Map<string, string[]>()
 
   constructor(
     private repos: Repositories,
@@ -77,24 +115,26 @@ export class FlowSupervisor {
     private git: FlowGit = defaultGit,
   ) {}
 
-  private settings(): { flowConcurrency: number; flowWorktreeRoot: string } {
+  private settings(): { flowWorktreeRoot: string } {
     const settings = this.repos.settings.get()
-    return {
-      flowConcurrency: Math.min(8, Math.max(1, settings.flowConcurrency ?? 4)),
-      flowWorktreeRoot: settings.flowWorktreeRoot ?? '',
-    }
+    return { flowWorktreeRoot: settings.flowWorktreeRoot ?? '' }
   }
 
   reconcileOnStartup(): void {
     for (const projectId of this.repos.flowRuns.reconcileRunning(
-      'Switchboard closed while this run was working, so it was stopped on the next launch.',
+      'Switchboard closed while this stage was running. Retry it.',
     )) {
       this.callbacks.onFlowChanged(projectId)
     }
   }
 
   async features(projectId: string, query: string, timeoutMs = 120_000): Promise<FlowFeature[]> {
-    const session = await this.flowSession(projectId)
+    const project = this.requireProject(projectId)
+    const session = await this.manager.startSession(project.id, false, this.sessionMode(project), undefined, {
+      background: true,
+      engine: 'claude',
+    })
+    this.manager.markSection(session.id, 'flow')
     await this.requireAdo(session.id)
     return new Promise<FlowFeature[]>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -111,465 +151,279 @@ export class FlowSupervisor {
     })
   }
 
+  async existingSpecs(projectId: string): Promise<SpecSummary[]> {
+    const project = this.requireProject(projectId)
+    const state = await readSpecKitState(project.path)
+    return state.specs
+  }
+
   async start(input: {
     projectId: string
-    featureId: string
-    featureTitle: string
+    source: FlowStartSource
+    autopilot: boolean
+    autoShip: boolean
+    baseBranch?: string
   }): Promise<FlowRun> {
-    if (this.repos.flowRuns.openFor(input.projectId)) {
+    const project = this.requireProject(input.projectId)
+    const stacks = await detectFlowStacks(project.path)
+    if (stacks.length === 0) {
+      throw { code: 'UNSUPPORTED', message: 'Flow supports .NET and Angular projects.' } satisfies IpcError
+    }
+    if (input.source.kind === 'spec' && !(await isSpecKitInstalled(project.path))) {
       throw {
-        code: 'RULE_NOT_ALLOWED',
-        message: 'A flow is already open for this project. Finish or cancel it first.',
+        code: 'UNSUPPORTED',
+        message: 'Spec Kit is not set up in this project yet.',
       } satisfies IpcError
     }
-    const session = await this.manager.startSession(input.projectId, false, 'plan', undefined, {
-      background: true,
-      engine: 'claude',
-    })
-    await this.requireAdo(session.id)
-    this.manager.markSection(session.id, 'flow')
-    this.manager.renameSession(session.id, `Flow: ${input.featureTitle}`.slice(0, 60))
+
+    const title = this.deriveTitle(input.source)
+    const base = input.baseBranch?.trim() || (await this.git.branch(project.path))
+    const root = this.git.root(project.path, this.settings().flowWorktreeRoot)
+    const branch = await this.git.uniqueBranch(project.path, title)
+    const worktreePath = worktreePathFor(root, branch)
+    await this.git.create({ repoRoot: project.path, path: worktreePath, branch, base })
+
+    let specDir: string | null = null
+    let startStage: FlowStage = 'spec'
+    if (input.source.kind === 'spec') {
+      const dstDir = join(worktreePath, 'specs', input.source.specId)
+      if (!existsSync(dstDir)) {
+        const srcDir = join(project.path, 'specs', input.source.specId)
+        await cp(srcDir, dstDir, { recursive: true }).catch(() => {})
+      }
+      specDir = `specs/${input.source.specId}`
+      startStage = existsSync(join(dstDir, 'tasks.md')) ? 'build' : 'plan'
+    }
+
     const run = this.repos.flowRuns.start({
-      ...input,
-      sessionId: session.id,
-      concurrency: this.settings().flowConcurrency,
+      projectId: project.id,
+      title,
+      source: input.source.kind,
+      sourceRef:
+        input.source.kind === 'ado'
+          ? input.source.featureId
+          : input.source.kind === 'spec'
+            ? input.source.specId
+            : null,
+      sourceUrl: input.source.kind === 'ado' ? input.source.url : null,
+      description: input.source.kind === 'text' ? input.source.description : '',
+      stacks,
+      stage: startStage,
+      autopilot: input.autopilot,
+      autoShip: input.autoShip,
+      baseBranch: base,
     })
+    this.repos.flowStages.ensureAll(run.id)
+    for (const stage of FLOW_STAGES) {
+      if (FLOW_STAGES.indexOf(stage) < FLOW_STAGES.indexOf(startStage)) {
+        this.repos.flowStages.update(run.id, stage, {
+          status: 'skipped',
+          summary: 'Started from an existing spec.',
+          finishedAt: nowIso(),
+        })
+      }
+    }
+    this.repos.flowRuns.update(run.id, { branch, worktreePath, specDir })
+    this.callbacks.onFlowChanged(project.id)
+    await this.beginStage(run.id, startStage)
+    return this.requireRun(run.id)
+  }
+
+  async approve(runId: string): Promise<FlowRun> {
+    const run = this.requireRun(runId)
+    const stageRow = this.repos.flowStages.get(runId, run.stage)
+    if (!stageRow || stageRow.status !== 'review') {
+      throw { code: 'RULE_NOT_ALLOWED', message: 'This stage is not waiting for approval.' } satisfies IpcError
+    }
+    this.repos.flowStages.update(runId, run.stage, { status: 'approved' })
+    this.callbacks.onFlowChanged(run.projectId)
+    await this.advance(runId)
+    return this.requireRun(runId)
+  }
+
+  async retry(runId: string): Promise<FlowRun> {
+    const run = this.requireRun(runId)
+    const stageRow = this.repos.flowStages.get(runId, run.stage)
+    if (!stageRow || stageRow.status !== 'failed') {
+      throw { code: 'RULE_NOT_ALLOWED', message: 'This stage has not failed.' } satisfies IpcError
+    }
+    await this.beginStage(runId, run.stage)
+    return this.requireRun(runId)
+  }
+
+  async skip(runId: string): Promise<FlowRun> {
+    const run = this.requireRun(runId)
+    const stageRow = this.repos.flowStages.get(runId, run.stage)
+    if (stageRow?.status === 'running' && stageRow.sessionId) {
+      await this.manager.interruptSession(stageRow.sessionId).catch(() => {})
+      this.sessionStage.delete(stageRow.sessionId)
+      this.pending.delete(stageRow.sessionId)
+    }
+    this.repos.flowStages.update(runId, run.stage, { status: 'skipped', finishedAt: nowIso() })
+    this.callbacks.onFlowChanged(run.projectId)
+    if (run.stage === 'ship') {
+      this.repos.flowRuns.finish(runId, 'done', null)
+      this.callbacks.onFlowChanged(run.projectId)
+      return this.requireRun(runId)
+    }
+    await this.advance(runId)
+    return this.requireRun(runId)
+  }
+
+  async fix(runId: string): Promise<FlowRun> {
+    const run = this.requireRun(runId)
+    if (run.stage !== 'review') {
+      throw { code: 'RULE_NOT_ALLOWED', message: 'Fix only applies to the review stage.' } satisfies IpcError
+    }
+    const stageRow = this.repos.flowStages.get(runId, 'review')
+    if (!stageRow || stageRow.status !== 'review') {
+      throw { code: 'RULE_NOT_ALLOWED', message: 'This stage is not waiting for a fix.' } satisfies IpcError
+    }
+    const project = this.requireProject(run.projectId)
+    const session = await this.sessionFor(run, project, 'review')
+    this.repos.flowStages.update(runId, 'review', {
+      status: 'running',
+      sessionId: session.id,
+      attempts: stageRow.attempts + 1,
+      startedAt: nowIso(),
+      finishedAt: null,
+    })
+    this.repos.flowRuns.update(runId, { status: 'running' })
+    this.callbacks.onFlowChanged(project.id)
     this.manager.watchFlow(session.id)
-    this.manager.sendMessage(
-      session.id,
-      scopePrompt({ featureId: input.featureId, featureTitle: input.featureTitle }),
-    )
-    this.callbacks.onFlowChanged(input.projectId)
+    this.sessionStage.set(session.id, { runId, stage: 'review' })
+    this.pending.set(session.id, this.tailFor(run, 'review'))
+    this.manager.sendMessage(session.id, fixFindingsPrompt())
+    return this.requireRun(runId)
+  }
+
+  async revise(runId: string, feedback: string): Promise<FlowRun> {
+    const run = this.requireRun(runId)
+    const stageRow = this.repos.flowStages.get(runId, run.stage)
+    if (!stageRow || stageRow.status !== 'review') {
+      throw { code: 'RULE_NOT_ALLOWED', message: 'This stage is not waiting for approval.' } satisfies IpcError
+    }
+    const project = this.requireProject(run.projectId)
+    const session = await this.sessionFor(run, project, run.stage)
+    this.repos.flowStages.update(runId, run.stage, {
+      status: 'running',
+      sessionId: session.id,
+      attempts: stageRow.attempts + 1,
+      startedAt: nowIso(),
+      finishedAt: null,
+      feedback,
+    })
+    this.repos.flowRuns.update(runId, { status: 'running' })
+    this.callbacks.onFlowChanged(project.id)
+    this.manager.watchFlow(session.id)
+    this.sessionStage.set(session.id, { runId, stage: run.stage })
+    this.pending.set(session.id, this.tailFor(run, run.stage))
+    this.manager.sendMessage(session.id, revisePrompt(ARTEFACT_NAME[run.stage], feedback))
+    return this.requireRun(runId)
+  }
+
+  async ship(runId: string): Promise<FlowRun> {
+    const run = this.requireRun(runId)
+    if (run.stage !== 'ship') {
+      throw {
+        code: 'RULE_NOT_ALLOWED',
+        message: 'This run has not reached the ship stage yet.',
+      } satisfies IpcError
+    }
+    const stageRow = this.repos.flowStages.get(runId, 'ship')
+    if (stageRow?.status === 'running') {
+      throw {
+        code: 'RULE_NOT_ALLOWED',
+        message: 'The pull request step is already running.',
+      } satisfies IpcError
+    }
+    await this.beginStage(runId, 'ship')
+    return this.requireRun(runId)
+  }
+
+  async cancel(runId: string): Promise<FlowRun> {
+    const run = this.requireRun(runId)
+    if (run.finishedAt) return run
+    const stageRow = this.repos.flowStages.get(runId, run.stage)
+    if (stageRow?.sessionId) {
+      await this.manager.interruptSession(stageRow.sessionId).catch(() => {})
+      this.sessionStage.delete(stageRow.sessionId)
+      this.pending.delete(stageRow.sessionId)
+    }
+    if (stageRow && stageRow.status === 'running') {
+      this.repos.flowStages.update(runId, run.stage, {
+        status: 'failed',
+        summary: 'Cancelled.',
+        finishedAt: nowIso(),
+      })
+    }
+    this.repos.flowRuns.finish(runId, 'cancelled', 'You stopped this flow.')
+    this.callbacks.onFlowChanged(run.projectId)
+    return this.requireRun(runId)
+  }
+
+  setAutopilot(runId: string, autopilot: boolean): FlowRun {
+    this.repos.flowRuns.update(runId, { autopilot })
+    const run = this.requireRun(runId)
+    this.callbacks.onFlowChanged(run.projectId)
     return run
   }
 
-  saveItems(runId: string, items: readonly ScopedItem[]): FlowItem[] {
+  async removeWorktree(runId: string, force: boolean): Promise<FlowRun> {
     const run = this.requireRun(runId)
-    if (run.status !== 'awaiting_approval') {
-      throw {
-        code: 'RULE_NOT_ALLOWED',
-        message: 'This run is not waiting for a breakdown to be approved.',
-      } satisfies IpcError
-    }
-    const saved = this.repos.flowItems.replaceForRun(runId, run.projectId, items)
-    this.callbacks.onFlowChanged(run.projectId)
-    return saved
-  }
-
-  async publish(runId: string): Promise<FlowRun> {
-    const run = this.requireRun(runId)
-    if (run.status !== 'awaiting_approval' && run.status !== 'publish_interrupted') {
-      throw {
-        code: 'RULE_NOT_ALLOWED',
-        message: 'This run is not ready to write its items to Azure DevOps.',
-      } satisfies IpcError
-    }
-    const items = this.repos.flowItems.listForRun(runId).filter((item) => item.status === 'proposed')
-    if (items.length === 0) {
-      throw {
-        code: 'INVALID_PATH',
-        message: 'There is nothing to create: every item is already in Azure DevOps.',
-      } satisfies IpcError
-    }
-    const session = await this.flowSession(run.projectId, run.sessionId)
-    await this.requireAdo(session.id)
-    this.repos.flowRuns.update(runId, { status: 'publishing', sessionId: session.id, note: null })
-    this.manager.watchFlow(session.id)
-    this.manager.sendMessage(session.id, publishPrompt({ run, items }))
-    this.callbacks.onFlowChanged(run.projectId)
-    return this.requireRun(runId)
-  }
-
-  private async crosscheck(runId: string, items: readonly ScopedItem[]): Promise<void> {
-    const run = this.repos.flowRuns.byId(runId)
-    if (!run) return
-    try {
-      // Lead B is always a fresh session: a reviewer that shares the author's context
-      // is not a second opinion.
-      const session = await this.manager.startSession(run.projectId, false, 'plan', undefined, {
-        background: true,
-        engine: 'claude',
-      })
-      this.manager.markSection(session.id, 'flow')
-      this.manager.renameSession(session.id, `Flow review: ${run.featureTitle}`.slice(0, 60))
-      this.repos.flowRuns.update(runId, { sessionId: session.id })
-      this.manager.watchFlow(session.id)
-      this.manager.sendMessage(
-        session.id,
-        crosscheckPrompt({
-          featureId: run.featureId,
-          featureTitle: run.featureTitle,
-          items,
-          round: run.crosscheckRound,
-        }),
-      )
-    } catch (error) {
-      this.repos.flowRuns.update(runId, {
-        status: 'awaiting_approval',
-        note: `The cross-check could not run (${errorText(error)}), so this breakdown has had one pair of eyes only.`,
-      })
-      this.callbacks.onFlowChanged(run.projectId)
-    }
-  }
-
-  private settleSignoff(
-    run: FlowRun,
-    verdict: 'approve' | 'revise',
-    concerns: string[],
-    revised: ScopedItem[] | null,
-  ): void {
-    if (verdict === 'approve') {
-      this.repos.flowRuns.update(run.id, {
-        status: 'awaiting_approval',
-        concerns,
-        note: concerns.length > 0 ? 'The reviewer approved it, with notes.' : null,
-      })
-      this.callbacks.onFlowChanged(run.projectId)
-      return
-    }
-    if (revised) this.repos.flowItems.replaceForRun(run.id, run.projectId, revised)
-    const round = run.crosscheckRound + 1
-    if (round >= MAX_CROSSCHECK_ROUNDS) {
-      this.repos.flowRuns.update(run.id, {
-        status: 'awaiting_approval',
-        crosscheckRound: round,
-        concerns,
-        note: `The two sessions did not agree after ${round} rounds, so the breakdown is yours to settle.`,
-      })
-      this.callbacks.onFlowChanged(run.projectId)
-      return
-    }
-    this.repos.flowRuns.update(run.id, { status: 'scoping', crosscheckRound: round, concerns })
-    this.callbacks.onFlowChanged(run.projectId)
-    void this.relayConcerns(run.id, concerns)
-  }
-
-  private async relayConcerns(runId: string, concerns: string[]): Promise<void> {
-    const run = this.repos.flowRuns.byId(runId)
-    if (!run) return
-    try {
-      const session = await this.manager.startSession(run.projectId, false, 'plan', undefined, {
-        background: true,
-        engine: 'claude',
-      })
-      this.manager.markSection(session.id, 'flow')
-      this.manager.renameSession(session.id, `Flow rescope: ${run.featureTitle}`.slice(0, 60))
-      this.repos.flowRuns.update(runId, { sessionId: session.id })
-      this.manager.watchFlow(session.id)
-      this.manager.sendMessage(session.id, reviseScopePrompt(concerns))
-    } catch (error) {
-      this.repos.flowRuns.update(runId, {
-        status: 'awaiting_approval',
-        note: `The revision could not be dispatched (${errorText(error)}). The reviewer's concerns are below, unanswered.`,
-      })
-      this.callbacks.onFlowChanged(run.projectId)
-    }
-  }
-
-  async writeSpec(runId: string): Promise<FlowRun> {
-    const run = this.requireRun(runId)
-    const items = this.repos.flowItems.listForRun(runId)
-    if (items.length === 0) {
-      throw {
-        code: 'INVALID_PATH',
-        message: 'Approve a breakdown first. The spec is written from the items.',
-      } satisfies IpcError
-    }
-    const project = this.repos.projects.byId(run.projectId)
-    if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
-    if (!(await isSpecKitInstalled(project.path))) {
-      throw {
-        code: 'UNSUPPORTED',
-        message: 'Install Spec Kit from the Specs tab first.',
-      } satisfies IpcError
-    }
-    if (run.specSessionId && this.manager.workdirFor(run.specSessionId)) {
-      throw {
-        code: 'RULE_NOT_ALLOWED',
-        message: 'The spec is already being written. Wait for that session to finish.',
-      } satisfies IpcError
-    }
-    const session = await this.manager.backgroundSessionFor(run.projectId, 'spec')
-    this.repos.flowRuns.update(runId, { specSessionId: session.id })
-    this.manager.sendMessage(session.id, `/speckit-specify ${specDescription({ run, items })}`)
-    this.callbacks.onFlowChanged(run.projectId)
-    return this.requireRun(runId)
-  }
-
-  async learn(runId: string): Promise<FlowRun> {
-    const run = this.requireRun(runId)
-    const items = this.repos.flowItems.listForRun(runId)
-    if (!items.some((item) => item.prId)) {
-      throw {
-        code: 'INVALID_PATH',
-        message: 'No pull request was raised for this feature, so there are no comments to read.',
-      } satisfies IpcError
-    }
-    const session = await this.manager.startSession(run.projectId, false, 'plan', undefined, {
-      background: true,
-      engine: 'claude',
-    })
-    await this.requireAdo(session.id)
-    this.manager.markSection(session.id, 'flow')
-    this.manager.renameSession(session.id, `Flow lessons: ${run.featureTitle}`.slice(0, 60))
-    this.repos.flowRuns.update(runId, { status: 'learning', sessionId: session.id, note: null })
-    this.manager.watchFlow(session.id)
-    this.manager.sendMessage(
-      session.id,
-      lessonsPrompt({ run, items, rejected: this.repos.flowLessons.rejectedRules(run.projectId) }),
-    )
-    this.callbacks.onFlowChanged(run.projectId)
-    return this.requireRun(runId)
-  }
-
-  async decideLesson(
-    lessonId: string,
-    accept: boolean,
-    reason: string | null,
-  ): Promise<{ appliedLines: number; path: string | null }> {
-    const lesson = this.repos.flowLessons.byId(lessonId)
-    if (!lesson) throw { code: 'NOT_FOUND', message: 'Lesson not found' } satisfies IpcError
-    if (!accept) {
-      this.repos.flowLessons.decide(lessonId, 'rejected', reason)
-      this.callbacks.onFlowChanged(lesson.projectId)
-      return { appliedLines: 0, path: null }
-    }
-    const project = this.repos.projects.byId(lesson.projectId)
-    if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
-    const written = await appendRule(project.path, lesson)
-    this.repos.flowLessons.decide(lessonId, 'accepted', reason)
-    this.callbacks.onFlowChanged(lesson.projectId)
-    return written
-  }
-
-  async startWork(runId: string): Promise<FlowRun> {
-    const run = this.requireRun(runId)
-    if (run.status !== 'ready' && run.status !== 'implementing') {
-      throw {
-        code: 'RULE_NOT_ALLOWED',
-        message: 'This run has no work items in Azure DevOps yet.',
-      } satisfies IpcError
-    }
-    const project = this.repos.projects.byId(run.projectId)
-    if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
-
-    const dirty = await this.git.dirty(project.path)
-    if (dirty.length > 0) {
+    if (!run.worktreePath) return run
+    const project = this.requireProject(run.projectId)
+    const outcome = await this.git.remove(project.path, run.worktreePath, { force })
+    if (!outcome.removed) {
       throw {
         code: 'CONFIRM_REQUIRED',
-        message: `The main checkout has ${dirty.length} uncommitted change${dirty.length === 1 ? '' : 's'}, and every work item branches from it. Commit or stash them first — Flow will not do that for you.`,
+        message: `The worktree has ${outcome.dirty.length} uncommitted change${outcome.dirty.length === 1 ? '' : 's'}.`,
       } satisfies IpcError
     }
-
-    const queued = this.repos.flowItems.queuePublished(runId)
-    if (queued === 0 && this.repos.flowItems.countActive(runId) === 0) {
-      throw {
-        code: 'INVALID_PATH',
-        message: 'There is nothing to work on: no item reached Azure DevOps.',
-      } satisfies IpcError
-    }
-    this.repos.flowRuns.update(runId, {
-      status: 'implementing',
-      baseBranch: run.baseBranch ?? (await this.git.branch(project.path)),
-      worktreeRoot: run.worktreeRoot ?? this.git.root(project.path, this.settings().flowWorktreeRoot),
-      note: null,
-    })
-    this.callbacks.onFlowChanged(run.projectId)
-    await this.pump(runId)
+    this.repos.flowRuns.update(runId, { worktreePath: null })
+    this.callbacks.onFlowChanged(project.id)
     return this.requireRun(runId)
   }
 
-  async retryItem(itemId: string): Promise<void> {
-    const item = this.repos.flowItems.byId(itemId)
-    if (!item) throw { code: 'NOT_FOUND', message: 'Work item not found' } satisfies IpcError
-    if (item.sessionId) await this.manager.interruptSession(item.sessionId).catch(() => {})
-    this.repos.flowItems.update(itemId, {
-      status: 'queued',
-      attempts: 0,
-      sessionId: null,
-      note: null,
-    })
-    this.callbacks.onFlowChanged(item.projectId)
-    void this.pump(item.runId)
-  }
-
-  private async pump(runId: string): Promise<void> {
-    if (this.pumping.has(runId)) return
-    this.pumping.add(runId)
+  async artefact(
+    runId: string,
+    stage: FlowStage,
+    kind?: FlowArtefactKind,
+  ): Promise<{ path: string | null; content: string } | null> {
+    const run = this.requireRun(runId)
+    const resolvedKind = kind ?? defaultArtefactKind(stage)
+    if (resolvedKind === 'report') {
+      const stageRow = this.repos.flowStages.get(runId, stage)
+      if (!stageRow?.report) return null
+      return { path: null, content: JSON.stringify(stageRow.report, null, 2) }
+    }
+    if (!run.worktreePath) return null
+    const rel = artefactRelPath(run.specDir, resolvedKind)
+    if (!rel) return null
+    if (resolvedKind === 'postman') {
+      const dir = resolveArtefactPath(run.worktreePath, rel)
+      if (!dir) return null
+      try {
+        const files = await readdir(dir)
+        const file = files.find((name) => name.endsWith('.postman_collection.json'))
+        if (!file) return null
+        const full = resolveArtefactPath(run.worktreePath, join(rel, file))
+        if (!full) return null
+        return { path: join(rel, file), content: await readFile(full, 'utf8') }
+      } catch {
+        return null
+      }
+    }
+    const abs = resolveArtefactPath(run.worktreePath, rel)
+    if (!abs) return null
     try {
-      await this.fill(runId)
-    } finally {
-      this.pumping.delete(runId)
+      return { path: rel, content: await readFile(abs, 'utf8') }
+    } catch {
+      return null
     }
-  }
-
-  private async fill(runId: string): Promise<void> {
-    const run = this.repos.flowRuns.byId(runId)
-    if (!run || run.status !== 'implementing') return
-    while (this.repos.flowItems.countActive(runId) < run.concurrency) {
-      const next = this.repos.flowItems.nextQueued(runId)
-      if (!next) break
-      this.repos.flowItems.update(next.id, { status: 'preparing', startedAt: nowIso() })
-      await this.beginItem(run, next.id)
-    }
-    const items = this.repos.flowItems.listForRun(runId)
-    const settled = items.every((item) =>
-      ['pr_open', 'done', 'failed', 'blocked', 'cancelled'].includes(item.status),
-    )
-    if (settled && items.length > 0) {
-      this.repos.flowRuns.update(runId, { status: 'ready', note: null })
-    }
-    this.callbacks.onFlowChanged(run.projectId)
-  }
-
-  private async beginItem(run: FlowRun, itemId: string): Promise<void> {
-    const item = this.repos.flowItems.byId(itemId)
-    const project = this.repos.projects.byId(run.projectId)
-    if (!item || !project) return
-    const branch = item.branch ?? branchNameFor(item.workItemId ?? item.localId, item.title)
-    const root = run.worktreeRoot ?? this.git.root(project.path, this.settings().flowWorktreeRoot)
-    const path = item.worktreePath ?? worktreePathFor(root, branch)
-    try {
-      await this.git.create({
-        repoRoot: project.path,
-        path,
-        branch,
-        base: run.baseBranch ?? 'HEAD',
-      })
-    } catch (error) {
-      this.repos.flowItems.update(itemId, {
-        status: 'blocked',
-        note: `The worktree could not be created: ${errorText(error)}`,
-      })
-      return
-    }
-    this.repos.flowItems.update(itemId, { branch, worktreePath: path })
-    await this.startImplementer(run, itemId)
-  }
-
-  private async startImplementer(run: FlowRun, itemId: string): Promise<void> {
-    const item = this.repos.flowItems.byId(itemId)
-    if (!item?.worktreePath || !item.branch) return
-    try {
-      const session = await this.manager.startSession(run.projectId, false, 'acceptEdits', undefined, {
-        background: true,
-        engine: 'claude',
-        cwd: item.worktreePath,
-        effort: 'max',
-      })
-      this.manager.markSection(session.id, 'flow')
-      this.manager.renameSession(session.id, `PBI ${item.workItemId ?? item.localId}`.slice(0, 60))
-      this.repos.flowItems.update(itemId, {
-        status: 'implementing',
-        sessionId: session.id,
-        attempts: item.attempts + 1,
-      })
-      this.manager.watchFlow(session.id)
-      this.manager.sendMessage(
-        session.id,
-        implementPrompt({ run, item, branch: item.branch, resumed: item.attempts > 0 }),
-      )
-    } catch (error) {
-      this.repos.flowItems.update(itemId, {
-        status: 'blocked',
-        note: `A session could not be started for this item: ${errorText(error)}`,
-      })
-    }
-  }
-
-  private async raisePr(run: FlowRun, itemId: string): Promise<void> {
-    const item = this.repos.flowItems.byId(itemId)
-    if (!item?.worktreePath || !item.branch) return
-    try {
-      const session = await this.manager.startSession(run.projectId, false, 'acceptEdits', undefined, {
-        background: true,
-        engine: 'claude',
-        cwd: item.worktreePath,
-      })
-      await this.requireAdo(session.id)
-      this.manager.markSection(session.id, 'flow')
-      this.manager.renameSession(session.id, `PR ${item.workItemId ?? item.localId}`.slice(0, 60))
-      this.repos.flowItems.update(itemId, { status: 'raising_pr', sessionId: session.id })
-      this.manager.watchFlow(session.id)
-      this.manager.sendMessage(
-        session.id,
-        prPrompt({ run, item, branch: item.branch, baseBranch: run.baseBranch ?? 'main' }),
-      )
-    } catch (error) {
-      this.repos.flowItems.update(itemId, {
-        status: 'blocked',
-        note: `The pull request step could not start: ${errorText(error)}`,
-      })
-      this.callbacks.onFlowChanged(run.projectId)
-    }
-  }
-
-  private restartItem(item: FlowItem, why: string): void {
-    if (item.attempts >= MAX_ITEM_ATTEMPTS) {
-      this.repos.flowItems.update(item.id, {
-        status: 'failed',
-        sessionId: null,
-        note: `${why} Gave up after ${item.attempts} attempts.`,
-        finishedAt: nowIso(),
-      })
-      this.callbacks.onFlowChanged(item.projectId)
-      void this.pump(item.runId)
-      return
-    }
-    this.repos.flowItems.update(item.id, {
-      status: 'queued',
-      sessionId: null,
-      note: `${why} Restarting, attempt ${item.attempts + 1} of ${MAX_ITEM_ATTEMPTS}.`,
-    })
-    this.callbacks.onFlowChanged(item.projectId)
-    const wait = FLOW_BACKOFF_MS[Math.min(Math.max(item.attempts - 1, 0), FLOW_BACKOFF_MS.length - 1)]
-    const timer = setTimeout(() => {
-      this.backoffTimers.delete(item.id)
-      void this.pump(item.runId)
-    }, wait)
-    timer.unref?.()
-    this.backoffTimers.set(item.id, timer)
-  }
-
-  async cancel(runId: string): Promise<void> {
-    const run = this.repos.flowRuns.byId(runId)
-    if (!run) throw { code: 'NOT_FOUND', message: 'Run not found' } satisfies IpcError
-    if (run.finishedAt) return
-    if (run.sessionId) await this.manager.interruptSession(run.sessionId).catch(() => {})
-    this.repos.flowRuns.finish(runId, 'cancelled', 'You stopped this flow.')
-    this.callbacks.onFlowChanged(run.projectId)
   }
 
   onFlowMarker(sessionId: string, marker: FlowMarker): void {
-    if (marker.kind === 'item' || marker.kind === 'pr') {
-      const item = this.repos.flowItems.bySessionId(sessionId)
-      if (!item) return
-      const run = this.repos.flowRuns.byId(item.runId)
-      if (!run) return
-      if (marker.kind === 'item') {
-        if (marker.outcome === 'blocked') {
-          this.repos.flowItems.update(item.id, {
-            status: 'blocked',
-            note: marker.why ?? marker.summary ?? 'The session reported it was blocked.',
-          })
-          this.callbacks.onFlowChanged(run.projectId)
-          void this.pump(run.id)
-          return
-        }
-        this.repos.flowItems.update(item.id, { note: marker.summary || null })
-        void this.raisePr(run, item.id)
-        return
-      }
-      this.repos.flowItems.update(item.id, {
-        status: 'pr_open',
-        prId: marker.prId,
-        prUrl: marker.url,
-        finishedAt: nowIso(),
-      })
-      this.callbacks.onFlowChanged(run.projectId)
-      void this.pump(run.id)
-      return
-    }
     if (marker.kind === 'features') {
       const waiter = this.featuresWaiters.get(sessionId)
       if (!waiter) return
@@ -578,90 +432,48 @@ export class FlowSupervisor {
       waiter.resolve(marker.features)
       return
     }
-    const run = this.repos.flowRuns.bySessionId(sessionId)
-    if (!run) return
-    if (marker.kind === 'scope' && run.status === 'scoping') {
-      this.repos.flowItems.replaceForRun(run.id, run.projectId, marker.items)
-      this.repos.flowRuns.update(run.id, {
-        status: 'crosscheck',
-        risks: marker.risks,
-        outOfScope: marker.outOfScope,
-        note: null,
+    const ctx = this.sessionStage.get(sessionId)
+    if (!ctx || ctx.stage !== marker.stage) return
+    const stageRow = this.repos.flowStages.get(ctx.runId, ctx.stage)
+    if (!stageRow || stageRow.status !== 'running') return
+    this.pending.delete(sessionId)
+    this.sessionStage.delete(sessionId)
+    if (marker.outcome === 'blocked') {
+      this.failStage(ctx.runId, ctx.stage, marker.why ?? marker.summary ?? 'The session reported it was blocked.', {
+        retryOnce: false,
       })
-      this.callbacks.onFlowChanged(run.projectId)
-      void this.crosscheck(run.id, marker.items)
       return
     }
-    if (marker.kind === 'signoff' && run.status === 'crosscheck') {
-      this.settleSignoff(run, marker.verdict, marker.concerns, marker.items)
-      return
-    }
-    if (marker.kind === 'lessons' && run.status === 'learning') {
-      const rejected = new Set(
-        this.repos.flowLessons.rejectedRules(run.projectId).map((rule) => flowRuleId(rule)),
-      )
-      let suppressed = 0
-      for (const lesson of marker.lessons) {
-        const ruleId = flowRuleId(lesson.rule)
-        // The prompt asks for rejected rules to be left out; this is what enforces it.
-        if (rejected.has(ruleId)) {
-          suppressed += 1
-          continue
-        }
-        this.repos.flowLessons.propose({
-          projectId: run.projectId,
-          runId: run.id,
-          ruleId,
-          rule: lesson.rule,
-          section: lesson.section,
-          evidence: lesson.evidence,
-        })
-      }
-      const parts = [marker.note]
-      if (suppressed > 0) {
-        parts.push(
-          `${suppressed} rule${suppressed === 1 ? ' was' : 's were'} left out because you rejected ${suppressed === 1 ? 'it' : 'them'} before.`,
-        )
-      }
-      if (marker.lessons.length === 0) parts.push('No reviewer comment became a rule.')
-      this.repos.flowRuns.update(run.id, {
-        status: 'done',
-        note: parts.filter((part): part is string => Boolean(part)).join(' ') || null,
+    this.completeStage(ctx.runId, ctx.stage, marker)
+  }
+
+  onVerifyReport(sessionId: string, report: VerifyReport): void {
+    const ctx = this.sessionStage.get(sessionId)
+    if (!ctx || ctx.stage !== 'test') return
+    const stageRow = this.repos.flowStages.get(ctx.runId, ctx.stage)
+    if (!stageRow || stageRow.status !== 'running') return
+    this.pending.delete(sessionId)
+    this.sessionStage.delete(sessionId)
+    const flowReport: FlowStageReport = { ...emptyFlowStageReport(), verify: report }
+    if (report.suites.length > 0 && verifyVerdict(report) === 'pass') {
+      this.repos.flowStages.update(ctx.runId, ctx.stage, {
+        status: 'review',
+        summary: `${report.suites.length} suite${report.suites.length === 1 ? '' : 's'} passed.`,
+        report: flowReport,
         finishedAt: nowIso(),
       })
-      this.callbacks.onFlowChanged(run.projectId)
+      this.repos.flowRuns.update(ctx.runId, { status: 'waiting' })
+      const run = this.repos.flowRuns.byId(ctx.runId)
+      if (run) this.callbacks.onFlowChanged(run.projectId)
+      this.maybeAutopilot(ctx.runId, ctx.stage)
       return
     }
-    if (marker.kind === 'published' && run.status === 'publishing') {
-      for (const made of marker.created) {
-        const item = this.repos.flowItems.byLocalId(run.id, made.localId)
-        if (!item) continue
-        this.repos.flowItems.update(item.id, {
-          workItemId: made.workItemId,
-          workItemUrl: made.url,
-          status: 'published',
-          note: null,
-        })
-      }
-      for (const miss of marker.failed) {
-        const item = this.repos.flowItems.byLocalId(run.id, miss.localId)
-        if (!item) continue
-        this.repos.flowItems.update(item.id, { status: 'failed', note: miss.why })
-      }
-      const remaining = this.repos.flowItems
-        .listForRun(run.id)
-        .filter((item) => item.status === 'proposed').length
-      this.repos.flowRuns.update(run.id, {
-        status: 'ready',
-        note:
-          marker.failed.length > 0
-            ? `${marker.failed.length} item${marker.failed.length === 1 ? '' : 's'} could not be created.`
-            : remaining > 0
-              ? `${remaining} item${remaining === 1 ? '' : 's'} were not reported either way.`
-              : null,
-      })
-      this.callbacks.onFlowChanged(run.projectId)
-    }
+    const failed = report.suites.filter((s) => s.status === 'fail').map((s) => s.id)
+    const why =
+      failed.length > 0
+        ? `The following suites failed: ${failed.join(', ')}.`
+        : 'No suite reported a pass or fail result — open the session output to see what ran.'
+    this.failStage(ctx.runId, ctx.stage, why, { retryOnce: false }, flowReport)
   }
 
   onSessionEnded(sessionId: string, _reason: SessionEndReason | 'crashed'): void {
@@ -674,35 +486,212 @@ export class FlowSupervisor {
         message: 'The session ended before it listed any Features.',
       } satisfies IpcError)
     }
-    const item = this.repos.flowItems.bySessionId(sessionId)
-    if (item) {
-      if (item.status === 'implementing') {
-        this.restartItem(item, 'The session ended before it reported on this item.')
+    const ctx = this.sessionStage.get(sessionId)
+    if (!ctx) return
+    this.sessionStage.delete(sessionId)
+    this.pending.delete(sessionId)
+    const stageRow = this.repos.flowStages.get(ctx.runId, ctx.stage)
+    if (!stageRow || stageRow.status !== 'running') return
+    this.failStage(ctx.runId, ctx.stage, 'The session ended before this stage reported.', { retryOnce: true })
+  }
+
+  onTurnEnded(sessionId: string): void {
+    const ctx = this.sessionStage.get(sessionId)
+    if (!ctx) return
+    const queue = this.pending.get(sessionId)
+    if (queue && queue.length > 0) {
+      const next = queue.shift()
+      if (next) this.manager.sendMessage(sessionId, next)
+      return
+    }
+    const stageRow = this.repos.flowStages.get(ctx.runId, ctx.stage)
+    if (!stageRow || stageRow.status !== 'running') return
+    this.sessionStage.delete(sessionId)
+    this.pending.delete(sessionId)
+    this.failStage(ctx.runId, ctx.stage, 'The session ended before this stage reported.', { retryOnce: true })
+  }
+
+  private deriveTitle(source: FlowStartSource): string {
+    if (source.kind === 'ado') return source.featureTitle
+    if (source.kind === 'text') return source.title
+    return source.specId
+  }
+
+  private sessionMode(project: Project): Project['defaultSessionMode'] {
+    return project.defaultSessionMode === 'bypass' ? 'acceptEdits' : project.defaultSessionMode
+  }
+
+  private async startStageSession(run: FlowRun, project: Project, stage: FlowStage): Promise<{ id: string }> {
+    const settings = this.repos.settings.get()
+    const effort = stage === 'build' ? 'max' : settings.effort
+    const session = await this.manager.startSession(project.id, false, this.sessionMode(project), undefined, {
+      background: true,
+      engine: 'claude',
+      cwd: run.worktreePath ?? project.path,
+      effort,
+    })
+    this.manager.markSection(session.id, 'flow')
+    this.manager.renameSession(session.id, `Flow · ${FLOW_STAGE_LABELS[stage]} · ${run.title}`.slice(0, 60))
+    return session
+  }
+
+  private async sessionFor(run: FlowRun, project: Project, stage: FlowStage): Promise<{ id: string }> {
+    const stageRow = this.repos.flowStages.get(run.id, stage)
+    if (stageRow?.sessionId && this.manager.workdirFor(stageRow.sessionId)) return { id: stageRow.sessionId }
+    return this.startStageSession(run, project, stage)
+  }
+
+  private verifyStepPrompt(run: FlowRun): string {
+    const plans: PlannedSuite[] = []
+    for (const stackId of run.stacks) {
+      const stack = stackById(stackId)
+      if (!stack) continue
+      plans.push(...planSuites(stack.suites, defaultSelection(stack.suites, null), null))
+    }
+    const label = run.stacks.map((id) => stackById(id)?.label ?? id).join(' + ') || 'project'
+    return buildVerifyPrompt(plans, label, null, [])
+  }
+
+  private planFor(run: FlowRun, stage: FlowStage): StagePlan {
+    const base = run.baseBranch ?? 'main'
+    switch (stage) {
+      case 'spec':
+        return { steps: [specifyPrompt(run), clarifyPrompt(run.autopilot)], handshake: specHandshake() }
+      case 'plan':
+        return { steps: [planPrompt(run.stacks), TASKS_PROMPT, ANALYZE_PROMPT], handshake: planHandshake() }
+      case 'build':
+        return { steps: buildSteps(run.stacks), handshake: buildHandshake() }
+      case 'clean':
+        return { steps: cleanSteps(run.stacks, base), handshake: cleanHandshake() }
+      case 'test':
+        return { steps: [testWritePrompt(run, run.stacks), this.verifyStepPrompt(run)], handshake: null }
+      case 'review':
+        return { steps: reviewSteps(run.stacks, base), handshake: reviewHandshake(base) }
+      case 'ship':
+        return { steps: [], handshake: shipPrompt(run) }
+    }
+  }
+
+  private tailFor(run: FlowRun, stage: FlowStage): string[] {
+    if (stage === 'test') return [this.verifyStepPrompt(run)]
+    const plan = this.planFor(run, stage)
+    return plan.handshake ? [plan.handshake] : []
+  }
+
+  private async beginStage(runId: string, stage: FlowStage): Promise<void> {
+    const run = this.requireRun(runId)
+    const project = this.requireProject(run.projectId)
+    const session = await this.startStageSession(run, project, stage)
+    const stageRow = this.repos.flowStages.get(runId, stage)
+    this.repos.flowStages.update(runId, stage, {
+      status: 'running',
+      sessionId: session.id,
+      attempts: (stageRow?.attempts ?? 0) + 1,
+      summary: null,
+      feedback: null,
+      startedAt: nowIso(),
+      finishedAt: null,
+    })
+    this.repos.flowRuns.update(runId, { stage, status: 'running' })
+    this.callbacks.onFlowChanged(project.id)
+    this.manager.watchFlow(session.id)
+    this.sessionStage.set(session.id, { runId, stage })
+    if (stage === 'spec' && run.source === 'ado') {
+      try {
+        await this.requireAdo(session.id)
+      } catch (error) {
+        this.sessionStage.delete(session.id)
+        this.failStage(runId, stage, errorText(error), { retryOnce: false })
         return
       }
-      if (item.status === 'raising_pr') {
-        this.repos.flowItems.update(item.id, {
-          status: 'pr_interrupted',
-          sessionId: null,
-          note: 'The session ended while raising the pull request. A branch may already be pushed, and a pull request may already exist, so check Azure Repos before retrying.',
-        })
-        this.callbacks.onFlowChanged(item.projectId)
-        void this.pump(item.runId)
-      }
-      return
     }
+    const plan = this.planFor(run, stage)
+    const queue = [...plan.steps]
+    if (plan.handshake) queue.push(plan.handshake)
+    const first = queue.shift()
+    this.pending.set(session.id, queue)
+    if (first) this.manager.sendMessage(session.id, first)
+  }
 
-    const run = this.repos.flowRuns.bySessionId(sessionId)
+  private completeStage(runId: string, stage: FlowStage, marker: FlowStageMarker): void {
+    const run = this.repos.flowRuns.byId(runId)
     if (!run) return
-    if (run.status === 'scoping') {
-      this.repos.flowRuns.finish(run.id, 'failed', SCOPE_LOST)
+    const report: FlowStageReport = {
+      tasksDone: marker.tasksDone,
+      tasksTotal: marker.tasksTotal,
+      verdict: marker.verdict,
+      findings: marker.findings,
+      unmet: marker.unmet,
+      prUrl: marker.prUrl,
+      prId: marker.prId,
+      verify: null,
+    }
+    this.repos.flowStages.update(runId, stage, {
+      status: 'review',
+      summary: marker.summary || null,
+      report,
+      finishedAt: nowIso(),
+    })
+    const patch: Parameters<Repositories['flowRuns']['update']>[1] = { status: 'waiting' }
+    if (stage === 'spec' && marker.specDir) patch.specDir = marker.specDir
+    if (stage === 'ship') {
+      patch.prUrl = marker.prUrl
+      patch.prId = marker.prId
+    }
+    this.repos.flowRuns.update(runId, patch)
+    this.callbacks.onFlowChanged(run.projectId)
+    this.maybeAutopilot(runId, stage)
+  }
+
+  private failStage(
+    runId: string,
+    stage: FlowStage,
+    why: string,
+    opts: { retryOnce: boolean },
+    report?: FlowStageReport | null,
+  ): void {
+    const run = this.repos.flowRuns.byId(runId)
+    if (!run) return
+    const stageRow = this.repos.flowStages.get(runId, stage)
+    this.repos.flowStages.update(runId, stage, {
+      status: 'failed',
+      summary: why,
+      report: report ?? stageRow?.report ?? null,
+      finishedAt: nowIso(),
+    })
+    this.repos.flowRuns.update(runId, { status: 'waiting' })
+    this.callbacks.onFlowChanged(run.projectId)
+    if (opts.retryOnce && run.autopilot && stageRow?.attempts === 1) {
+      void this.retry(runId)
+    }
+  }
+
+  private maybeAutopilot(runId: string, stage: FlowStage): void {
+    const run = this.repos.flowRuns.byId(runId)
+    if (!run?.autopilot) return
+    const stageRow = this.repos.flowStages.get(runId, stage)
+    if (!stageRow || stageRow.status !== 'review') return
+    if (stage === 'review' && stageRow.report?.verdict === 'needs_fixes') {
+      // Never auto-approve unresolved findings: fix up to the round cap, then leave it for a human.
+      if (stageRow.attempts <= MAX_FIX_ROUNDS) void this.fix(runId)
+      return
+    }
+    void this.approve(runId)
+  }
+
+  private async advance(runId: string): Promise<void> {
+    const run = this.requireRun(runId)
+    const idx = FLOW_STAGES.indexOf(run.stage)
+    const next = FLOW_STAGES[idx + 1]
+    if (!next) {
+      this.repos.flowRuns.finish(runId, 'done', null)
       this.callbacks.onFlowChanged(run.projectId)
       return
     }
-    if (run.status === 'publishing') {
-      this.repos.flowRuns.update(run.id, { status: 'publish_interrupted', note: PUBLISH_LOST })
-      this.callbacks.onFlowChanged(run.projectId)
-    }
+    this.repos.flowRuns.update(runId, { stage: next, status: 'waiting' })
+    this.callbacks.onFlowChanged(run.projectId)
+    if (next === 'ship' && !(run.autopilot && run.autoShip)) return
+    await this.beginStage(runId, next)
   }
 
   private requireRun(runId: string): FlowRun {
@@ -711,12 +700,10 @@ export class FlowSupervisor {
     return run
   }
 
-  private async flowSession(projectId: string, preferred?: string | null): Promise<{ id: string }> {
-    if (preferred && this.manager.workdirFor(preferred)) return { id: preferred }
-    return this.manager.startSession(projectId, false, 'plan', undefined, {
-      background: true,
-      engine: 'claude',
-    })
+  private requireProject(projectId: string): Project {
+    const project = this.repos.projects.byId(projectId)
+    if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
+    return project
   }
 
   private async requireAdo(sessionId: string): Promise<void> {

@@ -1173,11 +1173,15 @@ export class SessionManager {
   private flowHooks: {
     onMarker: (sessionId: string, marker: FlowMarker) => void
     onSessionEnded: (sessionId: string, reason: SessionEndReason | 'crashed') => void
+    onVerifyReport: (sessionId: string, report: VerifyReport) => void
+    onTurnEnded: (sessionId: string) => void
   } | null = null
 
   setFlowHooks(hooks: {
     onMarker: (sessionId: string, marker: FlowMarker) => void
     onSessionEnded: (sessionId: string, reason: SessionEndReason | 'crashed') => void
+    onVerifyReport: (sessionId: string, report: VerifyReport) => void
+    onTurnEnded: (sessionId: string) => void
   }): void {
     this.flowHooks = hooks
   }
@@ -1195,8 +1199,12 @@ export class SessionManager {
     const text = (payload as { text?: string }).text
     if (!text) return
     const marker = parseFlowMarker(text)
-    if (!marker) return
-    this.flowHooks?.onMarker(entry.row.id, marker)
+    if (marker) {
+      this.flowHooks?.onMarker(entry.row.id, marker)
+      return
+    }
+    const report = parseVerifyReport(text)
+    if (report) this.flowHooks?.onVerifyReport(entry.row.id, report)
   }
 
   private closeUnreportedFlow(entry: HostedEntry, reason: SessionEndReason | 'crashed'): void {
@@ -1592,7 +1600,10 @@ export class SessionManager {
     this.repos.sessions.update(entry.row.id, { status, statusDetail: detail ?? null })
     this.pushStatus(entry)
     this.callbacks.onCountersChanged()
-    if (status === 'done') void this.endIfIdleBackground(entry)
+    if (status === 'done') {
+      if (this.flowWatch.has(entry.row.id)) this.flowHooks?.onTurnEnded(entry.row.id)
+      void this.endIfIdleBackground(entry)
+    }
   }
 
   private async endIfIdleBackground(entry: HostedEntry): Promise<void> {
