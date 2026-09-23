@@ -12,7 +12,7 @@ test('a new project defaults to Auto, which is what every project ran as before'
 }) => {
   await page.getByTestId('add-project').click()
   await expect(page.getByTestId('session-mode-auto')).toBeChecked()
-  for (const mode of ['default', 'acceptEdits', 'plan']) {
+  for (const mode of ['default', 'acceptEdits', 'plan', 'bypass']) {
     await expect(page.getByTestId(`session-mode-${mode}`)).not.toBeChecked()
   }
 })
@@ -26,7 +26,39 @@ test('the mode chosen when adding a project is what its session starts in', asyn
   await expect(page.getByTestId('registration-dialog')).toBeHidden()
   const start = await page.evaluate(() => window.__mock.state().starts.at(-1))
   expect(start?.mode).toBe('acceptEdits')
+  expect(start?.bypassPermissions).toBe(false)
   expect(start?.planMode).toBe(false)
+})
+
+test('choosing Bypass sends bypass, and the session records it', async ({ page }) => {
+  await page.getByTestId('add-project').click()
+  await page.getByTestId('folder-input').fill('C:\\work\\gamma')
+  await page.getByTestId('session-mode-bypass').check()
+  await page.getByTestId('start-session').click()
+
+  await expect(page.getByTestId('registration-dialog')).toBeHidden()
+  const start = await page.evaluate(() => window.__mock.state().starts.at(-1))
+  expect(start?.mode).toBe('bypass')
+  expect(start?.bypassPermissions).toBe(true)
+  expect(start?.planMode).toBe(false)
+})
+
+test('the sandbox memory cap is set in the Projects tab and reaches the settings', async ({
+  page,
+}) => {
+  await page.getByTestId('open-settings').click()
+  await page.getByTestId('settings-tab-proj').click()
+  const input = page.getByTestId('setting-sandbox-memory')
+  await expect(input).toHaveValue('6g')
+  await expect(page.getByTestId('proj-session-mode-bypass')).toBeVisible()
+
+  await input.fill('12g')
+  await input.press('Enter')
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.switchboard.invoke('settings.get', undefined)),
+    )
+    .toMatchObject({ sandboxMemory: '12g' })
 })
 
 test('the mode can be changed afterwards, and the next session uses the new one', async ({

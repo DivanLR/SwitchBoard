@@ -89,6 +89,17 @@ const store = reactive({
     if (item) item.defaultSessionMode = mode
   },
 
+  async setUseContainers(projectId: string, on: boolean): Promise<void> {
+    const item = state.items.find((p) => p.id === projectId)
+    if (item) item.useContainers = on
+    try {
+      await invoke('projects.setUseContainers', { projectId, on })
+    } catch (e) {
+      await this.refresh()
+      throw e
+    }
+  },
+
   async renameSession(sessionId: string, label: string): Promise<void> {
     await invoke('sessions.rename', { sessionId, label })
     await this.refresh()
@@ -152,10 +163,21 @@ const store = reactive({
     if (item) item.refs = refs
   },
 
-  async startSession(projectId: string, resume = false, mode?: SessionMode): Promise<Session> {
+  async startSession(
+    projectId: string,
+    resume = false,
+    mode?: SessionMode,
+    containerised?: boolean,
+  ): Promise<Session> {
     state.starting = true
     try {
-      const session = await invoke('sessions.start', { projectId, resume, mode })
+      const session = await invoke('sessions.start', {
+        projectId,
+        resume,
+        mode,
+        containerised:
+          containerised ?? state.items.find((p) => p.id === projectId)?.useContainers ?? false,
+      })
       await this.refresh()
       this.focusSession(projectId, session.id)
       return session

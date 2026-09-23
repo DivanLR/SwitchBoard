@@ -535,6 +535,36 @@ test('a run that reports nothing is inconclusive, never a pass', async ({ page }
   await expect(page.getByTestId('tests-gate-unit')).not.toContainText('passed')
 })
 
+test('a project that runs in containers marks the suites its container cannot run, before the run', async ({
+  page,
+}) => {
+  const scenario = twoProjectScenario()
+  scenario.projects[0].useContainers = true
+  await openTests(page, scenario)
+  await page.getByTestId('tests-stack-dotnet').click()
+  await expect(page.getByTestId('tests-suite-dotnet-unit')).toBeEnabled()
+
+  await page.getByTestId('tests-change-stack').click()
+  await page.getByTestId('tests-stack-angular').click()
+  await expect(page.getByTestId('tests-suite-ng-build')).toBeEnabled()
+  await expect(page.getByTestId('tests-suite-ng-unit')).toBeDisabled()
+  await expect(page.getByTestId('tests-suite-ng-unit')).toContainText('browser is not in the bypass container')
+  await expect(page.getByTestId('tests-suite-ng-e2e')).toBeDisabled()
+})
+
+test('isolating each suite asks the host for an isolated run', async ({ page }) => {
+  await openTests(page)
+  await page.getByTestId('tests-stack-dotnet').click()
+  await expect(page.getByTestId('tests-isolated')).toHaveAttribute('aria-checked', 'false')
+
+  await page.getByTestId('tests-isolated').click()
+  await expect(page.getByTestId('tests-isolated')).toHaveAttribute('aria-checked', 'true')
+  await startRun(page)
+
+  const starts = await page.evaluate(() => window.__mock.state().verifyStarts)
+  expect(starts.at(-1)).toMatchObject({ projectId: 'p-alpha', isolated: true })
+})
+
 test('slow suites are opt-in, and ticking one puts it in the next run', async ({ page }) => {
   await openTests(page)
   await page.getByTestId('tests-stack-dotnet').click()

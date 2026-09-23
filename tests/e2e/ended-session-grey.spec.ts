@@ -75,7 +75,7 @@ test('the raw log is dimmed too, by its own single-element rule', async ({ page 
   expect(style.filter).toContain('saturate')
 })
 
-test('the header is NOT dimmed, because its controls still work', async ({ page }) => {
+test('the header is NOT dimmed, because three of its controls still work', async ({ page }) => {
   await page.evaluate(() => window.__mock.endSession('s-alpha'))
   await expect(page.getByTestId('ended-banner')).toBeVisible()
 
@@ -86,6 +86,7 @@ test('the header is NOT dimmed, because its controls still work', async ({ page 
   expect(headOpacity).toBe('1')
   await expect(page.getByTestId('new-session')).toBeEnabled()
   await expect(page.getByTestId('session-name')).toBeEnabled()
+  await expect(page.getByTestId('project-containers-input')).toBeEnabled()
 })
 
 test('the other sections keep working — they do not need a live session', async ({ page }) => {

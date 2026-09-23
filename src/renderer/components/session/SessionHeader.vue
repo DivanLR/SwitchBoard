@@ -87,6 +87,10 @@ function saveName(): void {
 function startAnother(): void {
   void projects.startSession(props.project.id)
 }
+
+function onContainersToggle(e: Event): void {
+  void projects.setUseContainers(props.project.id, (e.target as HTMLInputElement).checked)
+}
 </script>
 
 <template>
@@ -98,8 +102,16 @@ function startAnother(): void {
         <span class="h-path code" data-testid="session-project-path">{{ project.path }}</span>
       </div>
       <span class="spacer"></span>
+      <span
+        v-if="liveSession?.bypassPermissions"
+        class="pill bypass-pill"
+        data-testid="bypass-pill"
+        title="Started with --dangerously-skip-permissions"
+      >
+        <Icon name="warning" :size="12" /> Bypass
+      </span>
       <button
-        v-if="liveSession"
+        v-if="liveSession && !liveSession.bypassPermissions"
         class="pill plan-pill"
         :class="{ on: liveSession.inPlanMode }"
         data-testid="plan-mode-toggle"
@@ -133,6 +145,14 @@ function startAnother(): void {
           @update:model-value="(subagentEffort) => settingsStore.save({ subagentEffort })"
         />
       </template>
+      <span
+        v-if="liveSession?.bypassPermissions && project.gitNotice"
+        class="pill nogit-pill"
+        data-testid="nogit-pill"
+        :title="project.gitNotice"
+      >
+        <Icon name="warning" :size="12" /> No git
+      </span>
       <span
         v-if="liveSession?.heavySubagents"
         class="pill fanout-pill"
@@ -208,7 +228,11 @@ function startAnother(): void {
         v-if="ending"
         testid="ending-overlay"
         :title="`Ending ${project.name}…`"
-        sub="Draining the session."
+        :sub="
+          liveSession?.bypassPermissions || project.useContainers
+            ? 'Draining the session and tearing its container down.'
+            : 'Draining the session.'
+        "
         ring-testid="ending-bar"
       />
     </div>
@@ -236,6 +260,23 @@ function startAnother(): void {
         >
           {{ (liveSession ?? endedSession)?.name ?? 'Name this session' }}
         </button>
+      </div>
+      <div class="run-block ui-chip">
+        <span class="run-cap" aria-hidden="true">run</span>
+        <label class="wsl-check" data-testid="project-containers">
+          <input
+            type="checkbox"
+            data-testid="project-containers-input"
+            :checked="project.useContainers"
+            :title="
+              project.useContainers
+                ? 'This project runs its work inside WSL containers: the project folder is mounted read-write, and your Claude credentials, plugins and skills read-only. Nothing else of yours is. Slower to start, and only two containers may run at once machine-wide.'
+                : 'This project runs its work on this machine. Tick to run it inside WSL containers instead: isolated from the rest of your drive, slower to start, two at a time. Needs WSL 2.9.3 or newer.'
+            "
+            @change="onContainersToggle"
+          />
+          Run in Container
+        </label>
       </div>
       <span style="white-space: nowrap"><Icon name="branch" :size="12" /> <span class="mono">{{ liveSession?.branch ?? endedSession?.branch ?? '—' }}</span></span>
       <span
@@ -439,6 +480,18 @@ function startAnother(): void {
   border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
 }
 
+.pill.bypass-pill {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
+}
+
+.pill.nogit-pill {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
+}
+
 .pill.plan-pill {
   cursor: pointer;
   color: var(--text-tab);
@@ -506,11 +559,43 @@ function startAnother(): void {
   border-radius: var(--rp);
 }
 
-.name-block {
+.name-block,
+.run-block {
   min-width: 0;
 }
 
-.name-cap {
+.run-block {
+  order: 9;
+  margin-left: auto;
+}
+
+.wsl-check {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--fs-ui);
+  color: var(--text-tab);
+  cursor: pointer;
+  user-select: none;
+}
+
+.wsl-check:hover {
+  color: var(--text-strong);
+}
+
+.wsl-check input {
+  accent-color: var(--green);
+  cursor: pointer;
+  margin: 0;
+}
+
+.wsl-check:has(input:checked) {
+  color: var(--green);
+}
+
+.name-cap,
+.run-cap {
   flex: none;
   margin-right: 7px;
   font-family: var(--sans);

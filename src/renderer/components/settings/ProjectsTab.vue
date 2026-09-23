@@ -4,12 +4,29 @@ import type { SessionMode } from '@shared/domain'
 import { SESSION_MODES } from '@shared/domain'
 import type { ProjectListItem } from '@shared/ipc-types'
 import { useProjectsStore } from '@renderer/stores/projects'
+import { useSettingsStore } from '@renderer/stores/settings'
 import Icon from '@renderer/components/Icon.vue'
 
 const props = defineProps<{ project: ProjectListItem | null }>()
 const emit = defineEmits<{ (e: 'choose', projectId: string): void }>()
 
 const projects = useProjectsStore()
+const settingsStore = useSettingsStore()
+
+const sandboxMemVal = ref('')
+watch(
+  () => settingsStore.settings?.sandboxMemory,
+  (v) => {
+    sandboxMemVal.value = v ?? '6g'
+  },
+  { immediate: true },
+)
+
+function saveSandboxMemory(): void {
+  const value = sandboxMemVal.value.trim()
+  if (!value || value === settingsStore.settings?.sandboxMemory) return
+  void settingsStore.save({ sandboxMemory: value })
+}
 
 const projDd = ref(false)
 const projFilter = ref('')
@@ -156,11 +173,40 @@ async function saveSessionMode(mode: SessionMode): Promise<void> {
             <div class="opt-name">{{ m.label }}</div>
             <div class="opt-sub">{{ m.detail }}</div>
           </div>
-          <span class="opt-price mono">—</span>
+          <span class="opt-price mono">
+            <Icon v-if="m.value === 'bypass'" name="warning" :size="12" />
+            <template v-else>—</template>
+          </span>
         </button>
       </div>
     </div>
   </template>
+
+  <div class="group">
+    <div class="ui-kicker group-label">BYPASS SANDBOX</div>
+    <div class="group-desc">
+      For every project. Container sessions run in a WSL container capped at this much memory,
+      so one hungry build stops alone instead of killing every session (exit 137). A size such as
+      <span class="mono">6g</span> or <span class="mono">12g</span>, or
+      <span class="mono">0</span> for no cap. Applies from the next container session.
+    </div>
+    <div class="ui-card setting-row is-actionable">
+      <div class="sr-text">
+        <div class="sr-label">Sandbox memory</div>
+        <div class="sr-desc">
+          Raise it if container sessions die with exit 137 during builds or test runs
+        </div>
+      </div>
+      <input
+        v-model="sandboxMemVal"
+        class="add-cmd-input mono sandbox-mem-input"
+        data-testid="setting-sandbox-memory"
+        spellcheck="false"
+        @keydown.enter="saveSandboxMemory"
+        @blur="saveSandboxMemory"
+      />
+    </div>
+  </div>
 </template>
 
 <style scoped>
@@ -304,5 +350,14 @@ async function saveSessionMode(mode: SessionMode): Promise<void> {
   font-size: var(--fs-meta);
   color: var(--text-tab);
   margin-top: 8px;
+}
+
+.sandbox-mem-input {
+  flex: 0 0 72px;
+  text-align: right;
+  padding: 5px 9px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--rc);
 }
 </style>

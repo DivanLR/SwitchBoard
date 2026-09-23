@@ -73,9 +73,12 @@ verification report) and never invents a figure it did not measure.
   `%APPDATA%\terminal-switchboard\switchboard.db`, protected by the operating
   system account boundary and disk encryption rather than by application
   cryptography.
-- Every session runs on the host under one of five permission modes: default,
-  auto, accept edits, plan first, and do not ask. There is no bypass mode and no
-  container sandbox; both were removed on 2026-09-23 (see Scope Decisions).
+- Every session runs under one of six permission modes: default, auto, accept
+  edits, plan first, do not ask, and bypass. A session runs on the host unless
+  its project ticks Run in Container; bypass always runs in a disposable WSL
+  container, and at most two containers run at once. A session that works in a
+  folder other than the project's own, such as a Flow worktree, always runs on
+  the host, and a bypass project gives it accept edits instead.
 - Section work runs in the section's own session, not in the conversation, so a
   verification pass does not block the chat. A drawing and every Flow stage take
   a fresh session each; a Flow stage's session ends when its stage finishes.
@@ -182,9 +185,6 @@ Removed, each on the evidence of the application's own database on that date:
 - The Specs tab: Spec Kit was used from chat, not from the tab. Flow now drives
   Spec Kit and reads its folders.
 - The Codex engine: five sessions on 12 to 14 September 2026 and none since.
-- The WSL container sandbox and bypass mode: last used on 12 August 2026. Their
-  record (Docker to wslc on 2026-08-19, the memory ceiling, the lost capability
-  dropping) is in git history and in no current document.
 - Model routing (auto, advisor and orchestrator modes, a worker model, per turn
   classification): the owner ran basic mode, one model, for cost reasons.
 - The rule preference layer and the MCP scan history: neither could ever be
@@ -194,6 +194,11 @@ Removed, each on the evidence of the application's own database on that date:
   worktrees, pull requests, lessons into CLAUDE.md): never run once. On
   2026-09-21 the owner asked for Flow to become "a popup screen that lets me run
   through features and setup my specs", which the new Flow is.
+
+The WSL container sandbox and bypass mode were removed in the same pass and
+restored the same day, at the owner's direction: "do not remove sandbox
+containers as a feature". Run in Container, bypass, the sandbox memory setting
+and isolated test runs are all current features.
 
 This supersedes the constraint recorded on 2026-08-13 that "all six sections"
 (Session, Specs, Tests, Diff, Cleanup, Diagrams) must survive. The sections now

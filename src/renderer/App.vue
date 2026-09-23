@@ -252,7 +252,7 @@ const dbProject = computed(() => projects.dbProject)
       v-if="projects.starting"
       testid="session-start-overlay"
       title="Starting session…"
-      sub="This can take a few moments."
+      sub="First bypass start builds its container, which can take a few minutes."
     />
   </div>
 

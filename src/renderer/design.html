@@ -41,10 +41,13 @@
           id: 'p-ml',
           name: 'ml-pipeline',
           path: 'C:\\work\\ml-pipeline',
+          defaultSessionMode: 'bypass',
+          useContainers: true,
           session: {
             id: 's-ml',
             status: 'working',
             branch: 'train/sweep-7',
+            bypassPermissions: true,
           },
         },
         {

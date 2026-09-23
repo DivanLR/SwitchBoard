@@ -136,7 +136,7 @@ async function startSession(): Promise<void> {
           v-for="m in SESSION_MODES"
           :key="m.value"
           class="ui-row mode-row"
-          :class="{ on: mode === m.value, 'is-selected': mode === m.value }"
+          :class="{ on: mode === m.value, 'is-selected': mode === m.value, danger: m.value === 'bypass' }"
         >
           <input
             v-model="mode"
@@ -151,6 +151,10 @@ async function startSession(): Promise<void> {
             <span class="mode-desc">{{ m.detail }}</span>
           </span>
         </label>
+      </div>
+      <div v-if="mode === 'bypass'" class="ui-err-banner is-warn" data-testid="bypass-warning">
+        <Icon name="warning" :size="12" /> Nothing will ask for approval. Only use this in
+        throwaway or fully trusted folders.
       </div>
       <p class="mode-note">
         Saved on the project: every session it starts uses this, and you can change it in Settings.
@@ -332,6 +336,13 @@ async function startSession(): Promise<void> {
   box-shadow:
     inset 0 0 0 2px var(--bg-card),
     inset 0 0 0 11px var(--green);
+}
+
+.mode-row.danger .mode-input:checked {
+  border-color: var(--red);
+  box-shadow:
+    inset 0 0 0 2px var(--bg-card),
+    inset 0 0 0 11px var(--red);
 }
 
 .mode-row:has(.mode-input:focus-visible) {

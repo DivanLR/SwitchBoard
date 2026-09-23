@@ -12,6 +12,9 @@ const {
   startMode,
   modeOpen,
   resumeSession,
+  runInContainer,
+  containerForced,
+  containerOn,
   startError,
   modeChoices,
   startModeLabel,
@@ -33,6 +36,7 @@ const {
         <button
           type="button"
           class="mode-dd"
+          :class="{ armed: startMode === 'bypass' }"
           data-testid="start-mode-picker"
           :aria-expanded="modeOpen"
           aria-haspopup="listbox"
@@ -52,7 +56,7 @@ const {
             :key="m.value"
             type="button"
             class="mode-item"
-            :class="{ sel: m.value === startMode }"
+            :class="{ sel: m.value === startMode, armed: m.value === 'bypass' }"
             role="option"
             :aria-selected="m.value === startMode"
             :data-testid="`start-mode-${m.value}`"
@@ -62,6 +66,11 @@ const {
             <span class="mode-item-name">{{ m.label }}</span>
             <span class="mode-item-detail">{{ m.detail }}</span>
           </button>
+          <div v-if="resumeSession" class="mode-note">
+            Resuming keeps the last session's sandbox: its transcript lives
+            {{ session.bypassPermissions ? 'inside the container' : 'on this machine' }}, so only
+            matching modes are offered.
+          </div>
         </div>
       </div>
 
@@ -85,9 +94,33 @@ const {
         <span :class="{ faint: !canResume }">Resume session</span>
       </span>
 
+      <span class="resume-inline container-inline">
+        <button
+          class="switch"
+          :class="{ on: containerOn }"
+          data-testid="run-in-container"
+          role="switch"
+          :aria-checked="containerOn"
+          :disabled="containerForced"
+          :title="
+            containerForced
+              ? 'Bypass always runs in a container: it approves every tool call, so the container is the only thing left standing between it and your files.'
+              : 'The same setting as Run in Container in the header, for the whole project: every session and every section run goes into a WSL container. Your project folder is mounted read-write, and your Claude credentials, plugins and skills read-only. Nothing else of yours is. Slower to start, only two containers at once, and it needs WSL 2.9.3 or newer.'
+          "
+          @click="containerForced || (runInContainer = !runInContainer)"
+        >
+          <span class="knob"></span>
+        </button>
+        <span :class="{ faint: containerForced }">Use WSL containers</span>
+      </span>
+
       <button class="btn-solid" data-testid="start-session" :disabled="busy" @click="start()">
         {{ resumeSession ? 'Resume' : 'Start session' }}
       </button>
+    </div>
+    <div v-if="startMode === 'bypass'" class="bypass-warn" data-testid="bypass-warning">
+      <Icon name="warning" :size="12" /> Nothing will ask for approval. Only use this in throwaway
+      or fully trusted folders.
     </div>
     <div v-if="startError" class="ui-err" data-testid="start-error">
       <Icon name="cross" :size="12" /> {{ startError }}
@@ -142,7 +175,42 @@ const {
 .ended-actions .resume-inline {
   grid-row: 2;
   margin-top: 14px;
+  border-radius: var(--rc) var(--rc) 0 0;
+}
+
+.ended-actions .container-inline {
+  grid-row: 3;
+  margin-top: 0;
+  border-top: none;
+  border-radius: 0 0 var(--rc) var(--rc);
+}
+
+.mode-dd.armed .mode-dd-name,
+.mode-item.armed .mode-item-name {
+  color: var(--red);
+}
+
+.mode-note {
+  padding: 7px 11px;
+  border-top: 1px solid var(--border-soft);
+  font-size: var(--fs-micro);
+  line-height: 1.45;
+  color: var(--text-ghost);
+}
+
+.bypass-warn {
+  margin-top: 8px;
+  padding: 8px 10px;
+  font-size: var(--fs-meta);
+  line-height: 1.5;
+  color: var(--red-hover);
+  border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
+  background: color-mix(in srgb, var(--red) 6%, transparent);
   border-radius: var(--rc);
+}
+
+html.sb-light .bypass-warn {
+  color: var(--red);
 }
 
 .resume-inline .switch {

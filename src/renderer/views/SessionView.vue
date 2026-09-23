@@ -113,6 +113,7 @@ const terminalSession = computed(() => liveSession.value ?? endedSession.value)
 const terminalResumeId = computed(() => {
   const ended = endedSession.value
   if (liveSession.value || !ended?.sdkSessionId) return null
+  if (ended.bypassPermissions || props.project.useContainers) return null
   return ended.sdkSessionId
 })
 
