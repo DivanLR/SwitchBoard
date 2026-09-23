@@ -9,12 +9,15 @@ import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useInboxStore } from '@renderer/stores/inbox'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { GROUP_COLORS, mcpStatusColor } from '@renderer/project-accent'
-import { elapsedClock } from '@renderer/relative-time'
 import { useProjectGroups } from '@renderer/composables/useProjectGroups'
 import { UNGROUPED, useProjectDragDrop } from '@renderer/composables/useProjectDragDrop'
 import { trapTabWithin } from '@renderer/composables/useModal'
 import { useNow } from '@renderer/composables/useNow'
 import Icon from '@renderer/components/Icon.vue'
+import ProjectRow from '@renderer/components/sidebar/ProjectRow.vue'
+import ProjectContextMenu, { type ContextTarget } from '@renderer/components/sidebar/ProjectContextMenu.vue'
+import RepointDialog from '@renderer/components/sidebar/RepointDialog.vue'
+import ArchiveDialog from '@renderer/components/sidebar/ArchiveDialog.vue'
 
 const projects = useProjectsStore()
 const activeSession = useActiveSessionStore()
@@ -33,9 +36,6 @@ const agentsByProject = computed<Record<string, { id: string; name: string; task
   },
 )
 
-function openAgent(agentId: string): void {
-  activeSession.selectAgent(agentId)
-}
 const emit = defineEmits<{
   (e: 'add-project'): void
   (e: 'open-settings'): void
@@ -59,12 +59,7 @@ function toggleTheme(): void {
   localStorage.setItem('sb-theme', theme.value)
   applyTheme()
 }
-applyTheme() 
-
-function initials(name: string): string {
-  const words = name.split(/[^a-zA-Z0-9]+/).filter(Boolean)
-  return (words.length > 1 ? `${words[0][0]}${words[1][0]}` : name.slice(0, 2)).toLowerCase()
-}
+applyTheme()
 
 const now = useNow(1000)
 onMounted(() => {
@@ -76,10 +71,6 @@ onUnmounted(() => {
 })
 
 const collisions = computed(() => projects.nameCollisions)
-
-function timerOf(startedAt: string): string {
-  return elapsedClock(startedAt, now.value)
-}
 
 const showTimer = computed(() => settings.settings?.showSessionTimer ?? true)
 
@@ -99,48 +90,11 @@ function statusOfSession(session: Session): string {
   return session.endedAt ? 'ended' : session.status
 }
 
-function isExpanded(item: (typeof projects.items)[number]): boolean {
-  return (
-    item.id === projects.selectedProjectId || item.sessions.some((s) => !s.endedAt)
-  )
-}
-
 const statusById = computed<Record<string, string>>(() => {
   const out: Record<string, string> = {}
   for (const item of projects.items) out[item.id] = statusOf(item)
   return out
 })
-
-function markTitle(status: string): string {
-  if (status === 'needs_you') return 'Needs you'
-  if (status === 'working') return 'Working'
-  if (status === 'error') return 'Error'
-  if (status === 'ended') return 'Session ended'
-  return 'Done'
-}
-
-function glyphFor(status: string): string {
-  if (status === 'needs_you') return '!'
-  if (status === 'working') return '»'
-  if (status === 'error') return '×'
-  if (status === 'ended') return '·'
-  return '—'
-}
-
-const sessionStatus = statusOfSession
-
-function isFocusedSub(item: (typeof projects.items)[number], sessionId: string): boolean {
-  return item.id === projects.selectedProjectId && item.session?.id === sessionId
-}
-
-function focusSub(projectId: string, sessionId: string): void {
-  projects.select(projectId)
-  projects.focusSession(projectId, sessionId)
-}
-
-function endOneSession(sessionId: string): void {
-  void projects.endSessions([sessionId])
-}
 
 const pendingByProject = computed<Record<string, number>>(() => {
   const out: Record<string, number> = {}
@@ -203,13 +157,7 @@ const sections = computed(() => {
     .filter((section) => !filtering || section.items.length > 0)
 })
 
-const ctx = ref<{
-  kind: 'project' | 'group'
-  id: string
-  name: string
-  x: number
-  y: number
-} | null>(null)
+const ctx = ref<ContextTarget | null>(null)
 const renamingId = ref<string | null>(null)
 
 function focusOnMount(el: unknown): void {
@@ -230,8 +178,6 @@ function openGroupCtx(group: ProjectGroup, event: MouseEvent): void {
 function closeCtx(): void {
   ctx.value = null
 }
-
-
 
 function startRename(): void {
   if (!ctx.value) return
@@ -447,7 +393,6 @@ const archivedFolded = ref(true)
 function restore(projectId: string): void {
   void projects.unarchive(projectId)
 }
-
 </script>
 
 <template>
@@ -597,182 +542,36 @@ function restore(projectId: string): void {
         </div>
 
         <template v-if="collapsed || !section.folded">
-      <div
-        v-for="item in section.items"
-        :key="item.id"
-        class="project"
-        :class="{
-          active: item.id === projects.selectedProjectId,
-          live: LIVE_STATES.has(statusById[item.id] ?? 'none'),
-          'drop-before': rowDrop?.id === item.id && rowDrop.zone === 'before',
-          'drop-after': rowDrop?.id === item.id && rowDrop.zone === 'after',
-          'drop-file': rowDrop?.id === item.id && rowDrop.zone === 'file',
-        }"
-        :data-testid="`sidebar-project-${item.name}`"
-        :draggable="renamingId !== item.id"
-        role="option"
-        :aria-selected="item.id === projects.selectedProjectId"
-        :tabindex="renamingId === item.id ? -1 : 0"
-        @click="projects.select(item.id)"
-        @keydown.enter.self.prevent="projects.select(item.id)"
-        @keydown.space.self.prevent="projects.select(item.id)"
-        @contextmenu.prevent="openCtx(item, $event)"
-        @dragstart="onDragStart(item, $event)"
-        @dragover="onRowDragOver(item, $event)"
-        @dragleave="rowDrop = rowDrop?.id === item.id ? null : rowDrop"
-        @drop="onRowDrop(item, $event)"
-        @dragend="onDragEnd"
-      >
-        <div class="active-bg"></div>
-        <span
-          class="brace"
-          :data-testid="`project-accent-${item.name}`"
-          aria-hidden="true"
-        ></span>
-        <div class="content">
-          <div class="row">
-            <span
-              v-if="statusById[item.id] !== 'none'"
-              class="mark"
-              :class="statusById[item.id]"
-              :data-testid="`status-badge-${item.name}`"
-              :data-status="statusById[item.id]"
-              :title="markTitle(statusById[item.id])"
-            >
-              <span class="glyph" aria-hidden="true">{{ glyphFor(statusById[item.id]) }}</span>
-            </span>
-            <template v-if="collapsed">
-              <span class="initials mono">{{ initials(item.name) }}</span>
-              <span
-                v-if="(pendingByProject[item.id] ?? 0) > 0"
-                class="badge-count collapsed-badge"
-                :data-testid="`project-badge-${item.name}`"
-              >
-                {{ pendingByProject[item.id] ?? 0 }}
-              </span>
-            </template>
-            <template v-else>
-              <input
-                v-if="renamingId === item.id"
-                :ref="focusOnMount"
-                v-model="renameVal"
-                class="rename-input mono"
-                :data-testid="`rename-input-${item.name}`"
-                @click.stop
-                @keydown.enter="commitRename"
-                @keydown.esc="renamingId = null"
-                @blur="commitRename"
-              />
-              <span v-else class="name">{{ item.name }}</span>
-              <span
-                v-if="(pendingByProject[item.id] ?? 0) > 0"
-                class="badge-count"
-                :data-testid="`project-badge-${item.name}`"
-              >
-                {{ pendingByProject[item.id] ?? 0 }}
-              </span>
-              <span
-                v-if="item.session && !item.session.endedAt && showTimer"
-                class="timer mono"
-                :data-testid="`timer-${item.name}`"
-              >
-                {{ timerOf(item.session.startedAt) }}
-              </span>
-              <button
-                class="row-add mono"
-                :data-testid="`new-session-${item.name}`"
-                title="Start another session in this project"
-                @click.stop="startAnotherSession(item.id)"
-              >
-                <Icon name="plus" :size="12" />
-              </button>
-              <button
-                class="remove mono"
-                :data-testid="`remove-project-${item.name}`"
-                title="Archive this project"
-                @click.stop="askRemove(item.id)"
-              >
-                <Icon name="close" :size="12" />
-              </button>
-            </template>
-          </div>
-          <div v-if="!collapsed && isExpanded(item)" class="meta">
-            <span class="branch code"><Icon name="branch" :size="11" /> {{ item.session?.branch ?? '—' }}</span>
-          </div>
-          <div v-if="!collapsed && collisions.has(item.name)" class="path code">{{ item.path }}</div>
-          <div
-            v-if="!collapsed && item.sessions.length > 1"
-            class="subs"
-            :data-testid="`sidebar-subsessions-${item.name}`"
-          >
-            <div
-              v-for="(s, i) in item.sessions"
-              :key="s.id"
-              class="sub-row"
-              :class="[`st-${sessionStatus(s)}`, { sel: isFocusedSub(item, s.id) }]"
-            >
-            <button
-              type="button"
-              class="sub-line"
-              :class="{ sel: isFocusedSub(item, s.id) }"
-              :data-testid="`sidebar-subsession-${s.id}`"
-              :title="`${markTitle(sessionStatus(s))} — ${s.name ?? s.branch ?? 'no branch'} · session ${s.id}`"
-              @click.stop="focusSub(item.id, s.id)"
-            >
-              <span class="mark sub-mark" :class="sessionStatus(s)">
-                <span class="glyph" aria-hidden="true">{{ glyphFor(sessionStatus(s)) }}</span>
-              </span>
-              <span class="sub-ord mono">{{ i + 1 }}</span>
-              <span class="sub-name code">{{ s.name ?? s.branch ?? s.id.slice(0, 8) }}</span>
-              <span v-if="!s.endedAt && s.currentModel" class="sub-model mono">{{
-                modelLabel(s.currentModel)
-              }}</span>
-              <span v-if="!s.endedAt && showTimer" class="timer mono">{{
-                timerOf(s.startedAt)
-              }}</span>
-            </button>
-            <button
-              v-if="!s.endedAt"
-              type="button"
-              class="sub-x"
-              :data-testid="`session-end-${s.id}`"
-              :title="`End session ${i + 1}`"
-              :aria-label="`End session ${i + 1}`"
-              @click.stop="endOneSession(s.id)"
-            >
-              <Icon name="close" :size="10" />
-            </button>
-            </div>
-          </div>
-          <div
-            v-if="!collapsed && (agentsByProject[item.id]?.length ?? 0) > 0"
-            class="agents"
-            :data-testid="`sidebar-agents-${item.name}`"
-          >
-            <div
-              v-for="agent in agentsByProject[item.id] ?? []"
-              :key="agent.id"
-              class="agent-line"
-              :data-testid="`sidebar-agent-${agent.name}`"
-              @click.stop="openAgent(agent.id)"
-            >
-              <span class="agent-sq"></span>
-              <span
-                class="agent-name mono"
-                :class="{ sel: activeSession.selectedAgentId === agent.id }"
-              >
-                {{ agent.task || agent.name }}
-                <Icon
-                  v-if="activeSession.selectedAgentId === agent.id"
-                  name="arrow-left"
-                  :size="11"
-                  data-testid="sidebar-agent-selected"
-                />
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
+          <ProjectRow
+            v-for="item in section.items"
+            :key="item.id"
+            v-model:rename-val="renameVal"
+            :item="item"
+            :collapsed="collapsed"
+            :status="statusById[item.id]"
+            :live="LIVE_STATES.has(statusById[item.id] ?? 'none')"
+            :pending="pendingByProject[item.id] ?? 0"
+            :agents="agentsByProject[item.id] ?? []"
+            :show-path="collisions.has(item.name)"
+            :show-timer="showTimer"
+            :now="now"
+            :renaming="renamingId === item.id"
+            :class="{
+              'drop-before': rowDrop?.id === item.id && rowDrop.zone === 'before',
+              'drop-after': rowDrop?.id === item.id && rowDrop.zone === 'after',
+              'drop-file': rowDrop?.id === item.id && rowDrop.zone === 'file',
+            }"
+            @contextmenu.prevent="openCtx(item, $event)"
+            @dragstart="onDragStart(item, $event)"
+            @dragover="onRowDragOver(item, $event)"
+            @dragleave="rowDrop = rowDrop?.id === item.id ? null : rowDrop"
+            @drop="onRowDrop(item, $event)"
+            @dragend="onDragEnd"
+            @commit-rename="commitRename"
+            @cancel-rename="renamingId = null"
+            @new-session="startAnotherSession(item.id)"
+            @remove="askRemove(item.id)"
+          />
         </template>
       </template>
       <div v-if="projects.loaded && projects.visibleItems.length === 0" class="empty">
@@ -881,151 +680,42 @@ function restore(projectId: string): void {
     </div>
   </aside>
 
-  <div v-if="ctx" class="ctx-catcher" data-testid="project-ctx-catcher" @click="closeCtx" @contextmenu.prevent="closeCtx">
-    <div
-      class="ctx-menu"
-      data-testid="project-ctx-menu"
-      :style="{ left: `${ctx.x}px`, top: `${ctx.y}px` }"
-      @click.stop
-    >
-      <div class="ctx-name mono">{{ ctx.name }}</div>
-      <button class="ctx-item" data-testid="ctx-rename" @click="startRename">
-        <span class="icon-accent"><Icon name="pencil" /></span>Rename
-      </button>
-      <button class="ctx-item" data-testid="ctx-move-up" @click="ctxMove(-1)">
-        <span><Icon name="arrow-up" /></span>Move up
-      </button>
-      <button class="ctx-item" data-testid="ctx-move-down" @click="ctxMove(1)">
-        <span><Icon name="arrow-down" /></span>Move down
-      </button>
-      <template v-if="ctx.kind === 'project'">
-        <button class="ctx-item" data-testid="ctx-new-session" @click="ctxNewSession">
-          <span class="icon-accent"><Icon name="plus" /></span>New session here
-        </button>
-        <button
-          v-if="ctxLiveSessions.length > 1"
-          class="ctx-item"
-          data-testid="ctx-end-all"
-          @click="ctxEndAll"
-        >
-          <span class="icon-danger"><Icon name="stop" /></span>End all {{ ctxLiveSessions.length }} sessions
-        </button>
-        <div class="ctx-sep"></div>
-        <button class="ctx-item" data-testid="ctx-repoint" @click="startRepoint">
-          <span class="icon-accent"><Icon name="swap" /></span>Change folder…
-        </button>
-        <div class="ctx-sep"></div>
-        <button class="ctx-item" data-testid="ctx-new-group" @click="ctxNewGroup">
-          <span class="icon-accent"><Icon name="grid" /></span>New group with this
-        </button>
-        <button
-          v-for="g in groups"
-          :key="g.id"
-          class="ctx-item"
-          :data-testid="`ctx-move-to-${g.name}`"
-          @click="ctxAssign(g.id)"
-        >
-          <span><Icon name="arrow-right" /></span>Move to {{ g.name }}
-        </button>
-        <button
-          v-if="groupOf[ctx.id]"
-          class="ctx-item"
-          data-testid="ctx-move-to-ungrouped"
-          @click="ctxAssign(null)"
-        >
-          <span><Icon name="arrow-right" /></span>Move out of group
-        </button>
-        <div class="ctx-sep"></div>
-        <button class="ctx-item" data-testid="ctx-remove" @click="ctxDelete">
-          <span><Icon name="folder" /></span>Archive
-        </button>
-      </template>
-      <button
-        v-else
-        class="ctx-item danger"
-        data-testid="ctx-remove-group"
-        @click="ctxRemoveGroup"
-      >
-        <span><Icon name="trash" /></span>Remove group (keeps projects)
-      </button>
-    </div>
-  </div>
+  <ProjectContextMenu
+    v-if="ctx"
+    :menu="ctx"
+    :groups="groups"
+    :grouped="!!groupOf[ctx.id]"
+    :live-count="ctxLiveSessions.length"
+    @close="closeCtx"
+    @rename="startRename"
+    @move="ctxMove"
+    @new-session="ctxNewSession"
+    @end-all="ctxEndAll"
+    @repoint="startRepoint"
+    @new-group="ctxNewGroup"
+    @assign="ctxAssign"
+    @remove="ctxDelete"
+    @remove-group="ctxRemoveGroup"
+  />
 
-  <div v-if="repointTarget" class="overlay" data-testid="repoint-overlay" @click.self="cancelRepoint">
-    <div
-      class="dialog remove-dialog"
-      data-testid="repoint-dialog"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="repoint-dialog-title"
-    >
-      <div class="rd-icon" aria-hidden="true"><Icon name="swap" :size="18" /></div>
-      <div id="repoint-dialog-title" class="rd-title">
-        Change folder for {{ repointTarget.name }}
-      </div>
-      <div class="rd-body">
-        <input
-          v-model="repointVal"
-          class="mono repoint-input"
-          data-testid="repoint-input"
-          spellcheck="false"
-          @keydown.enter="commitRepoint"
-        />
-        <p class="rd-note dim">
-          Sessions, history, and folder access move to the new folder. The name stays
-          {{ repointTarget.name }}.
-        </p>
-        <p v-if="repointError" class="rd-error" data-testid="repoint-error">
-          {{ repointError }}
-        </p>
-      </div>
-      <div class="rd-actions">
-        <button
-          class="btn-solid"
-          data-testid="repoint-confirm"
-          :disabled="busy || repointVal.trim().length === 0"
-          @click="commitRepoint"
-        >
-          Change folder
-        </button>
-        <button class="btn-outline" data-testid="repoint-cancel" @click="cancelRepoint">
-          Cancel
-        </button>
-      </div>
-    </div>
-  </div>
+  <RepointDialog
+    v-if="repointTarget"
+    v-model="repointVal"
+    :project="repointTarget"
+    :error="repointError"
+    :busy="busy"
+    @confirm="commitRepoint"
+    @cancel="cancelRepoint"
+  />
 
-  <div v-if="confirmRemove" class="overlay" data-testid="remove-overlay" @click.self="cancelRemove">
-    <div
-      class="dialog remove-dialog"
-      data-testid="remove-dialog"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="remove-dialog-title"
-    >
-      <div class="rd-icon" aria-hidden="true"><Icon name="folder" :size="18" /></div>
-      <div id="remove-dialog-title" class="rd-title">Archive {{ confirmRemove.name }}?</div>
-      <div class="rd-body">
-        <div class="rd-path faint mono">{{ confirmRemove.path }}</div>
-        <p class="rd-note dim">
-          It moves to the Archived section at the foot of the list, and can be restored from
-          there. Sessions, settings, files and git history are untouched.
-        </p>
-        <p v-if="removeError" class="rd-error" data-testid="remove-error">{{ removeError }}</p>
-      </div>
-      <div class="rd-actions">
-        <button
-          class="btn-solid"
-          data-testid="remove-confirm"
-          :disabled="busy"
-          @click="confirmRemoveNow"
-        >
-          Archive
-        </button>
-        <button class="btn-outline" data-testid="remove-cancel" @click="cancelRemove">Keep it</button>
-      </div>
-    </div>
-  </div>
+  <ArchiveDialog
+    v-if="confirmRemove"
+    :project="confirmRemove"
+    :error="removeError"
+    :busy="busy"
+    @confirm="confirmRemoveNow"
+    @cancel="cancelRemove"
+  />
 </template>
 
 <style scoped>
@@ -1109,33 +799,10 @@ function restore(projectId: string): void {
   justify-content: center;
 }
 
-.initials {
-  font-size: var(--fs-meta);
-  color: var(--text-body);
-}
-
 .sidebar.collapsed .project {
   text-align: center;
   margin: 0 4px 5px;
   padding: 6px 4px;
-}
-
-.sidebar.collapsed .content {
-  padding: 1px 0;
-}
-
-.sidebar.collapsed .row {
-  flex-direction: column;
-  justify-content: center;
-  gap: 5px;
-}
-
-.collapsed-badge {
-  font-size: var(--fs-micro);
-  background: color-mix(in srgb, var(--amber) 15%, transparent);
-  border-color: color-mix(in srgb, var(--amber) 40%, transparent);
-  padding: 0 4px;
-  line-height: 12px;
 }
 
 .project.drop-before {
@@ -1166,10 +833,6 @@ function restore(projectId: string): void {
 
 .icon-accent {
   color: var(--green);
-}
-
-.icon-danger {
-  color: var(--red);
 }
 
 .filter-wrap {
@@ -1303,7 +966,6 @@ function restore(projectId: string): void {
   padding: 2px 0 8px;
 }
 
-
 .group-head {
   position: sticky;
   top: var(--section-row-h);
@@ -1403,38 +1065,6 @@ function restore(projectId: string): void {
   box-shadow: inset 0 0 0 1px var(--green);
 }
 
-
-
-.brace {
-  position: absolute;
-  right: 0;
-  top: 10px;
-  bottom: 10px;
-  width: 2px;
-  border-radius: 3px;
-  background: var(--idle);
-  pointer-events: none;
-  transition: background-color 0.12s var(--ease);
-}
-
-.project.live .brace {
-  background: var(--running);
-}
-
-
-.active-bg {
-  display: none;
-}
-
-.project.active .active-bg {
-  display: block;
-  position: absolute;
-  inset: 0;
-  background: color-mix(in srgb, var(--green) 9%, var(--bg-panel));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 20%, transparent);
-  border-radius: var(--rc);
-}
-
 .content {
   position: relative;
 }
@@ -1443,44 +1073,6 @@ function restore(projectId: string): void {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-
-.mark {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  color: var(--text-meta);
-  padding: 2px;
-}
-
-.mark .glyph {
-  width: 14px;
-  height: 12px;
-  font-family: var(--mono);
-  font-size: var(--fs-glyph);
-  font-weight: var(--w-em);
-  line-height: 12px;
-  text-align: center;
-}
-
-.mark.needs_you {
-  color: var(--amber);
-}
-
-.mark.working {
-  color: var(--running);
-}
-
-.mark.error {
-  color: var(--red);
-}
-
-.mark.done {
-  color: var(--text-mid);
-}
-
-.mark.ended {
-  color: var(--text-ghost);
 }
 
 .name {
@@ -1494,16 +1086,6 @@ function restore(projectId: string): void {
   text-overflow: ellipsis;
 }
 
-.project.active .name {
-  color: var(--text-bright);
-}
-
-.project.active .timer,
-.project.active .path,
-.project.active .branch {
-  color: var(--text-on-wash);
-}
-
 .remove {
   display: inline-flex;
   align-items: center;
@@ -1515,10 +1097,6 @@ function restore(projectId: string): void {
   color: var(--text-faint);
   opacity: 0;
   padding: 0;
-}
-
-.project:hover .remove {
-  opacity: 1;
 }
 
 .remove:hover {
@@ -1554,314 +1132,6 @@ function restore(projectId: string): void {
 .restore:hover {
   color: var(--green);
   opacity: 1;
-}
-
-.row-add {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  font-size: var(--fs-ui);
-  line-height: 1;
-  color: var(--text-faint);
-  opacity: 0;
-  padding: 0;
-}
-
-.project:hover .row-add {
-  opacity: 1;
-}
-
-.row-add:hover {
-  color: var(--green);
-}
-
-.remove-dialog {
-  width: 400px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border-card);
-  border-radius: var(--rc);
-  padding: 24px;
-  box-shadow: var(--shadow-dlg);
-  animation: sbIn 0.18s var(--ease);
-}
-
-.rd-icon {
-  width: 40px;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: color-mix(in srgb, var(--red) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--red) 35%, transparent);
-  border-radius: var(--rc);
-}
-
-.rd-title {
-  font-size: var(--fs-head);
-  font-weight: var(--w-em);
-  color: var(--text-bright);
-  margin-top: 14px;
-}
-
-.rd-body {
-  margin: 6px 0 0;
-}
-
-.rd-path {
-  font-size: var(--fs-micro);
-  margin-top: 2px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.rd-note {
-  font-size: var(--fs-ui);
-  line-height: 1.6;
-  color: var(--text-meta);
-  margin: 0;
-}
-
-.rd-error {
-  font-size: var(--fs-meta);
-  color: var(--red);
-  margin: 8px 0 0;
-}
-
-.repoint-input {
-  width: 100%;
-  font-size: var(--fs-ui);
-  padding: 9px 12px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--rc);
-  color: var(--text-strong);
-  margin-bottom: 10px;
-}
-
-.rd-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 9px;
-  margin-top: 20px;
-}
-
-.rd-actions .btn-solid,
-.rd-actions .btn-outline {
-  flex: 1;
-  text-align: center;
-  font-family: var(--sans);
-  font-size: var(--fs-ui);
-  padding: 9px 0;
-}
-
-.rd-actions .btn-outline {
-  color: var(--text-body);
-}
-
-.rd-actions .btn-outline:hover {
-  border-color: var(--border-strong);
-  color: var(--text-strong);
-}
-
-.danger-solid {
-  background: var(--red);
-  border-color: var(--red);
-  color: var(--red-ink);
-}
-
-.danger-solid:hover:not(:disabled) {
-  background: var(--red-hover);
-}
-
-.meta {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  padding-left: 17px;
-  margin-top: 1px;
-}
-
-.branch {
-  font-size: var(--fs-micro);
-  color: var(--text-faint);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.timer {
-  flex-shrink: 0;
-  font-size: var(--fs-meta);
-  font-variant-numeric: tabular-nums;
-  color: var(--text-ghost);
-}
-
-.path {
-  padding-left: 17px;
-  margin-top: 2px;
-  font-size: var(--fs-micro);
-  color: var(--text-ghost);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.subs {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-top: 5px;
-  padding-left: 15px;
-}
-
-.sub-row {
-  display: flex;
-  align-items: center;
-}
-
-.sub-row.st-working {
-  box-shadow: inset -2px 0 0 var(--running);
-}
-
-.sub-row.st-needs_you {
-  box-shadow: inset -2px 0 0 var(--amber);
-}
-
-.sub-row.st-error {
-  box-shadow: inset -2px 0 0 var(--red);
-}
-
-.sub-row .sub-line {
-  flex: 1;
-  min-width: 0;
-}
-
-.sub-x {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  color: var(--text-ghost);
-  background: none;
-  border: none;
-  border-radius: var(--rp);
-  opacity: 0;
-  cursor: pointer;
-}
-
-.sub-row:hover .sub-x,
-.sub-x:focus-visible {
-  opacity: 1;
-}
-
-.sub-x:hover {
-  color: var(--red);
-  background: color-mix(in srgb, var(--red) 14%, transparent);
-}
-
-.sub-line {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin: 0 -4px;
-  padding: 2px 4px;
-  border: none;
-  border-radius: var(--rc);
-  background: transparent;
-  cursor: pointer;
-  text-align: left;
-}
-
-.sub-line:hover {
-  background: var(--bg-hover);
-}
-
-.sub-line.sel {
-  background: var(--bg-active);
-  box-shadow: inset 2px 0 0 var(--green);
-}
-
-.sub-line:focus-visible {
-  outline: 1px solid var(--green);
-  outline-offset: -1px;
-}
-
-.sub-mark {
-  padding: 0;
-}
-
-.sub-model {
-  flex-shrink: 0;
-  font-size: var(--fs-micro);
-  color: var(--text-meta);
-}
-
-.sub-ord {
-  flex-shrink: 0;
-  font-size: var(--fs-micro);
-  color: var(--text-ghost);
-  font-variant-numeric: tabular-nums;
-}
-
-.sub-name {
-  flex: 1;
-  min-width: 0;
-  font-size: var(--fs-micro);
-  color: var(--text-tab);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.sub-line.sel .sub-name {
-  color: var(--text-strong);
-}
-
-.agents {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  margin-top: 5px;
-  padding-left: 17px;
-}
-
-.agent-line {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin: 0 -4px;
-  padding: 1px 4px;
-  cursor: pointer;
-}
-
-.agent-line:hover {
-  background: color-mix(in srgb, var(--green) 10%, transparent);
-}
-
-.agent-name.sel {
-  color: var(--text-strong);
-}
-
-.agent-sq {
-  width: 5px;
-  min-width: 5px;
-  height: 5px;
-  background: var(--blue);
-  animation: sbFade 1.8s var(--ease) infinite;
-}
-
-.agent-name {
-  font-size: var(--fs-micro);
-  color: var(--text-tab);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .empty {
@@ -1934,60 +1204,6 @@ function restore(projectId: string): void {
   bottom: 7px;
   width: 2px;
   background: var(--teal);
-}
-
-.ctx-menu {
-  position: fixed;
-  min-width: 180px;
-  background: var(--bg-panel-2);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-panel);
-  overflow: hidden;
-  box-shadow: var(--shadow-menu);
-  animation: sbIn 0.12s var(--ease);
-}
-
-html.sb-light .ctx-menu {
-  background: var(--bg-card);
-}
-
-.ctx-name {
-  padding: 8px 13px 6px;
-  font-size: var(--fs-micro);
-  letter-spacing: 0.12em;
-  color: var(--text-faint);
-  border-bottom: 1px solid color-mix(in srgb, var(--green) 18%, transparent);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.ctx-sep {
-  height: 1px;
-  margin: 3px 0;
-  background: color-mix(in srgb, var(--green) 18%, transparent);
-}
-
-.ctx-item {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  width: 100%;
-  padding: 9px 13px;
-  font-size: var(--fs-ui);
-  color: var(--text-body);
-  cursor: pointer;
-  background: transparent;
-}
-
-.ctx-item:hover {
-  background: color-mix(in srgb, var(--green) 10%, transparent);
-  color: var(--text-strong);
-}
-
-.ctx-item.danger:hover {
-  background: color-mix(in srgb, var(--red) 8%, transparent);
-  color: var(--red);
 }
 
 .foot {
