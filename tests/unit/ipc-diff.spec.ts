@@ -1,7 +1,7 @@
 import type { PtyHost } from '@main/terminal/pty-host'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { execSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { WireResult } from '@shared/ipc-types'
@@ -170,6 +170,29 @@ describe('diff.file', () => {
       expect(lines.filter((l) => l.type === 'add').map((l) => l.text)).toEqual(['line 20 changed'])
     } finally {
       rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it.each([
+    ['pathspec magic', ':!x/../../secret.txt'],
+    ['a parent segment', '../secret.txt'],
+  ])('refuses a path that %s would carry outside the project', async (_label, path) => {
+    const outer = mkdtempSync(join(tmpdir(), 'diff-tab-outer-'))
+    try {
+      const dir = join(outer, 'repo')
+      mkdirSync(dir)
+      execSync('git init', { cwd: dir, stdio: 'ignore' })
+      writeFileSync(join(dir, 'u.txt'), 'inside\n')
+      writeFileSync(join(outer, 'secret.txt'), 'outside the project\n')
+      const project = harness.repos.projects.insert({ name: 'a', path: dir, source: 'manual' })
+      harness.goLive(project.id, dir)
+
+      const result = await harness.call('diff.file', { projectId: project.id, path })
+      expect(result.ok).toBe(false)
+      if (result.ok) return
+      expect(result.error.code).toBe('INVALID_PATH')
+    } finally {
+      rmSync(outer, { recursive: true, force: true })
     }
   })
 

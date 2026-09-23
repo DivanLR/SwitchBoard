@@ -136,6 +136,27 @@ describe('diagramPath, the guard behind diagrams.open and diagrams.read', () => 
     expect(openPath).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['a batch file', 'run.bat'],
+    ['a shortcut', 'evil.lnk'],
+    ['a name with no extension', 'README'],
+  ])('refuses to open %s, because only an HTML drawing is ever opened', async (_label, file) => {
+    const project = projectWithDiagram(file, '@echo off')
+    const result = await harness.call('diagrams.open', { projectId: project.id, file })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('INVALID_PATH')
+    expect(openPath).not.toHaveBeenCalled()
+  })
+
+  it('refuses to read back a file that is not an HTML drawing', async () => {
+    const project = projectWithDiagram('notes.txt', 'private notes')
+    const result = await harness.call('diagrams.read', { projectId: project.id, file: 'notes.txt' })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('INVALID_PATH')
+  })
+
   it('refuses a bare name with none of those characters that still resolves outside the diagrams folder', async () => {
     const project = harness.repos.projects.insert({ name: 'p', path: 'C:\\fake\\project', source: 'manual' })
     const result = await harness.call('diagrams.open', { projectId: project.id, file: 'D:evil.html' })

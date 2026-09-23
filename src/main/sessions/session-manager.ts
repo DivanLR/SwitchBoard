@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { existsSync, readdirSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 
 const execFileAsync = promisify(execFile)
@@ -338,11 +338,14 @@ function parseUnifiedDiff(diffText: string): FileDiffContent {
 
 export async function readFileDiff(projectPath: string, path: string): Promise<FileDiffContent | null> {
   const root = gitRoot(projectPath) ?? projectPath
+  if (!resolve(root, path).startsWith(resolve(root) + sep)) {
+    throw { code: 'INVALID_PATH', message: 'That file is outside the project' } satisfies IpcError
+  }
   let statusOut: string
   try {
     ;({ stdout: statusOut } = await execFileAsync(
       'git',
-      ['-C', root, 'status', '--porcelain=v1', '--', path],
+      ['-C', root, '--literal-pathspecs', 'status', '--porcelain=v1', '--', path],
       GIT_EXEC_OPTS,
     ))
   } catch {
@@ -364,7 +367,7 @@ export async function readFileDiff(projectPath: string, path: string): Promise<F
   try {
     ;({ stdout: diffOut } = await execFileAsync(
       'git',
-      ['-C', root, 'diff', `--unified=${WHOLE_FILE_CONTEXT}`, '--', path],
+      ['-C', root, '--literal-pathspecs', 'diff', `--unified=${WHOLE_FILE_CONTEXT}`, '--', path],
       GIT_EXEC_OPTS,
     ))
   } catch {

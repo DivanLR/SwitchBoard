@@ -172,7 +172,7 @@ function toIpcError(error: unknown): IpcError {
 function diagramPath(repos: Repositories, projectId: string, file: string): string {
   const project = repos.projects.byId(projectId)
   if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
-  if (file.includes('/') || file.includes('\\') || file.includes('..')) {
+  if (file.includes('/') || file.includes('\\') || file.includes('..') || !/\.html$/i.test(file)) {
     throw { code: 'INVALID_PATH', message: 'Not a diagram file name' } satisfies IpcError
   }
   const dir = resolve(project.path, DIAGRAMS_DIR)

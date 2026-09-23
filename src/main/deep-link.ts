@@ -1,3 +1,5 @@
+import type { PermissionBroker } from './inbox/permission-broker'
+
 export const PROTOCOL_SCHEME = 'switchboard'
 
 function escapeXml(value: string): string {
@@ -29,6 +31,22 @@ export function buildApprovalToastXml(options: {
     `</actions>` +
     `</toast>`
   )
+}
+
+export function followDeepLink(
+  url: string,
+  broker: Pick<PermissionBroker, 'decide'>,
+  openInbox: (requestId: string) => void,
+): void {
+  const link = parseDeepLink(url)
+  if (!link) return
+  if (link.verb === 'approve') {
+    try {
+      broker.decide(link.requestId, 'approve', false)
+      return
+    } catch {}
+  }
+  openInbox(link.requestId)
 }
 
 export function parseDeepLink(url: string): { verb: 'approve' | 'inbox'; requestId: string } | null {

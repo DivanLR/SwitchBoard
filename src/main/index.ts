@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, Menu, nativeImage, net, protocol, session, 
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { mkdirSync, renameSync } from 'node:fs'
-import { resolveBundlePath } from './bundle-path'
+import { devRendererUrl, resolveBundlePath } from './bundle-path'
 import { openDatabase } from './store/db'
 import { createRepositories, type Repositories } from './store/repositories'
 import { runRetention, scheduleRetention } from './store/retention'
@@ -10,7 +10,7 @@ import { SessionManager } from './sessions/session-manager'
 import { PermissionBroker } from './inbox/permission-broker'
 import { classifyNoise } from './stream/swallow-rules'
 import { createNotifier } from './notifications'
-import { parseDeepLink, PROTOCOL_SCHEME } from './deep-link'
+import { followDeepLink, PROTOCOL_SCHEME } from './deep-link'
 import { registerProject } from './projects/discovery'
 import { computeCounters, registerIpcHandlers, RendererPush } from './ipc/handlers'
 import { readDiagramList } from './diagrams/list'
@@ -29,6 +29,7 @@ let shutdownComplete = false
 
 const APP_SCHEME = 'app'
 const APP_ORIGIN = `${APP_SCHEME}://bundle`
+const DEV_RENDERER_URL = devRendererUrl(app.isPackaged, process.env)
 
 const CONTENT_SECURITY_POLICY =
   "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; base-uri 'none'; object-src 'none'; form-action 'none'"
@@ -100,8 +101,8 @@ function createWindow(): void {
     }
   })
 
-  if (process.env.ELECTRON_RENDERER_URL) {
-    void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
+  if (DEV_RENDERER_URL) {
+    void mainWindow.loadURL(DEV_RENDERER_URL)
   } else {
     void mainWindow.loadURL(`${APP_ORIGIN}/index.html`)
   }
@@ -137,7 +138,7 @@ function applyContentSecurityPolicy(): void {
   session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false))
   session.defaultSession.setPermissionCheckHandler(() => false)
 
-  if (process.env.ELECTRON_RENDERER_URL) return
+  if (DEV_RENDERER_URL) return
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
@@ -172,7 +173,7 @@ function openCorruptSafe(dbPath: string): ReturnType<typeof openDatabase> {
 
 async function main(): Promise<void> {
   await app.whenReady()
-  if (!process.env.ELECTRON_RENDERER_URL) registerAppProtocol()
+  if (!DEV_RENDERER_URL) registerAppProtocol()
   applyContentSecurityPolicy()
 
   const db = openCorruptSafe(join(app.getPath('userData'), 'switchboard.db'))
@@ -244,19 +245,11 @@ async function main(): Promise<void> {
     repos.projects.byPath(dbProjectPath) ??
     registerProject(repos, { path: dbProjectPath, name: 'Database', source: 'manual' })
 
-  const handleDeepLink = (url: string): void => {
-    const link = parseDeepLink(url)
-    if (!link) return
-    if (link.verb === 'approve') {
-      try {
-        broker.decide(link.requestId, 'approve', true)
-        return 
-      } catch {
-      }
-    }
-    showWindow()
-    pusher.push('push.focusRequest', { target: 'inbox', requestId: link.requestId })
-  }
+  const handleDeepLink = (url: string): void =>
+    followDeepLink(url, broker, (requestId) => {
+      showWindow()
+      pusher.push('push.focusRequest', { target: 'inbox', requestId })
+    })
   const findDeepLinkUrl = (argv: string[]): string | undefined =>
     argv.find((arg) => arg.startsWith(`${PROTOCOL_SCHEME}://`))
   const deepLinkIn = (argv: string[]): void => {

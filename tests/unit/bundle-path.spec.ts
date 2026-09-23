@@ -1,8 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import { resolve, sep } from 'node:path'
-import { resolveBundlePath } from '@main/bundle-path'
+import { devRendererUrl, resolveBundlePath } from '@main/bundle-path'
 
 const ROOT = resolve('/app/out/renderer')
+
+describe('devRendererUrl', () => {
+  const env = { ELECTRON_RENDERER_URL: 'http://localhost:5173' }
+
+  it('ignores the dev server variable in a packaged build, so the bundle and its CSP always load', () => {
+    expect(devRendererUrl(true, env)).toBeUndefined()
+  })
+
+  it('honours it in development only', () => {
+    expect(devRendererUrl(false, env)).toBe('http://localhost:5173')
+    expect(devRendererUrl(false, {})).toBeUndefined()
+  })
+})
 
 describe('resolveBundlePath', () => {
   it('serves files inside the bundle', () => {
