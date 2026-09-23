@@ -103,6 +103,7 @@ test('every Spec Kit command is in the palette, and New spec asks for the descri
   }
   await page.getByTestId('sdd-cmd-speckit-converge').click()
   await expect.poll(() => sends(page)).toContain('/speckit-converge 001-cart')
+  expect(await page.evaluate(() => window.__mock.state().specPins)).toEqual([{ projectId: 'p-alpha', specId: '001-cart' }])
   await expect(page.getByTestId('sdd-cmd-speckit-converge')).toBeDisabled()
 
   await page.getByTestId('spec-new').click()

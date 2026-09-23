@@ -569,6 +569,9 @@ describe('the Feature list', () => {
     const failed = h.repos.flowStages.get(run.id, 'spec')!
     expect(failed.status).toBe('failed')
     expect(failed.summary).toContain('it is still starting after 1 seconds')
+    expect(failed.summary).toContain('Retry to wait for it again')
+    expect(failed.summary).not.toContain('Reconnect')
+    expect(flowStageActions(h.repos.flowRuns.byId(run.id)!, failed)).toContain('retry')
     state = { status: 'connected', error: null }
     await h.flow.retry(run.id)
     expect(h.repos.flowStages.get(run.id, 'spec')?.status).toBe('running')

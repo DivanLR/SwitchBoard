@@ -50,7 +50,14 @@ import { importSkills } from '@main/skills/import'
 import type { FlowSupervisor } from '@main/flow/flow-supervisor'
 import { disableSkill, enableSkill, installedSkillNames, liveSkillFolders, removeSkill } from '@main/skills/install'
 import { detectFlowStacks } from '@main/flow/stacks'
-import { installExtension, installSpecKit, readSddReport, readSpecDetail, readSpecKitState } from '@main/specs/spec-kit'
+import {
+  installExtension,
+  installSpecKit,
+  pinSpec,
+  readSddReport,
+  readSpecDetail,
+  readSpecKitState,
+} from '@main/specs/spec-kit'
 import { check as checkForUpdates, installNow } from '@main/updater'
 
 const EVENT_FLUSH_INTERVAL_MS = 33 
@@ -485,6 +492,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     },
     'specs.state': (req) => readSpecKitState(requireProject(req.projectId).path),
     'specs.detail': (req) => readSpecDetail(requireProject(req.projectId).path, req.specId),
+    'specs.pin': (req) => pinSpec(requireProject(req.projectId).path, req.specId),
     'specs.install': async (req) => {
       const project = requireProject(req.projectId)
       await installSpecKit(project.path)

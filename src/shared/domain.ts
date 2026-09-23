@@ -789,11 +789,12 @@ export function flowStageActions(
     return decided && row.report?.decision === 'go' ? ['feature'] : []
   }
   if (row.stage !== run.stage) return []
-  if (row.status === 'running') return ['skip']
-  if (row.status === 'failed') return ['retry', 'skip']
-  if (row.status === 'pending') return row.stage === 'ship' ? ['ship', 'skip'] : ['skip']
+  const bugTest = run.kind === 'bug' && row.stage === 'test'
+  if (row.status === 'running') return bugTest ? [] : ['skip']
+  if (row.status === 'failed') return bugTest ? ['fix', 'retry'] : ['retry', 'skip']
+  if (row.status === 'pending') return row.stage === 'ship' ? ['ship', 'skip'] : bugTest ? [] : ['skip']
   if (row.status !== 'review') return []
-  if (row.stage === stages[stages.length - 1]) return ['approve', 'revise']
+  if (row.stage === stages[stages.length - 1] || bugTest) return ['approve', 'revise']
   if (row.stage === 'review' && row.report?.verdict === 'needs_fixes') return ['fix', 'approve', 'revise', 'skip']
   return ['approve', 'revise', 'skip']
 }

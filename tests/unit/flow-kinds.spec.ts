@@ -318,6 +318,32 @@ describe('a feature run', () => {
     expect(row.summary).toContain('The checklist has 2 open items.')
     expect(h.repos.flowRuns.byId(run.id)?.stage).toBe('plan')
   })
+
+  it('tells the checklist how to handle its questions, and holds autopilot when no checklist was written', async () => {
+    const h = setup(project())
+    const run = await h.flow.start({
+      projectId: h.project.id,
+      source: { kind: 'text', title: 'Cart', description: '' },
+      autopilot: true,
+      autoShip: false,
+      checklist: true,
+    })
+    write(run.worktreePath!, 'specs/001-cart/spec.md', '# Cart\n')
+    h.flow.onFlowMarker(sessionOf(h, run.id, 'spec'), marker('spec', { specDir: 'specs/001-cart' }))
+    await vi.waitFor(() => expect(h.repos.flowStages.get(run.id, 'plan')?.status).toBe('running'), WAIT)
+    const plan = sessionOf(h, run.id, 'plan')
+    await vi.waitFor(() => expect(textsTo(h, plan)).not.toHaveLength(0), WAIT)
+    for (let i = 0; i < 4; i += 1) h.flow.onTurnEnded(plan)
+    expect(textsTo(h, plan).find((t) => t.startsWith('/speckit-checklist '))).toContain('Answer each question yourself')
+
+    h.flow.onFlowMarker(plan, marker('plan'))
+    const row = h.repos.flowStages.get(run.id, 'plan')!
+    expect(row.status).toBe('review')
+    expect(row.report?.checklistOpen).toBeNull()
+    expect(row.summary).toContain('No checklist was written in specs/001-cart/checklists/')
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(h.repos.flowRuns.byId(run.id)?.stage).toBe('plan')
+  })
 })
 
 describe('a bug run', () => {
@@ -442,6 +468,53 @@ describe('a bug run', () => {
     expect(readFileSync(join(run.worktreePath!, '.specify/bugs/cart-empty/assessment.md'), 'utf8')).toBe('# A\n')
   })
 
+  it('opened from a bug whose fix is recorded in the primary checkout, fixes it again in the worktree rather than testing base', async () => {
+    const path = project({ extensions: ['bug'] })
+    write(path, '.specify/bugs/cart-empty/assessment.md', '# A\n')
+    write(path, '.specify/bugs/cart-empty/fix.md', '# F\n')
+    write(path, '.specify/bugs/cart-empty/test.md', '- **Result**: verified\n')
+    const h = setup(path)
+    const run = await h.flow.start({ projectId: h.project.id, source: bug('Cart empties', '', 'cart-empty'), autopilot: true, autoShip: false })
+    expect(run.stage).toBe('fix')
+    expect(h.sent[0].text).toMatch(/^\/speckit-bug-fix slug=cart-empty /)
+    expect(h.sent[0].text).toContain('already exists, overwrite it')
+  })
+
+  it('sends a bug whose test did not verify back to Fix with what the test found, and never lets Skip past it', async () => {
+    const t = await atTest()
+    write(t.root, '.specify/bugs/login-times-out/test.md', '# Test\n\n- **Result**: partial\n')
+    t.h.flow.onFlowMarker(t.session, marker('test'))
+    const failed = t.h.repos.flowStages.get(t.run.id, 'test')!
+    expect(flowStageActions(t.h.repos.flowRuns.byId(t.run.id)!, failed)).toEqual(['fix', 'retry'])
+    await expect(t.h.flow.skip(t.run.id)).rejects.toMatchObject({ code: 'RULE_NOT_ALLOWED' })
+
+    await t.h.flow.fix(t.run.id)
+
+    expect(t.h.repos.flowRuns.byId(t.run.id)?.stage).toBe('fix')
+    const refix = textsTo(t.h, sessionOf(t.h, t.run.id, 'fix')).at(-1)!
+    expect(refix).toMatch(/^\/speckit-bug-fix slug=login-times-out /)
+    expect(refix).toContain('The bug test reported partial')
+    expect(refix).toContain('.specify/bugs/login-times-out/test.md')
+    t.h.flow.onFlowMarker(sessionOf(t.h, t.run.id, 'fix'), marker('fix'))
+    await t.h.flow.approve(t.run.id)
+    expect(t.h.repos.flowRuns.byId(t.run.id)?.stage).toBe('test')
+    expect(t.h.repos.flowStages.get(t.run.id, 'test')?.status).toBe('running')
+  })
+
+  it('keeps its reports in the primary checkout when its worktree is removed', async () => {
+    const t = await atTest()
+    write(t.root, '.specify/bugs/login-times-out/test.md', '- **Result**: verified\n')
+    await t.h.flow.cancel(t.run.id)
+
+    await t.h.flow.removeWorktree(t.run.id, true)
+
+    const primary = t.h.project.path
+    expect(readFileSync(join(primary, '.specify/bugs/login-times-out/test.md'), 'utf8')).toBe('- **Result**: verified\n')
+    expect(readFileSync(join(primary, '.specify/bugs/login-times-out/fix.md'), 'utf8')).toBe('# F\n')
+    rmSync(t.root, { recursive: true, force: true })
+    expect((await t.h.flow.artefact(t.run.id, 'test'))?.content).toBe('- **Result**: verified\n')
+  })
+
   it('refuses a slug that is not one', async () => {
     const h = setup(project({ extensions: ['bug'] }))
     await expect(
@@ -507,6 +580,21 @@ describe('an idea run', () => {
     expect(decideRow.report?.decision).toBe('go')
     expect(flowStageActions(done, decideRow)).toEqual(['feature'])
     expect(await h.flow.feature(run.id)).toEqual({ title: 'Offline mode', description: 'Build offline sync for the cart.' })
+  })
+
+  it('opened from an idea that is already decided, finishes at once with that decision, so a go offers the feature', async () => {
+    const path = project({ extensions: ['assess'] })
+    for (const file of ['intake', 'research', 'problem', 'concept']) write(path, `.specify/assessments/offline-mode/${file}.md`, '# x\n')
+    write(path, '.specify/assessments/offline-mode/decision.md', '# Decision\n\n- **Verdict**: go\n')
+    const h = setup(path)
+
+    const run = await h.flow.start({ projectId: h.project.id, source: { kind: 'idea', title: 'Offline mode', idea: '', slug: 'offline-mode' }, autopilot: true, autoShip: false })
+
+    expect(run.status).toBe('done')
+    expect(h.manager.startSession).not.toHaveBeenCalled()
+    const decideRow = h.repos.flowStages.get(run.id, 'decide')!
+    expect(decideRow).toMatchObject({ status: 'approved', summary: 'Already decided in .specify/assessments/offline-mode/decision.md.' })
+    expect(flowStageActions(run, decideRow)).toEqual(['feature'])
   })
 
   it('offers no feature after a kill', async () => {

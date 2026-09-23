@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type {
   ConstitutionState,
@@ -227,6 +227,22 @@ export async function readSpecKitState(projectPath: string): Promise<SpecKitStat
   ])
   const specs = await Promise.all(ids.map((id) => summarise(projectPath, id)))
   return { installed, specs, constitution, bugs, ideas, extensions: { bug, assess } }
+}
+
+export async function pinFeature(root: string, specDir: string): Promise<void> {
+  const file = join(root, '.specify', 'feature.json')
+  let current: Record<string, unknown> = {}
+  try {
+    current = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
+  } catch {}
+  await writeFile(file, `${JSON.stringify({ ...current, feature_directory: specDir }, null, 2)}\n`, 'utf8')
+}
+
+export async function pinSpec(projectPath: string, id: string): Promise<void> {
+  if (!(await isSpecKitInstalled(projectPath)) || !(await readSpecDetail(projectPath, id))) {
+    throw { code: 'NOT_FOUND', message: `This project has no Spec Kit feature ${id}.` } satisfies IpcError
+  }
+  await pinFeature(projectPath, `specs/${id}`)
 }
 
 export async function readSpecDetail(projectPath: string, id: string): Promise<SpecDetail | null> {

@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   installExtension,
   installSpecKit,
+  pinSpec,
   readConstitutionState,
   readSddEntries,
   readSddReport,
@@ -198,6 +199,23 @@ describe('installExtension', () => {
     const run = vi.fn<CommandRunner>()
     await expect(installExtension(bare, 'bug', run)).rejects.toMatchObject({ code: 'UNSUPPORTED' })
     expect(run).not.toHaveBeenCalled()
+  })
+})
+
+describe('pinSpec', () => {
+  it('points feature.json at the spec the SDD tab selected, keeps its other keys, and refuses a spec that is not there', async () => {
+    const p = project()
+    write(p, 'specs/001-login/spec.md', '# Login\n')
+    write(p, '.specify/feature.json', JSON.stringify({ feature_directory: 'specs/002-export', numbering: 'sequential' }))
+
+    await pinSpec(p, '001-login')
+
+    expect(JSON.parse(readFileSync(join(p, '.specify', 'feature.json'), 'utf8'))).toEqual({
+      feature_directory: 'specs/001-login',
+      numbering: 'sequential',
+    })
+    await expect(pinSpec(p, '..')).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    await expect(pinSpec(p, '003-none')).rejects.toMatchObject({ code: 'NOT_FOUND' })
   })
 })
 

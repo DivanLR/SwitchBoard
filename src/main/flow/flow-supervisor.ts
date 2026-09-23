@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
-import { cp, readFile, readdir, writeFile } from 'node:fs/promises'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { cp, readFile, readdir } from 'node:fs/promises'
 import { basename, isAbsolute, join, relative } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import type {
@@ -40,6 +40,7 @@ import type { SessionManager } from '@main/sessions/session-manager'
 import {
   bugAssessPrompt,
   bugFixPrompt,
+  bugRefixPrompt,
   bugTestPrompt,
   buildHandshake,
   buildSteps,
@@ -72,6 +73,7 @@ import { STACK_ORDER, detectFlowStacks } from './stacks'
 import {
   isExtensionInstalled,
   isSpecKitInstalled,
+  pinFeature,
   readConstitutionState,
   readSpecKitState,
 } from '@main/specs/spec-kit'
@@ -91,18 +93,22 @@ const ADO_HOLD_MS = 10 * 60_000
 
 const ADO_LISTED_MS = 10_000
 
-function adoProblem(state: { status: string; error: string | null } | null, waitMs: number): IpcError {
+function adoProblem(
+  state: { status: string; error: string | null } | null,
+  waitMs: number,
+  again: 'Reconnect' | 'Retry' = 'Reconnect',
+): IpcError {
   if (!state) return { code: 'NOT_LIVE', message: 'The session ended before the Azure DevOps MCP server connected.' }
   const why: Record<string, string> = {
-    pending: `it is still starting after ${Math.round(waitMs / 1000)} seconds, and npx may still be fetching it. Reconnect to wait for it again`,
-    'needs-auth': 'it needs you to sign in. Sign in to it in Claude Code with /mcp, then Reconnect',
-    failed: `it failed to start: ${state.error?.trim() || 'it gave no reason'}. Check the ado server in your Claude Code configuration, then Reconnect`,
-    disabled: 'it is disabled in your Claude Code configuration. Enable it, then Reconnect',
-    missing: 'no MCP server named ado is configured for it. Add the ado server to your Claude Code configuration, then Reconnect',
+    pending: `it is still starting after ${Math.round(waitMs / 1000)} seconds, and npx may still be fetching it. ${again} to wait for it again`,
+    'needs-auth': `it needs you to sign in. Sign in to it in Claude Code with /mcp, then ${again}`,
+    failed: `it failed to start: ${state.error?.trim() || 'it gave no reason'}. Check the ado server in your Claude Code configuration, then ${again}`,
+    disabled: `it is disabled in your Claude Code configuration. Enable it, then ${again}`,
+    missing: `no MCP server named ado is configured for it. Add the ado server to your Claude Code configuration, then ${again}`,
   }
   return {
     code: 'MCP_NOT_CONNECTED',
-    message: `The Azure DevOps MCP server is not connected for this session: ${why[state.status] ?? `it reports ${state.status}. Reconnect to try again`}.`,
+    message: `The Azure DevOps MCP server is not connected for this session: ${why[state.status] ?? `it reports ${state.status}. ${again} to try again`}.`,
   }
 }
 
@@ -156,9 +162,9 @@ function openChecklistItems(worktreePath: string, specDir: string): number | nul
   const dir = resolveArtefactPath(worktreePath, join(specDir, 'checklists'))
   if (!dir) return null
   try {
-    return readdirSync(dir)
-      .filter((name) => name.endsWith('.md'))
-      .reduce((sum, name) => sum + (readFileSync(join(dir, name), 'utf8').match(/^\s*-\s*\[ \]/gm)?.length ?? 0), 0)
+    const files = readdirSync(dir).filter((name) => name.endsWith('.md'))
+    if (files.length === 0) return null
+    return files.reduce((sum, name) => sum + (readFileSync(join(dir, name), 'utf8').match(/^\s*-\s*\[ \]/gm)?.length ?? 0), 0)
   } catch {
     return null
   }
@@ -173,6 +179,16 @@ async function copyMissing(fromRoot: string, toRoot: string, rel: string): Promi
   const to = join(toRoot, rel)
   if (!existsSync(from) || existsSync(to)) return
   await cp(from, to, { recursive: true }).catch(() => {})
+}
+
+async function copyNewer(fromRoot: string, toRoot: string, rel: string): Promise<void> {
+  const from = join(fromRoot, rel)
+  if (!existsSync(from)) return
+  await cp(from, join(toRoot, rel), {
+    recursive: true,
+    filter: (src, dest) =>
+      statSync(src).isDirectory() || !existsSync(dest) || statSync(src).mtimeMs > statSync(dest).mtimeMs,
+  }).catch(() => {})
 }
 
 function errorText(error: unknown): string {
@@ -363,7 +379,7 @@ export class FlowSupervisor {
       await copyMissing(project.path, worktreePath, specDir)
       startStage = existsSync(join(worktreePath, specDir, 'tasks.md')) ? 'build' : 'plan'
     }
-    if (slug) startStage = this.firstUndone(kind, worktreePath, slug)
+    if (slug) startStage = this.firstUndone(kind, worktreePath, slug) === 'assess' ? 'assess' : 'fix'
 
     const run = this.repos.flowRuns.start({
       projectId: project.id,
@@ -411,7 +427,8 @@ export class FlowSupervisor {
     slug: string,
     stacks: readonly string[],
   ): Promise<FlowRun> {
-    const startStage = this.firstUndone('idea', project.path, slug)
+    const open = this.firstUndone('idea', project.path, slug)
+    const startStage = open ?? 'decide'
     const run = this.repos.flowRuns.start({
       projectId: project.id,
       kind: 'idea',
@@ -428,6 +445,18 @@ export class FlowSupervisor {
       baseBranch: null,
     })
     this.skipBefore(run, startStage)
+    if (!open) {
+      const doc = sddDocPath('idea', slug, 'decide') ?? ''
+      this.repos.flowStages.update(run.id, 'decide', {
+        status: 'approved',
+        summary: `Already decided in ${doc}.`,
+        report: { ...emptyFlowStageReport(), decision: decisionOf(this.readDoc(run, doc)) },
+        finishedAt: nowIso(),
+      })
+      this.repos.flowRuns.finish(run.id, 'done', null)
+      this.callbacks.onFlowChanged(project.id)
+      return this.requireRun(run.id)
+    }
     this.callbacks.onFlowChanged(project.id)
     return this.exclusive(run.id, () => this.beginStage(run.id, startStage))
   }
@@ -445,10 +474,9 @@ export class FlowSupervisor {
     }
   }
 
-  private firstUndone(kind: FlowKind, root: string, slug: string): FlowStage {
+  private firstUndone(kind: FlowKind, root: string, slug: string): FlowStage | null {
     const docs = flowStagesOf(kind).filter((stage) => sddDocPath(kind, slug, stage) !== null)
-    const open = docs.find((stage) => !existsSync(join(root, sddDocPath(kind, slug, stage) ?? '')))
-    return open ?? docs[docs.length - 1] ?? flowStagesOf(kind)[0]
+    return docs.find((stage) => !existsSync(join(root, sddDocPath(kind, slug, stage) ?? ''))) ?? null
   }
 
   private async carrySdd(from: string, to: string, process: SddProcess, slug: string): Promise<void> {
@@ -527,8 +555,21 @@ export class FlowSupervisor {
     return this.exclusive(runId, async () => {
       const run = this.requireRun(runId)
       const stageRow = this.requireAction(run, 'fix')
+      if (run.stage === 'test') {
+        await this.refix(run, stageRow)
+        return
+      }
       await this.restartStage(run, stageRow, fixFindingsPrompt(stageRow.report, run), stageRow.feedback)
     })
+  }
+
+  private async refix(run: FlowRun, testRow: FlowStageRecord): Promise<void> {
+    const fixRow = this.repos.flowStages.get(run.id, 'fix')
+    if (!fixRow) return
+    this.repos.flowStages.update(run.id, 'test', { status: 'pending', finishedAt: null })
+    this.repos.flowRuns.update(run.id, { stage: 'fix', status: 'waiting' })
+    const back = { ...run, stage: 'fix' as const }
+    await this.restartStage(back, fixRow, bugRefixPrompt(back, run.stacks, run.repos, testRow.summary), null)
   }
 
   revise(runId: string, feedback: string): Promise<FlowRun> {
@@ -629,6 +670,9 @@ export class FlowSupervisor {
         message: 'This run still uses its worktree. Cancel the run or let it finish first.',
       } satisfies IpcError
     }
+    if (run.kind === 'bug' && run.slug) {
+      await copyNewer(run.worktreePath, this.requireProject(run.projectId).path, sddDirOf('bug', run.slug))
+    }
     const repos = this.reposOf(run).map((repo) => ({ ...repo }))
     const multi = run.repos.length > 0
     for (const repo of [...repos.slice(1), repos[0]]) {
@@ -715,7 +759,7 @@ export class FlowSupervisor {
   }
 
   private rootOf(run: FlowRun): string | null {
-    return run.worktreePath ?? (run.kind === 'idea' ? (this.repos.projects.byId(run.projectId)?.path ?? null) : null)
+    return run.worktreePath ?? (run.kind !== 'feature' ? (this.repos.projects.byId(run.projectId)?.path ?? null) : null)
   }
 
   private readDoc(run: FlowRun, rel: string): string | null {
@@ -993,14 +1037,8 @@ export class FlowSupervisor {
 
   private async pinFeature(run: FlowRun, stage: FlowStage): Promise<void> {
     if (stage === 'spec' || !run.specDir || !run.worktreePath) return
-    const specify = join(run.worktreePath, '.specify')
-    if (!existsSync(specify)) return
-    const file = join(specify, 'feature.json')
-    let current: Record<string, unknown> = {}
-    try {
-      current = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
-    } catch {}
-    await writeFile(file, `${JSON.stringify({ ...current, feature_directory: run.specDir }, null, 2)}\n`, 'utf8').catch(() => {})
+    if (!existsSync(join(run.worktreePath, '.specify'))) return
+    await pinFeature(run.worktreePath, run.specDir).catch(() => {})
   }
 
   private resolveSpecDir(run: FlowRun, reported: string | null): string | null {
@@ -1072,7 +1110,7 @@ export class FlowSupervisor {
       }
       case 'plan':
         return {
-          steps: [...planSteps(run.stacks, run.specDir, repos), ...(run.checklist ? checklistSteps(run.specDir) : [])],
+          steps: [...planSteps(run.stacks, run.specDir, repos), ...(run.checklist ? checklistSteps(run.specDir, run.autopilot) : [])],
           handshake: planHandshake(),
         }
       case 'build':
@@ -1149,7 +1187,7 @@ export class FlowSupervisor {
     this.sessionStage.set(session.id, { runId, stage })
     if (stage === 'spec' && run.source === 'ado') {
       try {
-        await this.requireAdo(session.id)
+        await this.requireAdo(session.id, 'Retry')
       } catch (error) {
         if (this.stillOn(runId, stage, session.id)) this.failStage(runId, stage, errorText(error), { retryOnce: false })
         return
@@ -1221,7 +1259,8 @@ export class FlowSupervisor {
     if (stage === 'plan' && run.checklist && run.specDir && run.worktreePath) {
       const open = openChecklistItems(run.worktreePath, run.specDir)
       extra.checklistOpen = open
-      if (open) notes.push(`The checklist has ${open} open item${open === 1 ? '' : 's'}.`)
+      if (open === null) notes.push(`No checklist was written in ${run.specDir}/checklists/, so the checklist gate did not run.`)
+      else if (open) notes.push(`The checklist has ${open} open item${open === 1 ? '' : 's'}.`)
     }
     return { fail: null, extra, notes }
   }
@@ -1359,7 +1398,7 @@ export class FlowSupervisor {
       return
     }
     if (stage === 'build' && report?.converged === false) return
-    if (stage === 'plan' && (report?.checklistOpen ?? 0) > 0) return
+    if (stage === 'plan' && run.checklist && report?.checklistOpen !== 0) return
     if (stage === 'review' && report?.verdict !== 'ready') {
       if (report?.verdict === 'needs_fixes' && stageRow.attempts <= MAX_FIX_ROUNDS) void this.fix(runId).catch(() => {})
       return
@@ -1395,7 +1434,7 @@ export class FlowSupervisor {
     return project
   }
 
-  private async requireAdo(sessionId: string): Promise<void> {
+  private async requireAdo(sessionId: string, again: 'Reconnect' | 'Retry' = 'Reconnect'): Promise<void> {
     const started = Date.now()
     const waiting = (state: { status: string } | null): boolean => {
       const elapsed = Date.now() - started
@@ -1408,6 +1447,6 @@ export class FlowSupervisor {
       state = await this.manager.mcpStatus(sessionId, ADO_SERVER)
     }
     if (state?.status === 'connected') return
-    throw adoProblem(state, this.ado.waitMs)
+    throw adoProblem(state, this.ado.waitMs, again)
   }
 }

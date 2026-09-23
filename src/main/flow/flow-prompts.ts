@@ -170,10 +170,10 @@ export function planSteps(stacks: readonly string[], specDir: string | null, rep
   ]
 }
 
-export function checklistSteps(specDir: string | null): string[] {
+export function checklistSteps(specDir: string | null, autopilot: boolean): string[] {
   const where = specDir ? `${specDir}/checklists/` : "the feature's checklists folder"
   return [
-    `/speckit-checklist ${featureLine(specDir)}`.trim(),
+    `/speckit-checklist ${args(featureLine(specDir), autopilot ? ANSWER_YOURSELF : ASK_ME)}`,
     `Go through every item in ${where}: mark [x] each item the spec, plan and tasks already satisfy, fix the spec ` +
       'or plan where that makes an item pass, and leave the rest unchecked. Do not tick an item you have not checked.',
   ]
@@ -230,6 +230,7 @@ export function buildHandshake(): string {
 function sddRules(run: Pick<FlowRun, 'slug' | 'autopilot'>): string {
   return [
     `Use slug=${run.slug ?? ''} exactly: do not ask me for a slug and do not pick another.`,
+    'If this command’s report for that slug already exists, overwrite it with this run’s result rather than stopping.',
     run.autopilot ? answerYourself('the report') : ASK_ME,
   ].join(' ')
 }
@@ -243,6 +244,19 @@ export function bugAssessPrompt(run: SddRun): string {
 export function bugFixPrompt(run: SddRun, stacks: readonly string[], repos: readonly Repo[] = []): string {
   const where = repos.length > 1 ? 'Change each repository the assessment names, and commit in each one.' : 'Commit the fix.'
   return `${sddCommand('speckit-bug-fix', '', run.slug)} ${args(stackContext(stacks), 'Keep the tests green.', where)}\n${sddRules(run)}`
+}
+
+export function bugRefixPrompt(
+  run: SddRun,
+  stacks: readonly string[],
+  repos: readonly Repo[],
+  why: string | null,
+): string {
+  const test = sddDocPath('bug', run.slug, 'test') ?? 'test.md'
+  return (
+    `${bugFixPrompt(run, stacks, repos)}\n` +
+    `The bug test did not verify the last fix${why ? `: ${why}` : '.'} Read ${test} for what it found and fix that on this branch.`
+  )
 }
 
 export function bugTestPrompt(run: SddRun): string {

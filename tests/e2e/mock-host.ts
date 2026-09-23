@@ -119,6 +119,7 @@ export interface MockDriver {
     verifyStarts: { projectId: string; suiteIds: string[]; isolated: boolean }[]
     planModeChanges: { sessionId: string; enabled: boolean }[]
     diagramOpens: { projectId: string; file: string }[]
+    specPins: { projectId: string; specId: string }[]
     prOpens: string[]
     pluginInstalls: { marketplace: string; pkg: string }[]
     diffApplies: { projectId: string; path: string; lines: string[]; instruction: string }[]
@@ -189,6 +190,7 @@ export function installMockHost(scenario: MockScenario): void {
   const diagramsByProject = new Map<string, DiagramEntry[]>()
   const diagramRequestedFiles = new Map<string, Set<string>>()
   const diagramOpens: { projectId: string; file: string }[] = []
+  const specPins: { projectId: string; specId: string }[] = []
   const prOpens: string[] = []
   const pluginInstalls: { marketplace: string; pkg: string }[] = []
   const diffApplies: { projectId: string; path: string; lines: string[]; instruction: string }[] = []
@@ -1241,6 +1243,9 @@ export function installMockHost(scenario: MockScenario): void {
       const details = specKitOf(String(req.projectId)).details as AnyRecord | undefined
       return details?.[String(req.specId)] ?? null
     },
+    'specs.pin': (req) => {
+      specPins.push({ projectId: String(req.projectId), specId: String(req.specId) })
+    },
     'specs.install': (req) => {
       const projectId = String(req.projectId)
       specKitByProject.set(projectId, { ...specKitOf(projectId), installed: true })
@@ -1992,6 +1997,7 @@ export function installMockHost(scenario: MockScenario): void {
       verifyStarts: [...verifyStarts],
       planModeChanges: [...planModeChanges],
       diagramOpens: [...diagramOpens],
+      specPins: [...specPins],
       prOpens: [...prOpens],
       pluginInstalls: [...pluginInstalls],
       diffApplies: [...diffApplies],

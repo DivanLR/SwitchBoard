@@ -90,8 +90,8 @@ const dialog = useNewSpecDialog({
 })
 const { prompt, text, slug, slugValid, ready } = dialog
 
-function dispatch(key: string, line: string, label: string): void {
-  void specs.run(props.projectId, line, key, label).catch((error: unknown) => {
+function dispatch(key: string, line: string, label: string, specId?: string): void {
+  void specs.run(props.projectId, line, key, label, specId).catch((error: unknown) => {
     useToastsStore().show('error', 'Could not start that command', errorMessage(error))
   })
 }
@@ -107,7 +107,7 @@ function run(command: SddCommand, target: string | null): void {
       : command.needs === 'slug'
         ? sddCommand(command.command, '', target)
         : `/${command.command}`
-  dispatch(command.command, line, `Running ${command.label}`)
+  dispatch(command.command, line, `Running ${command.label}`, command.needs === 'spec' ? (target ?? undefined) : undefined)
 }
 
 function openSpecInFlow(specId: string): void {

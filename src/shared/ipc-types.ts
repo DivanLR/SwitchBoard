@@ -217,6 +217,7 @@ export interface InvokeMap {
   'skills.run': { req: { projectId: string; name: string; argument?: string }; res: { sessionId: string } }
   'specs.state': { req: { projectId: string }; res: SpecKitState }
   'specs.detail': { req: { projectId: string; specId: string }; res: SpecDetail | null }
+  'specs.pin': { req: { projectId: string; specId: string }; res: void }
   'specs.install': { req: { projectId: string }; res: SpecKitState }
   'specs.installExtension': { req: { projectId: string; name: SddProcess }; res: SpecKitState }
   'specs.report': {

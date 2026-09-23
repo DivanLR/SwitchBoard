@@ -123,7 +123,8 @@ const store = reactive({
     state.report = { process, slug, file, path: found?.path ?? null, content: found?.content ?? null }
   },
 
-  async run(projectId: string, text: string, key: string, label: string): Promise<void> {
+  async run(projectId: string, text: string, key: string, label: string, specId?: string): Promise<void> {
+    if (specId) await invoke('specs.pin', { projectId, specId })
     const sessionId = await useSectionsStore().runInSession(projectId, text, true, false, 'spec')
     state.runs = [
       ...state.runs.filter((run) => run.projectId !== projectId || run.key !== key),
