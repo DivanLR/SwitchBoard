@@ -339,18 +339,27 @@ test('autopilot with autoShip on raises the pull request stage automatically too
   await expect(page.getByTestId('flow-stage-ship')).toContainText('running')
 })
 
-test('a question from the stage session is answered inline', async ({ page }) => {
+test('a question the stage session asks through AskUserQuestion is answered inline, into that tool call', async ({
+  page,
+}) => {
   await startTextRun(page)
   const runId = await currentRunId(page)
   await expect(page.getByTestId('flow-stage-session')).toBeVisible()
+  const sendsBefore = await page.evaluate(() => window.__mock.state().sends.length)
 
-  await page.evaluate((id) => window.__mock.askFlowQuestion(id, 'Which option?', ['Option A', 'Option B']), runId)
+  const eventId = await page.evaluate(
+    (id) => window.__mock.askFlowQuestion(id, 'Which option?', ['Option A', 'Option B']),
+    runId,
+  )
   await expect(page.getByTestId('mini-terminal-question')).toBeVisible()
   await expect(page.getByTestId('mini-terminal-question')).toContainText('Which option?')
 
   await page.getByTestId('question-option-Option A').click()
   await expect(page.getByTestId('mini-terminal-question')).toHaveCount(0)
-  await expect.poll(() => lastSend(page)).toBe('Option A')
+  await expect
+    .poll(async () => (await page.evaluate(() => window.__mock.state().answers)).at(-1))
+    .toEqual({ eventId, choice: 'Option A' })
+  expect(await page.evaluate(() => window.__mock.state().sends.length)).toBe(sendsBefore)
 })
 
 test('cancel stops the running stage session and ends the run', async ({ page }) => {

@@ -277,7 +277,7 @@ async function main(): Promise<void> {
     onMarker: (sessionId, marker) => flow.onFlowMarker(sessionId, marker),
     onSessionEnded: (sessionId, reason) => flow.onSessionEnded(sessionId, reason),
     onVerifyReport: (sessionId, report) => flow.onVerifyReport(sessionId, report),
-    onTurnEnded: (sessionId) => flow.onTurnEnded(sessionId),
+    onTurnEnded: (sessionId, error) => flow.onTurnEnded(sessionId, error),
   })
   flow.reconcileOnStartup()
 

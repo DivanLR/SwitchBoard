@@ -31,7 +31,9 @@ const question = computed(() => pendingQuestion(active.tails[props.sessionId] ??
 
 function answer(eventId: string, choice: string): void {
   answered.value = eventId
-  void active.sendTo(props.sessionId, choice.replace(/\s*\(recommended\)\s*$/i, ''))
+  const asked = (active.tails[props.sessionId] ?? []).some((e) => e.id === eventId && e.kind === 'question')
+  if (asked) void active.answerQuestion(eventId, choice, props.sessionId)
+  else void active.sendTo(props.sessionId, choice.replace(/\s*\(recommended\)\s*$/i, ''))
 }
 
 watch(lines, () => {

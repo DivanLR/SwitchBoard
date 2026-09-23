@@ -141,13 +141,10 @@ const store = reactive({
     await invoke('sessions.editQueued', { sessionId: this.sessionId, eventId, text })
   },
 
-  async answerQuestion(eventId: string, choice: string): Promise<void> {
-    if (!this.sessionId) return
-    await invoke('sessions.answerQuestion', {
-      sessionId: this.sessionId,
-      eventId,
-      choice,
-    })
+  async answerQuestion(eventId: string, choice: string, inSession?: string): Promise<void> {
+    const sessionId = inSession ?? this.sessionId
+    if (!sessionId) return
+    await invoke('sessions.answerQuestion', { sessionId, eventId, choice })
   },
 
   async interrupt(): Promise<{ stillQueued: number }> {

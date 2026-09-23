@@ -319,6 +319,65 @@ describe('a stage marker resolving the stage', () => {
   })
 })
 
+describe('a turn that ends in an error', () => {
+  it('sends the same step once more, then fails the stage with the error instead of moving on', async () => {
+    const h = setup()
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: true, autoShip: false })
+    const sid = sessionOf(h, run.id)
+    const first = h.sent[0].text
+
+    h.flow.onTurnEnded(sid, 'Usage limit reached')
+    expect(h.sent).toHaveLength(2)
+    expect(h.sent[1].text).toBe(first)
+
+    h.flow.onTurnEnded(sid, 'Usage limit reached')
+    expect(h.sent).toHaveLength(2)
+    const row = h.repos.flowStages.get(run.id, 'spec')!
+    expect(row.status).toBe('failed')
+    expect(row.summary).toContain('Usage limit reached')
+    expect(h.manager.startSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('carries on with the next step once the resent step succeeds', async () => {
+    const h = setup()
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+    const sid = sessionOf(h, run.id)
+    h.flow.onTurnEnded(sid, 'error_during_execution')
+    h.flow.onTurnEnded(sid)
+    expect(h.sent[2].text.startsWith('/speckit-clarify')).toBe(true)
+  })
+})
+
+describe('the Feature list', () => {
+  it('fails at once when the turn ends without a features marker', async () => {
+    const h = setup()
+    const listing = h.flow.features(h.project.id, '', 60_000)
+    await vi.waitFor(() => expect(h.sent).toHaveLength(1))
+    h.flow.onTurnEnded(h.sent[0].sessionId)
+    await expect(listing).rejects.toMatchObject({ code: 'NOT_LIVE' })
+    expect(h.ended).toEqual([h.sent[0].sessionId])
+  })
+})
+
+describe('the stage sessions', () => {
+  it('run only the build stage at max effort, and give the ship stage the merge and reviewer guard', async () => {
+    const h = setup()
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+    for (const stage of ['spec', 'plan', 'build', 'clean', 'test', 'review'] as const) {
+      h.flow.onFlowMarker(sessionOf(h, run.id, stage), specMarker({ stage }))
+      await h.flow.approve(run.id)
+    }
+    await h.flow.ship(run.id)
+    const opts = h.manager.startSession.mock.calls.map((call) => (call as unknown[])[4] as Record<string, unknown>)
+    expect(opts.map((o) => o.effort)).toEqual([undefined, undefined, 'max', undefined, undefined, undefined, undefined])
+    expect(opts.map((o) => o.section)).toEqual(Array(7).fill('flow'))
+    expect(opts.slice(0, 6).every((o) => o.denyTool === undefined)).toBe(true)
+    const guard = opts[6].denyTool as (tool: string, input: unknown) => string | null
+    expect(guard('Bash', { command: 'gh pr merge 12 --squash' })).toContain('left to a person')
+    expect(guard('Bash', { command: 'gh pr create --base main --fill' })).toBeNull()
+  })
+})
+
 describe('the spec folder', () => {
   it('takes specDir from the worktree feature.json after the spec stage, and keeps none without a spec.md', async () => {
     const h = setup()

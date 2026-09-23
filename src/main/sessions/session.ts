@@ -2,6 +2,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import {
   query,
   type CanUseTool,
+  type HookInput,
   type HookJSONOutput,
   type McpServerConfig,
   type PermissionMode,
@@ -87,6 +88,7 @@ interface HostedSessionOptions {
     effort: EffortLevel
   }
   mode: SessionMode
+  denyTool?: (toolName: string, input: unknown) => string | null
   onPlanModeChange?: (inPlanMode: boolean) => void
   summaries?: boolean
   sink: EventSink
@@ -119,6 +121,7 @@ export interface SessionHost {
   takeQueuedSends(): QueuedSend[]
   readonly isMidTask: boolean
   readonly currentStatus: SessionStatus
+  readonly lastTurnError: string | null
   attentionRaised(): void
   attentionCleared(): void
   clearBackgroundTasks(): void
@@ -158,6 +161,7 @@ export class HostedSession implements SessionHost {
   private backgroundTasks: { taskId: string; description: string }[] = []
   private stopping = false
   private fatal = false
+  private turnError: string | null = null
   private runLoop: Promise<void> | undefined
 
   constructor(options: HostedSessionOptions) {
@@ -198,7 +202,10 @@ export class HostedSession implements SessionHost {
             options: canUseToolOptions,
           }),
         hooks: {
-          PreToolUse: [{ matcher: 'Agent|Task', hooks: [() => this.gateSubagents()] }],
+          PreToolUse: [
+            { matcher: 'Agent|Task', hooks: [() => this.gateSubagents()] },
+            ...(this.options.denyTool ? [{ hooks: [(input: HookInput) => this.gateTool(input)] }] : []),
+          ],
         },
       },
     })
@@ -256,6 +263,11 @@ export class HostedSession implements SessionHost {
     this.maybeDowngradeOnLimit(message)
     this.mapper.handle(message)
     if (message.type === 'result') {
+      const failed = message as { subtype: string; result?: string; errors?: string[] }
+      this.turnError =
+        failed.subtype === 'success'
+          ? null
+          : [failed.result ?? '', ...(failed.errors ?? [])].join(' ').trim() || failed.subtype
       this.turnInFlight = false
       this.flushQueuedSends()
       this.recomputeStatus()
@@ -290,6 +302,15 @@ export class HostedSession implements SessionHost {
           'Subagents are only used at max effort in this app, and the Effort bar is below ' +
           'max. Do this work yourself, in this thread, without spawning agents.',
       },
+    })
+  }
+
+  private gateTool(input: HookInput): Promise<HookJSONOutput> {
+    const reason =
+      input.hook_event_name === 'PreToolUse' ? this.options.denyTool?.(input.tool_name, input.tool_input) : null
+    if (!reason) return Promise.resolve({})
+    return Promise.resolve({
+      hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason },
     })
   }
 
@@ -564,6 +585,10 @@ export class HostedSession implements SessionHost {
 
   get currentStatus(): SessionStatus {
     return this.status
+  }
+
+  get lastTurnError(): string | null {
+    return this.turnError
   }
 
   attentionRaised(): void {

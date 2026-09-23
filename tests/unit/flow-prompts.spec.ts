@@ -9,6 +9,7 @@ import {
   reviewHandshake,
   reviewSteps,
   revisePrompt,
+  shipForbidden,
   shipPrompt,
   testWritePrompt,
 } from '@main/flow/flow-prompts'
@@ -202,6 +203,26 @@ describe('the ship prompt', () => {
     expect(prompt).toContain('Postman collection: specs/001-cart/postman/cart.postman_collection.json')
 
     expect(shipPrompt(run, { verify: null, postman: null })).toContain('The Test stage left no report')
+  })
+
+  it('is backed by a hard deny for merging, approving, voting and adding reviewers', () => {
+    for (const command of [
+      'gh pr merge 12 --squash',
+      'gh pr review 12 --approve',
+      'gh pr edit 12 --add-reviewer alice',
+      'az repos pr update --id 9 --auto-complete true',
+      'az repos pr set-vote --id 9 --vote approve',
+      'az repos pr reviewer add --id 9 --reviewers bob',
+    ]) {
+      expect(shipForbidden('Bash', { command }), command).not.toBeNull()
+      expect(shipForbidden('PowerShell', { command }), command).not.toBeNull()
+    }
+    expect(shipForbidden('mcp__ado__repo_update_pull_request_reviewers', {})).not.toBeNull()
+    expect(shipForbidden('mcp__ado__repo_update_pull_request', { pullRequestId: 9, autoComplete: true })).not.toBeNull()
+    expect(shipForbidden('mcp__ado__repo_update_pull_request', { pullRequestId: 9, description: 'x' })).toBeNull()
+    expect(shipForbidden('Bash', { command: 'git push -u origin feature/cart' })).toBeNull()
+    expect(shipForbidden('Bash', { command: 'gh pr create --base main --fill' })).toBeNull()
+    expect(shipForbidden('mcp__ado__repo_create_pull_request', {})).toBeNull()
   })
 
   it('never mentions a work item for a text source', () => {

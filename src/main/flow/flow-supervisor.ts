@@ -34,6 +34,7 @@ import {
   reviewHandshake,
   reviewSteps,
   revisePrompt,
+  shipForbidden,
   shipPrompt,
   specHandshake,
   specifyPrompt,
@@ -121,6 +122,7 @@ export class FlowSupervisor {
   private featuresWaiters = new Map<string, FeaturesWaiter>()
   private sessionStage = new Map<string, { runId: string; stage: FlowStage }>()
   private pending = new Map<string, string[]>()
+  private current = new Map<string, { text: string; resent: boolean }>()
 
   constructor(
     private repos: Repositories,
@@ -146,8 +148,8 @@ export class FlowSupervisor {
     const project = this.requireProject(projectId)
     const session = await this.manager.startSession(project.id, false, project.defaultSessionMode, undefined, {
       background: true,
+      section: 'flow',
     })
-    this.manager.markSection(session.id, 'flow')
     try {
       await this.requireAdo(session.id)
     } catch (error) {
@@ -434,23 +436,52 @@ export class FlowSupervisor {
     if (!ctx) return
     this.sessionStage.delete(sessionId)
     this.pending.delete(sessionId)
+    this.current.delete(sessionId)
     const stageRow = this.repos.flowStages.get(ctx.runId, ctx.stage)
     if (!stageRow || stageRow.status !== 'running') return
     this.failStage(ctx.runId, ctx.stage, SESSION_ENDED, { retryOnce: true })
   }
 
-  onTurnEnded(sessionId: string): void {
+  onTurnEnded(sessionId: string, error: string | null = null): void {
+    const waiter = this.featuresWaiters.get(sessionId)
+    if (waiter) {
+      this.featuresWaiters.delete(sessionId)
+      clearTimeout(waiter.timer)
+      this.manager.endFlowSession(sessionId)
+      waiter.reject({
+        code: 'NOT_LIVE',
+        message: error
+          ? `The session could not list the Features: ${error}`
+          : 'The session answered without a Feature list. Open its output to see what it said.',
+      } satisfies IpcError)
+      return
+    }
     const ctx = this.sessionStage.get(sessionId)
     if (!ctx) return
+    const step = this.current.get(sessionId)
+    if (error) {
+      if (step && !step.resent) {
+        step.resent = true
+        this.manager.sendMessage(sessionId, step.text)
+        return
+      }
+      this.failStage(ctx.runId, ctx.stage, `A step of this stage failed twice: ${error}`, { retryOnce: false })
+      return
+    }
     const queue = this.pending.get(sessionId)
     if (queue && queue.length > 0) {
       const next = queue.shift()
-      if (next) this.manager.sendMessage(sessionId, next)
+      if (next) this.sendStep(sessionId, next)
       return
     }
     const stageRow = this.repos.flowStages.get(ctx.runId, ctx.stage)
     if (!stageRow || stageRow.status !== 'running') return
     this.failStage(ctx.runId, ctx.stage, ctx.stage === 'test' ? NO_VERIFY_REPORT : NO_REPORT, { retryOnce: true })
+  }
+
+  private sendStep(sessionId: string, text: string): void {
+    this.current.set(sessionId, { text, resent: false })
+    this.manager.sendMessage(sessionId, text)
   }
 
   private async requireSpec(projectPath: string, specId: string): Promise<void> {
@@ -494,14 +525,13 @@ export class FlowSupervisor {
   }
 
   private async startStageSession(run: FlowRun, project: Project, stage: FlowStage): Promise<{ id: string }> {
-    const settings = this.repos.settings.get()
-    const effort = stage === 'build' ? 'max' : settings.effort
     const session = await this.manager.startSession(project.id, false, project.defaultSessionMode, undefined, {
       background: true,
       cwd: run.worktreePath ?? project.path,
-      effort,
+      effort: stage === 'build' ? 'max' : undefined,
+      section: 'flow',
+      denyTool: stage === 'ship' ? shipForbidden : undefined,
     })
-    this.manager.markSection(session.id, 'flow')
     this.manager.renameSession(session.id, `Flow · ${FLOW_STAGE_LABELS[stage]} · ${run.title}`.slice(0, 60))
     return session
   }
@@ -510,6 +540,7 @@ export class FlowSupervisor {
     if (!sessionId) return
     this.sessionStage.delete(sessionId)
     this.pending.delete(sessionId)
+    this.current.delete(sessionId)
     this.manager.endFlowSession(sessionId)
   }
 
@@ -553,7 +584,7 @@ export class FlowSupervisor {
     this.sessionStage.set(session.id, { runId: run.id, stage: run.stage })
     await this.pinFeature(run, run.stage)
     this.pending.set(session.id, await this.tailFor(run, run.stage, session.id))
-    this.manager.sendMessage(session.id, prompt)
+    this.sendStep(session.id, prompt)
   }
 
   private async pinFeature(run: FlowRun, stage: FlowStage): Promise<void> {
@@ -680,7 +711,7 @@ export class FlowSupervisor {
     if (plan.handshake) queue.push(plan.handshake)
     const first = queue.shift()
     this.pending.set(session.id, queue)
-    if (first) this.manager.sendMessage(session.id, first)
+    if (first) this.sendStep(session.id, first)
   }
 
   private completeStage(runId: string, stage: FlowStage, marker: FlowStageMarker): void {

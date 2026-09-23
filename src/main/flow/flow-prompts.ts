@@ -281,6 +281,28 @@ export function revisePrompt(
   return lines.join('\n')
 }
 
+const SHIP_FORBIDDEN_COMMANDS: readonly RegExp[] = [
+  /\bgh\s+pr\s+(merge|review)\b/i,
+  /\bgh\s+pr\s+edit\b.*--add-reviewer/i,
+  /\bgh\s+api\b.*\/(merge|reviews|requested_reviewers)\b/i,
+  /\baz\s+repos\s+pr\s+(update|set-vote|reviewer)\b/i,
+]
+
+const SHIP_REFUSAL =
+  'The Ship stage raises the pull request and nothing more. Merging, approving, voting on or adding reviewers to it is left to a person.'
+
+export function shipForbidden(toolName: string, input: unknown): string | null {
+  const record = typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {}
+  const command = typeof record.command === 'string' ? record.command : ''
+  if (SHIP_FORBIDDEN_COMMANDS.some((pattern) => pattern.test(command))) return SHIP_REFUSAL
+  if (!toolName.startsWith('mcp__')) return null
+  if (/reviewer|vote|approve|merge/i.test(toolName)) return SHIP_REFUSAL
+  if (/update_pull_request/i.test(toolName) && /"autoComplete"\s*:\s*true|"status"\s*:\s*"completed"/i.test(JSON.stringify(record))) {
+    return SHIP_REFUSAL
+  }
+  return null
+}
+
 function measured(label: string, value: Measured): string[] {
   return value.value === null ? [] : [`- ${label}: ${value.value}%${value.source ? ` (${value.source})` : ''}`]
 }

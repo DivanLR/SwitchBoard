@@ -88,6 +88,21 @@ interface HostedEntry {
   ranATurn: boolean
 }
 
+interface FlowHooks {
+  onMarker: (sessionId: string, marker: FlowMarker) => void
+  onSessionEnded: (sessionId: string, reason: SessionEndReason | 'crashed') => void
+  onVerifyReport: (sessionId: string, report: VerifyReport) => void
+  onTurnEnded: (sessionId: string, error: string | null) => void
+}
+
+interface StartOptions {
+  background?: boolean
+  cwd?: string
+  effort?: EffortLevel
+  section?: SectionKind
+  denyTool?: (toolName: string, input: unknown) => string | null
+}
+
 const RUN_DEADLINE_MS = 45 * 60 * 1000
 const SWEEP_INTERVAL_MS = 60 * 1000
 
@@ -443,11 +458,7 @@ export class SessionManager {
     resume = false,
     requestedMode?: SessionMode,
     carryTranscriptFrom?: string,
-    opts?: {
-      background?: boolean
-      cwd?: string
-      effort?: EffortLevel
-    },
+    opts?: StartOptions,
   ): Promise<Session> {
     const project = this.repos.projects.byId(projectId)
     if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
@@ -462,13 +473,7 @@ export class SessionManager {
     mode: SessionMode,
     resume: boolean,
     carryTranscriptFrom: string | undefined,
-    opts:
-      | {
-          background?: boolean
-          cwd?: string
-          effort?: EffortLevel
-        }
-      | undefined,
+    opts: StartOptions | undefined,
   ): Promise<Session> {
     const projectId = project.id
     const claudeExecutablePath = resolveClaudeExecutable()
@@ -501,6 +506,7 @@ export class SessionManager {
       inPlanMode: mode === 'plan',
     }
     this.repos.sessions.insert(row)
+    if (opts?.section) this.repos.sessions.update(row.id, { sectionKind: opts.section })
 
     const workdir = opts?.cwd ?? project.path
 
@@ -510,6 +516,7 @@ export class SessionManager {
       seq: this.repos.events.maxSeq(row.id),
       live: new Map(),
       background: opts?.background === true,
+      sectionKind: opts?.section,
       ranATurn: false,
       session: null as unknown as SessionHost,
     }
@@ -548,8 +555,9 @@ export class SessionManager {
         claudeExecutablePath: claudeExecutablePath ?? undefined,
         mainModel: sessionModel,
         effort,
-        resolveModels: () => this.resolveModelRouting(),
+        resolveModels: opts?.effort ? undefined : () => this.resolveModelRouting(),
         mode,
+        denyTool: opts?.denyTool,
         onPlanModeChange: (inPlanMode) => {
           if (entry.row.inPlanMode === inPlanMode) return
           entry.row.inPlanMode = inPlanMode
@@ -561,7 +569,7 @@ export class SessionManager {
             from: project.name,
             projects: () => this.repos.projects.listActive(),
             enqueue: (targetId, text) => this.enqueueTask(targetId, text),
-            isRunning: (targetId) => this.liveEntryForProject(targetId) !== undefined,
+            isRunning: (targetId) => this.queueTarget(targetId) !== undefined,
             start: (targetId) => this.startSession(targetId),
             overview: () =>
               this.repos.projects.listActive().map((p) => {
@@ -678,8 +686,14 @@ export class SessionManager {
     return [...this.hosted.values()].find((e) => e.row.projectId === projectId)
   }
 
+  private queueTarget(projectId: string): HostedEntry | undefined {
+    return [...this.hosted.values()].find(
+      (e) => e.row.projectId === projectId && e.sectionKind !== 'flow' && !this.completing.has(e.row.id),
+    )
+  }
+
   private maybeDrainQueue(projectId: string): void {
-    const entry = this.liveEntryForProject(projectId)
+    const entry = this.queueTarget(projectId)
     if (!entry || entry.session.currentStatus !== 'done') return
     const next = this.repos.taskQueue.takeNext(projectId)
     if (!next) return
@@ -904,19 +918,9 @@ export class SessionManager {
 
   private flowWatch = new Set<string>()
 
-  private flowHooks: {
-    onMarker: (sessionId: string, marker: FlowMarker) => void
-    onSessionEnded: (sessionId: string, reason: SessionEndReason | 'crashed') => void
-    onVerifyReport: (sessionId: string, report: VerifyReport) => void
-    onTurnEnded: (sessionId: string) => void
-  } | null = null
+  private flowHooks: FlowHooks | null = null
 
-  setFlowHooks(hooks: {
-    onMarker: (sessionId: string, marker: FlowMarker) => void
-    onSessionEnded: (sessionId: string, reason: SessionEndReason | 'crashed') => void
-    onVerifyReport: (sessionId: string, report: VerifyReport) => void
-    onTurnEnded: (sessionId: string) => void
-  }): void {
+  setFlowHooks(hooks: FlowHooks): void {
     this.flowHooks = hooks
   }
 
@@ -965,7 +969,7 @@ export class SessionManager {
   }
 
   private closeUnreportedFlow(entry: HostedEntry, reason: SessionEndReason | 'crashed'): void {
-    if (!this.flowWatch.delete(entry.row.id)) return
+    if (!this.flowWatch.delete(entry.row.id) || this.quitting) return
     this.flowHooks?.onSessionEnded(entry.row.id, reason)
   }
 
@@ -1143,7 +1147,9 @@ export class SessionManager {
     this.callbacks.onCountersChanged()
     if (status === 'done') {
       if (this.flowEnding.has(entry.row.id)) void this.closeFlowSession(entry.row.id)
-      else if (this.flowWatch.has(entry.row.id)) this.flowHooks?.onTurnEnded(entry.row.id)
+      else if (this.flowWatch.has(entry.row.id) && !this.quitting) {
+        this.flowHooks?.onTurnEnded(entry.row.id, entry.session.lastTurnError)
+      }
       void this.endIfIdleBackground(entry)
     }
   }
