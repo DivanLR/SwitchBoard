@@ -148,6 +148,7 @@ export interface InvokeMap {
   'projects.refs.remove': { req: { projectId: string; path: string }; res: ProjectRef[] }
   'projects.archive': { req: { projectId: string }; res: void }
   'projects.unarchive': { req: { projectId: string }; res: void }
+  'projects.delete': { req: { projectId: string }; res: void }
   'terminal.open': {
     req: {
       id: string

@@ -7,6 +7,7 @@ import type {
 } from '@shared/domain'
 import type { Counters, ProjectListItem, SessionStatusPush } from '@shared/ipc-types'
 import { useActiveSessionStore } from './activeSession'
+import { useSettingsStore } from './settings'
 import { invoke } from '@renderer/ipc'
 
 const state = reactive({
@@ -133,6 +134,13 @@ const store = reactive({
     await invoke('projects.unarchive', { projectId })
     await this.refresh()
     this.select(projectId)
+  },
+
+  async deleteProject(projectId: string): Promise<void> {
+    await invoke('projects.delete', { projectId })
+    if (state.selectedProjectId === projectId) state.selectedProjectId = null
+    delete state.focusedSessionIds[projectId]
+    await Promise.all([this.refresh(), useSettingsStore().load()])
   },
 
   async rename(projectId: string, name: string): Promise<void> {

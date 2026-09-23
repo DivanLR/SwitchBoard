@@ -26,6 +26,7 @@ export interface MockProjectSeed {
   path: string
   session?: MockSessionSeed
   reserved?: boolean
+  archivedAt?: string
   defaultSessionMode?: string
   useContainers?: boolean
   diff?: { gitNotice: string | null; files: Record<string, unknown>[] }
@@ -292,7 +293,7 @@ export function installMockHost(scenario: MockScenario): void {
       path: p.path,
       source: 'manual',
       createdAt: now(),
-      archivedAt: null as string | null,
+      archivedAt: p.archivedAt ?? (null as string | null),
       refs: [] as { path: string; label: string }[],
       reserved: !!p.reserved,
       defaultSessionMode: p.defaultSessionMode ?? 'auto',
@@ -827,6 +828,14 @@ export function installMockHost(scenario: MockScenario): void {
     'projects.unarchive': (req) => {
       const project = projects.find((p) => p.id === req.projectId)
       if (project) project.archivedAt = null
+    },
+    'projects.delete': (req) => {
+      const at = projects.findIndex((p) => p.id === req.projectId)
+      if (at < 0) throw { code: 'NOT_FOUND', message: 'Project not found' }
+      if (projects[at].sessions.some((s) => !s.endedAt)) {
+        throw { code: 'ALREADY_ACTIVE', message: 'It has a live session. End every session in it first.' }
+      }
+      projects.splice(at, 1)
     },
     'projects.commands': (req) => projectCommands.get(String(req.projectId)) ?? [],
     'diff.list': (req) => {

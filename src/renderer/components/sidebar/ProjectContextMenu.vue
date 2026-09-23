@@ -26,6 +26,7 @@ const emit = defineEmits<{
   (e: 'new-group'): void
   (e: 'assign', groupId: string | null): void
   (e: 'remove'): void
+  (e: 'delete'): void
   (e: 'remove-group'): void
 }>()
 </script>
@@ -88,6 +89,9 @@ const emit = defineEmits<{
         <div class="ctx-sep"></div>
         <button class="ctx-item" data-testid="ctx-remove" @click="emit('remove')">
           <span><Icon name="folder" /></span>Archive
+        </button>
+        <button class="ctx-item danger" data-testid="ctx-delete" @click="emit('delete')">
+          <span><Icon name="trash" /></span>Delete from Switchboard…
         </button>
       </template>
       <button

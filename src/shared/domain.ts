@@ -86,6 +86,14 @@ export interface Project {
   useContainers: boolean
 }
 
+export const ARCHIVE_DELETE_DAYS = 30
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+export function archiveDaysLeft(archivedAt: string, now: number): number {
+  return Math.max(0, Math.ceil(ARCHIVE_DELETE_DAYS - (now - Date.parse(archivedAt)) / DAY_MS))
+}
+
 export interface CustomSkill {
   name: string
   description: string

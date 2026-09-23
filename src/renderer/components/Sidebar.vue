@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { isIpcError } from '@shared/ipc-types'
-import { modelLabel, type ProjectGroup, type Session } from '@shared/domain'
+import { archiveDaysLeft, modelLabel, type ProjectGroup, type Session } from '@shared/domain'
 import { groupSections } from '@shared/project-groups'
 import { activeAgents } from '@shared/agents'
 import { useProjectsStore } from '@renderer/stores/projects'
@@ -18,6 +18,7 @@ import ProjectRow from '@renderer/components/sidebar/ProjectRow.vue'
 import ProjectContextMenu, { type ContextTarget } from '@renderer/components/sidebar/ProjectContextMenu.vue'
 import RepointDialog from '@renderer/components/sidebar/RepointDialog.vue'
 import ArchiveDialog from '@renderer/components/sidebar/ArchiveDialog.vue'
+import DeleteProjectDialog from '@renderer/components/sidebar/DeleteProjectDialog.vue'
 
 const projects = useProjectsStore()
 const activeSession = useActiveSessionStore()
@@ -209,6 +210,12 @@ function ctxDelete(): void {
   ctx.value = null
 }
 
+function ctxDeleteProject(): void {
+  if (!ctx.value) return
+  askDelete(ctx.value.id)
+  ctx.value = null
+}
+
 function ctxMove(delta: number): void {
   if (!ctx.value) return
   if (ctx.value.kind === 'group') {
@@ -293,6 +300,38 @@ function cancelRemove(): void {
   removeError.value = null
 }
 
+const confirmDeleteId = ref<string | null>(null)
+const deleteError = ref<string | null>(null)
+
+const confirmDelete = computed(() => {
+  const id = confirmDeleteId.value
+  return id ? ([...projects.items, ...projects.archived].find((p) => p.id === id) ?? null) : null
+})
+
+function askDelete(projectId: string): void {
+  deleteError.value = null
+  confirmDeleteId.value = projectId
+}
+
+function cancelDelete(): void {
+  confirmDeleteId.value = null
+  deleteError.value = null
+}
+
+async function confirmDeleteNow(): Promise<void> {
+  if (!confirmDeleteId.value) return
+  deleteError.value = null
+  busy.value = true
+  try {
+    await projects.deleteProject(confirmDeleteId.value)
+    confirmDeleteId.value = null
+  } catch (e) {
+    deleteError.value = isIpcError(e) ? e.message : String(e)
+  } finally {
+    busy.value = false
+  }
+}
+
 const repointId = ref<string | null>(null)
 const repointVal = ref('')
 const repointError = ref<string | null>(null)
@@ -335,12 +374,15 @@ async function commitRepoint(): Promise<void> {
 }
 
 function onOverlayKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Tab' && (confirmRemoveId.value || repointId.value)) {
+  if (event.key === 'Tab' && (confirmRemoveId.value || confirmDeleteId.value || repointId.value)) {
     trapTab(event)
     return
   }
   if (event.key !== 'Escape') return
-  if (confirmRemoveId.value) {
+  if (confirmDeleteId.value) {
+    event.stopPropagation()
+    cancelDelete()
+  } else if (confirmRemoveId.value) {
     event.stopPropagation()
     cancelRemove()
   } else if (repointId.value) {
@@ -354,15 +396,17 @@ function onOverlayKeydown(event: KeyboardEvent): void {
 
 function trapTab(event: KeyboardEvent): void {
   const dialog = document.querySelector<HTMLElement>(
-    '[data-testid="remove-dialog"], [data-testid="repoint-dialog"]',
+    '[data-testid="remove-dialog"], [data-testid="delete-dialog"], [data-testid="repoint-dialog"]',
   )
   if (dialog) trapTabWithin(dialog, event)
 }
 
-watch([ctx, confirmRemoveId, repointId], async ([menu, removing, repointing]) => {
-  if (!menu && !removing && !repointing) return
+watch([ctx, confirmRemoveId, confirmDeleteId, repointId], async ([menu, removing, deleting, repointing]) => {
+  if (!menu && !removing && !deleting && !repointing) return
   await nextTick()
-  const selector = removing
+  const selector = deleting
+    ? '[data-testid="delete-cancel"]'
+    : removing
     ? '[data-testid="remove-cancel"]'
     : repointing
       ? '[data-testid="repoint-input"]'
@@ -389,6 +433,15 @@ async function confirmRemoveNow(): Promise<void> {
 }
 
 const archivedFolded = ref(true)
+
+const archivedDaysLeft = computed<Record<string, number>>(() =>
+  Object.fromEntries(projects.archived.map((p) => [p.id, archiveDaysLeft(p.archivedAt ?? '', now.value)])),
+)
+
+function daysLeftLabel(days: number): string {
+  if (days === 0) return 'deleting soon'
+  return `${days} ${days === 1 ? 'day' : 'days'} left`
+}
 
 function restore(projectId: string): void {
   void projects.unarchive(projectId)
@@ -601,6 +654,13 @@ function restore(projectId: string): void {
             <div class="content">
               <div class="row">
                 <span class="name">{{ item.name }}</span>
+                <span
+                  class="days-left"
+                  :data-testid="`archived-days-${item.name}`"
+                  title="Deleted from Switchboard when this reaches zero, unless you restore it. The folder on disk stays."
+                >
+                  {{ daysLeftLabel(archivedDaysLeft[item.id] ?? 0) }}
+                </span>
                 <button
                   class="restore mono"
                   :data-testid="`restore-project-${item.name}`"
@@ -608,6 +668,14 @@ function restore(projectId: string): void {
                   @click.stop="restore(item.id)"
                 >
                   <Icon name="refresh" :size="12" />
+                </button>
+                <button
+                  class="restore purge mono"
+                  :data-testid="`delete-project-${item.name}`"
+                  title="Delete from Switchboard now"
+                  @click.stop="askDelete(item.id)"
+                >
+                  <Icon name="trash" :size="12" />
                 </button>
               </div>
             </div>
@@ -695,6 +763,7 @@ function restore(projectId: string): void {
     @new-group="ctxNewGroup"
     @assign="ctxAssign"
     @remove="ctxDelete"
+    @delete="ctxDeleteProject"
     @remove-group="ctxRemoveGroup"
   />
 
@@ -715,6 +784,15 @@ function restore(projectId: string): void {
     :busy="busy"
     @confirm="confirmRemoveNow"
     @cancel="cancelRemove"
+  />
+
+  <DeleteProjectDialog
+    v-if="confirmDelete"
+    :project="confirmDelete"
+    :error="deleteError"
+    :busy="busy"
+    @confirm="confirmDeleteNow"
+    @cancel="cancelDelete"
   />
 </template>
 
@@ -1132,6 +1210,16 @@ function restore(projectId: string): void {
 .restore:hover {
   color: var(--green);
   opacity: 1;
+}
+
+.restore.purge:hover {
+  color: var(--red);
+}
+
+.days-left {
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  white-space: nowrap;
 }
 
 .empty {

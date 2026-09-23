@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { transaction, type AppDatabase } from './db'
+import { deleteProject, projectDeleteBlocker, type ProjectDeleteBlocker } from './retention'
 import type { DiagramPlan } from '@shared/diagram'
 import type {
   CustomSkill,
@@ -256,6 +257,14 @@ class ProjectsRepo {
 
   rename(id: string, name: string): void {
     this.db.prepare('UPDATE projects SET name = ? WHERE id = ?').run(name, id)
+  }
+
+  deleteBlocker(id: string): ProjectDeleteBlocker | null {
+    return projectDeleteBlocker(this.db, id)
+  }
+
+  delete(id: string): void {
+    deleteProject(this.db, id)
   }
 }
 

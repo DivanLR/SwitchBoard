@@ -33,7 +33,7 @@ try {
   process.exit(1)
 }
 console.log(
-  `${result.dryRun ? '[dry run] Would delete' : 'Deleted'} ${result.eventsDeleted} event rows and ${result.decisionsDeleted} resolved decisions (database: ${dbPath}).`,
+  `${result.dryRun ? '[dry run] Would delete' : 'Deleted'} ${result.eventsDeleted} event rows, ${result.decisionsDeleted} resolved decisions and ${result.projectsDeleted} projects archived over 30 days ago (database: ${dbPath}).`,
 )
 if (!dryRun && result.eventsDeleted + result.decisionsDeleted >= VACUUM_MIN_DELETIONS) {
   try {

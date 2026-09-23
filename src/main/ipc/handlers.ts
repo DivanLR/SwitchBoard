@@ -347,6 +347,27 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       }
       repos.projects.unarchive(req.projectId)
     },
+    'projects.delete': (req) => {
+      requireProject(req.projectId)
+      if (req.projectId === dbProjectId) {
+        throw { code: 'RULE_NOT_ALLOWED', message: 'The Database project cannot be deleted.' } satisfies IpcError
+      }
+      const blocker = repos.projects.deleteBlocker(req.projectId)
+      if (blocker === 'live_session') {
+        throw {
+          code: 'ALREADY_ACTIVE',
+          message: 'It has a live session. End every session in it first.',
+        } satisfies IpcError
+      }
+      if (blocker === 'flow_worktree') {
+        throw {
+          code: 'RULE_NOT_ALLOWED',
+          message: 'A Flow run still owns a worktree in it. Remove that worktree from the Flow run first.',
+        } satisfies IpcError
+      }
+      repos.events.flush()
+      repos.projects.delete(req.projectId)
+    },
     'projects.setUseContainers': (req) => {
       if (!repos.projects.byId(req.projectId)) {
         throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
