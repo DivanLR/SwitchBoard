@@ -1,9 +1,8 @@
 import { clipboard, dialog, ipcMain, shell, type BrowserWindow } from 'electron'
-import type { Project, Session, SessionEvent } from '@shared/domain'
+import type { CustomSkill, Project, Session, SessionEvent } from '@shared/domain'
 import type { SectionKind } from '@shared/domain'
 import { isDangerousCommand, sessionName } from '@shared/domain'
 import {
-  ARCHIFY,
   DIAGRAM_FILE_PICKS,
   DIAGRAM_PLUGIN,
   DIAGRAMS_DIR,
@@ -48,7 +47,7 @@ import { sandboxToolsFor } from '@main/sessions/wslc-sandbox'
 import { readDiagramList } from '@main/diagrams/list'
 import { importSkills } from '@main/skills/import'
 import type { FlowSupervisor } from '@main/flow/flow-supervisor'
-import { enableSkill, installedSkillNames } from '@main/skills/install'
+import { disableSkill, enableSkill, installedSkillNames, removeSkill } from '@main/skills/install'
 import { detectFlowStacks } from '@main/flow/stacks'
 import { check as checkForUpdates, installNow } from '@main/updater'
 
@@ -196,6 +195,13 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     const project = repos.projects.byId(projectId)
     if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
     return project
+  }
+
+  const listSkills = async (): Promise<CustomSkill[]> => {
+    const live = new Set(await installedSkillNames())
+    return repos.customSkills
+      .list()
+      .map((skill) => ({ ...skill, enabled: skill.enabled && live.has(skill.name) }))
   }
 
   const flowSnapshot = (projectId: string): FlowSnapshot => ({
@@ -394,18 +400,38 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'sessions.events': (req) => repos.events.page(req.sessionId, req.beforeSeq, req.limit),
     'sessions.promptHistory': (req) => repos.commandHistory.recent(req.projectId, req.limit),
     'projects.commands': (req) => repos.projectCommands.get(req.projectId),
-    'skills.list': () => installedSkillNames(),
+    'skills.list': listSkills,
     'skills.import': async (req) => {
-      if (req.url.trim() !== ARCHIFY.source) {
-        throw {
-          code: 'RULE_NOT_ALLOWED',
-          message: 'That skill is not one this app offers to import.',
-        } satisfies IpcError
-      }
       const result = await importSkills(req.url, skillsStagingRoot, new Set(await installedSkillNames()))
-      for (const name of result.imported) await enableSkill(skillsStagingRoot, name)
+      repos.customSkills.upsertMany(result.imported)
+      for (const skill of result.imported) {
+        try {
+          await enableSkill(skillsStagingRoot, skill.name)
+        } catch {
+          repos.customSkills.setEnabled(skill.name, false)
+        }
+      }
       await manager.reloadPlugins()
       return result
+    },
+    'skills.setEnabled': async (req) => {
+      if (!repos.customSkills.byName(req.name)) {
+        throw { code: 'NOT_FOUND', message: 'No such skill.' } satisfies IpcError
+      }
+      if (req.enabled) await enableSkill(skillsStagingRoot, req.name)
+      else await disableSkill(req.name)
+      repos.customSkills.setEnabled(req.name, req.enabled)
+      await manager.reloadPlugins()
+      return listSkills()
+    },
+    'skills.remove': async (req) => {
+      if (!repos.customSkills.byName(req.name)) {
+        throw { code: 'NOT_FOUND', message: 'No such skill.' } satisfies IpcError
+      }
+      await removeSkill(skillsStagingRoot, req.name)
+      repos.customSkills.remove(req.name)
+      await manager.reloadPlugins()
+      return listSkills()
     },
     'diff.list': (req) => {
       const project = repos.projects.byId(req.projectId)

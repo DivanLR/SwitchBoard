@@ -1,5 +1,6 @@
 import {
   DEFAULT_SETTINGS,
+  type CustomSkill,
   type DiagramEntry,
   type SectionKind,
   type Settings,
@@ -31,7 +32,7 @@ export interface MockProjectSeed {
 
 export interface MockScenario {
   projects: MockProjectSeed[]
-  skills?: string[]
+  skills?: CustomSkill[]
   settings: Settings
   suites?: AvailableSuites[]
 }
@@ -85,6 +86,7 @@ export interface MockDriver {
   addDiagram: (projectId: string, entry: DiagramEntry) => void
   startFlood: (intervalMs: number, perTick: number) => void
   stopFlood: () => void
+  setSkillImport: (skills: CustomSkill[]) => void
   setClipboardFails: (fails: boolean) => void
   state: () => {
     sends: { sessionId: string; text: string }[]
@@ -619,7 +621,8 @@ export function installMockHost(scenario: MockScenario): void {
     return { delivered: true }
   }
 
-  const installedSkills: string[] = [...(scenario.skills ?? [])]
+  const customSkills: CustomSkill[] = (scenario.skills ?? []).map((s) => ({ ...s }))
+  let nextSkillImport: CustomSkill[] | null = null
 
   let clipboardFails = false
 
@@ -696,10 +699,53 @@ export function installMockHost(scenario: MockScenario): void {
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
       project.useContainers = req.on === true
     },
-    'skills.list': () => [...installedSkills],
-    'skills.import': () => {
-      if (!installedSkills.includes('archify')) installedSkills.push('archify')
-      return { imported: ['archify'], skipped: [] }
+    'skills.list': () => customSkills.map((s) => ({ ...s })),
+    'skills.import': (req) => {
+      const url = String(req.url)
+      if (!/^https:\/\/(www\.)?github\.com\//.test(url)) {
+        throw { code: 'INVALID_PATH', message: 'Only https://github.com URLs can be imported.' }
+      }
+      const found = nextSkillImport ?? [
+        {
+          name: 'archify',
+          description: 'Create polished, validated diagrams as explorable standalone HTML.',
+          sourceUrl: url,
+          sourcePath: 'archify',
+          enabled: true,
+          fileCount: 190,
+          importedAt: new Date().toISOString(),
+        },
+      ]
+      nextSkillImport = null
+      const isOn = (name: string) => customSkills.some((c) => c.name === name && c.enabled)
+      const imported = found
+        .filter((s) => !isOn(s.name))
+        .map((s) => ({ ...s, sourceUrl: url, enabled: true }))
+      const skipped = found
+        .filter((s) => isOn(s.name))
+        .map((s) => ({ name: s.name, reason: 'A skill of that name is already imported.' }))
+      if (imported.length === 0 && skipped.length === 0) {
+        throw { code: 'NOT_FOUND', message: 'No SKILL.md found there. Link the folder that holds the skills.' }
+      }
+      for (const skill of imported) {
+        const at = customSkills.findIndex((c) => c.name === skill.name)
+        if (at >= 0) customSkills.splice(at, 1)
+        customSkills.push(skill)
+      }
+      customSkills.sort((a, b) => a.name.localeCompare(b.name))
+      return { imported, skipped }
+    },
+    'skills.setEnabled': (req) => {
+      const skill = customSkills.find((s) => s.name === String(req.name))
+      if (!skill) throw { code: 'NOT_FOUND', message: 'No such skill.' }
+      skill.enabled = req.enabled === true
+      return customSkills.map((s) => ({ ...s }))
+    },
+    'skills.remove': (req) => {
+      const at = customSkills.findIndex((s) => s.name === String(req.name))
+      if (at < 0) throw { code: 'NOT_FOUND', message: 'No such skill.' }
+      customSkills.splice(at, 1)
+      return customSkills.map((s) => ({ ...s }))
     },
     'sessions.rename': (req) => {
       const session = sessions.get(String(req.sessionId))
@@ -1715,6 +1761,9 @@ export function installMockHost(scenario: MockScenario): void {
     stopFlood: () => {
       if (floodTimer !== null) window.clearInterval(floodTimer)
       floodTimer = null
+    },
+    setSkillImport: (skills: CustomSkill[]) => {
+      nextSkillImport = skills
     },
     setClipboardFails: (fails: boolean) => {
       clipboardFails = fails

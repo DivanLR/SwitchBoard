@@ -86,8 +86,18 @@ export interface Project {
   useContainers: boolean
 }
 
+export interface CustomSkill {
+  name: string
+  description: string
+  sourceUrl: string
+  sourcePath: string
+  enabled: boolean
+  fileCount: number
+  importedAt: string
+}
+
 export interface SkillImportResult {
-  imported: string[]
+  imported: CustomSkill[]
   skipped: { name: string; reason: string }[]
 }
 

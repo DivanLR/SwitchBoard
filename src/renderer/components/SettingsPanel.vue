@@ -11,8 +11,9 @@ import McpTab from '@renderer/components/settings/McpTab.vue'
 import AllowedTab from '@renderer/components/settings/AllowedTab.vue'
 import DisplayTab from '@renderer/components/settings/DisplayTab.vue'
 import GeneralTab from '@renderer/components/settings/GeneralTab.vue'
+import SkillsTab from '@renderer/components/settings/SkillsTab.vue'
 
-export type SettingsTab = 'models' | 'proj' | 'mcp' | 'allowed' | 'term' | 'gen'
+export type SettingsTab = 'models' | 'proj' | 'mcp' | 'allowed' | 'skills' | 'term' | 'gen'
 
 const props = defineProps<{ initialTab?: SettingsTab }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -30,6 +31,7 @@ const TABS: { id: SettingsTab; label: string; icon: string }[] = [
   { id: 'proj', label: 'Projects', icon: 'folder' },
   { id: 'mcp', label: 'MCP', icon: 'database' },
   { id: 'allowed', label: 'Allowed list', icon: 'square-check' },
+  { id: 'skills', label: 'Skills', icon: 'spark' },
   { id: 'term', label: 'Display', icon: 'terminal' },
   { id: 'gen', label: 'General', icon: 'settings' },
 ]
@@ -93,6 +95,7 @@ onMounted(() => {
           <ProjectsTab v-else-if="tab === 'proj'" :project="proj" @choose="projId = $event" />
           <McpTab v-else-if="tab === 'mcp'" />
           <AllowedTab v-else-if="tab === 'allowed'" :settings="settings" :project="proj" />
+          <SkillsTab v-else-if="tab === 'skills'" />
           <DisplayTab v-else-if="tab === 'term'" :settings="settings" />
           <GeneralTab v-else :settings="settings" />
         </div>

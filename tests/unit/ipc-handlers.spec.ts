@@ -1,5 +1,5 @@
 import type { PtyHost } from '@main/terminal/pty-host'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -317,10 +317,22 @@ describe('diagrams.generate chooses its engine from the request', () => {
   })
 })
 
-describe('the archify skill import Diagrams offers', () => {
+describe('importing and managing a person’s own skills', () => {
+  const SOURCE = 'https://github.com/someone/skills/tree/main/skills'
   let home: string
   const previousProfile = process.env.USERPROFILE
   const previousHome = process.env.HOME
+
+  const live = (name: string) => join(home, '.claude', 'skills', name, 'SKILL.md')
+  const exists = (path: string) => stat(path).then(
+    () => true,
+    () => false,
+  )
+  const names = async (call: ReturnType<typeof setup>['call']) => {
+    const result = (await call('skills.list')) as WireResult<{ name: string; enabled: boolean }[]>
+    if (!result.ok) throw new Error('skills.list failed')
+    return result.value.map((skill) => `${skill.name}:${skill.enabled ? 'on' : 'off'}`)
+  }
 
   beforeEach(async () => {
     home = await mkdtemp(join(tmpdir(), 'sb-home-'))
@@ -328,9 +340,18 @@ describe('the archify skill import Diagrams offers', () => {
     process.env.HOME = home
     vi.stubGlobal('fetch', async (url: string) => {
       if (url.startsWith('https://api.github.com/')) {
-        return new Response(JSON.stringify({ tree: [{ path: 'archify/SKILL.md', type: 'blob', size: 64 }] }))
+        return new Response(
+          JSON.stringify({
+            tree: ['archify', 'skills/code-review', 'skills/write-tests'].map((dir) => ({
+              path: `${dir}/SKILL.md`,
+              type: 'blob',
+              size: 64,
+            })),
+          }),
+        )
       }
-      return new Response('---\nname: archify\ndescription: Draws architecture.\n---\n')
+      const name = url.split('/').at(-2)
+      return new Response(`---\nname: ${name}\ndescription: The ${name} skill.\n---\n`)
     })
   })
 
@@ -341,23 +362,76 @@ describe('the archify skill import Diagrams offers', () => {
     await rm(home, { recursive: true, force: true })
   })
 
-  it('refuses any source other than the archify skill', async () => {
+  it('imports every skill under any GitHub folder, records where each came from, and switches it on', async () => {
     const { call } = setup()
-    const result = await call('skills.import', { url: 'https://github.com/someone/skills' })
-    expect(result).toMatchObject({ ok: false, error: { code: 'RULE_NOT_ALLOWED' } })
+    const result = await call('skills.import', { url: SOURCE })
+    expect(result).toMatchObject({
+      ok: true,
+      value: { imported: [{ name: 'code-review' }, { name: 'write-tests' }], skipped: [] },
+    })
+    expect(await call('skills.list')).toMatchObject({
+      ok: true,
+      value: [
+        { name: 'code-review', sourceUrl: SOURCE, sourcePath: 'skills/code-review', enabled: true, fileCount: 1 },
+        { name: 'write-tests', sourceUrl: SOURCE, enabled: true },
+      ],
+    })
+    expect(await exists(live('code-review'))).toBe(true)
+
+    const again = await call('skills.import', { url: SOURCE })
+    expect(again).toMatchObject({ ok: false, error: { code: 'INVALID_PATH' } })
   })
 
-  it('counts the skill installed only while its live folder exists, and a repeat import repairs it', async () => {
+  it('refuses a source that is not a GitHub URL before asking anything', async () => {
     const { call } = setup()
-    expect(await call('skills.list')).toEqual({ ok: true, value: [] })
+    const result = await call('skills.import', { url: 'https://gitlab.com/someone/skills' })
+    expect(result).toMatchObject({ ok: false, error: { code: 'INVALID_PATH' } })
+    expect(await names(call)).toEqual([])
+  })
 
+  it('switching a skill off removes its live folder, and on copies it back', async () => {
+    const { call } = setup()
+    await call('skills.import', { url: SOURCE })
+
+    expect(await call('skills.setEnabled', { name: 'code-review', enabled: false })).toMatchObject({ ok: true })
+    expect(await exists(live('code-review'))).toBe(false)
+    expect(await names(call)).toEqual(['code-review:off', 'write-tests:on'])
+
+    await call('skills.setEnabled', { name: 'code-review', enabled: true })
+    expect(await exists(live('code-review'))).toBe(true)
+    expect(await names(call)).toEqual(['code-review:on', 'write-tests:on'])
+
+    const unknown = await call('skills.setEnabled', { name: 'nope', enabled: true })
+    expect(unknown).toMatchObject({ ok: false, error: { code: 'NOT_FOUND' } })
+  })
+
+  it('removing a skill deletes its row and its live folder, and only an imported skill can be removed', async () => {
+    const { call } = setup()
+    await call('skills.import', { url: SOURCE })
+
+    expect(await call('skills.remove', { name: 'write-tests' })).toMatchObject({
+      ok: true,
+      value: [{ name: 'code-review' }],
+    })
+    expect(await exists(live('write-tests'))).toBe(false)
+
+    const unknown = await call('skills.remove', { name: 'write-tests' })
+    expect(unknown).toMatchObject({ ok: false, error: { code: 'NOT_FOUND' } })
+  })
+
+  it('counts a skill on only while its row is enabled and its live folder exists, and a repeat import repairs it', async () => {
+    const { call } = setup()
     expect((await call('skills.import', { url: ARCHIFY.source })).ok).toBe(true)
-    expect(await call('skills.list')).toEqual({ ok: true, value: ['archify'] })
+    expect(await names(call)).toEqual(['archify:on'])
 
     await rm(join(home, '.claude', 'skills', 'archify'), { recursive: true, force: true })
-    expect(await call('skills.list')).toEqual({ ok: true, value: [] })
-
+    expect(await names(call)).toEqual(['archify:off'])
     expect((await call('skills.import', { url: ARCHIFY.source })).ok).toBe(true)
-    expect(await call('skills.list')).toEqual({ ok: true, value: ['archify'] })
+    expect(await names(call)).toEqual(['archify:on'])
+
+    await call('skills.setEnabled', { name: 'archify', enabled: false })
+    expect((await call('skills.import', { url: ARCHIFY.source })).ok).toBe(true)
+    expect(await names(call)).toEqual(['archify:on'])
+    expect(await exists(live('archify'))).toBe(true)
   })
 })

@@ -1,5 +1,6 @@
 import type {
   AvailableModel,
+  CustomSkill,
   DecisionRecord,
   DiagramEntry,
   DiffListResult,
@@ -187,8 +188,10 @@ export interface InvokeMap {
   'clipboard.write': { req: { text: string }; res: void }
   'clipboard.read': { req: void; res: { text: string } }
   'projects.commands': { req: { projectId: string }; res: ProjectCommand[] }
-  'skills.list': { req: void; res: string[] }
+  'skills.list': { req: void; res: CustomSkill[] }
   'skills.import': { req: { url: string }; res: SkillImportResult }
+  'skills.setEnabled': { req: { name: string; enabled: boolean }; res: CustomSkill[] }
+  'skills.remove': { req: { name: string }; res: CustomSkill[] }
   'diff.list': { req: { projectId: string }; res: DiffListResult }
   'diff.file': { req: { projectId: string; path: string }; res: FileDiffContent | null }
   'diff.apply': {

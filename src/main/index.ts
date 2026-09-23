@@ -14,7 +14,7 @@ import { followDeepLink, PROTOCOL_SCHEME } from './deep-link'
 import { registerProject } from './projects/discovery'
 import { computeCounters, registerIpcHandlers, RendererPush } from './ipc/handlers'
 import { readDiagramList } from './diagrams/list'
-import { stagingSkillsRoot } from './skills/install'
+import { reconcileSkills, stagingSkillsRoot } from './skills/install'
 import { FlowSupervisor } from './flow/flow-supervisor'
 import { initUpdater } from './updater'
 import { PtyHost } from './terminal/pty-host'
@@ -285,6 +285,7 @@ async function main(): Promise<void> {
     skillsStagingRoot: stagingSkillsRoot(app.getPath('userData')),
     ptyHost,
   })
+  void reconcileSkills(stagingSkillsRoot(app.getPath('userData')), repos.customSkills.list())
   scheduleRetention(() => {
     repos.events.flush()
     runRetention(db)

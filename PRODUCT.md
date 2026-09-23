@@ -179,9 +179,8 @@ Removed, each on the evidence of the application's own database on that date:
 - The in-app evaluation loop and the API test runner: no run ever recorded.
 - The Security tab: no audit ever run, and it depended on a skill that was never
   installed. Security scanning now happens inside Flow's review stage.
-- The Skills tab and the Cleanup tab: no section session of either kind ever
-  started. The skill import backend remains because the Diagrams archify engine
-  imports its skill through it. Cleanup now happens inside Flow's clean stage.
+- The Skills section tab and the Cleanup tab: no section session of either kind
+  ever started. Cleanup now happens inside Flow's clean stage.
 - The Specs tab: Spec Kit was used from chat, not from the tab. Flow now drives
   Spec Kit and reads its folders.
 - The Codex engine: five sessions on 12 to 14 September 2026 and none since.
@@ -199,6 +198,15 @@ The WSL container sandbox and bypass mode were removed in the same pass and
 restored the same day, at the owner's direction: "do not remove sandbox
 containers as a feature". Run in Container, bypass, the sandbox memory setting
 and isolated test runs are all current features.
+
+Skill import and management were cut back to the archify skill in the same pass
+and restored the same day, at the owner's direction: "I still want every person
+to import their own skills - its a feature allowing people to use their own
+stuff". Settings, Skills imports from any GitHub skills folder, groups the
+imported skills by source with an all on or all off switch per source, and
+switches or removes each one. An imported skill is a slash command in every
+session and appears in the composer suggestions, so it has no section of its
+own.
 
 This supersedes the constraint recorded on 2026-08-13 that "all six sections"
 (Session, Specs, Tests, Diff, Cleanup, Diagrams) must survive. The sections now

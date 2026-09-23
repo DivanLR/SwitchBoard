@@ -1,9 +1,9 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, posix } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import type { SkillImportResult } from '@shared/domain'
+import type { CustomSkill, SkillImportResult } from '@shared/domain'
 import type { IpcError } from '@shared/ipc-types'
-import { isSafeRepoPath, isSafeSegment, readSkillSource, type SkillSource } from './skill-source'
+import { isSafeRepoPath, isSafeSegment, readSkillSource, type SkillSource } from '@shared/skill-source'
 
 const MAX_FILES = 400
 const MAX_TOTAL_BYTES = 20 * 1024 * 1024
@@ -152,7 +152,7 @@ export async function importSkills(
     } satisfies IpcError
   }
 
-  const imported: string[] = []
+  const imported: CustomSkill[] = []
   const skipped: { name: string; reason: string }[] = []
   let budgetFiles = MAX_FILES
   let budgetBytes = MAX_TOTAL_BYTES
@@ -183,6 +183,7 @@ export async function importSkills(
 
     const target = join(stagingRoot, front.name)
     await rm(target, { recursive: true, force: true })
+    const filesBefore = budgetFiles
     try {
       for (const file of files) {
         const relative = file.path.slice(dir.length + 1)
@@ -201,7 +202,15 @@ export async function importSkills(
       await rm(target, { recursive: true, force: true })
       throw error
     }
-    imported.push(front.name)
+    imported.push({
+      name: front.name,
+      description: front.description,
+      sourceUrl: input.trim(),
+      sourcePath: dir,
+      enabled: true,
+      fileCount: filesBefore - budgetFiles,
+      importedAt: new Date().toISOString(),
+    })
   }
 
   for (const entry of oversized) {

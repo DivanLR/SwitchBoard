@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { transaction, type AppDatabase } from './db'
 import type { DiagramPlan } from '@shared/diagram'
 import type {
+  CustomSkill,
   DecisionOutcome,
   DecisionRecord,
   Draft,
@@ -1226,6 +1227,38 @@ export class DiagramRequestsRepo {
   }
 }
 
+class CustomSkillsRepo {
+  constructor(private db: AppDatabase) {}
+
+  list(): CustomSkill[] {
+    return (
+      this.db
+        .prepare('SELECT * FROM custom_skills ORDER BY name')
+        .all() as (Omit<CustomSkill, 'enabled'> & { enabled: number })[]
+    ).map((row) => ({ ...row, enabled: row.enabled === 1 }))
+  }
+
+  byName(name: string): CustomSkill | undefined {
+    return this.list().find((skill) => skill.name === name)
+  }
+
+  upsertMany(skills: readonly CustomSkill[]): void {
+    const upsert = this.db.prepare(
+      `INSERT OR REPLACE INTO custom_skills (name, description, sourceUrl, sourcePath, enabled, fileCount, importedAt)
+       VALUES (@name, @description, @sourceUrl, @sourcePath, @enabled, @fileCount, @importedAt)`,
+    )
+    for (const skill of skills) upsert.run({ ...skill, enabled: skill.enabled ? 1 : 0 })
+  }
+
+  setEnabled(name: string, enabled: boolean): void {
+    this.db.prepare('UPDATE custom_skills SET enabled = ? WHERE name = ?').run(enabled ? 1 : 0, name)
+  }
+
+  remove(name: string): void {
+    this.db.prepare('DELETE FROM custom_skills WHERE name = ?').run(name)
+  }
+}
+
 export interface Repositories {
   projects: ProjectsRepo
   sessions: SessionsRepo
@@ -1241,6 +1274,7 @@ export interface Repositories {
   flowRuns: FlowRunsRepo
   flowStages: FlowStagesRepo
   diagramRequests: DiagramRequestsRepo
+  customSkills: CustomSkillsRepo
 }
 
 export function createRepositories(db: AppDatabase): Repositories {
@@ -1259,5 +1293,6 @@ export function createRepositories(db: AppDatabase): Repositories {
     flowRuns: new FlowRunsRepo(db),
     flowStages: new FlowStagesRepo(db),
     diagramRequests: new DiagramRequestsRepo(db),
+    customSkills: new CustomSkillsRepo(db),
   }
 }
