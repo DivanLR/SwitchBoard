@@ -43,7 +43,7 @@ export async function detectProjectSuites(root: string): Promise<AvailableSuites
       lower.endsWith('.csproj') ||
       lower.endsWith('program.cs') ||
       lower.endsWith('startup.cs') ||
-      /(^|[/\\])package\.json$/.test(lower)
+      /(^|[/\\])(package|angular)\.json$/.test(lower)
     )
   })
   const contents = new Map<string, string | null>()

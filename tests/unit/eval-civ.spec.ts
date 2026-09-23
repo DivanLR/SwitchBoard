@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { detectStacks, stackEntries, TEST_STACKS } from '@shared/test-catalog'
+import { detectProjectSuites } from '@main/evals/verify-dispatch'
 
 describe('stack detection', () => {
   it('reports every stack present, so an API and its front end both get suites', () => {
@@ -138,5 +142,17 @@ describe('Angular suites that depend on project configuration', () => {
   it('offers everything when the tree was never read at all', () => {
     const all = TEST_STACKS.find((s) => s.id === 'angular')?.suites.map((s) => s.id)
     expect(detectStacks(['angular.json'])[0].suites.map((s) => s.id)).toEqual(all)
+  })
+
+  it('reads angular.json from disk in the real scan, so a lint target offers the lint suite', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ng-scan-'))
+    try {
+      await writeFile(join(root, 'angular.json'), '{"projects":{"app":{"architect":{"build":{},"lint":{}}}}}')
+      await writeFile(join(root, 'package.json'), '{"devDependencies":{"karma":"^6.4.0"}}')
+      const angular = (await detectProjectSuites(root)).find((s) => s.stackId === 'angular')
+      expect(angular?.suites.map((s) => s.id)).toContain('ng-lint')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 })
