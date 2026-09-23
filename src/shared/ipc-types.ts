@@ -44,6 +44,7 @@ type IpcErrorCode =
   | 'NOT_LIVE'
   | 'SANDBOX_FULL'
   | 'UNSUPPORTED'
+  | 'MCP_NOT_CONNECTED'
   | 'INTERNAL'
 
 export interface IpcError {
@@ -71,6 +72,7 @@ const IPC_ERROR_CODE_KEYS: Record<IpcErrorCode, true> = {
   NOT_LIVE: true,
   SANDBOX_FULL: true,
   UNSUPPORTED: true,
+  MCP_NOT_CONNECTED: true,
   INTERNAL: true,
 }
 
@@ -259,6 +261,7 @@ export interface InvokeMap {
   'verify.cancel': { req: { projectId: string; runId: string }; res: VerifyRun[] }
   'flow.list': { req: { projectId: string }; res: FlowSnapshot }
   'flow.features': { req: { projectId: string; query?: string }; res: FlowFeature[] }
+  'flow.reconnectAdo': { req: { projectId: string; query?: string }; res: FlowFeature[] }
   'flow.existingSpecs': { req: { projectId: string }; res: SpecSummary[] }
   'flow.detectStacks': { req: { projectId: string }; res: FlowStackId[] }
   'flow.start': {

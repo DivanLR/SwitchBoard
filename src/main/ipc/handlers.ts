@@ -631,6 +631,10 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       requireProject(req.projectId)
       return flow.features(req.projectId, req.query ?? '')
     },
+    'flow.reconnectAdo': async (req) => {
+      requireProject(req.projectId)
+      return flow.reconnectAdo(req.projectId, req.query ?? '')
+    },
     'flow.existingSpecs': async (req) => {
       requireProject(req.projectId)
       return flow.existingSpecs(req.projectId)

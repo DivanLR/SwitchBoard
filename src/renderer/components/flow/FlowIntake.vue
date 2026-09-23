@@ -126,6 +126,11 @@ async function search(): Promise<void> {
   await flow.searchFeatures(props.projectId, query.value)
 }
 
+async function reconnect(): Promise<void> {
+  feature.value = null
+  await flow.searchFeatures(props.projectId, query.value, true)
+}
+
 async function start(): Promise<void> {
   const picked = chosen.value
   if (!picked) return
@@ -254,10 +259,22 @@ async function start(): Promise<void> {
           type="button"
           class="btn-quiet"
           data-testid="flow-feature-refresh"
-          :disabled="flow.searching"
+          :disabled="flow.searching !== null"
           @click="search()"
         >
-          {{ flow.searching ? 'Asking DevOps…' : 'Find features' }}
+          {{ flow.searching === 'search' ? 'Asking DevOps…' : 'Find features' }}
+        </button>
+      </div>
+      <div v-if="flow.adoDown" class="ui-err-banner is-warn fin-ado" role="alert" data-testid="flow-ado-state">
+        <span class="fin-ado-text">{{ flow.adoDown }}</span>
+        <button
+          type="button"
+          class="btn-outline"
+          data-testid="flow-ado-reconnect"
+          :disabled="flow.searching !== null"
+          @click="reconnect()"
+        >
+          {{ flow.searching === 'reconnect' ? 'Reconnecting…' : 'Reconnect' }}
         </button>
       </div>
       <div class="fin-list" role="radiogroup" aria-label="Feature">
@@ -283,9 +300,11 @@ async function start(): Promise<void> {
           data-testid="flow-features-empty"
         >
           {{
-            flow.searching
-              ? 'Asking Azure DevOps for Features…'
-              : (flow.featuresNote ?? 'No Features loaded yet.')
+            flow.searching === 'reconnect'
+              ? 'Reconnecting the Azure DevOps MCP server, then asking it for Features…'
+              : flow.searching
+                ? 'Asking Azure DevOps for Features…'
+                : (flow.featuresNote ?? 'No Features loaded yet.')
           }}
         </div>
       </div>
@@ -511,6 +530,17 @@ async function start(): Promise<void> {
 
 .fin-search .btn-quiet {
   flex-shrink: 0;
+}
+
+.fin-ado {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.fin-ado-text {
+  flex: 1;
+  min-width: 0;
 }
 
 .fin-list {

@@ -6,6 +6,7 @@ import {
   type HookInput,
   type HookJSONOutput,
   type McpServerConfig,
+  type McpServerStatus,
   type PermissionMode,
   type PermissionResult,
   type Query,
@@ -135,6 +136,8 @@ export interface SessionHost {
   clearBackgroundTasks(): void
   setPlanMode(enabled: boolean): void
   reloadPlugins(): Promise<void>
+  mcpServerStatus(): Promise<McpServerStatus[]>
+  reconnectMcpServer(name: string): Promise<void>
 }
 
 export function explainExit(raw: string, containerised: boolean): string {
@@ -375,6 +378,15 @@ export class HostedSession implements SessionHost {
       )
     } catch {
     }
+  }
+
+  async mcpServerStatus(): Promise<McpServerStatus[]> {
+    return this.q ? this.q.mcpServerStatus() : []
+  }
+
+  async reconnectMcpServer(name: string): Promise<void> {
+    if (!this.q) throw new Error('The session has not started yet.')
+    await this.q.reconnectMcpServer(name)
   }
 
   setPlanMode(enabled: boolean): void {

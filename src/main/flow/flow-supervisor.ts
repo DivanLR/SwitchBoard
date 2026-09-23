@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { cp, readFile, readdir, writeFile } from 'node:fs/promises'
 import { basename, isAbsolute, join, relative } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import type {
   FlowKind,
   FlowRepo,
@@ -86,7 +87,24 @@ import type { FlowFeature } from '@shared/domain'
 
 export const ADO_SERVER = 'ado'
 
-const ADO_WAIT_MS = 30_000
+const ADO_HOLD_MS = 10 * 60_000
+
+const ADO_LISTED_MS = 10_000
+
+function adoProblem(state: { status: string; error: string | null } | null, waitMs: number): IpcError {
+  if (!state) return { code: 'NOT_LIVE', message: 'The session ended before the Azure DevOps MCP server connected.' }
+  const why: Record<string, string> = {
+    pending: `it is still starting after ${Math.round(waitMs / 1000)} seconds, and npx may still be fetching it. Reconnect to wait for it again`,
+    'needs-auth': 'it needs you to sign in. Sign in to it in Claude Code with /mcp, then Reconnect',
+    failed: `it failed to start: ${state.error?.trim() || 'it gave no reason'}. Check the ado server in your Claude Code configuration, then Reconnect`,
+    disabled: 'it is disabled in your Claude Code configuration. Enable it, then Reconnect',
+    missing: 'no MCP server named ado is configured for it. Add the ado server to your Claude Code configuration, then Reconnect',
+  }
+  return {
+    code: 'MCP_NOT_CONNECTED',
+    message: `The Azure DevOps MCP server is not connected for this session: ${why[state.status] ?? `it reports ${state.status}. Reconnect to try again`}.`,
+  }
+}
 
 const MAX_FIX_ROUNDS = 2
 
@@ -186,12 +204,14 @@ export class FlowSupervisor {
   private origins = new Map<string, Record<string, string | null>>()
   private rounds = new Map<string, number>()
   private looped = new Set<string>()
+  private adoSessions = new Map<string, { sessionId: string; timer: ReturnType<typeof setTimeout> }>()
 
   constructor(
     private repos: Repositories,
     private manager: SessionManager,
     private callbacks: FlowCallbacks,
     private git: FlowGit = defaultGit,
+    private ado: { waitMs: number; pollMs: number } = { waitMs: 90_000, pollMs: 1_000 },
   ) {}
 
   private settings(): { flowWorktreeRoot: string } {
@@ -209,30 +229,61 @@ export class FlowSupervisor {
 
   async features(projectId: string, query: string, timeoutMs = 120_000): Promise<FlowFeature[]> {
     const project = this.requireProject(projectId)
+    this.dropAdoSession(projectId)
     const session = await this.manager.startSession(project.id, false, project.defaultSessionMode, {
       background: true,
       section: 'flow',
     })
+    return this.listFeatures(projectId, session.id, query, timeoutMs)
+  }
+
+  async reconnectAdo(projectId: string, query: string, timeoutMs = 120_000): Promise<FlowFeature[]> {
+    this.requireProject(projectId)
+    const held = this.adoSessions.get(projectId)
+    if (!held || !this.manager.liveSessionIds().includes(held.sessionId)) return this.features(projectId, query, timeoutMs)
+    clearTimeout(held.timer)
+    this.adoSessions.delete(projectId)
+    await this.manager.reconnectMcpServer(held.sessionId, ADO_SERVER).catch(() => {})
+    return this.listFeatures(projectId, held.sessionId, query, timeoutMs)
+  }
+
+  private async listFeatures(projectId: string, sessionId: string, query: string, timeoutMs: number): Promise<FlowFeature[]> {
     try {
-      await this.requireAdo(session.id)
+      await this.requireAdo(sessionId)
     } catch (error) {
-      this.manager.endFlowSession(session.id)
+      if ((error as Partial<IpcError>).code === 'MCP_NOT_CONNECTED') this.holdAdoSession(projectId, sessionId)
+      else this.manager.endFlowSession(sessionId)
       throw error
     }
     return new Promise<FlowFeature[]>((resolve, reject) => {
       const timer = setTimeout(() => {
-        this.featuresWaiters.delete(session.id)
-        this.manager.endFlowSession(session.id)
+        this.featuresWaiters.delete(sessionId)
+        this.manager.endFlowSession(sessionId)
         reject({
           code: 'NOT_LIVE',
           message: 'The session did not answer with a Feature list in time.',
         } satisfies IpcError)
       }, timeoutMs)
       timer.unref?.()
-      this.featuresWaiters.set(session.id, { resolve, reject, timer })
-      this.manager.watchFlow(session.id)
-      this.manager.sendMessage(session.id, featuresPrompt(query))
+      this.featuresWaiters.set(sessionId, { resolve, reject, timer })
+      this.manager.watchFlow(sessionId)
+      this.manager.sendMessage(sessionId, featuresPrompt(query))
     })
+  }
+
+  private holdAdoSession(projectId: string, sessionId: string): void {
+    this.dropAdoSession(projectId)
+    const timer = setTimeout(() => this.dropAdoSession(projectId), ADO_HOLD_MS)
+    timer.unref?.()
+    this.adoSessions.set(projectId, { sessionId, timer })
+  }
+
+  private dropAdoSession(projectId: string): void {
+    const held = this.adoSessions.get(projectId)
+    if (!held) return
+    clearTimeout(held.timer)
+    this.adoSessions.delete(projectId)
+    this.manager.endFlowSession(held.sessionId)
   }
 
   async existingSpecs(projectId: string): Promise<SpecSummary[]> {
@@ -1345,12 +1396,18 @@ export class FlowSupervisor {
   }
 
   private async requireAdo(sessionId: string): Promise<void> {
-    const connected = await this.manager.connectedMcpServers(sessionId, [ADO_SERVER], ADO_WAIT_MS)
-    if (connected.includes(ADO_SERVER)) return
-    throw {
-      code: 'NOT_LIVE',
-      message:
-        'The Azure DevOps MCP server is not connected for this session, so Flow cannot read or write the board. Check the ado server in your Claude Code configuration and try again.',
-    } satisfies IpcError
+    const started = Date.now()
+    const waiting = (state: { status: string } | null): boolean => {
+      const elapsed = Date.now() - started
+      if (!state || elapsed >= this.ado.waitMs) return false
+      return state.status === 'pending' || (state.status === 'missing' && elapsed < ADO_LISTED_MS)
+    }
+    let state = await this.manager.mcpStatus(sessionId, ADO_SERVER)
+    while (waiting(state)) {
+      await delay(this.ado.pollMs)
+      state = await this.manager.mcpStatus(sessionId, ADO_SERVER)
+    }
+    if (state?.status === 'connected') return
+    throw adoProblem(state, this.ado.waitMs)
   }
 }

@@ -1,6 +1,6 @@
 import { computed, reactive, toRefs } from 'vue'
 import type { FlowFeature, FlowRun, FlowStackId, FlowStage, FlowStageRecord } from '@shared/domain'
-import type { FlowArtefactKind, FlowCompanionRequest, FlowStartSource } from '@shared/ipc-types'
+import { isIpcError, type FlowArtefactKind, type FlowCompanionRequest, type FlowStartSource } from '@shared/ipc-types'
 import { errorMessage, invoke } from '@renderer/ipc'
 import { useProjectsStore } from '@renderer/stores/projects'
 
@@ -12,7 +12,8 @@ const state = reactive({
   projectId: null as string | null,
   features: [] as FlowFeature[],
   featuresNote: null as string | null,
-  searching: false,
+  searching: null as 'search' | 'reconnect' | null,
+  adoDown: null as string | null,
   existingSpecs: [] as { id: string; title: string }[],
   stacksByProject: {} as Record<string, FlowStackId[]>,
   busy: null as string | null,
@@ -68,20 +69,22 @@ const store = reactive({
     state.stagesByProject[projectId] = stages
   },
 
-  async searchFeatures(projectId: string, query: string): Promise<void> {
+  async searchFeatures(projectId: string, query: string, reconnect = false): Promise<void> {
     state.error = null
+    state.adoDown = null
     state.featuresNote = null
-    state.searching = true
+    state.searching = reconnect ? 'reconnect' : 'search'
     try {
-      state.features = await invoke('flow.features', { projectId, query })
+      state.features = await invoke(reconnect ? 'flow.reconnectAdo' : 'flow.features', { projectId, query })
       if (state.features.length === 0) {
         state.featuresNote = 'No Feature matched that.'
       }
     } catch (error) {
       state.features = []
-      state.error = errorMessage(error)
+      if (isIpcError(error) && error.code === 'MCP_NOT_CONNECTED') state.adoDown = error.message
+      else state.error = errorMessage(error)
     } finally {
-      state.searching = false
+      state.searching = null
     }
   },
 

@@ -76,7 +76,7 @@ export interface MockDriver {
   setStatus: (sessionId: string, status: string) => void
   reportVerifyResult: (projectId: string, status: string, report: unknown) => void
   setAdoFeatures: (features: { id: string; title: string; state?: string | null }[]) => void
-  setAdoConnected: (on: boolean) => void
+  setAdoConnected: (on: boolean, why?: string) => void
   reportFlowStage: (
     runId: string,
     stage: string,
@@ -116,6 +116,7 @@ export interface MockDriver {
     prOpens: string[]
     pluginInstalls: { marketplace: string; pkg: string }[]
     diffApplies: { projectId: string; path: string; lines: string[]; instruction: string }[]
+    adoReconnects: number
   }
 }
 
@@ -448,6 +449,8 @@ export function installMockHost(scenario: MockScenario): void {
   const flowStacksByProject = new Map<string, string[]>()
   let adoFeatures: AnyRecord[] = []
   let adoConnected = true
+  let adoWhy = 'it failed to start'
+  let adoReconnects = 0
 
   const FLOW_KIND_ORDER: Record<string, readonly string[]> = {
     feature: ['spec', 'plan', 'build', 'clean', 'test', 'review', 'ship'],
@@ -1137,13 +1140,17 @@ export function installMockHost(scenario: MockScenario): void {
       return out
     },
     'flow.list': (req) => flowSnapshot(String(req.projectId)),
+    'flow.reconnectAdo': async (req) => {
+      adoReconnects += 1
+      return invokeHandlers['flow.features'](req)
+    },
     'flow.features': async (req) => {
       const projectId = String(req.projectId)
       if (!adoConnected) {
+        await new Promise((resolve) => setTimeout(resolve, 150))
         throw {
-          code: 'NOT_LIVE',
-          message:
-            'The Azure DevOps MCP server is not connected for this session, so Flow cannot read or write the board. Check the ado server in your Claude Code configuration and try again.',
+          code: 'MCP_NOT_CONNECTED',
+          message: `The Azure DevOps MCP server is not connected for this session: ${adoWhy}.`,
         }
       }
       const session = await sectionSession(projectId, 'flow')
@@ -1187,8 +1194,8 @@ export function installMockHost(scenario: MockScenario): void {
       const source = req.source as AnyRecord
       if (source.kind === 'ado' && !adoConnected) {
         throw {
-          code: 'NOT_LIVE',
-          message: 'The Azure DevOps MCP server is not connected for this session, so Flow cannot read or write the board.',
+          code: 'MCP_NOT_CONNECTED',
+          message: `The Azure DevOps MCP server is not connected for this session: ${adoWhy}.`,
         }
       }
       const stacks = [...(flowStacksByProject.get(projectId) ?? ['dotnet'])]
@@ -1793,8 +1800,9 @@ export function installMockHost(scenario: MockScenario): void {
         url: null,
       }))
     },
-    setAdoConnected: (on) => {
+    setAdoConnected: (on, why) => {
       adoConnected = on
+      if (why) adoWhy = why
     },
     reportFlowStage: (runId, stage, patch) => {
       const run = flowRun(runId)
@@ -1908,6 +1916,7 @@ export function installMockHost(scenario: MockScenario): void {
       prOpens: [...prOpens],
       pluginInstalls: [...pluginInstalls],
       diffApplies: [...diffApplies],
+      adoReconnects,
     }),
   }
 }

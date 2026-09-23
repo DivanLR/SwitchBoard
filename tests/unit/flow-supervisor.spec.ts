@@ -60,7 +60,9 @@ function specProject(): string {
   return dir
 }
 
-function setup(options?: { ado?: boolean; projectPath?: string }) {
+type McpState = { status: string; error: string | null } | null
+
+function setup(options?: { ado?: boolean; projectPath?: string; mcp?: () => McpState }) {
   const repos: Repos = createRepositories(openDatabase(':memory:'))
   const project = repos.projects.insert({
     name: 'alpha',
@@ -82,6 +84,12 @@ function setup(options?: { ado?: boolean; projectPath?: string }) {
     connectedMcpServers: vi.fn(async (_sessionId: string, wanted: readonly string[]) =>
       options?.ado === false ? [] : [...wanted],
     ),
+    mcpStatus: vi.fn(async (): Promise<McpState> => {
+      if (options?.mcp) return options.mcp()
+      return options?.ado === false ? { status: 'failed', error: 'spawn npx ENOENT' } : { status: 'connected', error: null }
+    }),
+    reconnectMcpServer: vi.fn(async (_sessionId: string, _name: string) => {}),
+    liveSessionIds: () => Array.from({ length: sessionCount }, (_, at) => `session-${at + 1}`).filter((id) => !ended.includes(id)),
     sendMessage: (sessionId: string, text: string) => sent.push({ sessionId, text }),
     watchFlow: (sessionId: string) => watched.push(sessionId),
     endFlowSession: (sessionId: string) => ended.push(sessionId),
@@ -92,7 +100,10 @@ function setup(options?: { ado?: boolean; projectPath?: string }) {
   }
 
   const git = fakeGit()
-  const flow = new FlowSupervisor(repos, manager as never, { onFlowChanged: (id) => changed.push(id) }, git)
+  const flow = new FlowSupervisor(repos, manager as never, { onFlowChanged: (id) => changed.push(id) }, git, {
+    waitMs: 1000,
+    pollMs: 10,
+  })
 
   return { repos, project, flow, manager, git, sent, watched, changed, ended, stopped }
 }
@@ -490,6 +501,76 @@ describe('the Feature list', () => {
     h.flow.onTurnEnded(h.sent[0].sessionId)
     await expect(listing).rejects.toMatchObject({ code: 'NOT_LIVE' })
     expect(h.ended).toEqual([h.sent[0].sessionId])
+  })
+
+  it.each([
+    [{ status: 'pending', error: null }, 'it is still starting after 1 seconds, and npx may still be fetching it'],
+    [{ status: 'needs-auth', error: null }, 'it needs you to sign in'],
+    [{ status: 'failed', error: 'spawn npx ENOENT' }, 'it failed to start: spawn npx ENOENT'],
+    [{ status: 'disabled', error: null }, 'it is disabled'],
+    [{ status: 'missing', error: null }, 'no MCP server named ado is configured'],
+  ])('names the ado server state %o, and keeps the session for Reconnect', async (state, why) => {
+    const h = setup({ mcp: () => state })
+    await expect(h.flow.features(h.project.id, '')).rejects.toEqual({
+      code: 'MCP_NOT_CONNECTED',
+      message: expect.stringContaining(`The Azure DevOps MCP server is not connected for this session: ${why}`),
+    })
+    expect(h.ended).toEqual([])
+    expect(h.sent).toEqual([])
+  })
+
+  it('waits while the server is still starting, then lists the Features once it connects', async () => {
+    let polls = 0
+    const h = setup({ mcp: () => (++polls < 5 ? { status: 'pending', error: null } : { status: 'connected', error: null }) })
+    const listing = h.flow.features(h.project.id, '')
+    await vi.waitFor(() => expect(h.sent).toHaveLength(1))
+    h.flow.onFlowMarker(h.sent[0].sessionId, { kind: 'features', features: [{ id: '1', title: 'A', state: null, url: null }] })
+    await expect(listing).resolves.toEqual([{ id: '1', title: 'A', state: null, url: null }])
+    expect(polls).toBe(5)
+  })
+
+  it('reconnects ado on the same session and retries the Feature list there', async () => {
+    let state: McpState = { status: 'failed', error: 'npm ERR! 404' }
+    const h = setup({ mcp: () => state })
+    await expect(h.flow.features(h.project.id, 'checkout')).rejects.toMatchObject({ code: 'MCP_NOT_CONNECTED' })
+    state = { status: 'connected', error: null }
+    const listing = h.flow.reconnectAdo(h.project.id, 'checkout')
+    await vi.waitFor(() => expect(h.sent).toHaveLength(1))
+    expect(h.manager.reconnectMcpServer).toHaveBeenCalledWith('session-1', 'ado')
+    expect(h.manager.startSession).toHaveBeenCalledTimes(1)
+    expect(h.sent[0]).toMatchObject({ sessionId: 'session-1', text: expect.stringContaining('Only Features matching: checkout') })
+    h.flow.onFlowMarker('session-1', { kind: 'features', features: [] })
+    await expect(listing).resolves.toEqual([])
+  })
+
+  it('keeps the session again when a reconnect still leaves ado down, and starts afresh once it is gone', async () => {
+    const h = setup({ mcp: () => ({ status: 'needs-auth', error: null }) })
+    await expect(h.flow.features(h.project.id, '')).rejects.toMatchObject({ code: 'MCP_NOT_CONNECTED' })
+    await expect(h.flow.reconnectAdo(h.project.id, '')).rejects.toMatchObject({ code: 'MCP_NOT_CONNECTED' })
+    expect(h.manager.startSession).toHaveBeenCalledTimes(1)
+    expect(h.ended).toEqual([])
+    await expect(h.flow.features(h.project.id, '')).rejects.toMatchObject({ code: 'MCP_NOT_CONNECTED' })
+    expect(h.ended).toEqual(['session-1'])
+    await expect(h.flow.reconnectAdo(h.project.id, '')).rejects.toMatchObject({ code: 'MCP_NOT_CONNECTED' })
+    expect(h.manager.reconnectMcpServer).toHaveBeenLastCalledWith('session-2', 'ado')
+  })
+
+  it('checks the ado state again when the spec stage of an ado run is retried', async () => {
+    let state: McpState = { status: 'pending', error: null }
+    const h = setup({ mcp: () => state })
+    const run = await h.flow.start({
+      projectId: h.project.id,
+      source: { kind: 'ado', featureId: '4711', featureTitle: 'Checkout v2', url: null },
+      autopilot: false,
+      autoShip: false,
+    })
+    const failed = h.repos.flowStages.get(run.id, 'spec')!
+    expect(failed.status).toBe('failed')
+    expect(failed.summary).toContain('it is still starting after 1 seconds')
+    state = { status: 'connected', error: null }
+    await h.flow.retry(run.id)
+    expect(h.repos.flowStages.get(run.id, 'spec')?.status).toBe('running')
+    expect(h.sent.at(-1)?.text).toContain('/speckit-specify')
   })
 })
 
