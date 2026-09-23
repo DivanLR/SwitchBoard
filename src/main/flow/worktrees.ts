@@ -178,11 +178,15 @@ export async function createWorktree(input: {
 export async function removeWorktree(
   repoRoot: string,
   path: string,
-  opts?: { force?: boolean },
+  opts?: { force?: boolean; deleteBranch?: string },
 ): Promise<{ removed: boolean; dirty: string[] }> {
   return serialise(async () => {
+    const dropBranch = async (): Promise<void> => {
+      if (opts?.deleteBranch) await git(repoRoot, ['branch', '-D', '--', opts.deleteBranch]).catch(() => '')
+    }
     if (!existsSync(path)) {
       await git(repoRoot, ['worktree', 'prune']).catch(() => '')
+      await dropBranch()
       return { removed: true, dirty: [] }
     }
     const dirty = opts?.force === true ? [] : await worktreeDirty(path).catch(() => [])
@@ -195,6 +199,7 @@ export async function removeWorktree(
       await git(repoRoot, args)
     }
     await git(repoRoot, ['worktree', 'prune']).catch(() => '')
+    await dropBranch()
     return { removed: true, dirty: [] }
   })
 }

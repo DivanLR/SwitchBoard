@@ -1215,7 +1215,7 @@ describe('a run across two repositories', () => {
     expect(h.git.create).not.toHaveBeenCalled()
   })
 
-  it('removes the worktree it already made and keeps no run when the next one fails', async () => {
+  it('removes the worktree and the branch it already made and keeps no run when the next one fails', async () => {
     const h = twoRepos()
     const create = h.git.create
     h.git.create = vi.fn(async (input: Parameters<FlowGit['create']>[0]) => {
@@ -1223,7 +1223,10 @@ describe('a run across two repositories', () => {
       return create(input)
     })
     await expect(startBoth(h)).rejects.toMatchObject({ code: 'INTERNAL', message: expect.stringContaining('beta') })
-    expect(h.git.remove).toHaveBeenCalledWith(h.project.path, join(h.project.path, '.worktrees', 'checkout-v2'), { force: true })
+    expect(h.git.remove).toHaveBeenCalledWith(h.project.path, join(h.project.path, '.worktrees', 'checkout-v2'), {
+      force: true,
+      deleteBranch: 'feature/checkout-v2',
+    })
     expect(h.repos.flowRuns.listForProject(h.project.id)).toEqual([])
     expect(h.manager.startSession).not.toHaveBeenCalled()
   })
@@ -1339,6 +1342,61 @@ describe('a run across two repositories', () => {
     expect(after.repos.map((repo) => repo.prUrl)).toEqual([null, 'https://git.beta.internal/beta/pulls/2'])
     expect(h.repos.flowStages.get(run.id, 'ship')?.summary).toContain('link for alpha was not an https address on an allowed host')
     await expect(h.flow.pullRequestUrl(run.id)).rejects.toMatchObject({ code: 'NOT_FOUND' })
+  })
+
+  it('keeps a pull request reported under its labelled repository name, and names a repository with none', async () => {
+    const h = twoRepos()
+    const run = await startBoth(h, 'develop')
+    for (const stage of ['spec', 'plan', 'build', 'clean', 'test', 'review'] as const) {
+      h.flow.onFlowMarker(sessionOf(h, run.id, stage), specMarker({ stage, verdict: stage === 'review' ? 'ready' : null }))
+      await h.flow.approve(run.id)
+    }
+    await h.flow.ship(run.id)
+    expect(h.sent.at(-1)!.text).toContain('named exactly as the repository name before the brackets')
+
+    h.flow.onFlowMarker(
+      sessionOf(h, run.id, 'ship'),
+      specMarker({
+        stage: 'ship',
+        pullRequests: [{ repository: `alpha (${run.worktreePath})`, prUrl: 'https://github.com/o/alpha/pull/1', prId: '1' }],
+      }),
+    )
+
+    expect(h.repos.flowRuns.byId(run.id)!.repos.map((repo) => repo.prUrl)).toEqual(['https://github.com/o/alpha/pull/1', null])
+    expect(h.repos.flowStages.get(run.id, 'ship')?.summary).toContain('reported no pull request for beta')
+  })
+
+  it('gives each companion its own folder under the worktree root setting, apart from every primary worktree', async () => {
+    const h = setup()
+    const parent = mkdtempSync(join(tmpdir(), 'flow-sup-web-'))
+    tempDirs.push(parent)
+    const webs = ['a', 'b'].map((side) => {
+      const path = join(parent, side, 'web')
+      mkdirSync(path, { recursive: true })
+      writeFileSync(join(path, 'angular.json'), '{"projects":{}}')
+      return h.repos.projects.insert({ name: `web ${side}`, path, source: 'manual' })
+    })
+    const override = join(parent, 'wt')
+    h.repos.settings.set({ flowWorktreeRoot: override })
+
+    await h.flow.start({
+      projectId: h.project.id,
+      source: textSource(),
+      autopilot: false,
+      autoShip: false,
+      companions: webs.map((web) => ({ projectId: web.id })),
+    })
+
+    expect(h.git.create).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        root: override,
+        others: [
+          { repoRoot: webs[0].path, root: join(override, 'web.worktrees') },
+          { repoRoot: webs[1].path, root: join(override, 'web-2.worktrees') },
+        ],
+      }),
+    )
   })
 
   it('removes every worktree of the run, the companion first, and names the one that is dirty', async () => {

@@ -213,10 +213,13 @@ export class FlowSupervisor {
     const title = this.deriveTitle(input.source)
     const override = this.settings().flowWorktreeRoot.trim()
     const root = this.git.root(project.path, override)
-    const others = companions.map((repo) => ({
-      repoRoot: repo.path,
-      root: this.git.root(repo.path, override ? join(override, basename(repo.path)) : null),
-    }))
+    const taken = new Set<string>()
+    const others = companions.map((repo) => {
+      let folder = `${basename(repo.path)}.worktrees`
+      for (let n = 2; taken.has(folder.toLowerCase()); n += 1) folder = `${basename(repo.path)}-${n}.worktrees`
+      taken.add(folder.toLowerCase())
+      return { repoRoot: repo.path, root: this.git.root(repo.path, override ? join(override, folder) : null) }
+    })
     const tree = await this.git.create({ repoRoot: project.path, root, title, base, others })
     const worktreePath = tree.path
     const made: FlowRepo[] = []
@@ -226,8 +229,12 @@ export class FlowSupervisor {
         const companion = await this.git.create({ repoRoot: repo.path, root: others[at].root, title, base: repo.baseBranch, branch })
         made.push({ ...repo, branch: companion.branch, worktreePath: companion.path })
       } catch (error) {
-        for (const done of made.reverse()) await this.git.remove(done.path, done.worktreePath ?? '', { force: true }).catch(() => {})
-        await this.git.remove(project.path, worktreePath, { force: true }).catch(() => {})
+        for (const done of made.reverse()) {
+          await this.git
+            .remove(done.path, done.worktreePath ?? '', { force: true, deleteBranch: done.branch ?? undefined })
+            .catch(() => {})
+        }
+        await this.git.remove(project.path, worktreePath, { force: true, deleteBranch: tree.branch ?? undefined }).catch(() => {})
         throw {
           code: 'INTERNAL',
           message: `Flow could not make the worktree in ${repo.name}, so it removed the ones it had made: ${errorText(error)}`,
@@ -915,6 +922,7 @@ export class FlowSupervisor {
     if (stage === 'ship') {
       const hosts = this.origins.get(runId) ?? {}
       const dropped: string[] = []
+      const unreported: string[] = []
       const keep = (repo: Pick<FlowRepo, 'name' | 'projectId'>, raw: string | null): string | null => {
         const url = allowedPullRequestUrl(raw, hosts[repo.projectId] ?? null)
         if (raw && !url) dropped.push(repo.name)
@@ -922,7 +930,12 @@ export class FlowSupervisor {
       }
       if (run.repos.length > 0) {
         const repos = run.repos.map((repo) => {
-          const reported = marker.pullRequests.find((pr) => pr.repository.trim().toLowerCase() === repo.name.toLowerCase())
+          const name = repo.name.toLowerCase()
+          const reported = marker.pullRequests.find((pr) => {
+            const label = pr.repository.trim().toLowerCase()
+            return label === name || label.startsWith(`${name} (`)
+          })
+          if (!reported) unreported.push(repo.name)
           return { ...repo, prUrl: keep(repo, reported?.prUrl ?? null), prId: reported?.prId ?? null }
         })
         patch.repos = repos
@@ -938,6 +951,9 @@ export class FlowSupervisor {
         summary = [summary, `The reported pull request link${whose} was not an https address on an allowed host, so it was not kept.`]
           .filter(Boolean)
           .join(' ')
+      }
+      if (unreported.length > 0) {
+        summary = [summary, `The Ship session reported no pull request for ${unreported.join(' or ')}.`].filter(Boolean).join(' ')
       }
     }
     const mustFix = marker.findings.some((finding) => finding.severity === 'must_fix')

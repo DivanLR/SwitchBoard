@@ -78,6 +78,24 @@ describe('the revise prompt, sent to a fresh session', () => {
   })
 })
 
+describe('the fix and revise prompts of a run across two repositories', () => {
+  const repos = [
+    { name: 'Api', path: 'C:\\src\\api', worktreePath: 'C:\\src\\api.worktrees\\cart', stacks: ['dotnet'], baseBranch: 'main' },
+    { name: 'Web', path: 'C:\\src\\web', worktreePath: 'C:\\src\\web.worktrees\\cart', stacks: ['angular'], baseBranch: 'develop' },
+  ]
+  const each = 'each against its own base (Api against main, Web against develop)'
+
+  it('give every repository its own base rather than the primary base for all', () => {
+    const fix = fixFindingsPrompt(null, { baseBranch: 'main', specDir: null, repos })
+    const revise = revisePrompt({ specDir: null, prUrl: null, baseBranch: 'main', repos }, 'build', 'Tidy it.')
+
+    for (const prompt of [fix, revise]) {
+      expect(prompt).toContain(each)
+      expect(prompt).not.toContain('branch against main')
+    }
+  })
+})
+
 describe('the plan steps', () => {
   it('name the spec folder in every Spec Kit command, each starting with its slash command', () => {
     const steps = planSteps(['dotnet'], 'specs/005-invoices')

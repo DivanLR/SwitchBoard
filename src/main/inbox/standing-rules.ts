@@ -68,9 +68,10 @@ export function pathOf(input: Record<string, unknown>): string | null {
 export function isPathWithinProject(
   projectPath: string,
   input: Record<string, unknown>,
+  cwd = projectPath,
 ): boolean {
   const path = pathOf(input)
-  return path !== null && isWithinDir(projectPath, path)
+  return path !== null && isWithinDir(projectPath, resolve(cwd, path))
 }
 
 export function deriveMatcher(command: string): PermissionRuleMatcher {

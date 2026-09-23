@@ -193,6 +193,15 @@ describe('removing a worktree', () => {
     expect(existsSync(join(path, 'work-in-progress.txt'))).toBe(true)
   })
 
+  it('deletes the branch too when asked, so a rolled back run leaves no branch behind', async () => {
+    const root = repo()
+    const { path, branch } = await make(root, 'Rolled back')
+
+    await removeWorktree(root, path, { force: true, deleteBranch: branch! })
+
+    expect(execSync('git branch --list', { cwd: root, encoding: 'utf8' })).not.toContain('rolled-back')
+  })
+
   it('discards a dirty one only when forced', async () => {
     const root = repo()
     const { path } = await make(root, 'Forced item')

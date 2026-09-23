@@ -329,6 +329,15 @@ describe('PermissionBroker lifecycle', () => {
     expect(flow.repos.requests.pending()).toHaveLength(3)
   })
 
+  it('reads a relative path from the session working folder, as the tool does, not from each folder in turn', async () => {
+    const flow = makeHarness(['C:\\wt\\feat', 'C:\\wt\\web\\feat'])
+    expect((await flow.gate('Edit', { file_path: 'src\\a.ts' })).behavior).toBe('allow')
+
+    void flow.gate('Write', { file_path: '..\\..\\web\\feat\\run.ps1' })
+    await settle()
+    expect(flow.repos.requests.pending()).toHaveLength(1)
+  })
+
   it('shows a Bash request with the command verbatim in the title and detail', async () => {
     void h.gate('Bash', { command: 'cd C:\\proj\\sub' })
     await settle()

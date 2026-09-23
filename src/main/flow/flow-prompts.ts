@@ -287,6 +287,12 @@ export function reviewSteps(stacks: readonly string[], base: string, repos: read
   return steps
 }
 
+function againstBase(base: string, repos: readonly Repo[]): string {
+  return repos.length > 1
+    ? `in every repository, each against its own base (${repos.map((repo) => `${repo.name} against ${repo.baseBranch}`).join(', ')})`
+    : `against ${base}`
+}
+
 export function reviewHandshake(
   base: string,
   specDir: string | null,
@@ -295,11 +301,8 @@ export function reviewHandshake(
 ): string {
   const conventions = stackContext(stacks)
   const multi = repos.length > 1
-  const against = multi
-    ? `in every repository, each against its own base (${repos.map((repo) => `${repo.name} against ${repo.baseBranch}`).join(', ')})`
-    : `against ${base}`
   const lines = [
-    `Review the changes on this branch ${against}, if you have not already. Check them`,
+    `Review the changes on this branch ${againstBase(base, repos)}, if you have not already. Check them`,
     `against every acceptance criterion in ${specDir ? `${specDir}/spec.md` : "this feature's spec.md"}.`,
   ]
   if (multi) lines.push("Give each finding's file as <repository name>/<path inside that repository>.")
@@ -327,12 +330,12 @@ function findingLine(finding: FlowReviewFinding): string {
 
 export function fixFindingsPrompt(
   report: Pick<FlowStageReport, 'findings' | 'unmet'> | null,
-  run: Pick<FlowRun, 'baseBranch' | 'specDir'>,
+  run: Pick<FlowRun, 'baseBranch' | 'specDir'> & { repos?: readonly Repo[] },
 ): string {
   const mustFix = (report?.findings ?? []).filter((finding) => finding.severity === 'must_fix')
   const unmet = report?.unmet ?? []
   const lines = [
-    `A review of the changes on this branch against ${run.baseBranch ?? 'the base branch'} found the problems below.`,
+    `A review of the changes on this branch ${againstBase(run.baseBranch ?? 'the base branch', run.repos ?? [])} found the problems below.`,
     'Fix every must_fix finding and every unmet acceptance criterion listed here, keep the tests green, and commit.',
   ]
   if (run.specDir) lines.push(`The acceptance criteria are in ${run.specDir}/spec.md.`)
@@ -360,7 +363,7 @@ export function artefactPathFor(run: Pick<FlowRun, 'specDir' | 'prUrl'>, stage: 
 }
 
 export function revisePrompt(
-  run: Pick<FlowRun, 'specDir' | 'prUrl' | 'baseBranch'>,
+  run: Pick<FlowRun, 'specDir' | 'prUrl' | 'baseBranch'> & { repos?: readonly Repo[] },
   stage: FlowStage,
   feedback: string,
 ): string {
@@ -368,7 +371,7 @@ export function revisePrompt(
   const lines = [`Revise ${REVISE_TARGET[stage]}${path ? ` (${path})` : ''} per this feedback:`, '', feedback.trim()]
   if (!path && run.specDir) lines.push('', `The feature's spec is ${run.specDir}/spec.md.`)
   if (stage !== 'spec' && stage !== 'plan') {
-    lines.push(`Compare this branch against ${run.baseBranch ?? 'the base branch'} to see what it changed so far.`)
+    lines.push(`Compare this branch ${againstBase(run.baseBranch ?? 'the base branch', run.repos ?? [])} to see what it changed so far.`)
   }
   return lines.join('\n')
 }
@@ -441,7 +444,7 @@ function shipEveryPrompt(
     '',
     ADO_RULE,
     HONESTY,
-    'Report only the pull request ids and urls the servers actually returned to you, one entry per repository, named as above.',
+    'Report only the pull request ids and urls the servers actually returned to you, one entry per repository, named exactly as the repository name before the brackets above.',
     '',
     markerLine(
       'ship',
