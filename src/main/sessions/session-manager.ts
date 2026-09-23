@@ -40,7 +40,7 @@ import { HostedSession, type PermissionGate, type SessionHost } from './session'
 import { switchboardMcp } from './inter-session'
 import { probeAvailableModels } from './model-catalog'
 import { foldModelTotals, type EventSink } from './message-mapper'
-import { heavySubagentSystemPromptAppend } from './session-shaping'
+import { heavySubagentSystemPromptAppend, workerAgents } from './session-shaping'
 import {
   TRANSCRIPT_EVENT_CAP,
   transcriptContextAppend,
@@ -100,6 +100,7 @@ interface StartOptions {
   cwd?: string
   effort?: EffortLevel
   section?: SectionKind
+  resumeSdkSessionId?: string
   denyTool?: (toolName: string, input: unknown) => string | null
 }
 
@@ -109,6 +110,8 @@ const SWEEP_INTERVAL_MS = 60 * 1000
 const REVIVE_COOLDOWN_MS = 10 * 60_000
 
 const CANCEL_NOTE = 'You stopped this run before it reported, so nothing it measured is known.'
+
+const APP_EXIT_NOTE = 'Switchboard closed, so this session ended. Its conversation can be resumed.'
 
 const MODELS_TTL_MS = 10 * 60_000
 
@@ -135,16 +138,21 @@ const TRANSCRIBED_KINDS: ReadonlySet<EventKind> = new Set(['prompt', 'assistant_
 
 const TRANSCRIPT_DEBOUNCE_MS = 3000
 
+function evictable(event: SessionEvent): boolean {
+  if (!STREAM_LOCAL_KINDS.has(event.kind)) return false
+  return !(event.kind === 'prompt' && (event.payload as { pending?: boolean }).pending)
+}
+
 function evictStaleLive(entry: HostedEntry): void {
   let streamLocal = 0
   for (const { event } of entry.live.values()) {
-    if (STREAM_LOCAL_KINDS.has(event.kind)) streamLocal++
+    if (evictable(event)) streamLocal++
   }
   if (streamLocal <= MAX_LIVE_STREAM_EVENTS) return
   let toDrop = streamLocal - MAX_LIVE_STREAM_EVENTS
   for (const [id, { event }] of entry.live) {
     if (toDrop === 0) break
-    if (!STREAM_LOCAL_KINDS.has(event.kind)) continue
+    if (!evictable(event)) continue
     entry.live.delete(id)
     toDrop--
   }
@@ -481,11 +489,9 @@ export class SessionManager {
       throw { code: 'NOT_FOUND', message: 'Claude Code was not found. Install it from https://claude.com/claude-code, then start a session.' } satisfies IpcError
     }
 
-    let resumeSdkSessionId: string | undefined
-    if (resume) {
-      const previous = this.repos.sessions.latestEndedForProject(projectId)
-      resumeSdkSessionId = previous?.sdkSessionId ?? undefined
-    }
+    const resumeSdkSessionId =
+      opts?.resumeSdkSessionId ??
+      (resume ? (this.repos.sessions.latestEndedForProject(projectId)?.sdkSessionId ?? undefined) : undefined)
 
     const row: Session = {
       id: sessionId,
@@ -557,6 +563,7 @@ export class SessionManager {
         effort,
         resolveModels: opts?.effort ? undefined : () => this.resolveModelRouting(),
         mode,
+        agents: workerAgents(settings.subagentEffort),
         denyTool: opts?.denyTool,
         onPlanModeChange: (inPlanMode) => {
           if (entry.row.inPlanMode === inPlanMode) return
@@ -569,11 +576,11 @@ export class SessionManager {
             from: project.name,
             projects: () => this.repos.projects.listActive(),
             enqueue: (targetId, text) => this.enqueueTask(targetId, text),
-            isRunning: (targetId) => this.queueTarget(targetId) !== undefined,
+            isRunning: (targetId) => this.foregroundEntry(targetId) !== undefined,
             start: (targetId) => this.startSession(targetId),
             overview: () =>
               this.repos.projects.listActive().map((p) => {
-                const live = this.liveEntryForProject(p.id)
+                const live = this.foregroundEntry(p.id)
                 return {
                   name: p.name,
                   running: live !== undefined,
@@ -631,6 +638,7 @@ export class SessionManager {
           if (this.diagramWatch.delete(row.id)) {
             this.callbacks.onDiagramsChanged(projectId)
           }
+          if (entry.session.currentStatus === 'done') void this.endIfIdleBackground(entry)
         },
         onExit: (reason, detail) => this.handleExit(entry, reason, detail),
       })
@@ -680,14 +688,14 @@ export class SessionManager {
     return [...this.hosted.values()].find((e) => e.row.projectId === projectId)
   }
 
-  private queueTarget(projectId: string): HostedEntry | undefined {
+  foregroundEntry(projectId: string): HostedEntry | undefined {
     return [...this.hosted.values()].find(
-      (e) => e.row.projectId === projectId && e.sectionKind !== 'flow' && !this.completing.has(e.row.id),
+      (e) => e.row.projectId === projectId && !e.background && !this.completing.has(e.row.id),
     )
   }
 
   private maybeDrainQueue(projectId: string): void {
-    const entry = this.queueTarget(projectId)
+    const entry = this.foregroundEntry(projectId)
     if (!entry || entry.session.currentStatus !== 'done') return
     const next = this.repos.taskQueue.takeNext(projectId)
     if (!next) return
@@ -829,8 +837,8 @@ export class SessionManager {
     }
     await Promise.allSettled(entries.map((entry) => entry.session.stop()))
     for (const entry of entries) {
-      entry.row.statusDetail ??= 'Switchboard closed, so this session ended. Its conversation can be resumed.'
-      this.finaliseRow(entry, 'app_exit') 
+      entry.row.statusDetail ??= APP_EXIT_NOTE
+      this.finaliseRow(entry, 'app_exit')
     }
     this.hosted.clear()
   }
@@ -1157,7 +1165,6 @@ export class SessionManager {
       return
     }
     if (this.flowWatch.has(id)) return
-    if (this.repos.taskQueue.listForProject(entry.row.projectId).length > 0) return
     if (!this.hosted.has(id)) return
     this.completing.add(id)
     await this.stopSession(
@@ -1188,8 +1195,13 @@ export class SessionManager {
     this.callbacks.onCountersChanged()
   }
 
-  private handleExit(entry: HostedEntry, reason: 'completed' | 'stopped' | 'crashed', detail?: string): void {
-    if (reason === 'stopped' && this.completing.delete(entry.row.id)) reason = 'completed'
+  private handleExit(entry: HostedEntry, exit: 'completed' | 'stopped' | 'crashed', detail?: string): void {
+    let reason: SessionEndReason = exit
+    if (exit === 'stopped' && this.completing.delete(entry.row.id)) reason = 'completed'
+    else if (exit === 'stopped' && this.quitting) {
+      reason = 'app_exit'
+      entry.row.statusDetail ??= APP_EXIT_NOTE
+    }
     this.flowEnding.delete(entry.row.id)
     if (!this.hosted.has(entry.row.id)) return
     this.closeUnreportedVerify(entry)
@@ -1216,7 +1228,9 @@ export class SessionManager {
     this.revivedAt.set(projectId, Date.now())
     void (async () => {
       try {
-        const revived = await this.startSession(projectId, true, undefined, undefined, {})
+        const revived = await this.startSession(projectId, false, undefined, undefined, {
+          resumeSdkSessionId: entry.row.sdkSessionId ?? undefined,
+        })
         this.sendMessage(
           revived.id,
           'Switchboard restarted this session: the previous process ended unexpectedly ' +

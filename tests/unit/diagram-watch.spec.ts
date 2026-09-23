@@ -67,8 +67,8 @@ describe('a diagram in flight keeps its session open', () => {
     }
     const stopped = vi.spyOn(manager, 'stopSession').mockResolvedValue(undefined)
 
-    finishTurn(manager, session.id)
     manager.watchDiagram(session.id, 'a-diagram.html')
+    ;(inner.hosted.get(session.id) as { ranATurn: boolean }).ranATurn = true
     inner.handleStatusChange(inner.hosted.get(session.id), 'done')
     await new Promise((r) => setTimeout(r, 10))
 
@@ -85,8 +85,8 @@ describe('a diagram in flight keeps its session open', () => {
     const stopped = vi.spyOn(manager, 'stopSession').mockResolvedValue(undefined)
 
     manager.watchDiagram(session.id, 'a-diagram.html')
-    finishTurn(manager, session.id)
     inner.handleStatusChange(inner.hosted.get(session.id), 'done')
+    finishTurn(manager, session.id)
     await new Promise((r) => setTimeout(r, 10))
 
     expect(stopped).toHaveBeenCalledWith(
@@ -98,6 +98,7 @@ describe('a diagram in flight keeps its session open', () => {
   it('tells the section the moment the drawing turn ends, and releases the watch', async () => {
     const { project, manager, changed } = setup()
     const session = await manager.diagramSessionFor(project.id)
+    vi.spyOn(manager, 'stopSession').mockResolvedValue(undefined)
     manager.watchDiagram(session.id, 'a-diagram.html')
 
     finishTurn(manager, session.id)

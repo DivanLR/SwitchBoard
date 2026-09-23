@@ -493,8 +493,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'sections.runInSession': async (req) => {
       const session = req.background
         ? await manager.backgroundSessionFor(req.projectId, req.kind)
-        : (repos.sessions.activeForProject(req.projectId) ??
-          (await manager.startSession(req.projectId)))
+        : (manager.foregroundEntry(req.projectId)?.row ?? (await manager.startSession(req.projectId)))
       if (req.watchDiagrams) manager.watchDiagram(session.id)
       manager.sendMessage(session.id, req.text)
       return { sessionId: session.id }

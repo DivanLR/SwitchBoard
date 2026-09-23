@@ -1,6 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises'
 import {
   query,
+  type AgentDefinition,
   type CanUseTool,
   type HookInput,
   type HookJSONOutput,
@@ -101,6 +102,7 @@ interface HostedSessionOptions {
   onBackgroundTasks?: (tasks: { taskId: string; description: string }[]) => void
   onMcpServers?: (servers: McpServer[]) => void
   mcpServers?: Record<string, McpServerConfig>
+  agents?: Record<string, AgentDefinition>
   onModel?: (model: string) => void
   onModels?: (models: AvailableModel[]) => void
   onTurnComplete: () => void
@@ -141,6 +143,11 @@ export function explainExit(raw: string): string {
       'broken or interrupted install of the CLI.'
   }
   return `Session process ended unexpectedly: ${raw}`
+}
+
+function isFailedResult(message: SDKMessage): boolean {
+  const msg = message as { type?: string; subtype?: string; is_error?: boolean }
+  return msg.type === 'result' && (msg.subtype !== 'success' || msg.is_error === true)
 }
 
 export function resolvePermissionMode(mode: SessionMode): PermissionMode {
@@ -190,6 +197,7 @@ export class HostedSession implements SessionHost {
             ? this.options.mainModel
             : undefined,
         mcpServers: this.options.mcpServers,
+        agents: this.options.agents,
         permissionMode: resolvePermissionMode(this.options.mode),
         systemPrompt: this.options.systemPromptAppend
           ? { type: 'preset', preset: 'claude_code', append: this.options.systemPromptAppend }
@@ -264,10 +272,9 @@ export class HostedSession implements SessionHost {
     this.mapper.handle(message)
     if (message.type === 'result') {
       const failed = message as { subtype: string; result?: string; errors?: string[] }
-      this.turnError =
-        failed.subtype === 'success'
-          ? null
-          : [failed.result ?? '', ...(failed.errors ?? [])].join(' ').trim() || failed.subtype
+      this.turnError = !isFailedResult(message)
+        ? null
+        : [failed.result ?? '', ...(failed.errors ?? [])].join(' ').trim() || failed.subtype
       this.turnInFlight = false
       this.flushQueuedSends()
       this.recomputeStatus()
@@ -393,10 +400,10 @@ export class HostedSession implements SessionHost {
     /\b(usage limit|rate[ -]?limit|too many requests|quota|limit reached|reset[s]? at|429)\b/i
   private maybeDowngradeOnLimit(message: SDKMessage): void {
     if (this.stopping || this.fatal) return
-    const msg = message as { type?: string; subtype?: string; errors?: string[]; result?: string }
-    if (msg.type !== 'result' || msg.subtype === 'success') return
+    const msg = message as { api_error_status?: number | null; errors?: string[]; result?: string }
+    if (!isFailedResult(message)) return
     const text = [msg.result ?? '', ...(msg.errors ?? [])].join('\n')
-    if (!HostedSession.LIMIT.test(text)) return
+    if (msg.api_error_status !== 429 && !HostedSession.LIMIT.test(text)) return
 
     const current = this.options.mainModel
     const next = nextStrongestModel(current)

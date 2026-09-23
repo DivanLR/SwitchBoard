@@ -327,7 +327,7 @@ class SessionsRepo {
   latestEndedForProject(projectId: string): Session | undefined {
     const row = this.db
       .prepare(
-        'SELECT * FROM sessions WHERE projectId = ? AND endedAt IS NOT NULL ORDER BY startedAt DESC LIMIT 1',
+        'SELECT * FROM sessions WHERE projectId = ? AND endedAt IS NOT NULL AND sectionKind IS NULL ORDER BY endedAt DESC LIMIT 1',
       )
       .get(projectId)
     return toSession(row as SessionRow | undefined)

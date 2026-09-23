@@ -52,8 +52,8 @@ function makeSession() {
 }
 
 const limitResult = (): unknown => ({
-  type: 'result', subtype: 'error_during_execution', session_id: 'sdk-1',
-  result: 'Usage limit reached — resets at 7pm', total_cost_usd: 0, duration_ms: 1, usage: {},
+  type: 'result', subtype: 'success', is_error: true, api_error_status: 429, session_id: 'sdk-1',
+  result: 'Claude AI usage limit reached|1790000000', total_cost_usd: 0, duration_ms: 1, usage: {},
 })
 
 describe('the main-loop model is pinned for the session', () => {
@@ -110,5 +110,20 @@ describe('a usage-limit downgrade', () => {
     send('Audit every view in the app and restyle all of them')
     expect(setModelCalls.at(-1)).toBe('sonnet')
     expect(setModelCalls).not.toContain('claude-opus-5[1m]')
+  })
+
+  it('recognises a 429 by its status alone, whatever the result text says', () => {
+    const { setModelCalls, feed } = makeSession()
+    feed({ ...(limitResult() as object), result: 'Request failed' })
+    expect(setModelCalls).toEqual(['sonnet'])
+  })
+
+  it('leaves the model alone on a successful turn that only talks about limits', () => {
+    const { setModelCalls, feed } = makeSession()
+    feed({
+      type: 'result', subtype: 'success', is_error: false, api_error_status: null, session_id: 'sdk-1',
+      result: 'Fixed the rate limit handling.', total_cost_usd: 0, duration_ms: 1, usage: {},
+    })
+    expect(setModelCalls).toEqual([])
   })
 })

@@ -88,8 +88,8 @@ describe('a session that ends says why', () => {
     }
     const session = await inner.startBackground(project.id, 'flow')
 
-    finishTurn(manager, session.id)
     inner.handleStatusChange(inner.hosted.get(session.id), 'done')
+    finishTurn(manager, session.id)
     await vi.waitFor(() => expect(pending.length).toBeGreaterThan(0))
     drainLoops()
 
