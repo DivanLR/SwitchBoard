@@ -125,10 +125,15 @@ Confirmed functionality:
 - A composer that accepts input mid task, queues it, and sends it when the
   session is ready, with slash command suggestions, project references and an
   "up next" queue. Undelivered messages survive a quit as drafts.
-- One model per session, chosen in Settings, never switched mid conversation. On
-  a usage limit the session drops to the next strongest model instead of
-  stopping. Subagents are allowed only at maximum effort, enforced by a hook, and
-  maximum subagent effort adds a fan out directive.
+- Model modes: auto, advisor, orchestrator and basic pair an intelligent model
+  with a worker model. The session runs one main loop model chosen from the mode,
+  and reaches the other tier through the advisor and worker subagents; it is
+  never switched between turns unless the setting itself changes. Pair models by
+  message reports the pattern each turn picks as an Advisor or Orchestrator chip.
+  A Diff comment runs on the worker model. On a usage limit the session drops to
+  the next strongest model instead of stopping. Subagents are allowed only at
+  maximum effort, enforced by a hook, and maximum subagent effort adds a fan out
+  directive.
 - **Flow**, a large popup opened from the session header, which takes one
   feature through seven stages, each a fresh Claude Code session in the run's
   worktree:
@@ -199,6 +204,8 @@ Removed, each on the evidence of the application's own database on that date:
   sessions always run on Claude Code.
 - Model routing (auto, advisor and orchestrator modes, a worker model, per turn
   classification): the owner ran basic mode, one model, for cost reasons.
+  Restored the same day at the owner's direction, with the four modes, both
+  models and the Pair models by message switch back in Settings, Models.
 - The rule preference layer and the MCP scan history: neither could ever be
   written from the interface.
 - Test stacks other than .NET and Angular.

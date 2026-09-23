@@ -61,6 +61,7 @@ export interface MockDriver {
   setUsage: (sessionId: string, utilization: number, resetsInMinutes: number, limitType: string) => void
   setAvailableModels: (models: { id: string; label: string; description: string }[]) => void
   setBackgroundTasks: (sessionId: string, tasks: { taskId: string; description: string }[]) => void
+  setTurnMode: (sessionId: string, mode: 'advisor' | 'orchestrator' | null) => void
   emitLines: (sessionId: string, lines: string[]) => void
   raisePermission: (options: {
     projectId: string
@@ -1624,6 +1625,12 @@ export function installMockHost(scenario: MockScenario): void {
       const s = sessions.get(sessionId)
       if (!s) return
       ;(s as unknown as AnyRecord).backgroundTasks = tasks
+      push('push.sessionStatus', { ...s })
+    },
+    setTurnMode: (sessionId, mode) => {
+      const s = sessions.get(sessionId)
+      if (!s) return
+      ;(s as unknown as AnyRecord).currentMode = mode
       push('push.sessionStatus', { ...s })
     },
     endSession: (sessionId) => {

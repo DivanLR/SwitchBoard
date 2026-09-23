@@ -7,17 +7,24 @@ describe('a fresh install', () => {
   const fresh = (): ReturnType<typeof createRepositories>['settings'] =>
     createRepositories(openDatabase(':memory:')).settings
 
-  it('arrives with a model, xhigh effort and summaries on', () => {
+  it('arrives with the strong model, the worker, xhigh effort and summaries on', () => {
     const settings = fresh().get()
 
-    expect(settings.model).not.toBe('default')
+    expect(settings.intelligentModel).not.toBe('default')
+    expect(settings.workerModel).not.toBe('default')
+    expect(settings.intelligentModel).not.toBe(settings.workerModel)
+    expect(settings.modelMode).toBe('auto')
+    expect(settings.autoModelRouting).toBe(true)
+
     expect(settings.effort).toBe('xhigh')
     expect(settings.subagentEffort).toBe('low')
     expect(settings.summaries).toBe(true)
   })
 
-  it('names the model concretely, not by family alias', () => {
-    expect(DEFAULT_SETTINGS.model).toMatch(/^claude-/)
+  it('names the intelligent model concretely, not by family alias', () => {
+    for (const id of [DEFAULT_SETTINGS.intelligentModel, DEFAULT_SETTINGS.workerModel]) {
+      expect(id).toMatch(/^claude-/)
+    }
   })
 
   it('still lets the developer switch any of them off', () => {
@@ -29,55 +36,38 @@ describe('a fresh install', () => {
   })
 })
 
-describe('migrating a settings row from before the model rename', () => {
-  it('carries an old intelligentModel value forward as model, and drops the routing keys', () => {
+describe('reading a settings row an install already stored', () => {
+  it('keeps the model modes and both models exactly as stored', () => {
     const db = openDatabase(':memory:')
     const settings = createRepositories(db).settings
     db.prepare(`INSERT INTO settings (key, value) VALUES ('settings', @value)`).run({
       value: JSON.stringify({
         intelligentModel: 'claude-fable-5',
-        workerModel: 'claude-sonnet-5',
-        modelMode: 'auto',
-        autoModelRouting: true,
+        workerModel: 'claude-haiku-4-5',
+        modelMode: 'basic',
+        autoModelRouting: false,
         effort: 'high',
       }),
     })
 
-    const migrated = settings.get()
-    expect(migrated.model).toBe('claude-fable-5')
-    expect(migrated.effort).toBe('high')
-    expect(migrated).not.toHaveProperty('intelligentModel')
-    expect(migrated).not.toHaveProperty('workerModel')
-    expect(migrated).not.toHaveProperty('modelMode')
-    expect(migrated).not.toHaveProperty('autoModelRouting')
+    const stored = settings.get()
+    expect(stored.intelligentModel).toBe('claude-fable-5')
+    expect(stored.workerModel).toBe('claude-haiku-4-5')
+    expect(stored.modelMode).toBe('basic')
+    expect(stored.autoModelRouting).toBe(false)
+    expect(stored.effort).toBe('high')
   })
-
-  it.each(['basic', 'advisor'])(
-    'keeps a %s mode user on the worker model their main loop actually ran',
-    (modelMode) => {
-      const db = openDatabase(':memory:')
-      const settings = createRepositories(db).settings
-      db.prepare(`INSERT INTO settings (key, value) VALUES ('settings', @value)`).run({
-        value: JSON.stringify({
-          intelligentModel: 'claude-opus-5',
-          workerModel: 'claude-sonnet-5',
-          modelMode,
-        }),
-      })
-
-      expect(settings.get().model).toBe('claude-sonnet-5')
-    },
-  )
 
   it('drops every key the settings no longer have, on read and so on the next write', () => {
     const db = openDatabase(':memory:')
     const settings = createRepositories(db).settings
     const retired = {
+      model: 'claude-opus-5',
       flowConcurrency: 4,
       heavySubagents: true,
     }
     db.prepare(`INSERT INTO settings (key, value) VALUES ('settings', @value)`).run({
-      value: JSON.stringify({ model: 'claude-opus-5', ...retired }),
+      value: JSON.stringify({ intelligentModel: 'claude-opus-5', ...retired }),
     })
 
     expect(Object.keys(settings.get()).sort()).toEqual(Object.keys(DEFAULT_SETTINGS).sort())

@@ -42,7 +42,7 @@ const emit = defineEmits<{
 }>()
 
 const modelSummary = computed(() => {
-  const id = settings.settings?.model ?? 'default'
+  const id = settings.settings?.intelligentModel ?? 'default'
   if (id === 'default') return 'default model'
   return modelLabel(id)
 })

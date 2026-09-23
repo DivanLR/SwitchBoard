@@ -16,6 +16,7 @@ import type {
   EffortLevel,
   EventPayloadMap,
   FileDiffContent,
+  ModelMode,
   Project,
   ProjectCommand,
   QueuedTask,
@@ -47,10 +48,13 @@ import { probeCodexModels } from './codex-catalog'
 import { CodexSession } from './codex-session'
 import { foldModelTotals, type EventSink } from './message-mapper'
 import {
+  heavySubagentModelMode,
   heavySubagentSystemPromptAppend,
+  modeAgents,
+  modesSystemPromptAppend,
   sandboxSystemPromptAppend,
-  workerAgents,
 } from './session-shaping'
+import { mainLoopModel } from './model-routing'
 import { parseFlowMarker, type FlowMarker } from '@main/flow/flow-markers'
 import {
   parseSuiteProgress,
@@ -119,6 +123,7 @@ interface FlowHooks {
 
 interface StartOptions {
   background?: boolean
+  workerMainLoop?: boolean
   cwd?: string
   additionalDirectories?: string[]
   effort?: EffortLevel
@@ -147,6 +152,8 @@ const APP_EXIT_NOTE = 'Switchboard closed, so this session ended. Its conversati
 const MODELS_TTL_MS = 10 * 60_000
 
 const NEVER_REUSED: ReadonlySet<SectionKind> = new Set(['diagram'])
+
+const WORKER_KINDS: ReadonlySet<SectionKind> = new Set(['diff'])
 
 const UPDATABLE_KINDS: ReadonlySet<EventKind> = new Set([
   'prompt',
@@ -507,12 +514,18 @@ export class SessionManager {
   }
 
   private resolveModelSettings(): {
-    model: string
+    intelligentModel: string
+    workerModel: string
+    modelMode: ModelMode
+    autoModelRouting: boolean
     effort: EffortLevel
   } {
     const settings = this.repos.settings.get()
     return {
-      model: settings.model,
+      intelligentModel: settings.intelligentModel,
+      workerModel: settings.workerModel,
+      modelMode: settings.modelMode ?? 'auto',
+      autoModelRouting: settings.autoModelRouting,
       effort: settings.effort,
     }
   }
@@ -639,7 +652,7 @@ export class SessionManager {
     }
 
     const settings = this.repos.settings.get()
-    const { model: sessionModel } = this.resolveModelSettings()
+    const { intelligentModel, workerModel } = this.resolveModelSettings()
     const activeCombo = settings.mcpActiveServers ?? []
     const schemaDoc = (
       (activeCombo.length > 0 ? readComboDoc(project.path, activeCombo) : null) ??
@@ -649,10 +662,14 @@ export class SessionManager {
       ? `## Database schema (from a previous MCP scan)\n\n${schemaDoc}`
       : null
     const effort = opts?.effort ?? settings.effort
-    const subagents = subagentsAllowed(effort)
+    const basic = settings.modelMode === 'basic'
+    const subagents = !basic && subagentsAllowed(effort)
     const heavySubagents = subagents && settings.subagentEffort === 'max'
     row.heavySubagents = heavySubagents
     const heavyAppend = heavySubagentSystemPromptAppend(heavySubagents)
+    const modesAppend = modesSystemPromptAppend(
+      subagents ? heavySubagentModelMode(heavySubagents, settings.modelMode ?? 'auto') : 'basic',
+    )
     const sandboxAppend = containerised
       ? sandboxSystemPromptAppend(
           [{ container: '/workspace' }, ...refMounts(project.refs.map((r) => r.path))],
@@ -699,16 +716,32 @@ export class SessionManager {
         resumeSdkSessionId,
         resumeFromSessionId,
         systemPromptAppend:
-          [sandboxAppend, heavyAppend, schemaAppend].filter((s): s is string => Boolean(s)).join('\n\n') ||
-          undefined,
+          [sandboxAppend, modesAppend, heavyAppend, schemaAppend]
+            .filter((s): s is string => Boolean(s))
+            .join('\n\n') || undefined,
         claudeExecutablePath: claudeExecutablePath ?? undefined,
-        mainModel: sessionModel,
+        mainModel: opts?.workerMainLoop
+          ? workerModel
+          : mainLoopModel(settings.modelMode, { intelligentModel, workerModel }),
+        workerMainLoop: opts?.workerMainLoop,
+        autoModelRouting: !basic && settings.autoModelRouting,
+        modelMode: settings.modelMode,
         effort,
         resolveModels: opts?.effort ? undefined : () => this.resolveModelSettings(),
+        onTurnMode: (turnMode) => {
+          if (entry.row.currentMode === turnMode) return
+          entry.row.currentMode = turnMode
+          this.pushStatus(entry)
+        },
         mode,
         containerised,
         nodeModulesVolumeKey: opts?.nodeModulesVolumeKey,
-        agents: workerAgents(settings.subagentEffort),
+        agents: modeAgents({
+          strongModel: intelligentModel,
+          cheapModel: workerModel,
+          mode: settings.modelMode,
+          effort: settings.subagentEffort,
+        }),
         denyTool: opts?.denyTool,
         onPlanModeChange: (inPlanMode) => {
           if (entry.row.inPlanMode === inPlanMode) return
@@ -918,7 +951,7 @@ export class SessionManager {
       projectId,
       false,
       project ? nativeMode(project.defaultSessionMode) : undefined,
-      { background: true, containerised: project?.useContainers === true },
+      { background: true, workerMainLoop: WORKER_KINDS.has(kind), containerised: project?.useContainers === true },
     )
     const entry = this.hosted.get(session.id)
     if (entry) entry.sectionKind = kind

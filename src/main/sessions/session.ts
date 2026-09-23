@@ -20,6 +20,7 @@ import {
   type AvailableModel,
   type EffortLevel,
   type McpServer,
+  type ModelMode,
   type ProjectCommand,
   type SessionMode,
   type SessionStatus,
@@ -28,6 +29,7 @@ import { sandboxSpawn, toContainerPaths, type SandboxPlan } from './wslc-sandbox
 import { MessageMapper, type EventSink } from './message-mapper'
 import { toAvailableModels } from './model-catalog'
 import { modelDeviation, nextStrongestModel } from './model-fallback'
+import { classifyWorkload, mainLoopModel } from './model-routing'
 
 const EXIT_GRACE_MS = 5_000
 
@@ -89,10 +91,18 @@ interface HostedSessionOptions {
   systemPromptAppend?: string
   claudeExecutablePath?: string
   mainModel?: string
+  workerMainLoop?: boolean
+  autoModelRouting?: boolean
+  modelMode?: ModelMode
   effort?: EffortLevel
   resolveModels?: () => {
+    intelligentModel: string
+    workerModel: string
+    modelMode: ModelMode
+    autoModelRouting: boolean
     effort: EffortLevel
   }
+  onTurnMode?: (mode: 'advisor' | 'orchestrator' | null) => void
   mode: SessionMode
   containerised?: boolean
   denyTool?: (toolName: string, input: unknown) => string | null
@@ -324,9 +334,35 @@ export class HostedSession implements SessionHost {
     }
   }
 
+  private appliedModel: string | null = null
+
+  private downgraded = false
   private refreshModelSettings(): void {
     const next = this.options.resolveModels?.()
-    if (next) this.options.effort = next.effort
+    if (!next) return
+    this.options.effort = next.effort
+    if (this.downgraded) return
+    this.options.mainModel = this.options.workerMainLoop
+      ? next.workerModel
+      : mainLoopModel(next.modelMode, next)
+    this.options.modelMode = next.modelMode
+    this.options.autoModelRouting = next.autoModelRouting
+  }
+
+  private applyModelForTurn(text: string): void {
+    if (!this.options.autoModelRouting) return
+    const auto = classifyWorkload(text)
+    const forced = this.options.modelMode
+    const pinned = forced === 'advisor' || forced === 'orchestrator' ? forced : null
+    const workload = pinned && auto !== 'plan' ? pinned : auto
+    this.options.onTurnMode?.(workload === 'plan' || forced === 'basic' ? null : workload)
+
+    const model = this.options.mainModel
+    const wanted = model && model !== 'default' ? model : undefined
+    const target = wanted ?? '__default__'
+    if (this.appliedModel === target) return
+    this.appliedModel = target
+    void this.q?.setModel(wanted).catch(() => {})
   }
 
   private currentEffort(): EffortLevel {
@@ -412,6 +448,7 @@ export class HostedSession implements SessionHost {
   private reconcileModel(reported: string): void {
     const wanted = this.options.mainModel
     if (!modelDeviation(reported, wanted)) return
+    this.appliedModel = null
     this.options.sink.append('assistant_text', {
       text:
         `⚙ This turn ran on ${modelLabel(reported)}, not the ${modelLabel(wanted ?? 'default')} ` +
@@ -455,6 +492,8 @@ export class HostedSession implements SessionHost {
       return
     }
     this.options.mainModel = next
+    this.downgraded = true
+    this.appliedModel = null
     void this.q?.setModel(next).catch(() => {})
     this.options.onModel?.(next)
     this.options.sink.append('assistant_text', {
@@ -559,6 +598,7 @@ export class HostedSession implements SessionHost {
     if (this.sandbox) text = toContainerPaths(text, this.sandbox.mounts)
     this.refreshModelSettings()
     this.applyEffort(this.options.effort ?? DEFAULT_SETTINGS.effort)
+    this.applyModelForTurn(text)
     this.options.sink.update(eventId, { text, pending: false }, { persist: true })
     this.mapper.noteDelivered(text)
     this.input.push({

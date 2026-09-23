@@ -262,17 +262,34 @@ describe('quitting the application', () => {
 })
 
 describe('subagents', () => {
-  it('registers one worker agent at the Subagents effort, and the fan-out directive names it', async () => {
+  it('registers the advisor and one worker at the Subagents effort, and the fan-out directive names the worker', async () => {
     const { repos, project, manager } = setup()
     repos.settings.set({ effort: 'max', subagentEffort: 'max' })
 
     await manager.startSession(project.id)
 
-    const agents = queries[0].options.agents as Record<string, { effort?: string }>
-    expect(Object.keys(agents)).toEqual(['worker'])
+    const agents = queries[0].options.agents as Record<string, { effort?: string; model?: string }>
+    expect(Object.keys(agents).sort()).toEqual(['advisor', 'worker'])
     expect(agents.worker.effort).toBe('max')
+    expect(agents.advisor.effort).toBe('max')
+    expect(agents.advisor.model).toBe(repos.settings.get().intelligentModel)
+    expect(agents.worker.model).toBe(repos.settings.get().workerModel)
     const systemPrompt = queries[0].options.systemPrompt as { append: string }
     expect(systemPrompt.append).toContain('"worker"')
+    expect(systemPrompt.append).toContain('MODEL MODES')
+  })
+
+  it('registers no subagents and no protocol in basic mode', async () => {
+    const { repos, project, manager } = setup()
+    repos.settings.set({ effort: 'max', subagentEffort: 'max', modelMode: 'basic' })
+
+    await manager.startSession(project.id)
+
+    expect(queries[0].options.agents).toEqual({})
+    expect(queries[0].options.model).toBe(repos.settings.get().workerModel)
+    const systemPrompt = queries[0].options.systemPrompt as { append: string } | undefined
+    expect(systemPrompt?.append ?? '').not.toContain('MODEL MODES')
+    expect(systemPrompt?.append ?? '').not.toContain('DIVIDE AND CONQUER')
   })
 
   it('runs the worker at the lower Subagents effort when the bar is below max', async () => {

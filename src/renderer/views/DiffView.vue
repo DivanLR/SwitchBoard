@@ -9,8 +9,8 @@ const props = defineProps<{ projectId: string }>()
 const diff = useDiffStore()
 const settings = useSettingsStore()
 
-const sessionModelLabel = computed(() =>
-  settings.settings ? modelLabel(settings.settings.model) : 'the session model',
+const workerLabel = computed(() =>
+  settings.settings ? modelLabel(settings.settings.workerModel) : 'the worker model',
 )
 
 const anchor = ref<number | null>(null)
@@ -336,7 +336,7 @@ const keyedLines = computed(() =>
             {{ diff.applyError }}
           </div>
           <div class="dlc-foot">
-            <span class="dlc-note">applied by a session on {{ sessionModelLabel }}</span>
+            <span class="dlc-note">applied by a worker session on {{ workerLabel }}</span>
             <button
               type="button"
               class="dlc-send"

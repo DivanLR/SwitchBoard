@@ -54,8 +54,46 @@ const ENGINE_CHOICES: { id: SessionEngine; label: string; desc: string }[] = [
   },
 ]
 
-function setModel(id: string): void {
-  save({ model: id })
+const MODE_CHOICES: { id: Settings['modelMode']; label: string; desc: string }[] = [
+  {
+    id: 'auto',
+    label: 'Auto (Recommended)',
+    desc: 'Intelligent model runs the session; each message picks the pattern — scoped work consults the advisor, broad work delegates to workers.',
+  },
+  {
+    id: 'advisor',
+    label: 'Advisor',
+    desc: 'Worker model runs the whole session and does the work; the intelligent model is a subagent consulted rarely for approach, unsticking, and review.',
+  },
+  {
+    id: 'orchestrator',
+    label: 'Orchestrator',
+    desc: 'Intelligent model runs the whole session, plans and reviews; well-scoped chunks go to cheap parallel workers.',
+  },
+  {
+    id: 'basic',
+    label: 'Basic (cheapest)',
+    desc: 'Worker model alone. No advisor, no workers, no delegation protocol — one model answering directly. Turns heavy subagents and per-message routing off for the session, whatever they are set to.',
+  },
+]
+
+const MODEL_SECTIONS = [
+  {
+    key: 'intelligentModel',
+    testid: 'intelligent-model',
+    label: 'INTELLIGENT MODEL',
+    desc: 'The strong one: plans, answers questions, orchestrates broad work, and advises the worker.',
+  },
+  {
+    key: 'workerModel',
+    testid: 'worker-model',
+    label: 'WORKER MODEL',
+    desc: 'Always the cheaper one: executes Advisor-mode turns and runs Orchestrator worker subagents.',
+  },
+] as const
+
+function setModel(key: 'intelligentModel' | 'workerModel', id: string): void {
+  save(key === 'intelligentModel' ? { intelligentModel: id } : { workerModel: id })
 }
 </script>
 
@@ -87,22 +125,42 @@ function setModel(id: string): void {
   </div>
 
   <div class="group">
-    <div class="ui-kicker group-label">MODEL</div>
+    <div class="ui-kicker group-label">MODE</div>
     <div class="group-desc">
-      Runs every turn of the session. Fixed once a session starts — switching it
-      mid-conversation would throw away the prompt cache and re-bill the whole
-      conversation, so a change here reaches only sessions started after it.
+      How the strong and cheap models pair up on work. Auto picks per message from the
+      workload; both patterns keep most tokens on the cheaper model.
     </div>
+    <div class="cards">
+      <button
+        v-for="m in MODE_CHOICES"
+        :key="m.id"
+        class="ui-card card-opt is-actionable"
+        :class="{ sel: settings.modelMode === m.id, 'is-selected': settings.modelMode === m.id }"
+        :data-testid="`mode-${m.id}`"
+        @click="save({ modelMode: m.id })"
+      >
+        <span class="opt-dot" :class="{ on: settings.modelMode === m.id }"></span>
+        <div class="opt-body">
+          <div class="opt-name">{{ m.label }}</div>
+          <div class="opt-sub">{{ m.desc }}</div>
+        </div>
+      </button>
+    </div>
+  </div>
+
+  <div v-for="section in MODEL_SECTIONS" :key="section.key" class="group">
+    <div class="ui-kicker group-label">{{ section.label }}</div>
+    <div class="group-desc">{{ section.desc }}</div>
     <div class="cards">
       <button
         v-for="m in modelChoices"
         :key="m.id"
         class="ui-card card-opt is-actionable"
-        :class="{ sel: settings.model === m.id, 'is-selected': settings.model === m.id }"
-        :data-testid="`model-${m.id}`"
-        @click="setModel(m.id)"
+        :class="{ sel: settings[section.key] === m.id, 'is-selected': settings[section.key] === m.id }"
+        :data-testid="`${section.testid}-${m.id}`"
+        @click="setModel(section.key, m.id)"
       >
-        <span class="opt-dot" :class="{ on: settings.model === m.id }"></span>
+        <span class="opt-dot" :class="{ on: settings[section.key] === m.id }"></span>
         <div class="opt-body">
           <div class="opt-name mono">{{ m.label }}</div>
           <div class="opt-sub">{{ m.desc }}</div>
@@ -140,9 +198,30 @@ function setModel(id: string): void {
     </div>
   </div>
 
+  <div class="ui-card setting-row is-actionable">
+    <div class="sr-text">
+      <div class="sr-label">Pair models by message</div>
+      <div class="sr-desc">
+        Reads each message and picks the pattern for that turn — consult the advisor, or
+        delegate to workers. The session keeps ONE main model either way: switching it
+        mid-session would throw away the prompt cache and re-bill the whole conversation.
+      </div>
+    </div>
+    <button
+      class="switch"
+      :class="{ on: settings.autoModelRouting }"
+      data-testid="setting-auto-routing"
+      role="switch"
+      :aria-checked="settings.autoModelRouting"
+      @click="save({ autoModelRouting: !settings.autoModelRouting })"
+    >
+      <span class="knob"></span>
+    </button>
+  </div>
+
   <div class="ui-card">
-    This applies to every project. New sessions pick it up immediately; running sessions
-    keep the model they started with.
+    These apply to every project. New sessions pick them up immediately; running sessions
+    switch on their next turn.
   </div>
 
   <div class="ui-card setting-row is-actionable">
@@ -155,7 +234,7 @@ function setModel(id: string): void {
         meter.
         <strong class="sr-warn">
           Subagents exist only at max. Below that, every session works in one thread and
-          the Agent tool is refused.
+          the Agent tool is refused, whatever the mode above says.
         </strong>
       </div>
     </div>
@@ -171,11 +250,11 @@ function setModel(id: string): void {
     <div class="sr-text">
       <div class="sr-label">Subagent effort</div>
       <div class="sr-desc">
-        Only matters once Effort is at max, where subagents exist at all. Sets the
-        effort of the worker agent a session delegates independent parts to. At max it
-        also switches on divide and conquer: the session is told to split work into
+        How hard the advisor and worker subagents reason, once Effort is at max. At max
+        it also switches on divide and conquer: the session is told to split work into
         independent parts and dispatch them to as many workers as the work allows, in
-        one batch, instead of working through it alone.
+        one batch, and is pinned to the Orchestrator protocol so the two instructions
+        agree.
         <strong class="sr-warn">
           Read when a session starts, so it applies from the next session. A session
           started at max carries a <Icon name="fork" :size="11" /> Fan-out pill.

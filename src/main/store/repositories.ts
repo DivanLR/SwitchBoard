@@ -588,19 +588,6 @@ class StandingRulesRepo {
   }
 }
 
-function legacyMainModel(stored: Record<string, unknown>): string {
-  const text = (value: unknown): string | undefined => (typeof value === 'string' ? value : undefined)
-  const work = text(stored.workModel) ?? 'default'
-  const intelligent =
-    'intelligentModel' in stored
-      ? text(stored.intelligentModel)
-      : work !== 'default'
-        ? work
-        : (text(stored.planModel) ?? 'default')
-  const basic = stored.modelMode === 'basic' || stored.modelMode === 'advisor'
-  return (basic ? (text(stored.workerModel) ?? intelligent) : intelligent) ?? DEFAULT_SETTINGS.model
-}
-
 class SettingsRepo {
   constructor(private db: AppDatabase) {}
 
@@ -616,7 +603,11 @@ class SettingsRepo {
     if (!('mcpActiveServers' in stored) && Array.isArray(stored.databaseMcpServers)) {
       stored.mcpActiveServers = [...stored.databaseMcpServers]
     }
-    if (!('model' in stored)) stored.model = legacyMainModel(stored)
+    if (!('intelligentModel' in stored)) {
+      const work = typeof stored.workModel === 'string' ? stored.workModel : 'default'
+      const plan = typeof stored.planModel === 'string' ? stored.planModel : 'default'
+      stored.intelligentModel = work !== 'default' ? work : plan
+    }
     const merged: Record<string, unknown> = { ...DEFAULT_SETTINGS, ...stored }
     return Object.fromEntries(Object.keys(DEFAULT_SETTINGS).map((key) => [key, merged[key]])) as unknown as Settings
   }

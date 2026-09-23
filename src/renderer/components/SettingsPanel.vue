@@ -86,7 +86,7 @@ onMounted(() => {
           </button>
           <span class="spacer"></span>
           <div v-if="settings" class="rail-foot mono">
-            {{ modelLabel(settings.model) }}
+            Smart {{ modelLabel(settings.intelligentModel) }}<br />Worker {{ modelLabel(settings.workerModel) }}
           </div>
         </div>
 
