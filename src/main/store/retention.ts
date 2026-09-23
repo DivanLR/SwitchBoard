@@ -7,8 +7,6 @@ interface RetentionResult {
 }
 
 const DECISION_DAYS = 30
-// A flow run puts a session on the project per work item, plus its own, so keeping
-// only the last two would delete a run's history while it was still going.
 const SESSIONS_PER_PROJECT = 12
 
 export function runRetention(
@@ -24,7 +22,8 @@ export function runRetention(
         FROM sessions
       ) WHERE rn <= ?
     )
-    AND sessionId NOT IN (SELECT id FROM sessions WHERE endedAt IS NULL)`
+    AND sessionId NOT IN (SELECT id FROM sessions WHERE endedAt IS NULL)
+    AND sessionId NOT IN (SELECT sessionId FROM flow_stages WHERE sessionId IS NOT NULL)`
 
   const decisionCutoff = new Date(
     now.getTime() - DECISION_DAYS * 24 * 60 * 60 * 1000,

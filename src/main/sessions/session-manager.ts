@@ -672,12 +672,6 @@ export class SessionManager {
     this.callbacks.onQueueChanged(projectId)
   }
 
-  markSection(sessionId: string, kind: SectionKind): void {
-    const entry = this.hosted.get(sessionId)
-    if (entry) entry.sectionKind = kind
-    this.repos.sessions.update(sessionId, { sectionKind: kind })
-  }
-
   workdirFor(sessionId: string): string | undefined {
     return this.hosted.get(sessionId)?.projectPath
   }

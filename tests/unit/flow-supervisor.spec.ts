@@ -86,7 +86,6 @@ function setup(options?: { ado?: boolean; projectPath?: string }) {
     stopSession: vi.fn(async (sessionId: string) => {
       stopped.push(sessionId)
     }),
-    markSection: vi.fn(),
     renameSession: vi.fn(),
   }
 

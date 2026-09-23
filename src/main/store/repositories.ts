@@ -740,8 +740,9 @@ function pruneToLast(
   keep: number,
 ): void {
   const orderColumn = table === 'flow_runs' ? 'createdAt' : 'startedAt'
+  const prunable = table === 'flow_runs' ? 'AND finishedAt IS NOT NULL AND worktreePath IS NULL' : ''
   db.prepare(
-    `DELETE FROM ${table} WHERE projectId = ? AND id NOT IN (
+    `DELETE FROM ${table} WHERE projectId = ? ${prunable} AND id NOT IN (
        SELECT id FROM ${table} WHERE projectId = ? ORDER BY ${orderColumn} DESC, rowid DESC LIMIT ?
      )`,
   ).run(projectId, projectId, keep)

@@ -52,8 +52,6 @@ describe('runRetention', () => {
     const { db, repos } = makeDb()
     const project = repos.projects.insert({ name: 'a', path: 'C:\\a', source: 'manual' })
     const oldSession = insertSession(repos, project.id, '2026-07-01T10:00:00.000Z')
-    // A flow run alone puts a dozen sessions on one project, so the kept window has to
-    // be filled before anything is pruned.
     for (let n = 0; n < 12; n += 1) {
       insertSession(repos, project.id, `2026-07-${String(5 + n).padStart(2, '0')}T10:00:00.000Z`)
     }
@@ -75,6 +73,35 @@ describe('runRetention', () => {
     expect(repos.events.page(previous)).toHaveLength(1)
     expect(repos.events.page(current)).toHaveLength(1)
     expect(repos.sessions.byId(oldSession)).toBeDefined()
+  })
+
+  it('keeps the events of a session a stage of an existing Flow run points at', () => {
+    const { db, repos } = makeDb()
+    const project = repos.projects.insert({ name: 'a', path: 'C:\\flow', source: 'manual' })
+    const stageSession = insertSession(repos, project.id, '2026-07-01T08:00:00.000Z')
+    for (let n = 0; n < 12; n += 1) {
+      insertSession(repos, project.id, `2026-07-${String(5 + n).padStart(2, '0')}T10:00:00.000Z`)
+    }
+    insertEvent(repos, stageSession, 1)
+    const run = repos.flowRuns.start({
+      projectId: project.id,
+      title: 'Checkout',
+      source: 'text',
+      sourceRef: null,
+      sourceUrl: null,
+      description: '',
+      stacks: ['dotnet'],
+      stage: 'spec',
+      autopilot: false,
+      autoShip: false,
+      baseBranch: 'main',
+    })
+    repos.flowStages.ensureAll(run.id)
+    repos.flowStages.update(run.id, 'spec', { sessionId: stageSession })
+    repos.events.flush()
+
+    expect(runRetention(db).eventsDeleted).toBe(0)
+    expect(repos.events.page(stageSession)).toHaveLength(1)
   })
 
   it('never prunes a session that is still running, however it ranks by start time', () => {

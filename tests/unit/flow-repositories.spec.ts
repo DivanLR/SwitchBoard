@@ -84,10 +84,10 @@ describe('FlowRunsRepo round trip', () => {
     expect(after?.finishedAt).not.toBeNull()
   })
 
-  it('keeps only the newest 20 runs per project', () => {
+  it('keeps only the newest 20 finished runs per project', () => {
     const { repos, project } = setup()
     for (let i = 0; i < 25; i += 1) {
-      repos.flowRuns.start({
+      const run = repos.flowRuns.start({
         projectId: project.id,
         title: `Run ${i}`,
         source: 'text',
@@ -100,8 +100,34 @@ describe('FlowRunsRepo round trip', () => {
         autoShip: false,
         baseBranch: 'main',
       })
+      repos.flowRuns.finish(run.id, 'done', null)
     }
     expect(repos.flowRuns.listForProject(project.id)).toHaveLength(20)
+  })
+
+  it('never prunes a run that is unfinished or still owns its worktree', () => {
+    const { repos, project } = setup()
+    const start = (title: string) =>
+      repos.flowRuns.start({
+        projectId: project.id,
+        title,
+        source: 'text',
+        sourceRef: null,
+        sourceUrl: null,
+        description: '',
+        stacks: ['dotnet'],
+        stage: 'spec',
+        autopilot: false,
+        autoShip: false,
+        baseBranch: 'main',
+      })
+    const live = start('Still running')
+    const owner = start('Finished, worktree kept')
+    repos.flowRuns.update(owner.id, { worktreePath: 'C:\\repo.worktrees\\kept' })
+    repos.flowRuns.finish(owner.id, 'done', null)
+    for (let i = 0; i < 25; i += 1) repos.flowRuns.finish(start(`Run ${i}`).id, 'done', null)
+    expect(repos.flowRuns.byId(live.id)).not.toBeNull()
+    expect(repos.flowRuns.byId(owner.id)?.worktreePath).toBe('C:\\repo.worktrees\\kept')
   })
 })
 
@@ -187,6 +213,7 @@ describe('FlowStagesRepo round trip', () => {
         baseBranch: 'main',
       })
       repos.flowStages.ensureAll(run.id)
+      repos.flowRuns.finish(run.id, 'done', null)
       return run
     })
 
