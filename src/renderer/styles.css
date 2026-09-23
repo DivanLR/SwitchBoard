@@ -51,7 +51,6 @@ html.sb-light {
   --text-meta: #545B64;
   --text-tab: #545B64;
   --text-noise: #5E656E;
-  --text-label: #545B64;
   --text-faint: #545B64;
   --text-ghost: #5E656E;
   --text-on-wash: #3A4048;
@@ -77,17 +76,12 @@ html.sb-light {
 
   --surface-inset: #FFFFFF;
   --surface-inset-line: rgba(20, 22, 26, 0.14);
-  --surface-line: rgba(20, 22, 26, 0.18);
-  --surface-raised: #EEF0F3;
-  --surface-hover: #E3E6EB;
-  --surface-hover-line: rgba(20, 22, 26, 0.22);
   --surface-sunken: #F0F2F5;
   --bg-panel-2: #E9ECF0;
 
   --sans: system-ui, -apple-system, 'Segoe UI', 'Inter', sans-serif;
   --w-em: 500;
   --elev: 0 1px 2px rgba(20, 22, 26, 0.04), 0 2px 8px rgba(20, 22, 26, 0.05);
-  --gloss: none;
   --hairline-shine: none;
   --rc: 10px;
   --rp: 6px;
@@ -158,7 +152,6 @@ html.sb-light {
   --text-meta: #868F9A;
   --text-tab: #868F9A;
   --text-noise: #868F9A;
-  --text-label: #868F9A;
   --text-faint: #868F9A;
   --text-ghost: #868F9A;
   --text-on-wash: #A8B0BA;
@@ -184,19 +177,13 @@ html.sb-light {
 
   --surface-inset: #0E1013;
   --surface-inset-line: rgba(221, 225, 230, 0.12);
-  --surface-line: rgba(221, 225, 230, 0.16);
-  --surface-raised: #1A1D22;
-  --surface-hover: #21252B;
-  --surface-hover-line: rgba(221, 225, 230, 0.22);
   --surface-sunken: #101216;
   --bg-panel-2: #131519;
 
   --sans: system-ui, -apple-system, 'Segoe UI', 'Inter', sans-serif;
   --mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
-  --serif: system-ui, -apple-system, 'Segoe UI', sans-serif;
 
   --elev: inset 0 1px 0 rgba(221, 225, 230, 0.06);
-  --gloss: none;
   --hairline-shine: inset 0 1px 0 rgba(221, 225, 230, 0.06);
   --rc: 10px;
   --rp: 6px;
@@ -245,7 +232,6 @@ html.sb-light {
   --surface-overlay: #191C21;
   --shadow-overlay: 0 24px 70px rgba(0, 0, 0, 0.55), 0 4px 16px rgba(0, 0, 0, 0.3);
   --shadow-toast: 0 8px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.2);
-  --crease: transparent;
 }
 
 * {
@@ -422,8 +408,7 @@ html.sb-light .btn-solid {
 .btn-solid:disabled,
 .btn-armed:disabled,
 .btn-outline:disabled,
-.btn-quiet:disabled,
-.seg-opt:disabled {
+.btn-quiet:disabled {
   opacity: 0.45;
   cursor: default;
 }
@@ -678,11 +663,6 @@ html.sb-light .btn-solid {
 
 .composer-input:focus {
   outline: none;
-}
-
-.to-row {
-  margin-top: 5px;
-  padding-left: 24px;
 }
 
 .to {
@@ -1037,11 +1017,6 @@ html.sb-light .btn-solid {
   }
 }
 
-/* Shared page primitives. One anatomy for every section: ui-body canvas,
-   ui-head meaning row, optional ui-toolbar, ui-tabs strip, then cards,
-   rows, empty and error states, footer. Built only from existing tokens.
-   Prefixed ui- so no scoped class in any view can collide with them. */
-
 .ui-body {
   flex: 1;
   min-height: 0;
@@ -1221,12 +1196,6 @@ button.ui-chip:hover:not(:disabled),
   min-height: 20px;
 }
 
-.badge-count.neutral {
-  color: var(--text-mid);
-  background: color-mix(in srgb, var(--text-mid) 8%, transparent);
-  border-color: color-mix(in srgb, var(--text-mid) 28%, transparent);
-}
-
 .ui-card {
   background: var(--bg-card);
   border: 1px solid var(--border-card);
@@ -1299,12 +1268,6 @@ button.ui-chip:hover:not(:disabled),
   background: var(--bg-active);
 }
 
-.ui-name {
-  flex: 0 0 auto;
-  font: 400 var(--fs-ui) / 1.4 var(--sans);
-  color: var(--text-body);
-}
-
 .ui-desc {
   flex: 1 1 auto;
   min-width: 0;
@@ -1313,10 +1276,6 @@ button.ui-chip:hover:not(:disabled),
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.ui-action {
-  flex: 0 0 auto;
 }
 
 button.ui-row {
@@ -1413,12 +1372,6 @@ button.ui-row:focus-visible {
   color: var(--red);
   border-color: color-mix(in srgb, var(--red) 35%, transparent);
   background: color-mix(in srgb, var(--red) 8%, transparent);
-}
-
-.ui-meaning.is-wrap {
-  white-space: normal;
-  overflow: visible;
-  text-overflow: clip;
 }
 
 .ui-spinner {
