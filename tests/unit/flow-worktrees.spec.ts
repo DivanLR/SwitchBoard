@@ -132,6 +132,20 @@ describe('branch and path naming', () => {
     execSync('git checkout --detach', { cwd: root, stdio: 'ignore' })
     expect(await currentBranch(root)).toBeNull()
   })
+
+  it('names the branch of a repository with no commits, and finds no commit behind it', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'flow-wt-'))
+    dirs.push(root)
+    execSync('git init -b master', { cwd: root, stdio: 'ignore' })
+    expect(await currentBranch(root)).toBe('master')
+    expect(await resolvesToCommit(root, 'master')).toBe(false)
+  })
+
+  it('still fails on a folder that is not a repository', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'flow-wt-'))
+    dirs.push(root)
+    await expect(currentBranch(root)).rejects.toThrow()
+  })
 })
 
 describe('creating a worktree', () => {

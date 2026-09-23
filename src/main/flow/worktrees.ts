@@ -45,8 +45,13 @@ async function git(cwd: string, args: string[]): Promise<string> {
 }
 
 export async function currentBranch(repoRoot: string): Promise<string | null> {
-  const name = (await git(repoRoot, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim()
-  return name === 'HEAD' || name.length === 0 ? null : name
+  try {
+    const name = (await git(repoRoot, ['symbolic-ref', '--quiet', '--short', 'HEAD'])).trim()
+    return name.length === 0 ? null : name
+  } catch (e) {
+    if ((e as { code?: unknown }).code === 1) return null
+    throw e
+  }
 }
 
 export async function resolvesToCommit(repoRoot: string, ref: string): Promise<boolean> {

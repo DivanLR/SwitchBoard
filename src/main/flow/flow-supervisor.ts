@@ -469,7 +469,7 @@ export class FlowSupervisor {
 
     if (kind === 'idea') return this.startIdea(project, input, title, slug ?? sddSlug(title), stacks)
 
-    const base = await this.baseFor(project.path, input.baseBranch)
+    const base = await this.baseFor(project.path, input.baseBranch, project.name)
     const override = this.settings().flowWorktreeRoot.trim()
     const root = this.git.root(project.path, override)
     const taken = new Set<string>()
@@ -1023,6 +1023,12 @@ export class FlowSupervisor {
       throw {
         code: 'INVALID_PATH',
         message: `${name ? `The checkout of ${name}` : 'This checkout'} is on a detached HEAD, so Flow cannot tell which branch to build on. Name a base branch and start again.`,
+      } satisfies IpcError
+    }
+    if (!(await this.git.resolves(repoRoot, current))) {
+      throw {
+        code: 'INVALID_PATH',
+        message: `${name ?? 'This repository'} has no commits yet, so Flow has nothing to branch its worktree from. Make a first commit on ${current} and start again.`,
       } satisfies IpcError
     }
     return current

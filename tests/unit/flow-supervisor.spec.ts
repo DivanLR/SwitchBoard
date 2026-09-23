@@ -258,6 +258,16 @@ describe('starting a run', () => {
     })
     expect(run.baseBranch).toBe('release/1.2')
   })
+
+  it('refuses a repository with no commits, and says to make the first one', async () => {
+    const h = setup()
+    h.git.branch = vi.fn(async () => 'master')
+    h.git.resolves = vi.fn(async () => false)
+    await expect(
+      h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false }),
+    ).rejects.toMatchObject({ code: 'INVALID_PATH', message: expect.stringContaining('has no commits yet') })
+    expect(h.git.create).not.toHaveBeenCalled()
+  })
 })
 
 function specMarker(overrides: Partial<FlowStageMarker> = {}): FlowStageMarker {
