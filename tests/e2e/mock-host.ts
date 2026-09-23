@@ -101,6 +101,7 @@ export interface MockDriver {
     }[]
     planModeChanges: { sessionId: string; enabled: boolean }[]
     diagramOpens: { projectId: string; file: string }[]
+    prOpens: string[]
     pluginInstalls: { marketplace: string; pkg: string }[]
     diffApplies: { projectId: string; path: string; lines: string[]; instruction: string }[]
   }
@@ -166,6 +167,7 @@ export function installMockHost(scenario: MockScenario): void {
   const diagramsByProject = new Map<string, DiagramEntry[]>()
   const diagramRequestedFiles = new Map<string, Set<string>>()
   const diagramOpens: { projectId: string; file: string }[] = []
+  const prOpens: string[] = []
   const pluginInstalls: { marketplace: string; pkg: string }[] = []
   const diffApplies: { projectId: string; path: string; lines: string[]; instruction: string }[] = []
   const DIAGRAMS_DIR = 'docs/diagrams'
@@ -482,18 +484,6 @@ export function installMockHost(scenario: MockScenario): void {
     return (await invokeHandlers['sessions.start']({ projectId })) as MockSession
   }
 
-  async function flowSessionFor(runId: string, stage: string): Promise<MockSession> {
-    const row = flowStage(runId, stage)
-    const sessionId = row?.sessionId as string | undefined
-    const existing = sessionId ? sessions.get(sessionId) : undefined
-    if (existing && !existing.endedAt) {
-      await new Promise((resolve) => setTimeout(resolve, 0))
-      return existing
-    }
-    const run = flowRun(runId)
-    return freshFlowSession(String(run?.projectId))
-  }
-
   function beginFlowStage(projectId: string, runId: string, stage: string): void {
     void freshFlowSession(projectId).then((session) => {
       const row = flowStage(runId, stage)
@@ -510,7 +500,7 @@ export function installMockHost(scenario: MockScenario): void {
   }
 
   function continueFlowStage(runId: string, stage: string, text: string): void {
-    void flowSessionFor(runId, stage).then((session) => {
+    void freshFlowSession(String(flowRun(runId)?.projectId)).then((session) => {
       const row = flowStage(runId, stage)
       updateStage(runId, stage, { status: 'running', sessionId: session.id, attempts: Number(row?.attempts ?? 0) + 1 })
       updateRun(runId, { status: 'running' })
@@ -548,12 +538,22 @@ export function installMockHost(scenario: MockScenario): void {
     const row = flowStage(runId, stage)
     if (!row || row.status !== 'review') return
     if (stage === 'review' && (row.report as AnyRecord | undefined)?.verdict === 'needs_fixes') {
-      if (Number(row.attempts ?? 0) <= MAX_FLOW_FIX_ROUNDS) {
-        continueFlowStage(runId, 'review', 'Fix every must_fix finding and every unmet acceptance criterion above, keep tests green, commit.\nSWB_FLOW')
-      }
+      if (Number(row.attempts ?? 0) <= MAX_FLOW_FIX_ROUNDS) continueFlowStage(runId, 'review', fixText(row))
       return
     }
     approveFlow(runId)
+  }
+
+  function fixText(row: AnyRecord): string {
+    const report = (row.report ?? {}) as { findings?: AnyRecord[]; unmet?: string[] }
+    const mustFix = (report.findings ?? []).filter((f) => f.severity === 'must_fix').map((f) => `- ${String(f.what)}`)
+    const unmet = (report.unmet ?? []).map((line) => `- ${line}`)
+    return [
+      'Fix every must_fix finding and every unmet acceptance criterion listed here, keep the tests green, and commit.',
+      ...mustFix,
+      ...unmet,
+      'SWB_FLOW',
+    ].join('\n')
   }
 
   function deliver(sessionId: string, text: string): void {
@@ -1158,10 +1158,11 @@ export function installMockHost(scenario: MockScenario): void {
     'flow.fix': (req) => {
       const runId = String(req.runId)
       const run = flowRun(runId)
-      if (!run || run.stage !== 'review') {
-        throw { code: 'RULE_NOT_ALLOWED', message: 'Fix only applies to the review stage.' }
+      const row = run ? flowStage(runId, 'review') : undefined
+      if (!run || run.stage !== 'review' || !row || (row.report as AnyRecord | null)?.verdict !== 'needs_fixes') {
+        throw { code: 'RULE_NOT_ALLOWED', message: 'Fix only applies to a review that found something to fix.' }
       }
-      continueFlowStage(runId, 'review', 'Fix every must_fix finding and every unmet acceptance criterion above, keep tests green, commit.\nSWB_FLOW')
+      continueFlowStage(runId, 'review', fixText(row))
       return flowSnapshot(run.projectId as string)
     },
     'flow.ship': (req) => {
@@ -1207,8 +1208,16 @@ export function installMockHost(scenario: MockScenario): void {
       const runId = String(req.runId)
       const run = flowRun(runId)
       if (!run) throw { code: 'NOT_FOUND', message: 'Run not found' }
+      if (!run.finishedAt) {
+        throw { code: 'RULE_NOT_ALLOWED', message: 'This run still uses its worktree. Cancel the run or let it finish first.' }
+      }
       updateRun(runId, { worktreePath: null })
       return flowSnapshot(run.projectId as string)
+    },
+    'flow.openPullRequest': (req) => {
+      const run = flowRun(String(req.runId))
+      if (!run?.prUrl) throw { code: 'NOT_FOUND', message: 'This run has no pull request yet.' }
+      prOpens.push(String(run.prUrl))
     },
     'flow.artefact': (req) => {
       const run = flowRun(String(req.runId))
@@ -1713,6 +1722,7 @@ export function installMockHost(scenario: MockScenario): void {
       starts: [...starts],
       planModeChanges: [...planModeChanges],
       diagramOpens: [...diagramOpens],
+      prOpens: [...prOpens],
       pluginInstalls: [...pluginInstalls],
       diffApplies: [...diffApplies],
     }),

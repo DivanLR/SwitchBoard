@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { FLOW_STACK_LABELS, type FlowFeature, type FlowStage } from '@shared/domain'
-import type { FlowStartSource } from '@shared/ipc-types'
+import { FLOW_STACK_LABELS, FLOW_STAGE_LABELS, type FlowStage } from '@shared/domain'
 import { useFlowStore } from '@renderer/stores/flow'
+import FlowIntake from '@renderer/components/flow/FlowIntake.vue'
 import FlowStageRail from '@renderer/components/flow/FlowStageRail.vue'
 import FlowStageDetail from '@renderer/components/flow/FlowStageDetail.vue'
 
@@ -12,14 +12,6 @@ const flow = useFlowStore()
 const selectedRunId = ref<string | null>(null)
 const selectedStage = ref<FlowStage | null>(null)
 const creating = ref(false)
-const source = ref<'ado' | 'text' | 'spec'>('text')
-const query = ref('')
-const textTitle = ref('')
-const textDescription = ref('')
-const specId = ref('')
-const baseBranch = ref('')
-const autopilot = ref(false)
-const autoShip = ref(false)
 const removeConfirm = ref(false)
 
 let stopPush: (() => void) | null = null
@@ -35,75 +27,39 @@ watch(
   () => props.projectId,
   (id) => {
     selectedRunId.value = null
+    creating.value = false
     void flow.load(id)
   },
 )
 
 const run = computed(() => flow.runs.find((r) => r.id === selectedRunId.value) ?? null)
 const stages = computed(() => (selectedRunId.value ? flow.stagesFor(selectedRunId.value) : []))
-const currentStage = computed(
+const shownStage = computed(
   () => stages.value.find((s) => s.stage === (selectedStage.value ?? run.value?.stage)) ?? null,
 )
+const finished = computed(() => Boolean(run.value?.finishedAt))
+const loaded = computed(() => flow.runsByProject[props.projectId] !== undefined)
+const empty = computed(() => loaded.value && flow.runs.length === 0 && !creating.value)
 
-watch(run, (next) => {
-  selectedStage.value = next?.stage ?? null
-  removeConfirm.value = false
+watch([() => run.value?.id, () => run.value?.stage], () => {
+  selectedStage.value = run.value?.stage ?? null
 })
+
+watch(
+  () => run.value?.id,
+  () => {
+    removeConfirm.value = false
+  },
+)
 
 function selectRun(id: string): void {
   selectedRunId.value = id
   creating.value = false
 }
 
-async function search(): Promise<void> {
-  await flow.searchFeatures(props.projectId, query.value)
-}
-
-async function pickAdoFeature(feature: FlowFeature): Promise<void> {
-  const id = await flow.start(
-    props.projectId,
-    { kind: 'ado', featureId: feature.id, featureTitle: feature.title, url: feature.url },
-    autopilot.value,
-    autoShip.value && autopilot.value,
-    baseBranch.value || undefined,
-  )
-  if (id) selectRun(id)
-}
-
-async function startFromText(): Promise<void> {
-  const built: FlowStartSource = { kind: 'text', title: textTitle.value.trim(), description: textDescription.value }
-  const id = await flow.start(
-    props.projectId,
-    built,
-    autopilot.value,
-    autoShip.value && autopilot.value,
-    baseBranch.value || undefined,
-  )
-  if (id) {
-    selectRun(id)
-    textTitle.value = ''
-    textDescription.value = ''
-  }
-}
-
-async function startFromSpec(): Promise<void> {
-  const id = await flow.start(
-    props.projectId,
-    { kind: 'spec', specId: specId.value },
-    autopilot.value,
-    autoShip.value && autopilot.value,
-    baseBranch.value || undefined,
-  )
-  if (id) selectRun(id)
-}
-
 function openCreate(): void {
   creating.value = true
   selectedRunId.value = null
-  query.value = ''
-  void flow.searchFeatures(props.projectId, '')
-  void flow.loadExistingSpecs(props.projectId)
-  void flow.detectStacks(props.projectId)
 }
 
 async function removeWorktree(): Promise<void> {
@@ -119,202 +75,112 @@ async function removeWorktree(): Promise<void> {
 
 <template>
   <div class="flow-view" data-testid="flow-view">
-    <div class="flow-cols">
-      <div class="flow-runs" data-testid="flow-run-list">
-        <div class="ui-toolbar">
+    <div v-if="empty" class="ui-empty flow-empty" data-testid="flow-empty">
+      <div v-if="flow.error" class="ui-err" role="alert" data-testid="flow-error">{{ flow.error }}</div>
+      <p class="ui-empty-sub">
+        Flow takes one feature through spec, plan, build, clean, test, review and pull request, each run in its own
+        worktree.
+      </p>
+      <button type="button" class="btn-solid" data-testid="flow-new" @click="openCreate()">New feature</button>
+    </div>
+
+    <div v-else-if="loaded || creating" class="flow-cols">
+      <nav class="flow-runs" data-testid="flow-run-list" aria-label="Flow runs">
+        <div class="ui-toolbar flow-runs-head">
           <span class="ui-kicker">Runs</span>
-          <span class="fr-spacer"></span>
-          <button type="button" class="btn-solid" data-testid="flow-new" @click="openCreate()">
+          <span class="fv-spacer"></span>
+          <button type="button" class="btn-solid" data-testid="flow-new" :disabled="creating" @click="openCreate()">
             New feature
           </button>
         </div>
-        <div v-if="flow.error" class="ui-err" data-testid="flow-error">{{ flow.error }}</div>
         <button
           v-for="item in flow.runs"
           :key="item.id"
           type="button"
-          class="ui-row"
+          class="ui-row flow-run-row"
           :class="{ 'is-selected': item.id === selectedRunId }"
+          :aria-current="item.id === selectedRunId ? 'true' : undefined"
           :data-testid="`flow-run-${item.id}`"
           @click="selectRun(item.id)"
         >
-          <span class="fr-title">{{ item.title }}</span>
-          <span class="ui-chip">{{ item.stage }}</span>
-          <span class="pill" :class="item.status">{{ item.status }}</span>
+          <span class="frr-title">{{ item.title }}</span>
+          <span class="frr-meta">
+            <span class="frr-stage">{{ FLOW_STAGE_LABELS[item.stage] }}</span>
+            <span class="pill" :class="item.status">{{ item.status }}</span>
+          </span>
         </button>
-        <div v-if="flow.runs.length === 0 && !creating" class="ui-empty-sub" data-testid="flow-no-runs">
-          No Flow runs yet for this project.
+      </nav>
+
+      <section class="flow-detail">
+        <div v-if="flow.error" class="ui-err-banner flow-error" role="alert" data-testid="flow-error">
+          {{ flow.error }}
         </div>
-      </div>
 
-      <div class="flow-detail">
-        <div v-if="creating" class="flow-create" data-testid="flow-create">
-          <div class="ui-tabs">
-            <button
-              v-for="tab in ['ado', 'text', 'spec'] as const"
-              :key="tab"
-              type="button"
-              class="ui-tab"
-              :class="{ on: source === tab }"
-              :data-testid="`flow-source-${tab}`"
-              @click="source = tab"
-            >
-              {{ tab === 'ado' ? 'Azure DevOps' : tab === 'text' ? 'Describe it' : 'Existing spec' }}
-            </button>
-          </div>
-
-          <div v-if="source === 'ado'" class="flow-source-body">
-            <div class="ui-toolbar">
-              <input
-                v-model="query"
-                class="fp-input"
-                data-testid="flow-feature-search"
-                placeholder="Search Azure DevOps Features, or leave blank for the most recent"
-                @keydown.enter="search()"
-              />
-              <button type="button" class="btn-outline" data-testid="flow-feature-refresh" @click="search()">
-                {{ flow.searching ? 'Asking DevOps…' : 'Find features' }}
-              </button>
-            </div>
-            <div v-if="flow.features.length === 0" class="ui-empty-sub" data-testid="flow-features-empty">
-              {{ flow.featuresNote ?? 'No features loaded yet.' }}
-            </div>
-            <button
-              v-for="feature in flow.features"
-              :key="feature.id"
-              type="button"
-              class="ui-row"
-              :data-testid="`flow-feature-${feature.id}`"
-              @click="pickAdoFeature(feature)"
-            >
-              <span class="mono">{{ feature.id }}</span>
-              <span class="fr-title">{{ feature.title }}</span>
-            </button>
-          </div>
-
-          <div v-else-if="source === 'text'" class="flow-source-body">
-            <input
-              v-model="textTitle"
-              class="fp-input"
-              data-testid="flow-text-title"
-              placeholder="Feature title"
-            />
-            <textarea
-              v-model="textDescription"
-              class="fp-textarea"
-              data-testid="flow-text-description"
-              rows="4"
-              placeholder="What should it do?"
-            ></textarea>
-            <button
-              type="button"
-              class="btn-solid"
-              data-testid="flow-text-start"
-              :disabled="!textTitle.trim() || flow.busy === 'start'"
-              @click="startFromText()"
-            >
-              Start
-            </button>
-          </div>
-
-          <div v-else class="flow-source-body">
-            <div v-if="flow.existingSpecs.length === 0" class="ui-empty-sub" data-testid="flow-specs-empty">
-              No existing spec folders found.
-            </div>
-            <button
-              v-for="spec in flow.existingSpecs"
-              :key="spec.id"
-              type="button"
-              class="ui-row"
-              :class="{ 'is-selected': specId === spec.id }"
-              :data-testid="`flow-existing-spec-${spec.id}`"
-              @click="specId = spec.id"
-            >
-              <span class="fr-title">{{ spec.title }}</span>
-            </button>
-            <button
-              type="button"
-              class="btn-solid"
-              data-testid="flow-spec-start"
-              :disabled="!specId || flow.busy === 'start'"
-              @click="startFromSpec()"
-            >
-              Start
-            </button>
-          </div>
-
-          <div class="flow-create-opts">
-            <div class="flow-stacks" data-testid="flow-stack-chips">
-              <span
-                v-for="stackId in flow.detectedStacks"
-                :key="stackId"
-                class="ui-chip"
-                :data-testid="`flow-stack-${stackId}`"
-              >
-                {{ FLOW_STACK_LABELS[stackId] }}
-              </span>
-              <span v-if="flow.detectedStacks.length === 0" class="ui-empty-sub" data-testid="flow-stack-none">
-                No .NET or Angular project detected here.
-              </span>
-            </div>
-            <input v-model="baseBranch" class="fp-input" data-testid="flow-base-branch" placeholder="Base branch (optional)" />
-            <label class="ui-row flow-switch-row">
-              <span>Autopilot — run every stage without stopping for approval</span>
-              <span class="switch" :class="{ on: autopilot }" data-testid="flow-autopilot-new" @click="autopilot = !autopilot">
-                <span class="knob"></span>
-              </span>
-            </label>
-            <label v-if="autopilot" class="ui-row flow-switch-row">
-              <span>Raise the pull request at the end</span>
-              <span class="switch" :class="{ on: autoShip }" data-testid="flow-autoship-new" @click="autoShip = !autoShip">
-                <span class="knob"></span>
-              </span>
-            </label>
-          </div>
-        </div>
+        <FlowIntake v-if="creating" :project-id="projectId" @started="selectRun" />
 
         <div v-else-if="run" class="flow-run" data-testid="flow-run" :data-run-id="run.id">
-          <div class="fr-head">
-            <span class="frh-title">{{ run.title }}</span>
-            <span class="ui-chip mono">{{ run.branch ?? '—' }}</span>
-            <span class="ui-chip mono">base {{ run.baseBranch ?? '—' }}</span>
-            <span v-for="stackId in run.stacks" :key="stackId" class="ui-chip">{{ FLOW_STACK_LABELS[stackId as keyof typeof FLOW_STACK_LABELS] ?? stackId }}</span>
-            <span class="pill" :class="run.status" data-testid="flow-run-status">{{ run.status }}</span>
-          </div>
-          <div v-if="run.worktreePath" class="flow-note mono" data-testid="flow-run-worktree">{{ run.worktreePath }}</div>
-          <div v-if="run.note" class="flow-note" data-testid="flow-run-note">{{ run.note }}</div>
+          <header class="flow-run-head">
+            <div class="frh-main">
+              <div class="frh-line">
+                <h2 class="ui-title frh-title">{{ run.title }}</h2>
+                <span class="pill" :class="run.status" data-testid="flow-run-status">{{ run.status }}</span>
+              </div>
+              <div class="frh-chips">
+                <span class="ui-chip mono" title="Branch">{{ run.branch ?? 'no branch yet' }}</span>
+                <span class="ui-chip mono" title="Base branch">base {{ run.baseBranch ?? 'unknown' }}</span>
+                <span v-for="stackId in run.stacks" :key="stackId" class="ui-chip">
+                  {{ FLOW_STACK_LABELS[stackId as keyof typeof FLOW_STACK_LABELS] ?? stackId }}
+                </span>
+              </div>
+              <div v-if="run.worktreePath" class="ui-meta frh-path" data-testid="flow-run-worktree">{{ run.worktreePath }}</div>
+              <div v-if="run.note" class="frh-note" data-testid="flow-run-note">{{ run.note }}</div>
+            </div>
+            <div class="ui-controls frh-controls">
+              <label v-if="!finished" class="frh-switch">
+                <span>Autopilot</span>
+                <button
+                  type="button"
+                  role="switch"
+                  class="switch"
+                  :class="{ on: run.autopilot }"
+                  :aria-checked="run.autopilot"
+                  data-testid="flow-autopilot-toggle"
+                  :disabled="flow.busy === 'autopilot'"
+                  @click="flow.setAutopilot(run.id, !run.autopilot)"
+                >
+                  <span class="knob"></span>
+                </button>
+              </label>
+              <button
+                v-if="!finished"
+                type="button"
+                class="btn-outline"
+                data-testid="flow-cancel"
+                :disabled="flow.busy === 'cancel'"
+                @click="flow.cancel(run.id)"
+              >
+                Cancel run
+              </button>
+              <button
+                v-if="finished && run.worktreePath"
+                type="button"
+                class="btn-outline"
+                data-testid="flow-remove-worktree"
+                :disabled="flow.busy === 'removeWorktree'"
+                @click="removeWorktree()"
+              >
+                {{ removeConfirm ? 'Confirm remove worktree' : 'Remove worktree' }}
+              </button>
+            </div>
+          </header>
 
           <FlowStageRail :stages="stages" :selected="selectedStage ?? run.stage" @select="(s) => (selectedStage = s)" />
 
-          <FlowStageDetail v-if="currentStage" :run="run" :stage="currentStage" />
-
-          <div class="ui-toolbar flow-foot">
-            <label class="ui-row flow-switch-row">
-              <span>Autopilot</span>
-              <span
-                class="switch"
-                :class="{ on: run.autopilot }"
-                data-testid="flow-autopilot-toggle"
-                @click="flow.setAutopilot(run.id, !run.autopilot)"
-              >
-                <span class="knob"></span>
-              </span>
-            </label>
-            <span class="fr-spacer"></span>
-            <button
-              v-if="run.worktreePath"
-              type="button"
-              class="btn-quiet"
-              data-testid="flow-remove-worktree"
-              @click="removeWorktree()"
-            >
-              {{ removeConfirm ? 'Confirm remove worktree' : 'Remove worktree' }}
-            </button>
-          </div>
+          <FlowStageDetail v-if="shownStage" :run="run" :stage="shownStage" />
         </div>
 
-        <div v-else class="ui-empty-sub" data-testid="flow-pick">Pick a run, or start a new feature.</div>
-      </div>
+        <div v-else class="ui-empty-line" data-testid="flow-pick">Pick a run on the left, or start a new feature.</div>
+      </section>
     </div>
   </div>
 </template>
@@ -327,6 +193,11 @@ async function removeWorktree(): Promise<void> {
   overflow: hidden;
 }
 
+.flow-empty {
+  flex: 1;
+  max-width: 760px;
+}
+
 .flow-cols {
   display: flex;
   flex: 1;
@@ -334,97 +205,123 @@ async function removeWorktree(): Promise<void> {
 }
 
 .flow-runs {
-  width: 280px;
+  width: 272px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 14px;
+  gap: 2px;
+  padding: var(--sp-5) var(--sp-4);
   overflow-y: auto;
   border-right: 1px solid var(--border);
+}
+
+.flow-runs-head {
+  margin-bottom: var(--sp-3);
+}
+
+.fv-spacer {
+  flex: 1;
+}
+
+.flow-run-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--sp-1);
+  padding: var(--sp-3);
+}
+
+.frr-title {
+  font-size: var(--fs-ui);
+  line-height: 1.4;
+  color: var(--text-body);
+}
+
+.frr-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.frr-stage {
+  font-size: var(--fs-meta);
+  color: var(--text-meta);
 }
 
 .flow-detail {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
-  padding: 14px 18px 24px;
+  padding: var(--sp-5) var(--sp-6) var(--sp-7);
 }
 
-.fr-spacer {
-  flex: 1;
-}
-
-.fr-title {
-  flex: 1;
-  font-size: var(--fs-meta);
-  color: var(--text);
-  text-align: left;
-}
-
-.flow-note {
-  font-size: var(--fs-meta);
-  color: var(--text-meta);
-}
-
-.fp-input,
-.fp-textarea {
-  padding: 7px 10px;
-  font-size: var(--fs-meta);
-  color: var(--text);
-  background: var(--bg-card);
-  border: 1px solid var(--border-card);
-  border-radius: var(--rc);
-  width: 100%;
-}
-
-.flow-source-body {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.flow-create-opts {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border);
-}
-
-.flow-stacks {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.flow-switch-row {
-  justify-content: space-between;
-  font-size: var(--fs-meta);
-  color: var(--text-mid);
+.flow-error {
+  margin-bottom: var(--sp-5);
 }
 
 .flow-run {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--sp-5);
+  max-width: 1120px;
 }
 
-.fr-head {
+.flow-run-head {
   display: flex;
-  align-items: baseline;
-  gap: 10px;
-  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--sp-5);
+}
+
+.frh-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.frh-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
 }
 
 .frh-title {
-  font-size: var(--fs-ui);
-  color: var(--text-strong);
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.flow-foot {
-  margin-top: 8px;
+.frh-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.frh-path {
+  overflow-wrap: anywhere;
+}
+
+.frh-note {
+  font-size: var(--fs-meta);
+  color: var(--text-mid);
+}
+
+.frh-controls {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-3);
+}
+
+.frh-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-ui);
+  color: var(--text-mid);
+  cursor: pointer;
 }
 </style>

@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { FlowRun, FlowStageRecord } from '@shared/domain'
+import {
+  FLOW_STAGE_LABELS,
+  flowStageActions,
+  type FlowRun,
+  type FlowStageAction,
+  type FlowStageRecord,
+  type FlowStageStatus,
+} from '@shared/domain'
 import { useFlowStore } from '@renderer/stores/flow'
 import Icon from '@renderer/components/Icon.vue'
 import MiniTerminal from '@renderer/components/MiniTerminal.vue'
@@ -19,128 +26,112 @@ watch(
   },
 )
 
-const statusChip = computed(() => {
-  if (props.stage.status === 'failed') return 'high'
-  if (props.stage.status === 'approved' || props.stage.status === 'skipped') return 'low'
-  return 'medium'
-})
+const STATUS_PILL: Record<FlowStageStatus, string> = {
+  pending: 'done',
+  running: 'running',
+  review: 'waiting',
+  approved: 'done',
+  skipped: 'done',
+  failed: 'failed',
+}
 
-const canApprove = computed(() => props.stage.status === 'review' && props.stage.stage !== 'ship')
-const canRetry = computed(() => props.stage.status === 'failed')
-const canSkip = computed(() => props.stage.status !== 'approved' && props.stage.status !== 'skipped')
-const canFix = computed(
-  () =>
-    props.stage.stage === 'review' &&
-    props.stage.status === 'review' &&
-    props.stage.report?.verdict === 'needs_fixes',
-)
-const canShip = computed(
-  () => props.stage.stage === 'ship' && (props.stage.status === 'pending' || props.stage.status === 'failed'),
-)
-const canRevise = computed(() => props.stage.status === 'review')
+const current = computed(() => !props.run.finishedAt && props.stage.stage === props.run.stage)
+const actions = computed(() => flowStageActions(props.run, props.stage))
+const buttons = computed(() => actions.value.filter((action) => action !== 'revise'))
+const canRevise = computed(() => actions.value.includes('revise'))
+
+function label(action: FlowStageAction): string {
+  if (action === 'approve') return props.stage.stage === 'ship' ? 'Finish' : 'Approve'
+  if (action === 'fix') return 'Fix findings'
+  if (action === 'retry') return 'Retry'
+  if (action === 'ship') return 'Raise pull request'
+  return props.stage.stage === 'ship' ? 'Finish without a pull request' : 'Skip this stage'
+}
+
+function testId(action: FlowStageAction): string {
+  return action === 'approve' && props.stage.stage === 'ship' ? 'flow-finish' : `flow-${action}`
+}
+
+function perform(action: FlowStageAction): void {
+  const runId = props.run.id
+  if (action === 'approve') void flow.approve(runId)
+  else if (action === 'fix') void flow.fix(runId)
+  else if (action === 'retry') void flow.retry(runId)
+  else if (action === 'ship') void flow.ship(runId)
+  else if (action === 'skip') void flow.skip(runId)
+}
 
 async function sendRevise(): Promise<void> {
   const text = feedback.value.trim()
   if (!text) return
-  await flow.revise(props.run.id, text)
-  feedback.value = ''
+  if (await flow.revise(props.run.id, text)) feedback.value = ''
 }
 </script>
 
 <template>
   <div class="ui-card flow-stage-card" data-testid="flow-stage-detail">
-    <div class="fi-head">
-      <span class="chip-risk" :class="statusChip" data-testid="flow-stage-status">{{ stage.status }}</span>
+    <div class="fsd-head">
+      <span class="fsd-name">{{ FLOW_STAGE_LABELS[stage.stage] }}</span>
+      <span class="pill" :class="STATUS_PILL[stage.status]" data-testid="flow-stage-status">{{ stage.status }}</span>
       <span v-if="stage.attempts > 1" class="ui-chip">{{ stage.attempts }} attempts</span>
+      <span v-if="!current" class="fsd-readonly" data-testid="flow-stage-readonly">Read only</span>
     </div>
-    <div v-if="stage.summary" class="fi-body" data-testid="flow-stage-summary">{{ stage.summary }}</div>
+
+    <div
+      v-if="stage.summary"
+      :class="stage.status === 'failed' ? 'ui-err-banner' : 'fsd-summary'"
+      data-testid="flow-stage-summary"
+    >
+      {{ stage.summary }}
+    </div>
 
     <FlowArtefact :run="run" :stage="stage" />
 
-    <div v-if="stage.sessionId" class="flow-terminal">
+    <div v-if="current && stage.sessionId" class="fsd-session">
       <button
         type="button"
-        class="btn-quiet flow-terminal-toggle"
+        class="btn-quiet fsd-session-toggle"
         data-testid="flow-terminal-toggle"
+        :aria-expanded="terminalOpen"
         @click="terminalOpen = !terminalOpen"
       >
         <Icon :name="terminalOpen ? 'minus' : 'plus'" :size="11" />
-        {{ terminalOpen ? 'Hide session' : 'Show session' }}
+        {{ terminalOpen ? 'Hide session output' : 'Show session output' }}
       </button>
       <MiniTerminal v-if="terminalOpen" :session-id="stage.sessionId" data-testid="flow-stage-session" />
     </div>
 
-    <div class="flow-actions">
+    <div v-if="canRevise" class="fsd-revise">
+      <input
+        v-model="feedback"
+        data-testid="flow-feedback"
+        placeholder="What should change? Revise runs this stage again with your feedback."
+        aria-label="Feedback for this stage"
+        @keydown.enter="sendRevise()"
+      />
       <button
-        v-if="canApprove"
-        type="button"
-        class="btn-solid"
-        data-testid="flow-approve"
-        :disabled="flow.busy === 'approve'"
-        @click="flow.approve(run.id)"
-      >
-        Approve
-      </button>
-      <button
-        v-if="canRetry"
-        type="button"
-        class="btn-outline"
-        data-testid="flow-retry"
-        :disabled="flow.busy === 'retry'"
-        @click="flow.retry(run.id)"
-      >
-        Retry
-      </button>
-      <button
-        v-if="canSkip"
         type="button"
         class="btn-quiet"
-        data-testid="flow-skip"
-        :disabled="flow.busy === 'skip'"
-        @click="flow.skip(run.id)"
+        data-testid="flow-revise"
+        :disabled="!feedback.trim() || flow.busy !== null"
+        @click="sendRevise()"
       >
-        Skip
-      </button>
-      <button
-        v-if="canFix"
-        type="button"
-        class="btn-outline"
-        data-testid="flow-fix"
-        :disabled="flow.busy === 'fix'"
-        @click="flow.fix(run.id)"
-      >
-        Fix findings
-      </button>
-      <button
-        v-if="canShip"
-        type="button"
-        class="btn-solid"
-        data-testid="flow-ship"
-        :disabled="flow.busy === 'ship'"
-        @click="flow.ship(run.id)"
-      >
-        Raise pull request
-      </button>
-      <button
-        v-if="run.status !== 'done' && run.status !== 'cancelled'"
-        type="button"
-        class="btn-quiet"
-        data-testid="flow-cancel"
-        @click="flow.cancel(run.id)"
-      >
-        Cancel
+        Revise
       </button>
     </div>
 
-    <div v-if="canRevise" class="flow-revise">
-      <input
-        v-model="feedback"
-        class="fp-input"
-        data-testid="flow-feedback"
-        placeholder="Revise per this feedback…"
-        @keydown.enter="sendRevise()"
-      />
-      <button type="button" class="btn-quiet" data-testid="flow-revise" @click="sendRevise()">Revise</button>
+    <div v-if="buttons.length > 0" class="fsd-actions" data-testid="flow-stage-actions">
+      <button
+        v-for="(action, at) in buttons"
+        :key="action"
+        type="button"
+        :class="at === 0 && action !== 'skip' ? 'btn-solid' : 'btn-quiet'"
+        :data-testid="testId(action)"
+        :disabled="flow.busy !== null"
+        @click="perform(action)"
+      >
+        {{ label(action) }}
+      </button>
     </div>
   </div>
 </template>
@@ -149,50 +140,63 @@ async function sendRevise(): Promise<void> {
 .flow-stage-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--sp-4);
 }
 
-.fi-head {
+.fsd-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-3);
 }
 
-.fi-body {
+.fsd-name {
+  font: var(--w-em) var(--fs-ui) / 1.3 var(--sans);
+  color: var(--text-strong);
+}
+
+.fsd-readonly {
+  margin-left: auto;
   font-size: var(--fs-meta);
-  color: var(--text-mid);
-  line-height: 1.5;
+  color: var(--text-meta);
 }
 
-.flow-terminal {
+.fsd-summary {
+  font-size: var(--fs-ui);
+  line-height: 1.5;
+  color: var(--text-body);
+}
+
+.fsd-session {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--sp-1);
 }
 
-.flow-terminal-toggle {
+.fsd-session-toggle {
   align-self: flex-start;
-  font-size: var(--fs-micro);
-}
-
-.flow-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.flow-revise {
-  display: flex;
-  gap: 8px;
-}
-
-.fp-input {
-  flex: 1;
-  padding: 7px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
   font-size: var(--fs-meta);
-  color: var(--text);
-  background: var(--bg-card);
-  border: 1px solid var(--border-card);
-  border-radius: var(--rc);
+  padding: 4px 10px;
+}
+
+.fsd-revise {
+  display: flex;
+  gap: var(--sp-3);
+}
+
+.fsd-revise input {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-ui);
+}
+
+.fsd-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--border-soft);
 }
 </style>

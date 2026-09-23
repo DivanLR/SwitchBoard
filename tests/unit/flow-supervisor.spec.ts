@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { FlowGit } from '@main/flow/flow-supervisor'
 import type { FlowStageMarker } from '@main/flow/flow-markers'
-import type { FlowStage } from '@shared/domain'
+import type { FlowStage, FlowStageAction, FlowStageStatus } from '@shared/domain'
+import { FLOW_STAGES, emptyFlowStageReport, flowStageActions } from '@shared/domain'
 import type { FlowStartSource } from '@shared/ipc-types'
 
 const { openDatabase } = await import('@main/store/db')
@@ -57,7 +58,8 @@ function setup(options?: { ado?: boolean; projectPath?: string }) {
   const sent: { sessionId: string; text: string }[] = []
   const watched: string[] = []
   const changed: string[] = []
-  const interrupted: string[] = []
+  const ended: string[] = []
+  const stopped: string[] = []
   let sessionCount = 0
 
   const manager = {
@@ -68,19 +70,18 @@ function setup(options?: { ado?: boolean; projectPath?: string }) {
     connectedMcpServers: vi.fn(async () => (options?.ado === false ? [] : ['ado'])),
     sendMessage: (sessionId: string, text: string) => sent.push({ sessionId, text }),
     watchFlow: (sessionId: string) => watched.push(sessionId),
+    endFlowSession: (sessionId: string) => ended.push(sessionId),
+    stopSession: vi.fn(async (sessionId: string) => {
+      stopped.push(sessionId)
+    }),
     markSection: vi.fn(),
     renameSession: vi.fn(),
-    interruptSession: vi.fn(async (sessionId: string) => {
-      interrupted.push(sessionId)
-      return { stillQueued: 0 }
-    }),
-    workdirFor: (sessionId: string) => (sessionId.startsWith('session-') ? 'C:\\work\\alpha' : undefined),
   }
 
   const git = fakeGit()
   const flow = new FlowSupervisor(repos, manager as never, { onFlowChanged: (id) => changed.push(id) }, git)
 
-  return { repos, project, flow, manager, git, sent, watched, changed, interrupted }
+  return { repos, project, flow, manager, git, sent, watched, changed, ended, stopped }
 }
 
 const textSource = (title = 'Checkout v2', description = 'Let a guest pay.'): FlowStartSource => ({
@@ -234,6 +235,7 @@ describe('a stage marker resolving the stage', () => {
     expect(after?.status).toBe('waiting')
     expect(after?.specDir).toBe('specs/001-checkout')
     expect(h.repos.flowStages.get(run.id, 'spec')?.status).toBe('review')
+    expect(h.ended).toEqual([sessionOf(h, run.id)])
   })
 
   it('fails the stage on a blocked outcome, with no automatic retry', async () => {
@@ -245,6 +247,7 @@ describe('a stage marker resolving the stage', () => {
     expect(h.repos.flowStages.get(run.id, 'spec')?.summary).toBe('no ado server')
     expect(h.repos.flowRuns.byId(run.id)?.status).toBe('waiting')
     expect(h.manager.startSession).toHaveBeenCalledTimes(1)
+    expect(h.ended).toEqual([sessionOf(h, run.id)])
   })
 
   it('ignores a marker from a session that is not tracked as a stage session', async () => {
@@ -272,6 +275,20 @@ describe('turn ended or session ended without a handshake', () => {
     await vi.waitFor(() => expect(h.repos.flowStages.get(run.id, 'spec')?.status).toBe('running'))
     expect(h.repos.flowStages.get(run.id, 'spec')?.attempts).toBe(2)
     expect(h.manager.startSession).toHaveBeenCalledTimes(2)
+    expect(h.ended).toContain(sid)
+  })
+
+  it('says the stage finished without reporting, not that the session ended', async () => {
+    const h = setup()
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+    const sid = sessionOf(h, run.id)
+    h.flow.onTurnEnded(sid)
+    h.flow.onTurnEnded(sid)
+    h.flow.onTurnEnded(sid)
+
+    expect(h.repos.flowStages.get(run.id, 'spec')?.status).toBe('failed')
+    expect(h.repos.flowStages.get(run.id, 'spec')?.summary).toBe('The stage finished without reporting its result.')
+    expect(h.ended).toEqual([sid])
   })
 
   it('does not retry a second time', async () => {
@@ -371,20 +388,74 @@ describe('the test stage', () => {
 
     expect(h.repos.flowStages.get(run.id, 'test')?.status).toBe('failed')
     expect(h.repos.flowStages.get(run.id, 'test')?.summary).toContain('dotnet-format')
+    expect(h.ended).toContain(sid)
+  })
+
+  it('ends the test session once its report lands', async () => {
+    const h = await toTestStage()
+    const run = h.repos.flowRuns.listForProject(h.project.id)[0]
+    const sid = h.repos.flowStages.get(run.id, 'test')!.sessionId!
+    h.flow.onVerifyReport(sid, {
+      suites: [{ id: 'dotnet-unit', label: 'Unit tests', status: 'pass', detail: '42 passed' }],
+      coverage: { line: { value: null, source: null }, changed: { value: null, source: null }, files: [] },
+      quality: {
+        gate: null,
+        gateSource: null,
+        duplication: { value: null, source: null },
+        debt: null,
+        mutation: { value: null, source: null },
+        mutationKilled: null,
+        mutationSurvived: null,
+        survivors: [],
+        archViolations: { value: null, source: null },
+        findings: [],
+      },
+      evidence: [],
+      endpoints: [],
+    })
+    expect(h.ended).toContain(sid)
+  })
+
+  it('says the verification step returned no report when the test turns end without one', async () => {
+    const h = await toTestStage()
+    const run = h.repos.flowRuns.listForProject(h.project.id)[0]
+    const sid = h.repos.flowStages.get(run.id, 'test')!.sessionId!
+    h.flow.onTurnEnded(sid)
+    h.flow.onTurnEnded(sid)
+
+    expect(h.repos.flowStages.get(run.id, 'test')?.status).toBe('failed')
+    expect(h.repos.flowStages.get(run.id, 'test')?.summary).toBe('The verification step did not return a report.')
   })
 })
 
 describe('approve, retry and skip', () => {
-  it('approve starts the next stage with a fresh session', async () => {
+  it('approve ends the stage session and starts the next stage with a fresh one', async () => {
     const h = setup()
     const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
-    h.flow.onFlowMarker(sessionOf(h, run.id), specMarker())
+    const specSession = sessionOf(h, run.id)
+    h.flow.onFlowMarker(specSession, specMarker())
+    h.ended.length = 0
 
     const after = await h.flow.approve(run.id)
 
     expect(after.stage).toBe('plan')
     expect(h.repos.flowStages.get(run.id, 'plan')?.status).toBe('running')
+    expect(sessionOf(h, run.id)).not.toBe(specSession)
+    expect(h.ended).toContain(specSession)
     expect(h.manager.startSession).toHaveBeenCalledTimes(2)
+  })
+
+  it('skip stops a running stage session at once and ends it', async () => {
+    const h = setup()
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+    const specSession = sessionOf(h, run.id)
+
+    await h.flow.skip(run.id)
+
+    expect(h.stopped).toEqual([specSession])
+    expect(h.ended).toContain(specSession)
+    h.flow.onTurnEnded(specSession)
+    expect(h.sent.filter((send) => send.sessionId === specSession)).toHaveLength(1)
   })
 
   it('refuses to approve a stage that is not waiting for it', async () => {
@@ -420,11 +491,30 @@ describe('approve, retry and skip', () => {
     const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
     await expect(h.flow.retry(run.id)).rejects.toMatchObject({ code: 'RULE_NOT_ALLOWED' })
 
-    h.flow.onFlowMarker(sessionOf(h, run.id), specMarker({ outcome: 'blocked', why: 'bad' }))
+    const failed = sessionOf(h, run.id)
+    h.flow.onFlowMarker(failed, specMarker({ outcome: 'blocked', why: 'bad' }))
+    h.ended.length = 0
     const after = await h.flow.retry(run.id)
     expect(after.stage).toBe('spec')
     expect(h.repos.flowStages.get(run.id, 'spec')?.status).toBe('running')
     expect(h.repos.flowStages.get(run.id, 'spec')?.attempts).toBe(2)
+    expect(sessionOf(h, run.id)).not.toBe(failed)
+    expect(h.ended).toEqual([failed])
+  })
+
+  it('fails the stage with the reason when its session cannot start, so Retry is offered', async () => {
+    const h = setup()
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+    h.flow.onFlowMarker(sessionOf(h, run.id), specMarker())
+    h.manager.startSession.mockRejectedValueOnce({ code: 'NOT_FOUND', message: 'Claude Code was not found.' })
+
+    const after = await h.flow.approve(run.id)
+
+    expect(after.stage).toBe('plan')
+    expect(h.repos.flowStages.get(run.id, 'plan')?.status).toBe('failed')
+    expect(h.repos.flowStages.get(run.id, 'plan')?.summary).toBe('Claude Code was not found.')
+    await h.flow.retry(run.id)
+    expect(h.repos.flowStages.get(run.id, 'plan')?.status).toBe('running')
   })
 
   it('skip moves past a stage without running it, and skipping ship finishes the run', async () => {
@@ -456,29 +546,73 @@ describe('fix and revise', () => {
     return current
   }
 
-  it('fix only applies to the review stage, and re-sends the review handshake', async () => {
+  it('fix only applies to a review that needs fixes, and runs in a fresh session told every finding', async () => {
     const h = setup()
     const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
     await expect(h.flow.fix(run.id)).rejects.toMatchObject({ code: 'RULE_NOT_ALLOWED' })
 
     const atReview = await toReview(h, run)
     const sid1 = h.repos.flowStages.get(atReview.id, 'review')!.sessionId!
-    h.flow.onFlowMarker(sid1, specMarker({ stage: 'review', verdict: 'needs_fixes', unmet: ['x'] }))
+    h.flow.onFlowMarker(
+      sid1,
+      specMarker({
+        stage: 'review',
+        verdict: 'needs_fixes',
+        findings: [
+          { severity: 'must_fix', file: 'Cart.cs', line: 12, what: 'Off-by-one in the total.' },
+          { severity: 'nit', file: null, line: null, what: 'Rename the helper.' },
+        ],
+        unmet: ['A guest can pay without an account.'],
+      }),
+    )
+    h.ended.length = 0
 
     await h.flow.fix(atReview.id)
+    const sid2 = h.repos.flowStages.get(atReview.id, 'review')!.sessionId!
     expect(h.repos.flowStages.get(atReview.id, 'review')?.status).toBe('running')
-    expect(h.sent.at(-1)?.text).toContain('Fix every must_fix finding')
+    expect(sid2).not.toBe(sid1)
+    expect(h.ended).toEqual([sid1])
+    const prompt = h.sent.at(-1)!
+    expect(prompt.sessionId).toBe(sid2)
+    expect(prompt.text).toContain('Fix every must_fix finding')
+    expect(prompt.text).toContain('Cart.cs:12: Off-by-one in the total.')
+    expect(prompt.text).toContain('A guest can pay without an account.')
+    expect(prompt.text).toContain('specs/001-checkout/spec.md')
+    expect(prompt.text).not.toContain('Rename the helper.')
+
+    h.flow.onTurnEnded(sid2)
+    expect(h.sent.at(-1)?.text).toContain('"stage":"review"')
   })
 
-  it('revise sends feedback and re-runs the same stage handshake', async () => {
+  it('refuses fix when the review found nothing to fix', async () => {
     const h = setup()
     const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
-    h.flow.onFlowMarker(sessionOf(h, run.id), specMarker())
+    const atReview = await toReview(h, run)
+    const sid = h.repos.flowStages.get(atReview.id, 'review')!.sessionId!
+    h.flow.onFlowMarker(sid, specMarker({ stage: 'review', verdict: 'ready' }))
+    await expect(h.flow.fix(atReview.id)).rejects.toMatchObject({ code: 'RULE_NOT_ALLOWED' })
+  })
+
+  it('revise runs in a fresh session told the artefact path and the feedback, then re-runs the handshake', async () => {
+    const h = setup()
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+    const first = sessionOf(h, run.id)
+    h.flow.onFlowMarker(first, specMarker())
+    h.ended.length = 0
 
     await h.flow.revise(run.id, 'Cover the guest checkout path too.')
+    const second = sessionOf(h, run.id)
+    expect(second).not.toBe(first)
+    expect(h.ended).toEqual([first])
     expect(h.repos.flowStages.get(run.id, 'spec')?.status).toBe('running')
     expect(h.repos.flowStages.get(run.id, 'spec')?.feedback).toBe('Cover the guest checkout path too.')
-    expect(h.sent.at(-1)?.text).toContain('Revise the spec per this feedback')
+    const prompt = h.sent.at(-1)!
+    expect(prompt.sessionId).toBe(second)
+    expect(prompt.text).toContain('Revise the spec (specs/001-checkout/spec.md) per this feedback')
+    expect(prompt.text).toContain('Cover the guest checkout path too.')
+
+    h.flow.onTurnEnded(second)
+    expect(h.sent.at(-1)?.text).toContain('"stage":"spec"')
   })
 
   it('autopilot fixes up to two rounds, then leaves it for a human', async () => {
@@ -515,15 +649,27 @@ describe('fix and revise', () => {
 })
 
 describe('cancel, autopilot and worktree removal', () => {
-  it('interrupts the running session and marks the run cancelled', async () => {
+  it('stops and ends the running session and marks the run cancelled', async () => {
     const h = setup()
     const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
     const after = await h.flow.cancel(run.id)
 
     expect(after.status).toBe('cancelled')
     expect(after.note).toBe('You stopped this flow.')
-    expect(h.interrupted).toEqual([sessionOf(h, run.id)])
+    expect(h.stopped).toEqual([sessionOf(h, run.id)])
+    expect(h.ended).toEqual([sessionOf(h, run.id)])
     expect(h.repos.flowStages.get(run.id, 'spec')?.status).toBe('failed')
+  })
+
+  it('ends a waiting stage session on cancel without stopping it twice', async () => {
+    const h = setup()
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+    h.flow.onFlowMarker(sessionOf(h, run.id), specMarker())
+    await h.flow.cancel(run.id)
+
+    expect(h.stopped).toEqual([])
+    expect(h.ended).toContain(sessionOf(h, run.id))
+    expect(h.repos.flowStages.get(run.id, 'spec')?.status).toBe('review')
   })
 
   it('setAutopilot toggles the flag and reports the change', () => {
@@ -548,9 +694,17 @@ describe('cancel, autopilot and worktree removal', () => {
     expect(h.changed).toContain(project.id)
   })
 
-  it('removes a clean worktree and clears the path', async () => {
+  it('refuses to remove the worktree of a run that still uses it', async () => {
     const h = setup()
     const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+    await expect(h.flow.removeWorktree(run.id, true)).rejects.toMatchObject({ code: 'RULE_NOT_ALLOWED' })
+    expect(h.git.remove).not.toHaveBeenCalled()
+  })
+
+  it('removes a clean worktree of a finished run and clears the path', async () => {
+    const h = setup()
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+    await h.flow.cancel(run.id)
     const after = await h.flow.removeWorktree(run.id, false)
     expect(after.worktreePath).toBeNull()
   })
@@ -559,7 +713,81 @@ describe('cancel, autopilot and worktree removal', () => {
     const h = setup()
     h.git.remove = vi.fn(async () => ({ removed: false, dirty: ['?? scratch.txt'] }))
     const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+    await h.flow.cancel(run.id)
     await expect(h.flow.removeWorktree(run.id, false)).rejects.toMatchObject({ code: 'CONFIRM_REQUIRED' })
+  })
+})
+
+describe('every stage status and action against the supervisor', () => {
+  const STATUSES: readonly FlowStageStatus[] = ['pending', 'running', 'review', 'approved', 'skipped', 'failed']
+  const ACTIONS: readonly FlowStageAction[] = ['approve', 'fix', 'revise', 'retry', 'ship', 'skip']
+
+  function seed(h: ReturnType<typeof setup>, stage: FlowStage, status: FlowStageStatus, verdict: 'ready' | 'needs_fixes' | null) {
+    const run = h.repos.flowRuns.start({
+      projectId: h.project.id,
+      title: `${stage} ${status}`,
+      source: 'text',
+      sourceRef: null,
+      sourceUrl: null,
+      description: '',
+      stacks: ['dotnet'],
+      stage,
+      autopilot: false,
+      autoShip: false,
+      baseBranch: 'main',
+    })
+    h.repos.flowStages.ensureAll(run.id)
+    h.repos.flowRuns.update(run.id, { worktreePath: h.project.path, specDir: 'specs/001-checkout' })
+    h.repos.flowStages.update(run.id, stage, {
+      status,
+      sessionId: 'seeded-session',
+      attempts: 1,
+      report: verdict ? { ...emptyFlowStageReport(), verdict } : null,
+    })
+    return h.repos.flowRuns.byId(run.id)!
+  }
+
+  async function accepted(h: ReturnType<typeof setup>, runId: string, action: FlowStageAction): Promise<boolean> {
+    try {
+      if (action === 'revise') await h.flow.revise(runId, 'Change it.')
+      else await h.flow[action](runId)
+      return true
+    } catch (error) {
+      if ((error as { code?: string }).code === 'RULE_NOT_ALLOWED') return false
+      throw error
+    }
+  }
+
+  it('accepts exactly the actions the stage card offers for the current stage', async () => {
+    const h = setup()
+    for (const stage of FLOW_STAGES) {
+      const verdicts = stage === 'review' ? (['ready', 'needs_fixes', null] as const) : ([null] as const)
+      for (const status of STATUSES) {
+        for (const verdict of verdicts) {
+          for (const action of ACTIONS) {
+            const run = seed(h, stage, status, verdict)
+            const offered = flowStageActions(run, h.repos.flowStages.get(run.id, stage)!).includes(action)
+            expect(await accepted(h, run.id, action), `${stage} ${status} ${verdict ?? ''} ${action}`).toBe(offered)
+          }
+        }
+      }
+    }
+  })
+
+  it('offers the ship stage in review Finish and Revise only, and a finished run nothing', async () => {
+    const h = setup()
+    const ship = seed(h, 'ship', 'review', null)
+    expect(flowStageActions(ship, h.repos.flowStages.get(ship.id, 'ship')!)).toEqual(['approve', 'revise'])
+
+    const finished = await h.flow.approve(ship.id)
+    expect(finished.status).toBe('done')
+    for (const action of ACTIONS) expect(await accepted(h, ship.id, action)).toBe(false)
+  })
+
+  it('offers nothing for a stage that is not the current one', () => {
+    expect(
+      flowStageActions({ stage: 'plan', finishedAt: null }, { stage: 'spec', status: 'review', report: null }),
+    ).toEqual([])
   })
 })
 

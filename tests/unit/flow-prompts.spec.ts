@@ -2,10 +2,58 @@ import { describe, expect, it } from 'vitest'
 import {
   buildSteps,
   cleanSteps,
+  fixFindingsPrompt,
   reviewSteps,
+  revisePrompt,
   shipPrompt,
   testWritePrompt,
 } from '@main/flow/flow-prompts'
+
+describe('the fix prompt, sent to a fresh session', () => {
+  const report = {
+    findings: [
+      { severity: 'must_fix' as const, file: 'Cart.cs', line: 12, what: 'Off-by-one in the total.' },
+      { severity: 'must_fix' as const, file: null, line: null, what: 'No test covers the empty cart.' },
+      { severity: 'should_fix' as const, file: 'Cart.cs', line: 40, what: 'Extract the rounding.' },
+    ],
+    unmet: ['A guest can pay without an account.'],
+  }
+
+  it('carries every must_fix finding with its location and every unmet criterion', () => {
+    const prompt = fixFindingsPrompt(report, { baseBranch: 'develop', specDir: 'specs/002-cart' })
+    expect(prompt).toContain('against develop')
+    expect(prompt).toContain('- Cart.cs:12: Off-by-one in the total.')
+    expect(prompt).toContain('- No test covers the empty cart.')
+    expect(prompt).toContain('- A guest can pay without an account.')
+    expect(prompt).toContain('specs/002-cart/spec.md')
+    expect(prompt).not.toContain('Extract the rounding.')
+  })
+
+  it('still reads on its own without a stored report', () => {
+    expect(fixFindingsPrompt(null, { baseBranch: null, specDir: null })).toContain('the base branch')
+  })
+})
+
+describe('the revise prompt, sent to a fresh session', () => {
+  const run = { specDir: 'specs/002-cart', prUrl: 'https://dev.azure.com/x/_git/y/pullrequest/9', baseBranch: 'main' }
+
+  it('names the artefact file and the feedback', () => {
+    const prompt = revisePrompt(run, 'plan', 'Split the migration into its own task.')
+    expect(prompt).toContain('Revise the plan and its tasks (specs/002-cart/plan.md) per this feedback')
+    expect(prompt).toContain('Split the migration into its own task.')
+  })
+
+  it('points a stage without an artefact file at the spec and the base branch', () => {
+    const prompt = revisePrompt(run, 'build', 'Use the existing money type.')
+    expect(prompt).toContain('the implementation on this branch')
+    expect(prompt).toContain('specs/002-cart/spec.md')
+    expect(prompt).toContain('against main')
+  })
+
+  it('names the pull request for the ship stage', () => {
+    expect(revisePrompt(run, 'ship', 'Mention the migration.')).toContain(run.prUrl)
+  })
+})
 
 describe('the build steps', () => {
   it('scaffolds .NET only for a dotnet-only run', () => {
