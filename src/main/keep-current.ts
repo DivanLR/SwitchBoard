@@ -6,11 +6,12 @@ import type { CustomSkill, KeepCurrentReport, KeepCurrentResult, KeepCurrentStat
 import { isIpcError } from '@shared/ipc-types'
 import { resolveClaudeExecutable } from '@main/sessions/claude-executable'
 import { reason, run as runCommand, type RunResult } from '@main/sessions/plugin-install'
+import { pinnedSpecify } from '@main/specs/spec-kit'
 import { folderShas, importSkills, remoteSkillShas } from '@main/skills/import'
 import { enableSkill, liveSkillFolders, liveSkillsRoot } from '@main/skills/install'
 import type { Repositories } from '@main/store/repositories'
 
-export type CommandRunner = (exe: string, args: readonly string[], cwd?: string) => Promise<RunResult>
+export type CommandRunner = (exe: string, args: readonly string[], cwd?: string, input?: string) => Promise<RunResult>
 
 const CONFIRM_CODES: ReadonlySet<string> = new Set([
   'command_source_refused',
@@ -42,9 +43,15 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-async function tryRun(run: CommandRunner, exe: string, args: readonly string[], cwd?: string): Promise<RunResult> {
+async function tryRun(
+  run: CommandRunner,
+  exe: string,
+  args: readonly string[],
+  cwd?: string,
+  input?: string,
+): Promise<RunResult> {
   try {
-    return await run(exe, args, cwd)
+    return await run(exe, args, cwd, input)
   } catch (error) {
     return { code: null, stdout: '', stderr: errorText(error) }
   }
@@ -157,15 +164,15 @@ function hasEntries(dir: string): boolean {
 
 export async function updateSpecKit(
   run: CommandRunner,
-  specify: string,
+  uvx: string,
   projects: readonly { name: string; path: string }[],
 ): Promise<KeepCurrentResult[]> {
   const out: KeepCurrentResult[] = []
   for (const project of projects) {
     if (!hasEntries(join(project.path, '.specify', 'extensions'))) continue
-    const result = await tryRun(run, specify, ['extension', 'update'], project.path)
+    const result = await tryRun(run, uvx, pinnedSpecify('extension', 'update'), project.path, 'y\n')
     const status: KeepCurrentStatus =
-      result.code !== 0 ? 'failed' : /up.to.date|no updates|already/i.test(result.stdout) ? 'current' : 'updated'
+      result.code !== 0 ? 'failed' : /Successfully updated/i.test(result.stdout) ? 'updated' : 'current'
     out.push(entry('speckit', project.name, status, reason(result)))
   }
   return out
@@ -175,10 +182,17 @@ function sameFiles(a: ReadonlyMap<string, string>, b: ReadonlyMap<string, string
   return a.size === b.size && [...a].every(([path, sha]) => b.get(path) === sha)
 }
 
+const GENERATED = /(^|\/)(__pycache__\/|\.DS_Store$|desktop\.ini$)|\.pyc$/i
+
+function ownFiles(files: ReadonlyMap<string, string>): Map<string, string> {
+  return new Map([...files].filter(([path]) => !GENERATED.test(path)))
+}
+
 export async function refreshSkills(
   skills: readonly CustomSkill[],
   stagingRoot: string,
   saveSkill: (skill: CustomSkill) => void,
+  current?: (name: string) => CustomSkill | undefined,
 ): Promise<KeepCurrentResult[]> {
   const out: KeepCurrentResult[] = []
   const live = new Set(await liveSkillFolders())
@@ -197,18 +211,18 @@ export async function refreshSkills(
       continue
     }
     for (const skill of group) {
-      const staged = await folderShas(join(stagingRoot, skill.name))
-      if (sameFiles(remote(skill.sourcePath), staged)) {
-        out.push(entry('skill', skill.name, 'current', 'No change at its source.'))
-        continue
-      }
-      if (!sameFiles(await folderShas(join(liveSkillsRoot(), skill.name)), staged)) {
-        out.push(
-          entry('skill', skill.name, 'failed', 'Its copy in .claude/skills has changes of your own, so it was left as it is.'),
-        )
-        continue
-      }
       try {
+        const staged = await folderShas(join(stagingRoot, skill.name))
+        if (sameFiles(remote(skill.sourcePath), staged)) {
+          out.push(entry('skill', skill.name, 'current', 'No change at its source.'))
+          continue
+        }
+        if (!sameFiles(ownFiles(await folderShas(join(liveSkillsRoot(), skill.name))), ownFiles(staged))) {
+          out.push(
+            entry('skill', skill.name, 'failed', 'Its copy in .claude/skills has changes of your own, so it was left as it is.'),
+          )
+          continue
+        }
         const others = new Set([...live].filter((name) => name !== skill.name))
         const fresh = (await importSkills(url, stagingRoot, others, skill.name)).imported.find(
           (imported) => imported.name === skill.name,
@@ -217,6 +231,7 @@ export async function refreshSkills(
           out.push(entry('skill', skill.name, 'failed', 'Its source no longer has a skill of that name.'))
           continue
         }
+        if (current && !current(skill.name)?.enabled) continue
         saveSkill(fresh)
         await enableSkill(stagingRoot, skill.name)
         out.push(entry('skill', skill.name, 'updated', `${fresh.fileCount} files from its source.`))
@@ -240,6 +255,7 @@ export function keepCurrentService(deps: {
   repos: Repositories
   stagingRoot: string
   run?: CommandRunner
+  onReport?: (report: KeepCurrentReport) => void
 }): { check: () => Promise<KeepCurrentReport>; schedule: () => () => void } {
   const run = deps.run ?? runCommand
   let running: Promise<KeepCurrentReport> | null = null
@@ -247,18 +263,22 @@ export function keepCurrentService(deps: {
   const check = (): Promise<KeepCurrentReport> => {
     running ??= (async () => {
       const claude = resolveClaudeExecutable()
-      const specify = onPath('specify')
+      const uvx = onPath('uvx')
       const results = [
         ...(claude
           ? await updatePlugins(run, claude)
           : [entry('plugin', 'Claude Code', 'failed', 'Claude Code was not found, so no plugin was checked.')]),
-        ...(await refreshSkills(deps.repos.customSkills.list(), deps.stagingRoot, (skill) =>
-          deps.repos.customSkills.upsertMany([skill]),
+        ...(await refreshSkills(
+          deps.repos.customSkills.list(),
+          deps.stagingRoot,
+          (skill) => deps.repos.customSkills.upsertMany([skill]),
+          (name) => deps.repos.customSkills.byName(name),
         )),
-        ...(specify ? await updateSpecKit(run, specify, deps.repos.projects.listActive()) : []),
+        ...(uvx ? await updateSpecKit(run, uvx, deps.repos.projects.listActive()) : []),
       ]
       const report = { checkedAt: new Date().toISOString(), results }
       deps.repos.settings.set({ keepCurrentLast: report })
+      deps.onReport?.(report)
       return report
     })().finally(() => {
       running = null

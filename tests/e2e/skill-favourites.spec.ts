@@ -109,6 +109,23 @@ test('a starred skill still runs, and runs the same skill', async ({ page }) => 
     .toContain('write-tests')
 })
 
+test('another project’s Skills tab shows none of this project’s skill run', async ({ page }) => {
+  await page.addInitScript(installMockHost, scenario())
+  await openSkills(page)
+
+  await page.getByTestId('skill-run-write-tests').click()
+  await expect(page.getByTestId('mini-terminal')).toBeVisible()
+
+  await page.getByTestId('sidebar-project-beta').click()
+  await page.getByTestId('tab-skills').click()
+  await expect(page.getByTestId('skills-view')).toBeVisible()
+  await expect(page.getByTestId('mini-terminal')).toHaveCount(0)
+
+  await page.getByTestId('sidebar-project-alpha').click()
+  await page.getByTestId('tab-skills').click()
+  await expect(page.getByTestId('mini-terminal')).toBeVisible()
+})
+
 test('the star survives leaving the section, because it is a preference', async ({ page }) => {
   await page.addInitScript(installMockHost, scenario())
   await openSkills(page)

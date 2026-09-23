@@ -39,9 +39,10 @@ function toggleServer(name: string): void {
 
 const currentKey = computed(() => comboKey(activeServers.value))
 
-const liveSession = computed(() =>
-  props.project.session && !props.project.session.endedAt ? props.project.session : null,
-)
+const liveSession = computed(() => {
+  const session = props.project.session
+  return session && !session.endedAt && (session.engine ?? 'claude') === 'claude' ? session : null
+})
 const working = computed(() => liveSession.value?.status === 'working')
 
 watch(

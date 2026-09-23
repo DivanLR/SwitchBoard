@@ -10,19 +10,24 @@ function crashLoops(): void {
   }
 }
 
+const { queryOptions } = vi.hoisted(() => ({ queryOptions: [] as { model?: string }[] }))
+
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   createSdkMcpServer: () => ({ type: 'sdk', name: 'switchboard', instance: {} }),
   tool: () => ({}),
-  query: () => ({
-    [Symbol.asyncIterator]: () => ({
-      next: () => new Promise((_resolve, reject) => pending.push({ reject })),
-    }),
-    supportedCommands: () => Promise.resolve([]),
-    supportedModels: () => Promise.resolve([]),
-    interrupt: () => Promise.resolve(),
-    setModel: () => Promise.resolve(),
-    applyFlagSettings: () => Promise.resolve(),
-  }),
+  query: (args: { options?: { model?: string } }) => {
+    queryOptions.push(args.options ?? {})
+    return {
+      [Symbol.asyncIterator]: () => ({
+        next: () => new Promise((_resolve, reject) => pending.push({ reject })),
+      }),
+      supportedCommands: () => Promise.resolve([]),
+      supportedModels: () => Promise.resolve([]),
+      interrupt: () => Promise.resolve(),
+      setModel: () => Promise.resolve(),
+      applyFlagSettings: () => Promise.resolve(),
+    }
+  },
 }))
 
 vi.mock('@main/sessions/claude-executable', () => ({
@@ -36,6 +41,7 @@ const { SessionManager } = await import('@main/sessions/session-manager')
 const dirs: string[] = []
 afterEach(() => {
   pending.length = 0
+  queryOptions.length = 0
   for (const d of dirs.splice(0)) {
     try {
       rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
@@ -108,6 +114,24 @@ describe('a crashed session is restarted by the app', () => {
     const revived = manager.liveSessionIds()[0]
     expect(manager.runsInContainer(revived)).toBe(false)
     expect(repos.sessions.byId(revived)?.bypassPermissions).toBe(false)
+  })
+
+  it('brings a session that dropped a model on a usage limit back on the lower model', async () => {
+    const { repos, project, manager } = setup()
+    repos.settings.set({ modelMode: 'auto', intelligentModel: 'claude-opus-5' })
+    const first = await manager.startSession(project.id)
+    expect(queryOptions.at(-1)?.model).toBe('claude-opus-5')
+    const hosted = (manager as unknown as { hosted: Map<string, { session: { handleMessage(m: unknown): void } }> })
+      .hosted
+    hosted.get(first.id)!.session.handleMessage({
+      type: 'result', subtype: 'success', is_error: true, api_error_status: 429, session_id: 'sdk-1',
+      result: 'Claude AI usage limit reached|1790000000', total_cost_usd: 0, duration_ms: 1, usage: {},
+    })
+
+    crashLoops()
+
+    await vi.waitFor(() => expect(manager.liveSessionIds()).toHaveLength(1))
+    expect(queryOptions.at(-1)?.model).toBe('sonnet')
   })
 
   it('brings a session back in the mode it was started in, not the project default', async () => {

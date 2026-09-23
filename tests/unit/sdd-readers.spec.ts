@@ -154,14 +154,18 @@ describe('readSpecKitState', () => {
 })
 
 describe('installExtension', () => {
-  it('runs specify extension add with an argument array in the project folder', async () => {
+  it('runs extension add through the same pinned Spec Kit as init, never an older specify on PATH', async () => {
     const p = project()
     const run = vi.fn<CommandRunner>(async (_file, _args, cwd) => {
       write(cwd, '.specify/extensions/assess/extension.yml', 'id: assess\n')
       return { code: 0, missing: false, output: 'Extension installed successfully!' }
     })
     await installExtension(p, 'assess', run)
-    expect(run).toHaveBeenCalledWith('specify', ['extension', 'add', 'assess'], p)
+    expect(run).toHaveBeenCalledWith(
+      'uvx',
+      ['--from', 'git+https://github.com/github/spec-kit.git', 'specify', 'extension', 'add', 'assess'],
+      p,
+    )
   })
 
   it('reports the CLI’s own error plainly when the add fails', async () => {

@@ -1,4 +1,5 @@
 import type {
+  ArchivedProject,
   AvailableModel,
   CustomSkill,
   DecisionRecord,
@@ -115,7 +116,7 @@ export interface Counters {
 
 interface ProjectsSnapshot {
   projects: ProjectListItem[]
-  archived: Project[]
+  archived: ArchivedProject[]
   counters: Counters
 }
 
@@ -177,6 +178,7 @@ export interface InvokeMap {
     req: {
       projectId: string
       resume?: boolean
+      resumeSessionId?: string
       mode?: SessionMode
       containerised?: boolean
       engine?: SessionEngine
@@ -407,6 +409,8 @@ export interface PushMap {
   'push.updateStatus': UpdateStatus
   'push.terminalData': TerminalDataPush
   'push.terminalExit': TerminalExitPush
+  'push.keepCurrent': KeepCurrentReport
+  'push.projectsChanged': Record<string, never>
 }
 
 export type PushChannel = keyof PushMap
@@ -425,6 +429,8 @@ const PUSH_CHANNEL_KEYS: Record<PushChannel, true> = {
   'push.updateStatus': true,
   'push.terminalData': true,
   'push.terminalExit': true,
+  'push.keepCurrent': true,
+  'push.projectsChanged': true,
 }
 
 export const PUSH_CHANNELS: readonly PushChannel[] = Object.keys(

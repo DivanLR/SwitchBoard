@@ -263,7 +263,9 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
   const handlers: Handlers = {
     'projects.list': () => ({
       projects: projectList(),
-      archived: repos.projects.listArchived(),
+      archived: repos.projects
+        .listArchived()
+        .map((project) => ({ ...project, keptBy: repos.projects.deleteBlocker(project.id) })),
       counters: computeCounters(repos),
     }),
     'dialog.pickFolder': async () => {
@@ -382,12 +384,17 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'terminal.resize': (req) => ptyHost.resize(req.id, req.cols, req.rows),
     'terminal.close': (req) => ptyHost.close(req.id),
     'sessions.rename': (req) => manager.renameSession(req.sessionId, req.label),
-    'sessions.start': (req) =>
-      manager.startSession(req.projectId, req.resume ?? false, req.mode, {
-        containerised: req.containerised === true,
-        engine: req.engine ?? repos.settings.get().defaultEngine,
+    'sessions.start': (req) => {
+      const shown = req.resume && req.resumeSessionId ? repos.sessions.byId(req.resumeSessionId) : undefined
+      const from = shown?.projectId === req.projectId && shown.sdkSessionId ? shown : undefined
+      return manager.startSession(req.projectId, req.resume ?? false, req.mode, {
+        containerised: from ? from.containerised : req.containerised,
+        engine: from?.engine ?? req.engine ?? repos.settings.get().defaultEngine,
+        resumeSdkSessionId: from?.sdkSessionId ?? undefined,
+        resumeFromSessionId: from ? (from.homeVolumeOf ?? from.id) : undefined,
         carryTranscriptFrom: req.carryTranscriptFrom,
-      }),
+      })
+    },
     'transcripts.for': (req) => transcriptFor(req.sessionId),
     'clipboard.write': (req) => {
       clipboard.writeText(req.text)

@@ -33,6 +33,12 @@ vi.mock('@main/sessions/wslc-sandbox', async (importOriginal) => {
   }
 })
 
+vi.mock('@main/sessions/codex-executable', () => ({
+  resolveCodexLaunch: () => ({ command: 'codex', prefixArgs: [], env: {} }),
+  codexInstalled: () => true,
+  CODEX_MISSING_MESSAGE: 'missing',
+}))
+
 const { openDatabase } = await import('@main/store/db')
 const { createRepositories } = await import('@main/store/repositories')
 const { SessionManager } = await import('@main/sessions/session-manager')
@@ -135,6 +141,17 @@ describe('the engine a session starts on', () => {
     await expect(manager.startSession(project.id, false, 'bypass', { engine: 'codex' })).rejects.toMatchObject({
       code: 'UNSUPPORTED',
     })
+  })
+
+  it('runs Codex on the host when only the project asks for a container or bypass', async () => {
+    const { repos, project, manager } = setup()
+    repos.projects.setUseContainers(project.id, true)
+    repos.projects.setSessionMode(project.id, 'bypass')
+
+    const codex = await manager.startSession(project.id, false, undefined, { engine: 'codex' })
+
+    expect(manager.runsInContainer(codex.id)).toBe(false)
+    expect(repos.sessions.byId(codex.id)).toMatchObject({ engine: 'codex', containerised: false, bypassPermissions: false })
   })
 
   it('resumes the last conversation of its own engine, never a Codex thread as a Claude one', async () => {

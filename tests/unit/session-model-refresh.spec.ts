@@ -106,6 +106,15 @@ describe('the per-turn mode report', () => {
     expect(turnModes).toEqual(['orchestrator'])
   })
 
+  it('reports no pattern after Settings leaves basic, since the session started without its advisor and worker', () => {
+    const { routing, turnModes, send } = makeSession('basic')
+    send('Fix the typo in SessionView.vue')
+    routing.modelMode = 'auto'
+    send('Fix the other typo in SessionView.vue')
+    send('Audit every view in the app and restyle all of them')
+    expect(turnModes).toEqual([null, null, null])
+  })
+
   it('reports no pattern in basic mode, where there is no second tier', () => {
     const { turnModes, send } = makeSession('basic')
     send('Fix the typo in SessionView.vue')

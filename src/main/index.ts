@@ -276,7 +276,11 @@ async function main(): Promise<void> {
   })
   flow.reconcileOnStartup()
 
-  const keeper = keepCurrentService({ repos, stagingRoot: stagingSkillsRoot(app.getPath('userData')) })
+  const keeper = keepCurrentService({
+    repos,
+    stagingRoot: stagingSkillsRoot(app.getPath('userData')),
+    onReport: (report) => pusher.push('push.keepCurrent', report),
+  })
   registerIpcHandlers({
     repos,
     manager,
@@ -291,7 +295,7 @@ async function main(): Promise<void> {
   void reconcileSkills(stagingSkillsRoot(app.getPath('userData')), repos.customSkills.list())
   scheduleRetention(() => {
     repos.events.flush()
-    runRetention(db)
+    if (runRetention(db).projectsDeleted > 0) pusher.push('push.projectsChanged', {})
   })
   keeper.schedule()
   initUpdater({ onStatus: (status) => pusher.push('push.updateStatus', status) })

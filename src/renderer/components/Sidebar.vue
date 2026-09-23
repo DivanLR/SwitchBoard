@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { isIpcError } from '@shared/ipc-types'
-import { archiveDaysLeft, modelLabel, type ProjectGroup, type Session } from '@shared/domain'
+import { archiveDaysLeft, modelLabel, type ProjectDeleteBlocker, type ProjectGroup, type Session } from '@shared/domain'
 import { groupSections } from '@shared/project-groups'
 import { activeAgents } from '@shared/agents'
 import { useProjectsStore } from '@renderer/stores/projects'
@@ -438,7 +438,9 @@ const archivedDaysLeft = computed<Record<string, number>>(() =>
   Object.fromEntries(projects.archived.map((p) => [p.id, archiveDaysLeft(p.archivedAt ?? '', now.value)])),
 )
 
-function daysLeftLabel(days: number): string {
+function daysLeftLabel(days: number, keptBy: ProjectDeleteBlocker | null | undefined): string {
+  if (days === 0 && keptBy === 'flow_worktree') return 'kept: a Flow run still has its worktree'
+  if (days === 0 && keptBy === 'live_session') return 'kept: a session is still live'
   if (days === 0) return 'deleting soon'
   return `${days} ${days === 1 ? 'day' : 'days'} left`
 }
@@ -659,7 +661,7 @@ function restore(projectId: string): void {
                   :data-testid="`archived-days-${item.name}`"
                   title="Deleted from Switchboard when this reaches zero, unless you restore it. The folder on disk stays."
                 >
-                  {{ daysLeftLabel(archivedDaysLeft[item.id] ?? 0) }}
+                  {{ daysLeftLabel(archivedDaysLeft[item.id] ?? 0, item.keptBy) }}
                 </span>
                 <button
                   class="restore mono"

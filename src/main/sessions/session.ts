@@ -92,6 +92,7 @@ interface HostedSessionOptions {
   systemPromptAppend?: string
   claudeExecutablePath?: string
   mainModel?: string
+  downgraded?: boolean
   workerMainLoop?: boolean
   autoModelRouting?: boolean
   modelMode?: ModelMode
@@ -141,6 +142,7 @@ export interface SessionHost {
   readonly isMidTask: boolean
   readonly currentStatus: SessionStatus
   readonly lastTurnError: string | null
+  readonly limitModel?: string
   attentionRaised(): void
   attentionCleared(): void
   clearBackgroundTasks(): void
@@ -212,6 +214,8 @@ export class HostedSession implements SessionHost {
   constructor(options: HostedSessionOptions) {
     this.sessionId = options.sessionId
     this.options = options
+    this.downgraded = options.downgraded === true
+    this.startedPaired = options.modelMode !== 'basic'
     this.mapper = new MessageMapper({
       sink: options.sink,
       onSdkSessionId: options.onSdkSessionId,
@@ -340,6 +344,12 @@ export class HostedSession implements SessionHost {
   private appliedModel: string | null = null
 
   private downgraded = false
+  private readonly startedPaired: boolean
+
+  get limitModel(): string | undefined {
+    return this.downgraded ? this.options.mainModel : undefined
+  }
+
   private refreshModelSettings(): void {
     const next = this.options.resolveModels?.()
     if (!next) return
@@ -358,7 +368,7 @@ export class HostedSession implements SessionHost {
     const forced = this.options.modelMode
     const pinned = forced === 'advisor' || forced === 'orchestrator' ? forced : null
     const workload = pinned && auto !== 'plan' ? pinned : auto
-    this.options.onTurnMode?.(workload === 'plan' || forced === 'basic' ? null : workload)
+    this.options.onTurnMode?.(workload === 'plan' || forced === 'basic' || !this.startedPaired ? null : workload)
 
     const model = this.options.mainModel
     const wanted = model && model !== 'default' ? model : undefined

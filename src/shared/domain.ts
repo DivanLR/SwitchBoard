@@ -90,6 +90,12 @@ export interface Project {
   useContainers: boolean
 }
 
+export type ProjectDeleteBlocker = 'live_session' | 'flow_worktree'
+
+export interface ArchivedProject extends Project {
+  keptBy?: ProjectDeleteBlocker | null
+}
+
 export const ARCHIVE_DELETE_DAYS = 30
 
 const DAY_MS = 24 * 60 * 60 * 1000

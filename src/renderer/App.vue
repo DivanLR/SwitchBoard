@@ -107,6 +107,8 @@ onMounted(async () => {
         if (push.eventId) active.focusEvent(push.eventId)
       }
     }),
+    window.switchboard.on('push.keepCurrent', (report) => settingsStore.applyKeepCurrent(report)),
+    window.switchboard.on('push.projectsChanged', () => void projects.refresh()),
     window.switchboard.on('push.updateStatus', (status) => {
       updates.apply(status)
       if (status.state === 'available') updateDismissed.value = false

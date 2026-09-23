@@ -119,6 +119,7 @@ interface HostedEntry {
   ranATurn: boolean
   nodeModulesVolumeKey?: string
   mode: SessionMode
+  carryTranscriptFrom?: string
 }
 
 interface FlowHooks {
@@ -142,6 +143,7 @@ interface StartOptions {
   nodeModulesVolumeKey?: string
   engine?: SessionEngine
   carryTranscriptFrom?: string
+  mainModel?: string
 }
 
 const MAX_CONTAINERS = 2
@@ -553,9 +555,9 @@ export class SessionManager {
     if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
     const onHost =
       opts?.section === 'flow' || (opts?.cwd !== undefined && relative(project.path, opts.cwd) !== '')
-    const chosen = requestedMode ?? project.defaultSessionMode
-    const mode = onHost ? nativeMode(chosen) : chosen
     const codex = opts?.engine === 'codex'
+    const chosen = requestedMode ?? project.defaultSessionMode
+    const mode = onHost || (codex && requestedMode === undefined) ? nativeMode(chosen) : chosen
     const containerised =
       !onHost && ((opts?.containerised ?? (!codex && project.useContainers)) === true || mode === 'bypass')
     if (codex && (containerised || mode === 'bypass')) {
@@ -662,6 +664,7 @@ export class SessionManager {
       session: null as unknown as SessionHost,
       nodeModulesVolumeKey: opts?.nodeModulesVolumeKey,
       mode,
+      carryTranscriptFrom: opts?.carryTranscriptFrom,
     }
 
     const settings = this.repos.settings.get()
@@ -735,9 +738,10 @@ export class SessionManager {
             .filter((s): s is string => Boolean(s))
             .join('\n\n') || undefined,
         claudeExecutablePath: claudeExecutablePath ?? undefined,
-        mainModel: opts?.workerMainLoop
-          ? workerModel
-          : mainLoopModel(settings.modelMode, { intelligentModel, workerModel }),
+        mainModel:
+          opts?.mainModel ??
+          (opts?.workerMainLoop ? workerModel : mainLoopModel(settings.modelMode, { intelligentModel, workerModel })),
+        downgraded: opts?.mainModel !== undefined,
         workerMainLoop: opts?.workerMainLoop,
         autoModelRouting: !basic && settings.autoModelRouting,
         modelMode: settings.modelMode,
@@ -1597,6 +1601,8 @@ export class SessionManager {
           resumeFromSessionId: entry.row.homeVolumeOf ?? entry.row.id,
           containerised: entry.containerised,
           engine: entry.row.engine,
+          mainModel: entry.session.limitModel,
+          carryTranscriptFrom: entry.carryTranscriptFrom,
         })
         this.sendMessage(
           revived.id,

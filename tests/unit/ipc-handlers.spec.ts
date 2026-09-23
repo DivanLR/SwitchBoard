@@ -112,6 +112,31 @@ describe('the invoke channel', () => {
     expect(listed.value).toMatchObject({ projects: [{ id: project.id }], archived: [] })
   })
 
+  it('says which archived project retention keeps, and why', async () => {
+    const project = harness.repos.projects.insert({ name: 'a', path: 'C:\\a', source: 'manual' })
+    const run = harness.repos.flowRuns.start({
+      projectId: project.id,
+      kind: 'feature',
+      title: 'Cart',
+      source: 'text',
+      sourceRef: null,
+      sourceUrl: null,
+      description: '',
+      stacks: ['dotnet'],
+      stage: 'ship',
+      autopilot: false,
+      autoShip: false,
+      baseBranch: 'main',
+    })
+    harness.repos.flowRuns.update(run.id, { worktreePath: 'C:\\a.worktrees\\cart' })
+    harness.repos.flowRuns.finish(run.id, 'done', null)
+    await harness.call('projects.archive', { projectId: project.id })
+
+    const listed = await harness.call('projects.list', undefined)
+
+    expect(listed).toMatchObject({ ok: true, value: { archived: [{ id: project.id, keptBy: 'flow_worktree' }] } })
+  })
+
   it('deletes a project only once none of its sessions is live', async () => {
     const project = harness.repos.projects.insert({ name: 'a', path: 'C:\\a', source: 'manual' })
     harness.repos.sessions.insert({
@@ -172,6 +197,55 @@ describe('the invoke channel', () => {
       ok: false,
       error: { code: 'NOT_FOUND', message: 'Unknown method does.not.exist' },
     } satisfies WireResult<never>)
+  })
+})
+
+describe('sessions.start', () => {
+  const ended = (h: ReturnType<typeof setup>, projectId: string, id: string, patch: Record<string, unknown>) => {
+    h.repos.sessions.insert({
+      id,
+      projectId,
+      engine: 'claude',
+      sdkSessionId: `sdk-${id}`,
+      status: 'done',
+      statusDetail: null,
+      branch: null,
+      diffAdds: null,
+      diffDels: null,
+      usageUtilization: null,
+      usageResetsAt: null,
+      usageLimitType: null,
+      startedAt: '2026-09-01T10:00:00.000Z',
+      endedAt: null,
+      endReason: null,
+      containerised: false,
+      homeVolumeOf: null,
+      ...patch,
+    })
+    h.repos.sessions.update(id, { endedAt: '2026-09-01T11:00:00.000Z', endReason: 'completed' })
+  }
+
+  it('leaves the container choice to the main process when the caller made none', async () => {
+    const h = setup()
+    const project = h.repos.projects.insert({ name: 'a', path: 'C:\\a', source: 'manual' })
+    const start = vi.spyOn(h.manager, 'startSession').mockResolvedValue({} as never)
+    await h.call('sessions.start', { projectId: project.id })
+    expect(start.mock.calls[0][3]?.containerised).toBeUndefined()
+  })
+
+  it('resumes the session the start panel shows, with its engine, container and home volume', async () => {
+    const h = setup()
+    const project = h.repos.projects.insert({ name: 'a', path: 'C:\\a', source: 'manual' })
+    ended(h, project.id, 'shown', { containerised: true, homeVolumeOf: 'first' })
+    ended(h, project.id, 'other', {})
+    const start = vi.spyOn(h.manager, 'startSession').mockResolvedValue({} as never)
+    await h.call('sessions.start', { projectId: project.id, resume: true, resumeSessionId: 'shown', containerised: false })
+    expect(start.mock.calls[0][3]).toMatchObject({
+      resumeSdkSessionId: 'sdk-shown',
+      resumeFromSessionId: 'first',
+      containerised: true,
+      engine: 'claude',
+    })
   })
 })
 

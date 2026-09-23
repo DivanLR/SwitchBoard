@@ -470,11 +470,18 @@ watch(
   },
 )
 
-const sectionSessionIds = ref<Partial<Record<SectionKind, string>>>({})
+const sectionSessionsByProject = ref<Record<string, Partial<Record<SectionKind, string>>>>({})
+const sectionSessionIds = computed(() => sectionSessionsByProject.value[props.project.id] ?? {})
+
+function noteSectionSession(projectId: string, kind: SectionKind, id: string): void {
+  const byProject = sectionSessionsByProject.value
+  sectionSessionsByProject.value = { ...byProject, [projectId]: { ...byProject[projectId], [kind]: id } }
+}
 
 function runPluginCommand(text: string, kind: SectionKind, watchDiagrams = false): void {
-  void sections.runInSession(props.project.id, text, true, watchDiagrams, kind).then((id) => {
-    sectionSessionIds.value = { ...sectionSessionIds.value, [kind]: id }
+  const projectId = props.project.id
+  void sections.runInSession(projectId, text, true, watchDiagrams, kind).then((id) => {
+    noteSectionSession(projectId, kind, id)
   })
 }
 
@@ -799,7 +806,7 @@ const { dragKind, onPaneDragOver, onPaneDragLeave, onPaneDrop } = projectRefs
       :project-id="project.id"
       :project-name="project.name"
       :session-id="sectionSessionIds.skills ?? null"
-      @ran="(id: string) => (sectionSessionIds = { ...sectionSessionIds, skills: id })"
+      @ran="(id: string) => noteSectionSession(project.id, 'skills', id)"
       @manage="emit('open-settings', 'skills')"
     />
     <SessionStream

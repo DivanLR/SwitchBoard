@@ -1,5 +1,5 @@
 import { reactive } from 'vue'
-import type { AvailableModel, Settings } from '@shared/domain'
+import type { AvailableModel, KeepCurrentReport, Settings } from '@shared/domain'
 import { errorMessage, invoke } from '@renderer/ipc'
 
 let latest = 0
@@ -40,6 +40,10 @@ const store = reactive({
     } finally {
       this.checkingPlugins = false
     }
+  },
+
+  applyKeepCurrent(report: KeepCurrentReport): void {
+    if (this.settings) this.settings = { ...this.settings, keepCurrentLast: report }
   },
 
   toggleMcpActiveServer(name: string): void {

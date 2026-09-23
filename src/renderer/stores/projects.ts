@@ -1,5 +1,6 @@
 import { computed, reactive, toRefs } from 'vue'
 import type {
+  ArchivedProject,
   Project,
   ProjectCommand,
   Session,
@@ -13,7 +14,7 @@ import { invoke } from '@renderer/ipc'
 
 const state = reactive({
   items: [] as ProjectListItem[],
-  archived: [] as Project[],
+  archived: [] as ArchivedProject[],
   selectedProjectId: null as string | null,
   counters: { running: 0, needsYou: 0, costTodayUsd: 0, tokensToday: 0 } as Counters,
   loaded: false,
@@ -179,17 +180,18 @@ const store = reactive({
     containerised?: boolean,
     engine?: SessionEngine,
     carryTranscriptFrom?: string,
+    resumeSessionId?: string,
   ): Promise<Session> {
     state.starting = true
     try {
       const session = await invoke('sessions.start', {
         projectId,
         resume,
+        resumeSessionId,
         mode,
         engine,
         carryTranscriptFrom,
-        containerised:
-          containerised ?? state.items.find((p) => p.id === projectId)?.useContainers ?? false,
+        containerised,
       })
       await this.refresh()
       this.focusSession(projectId, session.id)

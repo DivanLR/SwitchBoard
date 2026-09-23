@@ -1,5 +1,5 @@
 import { transaction, type AppDatabase } from './db.ts'
-import { ARCHIVE_DELETE_DAYS } from '../../shared/domain.ts'
+import { ARCHIVE_DELETE_DAYS, type ProjectDeleteBlocker } from '../../shared/domain.ts'
 
 interface RetentionResult {
   eventsDeleted: number
@@ -12,7 +12,7 @@ const DAY_MS = 24 * 60 * 60 * 1000
 const DECISION_DAYS = 30
 const SESSIONS_PER_PROJECT = 12
 
-export type ProjectDeleteBlocker = 'live_session' | 'flow_worktree'
+export type { ProjectDeleteBlocker }
 
 export function projectDeleteBlocker(db: AppDatabase, projectId: string): ProjectDeleteBlocker | null {
   if (db.prepare('SELECT 1 FROM sessions WHERE projectId = ? AND endedAt IS NULL LIMIT 1').get(projectId)) {

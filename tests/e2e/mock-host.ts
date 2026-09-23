@@ -111,6 +111,7 @@ export interface MockDriver {
       bypassPermissions?: boolean
       planMode?: boolean
       resume?: boolean
+      resumeSessionId?: string
       containerised?: boolean
       engine?: string
       carryTranscriptFrom?: string
@@ -443,6 +444,7 @@ export function installMockHost(scenario: MockScenario): void {
     bypassPermissions?: boolean
     planMode?: boolean
     resume?: boolean
+    resumeSessionId?: string
     containerised?: boolean
     engine?: string
     carryTranscriptFrom?: string
@@ -1029,6 +1031,8 @@ export function installMockHost(scenario: MockScenario): void {
       await new Promise((resolve) => setTimeout(resolve, 250))
       const mode = String(req.mode ?? project.defaultSessionMode ?? 'auto')
       const planMode = mode === 'plan'
+      const containerised =
+        typeof req.containerised === 'boolean' ? req.containerised : req.engine !== 'codex' && project.useContainers === true
       starts.push({
         projectId: String(req.projectId),
         deniedMcpServers: req.deniedMcpServers as string[] | undefined,
@@ -1036,7 +1040,8 @@ export function installMockHost(scenario: MockScenario): void {
         bypassPermissions: mode === 'bypass',
         planMode,
         resume: req.resume === true,
-        containerised: req.containerised === true,
+        resumeSessionId: req.resumeSessionId as string | undefined,
+        containerised,
         engine: req.engine as string | undefined,
         carryTranscriptFrom: req.carryTranscriptFrom as string | undefined,
       })
@@ -1054,7 +1059,7 @@ export function installMockHost(scenario: MockScenario): void {
         usageResetsAt: null,
         usageLimitType: null,
         bypassPermissions: mode === 'bypass',
-        containerised: req.containerised === true || mode === 'bypass',
+        containerised: containerised || mode === 'bypass',
         planMode,
         inPlanMode: planMode,
         mcpServers: [],

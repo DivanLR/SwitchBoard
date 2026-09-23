@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { installMockHost, type MockScenario } from './mock-host'
 import { DEFAULT_SETTINGS } from '../../src/shared/domain'
 
-function dbScenario(): MockScenario {
+function dbScenario(engine: 'claude' | 'codex' = 'claude'): MockScenario {
   return {
     settings: DEFAULT_SETTINGS,
     projects: [
@@ -20,6 +20,7 @@ function dbScenario(): MockScenario {
         session: {
           id: 's-db',
           status: 'working',
+          engine,
           mcpServers: [
             { name: 'postgres — production', status: 'connected' },
             { name: 'github', status: 'connected' },
@@ -136,6 +137,17 @@ test('two designated servers combine into one chat and one scan', async ({ page 
       (t) => t.startsWith('[MCP:') && t.includes('"postgres — production"') && t.includes('"github"'),
     ),
   ).toBe(true)
+})
+
+test('a live Codex session on the Database project is not treated as the database session', async ({ page }) => {
+  await page.addInitScript(installMockHost, dbScenario('codex'))
+  await page.goto('/')
+  await designateDbMcp(page)
+  await page.locator(mcpRow).first().click()
+  await expect(page.getByTestId('mcp-view')).toBeVisible()
+
+  await expect(page.getByTestId('mcp-start-session')).toBeVisible()
+  await expect(page.getByTestId('mcp-scan')).toHaveCount(0)
 })
 
 test('the manual start runs a normal session with no MCP server denied', async ({ page }) => {

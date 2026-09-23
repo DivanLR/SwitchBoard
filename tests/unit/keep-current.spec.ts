@@ -3,8 +3,10 @@ import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { CustomSkill } from '@shared/domain'
-import { refreshSkills, updatePlugins, updateSpecKit, type CommandRunner } from '@main/keep-current'
+import type { CustomSkill, KeepCurrentReport } from '@shared/domain'
+import { keepCurrentService, refreshSkills, updatePlugins, updateSpecKit, type CommandRunner } from '@main/keep-current'
+import { openDatabase } from '@main/store/db'
+import { createRepositories } from '@main/store/repositories'
 
 interface Call {
   exe: string
@@ -137,27 +139,47 @@ describe('updatePlugins', () => {
 })
 
 describe('updateSpecKit', () => {
-  it('runs specify extension update only in a project that has extensions installed', async () => {
+  const offered = '🔄 Checking for updates...\n\nUpdates available:\n\n  • bug: 0.0.1 → 1.0.0\n\nUpdate these extensions? [y/N]: '
+
+  it('runs the pinned specify extension update only where extensions are installed, and answers its one prompt', async () => {
     const withExtensions = join(home, 'with')
     const without = join(home, 'without')
-    await mkdir(join(withExtensions, '.specify', 'extensions', 'git'), { recursive: true })
+    await mkdir(join(withExtensions, '.specify', 'extensions', 'bug'), { recursive: true })
     await mkdir(join(without, '.specify'), { recursive: true })
-    const { run, calls } = fakeRunner(() => ({ stdout: 'Updated git to 1.2.0\n' }))
+    const calls: (Call & { input?: string })[] = []
+    const run: CommandRunner = async (exe, args, cwd, input) => {
+      calls.push({ exe, args, cwd, input })
+      return input === 'y\n'
+        ? { code: 0, stdout: `${offered}\n📦 Updating bug...\n\n✓ Successfully updated 1 extension(s)\n`, stderr: '' }
+        : { code: 1, stdout: `${offered}\nAborted.\n`, stderr: '' }
+    }
 
-    const results = await updateSpecKit(run, 'specify.exe', [
+    const results = await updateSpecKit(run, 'uvx.exe', [
       { name: 'with', path: withExtensions },
       { name: 'without', path: without },
     ])
 
-    expect(results).toEqual([{ kind: 'speckit', name: 'with', status: 'updated', detail: 'Updated git to 1.2.0' }])
-    expect(calls).toEqual([{ exe: 'specify.exe', args: ['extension', 'update'], cwd: withExtensions }])
+    expect(results).toMatchObject([{ kind: 'speckit', name: 'with', status: 'updated', detail: expect.stringContaining('Successfully updated') }])
+    expect(calls).toEqual([
+      {
+        exe: 'uvx.exe',
+        args: ['--from', 'git+https://github.com/github/spec-kit.git', 'specify', 'extension', 'update'],
+        cwd: withExtensions,
+        input: 'y\n',
+      },
+    ])
+  })
 
-    const quiet = fakeRunner(() => ({ stdout: 'All extensions are up to date.' }))
-    expect((await updateSpecKit(quiet.run, 'specify.exe', [{ name: 'with', path: withExtensions }]))[0].status).toBe(
-      'current',
-    )
+  it('reports current, not updated, when the CLI exits cleanly without updating anything', async () => {
+    const withExtensions = join(home, 'with')
+    await mkdir(join(withExtensions, '.specify', 'extensions'), { recursive: true })
+    await writeFile(join(withExtensions, '.specify', 'extensions', '.registry'), '{}')
+    for (const stdout of ['🔄 Checking for updates...\n\nAll extensions are up to date!', 'No extensions installed', `${offered}\nCancelled`]) {
+      const { run } = fakeRunner(() => ({ stdout }))
+      expect((await updateSpecKit(run, 'uvx.exe', [{ name: 'with', path: withExtensions }]))[0].status, stdout).toBe('current')
+    }
     const failing = fakeRunner(() => ({ code: 1, stderr: 'No catalog reachable' }))
-    expect(await updateSpecKit(failing.run, 'specify.exe', [{ name: 'with', path: withExtensions }])).toEqual([
+    expect(await updateSpecKit(failing.run, 'uvx.exe', [{ name: 'with', path: withExtensions }])).toEqual([
       { kind: 'speckit', name: 'with', status: 'failed', detail: 'No catalog reachable' },
     ])
   })
@@ -229,6 +251,31 @@ describe('refreshSkills', () => {
     expect(await readFile(join(live, 'research', 'SKILL.md'), 'utf8')).toBe(manifest('v2'))
   })
 
+  it('updates a skill whose live copy only gained files Python or Windows generate there', async () => {
+    stubSource(manifest('v2'))
+    await mkdir(join(live, 'research', 'scripts', '__pycache__'), { recursive: true })
+    await writeFile(join(live, 'research', 'scripts', '__pycache__', 'helper.cpython-311.pyc'), 'bytecode')
+    await writeFile(join(live, 'research', 'desktop.ini'), '[.ShellClassInfo]')
+
+    const results = await refreshSkills([skill], staging, () => {})
+
+    expect(results).toMatchObject([{ name: 'research', status: 'updated' }])
+    expect(await readFile(join(live, 'research', 'SKILL.md'), 'utf8')).toBe(manifest('v2'))
+  })
+
+  it('leaves alone a skill the person switched off or removed while its update downloaded', async () => {
+    stubSource(manifest('v2'))
+    const saved: CustomSkill[] = []
+
+    for (const now of [{ ...skill, enabled: false }, undefined]) {
+      await writeFile(join(staging, 'research', 'SKILL.md'), manifest('v1'))
+      const results = await refreshSkills([skill], staging, (s) => saved.push(s), () => now)
+      expect(results).toEqual([])
+    }
+    expect(saved).toEqual([])
+    expect(await readFile(join(live, 'research', 'SKILL.md'), 'utf8')).toBe(manifest('v1'))
+  })
+
   it('never overwrites a live copy the person edited, and skips a disabled skill', async () => {
     stubSource(manifest('v2'))
     await writeFile(join(live, 'research', 'SKILL.md'), manifest('my own edit'))
@@ -242,5 +289,19 @@ describe('refreshSkills', () => {
     expect(results).toMatchObject([{ name: 'research', status: 'failed', detail: expect.stringContaining('changes of your own') }])
     expect(await readFile(join(live, 'research', 'SKILL.md'), 'utf8')).toBe(manifest('my own edit'))
     expect(await readFile(join(staging, 'research', 'SKILL.md'), 'utf8')).toBe(manifest('v1'))
+  })
+})
+
+describe('keepCurrentService', () => {
+  it('hands every finished check to onReport, so an open Settings page can show it', async () => {
+    const repos = createRepositories(openDatabase(':memory:'))
+    const reports: KeepCurrentReport[] = []
+    const { run } = fakeRunner(() => ({ code: 1, stderr: 'offline' }))
+    const service = keepCurrentService({ repos, stagingRoot: join(home, 'staging'), run, onReport: (r) => reports.push(r) })
+
+    const report = await service.check()
+
+    expect(reports).toEqual([report])
+    expect(repos.settings.get().keepCurrentLast).toEqual(report)
   })
 })

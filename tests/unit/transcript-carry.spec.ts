@@ -90,6 +90,30 @@ describe('a session transcript', () => {
     if (secondPath) cleanup.push(secondPath)
   })
 
+  it('carries the same transcript again when a carried session is revived after a crash', async () => {
+    const h = setup()
+    const first = await h.manager.startSession(h.project.id, false, 'default', { containerised: false })
+    h.manager.sendMessage(first.id, 'tighten the lane rows')
+    h.inner.handleExit(h.inner.hosted.get(first.id), 'stopped')
+    const saved = transcriptFor(first.id)!
+    cleanup.push(saved.path)
+
+    const second = await h.manager.startSession(h.project.id, false, 'default', {
+      containerised: false,
+      carryTranscriptFrom: first.id,
+    })
+    h.inner.handleExit(h.inner.hosted.get(second.id), 'crashed')
+
+    await vi.waitFor(() => expect(h.manager.liveSessionIds()).toHaveLength(1))
+    const revived = h.manager.liveSessionIds()[0]
+    expect(queryOptions.at(-1)?.systemPrompt?.append ?? '').toContain(saved.digest)
+    h.inner.handleExit(h.inner.hosted.get(revived), 'stopped')
+    for (const id of [second.id, revived]) {
+      const path = transcriptFor(id)?.path
+      if (path) cleanup.push(path)
+    }
+  })
+
   it('carries nothing into a session started without it', async () => {
     const h = setup()
     const session = await h.manager.startSession(h.project.id, false, 'default', { containerised: false })

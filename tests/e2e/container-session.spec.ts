@@ -44,5 +44,5 @@ test('resuming a container session keeps it in a container, whatever the project
   await page.getByTestId('start-session').click()
   await expect
     .poll(async () => (await page.evaluate(() => window.__mock.state().starts)).at(-1))
-    .toMatchObject({ projectId: 'p-alpha', resume: true, mode: 'default', containerised: true })
+    .toMatchObject({ projectId: 'p-alpha', resume: true, resumeSessionId: 's-alpha', mode: 'default', containerised: true })
 })

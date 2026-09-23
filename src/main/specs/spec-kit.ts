@@ -19,6 +19,10 @@ import { SDD_DIRS, SDD_REPORTS, bugResultOf, decisionOf, isSddSlug, reportTitle,
 
 const SPEC_KIT_GIT = 'git+https://github.com/github/spec-kit.git'
 
+export function pinnedSpecify(...args: string[]): string[] {
+  return ['--from', SPEC_KIT_GIT, 'specify', ...args]
+}
+
 function specsDir(projectPath: string): string {
   return join(projectPath, 'specs')
 }
@@ -302,19 +306,7 @@ export async function installSpecKit(projectPath: string, run: CommandRunner = e
   const script = process.platform === 'win32' ? 'ps' : 'sh'
   const result = await run(
     'uvx',
-    [
-      '--from',
-      SPEC_KIT_GIT,
-      'specify',
-      'init',
-      '--here',
-      '--force',
-      '--integration',
-      'claude',
-      '--script',
-      script,
-      '--ignore-agent-tools',
-    ],
+    pinnedSpecify('init', '--here', '--force', '--integration', 'claude', '--script', script, '--ignore-agent-tools'),
     projectPath,
   )
   if (result.missing) {
@@ -339,11 +331,11 @@ export async function installExtension(
   if (!(await isSpecKitInstalled(projectPath))) {
     throw { code: 'UNSUPPORTED', message: 'Set up Spec Kit in this project before adding an extension.' } satisfies IpcError
   }
-  const result = await run('specify', ['extension', 'add', name], projectPath)
+  const result = await run('uvx', pinnedSpecify('extension', 'add', name), projectPath)
   if (result.missing) {
     throw {
       code: 'UNSUPPORTED',
-      message: 'The specify CLI is not on this machine’s PATH. Install it with uv tool install specify-cli and try again.',
+      message: 'uvx is not on this machine’s PATH, so the extension cannot be added. Install uv and try again.',
     } satisfies IpcError
   }
   if (result.code !== 0 || !(await isExtensionInstalled(projectPath, name))) {

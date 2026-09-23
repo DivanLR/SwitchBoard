@@ -8,28 +8,37 @@ export interface RunResult {
   code: number | null
   stdout: string
   stderr: string
+  timedOut?: boolean
 }
 
-export function run(exe: string, args: readonly string[], cwd?: string): Promise<RunResult> {
+export function run(exe: string, args: readonly string[], cwd?: string, input?: string): Promise<RunResult> {
   return new Promise((resolve, reject) => {
     const child = execFile(
       exe,
       args,
-      { cwd, timeout: INSTALL_TIMEOUT_MS, windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
+      {
+        cwd,
+        timeout: INSTALL_TIMEOUT_MS,
+        windowsHide: true,
+        maxBuffer: 4 * 1024 * 1024,
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' },
+      },
       (error, stdout, stderr) => {
-        const code = (error as { code?: number | null } | null)?.code ?? 0
-        if (error && typeof code !== 'number') {
+        const code = (error as { code?: unknown } | null)?.code
+        if (typeof code === 'string') {
           reject(error)
           return
         }
-        resolve({ code, stdout, stderr })
+        const timedOut = error?.killed === true || Boolean(error?.signal)
+        resolve({ code: error ? (typeof code === 'number' ? code : null) : 0, stdout, stderr, ...(timedOut ? { timedOut } : {}) })
       },
     )
-    child.stdin?.end()
+    child.stdin?.end(input)
   })
 }
 
 export function reason(result: RunResult): string {
+  if (result.timedOut) return `It timed out after ${INSTALL_TIMEOUT_MS / 1000} seconds and was stopped.`
   const text = `${result.stderr}\n${result.stdout}`
     .split(/\r?\n/)
     .map((line) => line.trim())

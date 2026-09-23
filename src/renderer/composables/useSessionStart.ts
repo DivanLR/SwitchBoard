@@ -150,6 +150,7 @@ export function useSessionStart(opts: {
         containerOn.value,
         startEngine.value,
         canCarry.value && carryTranscript.value ? lastTranscript.value?.sessionId : undefined,
+        wasResuming ? previous?.id : undefined,
       )
       watchForImmediateCrash(target, session.id, wasResuming)
     } catch (e) {
