@@ -46,6 +46,11 @@ const hostNote = computed(() => {
 })
 
 onMounted(() => {
+  const seed = flow.takeSeed(props.projectId)
+  if (seed?.kind === 'spec') {
+    source.value = 'spec'
+    specId.value = seed.specId
+  }
   void flow.loadExistingSpecs(props.projectId)
   void flow.detectStacks(props.projectId)
   for (const item of candidates.value) void flow.detectStacks(item.id)

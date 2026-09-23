@@ -773,9 +773,66 @@ export interface SpecSummary {
   tasksDone: number
 }
 
+export interface SpecSection {
+  title: string
+  body: string
+}
+
+export interface ResolvedClarification {
+  question: string
+  answer: string
+}
+
+export interface SpecTask {
+  id: string
+  label: string
+  done: boolean
+}
+
+export interface SpecPhase {
+  label: string
+  tasks: SpecTask[]
+}
+
+export interface SpecConvergence {
+  rounds: number
+  open: number
+}
+
+export interface SpecDetail extends SpecSummary {
+  description: string
+  path: string
+  sections: SpecSection[]
+  plan: SpecSection[]
+  phases: SpecPhase[]
+  clarifications: string[]
+  resolvedClarifications: ResolvedClarification[]
+  convergence: SpecConvergence
+}
+
+export type ConstitutionState = 'missing' | 'template' | 'written'
+
+export type SddProcess = 'bug' | 'assess'
+
+export type FlowBugResult = 'verified' | 'partial' | 'failed'
+
+export type FlowDecision = 'go' | 'needs-clarification' | 'kill'
+
+export interface SddEntry {
+  slug: string
+  title: string
+  files: string[]
+  verdict: string | null
+  severity: string | null
+}
+
 export interface SpecKitState {
-  installed: boolean 
+  installed: boolean
   specs: SpecSummary[]
+  constitution: ConstitutionState
+  bugs: SddEntry[]
+  ideas: SddEntry[]
+  extensions: Record<SddProcess, boolean>
 }
 
 export type DiffFileStatus = 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked'
@@ -794,6 +851,7 @@ export interface DiffListResult {
 }
 
 export type SectionKind =
+  | 'spec'
   | 'tests'
   | 'diff'
   | 'diagram'
@@ -827,6 +885,7 @@ export function sessionName(
 }
 
 const SECTION_LABELS: Record<SectionKind, string> = {
+  spec: 'SDD',
   tests: 'Tests',
   diff: 'Diff',
   diagram: 'Diagram',

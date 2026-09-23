@@ -140,7 +140,7 @@ const APP_EXIT_NOTE = 'Switchboard closed, so this session ended. Its conversati
 
 const MODELS_TTL_MS = 10 * 60_000
 
-const NEVER_REUSED: ReadonlySet<SectionKind> = new Set(['diagram'])
+const NEVER_REUSED: ReadonlySet<SectionKind> = new Set(['diagram', 'spec'])
 
 const UPDATABLE_KINDS: ReadonlySet<EventKind> = new Set([
   'prompt',

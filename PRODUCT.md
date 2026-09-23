@@ -152,6 +152,13 @@ Confirmed functionality:
   autopilot allows at most two automatic fix rounds on review, retries a lost
   session once, and stops before the pull request unless the developer also
   chose to raise it at the end.
+- An SDD tab over the project's Spec Kit folders, in three processes. Features
+  (`specs/<id>/`) shows the spec, plan, tasks progress, clarifications and the
+  converge state; Bugs (`.specify/bugs/<slug>/`) shows each report and the final
+  verdict; Ideas (`.specify/assessments/<slug>/`) shows each assessment and its
+  decision. It says whether the constitution is written, offers to write it,
+  runs every command of each process in a fresh session, installs the bug and
+  assess extensions with `specify extension add`, and opens a feature in Flow.
 - A Tests section that dispatches the .NET or Angular suites through a session
   and reports what the run measured, gate by gate.
 - A Diff tab, live session only, listing every changed file in the working tree
@@ -216,9 +223,13 @@ switches or removes each one. An imported skill is a slash command in every
 session and appears in the composer suggestions, so it has no section of its
 own.
 
+The Specs tab was restored the same day as the SDD tab, at the owner's
+direction that all three Spec Kit processes (Spec-Driven Development, Bug
+fixing, Idea assessment) be "part of my SDD for flow and for SDD tab".
+
 This supersedes the constraint recorded on 2026-08-13 that "all six sections"
 (Session, Specs, Tests, Diff, Cleanup, Diagrams) must survive. The sections now
-are Session, Tests, Diff and Diagrams, with Flow as a popup and the Database MCP
+are Session, SDD, Tests, Diff and Diagrams, with Flow as a popup and the Database MCP
 view alongside. Anything reading the six section rule as binding is reading a
 superseded document.
 

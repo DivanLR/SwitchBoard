@@ -53,6 +53,7 @@ export interface MockDriver {
   endSession: (sessionId: string) => void
   crashSession: (sessionId: string, detail: string) => void
   setSpecKit: (projectId: string, state: Record<string, unknown>) => void
+  setExtensionInstallError: (message: string | null) => void
   setStartDelay: (ms: number) => void
   setDiff: (projectId: string, result: { gitNotice: string | null; files: Record<string, unknown>[] }) => void
   setFileDiff: (projectId: string, path: string, content: Record<string, unknown>) => void
@@ -638,7 +639,7 @@ export function installMockHost(scenario: MockScenario): void {
   let startDelayMs = 250
 
   const sectionSessions = new Map<string, MockSession>()
-  const neverReused: ReadonlySet<SectionKind> = new Set(['diagram'])
+  const neverReused: ReadonlySet<SectionKind> = new Set(['diagram', 'spec'])
   async function sectionSession(projectId: string, kind: SectionKind): Promise<MockSession> {
     const key = `${projectId}|${kind}`
     const live = neverReused.has(kind) ? undefined : sectionSessions.get(key)
@@ -646,6 +647,32 @@ export function installMockHost(scenario: MockScenario): void {
     const started = (await invokeHandlers['sessions.start']({ projectId })) as MockSession
     sectionSessions.set(key, started)
     return started
+  }
+
+  let extensionInstallError: string | null = null
+
+  function specKitOf(projectId: string): AnyRecord {
+    return {
+      installed: false,
+      specs: [],
+      constitution: 'missing',
+      bugs: [],
+      ideas: [],
+      extensions: { bug: false, assess: false },
+      ...(specKitByProject.get(projectId) ?? {}),
+    }
+  }
+
+  function specKitState(projectId: string): AnyRecord {
+    const state = specKitOf(projectId)
+    return {
+      installed: state.installed,
+      specs: state.specs,
+      constitution: state.constitution,
+      bugs: state.bugs,
+      ideas: state.ideas,
+      extensions: state.extensions,
+    }
   }
 
   const invokeHandlers: Record<InvokeMethod, (req: AnyRecord) => unknown> = {
@@ -1123,6 +1150,31 @@ export function installMockHost(scenario: MockScenario): void {
       const state = specKitByProject.get(String(req.projectId)) as { specs?: AnyRecord[] } | undefined
       return (state?.specs ?? []).map((spec) => ({ id: spec.id, title: spec.title }))
     },
+    'specs.state': (req) => specKitState(String(req.projectId)),
+    'specs.detail': (req) => {
+      const details = specKitOf(String(req.projectId)).details as AnyRecord | undefined
+      return details?.[String(req.specId)] ?? null
+    },
+    'specs.install': (req) => {
+      const projectId = String(req.projectId)
+      specKitByProject.set(projectId, { ...specKitOf(projectId), installed: true })
+      return specKitState(projectId)
+    },
+    'specs.installExtension': async (req) => {
+      const projectId = String(req.projectId)
+      await new Promise((resolve) => setTimeout(resolve, 150))
+      if (extensionInstallError) throw { code: 'INTERNAL', message: extensionInstallError }
+      const current = specKitOf(projectId)
+      const extensions = { ...(current.extensions as AnyRecord), [String(req.name)]: true }
+      specKitByProject.set(projectId, { ...current, extensions })
+      return specKitState(projectId)
+    },
+    'specs.report': (req) => {
+      const reports = specKitOf(String(req.projectId)).reports as Record<string, string> | undefined
+      const dir = req.process === 'bug' ? 'bugs' : 'assessments'
+      const content = reports?.[`${String(req.process)}/${String(req.slug)}/${String(req.file)}`]
+      return content === undefined ? null : { path: `.specify/${dir}/${String(req.slug)}/${String(req.file)}`, content }
+    },
     'flow.detectStacks': (req) => [...(flowStacksByProject.get(String(req.projectId)) ?? ['dotnet'])],
     'flow.start': async (req) => {
       const projectId = String(req.projectId)
@@ -1594,6 +1646,9 @@ export function installMockHost(scenario: MockScenario): void {
       availableModels = models
     },
     setSpecKit: (projectId, state) => specKitByProject.set(projectId, state),
+    setExtensionInstallError: (message) => {
+      extensionInstallError = message
+    },
     setStartDelay: (ms) => {
       startDelayMs = ms
     },

@@ -32,7 +32,10 @@ import { toRawLines } from '@shared/stream-lines'
 import { useSectionsStore } from '@renderer/stores/sections'
 import { useDiffStore } from '@renderer/stores/diff'
 import { useFlowStore } from '@renderer/stores/flow'
+import { useSpecsStore } from '@renderer/stores/specs'
+import { useToastsStore } from '@renderer/stores/toasts'
 import Icon from '@renderer/components/Icon.vue'
+import SpecsView from '@renderer/views/SpecsView.vue'
 import TestsView from '@renderer/views/TestsView.vue'
 import DiffView from '@renderer/views/DiffView.vue'
 import DiagramsView from '@renderer/views/DiagramsView.vue'
@@ -53,6 +56,7 @@ const settingsStore = useSettingsStore()
 const sections = useSectionsStore()
 const diff = useDiffStore()
 const flow = useFlowStore()
+const specs = useSpecsStore()
 
 const outputPrefs = computed(() => ({
   fontSize: settingsStore.settings?.fontSize ?? 'md',
@@ -71,11 +75,17 @@ const shellEverOpened = ref(false)
 const mainTab = ref<
   | 'session'
   | 'terminal'
+  | 'spec'
   | 'tests'
   | 'diff'
   | 'diagrams'
 >('session')
 const diffCount = computed(() => diff.resultFor(props.project.id).files.length)
+const editTarget = ref<string | null>(null)
+
+watch(mainTab, (tab) => {
+  if (tab !== 'spec') editTarget.value = null
+})
 
 const composer = ref('')
 const restoredDraft = ref<string | null>(null)
@@ -236,6 +246,7 @@ watch(
     composer.value = composerDrafts.get(projectId) ?? ''
     restoredDraft.value = null
     mainTab.value = 'session'
+    editTarget.value = null
     terminalEverOpened.value = false
     shellEverOpened.value = false
     terminalMode.value = 'chat'
@@ -489,12 +500,26 @@ async function installPlugin(marketplace: string, pkg: string): Promise<void> {
 const installDiagramPlugin = (): Promise<void> =>
   installPlugin(DIAGRAM_PLUGIN.marketplace, DIAGRAM_PLUGIN.pkg)
 
+function onSetTarget(label: string): void {
+  editTarget.value = label
+  void nextTick(() => composerEl.value?.focus())
+}
+
 async function send(): Promise<void> {
   const text = composer.value.trim()
   if (!text) return
   busy.value = true
   try {
+    const target = editTarget.value
+    if (target) {
+      await specs.run(props.project.id, `✎ Spec edit → ${target}: ${text}`, 'spec-edit', 'Applying your edit')
+      composer.value = ''
+      editTarget.value = null
+      return
+    }
     if (await deliver(text)) composer.value = ''
+  } catch (error) {
+    useToastsStore().show('error', 'Could not start that edit', errorMessage(error))
   } finally {
     busy.value = false
   }
@@ -633,6 +658,14 @@ const { dragKind, onPaneDragOver, onPaneDragLeave, onPaneDrop } = projectRefs
       </button>
       <button
         class="ui-tab"
+        :class="{ sel: mainTab === 'spec', 'is-selected': mainTab === 'spec' }"
+        data-testid="tab-sdd"
+        @click="mainTab = 'spec'"
+      >
+        SDD
+      </button>
+      <button
+        class="ui-tab"
         :class="{ sel: mainTab === 'tests', 'is-selected': mainTab === 'tests' }"
         data-testid="tab-tests"
         @click="mainTab = 'tests'"
@@ -726,8 +759,14 @@ const { dragKind, onPaneDragOver, onPaneDragLeave, onPaneDrop } = projectRefs
       @chat="terminalMode = 'chat'"
     />
 
+    <SpecsView
+      v-if="mainTab === 'spec'"
+      :project-id="project.id"
+      @set-target="onSetTarget"
+      @open-flow="emit('open-flow')"
+    />
     <TestsView
-      v-if="mainTab === 'tests'"
+      v-else-if="mainTab === 'tests'"
       :project-id="project.id"
       :project-name="project.name"
       :branch="liveSession?.branch ?? endedSession?.branch ?? null"
@@ -769,9 +808,10 @@ const { dragKind, onPaneDragOver, onPaneDragLeave, onPaneDrop } = projectRefs
     </SessionStream>
 
     <SessionComposer
-      v-if="mainTab === 'session'"
+      v-if="mainTab === 'session' || editTarget"
       ref="composerCmp"
       v-model="composer"
+      :target="editTarget"
       :project="project"
       :live="!!liveSession"
       :send-to="sendTo"
@@ -783,6 +823,7 @@ const { dragKind, onPaneDragOver, onPaneDragLeave, onPaneDrop } = projectRefs
       :suggest="suggest"
       :ref-editor="projectRefs"
       @send="send()"
+      @clear-target="editTarget = null"
       @to-bottom="scrollToBottom()"
       @confirm-stop="confirmStop()"
       @cancel-stop="cancelStop()"

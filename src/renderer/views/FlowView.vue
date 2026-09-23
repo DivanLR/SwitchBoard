@@ -16,6 +16,7 @@ const removeConfirm = ref(false)
 
 let stopPush: (() => void) | null = null
 onMounted(() => {
+  if (flow.seed?.projectId === props.projectId) creating.value = true
   void flow.load(props.projectId)
   stopPush = window.switchboard.on('push.flowChanged', (push) => {
     if (push.projectId === props.projectId) flow.applyPush(push.projectId, push.runs, push.stages)

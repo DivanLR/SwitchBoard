@@ -24,6 +24,9 @@ import type {
   SessionMode,
   Settings,
   SkillImportResult,
+  SddProcess,
+  SpecDetail,
+  SpecKitState,
   SpecSummary,
   VerifyRun,
 } from './domain'
@@ -198,6 +201,14 @@ export interface InvokeMap {
   'skills.import': { req: { url: string }; res: SkillImportResult }
   'skills.setEnabled': { req: { name: string; enabled: boolean }; res: CustomSkill[] }
   'skills.remove': { req: { name: string }; res: CustomSkill[] }
+  'specs.state': { req: { projectId: string }; res: SpecKitState }
+  'specs.detail': { req: { projectId: string; specId: string }; res: SpecDetail | null }
+  'specs.install': { req: { projectId: string }; res: SpecKitState }
+  'specs.installExtension': { req: { projectId: string; name: SddProcess }; res: SpecKitState }
+  'specs.report': {
+    req: { projectId: string; process: SddProcess; slug: string; file: string }
+    res: { path: string; content: string } | null
+  }
   'diff.list': { req: { projectId: string }; res: DiffListResult }
   'diff.file': { req: { projectId: string; path: string }; res: FileDiffContent | null }
   'diff.apply': {

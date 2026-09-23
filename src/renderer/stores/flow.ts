@@ -17,6 +17,7 @@ const state = reactive({
   stacksByProject: {} as Record<string, FlowStackId[]>,
   busy: null as string | null,
   error: null as string | null,
+  seed: null as { projectId: string; source: FlowStartSource } | null,
 })
 
 const runs = computed<FlowRun[]>(() =>
@@ -86,6 +87,17 @@ const store = reactive({
 
   async loadExistingSpecs(projectId: string): Promise<void> {
     state.existingSpecs = await invoke('flow.existingSpecs', { projectId }).catch(() => [])
+  },
+
+  seedIntake(projectId: string, source: FlowStartSource): void {
+    state.seed = { projectId, source }
+  },
+
+  takeSeed(projectId: string): FlowStartSource | null {
+    const seed = state.seed
+    if (seed?.projectId !== projectId) return null
+    state.seed = null
+    return seed.source
   },
 
   async detectStacks(projectId: string): Promise<void> {
