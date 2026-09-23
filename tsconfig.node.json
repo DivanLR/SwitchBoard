@@ -4,6 +4,7 @@
     "target": "ES2023",
     "lib": ["ES2023"],
     "resolveJsonModule": true,
+    "rewriteRelativeImportExtensions": true,
     "types": ["node"],
     "paths": {
       "@shared/*": ["./src/shared/*"],

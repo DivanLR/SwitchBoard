@@ -615,14 +615,14 @@ const MIGRATIONS: Migration[] = [
         DROP TABLE mode_carry;
       `)
       for (const statement of [
+        "UPDATE sessions SET sdkSessionId = NULL WHERE engine = 'codex'",
         'ALTER TABLE sessions DROP COLUMN engine',
         'ALTER TABLE sessions DROP COLUMN bypassPermissions',
         'ALTER TABLE projects DROP COLUMN useContainers',
       ]) {
         try {
           db.exec(statement)
-        } catch {
-        }
+        } catch {}
       }
     },
   },

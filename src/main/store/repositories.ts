@@ -559,6 +559,19 @@ class StandingRulesRepo {
   }
 }
 
+function legacyMainModel(stored: Record<string, unknown>): string {
+  const text = (value: unknown): string | undefined => (typeof value === 'string' ? value : undefined)
+  const work = text(stored.workModel) ?? 'default'
+  const intelligent =
+    'intelligentModel' in stored
+      ? text(stored.intelligentModel)
+      : work !== 'default'
+        ? work
+        : (text(stored.planModel) ?? 'default')
+  const basic = stored.modelMode === 'basic' || stored.modelMode === 'advisor'
+  return (basic ? (text(stored.workerModel) ?? intelligent) : intelligent) ?? DEFAULT_SETTINGS.model
+}
+
 class SettingsRepo {
   constructor(private db: AppDatabase) {}
 
@@ -571,31 +584,12 @@ class SettingsRepo {
     if (typeof stored.databaseMcpServer === 'string' && !stored.databaseMcpServers) {
       stored.databaseMcpServers = [stored.databaseMcpServer]
     }
-    delete stored.databaseMcpServer
     if (!('mcpActiveServers' in stored) && Array.isArray(stored.databaseMcpServers)) {
       stored.mcpActiveServers = [...stored.databaseMcpServers]
     }
-    if (!('intelligentModel' in stored) && !('model' in stored)) {
-      const work = typeof stored.workModel === 'string' ? stored.workModel : 'default'
-      const plan = typeof stored.planModel === 'string' ? stored.planModel : 'default'
-      stored.intelligentModel = work !== 'default' ? work : plan
-    }
-    if (!('model' in stored)) {
-      stored.model = typeof stored.intelligentModel === 'string' ? stored.intelligentModel : DEFAULT_SETTINGS.model
-    }
-    delete stored.intelligentModel
-    delete stored.workerModel
-    delete stored.autoModelRouting
-    delete stored.modelMode
-    delete stored.planModel
-    delete stored.workModel
-    delete stored.dailySpendLimit
-    delete stored.projectApiBase
-    delete stored.projectApiStart
-    delete stored.projectApiQa
-    delete stored.projectApiQaHeaders
-    delete stored.favouriteSkills
-    return { ...DEFAULT_SETTINGS, ...stored }
+    if (!('model' in stored)) stored.model = legacyMainModel(stored)
+    const merged: Record<string, unknown> = { ...DEFAULT_SETTINGS, ...stored }
+    return Object.fromEntries(Object.keys(DEFAULT_SETTINGS).map((key) => [key, merged[key]])) as unknown as Settings
   }
 
   set(patch: Partial<Settings>): Settings {

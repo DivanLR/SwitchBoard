@@ -108,4 +108,13 @@ describe('sessionName', () => {
   it('falls back to the branch when no suite is named', () => {
     expect(sessionName('s1', { kinds: { s1: 'tests' } }, 'main')).toBe('Tests - main')
   })
+
+  it.each(['spec', 'cleanup', 'skills', 'security'])(
+    'gives no name to a session from the retired %s section, rather than "undefined"',
+    (retired) => {
+      const kinds = { s1: retired } as never
+      expect(sessionName('s1', { kinds }, 'main', 'completed')).toBeNull()
+      expect(sessionName('s1', { kinds }, null, 'app_exit')).toBeNull()
+    },
+  )
 })

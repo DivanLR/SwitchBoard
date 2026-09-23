@@ -1,7 +1,8 @@
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
-import { openDatabase } from './db'
-import { runRetention } from './retention'
+import { DatabaseSync } from 'node:sqlite'
+import { openDatabase } from './db.ts'
+import { runRetention } from './retention.ts'
 
 const VACUUM_MIN_DELETIONS = 500
 
@@ -21,8 +22,16 @@ if (!existsSync(dbPath)) {
   process.exit(1)
 }
 
-const db = openDatabase(dbPath)
-const result = runRetention(db, { dryRun })
+const db = dryRun ? new DatabaseSync(dbPath, { readOnly: true }) : openDatabase(dbPath)
+let result: ReturnType<typeof runRetention>
+try {
+  result = runRetention(db, { dryRun })
+} catch (error) {
+  console.error(
+    `Could not read ${dbPath}: ${(error as Error).message}. A database from an older Switchboard has to be opened by the app once first.`,
+  )
+  process.exit(1)
+}
 console.log(
   `${result.dryRun ? '[dry run] Would delete' : 'Deleted'} ${result.eventsDeleted} event rows and ${result.decisionsDeleted} resolved decisions (database: ${dbPath}).`,
 )

@@ -843,9 +843,10 @@ export function sessionName(
   const done = endReason === 'completed'
   const on = done ? ' - Complete' : branch ? ` - ${branch}` : ''
   const kind = work.kinds?.[sessionId]
+  const label: string | undefined = kind && SECTION_LABELS[kind]
   const suite = work.suites?.[sessionId]
-  if (kind && suite) return `${SECTION_LABELS[kind]}: ${suite}${done ? ' - Complete' : ''}`
-  if (kind) return `${SECTION_LABELS[kind]}${on}`
+  if (label && suite) return `${label}: ${suite}${done ? ' - Complete' : ''}`
+  if (label) return `${label}${on}`
   if (work.verifyRunSessionIds?.includes(sessionId)) return `Tests${on}`
   return null
 }
