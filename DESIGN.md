@@ -197,7 +197,7 @@ The measurement graticule named in the direction contract (a drawn grid across t
 
 ## Elevation & Depth
 
-The system is flat with a hairline lip, not a shadow-driven or bevelled material. `--elev` is a 1px inset highlight only (`inset 0 1px 0 rgba(221,225,230,0.06)` dark), used for a barely-there top edge on raised surfaces. Real box-shadows (`--shadow-dlg`, `--shadow-dd`, `--shadow-menu`) are reserved for the overlay tier only: dialogs, dropdowns and menus that sit above the graticule plane. Every shadow in the system carries both an offset and a blur; a hard, zero-blur block shadow belonged to the rejected pixel-grid world and has no licence here. No gradients and no glows exist anywhere in the build (`--gloss: none`, `--green-glow: none`): a coloured glow was judged decoration rather than depth and was removed from every button that is not the composer's Send.
+The system is flat with a hairline lip, not a shadow-driven or bevelled material. `--elev` is a 1px inset highlight only (`inset 0 1px 0 rgba(221,225,230,0.06)` dark), used for a barely-there top edge on raised surfaces. Real box-shadows (`--shadow-dlg`, `--shadow-dd`, `--shadow-menu`) are reserved for the overlay tier only: dialogs, dropdowns and menus that sit above the graticule plane. Every shadow in the system carries both an offset and a blur; a hard, zero-blur block shadow belonged to the rejected pixel-grid world and has no licence here. No gradients and no glows exist anywhere in the build (`--green-glow: none`): a coloured glow was judged decoration rather than depth and was removed from every button that is not the composer's Send.
 
 ### Shadow Vocabulary
 - **Elevation hairline** (`inset 0 1px 0 rgba(221,225,230,0.06)`): the only "depth" a flat panel or card gets.
@@ -261,11 +261,11 @@ depth, motion and behaviour.
 
 ### Navigation
 - **Sidebar rows:** system-UI face, mono only for names/paths where alignment matters; a status "fold mark" glyph substitutes for a coloured dot; rows expand to show a branch/timer line when selected or still running.
-- **Tabs (`.ui-tabs` / `.ui-tab`):** one tab component at every depth (the main Session row, Specs parts, Tests sub tabs, Inbox, MCP). The selected tab takes green text and a 1px inset bottom rule in trace-green (`box-shadow: inset 0 -1px 0 var(--green)`), not a border property, so it does not shift layout. The 2px rule earlier builds drew is the carried-over defect named under Don'ts; it is gone.
+- **Tabs (`.ui-tabs` / `.ui-tab`):** one tab component at every depth (the main Session row, Tests sub tabs, the Flow popup, Inbox, MCP). The selected tab takes green text and a 1px inset bottom rule in trace-green (`box-shadow: inset 0 -1px 0 var(--green)`), not a border property, so it does not shift layout. The 2px rule earlier builds drew is the carried-over defect named under Don'ts; it is gone.
 
 ### Shared page primitives (added 2026-09-22)
 
-Every section, popup body and side panel follows one skeleton, built from the `ui-` classes at the end of `styles.css` and nothing else: `.ui-head` (a one-line `.ui-meaning` sentence on the left, up to three `.ui-controls` on the right), an optional `.ui-toolbar`, an optional `.ui-tabs` strip, then the `.ui-body` canvas holding `.ui-card`s (with `.ui-card-head`, `.ui-title`, `.ui-meta`), `.ui-row`s (`.ui-name`, `.ui-desc`, `.ui-action`), a `.ui-empty` state or `.ui-empty-line`, and `.ui-err` or `.ui-err-banner`; `.ui-footer` closes a section that has a persistent bottom affordance. `.ui-segments`/`.ui-seg` is the segmented control, `.ui-chip` the neutral non-status tag (status stays with `.pill`, `.chip-risk`, `.chip-marker`). Controls share one 27px height. The primitives add no token; they only spend the existing ones. A slot with nothing to show is omitted, never rendered empty.
+Every section, popup body and side panel follows one skeleton, built from the `ui-` classes at the end of `styles.css` and nothing else: `.ui-head` (a one-line `.ui-meaning` sentence on the left, up to three `.ui-controls` on the right), an optional `.ui-toolbar`, an optional `.ui-tabs` strip, then the `.ui-body` canvas holding `.ui-card`s (with `.ui-card-head`, `.ui-title`, `.ui-meta`), `.ui-row`s (with `.ui-desc`), a `.ui-empty` state or `.ui-empty-line`, and `.ui-err` or `.ui-err-banner`; `.ui-footer` closes a section that has a persistent bottom affordance. `.ui-segments`/`.ui-seg` is the segmented control, `.ui-chip` the neutral non-status tag (status stays with `.pill`, `.chip-risk`, `.chip-marker`). Controls share one 27px height. The primitives add no token; they only spend the existing ones. A slot with nothing to show is omitted, never rendered empty.
 
 ## Do's and Don'ts
 
@@ -276,11 +276,11 @@ Every section, popup body and side panel follows one skeleton, built from the `u
 - **Do** hold identity colours (teal, purple) clear of the status colours (green, amber, red) so an identity marker can never be misread as a state.
 
 ### Don't:
-- **Don't** add a gradient, a gloss layer, or a coloured glow to any button or panel. `--gloss` and `--green-glow` are both `none` throughout the build.
+- **Don't** add a gradient, a gloss layer, or a coloured glow to any button or panel. `--green-glow` is `none` throughout the build.
 - **Don't** revive the sixteen-ink indexed palette, the DotGothic16 bitmap face, ordered dither, hard block shadows, bevelled edges, 0px card radii, or a 12px+ type floor. That world was built and explicitly rejected; PRODUCT.md records it as anti-reference, not as a style to draw from.
 - **Don't** treat a 2px coloured border-left/inset rule as a system pattern for "selected." It appears on a few rows (see below) as a carried-over defect from an earlier world, not as an established selection idiom; the craft floor for this world holds selection marks to 1px.
 - **Don't** promise a drawn measurement graticule or per-lane stepping traces as shipped behaviour. Neither is built; both remain plain hairline borders and static rows respectively.
 
 ---
 
-**Not canonized:** several selection states (`Sidebar.vue` `.sub-line.sel`, `SpecsView.vue` `.pt.sel`) still draw a 2px coloured inset rule to mark "selected," which predates this world and is thicker than the 1px hairline discipline the rest of the build follows. It is recorded above as a known carry-over defect, not written into the Components or Shapes sections as a system rule, because canonizing it would turn one unfixed inconsistency into a pattern future surfaces are told to repeat.
+**Not canonized:** several selection states (`.sub-line.sel` in the sidebar project row) still draw a 2px coloured inset rule to mark "selected," which predates this world and is thicker than the 1px hairline discipline the rest of the build follows. It is recorded above as a known carry-over defect, not written into the Components or Shapes sections as a system rule, because canonizing it would turn one unfixed inconsistency into a pattern future surfaces are told to repeat.
