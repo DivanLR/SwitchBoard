@@ -29,6 +29,7 @@ const verify = useVerifyStore()
 type SubTab = 'coverage' | 'quality' | 'evidence' | 'skill'
 const subTab = ref<SubTab>('evidence')
 const selected = ref<string[] | null>(null)
+const picking = ref(false)
 
 let stopPush: (() => void) | null = null
 onMounted(() => {
@@ -44,6 +45,7 @@ watch(
   () => props.projectId,
   (id) => {
     selected.value = null
+    picking.value = false
     void verify.load(id)
   },
 )
@@ -187,6 +189,8 @@ const detectHint = computed(() =>
 )
 
 function chooseStack(id: string): void {
+  picking.value = false
+  if (id === chosenId.value) return
   selected.value = null
   void settingsStore.save({
     projectTestStacks: { ...(settingsStore.settings?.projectTestStacks ?? {}), [props.projectId]: id },
@@ -355,22 +359,33 @@ function statusWord(run: VerifyRun): string {
 
 <template>
   <div class="tests" data-testid="tests-view">
-    <template v-if="!stack">
+    <template v-if="!stack || picking">
       <div class="intro">
         Pick the verification stack for <span class="proj">{{ projectName }}</span> — it decides which
         suites, gates and commands this section offers.
+        <span v-if="stack" class="hint" data-testid="tests-current-hint">
+          Current stack: {{ profileName }}. Pick it again to keep it.
+        </span>
         <span class="hint" data-testid="tests-detect-hint">{{ detectHint }}</span>
       </div>
       <button
         v-for="s in TEST_STACKS"
         :key="s.id"
         class="ui-card is-actionable stack-row"
+        :class="{ 'is-current': s.id === chosenId }"
         :data-testid="`tests-stack-${s.id}`"
+        :aria-current="s.id === chosenId ? 'true' : undefined"
         @click="chooseStack(s.id)"
       >
         <span class="stack-name">{{ s.label }}</span>
         <span class="stack-sub">{{ s.suites.map((x) => x.label).join(' · ') }}</span>
+        <span v-if="s.id === chosenId" class="badge-count cur" :data-testid="`tests-stack-${s.id}-current`">
+          <Icon name="check" :size="11" /> CURRENT
+        </span>
         <span v-if="detected.some((d) => d.stackId === s.id)" class="badge-count det">DETECTED</span>
+      </button>
+      <button v-if="stack" class="link" data-testid="tests-keep-stack" @click="picking = false">
+        keep {{ profileName }}
       </button>
     </template>
 
@@ -395,7 +410,7 @@ function statusWord(run: VerifyRun): string {
           >
             {{ isFullScreen ? 'exit full screen' : 'full screen' }}
           </button>
-          <button class="link" data-testid="tests-change-stack" @click="chooseStack('')">change stack</button>
+          <button class="link" data-testid="tests-change-stack" @click="picking = true">change stack</button>
         </div>
         <div class="prof-meta">
           <span v-if="branch">on <span class="mono">{{ branch }}</span></span
@@ -887,6 +902,22 @@ function statusWord(run: VerifyRun): string {
   background: color-mix(in srgb, var(--green) 10%, transparent);
   border-radius: var(--rp);
   padding: 1px 9px;
+}
+
+.cur {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-micro);
+  color: var(--text-bright);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--rp);
+  padding: 1px 9px;
+}
+
+.stack-row.is-current {
+  border-color: var(--green);
 }
 
 .prof {

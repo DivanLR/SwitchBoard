@@ -674,6 +674,17 @@ test('the stack choice persists per project and can be changed', async ({ page }
 
   await page.getByTestId('tests-change-stack').click()
   await expect(page.getByTestId('tests-stack-dotnet')).toBeVisible()
+  await expect(page.getByTestId('tests-stack-dotnet-current')).toBeVisible()
+  await expect(page.getByTestId('tests-stack-dotnet')).toHaveAttribute('aria-current', 'true')
+  await expect(page.getByTestId('tests-stack-angular-current')).toHaveCount(0)
+  await expect(page.getByTestId('tests-current-hint')).toContainText('Current stack')
+
+  await page.getByTestId('tests-keep-stack').click()
+  await expect(page.getByTestId('tests-run')).toBeVisible()
+
+  await page.getByTestId('tests-change-stack').click()
+  await page.getByTestId('tests-stack-dotnet').click()
+  await expect(page.getByTestId('tests-run')).toBeVisible()
 })
 
 test('a figure checked against the runner’s own report file is marked as checked', async ({ page }) => {
