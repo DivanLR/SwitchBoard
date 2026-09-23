@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import {
-  FLOW_STAGES,
   FLOW_STAGE_LABELS,
+  flowStagesOf,
+  type FlowKind,
   type FlowStage,
   type FlowStageRecord,
   type FlowStageStatus,
@@ -9,9 +11,12 @@ import {
 import Icon from '@renderer/components/Icon.vue'
 
 const props = defineProps<{
+  kind: FlowKind
   stages: FlowStageRecord[]
   selected: FlowStage
 }>()
+
+const rail = computed(() => flowStagesOf(props.kind))
 const emit = defineEmits<{ (e: 'select', stage: FlowStage): void }>()
 
 function statusOf(stage: FlowStage): FlowStageStatus {
@@ -34,9 +39,10 @@ const STATUS_ICON: Record<FlowStageStatus, string> = {
     role="tablist"
     aria-label="Stages"
     data-testid="flow-stage-rail"
+    :data-kind="kind"
   >
     <button
-      v-for="s in FLOW_STAGES"
+      v-for="s in rail"
       :key="s"
       type="button"
       role="tab"

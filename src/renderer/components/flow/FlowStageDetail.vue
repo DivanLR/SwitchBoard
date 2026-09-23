@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import {
   FLOW_STAGE_LABELS,
   flowStageActions,
+  flowStagesOf,
   type FlowRun,
   type FlowStageAction,
   type FlowStageRecord,
@@ -14,6 +15,7 @@ import MiniTerminal from '@renderer/components/MiniTerminal.vue'
 import FlowArtefact from '@renderer/components/flow/FlowArtefact.vue'
 
 const props = defineProps<{ run: FlowRun; stage: FlowStageRecord }>()
+const emit = defineEmits<{ (e: 'start-feature', runId: string): void }>()
 
 const flow = useFlowStore()
 const feedback = ref('')
@@ -39,17 +41,22 @@ const current = computed(() => !props.run.finishedAt && props.stage.stage === pr
 const actions = computed(() => flowStageActions(props.run, props.stage))
 const buttons = computed(() => actions.value.filter((action) => action !== 'revise'))
 const canRevise = computed(() => actions.value.includes('revise'))
+const last = computed(() => {
+  const stages = flowStagesOf(props.run.kind)
+  return props.stage.stage === stages[stages.length - 1]
+})
 
 function label(action: FlowStageAction): string {
-  if (action === 'approve') return props.stage.stage === 'ship' ? 'Finish' : 'Approve'
+  if (action === 'approve') return last.value ? 'Finish' : 'Approve'
   if (action === 'fix') return 'Fix findings'
   if (action === 'retry') return 'Retry'
   if (action === 'ship') return 'Raise pull request'
+  if (action === 'feature') return 'Start a feature from this decision'
   return props.stage.stage === 'ship' ? 'Finish without a pull request' : 'Skip this stage'
 }
 
 function testId(action: FlowStageAction): string {
-  return action === 'approve' && props.stage.stage === 'ship' ? 'flow-finish' : `flow-${action}`
+  return action === 'approve' && last.value ? 'flow-finish' : `flow-${action}`
 }
 
 function perform(action: FlowStageAction): void {
@@ -59,6 +66,7 @@ function perform(action: FlowStageAction): void {
   else if (action === 'retry') void flow.retry(runId)
   else if (action === 'ship') void flow.ship(runId)
   else if (action === 'skip') void flow.skip(runId)
+  else if (action === 'feature') emit('start-feature', runId)
 }
 
 async function sendRevise(): Promise<void> {

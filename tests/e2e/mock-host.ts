@@ -55,6 +55,7 @@ export interface MockDriver {
   endSession: (sessionId: string) => void
   crashSession: (sessionId: string, detail: string) => void
   setSpecKit: (projectId: string, state: Record<string, unknown>) => void
+  setExtensionInstallError: (message: string | null) => void
   setStartDelay: (ms: number) => void
   setDiff: (projectId: string, result: { gitNotice: string | null; files: Record<string, unknown>[] }) => void
   setFileDiff: (projectId: string, path: string, content: Record<string, unknown>) => void
@@ -78,7 +79,7 @@ export interface MockDriver {
   setStatus: (sessionId: string, status: string) => void
   reportVerifyResult: (projectId: string, status: string, report: unknown) => void
   setAdoFeatures: (features: { id: string; title: string; state?: string | null }[]) => void
-  setAdoConnected: (on: boolean) => void
+  setAdoConnected: (on: boolean, why?: string) => void
   reportFlowStage: (
     runId: string,
     stage: string,
@@ -120,6 +121,7 @@ export interface MockDriver {
     prOpens: string[]
     pluginInstalls: { marketplace: string; pkg: string }[]
     diffApplies: { projectId: string; path: string; lines: string[]; instruction: string }[]
+    adoReconnects: number
   }
 }
 
@@ -457,8 +459,16 @@ export function installMockHost(scenario: MockScenario): void {
   const flowStacksByProject = new Map<string, string[]>()
   let adoFeatures: AnyRecord[] = []
   let adoConnected = true
+  let adoWhy = 'it failed to start'
+  let adoReconnects = 0
 
-  const FLOW_STAGE_ORDER = ['spec', 'plan', 'build', 'clean', 'test', 'review', 'ship'] as const
+  const FLOW_KIND_ORDER: Record<string, readonly string[]> = {
+    feature: ['spec', 'plan', 'build', 'clean', 'test', 'review', 'ship'],
+    bug: ['assess', 'fix', 'test', 'clean', 'review', 'ship'],
+    idea: ['intake', 'research', 'define', 'shape', 'decide'],
+  }
+  const stagesOfRun = (run: AnyRecord | undefined): readonly string[] =>
+    FLOW_KIND_ORDER[String(run?.kind ?? 'feature')] ?? FLOW_KIND_ORDER.feature
   const MAX_FLOW_FIX_ROUNDS = 2
 
   function emptyFlowReport(): AnyRecord {
@@ -541,8 +551,8 @@ export function installMockHost(scenario: MockScenario): void {
   function advanceFlow(projectId: string, runId: string): void {
     const run = flowRun(runId)
     if (!run) return
-    const index = FLOW_STAGE_ORDER.indexOf(run.stage as (typeof FLOW_STAGE_ORDER)[number])
-    const next = FLOW_STAGE_ORDER[index + 1]
+    const order = stagesOfRun(run)
+    const next = order[order.indexOf(String(run.stage)) + 1]
     if (!next) {
       updateRun(runId, { status: 'done', finishedAt: new Date().toISOString() })
       pushFlow(projectId)
@@ -648,7 +658,7 @@ export function installMockHost(scenario: MockScenario): void {
   let startDelayMs = 250
 
   const sectionSessions = new Map<string, MockSession>()
-  const neverReused: ReadonlySet<SectionKind> = new Set(['diagram'])
+  const neverReused: ReadonlySet<SectionKind> = new Set(['diagram', 'spec'])
   async function sectionSession(projectId: string, kind: SectionKind): Promise<MockSession> {
     const key = `${projectId}|${kind}`
     const live = neverReused.has(kind) ? undefined : sectionSessions.get(key)
@@ -656,6 +666,32 @@ export function installMockHost(scenario: MockScenario): void {
     const started = (await invokeHandlers['sessions.start']({ projectId })) as MockSession
     sectionSessions.set(key, started)
     return started
+  }
+
+  let extensionInstallError: string | null = null
+
+  function specKitOf(projectId: string): AnyRecord {
+    return {
+      installed: false,
+      specs: [],
+      constitution: 'missing',
+      bugs: [],
+      ideas: [],
+      extensions: { bug: false, assess: false },
+      ...(specKitByProject.get(projectId) ?? {}),
+    }
+  }
+
+  function specKitState(projectId: string): AnyRecord {
+    const state = specKitOf(projectId)
+    return {
+      installed: state.installed,
+      specs: state.specs,
+      constitution: state.constitution,
+      bugs: state.bugs,
+      ideas: state.ideas,
+      extensions: state.extensions,
+    }
   }
 
   const invokeHandlers: Record<InvokeMethod, (req: AnyRecord) => unknown> = {
@@ -1172,13 +1208,17 @@ export function installMockHost(scenario: MockScenario): void {
       return out
     },
     'flow.list': (req) => flowSnapshot(String(req.projectId)),
+    'flow.reconnectAdo': async (req) => {
+      adoReconnects += 1
+      return invokeHandlers['flow.features'](req)
+    },
     'flow.features': async (req) => {
       const projectId = String(req.projectId)
       if (!adoConnected) {
+        await new Promise((resolve) => setTimeout(resolve, 150))
         throw {
-          code: 'NOT_LIVE',
-          message:
-            'The Azure DevOps MCP server is not connected for this session, so Flow cannot read or write the board. Check the ado server in your Claude Code configuration and try again.',
+          code: 'MCP_NOT_CONNECTED',
+          message: `The Azure DevOps MCP server is not connected for this session: ${adoWhy}.`,
         }
       }
       const session = await sectionSession(projectId, 'flow')
@@ -1191,14 +1231,39 @@ export function installMockHost(scenario: MockScenario): void {
       const state = specKitByProject.get(String(req.projectId)) as { specs?: AnyRecord[] } | undefined
       return (state?.specs ?? []).map((spec) => ({ id: spec.id, title: spec.title }))
     },
+    'specs.state': (req) => specKitState(String(req.projectId)),
+    'specs.detail': (req) => {
+      const details = specKitOf(String(req.projectId)).details as AnyRecord | undefined
+      return details?.[String(req.specId)] ?? null
+    },
+    'specs.install': (req) => {
+      const projectId = String(req.projectId)
+      specKitByProject.set(projectId, { ...specKitOf(projectId), installed: true })
+      return specKitState(projectId)
+    },
+    'specs.installExtension': async (req) => {
+      const projectId = String(req.projectId)
+      await new Promise((resolve) => setTimeout(resolve, 150))
+      if (extensionInstallError) throw { code: 'INTERNAL', message: extensionInstallError }
+      const current = specKitOf(projectId)
+      const extensions = { ...(current.extensions as AnyRecord), [String(req.name)]: true }
+      specKitByProject.set(projectId, { ...current, extensions })
+      return specKitState(projectId)
+    },
+    'specs.report': (req) => {
+      const reports = specKitOf(String(req.projectId)).reports as Record<string, string> | undefined
+      const dir = req.process === 'bug' ? 'bugs' : 'assessments'
+      const content = reports?.[`${String(req.process)}/${String(req.slug)}/${String(req.file)}`]
+      return content === undefined ? null : { path: `.specify/${dir}/${String(req.slug)}/${String(req.file)}`, content }
+    },
     'flow.detectStacks': (req) => [...(flowStacksByProject.get(String(req.projectId)) ?? ['dotnet'])],
     'flow.start': async (req) => {
       const projectId = String(req.projectId)
       const source = req.source as AnyRecord
       if (source.kind === 'ado' && !adoConnected) {
         throw {
-          code: 'NOT_LIVE',
-          message: 'The Azure DevOps MCP server is not connected for this session, so Flow cannot read or write the board.',
+          code: 'MCP_NOT_CONNECTED',
+          message: `The Azure DevOps MCP server is not connected for this session: ${adoWhy}.`,
         }
       }
       const stacks = [...(flowStacksByProject.get(projectId) ?? ['dotnet'])]
@@ -1223,32 +1288,45 @@ export function installMockHost(scenario: MockScenario): void {
           prId: null,
         }
       }
+      const kind = source.kind === 'bug' || source.kind === 'idea' ? String(source.kind) : 'feature'
+      const extension = kind === 'bug' ? 'bug' : 'assess'
+      const kit = specKitOf(projectId).extensions as AnyRecord
+      if (kind !== 'feature' && kit[extension] !== true) {
+        throw {
+          code: 'UNSUPPORTED',
+          message: `The ${extension} extension is not installed in this project. Install it from the SDD tab first.`,
+        }
+      }
+      const idea = kind === 'idea'
       const repos =
-        companions.length > 0
+        companions.length > 0 && !idea
           ? [repoOf(projectId, req.baseBranch as string | undefined), ...companions.map((c) => repoOf(c.projectId, c.baseBranch))]
           : []
+      const title =
+        source.kind === 'ado' ? String(source.featureTitle) : source.kind === 'spec' ? String(source.specId) : String(source.title)
       const run: AnyRecord = {
         id,
         projectId,
+        kind,
+        slug:
+          kind === 'feature'
+            ? null
+            : String(source.slug ?? title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')),
+        checklist: kind === 'feature' && req.checklist === true,
         repos,
-        title:
-          source.kind === 'ado'
-            ? String(source.featureTitle)
-            : source.kind === 'text'
-              ? String(source.title)
-              : String(source.specId),
-        source: source.kind,
+        title,
+        source: source.kind === 'ado' || source.kind === 'spec' ? source.kind : 'text',
         sourceRef: source.kind === 'ado' ? String(source.featureId) : source.kind === 'spec' ? String(source.specId) : null,
         sourceUrl: source.kind === 'ado' ? (source.url ?? null) : null,
-        description: source.kind === 'text' ? String(source.description ?? '') : '',
+        description: String(source.description ?? source.symptom ?? source.idea ?? ''),
         stacks: ['dotnet', 'angular'].filter((s) => [stacks, ...repos.map((r) => r.stacks as string[])].some((l) => l.includes(s))),
-        stage: 'spec',
+        stage: FLOW_KIND_ORDER[kind][0],
         status: 'running',
         autopilot: req.autopilot === true,
-        autoShip: req.autoShip === true,
-        baseBranch: (req.baseBranch as string | undefined) ?? 'main',
-        branch: `feature/${id}`,
-        worktreePath: repos[0]?.worktreePath ?? `C:\\work\\${id}`,
+        autoShip: req.autoShip === true && !idea,
+        baseBranch: idea ? null : ((req.baseBranch as string | undefined) ?? 'main'),
+        branch: idea ? null : `feature/${id}`,
+        worktreePath: idea ? null : (repos[0]?.worktreePath ?? `C:\\work\\${id}`),
         specDir: null,
         prUrl: null,
         prId: null,
@@ -1261,7 +1339,7 @@ export function installMockHost(scenario: MockScenario): void {
       flowRunsByProject.set(projectId, runs)
       flowStagesByRun.set(
         id,
-        FLOW_STAGE_ORDER.map((stage) => ({
+        FLOW_KIND_ORDER[kind].map((stage) => ({
           runId: id,
           stage,
           status: 'pending',
@@ -1274,7 +1352,7 @@ export function installMockHost(scenario: MockScenario): void {
           finishedAt: null,
         })),
       )
-      beginFlowStage(projectId, id, 'spec')
+      beginFlowStage(projectId, id, FLOW_KIND_ORDER[kind][0])
       return { runId: id, ...flowSnapshot(projectId) }
     },
     'flow.approve': (req) => {
@@ -1300,7 +1378,7 @@ export function installMockHost(scenario: MockScenario): void {
       const run = flowRun(runId)
       if (!run) throw { code: 'NOT_FOUND', message: 'Run not found' }
       updateStage(runId, run.stage as string, { status: 'skipped', finishedAt: new Date().toISOString() })
-      if (run.stage === 'ship') {
+      if (run.stage === stagesOfRun(run).at(-1)) {
         updateRun(runId, { status: 'done', finishedAt: new Date().toISOString() })
         pushFlow(run.projectId as string)
       } else {
@@ -1317,6 +1395,15 @@ export function installMockHost(scenario: MockScenario): void {
       }
       continueFlowStage(runId, 'review', fixText(row))
       return flowSnapshot(run.projectId as string)
+    },
+    'flow.feature': (req) => {
+      const run = flowRun(String(req.runId))
+      const decide = run ? flowStage(String(run.id), 'decide') : undefined
+      const go = (decide?.report as AnyRecord | null | undefined)?.decision === 'go'
+      if (!run || run.kind !== 'idea' || run.status !== 'done' || decide?.status !== 'approved' || !go) {
+        throw { code: 'RULE_NOT_ALLOWED', message: 'A feature starts from the Flow intake.' }
+      }
+      return { title: String(run.title), description: 'Build the offline cart from the decision.' }
     },
     'flow.ship': (req) => {
       const runId = String(req.runId)
@@ -1382,6 +1469,10 @@ export function installMockHost(scenario: MockScenario): void {
       if (!run) return null
       const stageName = String(req.stage)
       const kind = String(req.kind ?? (stageName === 'spec' ? 'spec' : stageName === 'test' ? 'report' : 'tasks'))
+      if (kind === 'doc') {
+        const dir = run.kind === 'bug' ? 'bugs' : 'assessments'
+        return { path: `.specify/${dir}/${String(run.slug)}/${stageName}.md`, content: `# ${stageName} report\n\nMock ${stageName} body.\n` }
+      }
       if (kind === 'report') {
         const stage = flowStage(run.id as string, stageName)
         return { path: null, content: JSON.stringify(stage?.report ?? {}, null, 2) }
@@ -1662,6 +1753,9 @@ export function installMockHost(scenario: MockScenario): void {
       availableModels = models
     },
     setSpecKit: (projectId, state) => specKitByProject.set(projectId, state),
+    setExtensionInstallError: (message) => {
+      extensionInstallError = message
+    },
     setStartDelay: (ms) => {
       startDelayMs = ms
     },
@@ -1780,8 +1874,9 @@ export function installMockHost(scenario: MockScenario): void {
         url: null,
       }))
     },
-    setAdoConnected: (on) => {
+    setAdoConnected: (on, why) => {
       adoConnected = on
+      if (why) adoWhy = why
     },
     reportFlowStage: (runId, stage, patch) => {
       const run = flowRun(runId)
@@ -1895,6 +1990,7 @@ export function installMockHost(scenario: MockScenario): void {
       prOpens: [...prOpens],
       pluginInstalls: [...pluginInstalls],
       diffApplies: [...diffApplies],
+      adoReconnects,
     }),
   }
 }

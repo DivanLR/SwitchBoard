@@ -1,6 +1,6 @@
 import { computed, reactive, toRefs } from 'vue'
 import type { FlowFeature, FlowRun, FlowStackId, FlowStage, FlowStageRecord } from '@shared/domain'
-import type { FlowArtefactKind, FlowCompanionRequest, FlowStartSource } from '@shared/ipc-types'
+import { isIpcError, type FlowArtefactKind, type FlowCompanionRequest, type FlowStartSource } from '@shared/ipc-types'
 import { errorMessage, invoke } from '@renderer/ipc'
 import { useProjectsStore } from '@renderer/stores/projects'
 
@@ -12,11 +12,13 @@ const state = reactive({
   projectId: null as string | null,
   features: [] as FlowFeature[],
   featuresNote: null as string | null,
-  searching: false,
+  searching: null as 'search' | 'reconnect' | null,
+  adoDown: null as string | null,
   existingSpecs: [] as { id: string; title: string }[],
   stacksByProject: {} as Record<string, FlowStackId[]>,
   busy: null as string | null,
   error: null as string | null,
+  seed: null as { projectId: string; source: FlowStartSource } | null,
 })
 
 const runs = computed<FlowRun[]>(() =>
@@ -67,25 +69,38 @@ const store = reactive({
     state.stagesByProject[projectId] = stages
   },
 
-  async searchFeatures(projectId: string, query: string): Promise<void> {
+  async searchFeatures(projectId: string, query: string, reconnect = false): Promise<void> {
     state.error = null
+    state.adoDown = null
     state.featuresNote = null
-    state.searching = true
+    state.searching = reconnect ? 'reconnect' : 'search'
     try {
-      state.features = await invoke('flow.features', { projectId, query })
+      state.features = await invoke(reconnect ? 'flow.reconnectAdo' : 'flow.features', { projectId, query })
       if (state.features.length === 0) {
         state.featuresNote = 'No Feature matched that.'
       }
     } catch (error) {
       state.features = []
-      state.error = errorMessage(error)
+      if (isIpcError(error) && error.code === 'MCP_NOT_CONNECTED') state.adoDown = error.message
+      else state.error = errorMessage(error)
     } finally {
-      state.searching = false
+      state.searching = null
     }
   },
 
   async loadExistingSpecs(projectId: string): Promise<void> {
     state.existingSpecs = await invoke('flow.existingSpecs', { projectId }).catch(() => [])
+  },
+
+  seedIntake(projectId: string, source: FlowStartSource): void {
+    state.seed = { projectId, source }
+  },
+
+  takeSeed(projectId: string): FlowStartSource | null {
+    const seed = state.seed
+    if (seed?.projectId !== projectId) return null
+    state.seed = null
+    return seed.source
   },
 
   async detectStacks(projectId: string): Promise<void> {
@@ -99,6 +114,7 @@ const store = reactive({
     autoShip: boolean,
     baseBranch?: string,
     companions?: FlowCompanionRequest[],
+    checklist?: boolean,
   ): Promise<string | null> {
     let runId: string | null = null
     await this.act('start', async () => {
@@ -107,6 +123,7 @@ const store = reactive({
         source,
         autopilot,
         autoShip,
+        checklist,
         baseBranch,
         companions,
       })
@@ -138,6 +155,13 @@ const store = reactive({
 
   async ship(runId: string): Promise<boolean> {
     return this.act('ship', async () => this.applySnapshot(await invoke('flow.ship', { runId })))
+  },
+
+  async featureFrom(projectId: string, runId: string): Promise<boolean> {
+    return this.act('feature', async () => {
+      const seed = await invoke('flow.feature', { runId })
+      state.seed = { projectId, source: { kind: 'text', title: seed.title, description: seed.description } }
+    })
   },
 
   async cancel(runId: string): Promise<boolean> {

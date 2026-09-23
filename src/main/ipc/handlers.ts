@@ -50,6 +50,7 @@ import { importSkills } from '@main/skills/import'
 import type { FlowSupervisor } from '@main/flow/flow-supervisor'
 import { disableSkill, enableSkill, installedSkillNames, liveSkillFolders, removeSkill } from '@main/skills/install'
 import { detectFlowStacks } from '@main/flow/stacks'
+import { installExtension, installSpecKit, readSddReport, readSpecDetail, readSpecKitState } from '@main/specs/spec-kit'
 import { check as checkForUpdates, installNow } from '@main/updater'
 
 const EVENT_FLUSH_INTERVAL_MS = 33 
@@ -475,6 +476,23 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       manager.sendMessage(session.id, argument ? `/${skill.name} ${argument}` : `/${skill.name}`)
       return { sessionId: session.id }
     },
+    'specs.state': (req) => readSpecKitState(requireProject(req.projectId).path),
+    'specs.detail': (req) => readSpecDetail(requireProject(req.projectId).path, req.specId),
+    'specs.install': async (req) => {
+      const project = requireProject(req.projectId)
+      await installSpecKit(project.path)
+      return readSpecKitState(project.path)
+    },
+    'specs.installExtension': async (req) => {
+      const project = requireProject(req.projectId)
+      if (req.name !== 'bug' && req.name !== 'assess') {
+        throw { code: 'NOT_FOUND', message: 'Switchboard installs only the bug and assess extensions.' } satisfies IpcError
+      }
+      await installExtension(project.path, req.name)
+      await manager.reloadPlugins()
+      return readSpecKitState(project.path)
+    },
+    'specs.report': (req) => readSddReport(requireProject(req.projectId).path, req.process, req.slug, req.file),
     'diff.list': (req) => {
       const project = repos.projects.byId(req.projectId)
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
@@ -654,6 +672,10 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       requireProject(req.projectId)
       return flow.features(req.projectId, req.query ?? '')
     },
+    'flow.reconnectAdo': async (req) => {
+      requireProject(req.projectId)
+      return flow.reconnectAdo(req.projectId, req.query ?? '')
+    },
     'flow.existingSpecs': async (req) => {
       requireProject(req.projectId)
       return flow.existingSpecs(req.projectId)
@@ -672,6 +694,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         source: req.source,
         autopilot: req.autopilot,
         autoShip: req.autoShip,
+        checklist: req.checklist,
         baseBranch: req.baseBranch,
         companions: req.companions,
       })
@@ -697,6 +720,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       await flow.ship(req.runId)
       return flowSnapshotForRun(req.runId)
     },
+    'flow.feature': (req) => flow.feature(req.runId),
     'flow.cancel': async (req) => {
       await flow.cancel(req.runId)
       return flowSnapshotForRun(req.runId)

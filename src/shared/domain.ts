@@ -614,9 +614,41 @@ export const FLOW_STACK_LABELS: Readonly<Record<FlowStackId, string>> = {
 
 export type FlowSource = 'ado' | 'text' | 'spec'
 
-export type FlowStage = 'spec' | 'plan' | 'build' | 'clean' | 'test' | 'review' | 'ship'
+export type FlowKind = 'feature' | 'bug' | 'idea'
+
+export const FLOW_KIND_LABELS: Readonly<Record<FlowKind, string>> = {
+  feature: 'Feature',
+  bug: 'Bug',
+  idea: 'Idea',
+}
+
+export type FlowStage =
+  | 'spec'
+  | 'plan'
+  | 'build'
+  | 'clean'
+  | 'test'
+  | 'review'
+  | 'ship'
+  | 'assess'
+  | 'fix'
+  | 'intake'
+  | 'research'
+  | 'define'
+  | 'shape'
+  | 'decide'
 
 export const FLOW_STAGES: readonly FlowStage[] = ['spec', 'plan', 'build', 'clean', 'test', 'review', 'ship']
+
+export const FLOW_KIND_STAGES: Readonly<Record<FlowKind, readonly FlowStage[]>> = {
+  feature: FLOW_STAGES,
+  bug: ['assess', 'fix', 'test', 'clean', 'review', 'ship'],
+  idea: ['intake', 'research', 'define', 'shape', 'decide'],
+}
+
+export function flowStagesOf(kind: FlowKind | null | undefined): readonly FlowStage[] {
+  return FLOW_KIND_STAGES[kind ?? 'feature'] ?? FLOW_STAGES
+}
 
 export const FLOW_STAGE_LABELS: Readonly<Record<FlowStage, string>> = {
   spec: 'Spec',
@@ -626,6 +658,13 @@ export const FLOW_STAGE_LABELS: Readonly<Record<FlowStage, string>> = {
   test: 'Test',
   review: 'Review',
   ship: 'Ship',
+  assess: 'Assess',
+  fix: 'Fix',
+  intake: 'Intake',
+  research: 'Research',
+  define: 'Define',
+  shape: 'Shape',
+  decide: 'Decide',
 }
 
 export type FlowStageStatus = 'pending' | 'running' | 'review' | 'approved' | 'skipped' | 'failed'
@@ -657,6 +696,11 @@ export interface FlowStageReport {
   prUrl: string | null
   prId: string | null
   verify: VerifyReport | null
+  rounds?: number | null
+  converged?: boolean | null
+  checklistOpen?: number | null
+  bugResult?: FlowBugResult | null
+  decision?: FlowDecision | null
 }
 
 export function emptyFlowStageReport(): FlowStageReport {
@@ -700,6 +744,9 @@ export interface FlowRepo {
 export interface FlowRun {
   id: string
   projectId: string
+  kind: FlowKind
+  slug: string | null
+  checklist: boolean
   repos: FlowRepo[]
   title: string
   source: FlowSource
@@ -723,18 +770,24 @@ export interface FlowRun {
   finishedAt: string | null
 }
 
-export type FlowStageAction = 'approve' | 'fix' | 'revise' | 'retry' | 'ship' | 'skip'
+export type FlowStageAction = 'approve' | 'fix' | 'revise' | 'retry' | 'ship' | 'skip' | 'feature'
 
 export function flowStageActions(
-  run: Pick<FlowRun, 'stage' | 'finishedAt'>,
+  run: Pick<FlowRun, 'stage' | 'finishedAt'> & Partial<Pick<FlowRun, 'kind' | 'status'>>,
   row: Pick<FlowStageRecord, 'stage' | 'status' | 'report'>,
 ): FlowStageAction[] {
-  if (run.finishedAt || row.stage !== run.stage) return []
+  const stages = flowStagesOf(run.kind)
+  if (!stages.includes(row.stage)) return []
+  if (run.finishedAt) {
+    const decided = run.kind === 'idea' && run.status === 'done' && row.stage === 'decide' && row.status === 'approved'
+    return decided && row.report?.decision === 'go' ? ['feature'] : []
+  }
+  if (row.stage !== run.stage) return []
   if (row.status === 'running') return ['skip']
   if (row.status === 'failed') return ['retry', 'skip']
   if (row.status === 'pending') return row.stage === 'ship' ? ['ship', 'skip'] : ['skip']
   if (row.status !== 'review') return []
-  if (row.stage === 'ship') return ['approve', 'revise']
+  if (row.stage === stages[stages.length - 1]) return ['approve', 'revise']
   if (row.stage === 'review' && row.report?.verdict === 'needs_fixes') return ['fix', 'approve', 'revise', 'skip']
   return ['approve', 'revise', 'skip']
 }
@@ -837,9 +890,66 @@ export interface SpecSummary {
   tasksDone: number
 }
 
+export interface SpecSection {
+  title: string
+  body: string
+}
+
+export interface ResolvedClarification {
+  question: string
+  answer: string
+}
+
+export interface SpecTask {
+  id: string
+  label: string
+  done: boolean
+}
+
+export interface SpecPhase {
+  label: string
+  tasks: SpecTask[]
+}
+
+export interface SpecConvergence {
+  rounds: number
+  open: number
+}
+
+export interface SpecDetail extends SpecSummary {
+  description: string
+  path: string
+  sections: SpecSection[]
+  plan: SpecSection[]
+  phases: SpecPhase[]
+  clarifications: string[]
+  resolvedClarifications: ResolvedClarification[]
+  convergence: SpecConvergence
+}
+
+export type ConstitutionState = 'missing' | 'template' | 'written'
+
+export type SddProcess = 'bug' | 'assess'
+
+export type FlowBugResult = 'verified' | 'partial' | 'failed'
+
+export type FlowDecision = 'go' | 'needs-clarification' | 'kill'
+
+export interface SddEntry {
+  slug: string
+  title: string
+  files: string[]
+  verdict: string | null
+  severity: string | null
+}
+
 export interface SpecKitState {
-  installed: boolean 
+  installed: boolean
   specs: SpecSummary[]
+  constitution: ConstitutionState
+  bugs: SddEntry[]
+  ideas: SddEntry[]
+  extensions: Record<SddProcess, boolean>
 }
 
 export type DiffFileStatus = 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked'
@@ -858,6 +968,7 @@ export interface DiffListResult {
 }
 
 export type SectionKind =
+  | 'spec'
   | 'tests'
   | 'diff'
   | 'diagram'
@@ -892,6 +1003,7 @@ export function sessionName(
 }
 
 const SECTION_LABELS: Record<SectionKind, string> = {
+  spec: 'SDD',
   tests: 'Tests',
   diff: 'Diff',
   diagram: 'Diagram',

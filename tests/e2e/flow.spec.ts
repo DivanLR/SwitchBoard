@@ -95,6 +95,31 @@ test('a feature from Azure DevOps is picked, then started, with the detected sta
   await expect(page.getByTestId('flow-stage-spec')).toContainText('running')
 })
 
+test('an unconnected ado server says which state it is in, and Reconnect retries the Feature list', async ({ page }) => {
+  await openFlow(page)
+  await page.evaluate((features) => {
+    window.__mock.setAdoFeatures(features)
+    window.__mock.setAdoConnected(false, 'it needs you to sign in. Sign in to it in Claude Code with /mcp, then Reconnect')
+  }, FEATURES)
+  await page.getByTestId('flow-new').click()
+  await page.getByTestId('flow-source-ado').click()
+  await expect(page.getByTestId('flow-ado-state')).toContainText(
+    'The Azure DevOps MCP server is not connected for this session: it needs you to sign in.',
+  )
+  await expect(page.getByTestId('flow-error')).toHaveCount(0)
+  await expect(page.getByTestId('flow-ado-reconnect')).toBeEnabled()
+
+  await page.evaluate(() => window.__mock.setAdoConnected(false, 'it failed to start: spawn npx ENOENT'))
+  await page.getByTestId('flow-ado-reconnect').click()
+  await expect(page.getByTestId('flow-ado-state')).toContainText('it failed to start: spawn npx ENOENT')
+
+  await page.evaluate(() => window.__mock.setAdoConnected(true))
+  await page.getByTestId('flow-ado-reconnect').click()
+  await expect(page.getByTestId('flow-ado-state')).toHaveCount(0)
+  await expect(page.getByTestId('flow-feature-4711')).toContainText('Checkout v2')
+  expect((await page.evaluate(() => window.__mock.state())).adoReconnects).toBe(2)
+})
+
 test('starts a run from a written description', async ({ page }) => {
   await openFlow(page)
   await page.getByTestId('flow-new').click()

@@ -197,10 +197,10 @@ async function openSkillsSection(page: Page, scenario: MockScenario): Promise<vo
 
 const ON_SOURCE = FOUND.map((s) => ({ ...s, sourceUrl: 'https://github.com/o/r' }))
 
-test('the Skills tab sits beside Session, Tests, Diff and Diagrams', async ({ page }) => {
+test('the Skills tab sits after Session, Tests, Diff and Diagrams, and before SDD', async ({ page }) => {
   await openSkillsSection(page, scenarioWith(ON_SOURCE))
   const tabs = page.locator('.main-tabs .ui-tab')
-  await expect(tabs).toHaveText(['Session', 'Tests', 'Diff', 'Diagrams', 'Skills'])
+  await expect(tabs).toHaveText(['Session', 'Tests', 'Diff', 'Diagrams', 'Skills', 'SDD'])
   await expect(page.getByTestId('tab-skills')).toHaveClass(/sel/)
 })
 

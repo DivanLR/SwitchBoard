@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process'
 import type { Readable } from 'node:stream'
+import type { McpServerStatus } from '@anthropic-ai/claude-agent-sdk'
 import type { AvailableModel, SessionMode, SessionStatus } from '@shared/domain'
 import type { EventSink, ModelTurnUsage } from './message-mapper'
 import { CodexMapper } from './codex-mapper'
@@ -181,6 +182,14 @@ export class CodexSession implements SessionHost {
   setPlanMode(): void {}
 
   async reloadPlugins(): Promise<void> {}
+
+  async mcpServerStatus(): Promise<McpServerStatus[]> {
+    return []
+  }
+
+  async reconnectMcpServer(): Promise<void> {
+    throw new Error('A Codex session has no MCP servers to reconnect.')
+  }
 
   private runTurn(prompt: string): void {
     const launch = resolveCodexLaunch()

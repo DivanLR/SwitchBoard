@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { FLOW_STACK_LABELS, FLOW_STAGE_LABELS, type FlowStage } from '@shared/domain'
+import { FLOW_KIND_LABELS, FLOW_STACK_LABELS, FLOW_STAGE_LABELS, type FlowStage } from '@shared/domain'
 import { useFlowStore } from '@renderer/stores/flow'
 import FlowIntake from '@renderer/components/flow/FlowIntake.vue'
 import FlowStageRail from '@renderer/components/flow/FlowStageRail.vue'
@@ -16,6 +16,7 @@ const removeConfirm = ref(false)
 
 let stopPush: (() => void) | null = null
 onMounted(() => {
+  if (flow.seed?.projectId === props.projectId) creating.value = true
   void flow.load(props.projectId)
   stopPush = window.switchboard.on('push.flowChanged', (push) => {
     if (push.projectId === props.projectId) flow.applyPush(push.projectId, push.runs, push.stages)
@@ -67,6 +68,10 @@ function openCreate(): void {
   selectedRunId.value = null
 }
 
+async function startFeature(runId: string): Promise<void> {
+  if (await flow.featureFrom(props.projectId, runId)) openCreate()
+}
+
 async function removeWorktree(): Promise<void> {
   if (!run.value) return
   if (!removeConfirm.value) {
@@ -84,9 +89,10 @@ async function removeWorktree(): Promise<void> {
       <div v-if="flow.error" class="ui-err" role="alert" data-testid="flow-error">{{ flow.error }}</div>
       <p class="ui-empty-sub">
         Flow takes one feature through spec, plan, build, clean, test, review and pull request, each run in its own
-        worktree.
+        worktree. A bug goes through assess, fix and test first; an idea goes from intake to a decision without
+        touching code.
       </p>
-      <button type="button" class="btn-solid" data-testid="flow-new" @click="openCreate()">New feature</button>
+      <button type="button" class="btn-solid" data-testid="flow-new" @click="openCreate()">New run</button>
     </div>
 
     <div v-else-if="loaded || creating" class="flow-cols">
@@ -95,7 +101,7 @@ async function removeWorktree(): Promise<void> {
           <span class="ui-kicker">Runs</span>
           <span class="fv-spacer"></span>
           <button type="button" class="btn-solid" data-testid="flow-new" :disabled="creating" @click="openCreate()">
-            New feature
+            New run
           </button>
         </div>
         <button
@@ -110,7 +116,9 @@ async function removeWorktree(): Promise<void> {
         >
           <span class="frr-title">{{ item.title }}</span>
           <span class="frr-meta">
+            <span class="ui-chip" :data-testid="`flow-run-kind-${item.id}`">{{ FLOW_KIND_LABELS[item.kind] }}</span>
             <span class="frr-stage">{{ FLOW_STAGE_LABELS[item.stage] }}</span>
+            <span class="fv-spacer"></span>
             <span class="pill" :class="item.status">{{ item.status }}</span>
           </span>
         </button>
@@ -148,6 +156,10 @@ async function removeWorktree(): Promise<void> {
                   <div v-if="repo.worktreePath" class="ui-meta frh-path">{{ repo.worktreePath }}</div>
                 </li>
               </ul>
+              <div v-else-if="run.kind === 'idea'" class="frh-chips">
+                <span class="ui-chip" data-testid="flow-run-primary">Primary checkout, no worktree, no branch</span>
+                <span v-if="run.slug" class="ui-chip mono">.specify/assessments/{{ run.slug }}/</span>
+              </div>
               <template v-else>
                 <div class="frh-chips">
                   <span class="ui-chip mono" title="Branch">{{ run.branch ?? 'no branch yet' }}</span>
@@ -201,9 +213,14 @@ async function removeWorktree(): Promise<void> {
             </div>
           </header>
 
-          <FlowStageRail :stages="stages" :selected="selectedStage ?? run.stage" @select="(s) => (selectedStage = s)" />
+          <FlowStageRail
+            :kind="run.kind"
+            :stages="stages"
+            :selected="selectedStage ?? run.stage"
+            @select="(s) => (selectedStage = s)"
+          />
 
-          <FlowStageDetail v-if="shownStage" :run="run" :stage="shownStage" />
+          <FlowStageDetail v-if="shownStage" :run="run" :stage="shownStage" @start-feature="startFeature" />
         </div>
 
         <div v-else class="ui-empty-line" data-testid="flow-pick">Pick a run on the left, or start a new feature.</div>

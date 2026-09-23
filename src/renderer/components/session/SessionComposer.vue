@@ -19,8 +19,10 @@ const props = defineProps<{
   queuedEditError: string
   suggest: ReturnType<typeof useCommandSuggestions>
   refEditor: ReturnType<typeof useProjectRefs>
+  target?: string | null
 }>()
 const emit = defineEmits<{
+  (e: 'clear-target'): void
   (e: 'send'): void
   (e: 'to-bottom'): void
   (e: 'confirm-stop'): void
@@ -62,11 +64,12 @@ const queuedTasks = computed(() => queue.forProject(props.project.id))
 const composerEl = useTemplateRef<HTMLTextAreaElement>('composerEl')
 defineExpose({ input: composerEl })
 
-const composerPlaceholder = computed(() =>
-  props.live ? `Send a message to ${props.sendTo}…` : 'Start a session first',
-)
+const composerPlaceholder = computed(() => {
+  if (props.target) return `Describe the change for ${props.target}…`
+  return props.live ? `Send a message to ${props.sendTo}…` : 'Start a session first'
+})
 
-const composerDead = computed(() => !props.live)
+const composerDead = computed(() => !props.live && !props.target)
 
 const composerEmpty = computed(() => composer.value.trim().length === 0)
 
@@ -226,7 +229,25 @@ async function enqueue(): Promise<void> {
     </div>
 
     <div class="composer-row">
-      <span class="caret mono"><Icon name="chevron-right" :size="14" /></span>
+      <span v-if="target" class="caret target mono"><Icon name="pencil" :size="12" /></span>
+      <span v-else class="caret mono"><Icon name="chevron-right" :size="14" /></span>
+      <span
+        v-if="target"
+        class="target-chip ui-chip is-on"
+        data-testid="composer-target"
+        title="Spec edit target: your message changes this part of the spec"
+      >
+        <span class="mono">{{ target }}</span>
+        <button
+          type="button"
+          class="target-x"
+          data-testid="composer-target-clear"
+          aria-label="Clear the spec edit target"
+          @click="emit('clear-target')"
+        >
+          <Icon name="close" :size="11" />
+        </button>
+      </span>
       <div class="input-wrap">
         <div
           v-if="suggestions.length > 0"
@@ -283,6 +304,7 @@ async function enqueue(): Promise<void> {
       </div>
       <span class="to-inline" data-testid="composer-to">to {{ sendTo }}</span>
       <button
+        v-if="!target"
         class="queue-btn"
         data-testid="composer-queue"
         title="Add to the queue — runs after the current goal finishes"
@@ -304,6 +326,25 @@ async function enqueue(): Promise<void> {
 </template>
 
 <style scoped>
+.caret.target {
+  color: var(--amber);
+}
+
+.target-chip {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.target-x {
+  cursor: pointer;
+  color: var(--text-faint);
+  background: transparent;
+}
+
+.target-x:hover {
+  color: var(--red);
+}
+
 .draft-float {
   margin-bottom: 5px;
   padding: 4px 8px;

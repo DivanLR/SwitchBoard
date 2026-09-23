@@ -159,7 +159,7 @@ const APP_EXIT_NOTE = 'Switchboard closed, so this session ended. Its conversati
 
 const MODELS_TTL_MS = 10 * 60_000
 
-const NEVER_REUSED: ReadonlySet<SectionKind> = new Set(['diagram'])
+const NEVER_REUSED: ReadonlySet<SectionKind> = new Set(['diagram', 'spec'])
 
 const WORKER_KINDS: ReadonlySet<SectionKind> = new Set(['diff'])
 
@@ -1094,6 +1094,21 @@ export class SessionManager {
       live = connected()
     }
     return wanted.filter((name) => live.includes(name))
+  }
+
+  async mcpStatus(sessionId: string, name: string): Promise<{ status: string; error: string | null } | null> {
+    const entry = this.hosted.get(sessionId)
+    if (!entry) return null
+    const all = await Promise.race([entry.session.mcpServerStatus(), delay(10_000).then(() => null)]).catch(() => null)
+    if (!all) return { status: 'pending', error: null }
+    const found = all.find((server) => server.name === name)
+    return found ? { status: found.status, error: found.error ?? null } : { status: 'missing', error: null }
+  }
+
+  async reconnectMcpServer(sessionId: string, name: string): Promise<void> {
+    const entry = this.hosted.get(sessionId)
+    if (!entry) throw { code: 'NOT_LIVE', message: 'That session has ended.' } satisfies IpcError
+    await entry.session.reconnectMcpServer(name)
   }
 
   private static readonly TEXT_SCAN_KINDS = new Set<EventKind>(['assistant_text', 'summary', 'result'])

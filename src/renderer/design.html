@@ -257,10 +257,26 @@
 
       m.setSpecKit('p-alpha', {
         installed: true,
+        constitution: 'written',
         specs: [
           { id: '003-empty-cart', title: 'Empty cart placeholder' },
           { id: '002-cart-totals', title: 'Cart totals rounding' },
         ],
+        bugs: [
+          {
+            slug: 'login-timeout',
+            title: 'Login times out behind the proxy',
+            files: ['assessment.md', 'fix.md'],
+            verdict: null,
+            severity: 'high',
+          },
+        ],
+        ideas: [{ slug: 'offline-mode', title: 'Offline mode', files: ['intake.md', 'decision.md'], verdict: 'go', severity: null }],
+        extensions: { bug: true, assess: true },
+        reports: {
+          'bug/login-timeout/assessment.md': '# Assessment\n\n- **Severity**: high\n',
+          'assess/offline-mode/decision.md': '# Decision\n\n- **Verdict**: go\n',
+        },
       })
 
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))

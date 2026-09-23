@@ -669,6 +669,72 @@ const MIGRATIONS: Migration[] = [
       `)
     },
   },
+  {
+    name: '044-flow-kinds',
+    up: (db) => {
+      const stages = `'spec', 'plan', 'build', 'clean', 'test', 'review', 'ship',
+            'assess', 'fix', 'intake', 'research', 'define', 'shape', 'decide'`
+      const columns = `id, projectId, title, source, sourceRef, sourceUrl, description, stacks, stage, status,
+          autopilot, autoShip, baseBranch, branch, worktreePath, specDir, prUrl, prId, note,
+          createdAt, updatedAt, finishedAt, repos`
+      const stageColumns = 'runId, stage, status, sessionId, attempts, summary, report, feedback, startedAt, finishedAt'
+      db.exec(`
+        CREATE TEMP TABLE flow_stages_044 AS SELECT * FROM flow_stages;
+        DROP TABLE flow_stages;
+
+        CREATE TABLE flow_runs_044 (
+          id TEXT PRIMARY KEY,
+          projectId TEXT NOT NULL REFERENCES projects(id),
+          kind TEXT NOT NULL DEFAULT 'feature' CHECK (kind IN ('feature', 'bug', 'idea')),
+          slug TEXT,
+          checklist INTEGER NOT NULL DEFAULT 0,
+          title TEXT NOT NULL,
+          source TEXT NOT NULL CHECK (source IN ('ado', 'text', 'spec')),
+          sourceRef TEXT,
+          sourceUrl TEXT,
+          description TEXT NOT NULL DEFAULT '',
+          stacks TEXT NOT NULL DEFAULT '[]',
+          stage TEXT NOT NULL CHECK (stage IN (${stages})),
+          status TEXT NOT NULL CHECK (status IN (
+            'running', 'waiting', 'done', 'failed', 'cancelled')),
+          autopilot INTEGER NOT NULL DEFAULT 0,
+          autoShip INTEGER NOT NULL DEFAULT 0,
+          baseBranch TEXT,
+          branch TEXT,
+          worktreePath TEXT,
+          specDir TEXT,
+          prUrl TEXT,
+          prId TEXT,
+          note TEXT,
+          createdAt TEXT NOT NULL,
+          updatedAt TEXT NOT NULL,
+          finishedAt TEXT,
+          repos TEXT NOT NULL DEFAULT '[]'
+        );
+        INSERT INTO flow_runs_044 (${columns}) SELECT ${columns} FROM flow_runs;
+        DROP TABLE flow_runs;
+        ALTER TABLE flow_runs_044 RENAME TO flow_runs;
+        CREATE INDEX idx_flow_runs_project ON flow_runs (projectId, createdAt DESC);
+
+        CREATE TABLE flow_stages (
+          runId TEXT NOT NULL REFERENCES flow_runs(id) ON DELETE CASCADE,
+          stage TEXT NOT NULL CHECK (stage IN (${stages})),
+          status TEXT NOT NULL CHECK (status IN (
+            'pending', 'running', 'review', 'approved', 'skipped', 'failed')),
+          sessionId TEXT,
+          attempts INTEGER NOT NULL DEFAULT 0,
+          summary TEXT,
+          report TEXT,
+          feedback TEXT,
+          startedAt TEXT,
+          finishedAt TEXT,
+          PRIMARY KEY (runId, stage)
+        );
+        INSERT INTO flow_stages (${stageColumns}) SELECT ${stageColumns} FROM flow_stages_044;
+        DROP TABLE flow_stages_044;
+      `)
+    },
+  },
 ]
 
 export function transaction<T>(db: AppDatabase, work: () => T): T {
