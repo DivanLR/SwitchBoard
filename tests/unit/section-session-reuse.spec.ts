@@ -116,6 +116,34 @@ describe('the session a section dispatch lands in', () => {
     expect(repos.projects.byId(project.id)?.path).toBe(project.path)
   })
 
+  it('leaves a bypass default behind, so a section session stays off the container', async () => {
+    const { repos, project, manager } = setup()
+    repos.projects.setSessionMode(project.id, 'bypass')
+
+    const session = await manager.backgroundSessionFor(project.id, 'diff')
+
+    expect(session.bypassPermissions).toBe(false)
+    const hosted = (manager as unknown as { hosted: Map<string, { containerised: boolean }> }).hosted
+    expect(hosted.get(session.id)?.containerised).toBe(false)
+  })
+
+  it('runs a worktree session on this machine, because a container mounts only the project', async () => {
+    const { repos, project, manager } = setup()
+    repos.projects.setUseContainers(project.id, true)
+    const worktree = mkdtempSync(join(tmpdir(), 'section-worktree-b-'))
+    dirs.push(worktree)
+
+    const session = await manager.startSession(project.id, false, 'bypass', {
+      background: true,
+      containerised: true,
+      cwd: worktree,
+    })
+
+    const hosted = (manager as unknown as { hosted: Map<string, { containerised: boolean }> }).hosted
+    expect(hosted.get(session.id)?.containerised).toBe(false)
+    expect(session.bypassPermissions).toBe(false)
+  })
+
   it('never crosses projects', async () => {
     const { repos, project, manager } = setup()
     const dir = mkdtempSync(join(tmpdir(), 'section-reuse-b-'))

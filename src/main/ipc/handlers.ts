@@ -43,7 +43,8 @@ import { join, resolve, sep } from 'node:path'
 import { stackById } from '@shared/test-catalog'
 import { detectProjectSuites, evidencePrompt, planSuites, verifyPrompt } from '@main/verify/verify-dispatch'
 import { readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
-import { readDiffList, readFileDiff } from '@main/sessions/session-manager'
+import { gitNotice, readDiffList, readFileDiff } from '@main/sessions/session-manager'
+import { sandboxToolsFor } from '@main/sessions/wslc-sandbox'
 import { readDiagramList } from '@main/diagrams/list'
 import { importSkills } from '@main/skills/import'
 import type { FlowSupervisor } from '@main/flow/flow-supervisor'
@@ -231,6 +232,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
           .map((r) => r.sessionId)
           .filter((id): id is string => !!id),
         diagrams: [...repos.diagramRequests.forProject(project.id).values()],
+        suites: manager.isolatedSuiteNamesFor(project.id),
         kinds: {
           ...Object.fromEntries(
             rows.filter((s) => s.sectionKind).map((s) => [s.id, s.sectionKind as SectionKind]),
@@ -243,6 +245,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         ...project,
         session: sessions[0] ?? null,
         sessions,
+        gitNotice: gitNotice(project.path),
         drafts: repos.drafts.listForProject(project.id),
         reserved: project.id === dbProjectId,
       }
@@ -338,12 +341,21 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       }
       repos.projects.unarchive(req.projectId)
     },
+    'projects.setUseContainers': (req) => {
+      if (!repos.projects.byId(req.projectId)) {
+        throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
+      }
+      repos.projects.setUseContainers(req.projectId, req.on)
+    },
     'terminal.open': (req) => ptyHost.open(req),
     'terminal.write': (req) => ptyHost.write(req.id, req.data),
     'terminal.resize': (req) => ptyHost.resize(req.id, req.cols, req.rows),
     'terminal.close': (req) => ptyHost.close(req.id),
     'sessions.rename': (req) => manager.renameSession(req.sessionId, req.label),
-    'sessions.start': (req) => manager.startSession(req.projectId, req.resume ?? false, req.mode),
+    'sessions.start': (req) =>
+      manager.startSession(req.projectId, req.resume ?? false, req.mode, {
+        containerised: req.containerised === true,
+      }),
     'clipboard.write': (req) => {
       clipboard.writeText(req.text)
     },
@@ -506,27 +518,50 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'verify.start': async (req) => {
       const stack = stackById(req.stackId)
       if (!stack) throw { code: 'NOT_FOUND', message: 'Unknown stack.' } satisfies IpcError
-      const session = await manager.backgroundSessionFor(req.projectId, 'tests')
+      const session = req.isolated ? null : await manager.backgroundSessionFor(req.projectId, 'tests')
+      const project = repos.projects.byId(req.projectId)
+      const sandboxed =
+        project && (req.isolated || (session && manager.runsInContainer(session.id)))
+          ? sandboxToolsFor(project.path)
+          : null
       const overrides = repos.settings.get().projectSuiteCommands?.[req.projectId] ?? {}
       const suites = stack.suites.map((suite) =>
         overrides[suite.id] ? { ...suite, command: overrides[suite.id] } : suite,
       )
-      const plan = planSuites(suites, req.suiteIds)
+      const plan = planSuites(suites, req.suiteIds, sandboxed)
       if (plan.length === 0) {
         throw { code: 'INVALID_PATH', message: 'Choose at least one suite to run.' } satisfies IpcError
+      }
+      if (plan.every((p) => p.unavailable)) {
+        throw {
+          code: 'INVALID_PATH',
+          message: 'None of the chosen suites can run in the container. Untick Run in Container, or pick other suites.',
+        } satisfies IpcError
       }
       const run = repos.verifyRuns.start({
         projectId: req.projectId,
         stackId: stack.id,
-        sessionId: session.id,
-        branch: session.branch,
+        sessionId: session?.id ?? null,
+        branch: session?.branch ?? null,
         requested: plan.map((p) => p.suite.id),
       })
       const configured = repos.settings.get().databaseMcpServers ?? []
-      const dbServers = await manager.connectedMcpServers(session.id, configured)
-      manager.watchVerifyReport(session.id, run.id, 'suites')
-      manager.sendMessage(session.id, verifyPrompt(plan, stack.label, dbServers))
-      return { sessionId: session.id, runs: repos.verifyRuns.listForProject(req.projectId) }
+      const dbServers =
+        req.isolated || !session ? configured : await manager.connectedMcpServers(session.id, configured)
+      if (req.isolated) {
+        void manager.runSuitesIsolated({
+          runId: run.id,
+          projectId: req.projectId,
+          plan,
+          stackLabel: stack.label,
+          sandboxed,
+          dbServers,
+        })
+      } else if (session) {
+        manager.watchVerifyReport(session.id, run.id, 'suites')
+        manager.sendMessage(session.id, verifyPrompt(plan, stack.label, dbServers, sandboxed))
+      }
+      return { sessionId: session?.id ?? null, runs: repos.verifyRuns.listForProject(req.projectId) }
     },
     'verify.evidence': async (req) => {
       const run = req.runId
@@ -539,7 +574,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       const session =
         ran && !ran.endedAt ? ran : await manager.backgroundSessionFor(req.projectId, 'tests')
       manager.watchVerifyReport(session.id, run.id, 'evidence')
-      manager.sendMessage(session.id, evidencePrompt([]))
+      manager.sendMessage(session.id, evidencePrompt([], manager.runsInContainer(session.id)))
       return { sessionId: session.id, runs: repos.verifyRuns.listForProject(req.projectId) }
     },
     'verify.cancel': async (req) => {

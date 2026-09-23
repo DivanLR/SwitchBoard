@@ -75,8 +75,6 @@ describe('migrating a settings row from before the model rename', () => {
     const retired = {
       defaultEngine: 'codex',
       codexModel: 'gpt-5-codex',
-      projectIsolatedRuns: { p: true },
-      sandboxMemory: '12G',
       flowConcurrency: 4,
     }
     db.prepare(`INSERT INTO settings (key, value) VALUES ('settings', @value)`).run({
@@ -90,5 +88,17 @@ describe('migrating a settings row from before the model rename', () => {
         .value,
     ) as Record<string, unknown>
     for (const key of Object.keys(retired)) expect(stored).not.toHaveProperty(key)
+  })
+
+  it('keeps the container settings an older install stored', () => {
+    const db = openDatabase(':memory:')
+    const settings = createRepositories(db).settings
+    db.prepare(`INSERT INTO settings (key, value) VALUES ('settings', @value)`).run({
+      value: JSON.stringify({ sandboxMemory: '12G', projectIsolatedRuns: { p: true } }),
+    })
+
+    expect(settings.get().sandboxMemory).toBe('12G')
+    expect(settings.get().projectIsolatedRuns).toEqual({ p: true })
+    expect(DEFAULT_SETTINGS.sandboxMemory).toBe('6g')
   })
 })

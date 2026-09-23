@@ -65,4 +65,28 @@ describe('037-claude-only', () => {
       { id: 'codex', sdkSessionId: null },
     ])
   })
+
+  it('keeps a bypass project, its container flag and a bypass session, which are still a feature', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'migrate-037-bypass-'))
+    dirs.push(dir)
+    const path = join(dir, 'switchboard.db')
+    const before = openDatabase(path)
+    before.exec(`
+      DELETE FROM migrations WHERE name = '037-claude-only';
+      ALTER TABLE sessions ADD COLUMN engine TEXT NOT NULL DEFAULT 'claude';
+      INSERT INTO projects (id, name, path, source, createdAt, position, defaultSessionMode, useContainers)
+        VALUES ('p', 'p', 'C:/p', 'manual', '2026-09-01T00:00:00.000Z', 0, 'bypass', 1);
+      INSERT INTO sessions (id, projectId, sdkSessionId, status, startedAt, bypassPermissions)
+        VALUES ('s', 'p', 'claude-conversation', 'done', '2026-09-01T00:00:00.000Z', 1);
+    `)
+    before.close()
+
+    const after = openDatabase(path)
+    const project = after.prepare('SELECT defaultSessionMode, useContainers FROM projects').get()
+    const session = after.prepare('SELECT bypassPermissions FROM sessions').get()
+    after.close()
+
+    expect(project).toEqual({ defaultSessionMode: 'bypass', useContainers: 1 })
+    expect(session).toEqual({ bypassPermissions: 1 })
+  })
 })

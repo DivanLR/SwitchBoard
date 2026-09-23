@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { heavySubagentSystemPromptAppend } from '@main/sessions/session-shaping'
+import {
+  heavySubagentSystemPromptAppend,
+  sandboxSystemPromptAppend,
+} from '@main/sessions/session-shaping'
 
 describe('heavySubagentSystemPromptAppend', () => {
   it('adds nothing unless the setting is on', () => {
@@ -25,5 +28,13 @@ describe('heavySubagentSystemPromptAppend', () => {
     expect(append).not.toContain('grinding through a list')
     expect(append).not.toContain('ask what the other four are')
     expect(append).toContain('fan-out spends more tokens')
+  })
+})
+
+describe('sandboxSystemPromptAppend prose', () => {
+  it('drops the build-per-platform mechanism aside, keeps the actionable instruction', () => {
+    const append = sandboxSystemPromptAppend([{ container: '/workspace' }], null, true) ?? ''
+    expect(append).not.toContain('ship a build per platform')
+    expect(append).toContain('npm ci')
   })
 })

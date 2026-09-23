@@ -96,4 +96,17 @@ describe('a crashed session is restarted by the app', () => {
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(manager.liveSessionIds()).toHaveLength(0)
   })
+
+  it('brings a host session on a bypass project back on the host, not in a bypass container', async () => {
+    const { repos, project, manager } = setup()
+    repos.projects.setSessionMode(project.id, 'bypass')
+    await manager.startSession(project.id, false, 'auto')
+
+    crashLoops()
+
+    await vi.waitFor(() => expect(manager.liveSessionIds()).toHaveLength(1))
+    const revived = manager.liveSessionIds()[0]
+    expect(manager.runsInContainer(revived)).toBe(false)
+    expect(repos.sessions.byId(revived)?.bypassPermissions).toBe(false)
+  })
 })

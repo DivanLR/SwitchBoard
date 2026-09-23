@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { openDatabase, type AppDatabase } from '@main/store/db'
 import { createRepositories, type Repositories } from '@main/store/repositories'
 import { registerProject } from '@main/projects/discovery'
+import { resolvePermissionMode } from '@main/sessions/session'
 import { DEFAULT_SESSION_MODE, SESSION_MODES } from '@shared/domain'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -37,13 +38,13 @@ describe('a project carries its own session mode', () => {
   it('changes on request and applies to the project from then on', () => {
     const { repos } = setup()
     const project = repos.projects.insert({ name: 'a', path: 'C:\\a', source: 'manual' })
-    repos.projects.setSessionMode(project.id, 'acceptEdits')
-    expect(repos.projects.byId(project.id)?.defaultSessionMode).toBe('acceptEdits')
+    repos.projects.setSessionMode(project.id, 'bypass')
+    expect(repos.projects.byId(project.id)?.defaultSessionMode).toBe('bypass')
     repos.projects.setSessionMode(project.id, 'plan')
     expect(repos.projects.byId(project.id)?.defaultSessionMode).toBe('plan')
   })
 
-  it('refuses a value outside the five, at the schema rather than only in TypeScript', () => {
+  it('refuses a value outside the six, at the schema rather than only in TypeScript', () => {
     const { repos, db } = setup()
     const project = repos.projects.insert({ name: 'a', path: 'C:\\a', source: 'manual' })
     expect(() =>
@@ -84,7 +85,7 @@ describe('the mode a project holds is the mode the SDK spawns in', () => {
         defaultSessionMode: value,
       })
       const stored = repos.projects.byId(project.id)!.defaultSessionMode
-      expect(stored).toBe(value)
+      expect(resolvePermissionMode(stored)).toBe(value === 'bypass' ? 'bypassPermissions' : value)
     }
   })
 })

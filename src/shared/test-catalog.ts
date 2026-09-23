@@ -1,11 +1,14 @@
 type SuiteKind = 'api' | 'unit' | 'ui' | 'coverage' | 'quality' | 'mutation'
 
+export type SuiteTool = 'dotnet' | 'node' | 'browser'
+
 export interface TestSuite {
   id: string
   kind: SuiteKind
   label: string
   acceptance: string
   command: string
+  needs: SuiteTool
   mcp?: string
   heavy?: boolean
 }
@@ -29,6 +32,7 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Unit tests',
         acceptance: 'the solution builds and every unit test passes',
         command: 'dotnet test --nologo --logger trx',
+        needs: 'dotnet',
       },
       {
         id: 'dotnet-coverage',
@@ -36,6 +40,7 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Coverage',
         acceptance: 'the changed code is covered by tests',
         command: 'dotnet test --nologo --logger trx --collect:"XPlat Code Coverage"',
+        needs: 'dotnet',
       },
       {
         id: 'dotnet-api',
@@ -43,6 +48,7 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'API integration tests',
         acceptance: 'every endpoint answers as its contract says (status, shape, auth)',
         command: 'dotnet test --nologo --logger trx --filter Category=Integration',
+        needs: 'dotnet',
       },
       {
         id: 'dotnet-http',
@@ -52,6 +58,7 @@ export const TEST_STACKS: readonly TestStack[] = [
           'the running API answers real requests correctly, checked against real rows',
         command:
           "start the API, take real identifiers from the project's database MCP server, call the endpoints with them (plus the project's .http file if present), and check each response back against the data",
+        needs: 'dotnet',
       },
       {
         id: 'dotnet-arch',
@@ -59,6 +66,7 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Architecture rules',
         acceptance: 'no layer depends on something it may not depend on',
         command: 'dotnet test --nologo --logger trx --filter Category=Architecture',
+        needs: 'dotnet',
       },
       {
         id: 'dotnet-format',
@@ -66,6 +74,7 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Format and analyzers',
         acceptance: 'formatting and analyzer rules are clean',
         command: 'dotnet format --verify-no-changes && dotnet build --nologo -warnaserror',
+        needs: 'dotnet',
       },
       {
         id: 'dotnet-sonar',
@@ -77,6 +86,7 @@ export const TEST_STACKS: readonly TestStack[] = [
           'project through the SonarQube MCP server, and name the server as the source. If the ' +
           'gate has never been computed for this branch, say so — do not report the main branch ' +
           "figures as though they were this branch's.",
+        needs: 'dotnet',
         mcp: 'sonarqube',
       },
       {
@@ -89,6 +99,7 @@ export const TEST_STACKS: readonly TestStack[] = [
           'anti-patterns and circular dependencies, and find dead code. Report errors and ' +
           'warnings separately, and count only what this working tree introduced — compare ' +
           'against the diff rather than reporting the solution\'s whole backlog as a failure.',
+        needs: 'dotnet',
         mcp: 'roslyn-navigator',
       },
       {
@@ -97,6 +108,7 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Mutation testing (Stryker)',
         acceptance: 'the tests fail when the code is broken on purpose',
         command: 'dotnet stryker',
+        needs: 'dotnet',
         heavy: true,
       },
     ],
@@ -112,6 +124,7 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Unit tests (Karma/Jasmine)',
         acceptance: 'every component and service spec passes',
         command: 'npx ng test --watch=false --browsers=ChromeHeadless',
+        needs: 'browser',
       },
       {
         id: 'ng-coverage',
@@ -119,6 +132,7 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Coverage',
         acceptance: 'the changed components are covered',
         command: 'npx ng test --watch=false --code-coverage --browsers=ChromeHeadless',
+        needs: 'browser',
       },
       {
         id: 'ng-build',
@@ -126,6 +140,7 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Production build',
         acceptance: 'the production build succeeds with no new warnings',
         command: 'npx ng build',
+        needs: 'node',
       },
       {
         id: 'ng-lint',
@@ -133,6 +148,7 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Lint',
         acceptance: 'lint is clean',
         command: 'npx ng lint',
+        needs: 'node',
       },
       {
         id: 'ng-e2e',
@@ -140,13 +156,52 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'UI end-to-end',
         acceptance: 'the affected screens work end to end in a real browser',
         command: 'npx playwright test',
+        needs: 'browser',
       },
     ],
   },
 ]
 
-export function defaultSelection(suites: readonly TestSuite[]): string[] {
-  return suites.filter((s) => !s.heavy).map((s) => s.id)
+export function sandboxNeedsDotnet(stacks: readonly AvailableSuites[]): boolean {
+  return stacks.some((s) => s.stackId === 'dotnet')
+}
+
+export function sandboxTools(dotnet: boolean, browser = false): readonly SuiteTool[] {
+  const tools: SuiteTool[] = ['node']
+  if (dotnet) tools.push('dotnet')
+  if (browser) tools.push('browser')
+  return tools
+}
+
+export function needsBrowser(
+  entries: readonly string[],
+  read?: (entry: string) => string | null,
+): boolean {
+  const lower = entries.map((entry) => entry.replace(/\\/g, '/').toLowerCase())
+  const named = lower.some(
+    (entry) =>
+      /(^|\/)playwright[.-]?[a-z0-9.-]*\.(config|conf)\.(ts|js|mjs|cjs)$/.test(entry) ||
+      /(^|\/)karma\.conf\.(js|ts)$/.test(entry) ||
+      /(^|\/)angular\.json$/.test(entry) ||
+      /(^|\/)(cypress|wdio)\.config\.(ts|js|mjs|cjs)$/.test(entry),
+  )
+  if (named || !read) return named
+  for (const entry of entries.filter((e) => /(^|[\\/])package\.json$/i.test(e)).slice(0, 8)) {
+    const text = read(entry)
+    if (text && /"@playwright\/test"|"playwright"|"karma"|"cypress"/.test(text)) return true
+  }
+  return false
+}
+
+export type SandboxEnv = readonly SuiteTool[] | null
+
+export function unavailableReason(suite: TestSuite, sandbox: SandboxEnv): string | null {
+  if (!sandbox || sandbox.includes(suite.needs)) return null
+  return `${suite.needs} is not in the bypass container`
+}
+
+export function defaultSelection(suites: readonly TestSuite[], sandbox: SandboxEnv = null): string[] {
+  return suites.filter((s) => !s.heavy && !unavailableReason(s, sandbox)).map((s) => s.id)
 }
 
 export interface VerifyGate {

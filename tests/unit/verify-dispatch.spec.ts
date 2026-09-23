@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { verifyVerdict } from '@shared/domain'
-import { stackById, defaultSelection } from '@shared/test-catalog'
 import {
+  stackById,
+  defaultSelection,
+  sandboxNeedsDotnet,
+  sandboxTools,
+  unavailableReason,
+} from '@shared/test-catalog'
+import {
+  evidencePrompt,
   parseVerifyReport,
   planSuites,
   verifyMarkerBroken,
@@ -10,6 +17,10 @@ import {
 } from '@main/verify/verify-dispatch'
 
 const dotnet = stackById('dotnet')!
+const angular = stackById('angular')!
+
+const NODE_BOX = sandboxTools(false)
+const DOTNET_BOX = sandboxTools(true)
 
 describe('planning a run', () => {
   it('leaves slow suites out of the default selection', () => {
@@ -22,6 +33,73 @@ describe('planning a run', () => {
     const prompt = verifyPrompt(planSuites(dotnet.suites, ['dotnet-unit']), '.NET')
     expect(prompt).toContain('STOP at the first one that fails')
     expect(prompt).toContain(VERIFY_MARKER)
+  })
+
+  it('marks the suites the bypass container cannot run, instead of attempting them', () => {
+    const plan = planSuites(dotnet.suites, ['dotnet-unit', 'dotnet-arch'], NODE_BOX)
+    expect(plan).toHaveLength(2)
+    expect(plan.every((p) => p.unavailable?.includes('dotnet'))).toBe(true)
+
+    expect(planSuites(dotnet.suites, ['dotnet-unit'])[0].unavailable).toBeNull()
+  })
+
+  it('runs dotnet suites in the .NET sandbox image, which a .NET project gets', () => {
+    expect(
+      sandboxNeedsDotnet([{ stackId: 'dotnet', stackLabel: '.NET', suites: dotnet.suites }]),
+    ).toBe(true)
+    expect(
+      sandboxNeedsDotnet([{ stackId: 'angular', stackLabel: 'Angular', suites: angular.suites }]),
+    ).toBe(false)
+    expect(planSuites(dotnet.suites, ['dotnet-unit'], DOTNET_BOX)[0].unavailable).toBeNull()
+  })
+
+  it('keeps node suites runnable in the container, but not browser ones without a browser', () => {
+    expect(unavailableReason(angular.suites.find((s) => s.id === 'ng-build')!, NODE_BOX)).toBeNull()
+    expect(unavailableReason(angular.suites.find((s) => s.id === 'ng-unit')!, NODE_BOX)).toContain(
+      'browser',
+    )
+  })
+
+  it('leaves unavailable suites out of the default selection too', () => {
+    const chosen = defaultSelection(angular.suites, NODE_BOX)
+    expect(chosen).toContain('ng-build')
+    expect(chosen).not.toContain('ng-unit')
+  })
+
+  it('tells the session what not to attempt, and why', () => {
+    const prompt = verifyPrompt(
+      planSuites(dotnet.suites, ['dotnet-unit'], NODE_BOX),
+      '.NET',
+      [],
+      NODE_BOX,
+    )
+    expect(prompt).toContain('Do NOT attempt these')
+    expect(prompt).toContain('dotnet is not in the bypass container')
+    expect(prompt).toContain(VERIFY_MARKER)
+  })
+})
+
+describe('the bind-mount lock note', () => {
+  it('tells a containerised run what a denied bin path actually means', () => {
+    const plan = planSuites(dotnet.suites, ['dotnet-unit'], DOTNET_BOX)
+    const prompt = verifyPrompt(plan, '.NET', [], DOTNET_BOX)
+    expect(prompt).toContain('MSB3021')
+    expect(prompt).toMatch(/locked by a process on the host/i)
+    expect(prompt).toMatch(/RETRY IN THE OTHER CONFIGURATION/i)
+    expect(prompt).toContain('-c Release')
+    expect(prompt).toMatch(/Never delete bin\/ or obj\//i)
+  })
+
+  it('says nothing about it when the run is not containerised', () => {
+    const plan = planSuites(dotnet.suites, ['dotnet-unit'])
+    expect(verifyPrompt(plan, '.NET', [])).not.toContain('MSB3021')
+  })
+})
+
+describe('the evidence pass in a container', () => {
+  it('skips screenshots, because the container has no display', () => {
+    expect(evidencePrompt([], true)).toContain('skip screenshots')
+    expect(evidencePrompt([], false)).toContain('screenshot the affected screen')
   })
 })
 

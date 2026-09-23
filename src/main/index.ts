@@ -214,7 +214,7 @@ async function main(): Promise<void> {
       return broker.handle(context)
     },
   })
-  manager.reconcileOnStartup()
+  manager.reconcileOnStartup(app.isPackaged)
   manager.startWatchdog()
   void manager.models()
 

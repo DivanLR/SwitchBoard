@@ -90,7 +90,22 @@ describe('sessionName', () => {
     expect(sessionName('s1', { kinds: { s1: 'diagram' } }, 'main', null)).toBe('Diagram - main')
   })
 
-  it('names a Tests section session after its branch', () => {
+  it('names an isolated test session by its suite, not by the shared branch', () => {
+    expect(
+      sessionName('s1', { kinds: { s1: 'tests' }, suites: { s1: 'Unit' } }, 'main'),
+    ).toBe('Tests: Unit')
+    expect(
+      sessionName('s2', { kinds: { s2: 'tests' }, suites: { s2: 'HTTP smoke' } }, 'main'),
+    ).toBe('Tests: HTTP smoke')
+  })
+
+  it('still says Complete when that suite finished', () => {
+    expect(
+      sessionName('s1', { kinds: { s1: 'tests' }, suites: { s1: 'Unit' } }, 'main', 'completed'),
+    ).toBe('Tests: Unit - Complete')
+  })
+
+  it('falls back to the branch when no suite is named', () => {
     expect(sessionName('s1', { kinds: { s1: 'tests' } }, 'main')).toBe('Tests - main')
   })
 

@@ -27,7 +27,7 @@ export type PermissionRequestStatus = 'pending' | 'approved' | 'denied' | 'expir
 
 export type DecisionOutcome = Exclude<PermissionRequestStatus, 'pending'>
 
-export type SessionMode = 'default' | 'dontAsk' | 'auto' | 'acceptEdits' | 'plan'
+export type SessionMode = 'default' | 'dontAsk' | 'auto' | 'acceptEdits' | 'plan' | 'bypass'
 
 export const DEFAULT_SESSION_MODE: SessionMode = 'auto'
 
@@ -62,6 +62,11 @@ export const SESSION_MODES: readonly {
     label: 'Plan first',
     detail: 'Reads and researches without changing anything, then sends a plan to your inbox.',
   },
+  {
+    value: 'bypass',
+    label: 'Bypass',
+    detail: 'Nothing asks for approval. Runs inside a disposable WSL container.',
+  },
 ]
 
 export interface ProjectRef {
@@ -78,6 +83,7 @@ export interface Project {
   archivedAt: string | null
   refs: ProjectRef[]
   defaultSessionMode: SessionMode
+  useContainers: boolean
 }
 
 export interface SkillImportResult {
@@ -109,6 +115,7 @@ export interface Session {
   derivedName?: string | null
   label?: string | null
   sectionKind?: SectionKind | null
+  bypassPermissions?: boolean
   planMode?: boolean
   inPlanMode?: boolean
   heavySubagents?: boolean
@@ -384,6 +391,7 @@ export interface Settings {
   projectTestStacks: Record<string, string>
   projectSuiteCommands: Record<string, Record<string, string>>
   projectTestSelection: Record<string, string[]>
+  projectIsolatedRuns: Record<string, boolean>
   projectAcceptedGates: Record<string, string[]>
   autoApproveLow: boolean
   autoApproveMedium: boolean
@@ -393,6 +401,7 @@ export interface Settings {
   databaseMcpServers: string[]
   diagramEngine: 'diagram-design' | 'archify'
   mcpActiveServers: string[]
+  sandboxMemory: string
   flowWorktreeRoot: string
 }
 
@@ -412,6 +421,7 @@ export const DEFAULT_SETTINGS: Settings = {
   projectTestStacks: {},
   projectSuiteCommands: {},
   projectTestSelection: {},
+  projectIsolatedRuns: {},
   projectAcceptedGates: {},
   autoApproveLow: false,
   autoApproveMedium: false,
@@ -420,6 +430,7 @@ export const DEFAULT_SETTINGS: Settings = {
   disabledCommands: {},
   databaseMcpServers: [],
   mcpActiveServers: [],
+  sandboxMemory: '6g',
   flowWorktreeRoot: '',
   diagramEngine: 'diagram-design',
 }
@@ -769,6 +780,7 @@ export function sessionName(
     verifyRunSessionIds?: readonly string[]
     diagrams?: readonly { sessionId: string | null; description: string }[]
     kinds?: Readonly<Record<string, SectionKind>>
+    suites?: Readonly<Record<string, string>>
   },
   branch?: string | null,
   endReason?: SessionEndReason | null,
@@ -782,6 +794,8 @@ export function sessionName(
   const on = done ? ' - Complete' : branch ? ` - ${branch}` : ''
   const kind = work.kinds?.[sessionId]
   const label: string | undefined = kind && SECTION_LABELS[kind]
+  const suite = work.suites?.[sessionId]
+  if (label && suite) return `${label}: ${suite}${done ? ' - Complete' : ''}`
   if (label) return `${label}${on}`
   if (work.verifyRunSessionIds?.includes(sessionId)) return `Tests${on}`
   return null
