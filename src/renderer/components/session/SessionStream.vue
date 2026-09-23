@@ -6,7 +6,9 @@ import type { RawLine } from '@shared/stream-lines'
 import type { ProjectListItem } from '@shared/ipc-types'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useInboxStore } from '@renderer/stores/inbox'
+import { useElicitationsStore } from '@renderer/stores/elicitations'
 import StreamEvent from '@renderer/components/StreamEvent.vue'
+import ElicitationCard from '@renderer/components/ElicitationCard.vue'
 import SwallowedBlock from '@renderer/components/SwallowedBlock.vue'
 import QuestionEvent from '@renderer/components/QuestionEvent.vue'
 import Icon from '@renderer/components/Icon.vue'
@@ -41,6 +43,7 @@ const tasksExpanded = defineModel<boolean>('tasksExpanded', { required: true })
 
 const active = useActiveSessionStore()
 const inbox = useInboxStore()
+const elicitations = useElicitationsStore()
 
 const SHOW_LIMIT = 6
 const shownAgents = computed(() =>
@@ -135,6 +138,8 @@ function openInbox(requestId: string): void {
           @edit-queued="(eventId, text) => emit('edit-queued', eventId, text)"
         />
       </template>
+
+      <ElicitationCard v-for="ask in elicitations.forSession(liveSession?.id)" :key="ask.id" :item="ask" />
 
       <QuestionEvent
         v-if="inlineQuestion"

@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useInboxStore } from '@renderer/stores/inbox'
+import { useElicitationsStore } from '@renderer/stores/elicitations'
 import { useQueueStore } from '@renderer/stores/queue'
 import { useTerminalStore } from '@renderer/stores/terminal'
 import { useDiagramsStore } from '@renderer/stores/diagrams'
@@ -24,6 +25,7 @@ import Icon from '@renderer/components/Icon.vue'
 const projects = useProjectsStore()
 const active = useActiveSessionStore()
 const inbox = useInboxStore()
+const elicitations = useElicitationsStore()
 const queue = useQueueStore()
 const terminal = useTerminalStore()
 const diagrams = useDiagramsStore()
@@ -92,6 +94,7 @@ onMounted(async () => {
     window.switchboard.on('push.sessionStatus', (push) => projects.applyStatusPush(push)),
     window.switchboard.on('push.counters', (counters) => projects.setCounters(counters)),
     window.switchboard.on('push.inboxChanged', (push) => inbox.applyInboxPush(push)),
+    window.switchboard.on('push.elicitations', (pending) => elicitations.apply(pending)),
     window.switchboard.on('push.queueChanged', (push) => queue.applyQueuePush(push)),
     window.switchboard.on('push.terminalData', (push) => terminal.applyData(push)),
     window.switchboard.on('push.terminalExit', (push) => terminal.applyExit(push)),
@@ -117,7 +120,7 @@ onMounted(async () => {
 
   await settingsStore.load()
   active.defaultView = settingsStore.settings?.defaultView ?? 'clean'
-  await Promise.all([projects.refresh(), inbox.refresh()])
+  await Promise.all([projects.refresh(), inbox.refresh(), elicitations.refresh()])
 })
 
 onUnmounted(() => {

@@ -2,8 +2,10 @@
 import { computed, useTemplateRef } from 'vue'
 import { useModal } from '@renderer/composables/useModal'
 import { useInboxStore } from '@renderer/stores/inbox'
+import { useElicitationsStore } from '@renderer/stores/elicitations'
 import FlowView from '@renderer/views/FlowView.vue'
 import Icon from '@renderer/components/Icon.vue'
+import ElicitationCard from '@renderer/components/ElicitationCard.vue'
 
 const props = defineProps<{ projectId: string; projectName: string }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -12,9 +14,11 @@ const dialogEl = useTemplateRef<HTMLElement>('dialog')
 useModal(dialogEl, () => emit('close'))
 
 const inbox = useInboxStore()
+const elicitations = useElicitationsStore()
 const waiting = computed(
   () => inbox.pending.filter((item) => item.projectId === props.projectId).length,
 )
+const asks = computed(() => elicitations.flowFor(props.projectId))
 </script>
 
 <template>
@@ -52,6 +56,9 @@ const waiting = computed(
         >
           <Icon name="close" />
         </button>
+      </div>
+      <div v-if="asks.length > 0" class="fd-asks" data-testid="flow-popup-asks" aria-live="polite">
+        <ElicitationCard v-for="item in asks" :key="item.id" :item="item" />
       </div>
       <div class="fd-body">
         <FlowView :project-id="projectId" />
@@ -92,6 +99,13 @@ const waiting = computed(
 
 .fd-spacer {
   flex: 1;
+}
+
+.fd-asks {
+  max-height: 40vh;
+  overflow-y: auto;
+  padding: var(--sp-4) var(--sp-5) 0;
+  border-bottom: 1px solid var(--border);
 }
 
 .fd-body {

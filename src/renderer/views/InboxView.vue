@@ -2,14 +2,17 @@
 import { nextTick, onMounted, onWatcherCleanup, ref, watch } from 'vue'
 import { isDangerousCommand, type DecisionRecord, type PermissionRequest } from '@shared/domain'
 import { useInboxStore } from '@renderer/stores/inbox'
+import { useElicitationsStore } from '@renderer/stores/elicitations'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { relativeTime } from '@renderer/relative-time'
 import { useNow } from '@renderer/composables/useNow'
 import Icon from '@renderer/components/Icon.vue'
+import ElicitationCard from '@renderer/components/ElicitationCard.vue'
 
 const RISK_LABEL: Record<'low' | 'medium' | 'high', string> = { low: 'Low', medium: 'Medium', high: 'High' }
 
 const inbox = useInboxStore()
+const elicitations = useElicitationsStore()
 const projects = useProjectsStore()
 const emit = defineEmits<{ (e: 'collapse'): void }>()
 
@@ -279,11 +282,18 @@ async function approveAll(group: { projectId: string; items: PermissionRequest[]
     </div>
 
     <div v-if="tab === 'inbox'" class="ui-body" aria-live="polite" aria-relevant="additions">
-      <div v-if="inbox.groups.length === 0" class="ui-empty" data-testid="inbox-zero">
+      <div v-if="inbox.groups.length === 0 && elicitations.count === 0" class="ui-empty" data-testid="inbox-zero">
         <Icon name="check" class="empty-icon ui-empty-icon" :size="18" />
         <div class="ui-empty-title">Inbox zero</div>
         <div class="ui-empty-sub">New permission requests from any project land here.</div>
       </div>
+
+      <ElicitationCard
+        v-for="item in elicitations.pending"
+        :key="item.id"
+        :item="item"
+        :project="projectName(item.projectId)"
+      />
 
       <div
         v-for="group in inbox.groups"

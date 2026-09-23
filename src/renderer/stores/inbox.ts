@@ -2,6 +2,7 @@ import { computed, reactive, toRefs } from 'vue'
 import type { DecisionRecord, PermissionRequest, PermissionRule } from '@shared/domain'
 import type { InboxChangedPush } from '@shared/ipc-types'
 import { invoke } from '@renderer/ipc'
+import { useElicitationsStore } from '@renderer/stores/elicitations'
 
 const UNDELIVERABLE_DECISION =
   'The decision could not be delivered: the originating session has ended. The item was marked expired.'
@@ -23,7 +24,7 @@ const groups = computed((): { projectId: string; items: PermissionRequest[] }[] 
   }))
 })
 
-const pendingCount = computed((): number => state.pending.length)
+const pendingCount = computed((): number => state.pending.length + useElicitationsStore().count)
 
 const store = reactive({
   ...toRefs(state),
