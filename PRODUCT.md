@@ -116,11 +116,16 @@ Confirmed functionality:
   stream (or in the Flow popup, for a Flow stage) and drive the "needs you"
   status.
 - MCP sign-in and input requests from any Claude session land in the inbox, the
-  session stream and, for a Flow session, the Flow popup. A sign-in opens its
-  link in the browser at once, only when it is https with no credentials in it,
-  and its card stays until the server confirms it; a form asks for the server's
-  own fields. Each card names the server and the tool call that asked, and keeps
-  only a link's host and path.
+  session stream and, for a Flow session, the Flow popup. A link that is not
+  https, or carries credentials, never opens. The ado server's sign-in on a
+  Microsoft sign-in host (login.microsoftonline.com, login.live.com,
+  app.vssps.visualstudio.com) opens in the browser at once and its card keeps
+  only the host and path; any other link shows in full and opens only when you
+  press Open. A sign-in card stays until the server confirms it, and Hide only
+  removes the card, since the call keeps waiting. A form asks for the server's
+  own fields. Each card names the server and the tool call that asked, or says
+  it was one of several calls to that server running at once. The desktop
+  notification names the server and opens the Inbox on the card.
 - Risk classification as low, medium or high by first match rules. Anything no
   rule matches is treated as high risk. High risk approvals require an explicit
   confirmation step. Low and medium risk may be auto approved by setting.

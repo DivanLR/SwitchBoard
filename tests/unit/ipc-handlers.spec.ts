@@ -275,7 +275,7 @@ describe('elicitations over the invoke channel', () => {
       sessionId: session,
       request: { serverName: 'ado', message: 'Pick a project', mode: 'form', requestedSchema: { type: 'object', properties: { project: { type: 'string' } } } },
       signal: new AbortController().signal,
-      trigger: null,
+      calls: [],
     })
     const listed = await call('elicitations.pending')
     expect(listed).toMatchObject({ ok: true, value: [{ serverName: 'ado', mode: 'form' }] })

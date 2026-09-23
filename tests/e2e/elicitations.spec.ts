@@ -35,7 +35,55 @@ const PROJECT_FIELDS = [
   },
 ]
 
-test('a sign-in request shows in the Inbox and the session stream with the server, the tool call and the host, and Cancel clears it', async ({ page }) => {
+test('a link Switchboard did not open shows in full, opens only on Open, and Cancel before that answers the server', async ({ page }) => {
+  const url = 'https://sso.example.com/start?client=abc&state=1'
+  const id = await page.evaluate(
+    (link) =>
+      window.__mock.raiseElicitation({
+        sessionId: 's-alpha',
+        projectId: 'p-alpha',
+        mode: 'url',
+        server: 'Microsoft',
+        serverName: 'tools',
+        host: 'sso.example.com',
+        path: '/start',
+        url: link,
+      }),
+    url,
+  )
+  const card = page.getByTestId('inbox-view').getByTestId('elicitation-card')
+  await expect(card.getByTestId('elicitation-consent')).toHaveText(
+    'tools asks you to open a page on sso.example.com. Check the whole link first: Switchboard opens it only when you press Open.',
+  )
+  await expect(card.getByTestId('elicitation-url')).toHaveText(url)
+  await expect(card.getByTestId('elicitation-host')).toHaveCount(0)
+  await expect(card.getByTestId('elicitation-cancel')).toHaveText('Cancel')
+
+  await card.getByTestId('elicitation-open').click()
+  await expect(card.getByTestId('elicitation-host')).toContainText('Opened sso.example.com in your browser.')
+  await expect(card.getByTestId('elicitation-url')).toHaveCount(0)
+  await expect(card.getByTestId('elicitation-open-again')).toBeVisible()
+  expect((await page.evaluate(() => window.__mock.state())).elicitationOpens).toEqual([id])
+
+  const other = await page.evaluate(() =>
+    window.__mock.raiseElicitation({ sessionId: 's-beta', projectId: 'p-beta', mode: 'url', host: 'sso.example.com', url: 'https://sso.example.com/b' }),
+  )
+  await page.getByTestId('inbox-view').locator(`[data-elicitation-id="${other}"]`).getByTestId('elicitation-cancel').click()
+  expect((await page.evaluate(() => window.__mock.state())).elicitationAnswers).toEqual([{ id: other, action: 'cancel' }])
+  expect((await page.evaluate(() => window.__mock.state())).elicitationOpens).toEqual([id])
+})
+
+test('clicking a sign-in notification opens a collapsed Inbox on its card', async ({ page }) => {
+  await page.getByTestId('inbox-collapse').click()
+  await expect(page.getByTestId('inbox-view')).toHaveCount(0)
+  const id = await page.evaluate(() =>
+    window.__mock.raiseElicitation({ sessionId: 's-beta', projectId: 'p-beta', mode: 'url', host: 'login.microsoftonline.com' }),
+  )
+  await page.evaluate((requestId) => window.__mock.focusInbox(requestId), id)
+  await expect(page.getByTestId('inbox-view').locator(`[data-elicitation-id="${id}"]`)).toBeInViewport()
+})
+
+test('a sign-in request shows in the Inbox and the session stream with the server, the tool call and the host, and Hide clears it', async ({ page }) => {
   const id = await page.evaluate(() =>
     window.__mock.raiseElicitation({
       sessionId: 's-alpha',
@@ -68,6 +116,10 @@ test('a sign-in request shows in the Inbox and the session stream with the serve
   await card.getByTestId('elicitation-open-again').click()
   await expect.poll(async () => (await page.evaluate(() => window.__mock.state())).elicitationOpens).toEqual([id])
 
+  await expect(card.getByTestId('elicitation-hide-note')).toHaveText(
+    'Hide only removes this card. The call keeps waiting until ado gives up; stop the session to end it now.',
+  )
+  await expect(card.getByTestId('elicitation-cancel')).toHaveText('Hide')
   await card.getByTestId('elicitation-cancel').click()
   await expect(page.getByTestId('elicitation-card')).toHaveCount(0)
   await expect(page.getByTestId('inbox-zero')).toBeVisible()

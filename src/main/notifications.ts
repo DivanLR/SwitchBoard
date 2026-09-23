@@ -35,7 +35,7 @@ export function createNotifier(deps: NotifierDeps): (context: NeedsYouContext) =
 
     const projectName = deps.projectName(context.projectId)
     const approvable =
-      process.platform === 'win32' && context.requestId && context.kind !== 'question'
+      process.platform === 'win32' && context.requestId && (context.kind === 'permission' || context.kind === 'plan')
     const notification = new Notification({
       title: `${projectName} needs you`,
       body: `${KIND_LABEL[context.kind]}: ${context.title}`,

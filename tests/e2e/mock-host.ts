@@ -48,6 +48,7 @@ export interface MockDriver {
   emitEvent: (sessionId: string, kind: string, payload: Record<string, unknown>) => string
   updateEvent: (sessionId: string, eventId: string, payload: Record<string, unknown>) => void
   focusSession: (sessionId: string) => void
+  focusInbox: (requestId: string) => void
   setCommands: (
     projectId: string,
     commands: (string | { name: string; description?: string })[],
@@ -1667,6 +1668,9 @@ export function installMockHost(scenario: MockScenario): void {
     },
     'elicitations.openAgain': (req) => {
       elicitationOpens.push(String(req.id))
+      if (!elicitations.some((item) => item.id === req.id && item.url)) return
+      elicitations = elicitations.map((item) => (item.id === req.id ? { ...item, url: null } : item))
+      push('push.elicitations', [...elicitations])
     },
     'inbox.pending': () => [...pending],
     'inbox.decide': (req) =>
@@ -1828,6 +1832,7 @@ export function installMockHost(scenario: MockScenario): void {
     emitEvent: (sessionId, kind, payload) => String(appendEvent(sessionId, kind, payload).id),
     updateEvent: (sessionId, eventId, payload) => updateEvent(sessionId, eventId, payload),
     focusSession: (sessionId) => push('push.focusRequest', { target: 'session', sessionId }),
+    focusInbox: (requestId) => push('push.focusRequest', { target: 'inbox', requestId }),
     setCommands: (projectId, commands) => {
       const shaped = commands.map((c) => (typeof c === 'string' ? { name: c } : c))
       projectCommands.set(projectId, shaped)
@@ -1987,6 +1992,7 @@ export function installMockHost(scenario: MockScenario): void {
         intent: null,
         host: null,
         path: null,
+        url: null,
         refused: null,
         fields: [],
         createdAt: now(),

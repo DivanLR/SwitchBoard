@@ -93,7 +93,7 @@ export interface ElicitationGate {
     sessionId: string
     request: ElicitationRequest
     signal: AbortSignal
-    trigger: ToolCall | null
+    calls: ToolCall[]
   }): Promise<ElicitationResult>
   completed(sessionId: string, serverName: string, elicitationId: string): void
   toolFinished(sessionId: string, toolUseId: string): void
@@ -404,8 +404,8 @@ export class HostedSession implements SessionHost {
     signal: AbortSignal,
   ): Promise<ElicitationResult> {
     const prefix = mcpToolPrefix(request.serverName)
-    const trigger = [...this.mcpCalls.values()].findLast((call) => call.tool.startsWith(prefix)) ?? null
-    return elicit.request({ sessionId: this.sessionId, request, signal, trigger })
+    const calls = [...this.mcpCalls.values()].filter((call) => call.tool.startsWith(prefix))
+    return elicit.request({ sessionId: this.sessionId, request, signal, calls })
   }
 
   private appliedModel: string | null = null

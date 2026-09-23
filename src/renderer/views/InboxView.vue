@@ -59,10 +59,13 @@ watch(
     if (!requestId) return
     tab.value = 'inbox'
     void nextTick(() => {
-      document.querySelector(`[data-request-id="${requestId}"]`)?.scrollIntoView({ block: 'center' })
+      document
+        .querySelector(`[data-request-id="${requestId}"], [data-elicitation-id="${requestId}"]`)
+        ?.scrollIntoView({ block: 'center' })
       inbox.clearFocusRequest()
     })
   },
+  { immediate: true },
 )
 
 function projectName(projectId: string): string {

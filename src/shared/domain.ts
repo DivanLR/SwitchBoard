@@ -332,6 +332,7 @@ export interface Elicitation {
   intent: ToolIntent | null
   host: string | null
   path: string | null
+  url: string | null
   refused: string | null
   fields: ElicitationField[]
   createdAt: string

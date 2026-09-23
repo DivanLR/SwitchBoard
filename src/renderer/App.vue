@@ -103,6 +103,7 @@ onMounted(async () => {
     ),
     window.switchboard.on('push.focusRequest', (push) => {
       if (push.target === 'inbox') {
+        setInboxCollapsed(false)
         inbox.focusRequest(push.requestId)
       } else {
         const project = projects.items.find((p) => p.session?.id === push.sessionId)

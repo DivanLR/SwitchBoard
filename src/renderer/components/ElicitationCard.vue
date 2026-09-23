@@ -62,23 +62,36 @@ async function openAgain(): Promise<void> {
 
     <template v-if="url">
       <div v-if="item.refused" class="el-bad" role="alert" data-testid="elicitation-refused">{{ item.refused }}</div>
-      <div v-else class="el-text" data-testid="elicitation-host">
-        Opened <span class="mono">{{ item.host }}</span> in your browser. Finish signing in there; this card closes
-        when {{ item.server }} confirms it.
-      </div>
+      <template v-else-if="item.url">
+        <div class="el-text" data-testid="elicitation-consent">
+          {{ item.serverName }} asks you to open a page on <span class="mono el-host">{{ item.host }}</span>. Check the
+          whole link first: Switchboard opens it only when you press Open.
+        </div>
+        <div class="mono el-link" data-testid="elicitation-url">{{ item.url }}</div>
+      </template>
+      <template v-else>
+        <div class="el-text" data-testid="elicitation-host">
+          Opened <span class="mono">{{ item.host }}</span> in your browser. Finish signing in there; this card closes
+          when {{ item.server }} confirms it.
+        </div>
+        <div class="el-meta" data-testid="elicitation-hide-note">
+          Hide only removes this card. The call keeps waiting until {{ item.serverName }} gives up; stop the session to
+          end it now.
+        </div>
+      </template>
       <div v-if="error" class="el-bad" role="alert" data-testid="elicitation-error">{{ error }}</div>
       <div class="el-actions">
         <button
           v-if="!item.refused"
           type="button"
-          class="btn-outline"
-          data-testid="elicitation-open-again"
+          :class="item.url ? 'btn-solid' : 'btn-outline'"
+          :data-testid="item.url ? 'elicitation-open' : 'elicitation-open-again'"
           @click="openAgain()"
         >
-          Open again
+          {{ item.url ? 'Open' : 'Open again' }}
         </button>
         <button type="button" class="btn-quiet" data-testid="elicitation-cancel" :disabled="busy" @click="answer('cancel')">
-          {{ item.refused ? 'Dismiss' : 'Cancel' }}
+          {{ item.refused ? 'Dismiss' : item.url ? 'Cancel' : 'Hide' }}
         </button>
       </div>
     </template>
@@ -180,6 +193,18 @@ async function openAgain(): Promise<void> {
 
 .el-intent {
   color: var(--text-mid);
+}
+
+.el-host {
+  font-weight: var(--w-em);
+  color: var(--text-title);
+}
+
+.el-link {
+  font-size: var(--fs-meta);
+  line-height: 1.4;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
 }
 
 .el-bad {

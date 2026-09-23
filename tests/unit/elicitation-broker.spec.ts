@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { Elicitation } from '@shared/domain'
-import type { ElicitationRequest } from '@main/sessions/session'
+import type { ElicitationRequest, ToolCall } from '@main/sessions/session'
 import { openDatabase } from '@main/store/db'
 import { createRepositories, newId, nowIso } from '@main/store/repositories'
 import {
   ElicitationBroker,
+  callsIntent,
   checkSignInUrl,
   formContent,
   formFields,
@@ -25,6 +26,7 @@ function setup(section: 'flow' | null = null) {
   const opened: string[] = []
   const attention: string[] = []
   const notified: { kind: string; title: string }[] = []
+  const focus: string[] = []
   let pending: Elicitation[] = []
   const broker = new ElicitationBroker(
     repos,
@@ -34,21 +36,32 @@ function setup(section: 'flow' | null = null) {
     },
     {
       onChanged: (list) => (pending = list),
-      onNeedsYou: (context) => notified.push({ kind: context.kind, title: context.title }),
+      onNeedsYou: (context) => {
+        notified.push({ kind: context.kind, title: context.title })
+        focus.push(context.requestId)
+      },
       openExternal: (url) => opened.push(url),
     },
   )
-  const ask = (request: Partial<ElicitationRequest>, signal = new AbortController().signal, trigger: Parameters<ElicitationBroker['request']>[0]['trigger'] = null) =>
-    broker.request({ sessionId, request: { serverName: 'ado', message: 'Sign in', ...request }, signal, trigger })
-  return { broker, sessionId, project, opened, attention, notified, ask, pending: () => pending }
+  const ask = (request: Partial<ElicitationRequest>, signal = new AbortController().signal, calls: ToolCall[] = []) =>
+    broker.request({ sessionId, request: { serverName: 'ado', message: 'Sign in', ...request }, signal, calls })
+  return { broker, sessionId, project, opened, attention, notified, focus, ask, pending: () => pending }
 }
 
 const SIGN_IN = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=abc&state=secret#frag'
 
+const call = (toolUseId: string, tool = 'mcp__ado__wit_query', input: Record<string, unknown> = {}): ToolCall => ({
+  toolUseId,
+  tool,
+  input,
+})
+
 describe('a url sign-in', () => {
-  it('opens an https link at once, accepts, and keeps a card with the host and path but no query', async () => {
+  it('opens an ado sign-in on a Microsoft sign-in host at once, accepts, and keeps a card with the host and path but no query', async () => {
     const h = setup()
-    await expect(h.ask({ mode: 'url', url: SIGN_IN, elicitationId: 'e-1', message: `Open ${SIGN_IN} to sign in` })).resolves.toEqual({ action: 'accept' })
+    await expect(
+      h.ask({ mode: 'url', url: SIGN_IN, elicitationId: 'e-1', message: `Open ${SIGN_IN} to sign in` }, undefined, [call('tu-1')]),
+    ).resolves.toEqual({ action: 'accept' })
     expect(h.opened).toEqual([SIGN_IN])
     const [card] = h.pending()
     expect(card).toMatchObject({
@@ -56,17 +69,19 @@ describe('a url sign-in', () => {
       server: 'ado',
       host: 'login.microsoftonline.com',
       path: '/common/oauth2/v2.0/authorize',
+      url: null,
       refused: null,
       message: 'Open https://login.microsoftonline.com/common/oauth2/v2.0/authorize to sign in',
     })
     expect(JSON.stringify(card)).not.toContain('secret')
     expect(h.attention).toEqual([`+${h.sessionId}`])
     expect(h.notified).toEqual([{ kind: 'sign_in', title: 'ado wants you to sign in' }])
+    expect(h.focus).toEqual([card.id])
   })
 
   it('opens it again on request, and closes the card when the server says the sign-in is complete', async () => {
     const h = setup()
-    await h.ask({ mode: 'url', url: SIGN_IN, elicitationId: 'e-1' })
+    await h.ask({ mode: 'url', url: SIGN_IN, elicitationId: 'e-1' }, undefined, [call('tu-1')])
     const id = h.pending()[0].id
     h.broker.openAgain(id)
     expect(h.opened).toEqual([SIGN_IN, SIGN_IN])
@@ -74,6 +89,50 @@ describe('a url sign-in', () => {
     expect(h.pending()).toHaveLength(1)
     h.broker.completed(h.sessionId, 'ado', 'e-1')
     expect(h.pending()).toEqual([])
+    expect(h.attention).toEqual([`+${h.sessionId}`, `-${h.sessionId}`])
+  })
+
+  it.each([
+    ['another host for ado', 'ado', 'https://login.microsoftonline.com.example-attacker.net/authorize?state=1'],
+    ['a port on the sign-in host', 'ado', 'https://login.microsoftonline.com:8443/authorize'],
+    ['the sign-in host for another server', 'github', SIGN_IN],
+  ])('does not open %s until the person presses Open, and shows the whole link first', async (_, serverName, link) => {
+    const h = setup()
+    const answer = h.ask({ serverName, mode: 'url', url: link, displayName: 'Microsoft', title: 'Sign in to Microsoft' })
+    expect(h.opened).toEqual([])
+    const [card] = h.pending()
+    expect(card.url).toBe(new URL(link).href)
+    expect(h.attention).toEqual([`+${h.sessionId}`])
+    expect(h.notified).toEqual([{ kind: 'sign_in', title: `${serverName}: Sign in to Microsoft` }])
+
+    h.broker.openAgain(card.id)
+    await expect(answer).resolves.toEqual({ action: 'accept' })
+    expect(h.opened).toEqual([new URL(link).href])
+    expect(h.pending()[0].url).toBeNull()
+    expect(h.attention).toEqual([`+${h.sessionId}`, `-${h.sessionId}`])
+    h.broker.openAgain(card.id)
+    expect(h.opened).toHaveLength(2)
+  })
+
+  it('answers cancel and opens nothing when the person cancels a link it did not open', async () => {
+    const h = setup()
+    const answer = h.ask({ mode: 'url', url: 'https://sso.example.com/start' })
+    h.broker.respond(h.pending()[0].id, 'cancel')
+    await expect(answer).resolves.toEqual({ action: 'cancel' })
+    expect(h.opened).toEqual([])
+    expect(h.pending()).toEqual([])
+  })
+
+  it('holds the session only while a call to that server is still running once the page is open', async () => {
+    const h = setup()
+    await h.ask({ mode: 'url', url: SIGN_IN })
+    expect(h.pending()).toHaveLength(1)
+    expect(h.attention).toEqual([])
+
+    const answer = h.ask({ mode: 'url', url: 'https://sso.example.com/start' })
+    expect(h.attention).toEqual([`+${h.sessionId}`])
+    h.broker.openAgain(h.pending()[1].id)
+    await answer
     expect(h.attention).toEqual([`+${h.sessionId}`, `-${h.sessionId}`])
   })
 
@@ -92,9 +151,19 @@ describe('a url sign-in', () => {
     expect(h.pending()).toEqual([])
   })
 
+  it('keeps the reason for a refused link after the call that asked returns, until it is dismissed', async () => {
+    const h = setup()
+    await h.ask({ mode: 'url', url: 'http://login.example.com/authorize', elicitationId: 'e-7' }, undefined, [call('tu-7')])
+    h.broker.toolFinished(h.sessionId, 'tu-7')
+    h.broker.completed(h.sessionId, 'ado', 'e-7')
+    expect(h.pending()[0].refused).toBe('The link is http, not https, so Switchboard did not open it.')
+    h.broker.respond(h.pending()[0].id, 'cancel')
+    expect(h.pending()).toEqual([])
+  })
+
   it('closes when the session ends, when the tool call that asked finishes, or when the person cancels', async () => {
     const h = setup()
-    await h.ask({ mode: 'url', url: SIGN_IN }, undefined, { toolUseId: 'tu-1', tool: 'mcp__ado__core_list_projects', input: { top: 1 } })
+    await h.ask({ mode: 'url', url: SIGN_IN }, undefined, [call('tu-1', 'mcp__ado__core_list_projects', { top: 1 })])
     h.broker.toolFinished(h.sessionId, 'tu-2')
     expect(h.pending()).toHaveLength(1)
     h.broker.toolFinished(h.sessionId, 'tu-1')
@@ -198,21 +267,35 @@ describe('a form request', () => {
 
   it('marks a Flow session so the Flow popup shows it, and names the tool call that asked', async () => {
     const h = setup('flow')
-    void h.ask({ displayName: 'Azure DevOps', requestedSchema: schema }, undefined, {
-      toolUseId: 'tu-9',
-      tool: 'mcp__ado__wit_query',
-      input: {
+    void h.ask({ displayName: 'Azure DevOps', requestedSchema: schema }, undefined, [
+      call('tu-9', 'mcp__ado__wit_query', {
         action: 'wiql',
         top: 25,
         wiql: "SELECT [System.Id] FROM WorkItems WHERE [System.WorkItemType] = 'Feature' AND [System.AssignedTo] = @Me",
-      },
-    })
+      }),
+    ])
     expect(h.pending()[0]).toMatchObject({
       flow: true,
       server: 'Azure DevOps',
       serverName: 'ado',
       intent: { tool: 'wit_query', summary: 'wit_query: Features assigned to you' },
     })
+  })
+
+  it('names no single call when several calls to that server run at once, and waits until all of them return', async () => {
+    const h = setup()
+    const answer = h.ask({ requestedSchema: schema }, undefined, [
+      call('tu-1', 'mcp__ado__wit_work_item', { project: 'A', ids: [1] }),
+      call('tu-2', 'mcp__ado__wit_work_item', { project: 'B', ids: [2] }),
+      call('tu-3', 'mcp__ado__wit_query', { project: 'C' }),
+    ])
+    expect(h.pending()[0].intent).toEqual({ tool: 'ado', summary: 'one of 3 calls to ado at once: wit_work_item, wit_query' })
+    h.broker.toolFinished(h.sessionId, 'tu-2')
+    h.broker.toolFinished(h.sessionId, 'tu-3')
+    expect(h.pending()).toHaveLength(1)
+    h.broker.toolFinished(h.sessionId, 'tu-1')
+    await expect(answer).resolves.toEqual({ action: 'cancel' })
+    expect(h.pending()).toEqual([])
   })
 })
 
@@ -228,6 +311,8 @@ describe('the tool intent and the url checks', () => {
     )
     expect(toolIntent('mcp__ado__wit_my_work_items', {}).summary).toBe('wit_my_work_items')
     expect(toolIntent('mcp__web__fetch', { url: 'https://x.test/a?token=1' }).summary).toBe('fetch: url https://x.test/a')
+    expect(callsIntent('ado', [])).toBeNull()
+    expect(callsIntent('ado', [call('tu-1', 'mcp__ado__core_list_projects', { top: 1 })])?.summary).toBe('core_list_projects: top 1')
   })
 
   it('strips the query string and fragment from every link in a text', () => {

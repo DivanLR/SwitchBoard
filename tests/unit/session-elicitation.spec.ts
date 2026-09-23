@@ -59,7 +59,7 @@ describe('MCP elicitation in a Claude session', () => {
     expect(start().onElicitation).toBeUndefined()
   })
 
-  it('hands every elicitation to the gate with the latest in-flight call to that server', async () => {
+  it('hands every elicitation to the gate with every in-flight call to that server, since it cannot tell which one asked', async () => {
     const g = gate()
     const { feed, onElicitation } = start(g)
     feed(toolUse('tu-1', 'mcp__ado__core_list_projects', { top: 1 }))
@@ -71,17 +71,20 @@ describe('MCP elicitation in a Claude session', () => {
       sessionId: 's1',
       request: { serverName: 'ado', message: 'Pick a project', mode: 'form' },
       signal,
-      trigger: { toolUseId: 'tu-3', tool: 'mcp__ado__wit_query', input: { project: 'Einstein Renewal' } },
+      calls: [
+        { toolUseId: 'tu-1', tool: 'mcp__ado__core_list_projects', input: { top: 1 } },
+        { toolUseId: 'tu-3', tool: 'mcp__ado__wit_query', input: { project: 'Einstein Renewal' } },
+      ],
     })
 
     feed(toolResult('tu-3'))
     expect(g.toolFinished).toHaveBeenCalledWith('s1', 'tu-3')
     await onElicitation?.({ serverName: 'ado', message: 'Sign in', mode: 'url' }, { signal })
-    expect(g.request).toHaveBeenLastCalledWith(expect.objectContaining({ trigger: expect.objectContaining({ toolUseId: 'tu-1' }) }))
+    expect(g.request).toHaveBeenLastCalledWith(expect.objectContaining({ calls: [expect.objectContaining({ toolUseId: 'tu-1' })] }))
 
     feed(toolResult('tu-1'))
     await onElicitation?.({ serverName: 'ado', message: 'Sign in', mode: 'url' }, { signal })
-    expect(g.request).toHaveBeenLastCalledWith(expect.objectContaining({ trigger: null }))
+    expect(g.request).toHaveBeenLastCalledWith(expect.objectContaining({ calls: [] }))
   })
 
   it('forwards the completion of a url elicitation to the gate', () => {

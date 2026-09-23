@@ -135,8 +135,20 @@ export function toolIntent(toolName: string, input: Record<string, unknown>): To
   return { tool, summary: line.length > 140 ? `${line.slice(0, 139)}…` : line }
 }
 
-function headline(item: Elicitation): string {
-  return item.title ?? (item.mode === 'url' ? `${item.server} wants you to sign in` : `${item.server} needs an answer`)
+export function callsIntent(serverName: string, calls: ToolCall[]): ToolIntent | null {
+  if (calls.length === 0) return null
+  if (calls.length === 1) return toolIntent(calls[0].tool, calls[0].input)
+  const tools = [...new Set(calls.map((call) => toolIntent(call.tool, {}).tool))].join(', ')
+  return { tool: serverName, summary: `one of ${calls.length} calls to ${serverName} at once: ${tools}` }
+}
+
+const SIGN_IN_HOSTS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['ado', new Set(['login.microsoftonline.com', 'login.live.com', 'app.vssps.visualstudio.com'])],
+])
+
+function toastTitle(item: Elicitation): string {
+  if (item.title) return `${item.serverName}: ${item.title}`
+  return item.mode === 'url' ? `${item.serverName} wants you to sign in` : `${item.serverName} needs an answer`
 }
 
 interface Attention {
@@ -146,7 +158,13 @@ interface Attention {
 
 interface ElicitationCallbacks {
   onChanged: (pending: Elicitation[]) => void
-  onNeedsYou: (context: { projectId: string; sessionId: string; kind: 'sign_in' | 'input'; title: string }) => void
+  onNeedsYou: (context: {
+    projectId: string
+    sessionId: string
+    requestId: string
+    kind: 'sign_in' | 'input'
+    title: string
+  }) => void
   openExternal: (url: string) => unknown
 }
 
@@ -154,7 +172,7 @@ interface Entry {
   item: Elicitation
   url: string | null
   elicitationId: string | null
-  toolUseId: string | null
+  calls: Set<string>
   attention: boolean
   settle: ((result: ElicitationResult) => void) | null
 }
@@ -178,13 +196,15 @@ export class ElicitationBroker implements ElicitationGate {
     sessionId: string
     request: ElicitationRequest
     signal: AbortSignal
-    trigger: ToolCall | null
+    calls: ToolCall[]
   }): Promise<ElicitationResult> {
-    const { sessionId, request, signal, trigger } = context
+    const { sessionId, request, signal, calls } = context
     const session = this.repos.sessions.byId(sessionId)
     if (!session || signal.aborted) return Promise.resolve({ action: 'cancel' })
     const url = request.mode === 'url'
     const link = url ? checkSignInUrl(request.url) : null
+    const href = link && !link.refused ? new URL(request.url as string).href : null
+    const auto = href !== null && SIGN_IN_HOSTS.get(request.serverName)?.has(link?.host ?? '') === true
     const item: Elicitation = {
       id: newId(),
       sessionId,
@@ -196,28 +216,35 @@ export class ElicitationBroker implements ElicitationGate {
       message: redactUrls(request.message ?? ''),
       title: text(request.title) ? redactUrls(request.title as string) : null,
       description: text(request.description) ? redactUrls(request.description as string) : null,
-      intent: trigger ? toolIntent(trigger.tool, trigger.input) : null,
+      intent: callsIntent(request.serverName, calls),
       host: link?.host ?? null,
       path: link?.path ?? null,
+      url: auto ? null : href,
       refused: link?.refused ?? null,
       fields: url ? [] : formFields(request.requestedSchema),
       createdAt: nowIso(),
     }
     const entry: Entry = {
       item,
-      url: url && !item.refused ? (request.url ?? null) : null,
+      url: href,
       elicitationId: request.elicitationId ?? null,
-      toolUseId: trigger?.toolUseId ?? null,
-      attention: !item.refused,
+      calls: new Set(item.refused ? [] : calls.map((call) => call.toolUseId)),
+      attention: !item.refused && (!auto || calls.length > 0),
       settle: null,
     }
     this.entries.set(item.id, entry)
     if (entry.attention) this.sessions.attentionRaised(sessionId)
     this.callbacks.onChanged(this.pending())
     if (item.refused) return Promise.resolve({ action: 'decline' })
-    this.callbacks.onNeedsYou({ projectId: item.projectId, sessionId, kind: url ? 'sign_in' : 'input', title: headline(item) })
+    this.callbacks.onNeedsYou({
+      projectId: item.projectId,
+      sessionId,
+      requestId: item.id,
+      kind: url ? 'sign_in' : 'input',
+      title: toastTitle(item),
+    })
     signal.addEventListener('abort', () => this.finish(item.id, { action: 'cancel' }), { once: true })
-    if (url) {
+    if (auto) {
       this.open(entry)
       return Promise.resolve({ action: 'accept' })
     }
@@ -241,19 +268,28 @@ export class ElicitationBroker implements ElicitationGate {
     const entry = this.entries.get(id)
     if (!entry?.url) throw GONE
     this.open(entry)
+    if (!entry.settle) return
+    entry.settle({ action: 'accept' })
+    entry.settle = null
+    entry.item = { ...entry.item, url: null }
+    if (entry.attention && entry.calls.size === 0) {
+      entry.attention = false
+      this.sessions.attentionCleared(entry.item.sessionId)
+    }
+    this.callbacks.onChanged(this.pending())
   }
 
   completed(sessionId: string, serverName: string, elicitationId: string): void {
     for (const [id, entry] of [...this.entries]) {
-      if (entry.item.sessionId === sessionId && entry.item.serverName === serverName && entry.elicitationId === elicitationId) {
-        this.finish(id, { action: 'accept' })
-      }
+      if (entry.item.refused || entry.item.sessionId !== sessionId || entry.item.serverName !== serverName) continue
+      if (entry.elicitationId === elicitationId) this.finish(id, { action: 'accept' })
     }
   }
 
   toolFinished(sessionId: string, toolUseId: string): void {
     for (const [id, entry] of [...this.entries]) {
-      if (entry.item.sessionId === sessionId && entry.toolUseId === toolUseId) this.finish(id, { action: 'cancel' })
+      if (entry.item.sessionId !== sessionId || !entry.calls.delete(toolUseId)) continue
+      if (entry.calls.size === 0) this.finish(id, { action: 'cancel' })
     }
   }
 
