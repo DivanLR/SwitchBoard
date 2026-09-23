@@ -2,6 +2,8 @@ import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { FlowStackId } from '@shared/domain'
 
+export const STACK_ORDER: readonly FlowStackId[] = ['dotnet', 'angular']
+
 const SKIP_DIRS: ReadonlySet<string> = new Set(['node_modules', 'bin', 'obj', '.git', '.worktrees'])
 
 const MAX_DEPTH = 3

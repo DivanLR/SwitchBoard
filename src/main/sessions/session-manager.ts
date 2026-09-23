@@ -94,6 +94,7 @@ interface HostedEntry {
   session: SessionHost
   row: Session
   projectPath: string
+  folders: string[]
   seq: number
   live: Map<string, LiveEventEntry>
   containerised: boolean
@@ -114,6 +115,7 @@ interface FlowHooks {
 interface StartOptions {
   background?: boolean
   cwd?: string
+  additionalDirectories?: string[]
   effort?: EffortLevel
   section?: SectionKind
   resumeSdkSessionId?: string
@@ -498,10 +500,11 @@ export class SessionManager {
   ): Promise<Session> {
     const project = this.repos.projects.byId(projectId)
     if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
-    const elsewhere = opts?.cwd !== undefined && relative(project.path, opts.cwd) !== ''
+    const onHost =
+      opts?.section === 'flow' || (opts?.cwd !== undefined && relative(project.path, opts.cwd) !== '')
     const chosen = requestedMode ?? project.defaultSessionMode
-    const mode = elsewhere ? nativeMode(chosen) : chosen
-    const containerised = !elsewhere && (opts?.containerised === true || mode === 'bypass')
+    const mode = onHost ? nativeMode(chosen) : chosen
+    const containerised = !onHost && (opts?.containerised === true || mode === 'bypass')
     if (containerised) this.refuseWhenContainersFull()
     const sessionId = newId()
     if (containerised) this.reservedContainerIds.add(sessionId)
@@ -577,9 +580,12 @@ export class SessionManager {
 
     const workdir = opts?.cwd ?? project.path
 
+    const extraDirs = opts?.additionalDirectories ?? []
+
     const entry: HostedEntry = {
       row,
       projectPath: workdir,
+      folders: [workdir, ...extraDirs],
       seq: this.repos.events.maxSeq(row.id),
       live: new Map(),
       containerised,
@@ -617,6 +623,7 @@ export class SessionManager {
       entry.session = new HostedSession({
         sessionId: row.id,
         projectPath: workdir,
+        extraDirs,
         refDirs: project.refs.map((r) => r.path),
         sandboxMemory: settings.sandboxMemory,
         resumeSdkSessionId,
@@ -1261,6 +1268,10 @@ export class SessionManager {
         'This suite ran in its own container, which closed when the suite finished.',
       ).catch(() => {})
     }
+  }
+
+  sessionFolders(sessionId: string): string[] {
+    return this.hosted.get(sessionId)?.folders ?? []
   }
 
   sinkFor(sessionId: string): EventSink {

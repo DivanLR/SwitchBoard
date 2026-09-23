@@ -81,7 +81,12 @@ export interface MockDriver {
   ) => void
   askFlowQuestion: (runId: string, text: string, options: string[]) => string
   reportFlowVerify: (runId: string, report: Record<string, unknown> | null) => void
-  reportFlowShip: (runId: string, prUrl: string, prId: string) => void
+  reportFlowShip: (
+    runId: string,
+    prUrl: string,
+    prId: string,
+    perRepo?: { projectId: string; prUrl: string; prId: string }[],
+  ) => void
   setFlowStacks: (projectId: string, stacks: string[]) => void
   addDiagram: (projectId: string, entry: DiagramEntry) => void
   startFlood: (intervalMs: number, perTick: number) => void
@@ -1128,9 +1133,29 @@ export function installMockHost(scenario: MockScenario): void {
       const runs = flowRunsByProject.get(projectId) ?? []
       const id = `flow-${runs.length + 1}`
       const now = new Date().toISOString()
+      const companions = (req.companions ?? []) as { projectId: string; baseBranch?: string }[]
+      const repoOf = (repoId: string, baseBranch: string | undefined): AnyRecord => {
+        const project = projects.find((p) => p.id === repoId)
+        return {
+          projectId: repoId,
+          name: project?.name ?? repoId,
+          path: project?.path ?? '',
+          stacks: [...(flowStacksByProject.get(repoId) ?? ['dotnet'])],
+          baseBranch: baseBranch ?? 'main',
+          branch: `feature/${id}`,
+          worktreePath: `${project?.path ?? 'C:\\work'}.worktrees\\${id}`,
+          prUrl: null,
+          prId: null,
+        }
+      }
+      const repos =
+        companions.length > 0
+          ? [repoOf(projectId, req.baseBranch as string | undefined), ...companions.map((c) => repoOf(c.projectId, c.baseBranch))]
+          : []
       const run: AnyRecord = {
         id,
         projectId,
+        repos,
         title:
           source.kind === 'ado'
             ? String(source.featureTitle)
@@ -1141,14 +1166,14 @@ export function installMockHost(scenario: MockScenario): void {
         sourceRef: source.kind === 'ado' ? String(source.featureId) : source.kind === 'spec' ? String(source.specId) : null,
         sourceUrl: source.kind === 'ado' ? (source.url ?? null) : null,
         description: source.kind === 'text' ? String(source.description ?? '') : '',
-        stacks,
+        stacks: ['dotnet', 'angular'].filter((s) => [stacks, ...repos.map((r) => r.stacks as string[])].some((l) => l.includes(s))),
         stage: 'spec',
         status: 'running',
         autopilot: req.autopilot === true,
         autoShip: req.autoShip === true,
         baseBranch: (req.baseBranch as string | undefined) ?? 'main',
         branch: `feature/${id}`,
-        worktreePath: `C:\\work\\${id}`,
+        worktreePath: repos[0]?.worktreePath ?? `C:\\work\\${id}`,
         specDir: null,
         prUrl: null,
         prId: null,
@@ -1264,13 +1289,18 @@ export function installMockHost(scenario: MockScenario): void {
       if (!run.finishedAt) {
         throw { code: 'RULE_NOT_ALLOWED', message: 'This run still uses its worktree. Cancel the run or let it finish first.' }
       }
-      updateRun(runId, { worktreePath: null })
+      updateRun(runId, {
+        worktreePath: null,
+        repos: ((run.repos ?? []) as AnyRecord[]).map((repo) => ({ ...repo, worktreePath: null })),
+      })
       return flowSnapshot(run.projectId as string)
     },
     'flow.openPullRequest': (req) => {
       const run = flowRun(String(req.runId))
-      if (!run?.prUrl) throw { code: 'NOT_FOUND', message: 'This run has no pull request yet.' }
-      prOpens.push(String(run.prUrl))
+      const repo = ((run?.repos ?? []) as AnyRecord[]).find((r) => r.projectId === req.projectId)
+      const url = req.projectId ? repo?.prUrl : run?.prUrl
+      if (!url) throw { code: 'NOT_FOUND', message: 'This run has no pull request yet.' }
+      prOpens.push(String(url))
     },
     'flow.artefact': (req) => {
       const run = flowRun(String(req.runId))
@@ -1717,7 +1747,7 @@ export function installMockHost(scenario: MockScenario): void {
       pushFlow(run.projectId as string)
       if (!failed) maybeAutopilotAdvance(runId, 'test')
     },
-    reportFlowShip: (runId, prUrl, prId) => {
+    reportFlowShip: (runId, prUrl, prId, perRepo = []) => {
       const run = flowRun(runId)
       const row = flowStage(runId, 'ship')
       if (!run || !row) return
@@ -1727,7 +1757,11 @@ export function installMockHost(scenario: MockScenario): void {
         report: { ...emptyFlowReport(), prUrl, prId },
         finishedAt: new Date().toISOString(),
       })
-      updateRun(runId, { prUrl, prId, status: 'waiting' })
+      const repos = ((run.repos ?? []) as AnyRecord[]).map((repo) => {
+        const pr = perRepo.find((p) => p.projectId === repo.projectId)
+        return { ...repo, prUrl: pr?.prUrl ?? null, prId: pr?.prId ?? null }
+      })
+      updateRun(runId, { prUrl, prId, repos, status: 'waiting' })
       pushFlow(run.projectId as string)
       maybeAutopilotAdvance(runId, 'ship')
     },

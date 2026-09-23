@@ -143,17 +143,25 @@ export async function createWorktree(input: {
   root: string
   title: string
   base: string
+  others?: readonly { repoRoot: string; root: string }[]
+  branch?: string
 }): Promise<Worktree> {
   return serialise(async () => {
-    const held = new Set((await listWorktrees(input.repoRoot)).map((tree) => tree.path.toLowerCase()))
+    const repos = [{ repoRoot: input.repoRoot, root: input.root }, ...(input.others ?? [])]
+    const held = new Set(
+      (await Promise.all(repos.map((repo) => listWorktrees(repo.repoRoot)))).flat().map((tree) => tree.path.toLowerCase()),
+    )
     const free = async (branch: string): Promise<boolean> => {
-      const path = worktreePathFor(input.root, branch)
-      if (held.has(resolve(path).toLowerCase()) || existsSync(path)) return false
-      return !(await branchTaken(input.repoRoot, branch))
+      for (const repo of repos) {
+        const path = worktreePathFor(repo.root, branch)
+        if (held.has(resolve(path).toLowerCase()) || existsSync(path)) return false
+        if (await branchTaken(repo.repoRoot, branch)) return false
+      }
+      return true
     }
     const slug = slugify(input.title)
-    let branch = `feature/${slug}`
-    for (let n = 2; !(await free(branch)); n += 1) branch = `feature/${slug}-${n}`
+    let branch = input.branch ?? `feature/${slug}`
+    for (let n = 2; !input.branch && !(await free(branch)); n += 1) branch = `feature/${slug}-${n}`
     const path = worktreePathFor(input.root, branch)
     await ensureWorktreeIgnore(input.repoRoot, input.root)
     await mkdir(input.root, { recursive: true })

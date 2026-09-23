@@ -3,22 +3,25 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const { flagCalls } = vi.hoisted(() => ({ flagCalls: [] as unknown[] }))
+const { flagCalls, queryOptions } = vi.hoisted(() => ({ flagCalls: [] as unknown[], queryOptions: [] as unknown[] }))
 
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   createSdkMcpServer: () => ({ type: 'sdk', name: 'switchboard', instance: {} }),
   tool: () => ({}),
-  query: () => ({
-    [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
-    supportedCommands: () => Promise.resolve([]),
-    supportedModels: () => Promise.resolve([]),
-    interrupt: () => Promise.resolve(),
-    applyFlagSettings: (settings: unknown) => {
-      flagCalls.push(settings)
-      return Promise.resolve()
-    },
-    setModel: () => Promise.resolve(),
-  }),
+  query: (args: { options?: unknown }) => {
+    queryOptions.push(args.options)
+    return {
+      [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
+      supportedCommands: () => Promise.resolve([]),
+      supportedModels: () => Promise.resolve([]),
+      interrupt: () => Promise.resolve(),
+      applyFlagSettings: (settings: unknown) => {
+        flagCalls.push(settings)
+        return Promise.resolve()
+      },
+      setModel: () => Promise.resolve(),
+    }
+  },
 }))
 
 vi.mock('@main/sessions/claude-executable', () => ({
@@ -119,6 +122,24 @@ describe('the project task queue', () => {
 })
 
 describe('a Flow stage session', () => {
+  it('works in its worktree with every companion worktree as an extra directory, all of them its own folders', async () => {
+    const h = setup()
+    const primary = join(h.project.path, 'alpha.worktrees', 'checkout')
+    const companion = join(h.project.path, 'api.worktrees', 'checkout')
+    const session = await h.manager.startSession(h.project.id, false, undefined, {
+      background: true,
+      cwd: primary,
+      additionalDirectories: [companion],
+    })
+    const options = queryOptions.at(-1) as { cwd: string; additionalDirectories: string[] }
+    expect(options.cwd).toBe(primary)
+    expect(options.additionalDirectories).toEqual([primary, companion])
+    expect(h.manager.sessionFolders(session.id)).toEqual([primary, companion])
+
+    const plain = await h.manager.startSession(h.project.id, false, undefined, { background: true })
+    expect(h.manager.sessionFolders(plain.id)).toEqual([h.project.path])
+  })
+
   it('reports a turn that ended in an error with that error', async () => {
     const h = setup()
     const session = await h.manager.startSession(h.project.id, false, undefined, { background: true })

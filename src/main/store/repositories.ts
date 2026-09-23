@@ -20,6 +20,7 @@ import type {
   QueuedTask,
   SectionKind,
   Session,
+  FlowRepo,
   FlowRun,
   FlowSource,
   FlowStage,
@@ -911,6 +912,7 @@ class FlowRunsRepo {
     const run: FlowRun = {
       id: newId(),
       projectId: input.projectId,
+      repos: [],
       title: input.title,
       source: input.source,
       sourceRef: input.sourceRef,
@@ -992,6 +994,7 @@ class FlowRunsRepo {
         | 'prId'
         | 'note'
         | 'finishedAt'
+        | 'repos'
       >
     >,
   ): void {
@@ -1010,11 +1013,13 @@ class FlowRunsRepo {
       ] as const
     ).filter((key) => patch[key] !== undefined)
     const bools = (['autopilot', 'autoShip'] as const).filter((key) => patch[key] !== undefined)
-    if (columns.length === 0 && bools.length === 0) return
-    const sets = [...columns, ...bools, 'updatedAt'].map((key) => `${key} = ?`).join(', ')
+    const json = patch.repos !== undefined ? (['repos'] as const) : []
+    if (columns.length === 0 && bools.length === 0 && json.length === 0) return
+    const sets = [...columns, ...bools, ...json, 'updatedAt'].map((key) => `${key} = ?`).join(', ')
     const values = [
       ...columns.map((key) => patch[key] ?? null),
       ...bools.map((key) => (patch[key] ? 1 : 0)),
+      ...json.map(() => JSON.stringify(patch.repos)),
       nowIso(),
     ]
     this.db.prepare(`UPDATE flow_runs SET ${sets} WHERE id = ?`).run(...values, id)
@@ -1121,6 +1126,7 @@ class FlowStagesRepo {
 interface FlowRunRow {
   id: string
   projectId: string
+  repos: string
   title: string
   source: FlowSource
   sourceRef: string | null
@@ -1159,6 +1165,7 @@ interface FlowStageRow {
 function hydrateFlowRun(row: FlowRunRow): FlowRun {
   return {
     ...row,
+    repos: parseJson<FlowRepo[]>(row.repos) ?? [],
     stacks: parseJson<string[]>(row.stacks) ?? [],
     autopilot: row.autopilot === 1,
     autoShip: row.autoShip === 1,

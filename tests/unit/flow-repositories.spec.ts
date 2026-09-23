@@ -76,6 +76,39 @@ describe('FlowRunsRepo round trip', () => {
     expect(Date.parse(after!.updatedAt)).toBeGreaterThanOrEqual(Date.parse(run.updatedAt))
   })
 
+  it('keeps no repositories for a single-repository run and every one of them for a wider run', () => {
+    const { repos, project } = setup()
+    const run = repos.flowRuns.start({
+      projectId: project.id,
+      title: 'X',
+      source: 'text',
+      sourceRef: null,
+      sourceUrl: null,
+      description: '',
+      stacks: ['dotnet', 'angular'],
+      stage: 'spec',
+      autopilot: false,
+      autoShip: false,
+      baseBranch: 'main',
+    })
+    expect(repos.flowRuns.byId(run.id)?.repos).toEqual([])
+
+    const api = {
+      projectId: 'p-api',
+      name: 'Api',
+      path: 'C:\\work\\api',
+      stacks: ['dotnet'],
+      baseBranch: 'develop',
+      branch: 'feature/x',
+      worktreePath: 'C:\\work\\api.worktrees\\x',
+      prUrl: null,
+      prId: null,
+    }
+    const fe = { ...api, projectId: project.id, name: 'alpha', path: project.path, stacks: ['angular'], baseBranch: 'main' }
+    repos.flowRuns.update(run.id, { repos: [fe, api] })
+    expect(repos.flowRuns.byId(run.id)?.repos).toEqual([fe, api])
+  })
+
   it('finishes a run with a status and a note', () => {
     const { repos, project } = setup()
     const run = repos.flowRuns.start({

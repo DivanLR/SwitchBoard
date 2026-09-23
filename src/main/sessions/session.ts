@@ -80,6 +80,7 @@ export type PermissionGate = (context: {
 interface HostedSessionOptions {
   sessionId: string
   projectPath: string
+  extraDirs?: string[]
   refDirs?: string[]
   sandboxMemory?: string
   resumeSdkSessionId?: string
@@ -229,7 +230,7 @@ export class HostedSession implements SessionHost {
         settingSources: ['user', 'project', 'local'],
         additionalDirectories: sandbox
           ? sandbox.additionalDirectories
-          : [this.options.projectPath, ...(this.options.refDirs ?? [])],
+          : [this.options.projectPath, ...(this.options.extraDirs ?? []), ...(this.options.refDirs ?? [])],
         model:
           this.options.mainModel && this.options.mainModel !== 'default'
             ? this.options.mainModel

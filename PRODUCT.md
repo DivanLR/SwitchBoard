@@ -76,9 +76,11 @@ verification report) and never invents a figure it did not measure.
 - Every session runs under one of six permission modes: default, auto, accept
   edits, plan first, do not ask, and bypass. A session runs on the host unless
   its project ticks Run in Container; bypass always runs in a disposable WSL
-  container, and at most two containers run at once. A session that works in a
-  folder other than the project's own, such as a Flow worktree, always runs on
-  the host, and a bypass project gives it accept edits instead.
+  container, and at most two containers run at once. Every Flow session, and
+  any session that works in a folder other than the project's own, runs on the
+  host, because a container mounts only the project folder and a Flow run works
+  in its worktrees; a bypass project gives it accept edits instead, and the Flow
+  intake says so in one line.
 - Section work runs in the section's own session, not in the conversation, so a
   verification pass does not block the chat. A drawing and every Flow stage take
   a fresh session each; a Flow stage's session ends when its stage finishes.
@@ -87,6 +89,12 @@ verification report) and never invents a figure it did not measure.
   are never swept up by a `dotnet test` glob in the main checkout. A setting
   overrides the root. The worktree branches from the committed head of the base
   branch; uncommitted work in the main checkout is not carried over.
+- A Flow run belongs to the project it was opened from, where the spec lives,
+  and may also change other registered projects (the everyday case is an
+  Angular front end with a .NET API). Each of them gets its own worktree in its
+  own sibling folder on the same branch name, with its own base branch; the
+  stage sessions work in the primary worktree and see the others as extra
+  directories, and the Ship stage raises one pull request per repository.
 - Retention runs automatically: raw output for the twelve most recent sessions
   per project, decision history for 30 days, and the twenty most recent Flow runs
   per project.
@@ -235,10 +243,8 @@ Technical constraints:
 - Sessions must pass an explicit path to the standalone Claude Code executable.
   The SDK's own default crashes under Electron with a V8 snapshot assertion.
 
-Explicitly undecided: code signing for distributed builds, and whether Flow
-should support a feature that spans two repositories (an Angular front end and a
-.NET API) in one run. Today a run belongs to one project; the other repository
-can be referenced from the session but gets no worktree of its own.
+Explicitly undecided: code signing for distributed builds. On 2026-09-23 the
+owner decided that one Flow run may span two or more repositories.
 
 ## Brand Commitments
 

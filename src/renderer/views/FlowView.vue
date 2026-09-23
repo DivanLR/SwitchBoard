@@ -38,6 +38,11 @@ const shownStage = computed(
   () => stages.value.find((s) => s.stage === (selectedStage.value ?? run.value?.stage)) ?? null,
 )
 const finished = computed(() => Boolean(run.value?.finishedAt))
+const worktrees = computed(() => Math.max(1, run.value?.repos.filter((repo) => repo.worktreePath).length ?? 0))
+const removeLabel = computed(() => {
+  const what = worktrees.value > 1 ? `${worktrees.value} worktrees` : 'worktree'
+  return removeConfirm.value ? `Confirm remove ${what}` : `Remove ${what}`
+})
 const loaded = computed(() => flow.runsByProject[props.projectId] !== undefined)
 const empty = computed(() => loaded.value && flow.runs.length === 0 && !creating.value)
 
@@ -125,14 +130,36 @@ async function removeWorktree(): Promise<void> {
                 <h2 class="ui-title frh-title">{{ run.title }}</h2>
                 <span class="pill" :class="run.status" data-testid="flow-run-status">{{ run.status }}</span>
               </div>
-              <div class="frh-chips">
-                <span class="ui-chip mono" title="Branch">{{ run.branch ?? 'no branch yet' }}</span>
-                <span class="ui-chip mono" title="Base branch">base {{ run.baseBranch ?? 'unknown' }}</span>
-                <span v-for="stackId in run.stacks" :key="stackId" class="ui-chip">
-                  {{ FLOW_STACK_LABELS[stackId as keyof typeof FLOW_STACK_LABELS] ?? stackId }}
-                </span>
-              </div>
-              <div v-if="run.worktreePath" class="ui-meta frh-path" data-testid="flow-run-worktree">{{ run.worktreePath }}</div>
+              <ul v-if="run.repos.length > 0" class="frh-repos" data-testid="flow-run-repos">
+                <li
+                  v-for="repo in run.repos"
+                  :key="repo.projectId"
+                  class="frh-repo"
+                  :data-testid="`flow-run-repo-${repo.projectId}`"
+                >
+                  <div class="frh-chips">
+                    <span class="frh-repo-name">{{ repo.name }}</span>
+                    <span class="ui-chip mono" title="Branch">{{ repo.branch ?? 'no branch yet' }}</span>
+                    <span class="ui-chip mono" title="Base branch">base {{ repo.baseBranch }}</span>
+                    <span v-for="stackId in repo.stacks" :key="stackId" class="ui-chip">
+                      {{ FLOW_STACK_LABELS[stackId as keyof typeof FLOW_STACK_LABELS] ?? stackId }}
+                    </span>
+                  </div>
+                  <div v-if="repo.worktreePath" class="ui-meta frh-path">{{ repo.worktreePath }}</div>
+                </li>
+              </ul>
+              <template v-else>
+                <div class="frh-chips">
+                  <span class="ui-chip mono" title="Branch">{{ run.branch ?? 'no branch yet' }}</span>
+                  <span class="ui-chip mono" title="Base branch">base {{ run.baseBranch ?? 'unknown' }}</span>
+                  <span v-for="stackId in run.stacks" :key="stackId" class="ui-chip">
+                    {{ FLOW_STACK_LABELS[stackId as keyof typeof FLOW_STACK_LABELS] ?? stackId }}
+                  </span>
+                </div>
+                <div v-if="run.worktreePath" class="ui-meta frh-path" data-testid="flow-run-worktree">
+                  {{ run.worktreePath }}
+                </div>
+              </template>
               <div v-if="run.note" class="frh-note" data-testid="flow-run-note">{{ run.note }}</div>
             </div>
             <div class="ui-controls frh-controls">
@@ -169,7 +196,7 @@ async function removeWorktree(): Promise<void> {
                 :disabled="flow.busy === 'removeWorktree'"
                 @click="removeWorktree()"
               >
-                {{ removeConfirm ? 'Confirm remove worktree' : 'Remove worktree' }}
+                {{ removeLabel }}
               </button>
             </div>
           </header>
@@ -303,6 +330,27 @@ async function removeWorktree(): Promise<void> {
 
 .frh-path {
   overflow-wrap: anywhere;
+}
+
+.frh-repos {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.frh-repo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.frh-chips .frh-repo-name {
+  align-self: center;
+  font-size: var(--fs-ui);
+  color: var(--text-body);
 }
 
 .frh-note {

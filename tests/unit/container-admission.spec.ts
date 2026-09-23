@@ -123,6 +123,28 @@ describe('a session working outside the project folder', () => {
     }
   })
 
+  it('keeps every Flow session on this machine, even one in the project folder itself', async () => {
+    const { db, repos, manager, project, dir, hosted } = setup()
+    try {
+      buildGate.release()
+      repos.projects.setSessionMode(project.id, 'bypass')
+      repos.projects.setUseContainers(project.id, true)
+
+      const session = await manager.startSession(project.id, false, 'bypass', {
+        background: true,
+        section: 'flow',
+        containerised: true,
+      })
+
+      expect(session.bypassPermissions).toBe(false)
+      expect(hosted.get(session.id)?.containerised).toBe(false)
+      expect(hosted.get(session.id)?.session.options.mode).toBe('acceptEdits')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+      db.close()
+    }
+  })
+
   it('still takes one when the explicit folder is the project folder itself', async () => {
     const { db, repos, manager, project, dir, hosted } = setup()
     try {

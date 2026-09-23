@@ -22,6 +22,13 @@ export interface FlowStageMarker {
   unmet: string[]
   prUrl: string | null
   prId: string | null
+  pullRequests: FlowPullRequestMarker[]
+}
+
+export interface FlowPullRequestMarker {
+  repository: string
+  prUrl: string | null
+  prId: string | null
 }
 
 export type FlowMarker = FlowFeaturesMarker | FlowStageMarker
@@ -48,10 +55,25 @@ function features(value: unknown): FlowFeature[] {
   for (const entry of asArray(value)) {
     if (typeof entry !== 'object' || entry === null) continue
     const record = entry as Record<string, unknown>
-    const id = str(record.id) ?? (typeof record.id === 'number' ? String(record.id) : null)
+    const id = idOf(record.id)
     const title = str(record.title)
     if (!id || !title) continue
     found.push({ id, title, state: str(record.state), url: str(record.url) })
+  }
+  return found
+}
+
+function idOf(value: unknown): string | null {
+  return str(value) ?? (typeof value === 'number' ? String(value) : null)
+}
+
+function pullRequests(value: unknown): FlowPullRequestMarker[] {
+  const found: FlowPullRequestMarker[] = []
+  for (const entry of asArray(value)) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const record = entry as Record<string, unknown>
+    const repository = str(record.repository)
+    if (repository) found.push({ repository, prUrl: str(record.prUrl), prId: idOf(record.prId) })
   }
   return found
 }
@@ -110,6 +132,7 @@ export function parseFlowMarker(text: string): FlowMarker | null {
       unmet: strings(record.unmet),
       prUrl: str(record.prUrl),
       prId: str(record.prId),
+      pullRequests: pullRequests(record.pullRequests),
     }
   }
   return null

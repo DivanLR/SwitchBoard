@@ -1,6 +1,6 @@
 import { computed, reactive, toRefs } from 'vue'
 import type { FlowFeature, FlowRun, FlowStackId, FlowStage, FlowStageRecord } from '@shared/domain'
-import type { FlowArtefactKind, FlowStartSource } from '@shared/ipc-types'
+import type { FlowArtefactKind, FlowCompanionRequest, FlowStartSource } from '@shared/ipc-types'
 import { errorMessage, invoke } from '@renderer/ipc'
 import { useProjectsStore } from '@renderer/stores/projects'
 
@@ -14,7 +14,7 @@ const state = reactive({
   featuresNote: null as string | null,
   searching: false,
   existingSpecs: [] as { id: string; title: string }[],
-  detectedStacks: [] as FlowStackId[],
+  stacksByProject: {} as Record<string, FlowStackId[]>,
   busy: null as string | null,
   error: null as string | null,
 })
@@ -89,7 +89,7 @@ const store = reactive({
   },
 
   async detectStacks(projectId: string): Promise<void> {
-    state.detectedStacks = await invoke('flow.detectStacks', { projectId }).catch(() => [])
+    state.stacksByProject[projectId] = await invoke('flow.detectStacks', { projectId }).catch(() => [])
   },
 
   async start(
@@ -98,6 +98,7 @@ const store = reactive({
     autopilot: boolean,
     autoShip: boolean,
     baseBranch?: string,
+    companions?: FlowCompanionRequest[],
   ): Promise<string | null> {
     let runId: string | null = null
     await this.act('start', async () => {
@@ -107,6 +108,7 @@ const store = reactive({
         autopilot,
         autoShip,
         baseBranch,
+        companions,
       })
       runId = snapshot.runId
       state.runsByProject[projectId] = snapshot.runs
@@ -162,8 +164,8 @@ const store = reactive({
     )
   },
 
-  async openPullRequest(runId: string): Promise<boolean> {
-    return this.act('openPullRequest', async () => invoke('flow.openPullRequest', { runId }))
+  async openPullRequest(runId: string, projectId?: string): Promise<boolean> {
+    return this.act('openPullRequest', async () => invoke('flow.openPullRequest', { runId, projectId }))
   },
 
   async artefact(

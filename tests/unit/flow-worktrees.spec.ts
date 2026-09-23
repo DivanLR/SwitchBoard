@@ -63,6 +63,24 @@ describe('branch and path naming', () => {
     expect(tree.path).toBe(resolve(worktreePathFor(join(root, '.worktrees'), 'feature/checkout-v2')))
   })
 
+  it('picks a branch free in every repository of a run, then makes the same one in the others', async () => {
+    const fe = repo()
+    const api = repo()
+    execSync('git branch feature/checkout-v2', { cwd: api, stdio: 'ignore' })
+    const apiRoot = join(api, '.worktrees')
+    const tree = await createWorktree({
+      repoRoot: fe,
+      root: join(fe, '.worktrees'),
+      title: 'Checkout v2',
+      base: 'main',
+      others: [{ repoRoot: api, root: apiRoot }],
+    })
+    expect(tree.branch).toBe('feature/checkout-v2-2')
+    const companion = await createWorktree({ repoRoot: api, root: apiRoot, title: 'Checkout v2', base: 'main', branch: tree.branch! })
+    expect(companion.branch).toBe('feature/checkout-v2-2')
+    expect(companion.path).toBe(resolve(worktreePathFor(apiRoot, 'feature/checkout-v2-2')))
+  })
+
   it('dedupes with -2, -3 when the branch already exists locally or only on a remote', async () => {
     const root = repo()
     execSync('git branch feature/checkout-v2', { cwd: root, stdio: 'ignore' })
