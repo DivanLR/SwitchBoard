@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -8,6 +8,7 @@ import {
   parseSkillFrontmatter,
   parseSkillSource,
 } from '@main/skills/import'
+import { reconcileSkills } from '@main/skills/install'
 import { readSkillSource } from '@shared/skill-source'
 
 describe('parseSkillSource', () => {
@@ -206,5 +207,109 @@ describe('importSkills download policy', () => {
       TREE.tree.pop()
       await rm(root, { recursive: true, force: true })
     }
+  })
+})
+
+describe('importSkills folder layout', () => {
+  let root: string
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'sb-skills-'))
+  })
+
+  afterEach(async () => {
+    vi.unstubAllGlobals()
+    await rm(root, { recursive: true, force: true })
+  })
+
+  function stubTree(paths: string[], body: (path: string) => Response): void {
+    vi.stubGlobal('fetch', async (url: string) => {
+      if (url.startsWith('https://api.github.com/')) {
+        return new Response(JSON.stringify({ tree: paths.map((path) => ({ path, type: 'blob', size: 64 })) }))
+      }
+      return body(decodeURIComponent(url.split('/main/')[1] ?? ''))
+    })
+  }
+
+  const manifest = (name: string) => new Response(`---\nname: ${name}\ndescription: x\n---\n`)
+
+  it('imports a repository whose root is the skill with every file name and subfolder intact', async () => {
+    stubTree(['SKILL.md', 'README.md', 'bin/tool.mjs'], (path) =>
+      path === 'SKILL.md' ? manifest('myskill') : new Response(`content of ${path}`),
+    )
+
+    const result = await importSkills('https://github.com/someone/myskill/tree/main', root, new Set())
+
+    expect(result.imported).toMatchObject([{ name: 'myskill', sourcePath: '', fileCount: 3 }])
+    expect((await readdir(join(root, 'myskill'))).sort()).toEqual(['README.md', 'SKILL.md', 'bin'])
+    expect(await readFile(join(root, 'myskill', 'bin', 'tool.mjs'), 'utf8')).toBe('content of bin/tool.mjs')
+  })
+
+  it('takes the first of two skills that share a name and says why it skipped the second', async () => {
+    stubTree(['skills/a/SKILL.md', 'skills/a/only-in-a.md', 'legacy/a/SKILL.md'], (path) =>
+      path.endsWith('SKILL.md') ? manifest('dup') : new Response('a'),
+    )
+
+    const result = await importSkills('https://github.com/someone/skills/tree/main', root, new Set())
+
+    expect(result.imported).toMatchObject([{ name: 'dup', sourcePath: 'skills/a' }])
+    expect(result.skipped).toEqual([{ name: 'dup', reason: 'Another skill in this import already has that name.' }])
+    expect((await readdir(join(root, 'dup'))).sort()).toEqual(['SKILL.md', 'only-in-a.md'])
+  })
+
+  it('keeps the staged copy of a skill when a re-import of it fails part way', async () => {
+    await mkdir(join(root, 'research'), { recursive: true })
+    await writeFile(join(root, 'research', 'SKILL.md'), 'the copy that works')
+    stubTree(['research/SKILL.md', 'research/big.md'], (path) =>
+      path.endsWith('SKILL.md') ? manifest('research') : new Response('', { status: 404 }),
+    )
+
+    await expect(
+      importSkills('https://github.com/someone/skills/tree/main', root, new Set()),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' })
+
+    expect(await readFile(join(root, 'research', 'SKILL.md'), 'utf8')).toBe('the copy that works')
+    expect(await readdir(root)).toEqual(['research'])
+  })
+})
+
+describe('reconcileSkills at startup', () => {
+  let home: string
+  let staging: string
+  const previous = { USERPROFILE: process.env.USERPROFILE, HOME: process.env.HOME }
+
+  beforeEach(async () => {
+    home = await mkdtemp(join(tmpdir(), 'sb-home-'))
+    staging = join(home, 'staging')
+    process.env.USERPROFILE = home
+    process.env.HOME = home
+    for (const name of ['tdd', 'missing', 'off']) {
+      await mkdir(join(staging, name), { recursive: true })
+      await writeFile(join(staging, name, 'SKILL.md'), `staged ${name}`)
+    }
+  })
+
+  afterEach(async () => {
+    process.env.USERPROFILE = previous.USERPROFILE
+    process.env.HOME = previous.HOME
+    await rm(home, { recursive: true, force: true })
+  })
+
+  it('restores only a missing skill, and leaves a live folder a person edited or owns alone', async () => {
+    const live = join(home, '.claude', 'skills')
+    await mkdir(join(live, 'tdd'), { recursive: true })
+    await writeFile(join(live, 'tdd', 'SKILL.md'), 'edited for my team')
+    await mkdir(join(live, 'off'), { recursive: true })
+    await writeFile(join(live, 'off', 'SKILL.md'), 'my own skill of that name')
+
+    await reconcileSkills(staging, [
+      { name: 'tdd', enabled: true },
+      { name: 'missing', enabled: true },
+      { name: 'off', enabled: false },
+    ])
+
+    expect(await readFile(join(live, 'tdd', 'SKILL.md'), 'utf8')).toBe('edited for my team')
+    expect(await readFile(join(live, 'missing', 'SKILL.md'), 'utf8')).toBe('staged missing')
+    expect(await readFile(join(live, 'off', 'SKILL.md'), 'utf8')).toBe('my own skill of that name')
   })
 })

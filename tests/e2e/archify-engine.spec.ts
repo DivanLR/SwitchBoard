@@ -69,6 +69,15 @@ test('switching to archify offers its five types, and says what each is for', as
   await expect(page.getByTestId('archify-options')).toContainText('API call chains')
 })
 
+test('an archify the person installed outside the app counts as installed', async ({ page }) => {
+  await page.addInitScript(installMockHost, { ...scenario(), liveSkills: [ARCHIFY.skill] })
+  await openDiagrams(page)
+  await page.getByTestId('diagram-engine-archify').click()
+
+  await expect(page.getByTestId('archify-options')).toBeVisible()
+  await expect(page.getByTestId('diagrams-install')).toHaveCount(0)
+})
+
 test('the engine survives leaving the tab, because it is a preference and not a mood', async ({
   page,
 }) => {

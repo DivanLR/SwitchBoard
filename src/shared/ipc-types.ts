@@ -194,6 +194,7 @@ export interface InvokeMap {
   'clipboard.read': { req: void; res: { text: string } }
   'projects.commands': { req: { projectId: string }; res: ProjectCommand[] }
   'skills.list': { req: void; res: CustomSkill[] }
+  'skills.installed': { req: void; res: string[] }
   'skills.import': { req: { url: string }; res: SkillImportResult }
   'skills.setEnabled': { req: { name: string; enabled: boolean }; res: CustomSkill[] }
   'skills.remove': { req: { name: string }; res: CustomSkill[] }

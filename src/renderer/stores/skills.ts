@@ -5,6 +5,7 @@ import { useToastsStore } from '@renderer/stores/toasts'
 
 const store = reactive({
   items: [] as CustomSkill[],
+  installed: [] as string[],
   loading: false,
   importing: false,
   error: null as string | null,
@@ -13,7 +14,10 @@ const store = reactive({
   async load(): Promise<void> {
     store.loading = true
     try {
-      store.items = await invoke('skills.list', undefined)
+      ;[store.items, store.installed] = await Promise.all([
+        invoke('skills.list', undefined),
+        invoke('skills.installed', undefined),
+      ])
     } finally {
       store.loading = false
     }
@@ -50,6 +54,7 @@ const store = reactive({
     store.error = null
     try {
       store.items = await invoke('skills.setEnabled', { name, enabled: on })
+      store.installed = await invoke('skills.installed', undefined)
     } catch (e) {
       store.error = errorMessage(e)
     }
@@ -63,6 +68,7 @@ const store = reactive({
     store.error = null
     try {
       store.items = await invoke('skills.remove', { name })
+      store.installed = await invoke('skills.installed', undefined)
     } catch (e) {
       store.error = errorMessage(e)
     }

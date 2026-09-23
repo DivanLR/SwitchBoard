@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, posix } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { CustomSkill, SkillImportResult } from '@shared/domain'
@@ -154,63 +154,72 @@ export async function importSkills(
 
   const imported: CustomSkill[] = []
   const skipped: { name: string; reason: string }[] = []
+  const incoming: { from: string; to: string }[] = []
   let budgetFiles = MAX_FILES
   let budgetBytes = MAX_TOTAL_BYTES
 
-  for (const dir of skillDirs) {
-    const files = inScope.filter((entry) => posix.dirname(entry.path) === dir || entry.path.startsWith(`${dir}/`))
-    const label = posix.basename(dir)
-    const manifest = files.find((entry) => posix.basename(entry.path) === 'SKILL.md' && posix.dirname(entry.path) === dir)
-    if (!manifest) continue
+  try {
+    for (const dir of skillDirs) {
+      const base = dir === '.' ? '' : dir
+      const files = base === '' ? inScope : inScope.filter((entry) => entry.path.startsWith(`${base}/`))
+      const label = base === '' ? source.repo : posix.basename(base)
 
-    const front = parseSkillFrontmatter((await download(source, ref, manifest.path)).toString('utf8'))
-    if (!front) {
-      skipped.push({ name: label, reason: 'Its SKILL.md has no name in the frontmatter.' })
-      continue
-    }
-    if (!isUsableSkillName(front.name)) {
-      skipped.push({ name: front.name, reason: 'That name cannot be a folder or a slash command.' })
-      continue
-    }
-    if (existing.has(front.name)) {
-      skipped.push({ name: front.name, reason: 'A skill of that name is already imported.' })
-      continue
-    }
-    if (files.length > budgetFiles) {
-      skipped.push({ name: front.name, reason: 'This import already reached its file limit.' })
-      continue
-    }
+      const front = parseSkillFrontmatter((await download(source, ref, posix.join(dir, 'SKILL.md'))).toString('utf8'))
+      if (!front) {
+        skipped.push({ name: label, reason: 'Its SKILL.md has no name in the frontmatter.' })
+        continue
+      }
+      if (!isUsableSkillName(front.name)) {
+        skipped.push({ name: front.name, reason: 'That name cannot be a folder or a slash command.' })
+        continue
+      }
+      if (existing.has(front.name)) {
+        skipped.push({ name: front.name, reason: 'A skill of that name is already imported.' })
+        continue
+      }
+      if (imported.some((skill) => skill.name === front.name)) {
+        skipped.push({ name: front.name, reason: 'Another skill in this import already has that name.' })
+        continue
+      }
+      if (files.length > budgetFiles) {
+        skipped.push({ name: front.name, reason: 'This import already reached its file limit.' })
+        continue
+      }
 
-    const target = join(stagingRoot, front.name)
-    await rm(target, { recursive: true, force: true })
-    const filesBefore = budgetFiles
-    try {
+      const from = join(stagingRoot, `.incoming-${front.name}`)
+      incoming.push({ from, to: join(stagingRoot, front.name) })
+      await rm(from, { recursive: true, force: true })
+      const filesBefore = budgetFiles
       for (const file of files) {
-        const relative = file.path.slice(dir.length + 1)
+        const relative = base === '' ? file.path : file.path.slice(base.length + 1)
         if (!isSafeRepoPath(relative)) continue
         const bytes = await download(source, ref, file.path)
         budgetBytes -= bytes.byteLength
         if (budgetBytes < 0) {
           throw { code: 'INVALID_PATH', message: 'That import is larger than this allows.' } satisfies IpcError
         }
-        const destination = join(target, relative)
+        const destination = join(from, relative)
         await mkdir(dirname(destination), { recursive: true })
         await writeFile(destination, bytes)
         budgetFiles -= 1
       }
-    } catch (error) {
-      await rm(target, { recursive: true, force: true })
-      throw error
+      imported.push({
+        name: front.name,
+        description: front.description,
+        sourceUrl: input.trim(),
+        sourcePath: base,
+        enabled: true,
+        fileCount: filesBefore - budgetFiles,
+        importedAt: new Date().toISOString(),
+      })
     }
-    imported.push({
-      name: front.name,
-      description: front.description,
-      sourceUrl: input.trim(),
-      sourcePath: dir,
-      enabled: true,
-      fileCount: filesBefore - budgetFiles,
-      importedAt: new Date().toISOString(),
-    })
+  } catch (error) {
+    for (const { from } of incoming) await rm(from, { recursive: true, force: true })
+    throw error
+  }
+  for (const { from, to } of incoming) {
+    await rm(to, { recursive: true, force: true })
+    await rename(from, to)
   }
 
   for (const entry of oversized) {

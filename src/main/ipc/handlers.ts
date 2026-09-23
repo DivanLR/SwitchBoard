@@ -47,7 +47,7 @@ import { sandboxToolsFor } from '@main/sessions/wslc-sandbox'
 import { readDiagramList } from '@main/diagrams/list'
 import { importSkills } from '@main/skills/import'
 import type { FlowSupervisor } from '@main/flow/flow-supervisor'
-import { disableSkill, enableSkill, installedSkillNames, removeSkill } from '@main/skills/install'
+import { disableSkill, enableSkill, installedSkillNames, liveSkillFolders, removeSkill } from '@main/skills/install'
 import { detectFlowStacks } from '@main/flow/stacks'
 import { check as checkForUpdates, installNow } from '@main/updater'
 
@@ -401,8 +401,9 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'sessions.promptHistory': (req) => repos.commandHistory.recent(req.projectId, req.limit),
     'projects.commands': (req) => repos.projectCommands.get(req.projectId),
     'skills.list': listSkills,
+    'skills.installed': installedSkillNames,
     'skills.import': async (req) => {
-      const result = await importSkills(req.url, skillsStagingRoot, new Set(await installedSkillNames()))
+      const result = await importSkills(req.url, skillsStagingRoot, new Set(await liveSkillFolders()))
       repos.customSkills.upsertMany(result.imported)
       for (const skill of result.imported) {
         try {

@@ -40,12 +40,17 @@ export async function reconcileSkills(
   stagingRoot: string,
   skills: readonly { name: string; enabled: boolean }[],
 ): Promise<void> {
+  const live = new Set(await liveSkillFolders())
   for (const skill of skills) {
+    if (!skill.enabled || live.has(skill.name)) continue
     try {
-      if (skill.enabled) await enableSkill(stagingRoot, skill.name)
-      else await disableSkill(skill.name)
+      await enableSkill(stagingRoot, skill.name)
     } catch {}
   }
+}
+
+export async function liveSkillFolders(): Promise<string[]> {
+  return (await readdir(liveSkillsRoot()).catch(() => [] as string[])).map((name) => name.toLowerCase())
 }
 
 export async function installedSkillNames(): Promise<string[]> {

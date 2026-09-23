@@ -15,6 +15,7 @@ export interface MockSessionSeed {
   startedAt?: string
   mcpServers?: { name: string; status: string }[]
   bypassPermissions?: boolean
+  containerised?: boolean
   planMode?: boolean
 }
 
@@ -33,6 +34,7 @@ export interface MockProjectSeed {
 export interface MockScenario {
   projects: MockProjectSeed[]
   skills?: CustomSkill[]
+  liveSkills?: string[]
   settings: Settings
   suites?: AvailableSuites[]
 }
@@ -138,6 +140,7 @@ export function installMockHost(scenario: MockScenario): void {
     usageResetsAt: number | null
     usageLimitType: string | null
     bypassPermissions: boolean
+    containerised: boolean
     planMode: boolean
     inPlanMode: boolean
     mcpServers: { name: string; status: string }[]
@@ -272,6 +275,7 @@ export function installMockHost(scenario: MockScenario): void {
         usageResetsAt: null,
         usageLimitType: null,
         bypassPermissions: p.session.bypassPermissions ?? false,
+        containerised: p.session.containerised ?? p.session.bypassPermissions ?? false,
         planMode: p.session.planMode ?? false,
         inPlanMode: p.session.planMode ?? false,
         mcpServers: p.session.mcpServers ?? [],
@@ -705,6 +709,8 @@ export function installMockHost(scenario: MockScenario): void {
       project.useContainers = req.on === true
     },
     'skills.list': () => customSkills.map((s) => ({ ...s })),
+    'skills.installed': () =>
+      [...new Set([...(scenario.liveSkills ?? []), ...customSkills.filter((s) => s.enabled).map((s) => s.name)])].sort(),
     'skills.import': (req) => {
       const url = String(req.url)
       if (!/^https:\/\/(www\.)?github\.com\//.test(url)) {
@@ -965,6 +971,7 @@ export function installMockHost(scenario: MockScenario): void {
         usageResetsAt: null,
         usageLimitType: null,
         bypassPermissions: mode === 'bypass',
+        containerised: req.containerised === true || mode === 'bypass',
         planMode,
         inPlanMode: planMode,
         mcpServers: [],

@@ -1,5 +1,5 @@
 import type { PtyHost } from '@main/terminal/pty-host'
-import { mkdtemp, rm, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -433,5 +433,29 @@ describe('importing and managing a person’s own skills', () => {
     expect((await call('skills.import', { url: ARCHIFY.source })).ok).toBe(true)
     expect(await names(call)).toEqual(['archify:on'])
     expect(await exists(live('archify'))).toBe(true)
+  })
+
+  it('never imports over a folder of the person’s own, whatever its case and even with no SKILL.md', async () => {
+    const { call } = setup()
+    const own = join(home, '.claude', 'skills', 'Code-Review')
+    await mkdir(own, { recursive: true })
+    await writeFile(join(own, 'notes.txt'), 'mine')
+
+    const result = await call('skills.import', { url: SOURCE })
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: { imported: [{ name: 'write-tests' }], skipped: [{ name: 'code-review' }] },
+    })
+    expect(await readFile(join(own, 'notes.txt'), 'utf8')).toBe('mine')
+  })
+
+  it('reports a skill installed outside the app as installed, so Diagrams can use it', async () => {
+    const { call } = setup()
+    await mkdir(join(home, '.claude', 'skills', 'archify'), { recursive: true })
+    await writeFile(live('archify'), '---\nname: archify\n---\n')
+
+    expect(await call('skills.installed')).toEqual({ ok: true, value: ['archify'] })
+    expect(await names(call)).toEqual([])
   })
 })
