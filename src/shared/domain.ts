@@ -470,6 +470,19 @@ export const DEFAULT_SETTINGS: Settings = {
   diagramEngine: 'diagram-design',
 }
 
+export interface TranscriptSummary {
+  sessionId: string
+  projectId: string
+  projectName: string
+  savedAt: string
+  expiresAt: string
+  path: string
+  prompts: number
+  replies: number
+  lastPrompt: string | null
+  digest: string
+}
+
 export interface ProjectCommand {
   name: string
   description?: string

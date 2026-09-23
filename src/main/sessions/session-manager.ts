@@ -28,6 +28,7 @@ import type {
   SessionMode,
   SessionStatus,
   SuiteResult,
+  TranscriptSummary,
   VerifyReport,
 } from '@shared/domain'
 import {
@@ -55,6 +56,12 @@ import {
   sandboxSystemPromptAppend,
 } from './session-shaping'
 import { mainLoopModel } from './model-routing'
+import {
+  TRANSCRIPT_EVENT_CAP,
+  transcriptContextAppend,
+  transcriptFor,
+  writeTranscript,
+} from './transcript'
 import { parseFlowMarker, type FlowMarker } from '@main/flow/flow-markers'
 import {
   parseSuiteProgress,
@@ -134,6 +141,7 @@ interface StartOptions {
   containerised?: boolean
   nodeModulesVolumeKey?: string
   engine?: SessionEngine
+  carryTranscriptFrom?: string
 }
 
 const MAX_CONTAINERS = 2
@@ -171,6 +179,10 @@ const STREAM_LOCAL_KINDS: ReadonlySet<EventKind> = new Set([
 ])
 
 const MAX_LIVE_STREAM_EVENTS = 200
+
+const TRANSCRIBED_KINDS: ReadonlySet<EventKind> = new Set(['prompt', 'assistant_text', 'summary'])
+
+const TRANSCRIPT_DEBOUNCE_MS = 3000
 
 function evictable(event: SessionEvent): boolean {
   if (!STREAM_LOCAL_KINDS.has(event.kind)) return false
@@ -425,6 +437,7 @@ export class SessionManager {
   private classifier: NoiseClassifier | null = null
   private revivedAt = new Map<string, number>()
   private quitting = false
+  private transcriptTimers = new Map<string, ReturnType<typeof setTimeout>>()
   availableModels: AvailableModel[] = []
   private probingModels: Promise<AvailableModel[]> | null = null
   private modelsProbedAt = 0
@@ -677,6 +690,8 @@ export class SessionManager {
           hasNodeModulesVolume(project.path),
         )
       : null
+    const carried = opts?.carryTranscriptFrom ? transcriptFor(opts.carryTranscriptFrom) : null
+    const transcriptAppend = carried ? transcriptContextAppend(carried, !containerised) : null
     try {
       entry.session = engine === 'codex'
         ? new CodexSession({
@@ -716,7 +731,7 @@ export class SessionManager {
         resumeSdkSessionId,
         resumeFromSessionId,
         systemPromptAppend:
-          [sandboxAppend, modesAppend, heavyAppend, schemaAppend]
+          [sandboxAppend, modesAppend, heavyAppend, schemaAppend, transcriptAppend]
             .filter((s): s is string => Boolean(s))
             .join('\n\n') || undefined,
         claudeExecutablePath: claudeExecutablePath ?? undefined,
@@ -1429,6 +1444,7 @@ export class SessionManager {
           evictStaleLive(entry)
         }
         this.scanMarkers(entry, kind, payload)
+        if (persist && TRANSCRIBED_KINDS.has(kind)) this.scheduleTranscript(entry.row.id)
         this.callbacks.onEvent({ ...event })
         return event as SessionEvent<K>
       },
@@ -1461,6 +1477,7 @@ export class SessionManager {
           }
         }
         this.scanMarkers(entry, liveEntry.event.kind, payload)
+        if (options?.persist && TRANSCRIBED_KINDS.has(liveEntry.event.kind)) this.scheduleTranscript(entry.row.id)
         this.callbacks.onEvent({ ...liveEntry.event })
       },
     }
@@ -1577,6 +1594,36 @@ export class SessionManager {
     })()
   }
 
+  private saveTranscript(sessionId: string): TranscriptSummary {
+    const row = this.hosted.get(sessionId)?.row ?? this.repos.sessions.byId(sessionId)
+    if (!row) throw { code: 'NOT_FOUND', message: 'Session not found' } satisfies IpcError
+    const project = this.repos.projects.byId(row.projectId)
+    const events = this.repos.events.page(sessionId, undefined, TRANSCRIPT_EVENT_CAP)
+    return writeTranscript(row, project?.name ?? row.projectId, events)
+  }
+
+  private scheduleTranscript(sessionId: string): void {
+    const pending = this.transcriptTimers.get(sessionId)
+    if (pending) clearTimeout(pending)
+    const timer = setTimeout(() => {
+      this.transcriptTimers.delete(sessionId)
+      try {
+        this.saveTranscript(sessionId)
+      } catch {}
+    }, TRANSCRIPT_DEBOUNCE_MS)
+    timer.unref?.()
+    this.transcriptTimers.set(sessionId, timer)
+  }
+
+  private flushTranscript(sessionId: string): void {
+    const pending = this.transcriptTimers.get(sessionId)
+    if (pending) clearTimeout(pending)
+    this.transcriptTimers.delete(sessionId)
+    try {
+      this.saveTranscript(sessionId)
+    } catch {}
+  }
+
   private finaliseRow(entry: HostedEntry, reason: Session['endReason']): void {
     if (entry.row.endedAt) return
     entry.row.endedAt = nowIso()
@@ -1588,6 +1635,7 @@ export class SessionManager {
       endReason: reason,
     })
     if (entry.containerised && !entry.nodeModulesVolumeKey) removeNodeModulesVolume(entry.row.id)
+    this.flushTranscript(entry.row.id)
     this.pushStatus(entry)
   }
 

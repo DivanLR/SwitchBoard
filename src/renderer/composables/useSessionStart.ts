@@ -5,6 +5,7 @@ import { isIpcError, type ProjectListItem } from '@shared/ipc-types'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { useTerminalStore } from '@renderer/stores/terminal'
+import { useTranscriptsStore } from '@renderer/stores/transcripts'
 
 export function useSessionStart(opts: {
   project: MaybeRefOrGetter<ProjectListItem>
@@ -13,6 +14,7 @@ export function useSessionStart(opts: {
   const projects = useProjectsStore()
   const settings = useSettingsStore()
   const terminals = useTerminalStore()
+  const transcripts = useTranscriptsStore()
   const defaultEngine = (): SessionEngine => settings.settings?.defaultEngine ?? DEFAULT_SESSION_ENGINE
   const project = (): ProjectListItem => toValue(opts.project)
   const endedSession = (): Session | null => toValue(opts.endedSession)
@@ -44,6 +46,16 @@ export function useSessionStart(opts: {
     return !!previous?.sdkSessionId && (previous.engine ?? DEFAULT_SESSION_ENGINE) === startEngine.value
   })
 
+  const carryTranscript = ref(false)
+  const lastTranscript = computed(() => {
+    const id = endedSession()?.id
+    const transcript = id ? transcripts.bySession[id] : null
+    return transcript && transcript.prompts > 0 ? transcript : null
+  })
+  const canCarry = computed(
+    () => startEngine.value === 'claude' && !resumeSession.value && lastTranscript.value !== null,
+  )
+
   const modeChoices = computed(() => {
     const onHost =
       startEngine.value === 'codex' || (resumeSession.value && !endedSession()?.containerised)
@@ -62,6 +74,7 @@ export function useSessionStart(opts: {
     busy.value = false
     modeOpen.value = false
     resumeSession.value = false
+    carryTranscript.value = false
     startMode.value = project().defaultSessionMode ?? DEFAULT_SESSION_MODE
     startEngine.value = defaultEngine()
   }
@@ -69,7 +82,9 @@ export function useSessionStart(opts: {
   watch(
     () => endedSession()?.id ?? null,
     (id) => {
+      carryTranscript.value = false
       if (!id) return
+      void transcripts.load(id).catch(() => {})
       const previous = endedSession()
       startMode.value = previous?.bypassPermissions
         ? 'bypass'
@@ -134,6 +149,7 @@ export function useSessionStart(opts: {
         startMode.value,
         containerOn.value,
         startEngine.value,
+        canCarry.value && carryTranscript.value ? lastTranscript.value?.sessionId : undefined,
       )
       watchForImmediateCrash(target, session.id, wasResuming)
     } catch (e) {
@@ -160,6 +176,9 @@ export function useSessionStart(opts: {
     startModeLabel,
     startModeDetail,
     canResume,
+    carryTranscript,
+    lastTranscript,
+    canCarry,
     busy,
     start,
     reset,

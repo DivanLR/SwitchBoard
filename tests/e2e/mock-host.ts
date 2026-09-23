@@ -111,6 +111,7 @@ export interface MockDriver {
       resume?: boolean
       containerised?: boolean
       engine?: string
+      carryTranscriptFrom?: string
     }[]
     verifyStarts: { projectId: string; suiteIds: string[]; isolated: boolean }[]
     planModeChanges: { sessionId: string; enabled: boolean }[]
@@ -441,6 +442,7 @@ export function installMockHost(scenario: MockScenario): void {
     resume?: boolean
     containerised?: boolean
     engine?: string
+    carryTranscriptFrom?: string
   }[] = []
   const verifyStarts: { projectId: string; suiteIds: string[]; isolated: boolean }[] = []
   const planModeChanges: { sessionId: string; enabled: boolean }[] = []
@@ -965,6 +967,7 @@ export function installMockHost(scenario: MockScenario): void {
         resume: req.resume === true,
         containerised: req.containerised === true,
         engine: req.engine as string | undefined,
+        carryTranscriptFrom: req.carryTranscriptFrom as string | undefined,
       })
       const session: MockSession = {
         id: nextId('sess'),
@@ -1084,6 +1087,27 @@ export function installMockHost(scenario: MockScenario): void {
       setStatus(sessionId, 'working')
     },
     'sessions.events': (req) => [...(eventsBySession.get(String(req.sessionId)) ?? [])],
+    'transcripts.for': (req) => {
+      const session = sessions.get(String(req.sessionId))
+      if (!session) return null
+      const payloadOf = (e: AnyRecord): AnyRecord => (e.payload as AnyRecord | undefined) ?? {}
+      const own = eventsBySession.get(session.id) ?? []
+      const prompts = own.filter((e) => e.kind === 'prompt' && !payloadOf(e).pending)
+      const project = projects.find((p) => p.id === session.projectId)
+      const savedAt = now()
+      return {
+        sessionId: session.id,
+        projectId: session.projectId,
+        projectName: project?.name ?? session.projectId,
+        savedAt,
+        expiresAt: new Date(Date.parse(savedAt) + 12 * 60 * 60 * 1000).toISOString(),
+        path: `/tmp/switchboard-transcripts/${session.id}.md`,
+        prompts: prompts.length,
+        replies: own.filter((e) => e.kind === 'assistant_text' || e.kind === 'summary').length,
+        lastPrompt: prompts.length > 0 ? String(payloadOf(prompts[prompts.length - 1]).text ?? '') : null,
+        digest: `Previous session on ${project?.name ?? session.projectId} (${session.id}).`,
+      }
+    },
     'clipboard.write': async (req) => {
       if (clipboardFails) throw { code: 'INTERNAL', message: 'Clipboard unavailable.' }
       try {

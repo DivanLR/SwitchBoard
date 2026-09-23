@@ -44,6 +44,7 @@ import { detectProjectSuites, evidencePrompt, planSuites, verifyPrompt } from '@
 import { readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
 import { gitNotice, readDiffList, readFileDiff } from '@main/sessions/session-manager'
 import { sandboxToolsFor } from '@main/sessions/wslc-sandbox'
+import { transcriptFor } from '@main/sessions/transcript'
 import { readDiagramList } from '@main/diagrams/list'
 import { importSkills } from '@main/skills/import'
 import type { FlowSupervisor } from '@main/flow/flow-supervisor'
@@ -362,7 +363,9 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       manager.startSession(req.projectId, req.resume ?? false, req.mode, {
         containerised: req.containerised === true,
         engine: req.engine ?? repos.settings.get().defaultEngine,
+        carryTranscriptFrom: req.carryTranscriptFrom,
       }),
+    'transcripts.for': (req) => transcriptFor(req.sessionId),
     'clipboard.write': (req) => {
       clipboard.writeText(req.text)
     },

@@ -26,6 +26,7 @@ import type {
   Settings,
   SkillImportResult,
   SpecSummary,
+  TranscriptSummary,
   VerifyRun,
 } from './domain'
 import type { AvailableSuites } from './test-catalog'
@@ -170,9 +171,11 @@ export interface InvokeMap {
       mode?: SessionMode
       containerised?: boolean
       engine?: SessionEngine
+      carryTranscriptFrom?: string
     }
     res: Session
   }
+  'transcripts.for': { req: { sessionId: string }; res: TranscriptSummary | null }
   'sessions.setPlanMode': { req: { sessionId: string; enabled: boolean }; res: void }
   'sessions.stop': { req: { sessionId: string }; res: void }
   'sessions.fate': {

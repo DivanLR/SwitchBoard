@@ -21,6 +21,9 @@ const {
   startModeLabel,
   startModeDetail,
   canResume,
+  carryTranscript,
+  lastTranscript,
+  canCarry,
   busy,
   start,
 } = props.starter
@@ -132,6 +135,22 @@ const {
         <span :class="{ faint: !canResume }">Resume session</span>
       </span>
 
+      <span v-if="canCarry && lastTranscript" class="resume-inline carry-inline">
+        <button
+          class="switch"
+          :class="{ on: carryTranscript }"
+          data-testid="carry-transcript-toggle"
+          role="switch"
+          :aria-checked="carryTranscript"
+          :disabled="busy"
+          :title="`Seed the new session with this session's transcript (${lastTranscript.prompts} prompts). Its digest goes into the new session's instructions, and the full file stays on this machine for twelve hours after its last write.`"
+          @click="carryTranscript = !carryTranscript"
+        >
+          <span class="knob"></span>
+        </button>
+        <span>Carry last transcript</span>
+      </span>
+
       <span v-if="startEngine === 'claude'" class="resume-inline container-inline">
         <button
           class="switch"
@@ -225,8 +244,15 @@ const {
   border-radius: var(--rc);
 }
 
-.ended-actions .container-inline {
+.ended-actions .carry-inline {
   grid-row: 3;
+  margin-top: 0;
+  border-top: none;
+  border-radius: 0;
+}
+
+.ended-actions .container-inline {
+  grid-row: 4;
   margin-top: 0;
   border-top: none;
   border-radius: 0 0 var(--rc) var(--rc);

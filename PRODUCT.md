@@ -169,6 +169,14 @@ Confirmed functionality:
   Settings, bound to a reserved project so its session outlives view switches.
 - A session can hand work to another open project; the receiving session is
   started and shown, never left in an invisible queue.
+- Session transcripts. Each session exports a markdown copy of its prompt and
+  reply spine to a temporary file, rewritten as the conversation lands and
+  deleted twelve hours after its last write, so a crash leaves one behind. The
+  export reads the already persisted events rather than keeping a second live
+  log. The start panel of an ended Claude session offers Carry last transcript:
+  the new session gets its digest in its instructions and the file's path to
+  read on demand. A container session gets the digest only, because the file is
+  on this machine; a resume and a Codex start carry nothing extra.
 
 Terminology and standing rules the code enforces:
 
@@ -213,6 +221,9 @@ Removed, each on the evidence of the application's own database on that date:
   worktrees, pull requests, lessons into CLAUDE.md): never run once. On
   2026-09-21 the owner asked for Flow to become "a popup screen that lets me run
   through features and setup my specs", which the new Flow is.
+
+Session transcripts were removed in the same pass and restored the same day at
+the owner's direction, with the carry switch back in the start panel.
 
 The WSL container sandbox and bypass mode were removed in the same pass and
 restored the same day, at the owner's direction: "do not remove sandbox

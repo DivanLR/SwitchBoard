@@ -170,6 +170,7 @@ const store = reactive({
     mode?: SessionMode,
     containerised?: boolean,
     engine?: SessionEngine,
+    carryTranscriptFrom?: string,
   ): Promise<Session> {
     state.starting = true
     try {
@@ -178,6 +179,7 @@ const store = reactive({
         resume,
         mode,
         engine,
+        carryTranscriptFrom,
         containerised:
           containerised ?? state.items.find((p) => p.id === projectId)?.useContainers ?? false,
       })
