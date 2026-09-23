@@ -395,6 +395,20 @@ export function subagentsAllowed(effort: EffortLevel): boolean {
   return effort === 'max'
 }
 
+export type KeepCurrentStatus = 'updated' | 'current' | 'failed' | 'needs_confirmation'
+
+export interface KeepCurrentResult {
+  kind: 'marketplace' | 'plugin' | 'skill' | 'speckit'
+  name: string
+  status: KeepCurrentStatus
+  detail: string
+}
+
+export interface KeepCurrentReport {
+  checkedAt: string
+  results: KeepCurrentResult[]
+}
+
 export interface Settings {
   defaultView: 'clean' | 'raw'
   notificationsEnabled: boolean
@@ -423,6 +437,8 @@ export interface Settings {
   mcpActiveServers: string[]
   sandboxMemory: string
   flowWorktreeRoot: string
+  keepCurrent: boolean
+  keepCurrentLast: KeepCurrentReport | null
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -453,6 +469,8 @@ export const DEFAULT_SETTINGS: Settings = {
   sandboxMemory: '6g',
   flowWorktreeRoot: '',
   diagramEngine: 'diagram-design',
+  keepCurrent: true,
+  keepCurrentLast: null,
 }
 
 export interface ProjectCommand {

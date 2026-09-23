@@ -1,5 +1,6 @@
-import { mkdir, rename, rm, writeFile } from 'node:fs/promises'
-import { dirname, join, posix } from 'node:path'
+import { createHash } from 'node:crypto'
+import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { dirname, join, posix, relative, sep } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { CustomSkill, SkillImportResult } from '@shared/domain'
 import type { IpcError } from '@shared/ipc-types'
@@ -22,6 +23,60 @@ interface TreeEntry {
   path: string
   type: string
   size?: number
+  sha?: string
+}
+
+interface SourceListing {
+  source: SkillSource
+  ref: string
+  inScope: TreeEntry[]
+  oversized: TreeEntry[]
+}
+
+async function listSource(input: string): Promise<SourceListing> {
+  const source = parseSkillSource(input)
+  const ref = source.ref ?? (await defaultBranch(source))
+  const tree = await readTree({ ...source, ref })
+  const prefix = source.path === '' ? '' : `${source.path}/`
+  const blobs = tree.filter(
+    (entry) => entry.type === 'blob' && entry.path.startsWith(prefix) && isSafeRepoPath(entry.path),
+  )
+  return {
+    source,
+    ref,
+    inScope: blobs.filter((entry) => (entry.size ?? 0) <= MAX_FILE_BYTES),
+    oversized: blobs.filter((entry) => (entry.size ?? 0) > MAX_FILE_BYTES),
+  }
+}
+
+function skillFiles(inScope: readonly TreeEntry[], base: string): (TreeEntry & { relative: string })[] {
+  const files = base === '' ? inScope : inScope.filter((entry) => entry.path.startsWith(`${base}/`))
+  return files
+    .map((file) => ({ ...file, relative: base === '' ? file.path : file.path.slice(base.length + 1) }))
+    .filter((file) => isSafeRepoPath(file.relative))
+}
+
+export async function remoteSkillShas(
+  input: string,
+): Promise<(sourcePath: string) => Map<string, string>> {
+  const { inScope } = await listSource(input)
+  return (sourcePath) =>
+    new Map(skillFiles(inScope, sourcePath).map((file) => [file.relative, file.sha ?? '']))
+}
+
+export async function folderShas(dir: string): Promise<Map<string, string>> {
+  const entries = await readdir(dir, { recursive: true, withFileTypes: true }).catch(() => [])
+  const files = entries.filter((entry) => entry.isFile())
+  return new Map(
+    await Promise.all(
+      files.map(async (entry): Promise<[string, string]> => {
+        const full = join(entry.parentPath, entry.name)
+        const bytes = await readFile(full)
+        const sha = createHash('sha1').update(`blob ${bytes.byteLength}\0`).update(bytes).digest('hex')
+        return [relative(dir, full).split(sep).join('/'), sha]
+      }),
+    ),
+  )
 }
 
 async function getJson(url: string): Promise<unknown> {
@@ -130,17 +185,9 @@ export async function importSkills(
   input: string,
   stagingRoot: string,
   existing: ReadonlySet<string>,
+  only?: string,
 ): Promise<SkillImportResult> {
-  const source = parseSkillSource(input)
-  const ref = source.ref ?? (await defaultBranch(source))
-  const tree = await readTree({ ...source, ref })
-
-  const prefix = source.path === '' ? '' : `${source.path}/`
-  const blobs = tree.filter(
-    (entry) => entry.type === 'blob' && entry.path.startsWith(prefix) && isSafeRepoPath(entry.path),
-  )
-  const inScope = blobs.filter((entry) => (entry.size ?? 0) <= MAX_FILE_BYTES)
-  const oversized = blobs.filter((entry) => (entry.size ?? 0) > MAX_FILE_BYTES)
+  const { source, ref, inScope, oversized } = await listSource(input)
 
   const skillDirs = inScope
     .filter((entry) => posix.basename(entry.path) === 'SKILL.md')
@@ -161,10 +208,11 @@ export async function importSkills(
   try {
     for (const dir of skillDirs) {
       const base = dir === '.' ? '' : dir
-      const files = base === '' ? inScope : inScope.filter((entry) => entry.path.startsWith(`${base}/`))
+      const files = skillFiles(inScope, base)
       const label = base === '' ? source.repo : posix.basename(base)
 
       const front = parseSkillFrontmatter((await download(source, ref, posix.join(dir, 'SKILL.md'))).toString('utf8'))
+      if (only !== undefined && front?.name !== only) continue
       if (!front) {
         skipped.push({ name: label, reason: 'Its SKILL.md has no name in the frontmatter.' })
         continue
@@ -191,14 +239,12 @@ export async function importSkills(
       await rm(from, { recursive: true, force: true })
       const filesBefore = budgetFiles
       for (const file of files) {
-        const relative = base === '' ? file.path : file.path.slice(base.length + 1)
-        if (!isSafeRepoPath(relative)) continue
         const bytes = await download(source, ref, file.path)
         budgetBytes -= bytes.byteLength
         if (budgetBytes < 0) {
           throw { code: 'INVALID_PATH', message: 'That import is larger than this allows.' } satisfies IpcError
         }
-        const destination = join(from, relative)
+        const destination = join(from, file.relative)
         await mkdir(dirname(destination), { recursive: true })
         await writeFile(destination, bytes)
         budgetFiles -= 1

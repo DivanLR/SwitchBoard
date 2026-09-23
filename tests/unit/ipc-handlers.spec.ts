@@ -67,6 +67,7 @@ function setup() {
     dbProjectId: 'db-project',
     skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),
     flow: { reconcileOnStartup: () => {} } as never,
+    keepCurrent: async () => ({ checkedAt: '', results: [] }),
     ptyHost: { open: () => ({ scrollback: '', reused: false }), write: () => {}, resize: () => {}, close: () => {}, closeAll: () => {} } as unknown as PtyHost,
   })
 
@@ -269,6 +270,7 @@ describe('the sender-trust check', () => {
       dbProjectId: 'db-project',
       skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),
       flow: { reconcileOnStartup: () => {} } as never,
+      keepCurrent: async () => ({ checkedAt: '', results: [] }),
       ptyHost: { open: () => ({ scrollback: '', reused: false }), write: () => {}, resize: () => {}, close: () => {}, closeAll: () => {} } as unknown as PtyHost,
     })
     const listener = registered.get(INVOKE_CHANNEL)!

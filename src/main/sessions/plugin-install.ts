@@ -4,18 +4,18 @@ import { resolveClaudeExecutable } from './claude-executable'
 
 const INSTALL_TIMEOUT_MS = 120_000
 
-interface RunResult {
+export interface RunResult {
   code: number | null
   stdout: string
   stderr: string
 }
 
-function run(exe: string, args: readonly string[]): Promise<RunResult> {
+export function run(exe: string, args: readonly string[], cwd?: string): Promise<RunResult> {
   return new Promise((resolve, reject) => {
-    execFile(
+    const child = execFile(
       exe,
       args,
-      { timeout: INSTALL_TIMEOUT_MS, windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
+      { cwd, timeout: INSTALL_TIMEOUT_MS, windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
       (error, stdout, stderr) => {
         const code = (error as { code?: number | null } | null)?.code ?? 0
         if (error && typeof code !== 'number') {
@@ -25,14 +25,15 @@ function run(exe: string, args: readonly string[]): Promise<RunResult> {
         resolve({ code, stdout, stderr })
       },
     )
+    child.stdin?.end()
   })
 }
 
-function reason(result: RunResult): string {
+export function reason(result: RunResult): string {
   const text = `${result.stderr}\n${result.stdout}`
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter(Boolean)
+    .filter((line) => /[A-Za-z0-9]/.test(line))
   return text.at(-1) ?? `exit code ${result.code}`
 }
 

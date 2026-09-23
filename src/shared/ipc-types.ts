@@ -6,6 +6,7 @@ import type {
   DiffListResult,
   Draft,
   FileDiffContent,
+  KeepCurrentReport,
   PermissionRequest,
   PermissionRequestStatus,
   PermissionRule,
@@ -216,6 +217,7 @@ export interface InvokeMap {
     res: { sessionId: string; file: string }
   }
   'plugins.install': { req: { marketplace: string; pkg: string }; res: void }
+  'plugins.keepCurrent': { req: void; res: KeepCurrentReport }
   'diagrams.open': { req: { projectId: string; file: string }; res: void }
   'diagrams.read': { req: { projectId: string; file: string }; res: { html: string } }
   'mcp.readSchema': { req: { projectId: string; servers?: string[] }; res: { content: string | null } }

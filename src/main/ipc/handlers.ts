@@ -1,5 +1,5 @@
 import { clipboard, dialog, ipcMain, shell, type BrowserWindow } from 'electron'
-import type { CustomSkill, Project, Session, SessionEvent } from '@shared/domain'
+import type { CustomSkill, KeepCurrentReport, Project, Session, SessionEvent } from '@shared/domain'
 import type { SectionKind } from '@shared/domain'
 import { isDangerousCommand, sessionName } from '@shared/domain'
 import {
@@ -137,6 +137,7 @@ interface HandlerDeps {
   getWindow: () => BrowserWindow | null
   dbProjectId: string
   ptyHost: PtyHost
+  keepCurrent: () => Promise<KeepCurrentReport>
 }
 
 function localMidnightIso(): string {
@@ -762,6 +763,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       await installPlugin(req.marketplace, req.pkg)
       await manager.reloadPlugins()
     },
+    'plugins.keepCurrent': () => deps.keepCurrent(),
     'settings.get': () => repos.settings.get(),
     'settings.set': (req) => repos.settings.set(req),
     'models.available': () => manager.models(),

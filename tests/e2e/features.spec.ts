@@ -25,6 +25,38 @@ test('settings exposes model cards', async ({ page }) => {
   await expect(page.getByTestId('model-summary')).toContainText('Opus 5')
 })
 
+test('General keeps plugins and skills up to date, checks on demand and lists every result', async ({ page }) => {
+  await page.getByTestId('open-settings').click()
+  const panel = page.getByTestId('settings-panel')
+  await panel.getByTestId('settings-tab-gen').click()
+
+  const toggle = panel.getByTestId('setting-keep-current')
+  await expect(toggle).toHaveAttribute('aria-checked', 'true')
+  await expect(panel).toContainText('Updates apply to sessions started afterwards.')
+  await expect(panel.getByTestId('keep-current-last')).toHaveText('Not checked yet.')
+  await expect(panel.getByTestId('keep-current-results')).toHaveCount(0)
+
+  await panel.getByTestId('keep-current-check').click()
+  await expect(panel.getByTestId('keep-current-last')).toContainText('Last checked')
+  await expect(panel.getByTestId('keep-current-last')).toContainText(
+    '1 needs your confirmation, 1 failed, 1 updated, 1 current.',
+  )
+  const rows = panel.getByTestId('keep-current-results').getByTestId('keep-result-status')
+  await expect(rows).toHaveText(['Needs your confirmation', 'Failed', 'Updated', 'Current'])
+  await expect(panel.getByTestId('keep-result-brag@brag (project)')).toContainText(
+    'The marketplace declares a command to fetch it.',
+  )
+  await expect(panel.getByTestId('keep-result-research')).toContainText('GitHub is rate-limiting this machine.')
+
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-checked', 'false')
+  await panel.getByTestId('settings-done').click()
+  await page.getByTestId('open-settings').click()
+  await panel.getByTestId('settings-tab-gen').click()
+  await expect(panel.getByTestId('setting-keep-current')).toHaveAttribute('aria-checked', 'false')
+  await expect(panel.getByTestId('keep-current-results').getByTestId('keep-result-status')).toHaveCount(4)
+})
+
 test('the picker follows the account: a new model appears, a retired one goes', async ({ page }) => {
   await page.evaluate(() =>
     window.__mock.setAvailableModels([

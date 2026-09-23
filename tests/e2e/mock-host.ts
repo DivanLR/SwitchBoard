@@ -926,6 +926,19 @@ export function installMockHost(scenario: MockScenario): void {
         push('push.projectCommands', { projectId: project.id, commands: shaped })
       }
     },
+    'plugins.keepCurrent': () => {
+      const report = {
+        checkedAt: now(),
+        results: [
+          { kind: 'marketplace', name: 'ponytail', status: 'current', detail: 'Catalogue refreshed.' },
+          { kind: 'plugin', name: 'ponytail@ponytail', status: 'updated', detail: 'Plugin "ponytail" updated from 4.8.4 to 4.9.0.' },
+          { kind: 'plugin', name: 'brag@brag (project)', status: 'needs_confirmation', detail: 'The marketplace declares a command to fetch it.' },
+          { kind: 'skill', name: 'research', status: 'failed', detail: 'GitHub is rate-limiting this machine.' },
+        ],
+      }
+      settings = { ...settings, keepCurrentLast: report }
+      return report
+    },
     'diagrams.read': (req) => ({
       html: `<!doctype html><title>${String(req.file)}</title><body><svg role="img" aria-label="${String(req.file)}"><text x="4" y="16">${String(req.file)}</text></svg></body>`,
     }),

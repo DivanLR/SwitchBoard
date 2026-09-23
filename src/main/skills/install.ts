@@ -2,7 +2,7 @@ import { cp, mkdir, readdir, rm, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-function liveSkillsRoot(): string {
+export function liveSkillsRoot(): string {
   return join(homedir(), '.claude', 'skills')
 }
 
