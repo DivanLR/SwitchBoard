@@ -19,11 +19,9 @@ function event(kind: EventKind, payload: unknown): SessionEvent {
 function rule(partial: Partial<SwallowRule>): SwallowRule {
   return {
     id: partial.id ?? Math.random().toString(36).slice(2),
-    position: partial.position ?? 0,
     eventKindMatcher: partial.eventKindMatcher ?? '*',
     pattern: partial.pattern ?? '.*',
     noiseKind: partial.noiseKind ?? 'noise',
-    enabled: partial.enabled ?? true,
   }
 }
 
@@ -61,17 +59,12 @@ describe('classifyNoise', () => {
     expect(classifyNoise(rules, event('raw_output', { text: 'x' }))).toBeNull()
   })
 
-  it('applies rules in position order, first match wins', () => {
+  it('applies rules in list order, first match wins', () => {
     const rules = [
-      rule({ position: 0, pattern: 'download', noiseKind: 'progress' }),
-      rule({ position: 1, pattern: '.*', noiseKind: 'other' }),
+      rule({ pattern: 'download', noiseKind: 'progress' }),
+      rule({ pattern: '.*', noiseKind: 'other' }),
     ]
     expect(classifyNoise(rules, event('raw_output', { text: 'downloading 3%' }))).toBe('progress')
-  })
-
-  it('skips disabled rules (toggling beats deleting)', () => {
-    const rules = [rule({ enabled: false, pattern: '.*' })]
-    expect(classifyNoise(rules, event('raw_output', { text: 'anything' }))).toBeNull()
   })
 
   it('treats invalid regular expressions as non-matching', () => {

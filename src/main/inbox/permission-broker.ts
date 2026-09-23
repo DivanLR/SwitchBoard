@@ -9,11 +9,12 @@ import {
 import type { InboxChangedPush } from '@shared/ipc-types'
 import { newId, nowIso, type Repositories } from '@main/store/repositories'
 import type { SessionManager } from '@main/sessions/session-manager'
-import { classifyRisk } from './risk-rules'
-import { RuleSet } from './rule-set'
+import { classifyRisk, defaultRiskRules } from './risk-rules'
 import { deriveMatcher, evaluateStandingRules, isPathWithinProject, pathOf } from './standing-rules'
 
 const CWD_AUTO_APPROVE_TOOLS = new Set(['Read', 'Write', 'Edit', 'NotebookEdit'])
+
+const RISK_RULES = defaultRiskRules()
 
 export class BrokerError extends Error {
   constructor(
@@ -135,15 +136,11 @@ export class PermissionBroker {
   private pending = new Map<string, PendingEntry>()
   private questions = new Map<string, QuestionGroup>()
 
-  readonly rules: RuleSet
-
   constructor(
     private repos: Repositories,
     private manager: SessionManager,
     private callbacks: BrokerCallbacks,
-  ) {
-    this.rules = new RuleSet()
-  }
+  ) {}
 
   async handle(context: CanUseToolContext): Promise<PermissionResult> {
     if (context.toolName === 'AskUserQuestion') {
@@ -171,7 +168,7 @@ export class PermissionBroker {
       project !== undefined &&
       isPathWithinProject(project.path, context.input)
     const described = describeTool(context.toolName, context.input)
-    const risk = classifyRisk(this.rules.riskRules(), context.toolName, context.input)
+    const risk = classifyRisk(RISK_RULES, context.toolName, context.input)
     const settings = this.repos.settings.get()
     const autoApproved =
       Boolean(standing) ||

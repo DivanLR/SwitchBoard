@@ -424,12 +424,6 @@ export class SessionManager {
     this.watchdog.unref?.()
   }
 
-  stopWatchdog(): void {
-    if (!this.watchdog) return
-    clearInterval(this.watchdog)
-    this.watchdog = null
-  }
-
   private watchdog: ReturnType<typeof setInterval> | null = null
 
   private sweepStaleRuns(deadlineMs: number): void {
@@ -659,10 +653,6 @@ export class SessionManager {
   removeTask(projectId: string, id: string): void {
     this.repos.taskQueue.remove(id)
     this.callbacks.onQueueChanged(projectId)
-  }
-
-  workdirFor(sessionId: string): string | undefined {
-    return this.hosted.get(sessionId)?.projectPath
   }
 
   liveEntryForProject(projectId: string): HostedEntry | undefined {

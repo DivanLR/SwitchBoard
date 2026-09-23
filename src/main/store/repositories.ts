@@ -824,15 +824,6 @@ class VerifyRunsRepo {
     return affected.map((row) => row.projectId)
   }
 
-  runningFor(projectId: string): VerifyRun | null {
-    const row = this.db
-      .prepare(
-        "SELECT * FROM verify_runs WHERE projectId = ? AND status = 'running' ORDER BY startedAt DESC, rowid DESC LIMIT 1",
-      )
-      .get(projectId) as VerifyRunRow | undefined
-    return row ? hydrateVerifyRun(row) : null
-  }
-
   finish(id: string, status: VerifyRun['status'], report: VerifyReport | null, note: string | null): void {
     this.db
       .prepare('UPDATE verify_runs SET status = ?, report = ?, note = ?, finishedAt = ? WHERE id = ?')
@@ -973,17 +964,6 @@ class FlowRunsRepo {
     return row ? hydrateFlowRun(row) : null
   }
 
-  bySessionId(sessionId: string): FlowRun | null {
-    const row = this.db
-      .prepare(
-        `SELECT flow_runs.* FROM flow_runs
-           JOIN flow_stages ON flow_stages.runId = flow_runs.id
-         WHERE flow_stages.sessionId = ?`,
-      )
-      .get(sessionId) as FlowRunRow | undefined
-    return row ? hydrateFlowRun(row) : null
-  }
-
   update(
     id: string,
     patch: Partial<
@@ -1101,13 +1081,6 @@ class FlowStagesRepo {
     return row ? hydrateFlowStage(row) : null
   }
 
-  bySessionId(sessionId: string): FlowStageRecord | null {
-    const row = this.db
-      .prepare('SELECT * FROM flow_stages WHERE sessionId = ?')
-      .get(sessionId) as FlowStageRow | undefined
-    return row ? hydrateFlowStage(row) : null
-  }
-
   update(
     runId: string,
     stage: FlowStage,
@@ -1202,15 +1175,6 @@ export class DiagramRequestsRepo {
            createdAt = excluded.createdAt`,
       )
       .run(projectId, file, sessionId, description, nowIso())
-  }
-
-  latestSessionFor(projectId: string): string | null {
-    const row = this.db
-      .prepare(
-        'SELECT sessionId FROM diagram_requests WHERE projectId = ? ORDER BY createdAt DESC LIMIT 1',
-      )
-      .get(projectId) as { sessionId: string | null } | undefined
-    return row?.sessionId ?? null
   }
 
   forProject(

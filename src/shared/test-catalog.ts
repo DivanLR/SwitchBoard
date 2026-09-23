@@ -1,19 +1,13 @@
 type SuiteKind = 'api' | 'unit' | 'ui' | 'coverage' | 'quality' | 'mutation'
 
-export type SuiteTool = 'dotnet' | 'node' | 'browser'
-
-type AppShape = 'api'
-
 export interface TestSuite {
   id: string
   kind: SuiteKind
   label: string
   acceptance: string
   command: string
-  needs: SuiteTool
   mcp?: string
   heavy?: boolean
-  appliesTo?: readonly AppShape[]
 }
 
 interface TestStack {
@@ -35,7 +29,6 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Unit tests',
         acceptance: 'the solution builds and every unit test passes',
         command: 'dotnet test --nologo --logger trx',
-        needs: 'dotnet',
       },
       {
         id: 'dotnet-coverage',
@@ -43,7 +36,6 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Coverage',
         acceptance: 'the changed code is covered by tests',
         command: 'dotnet test --nologo --logger trx --collect:"XPlat Code Coverage"',
-        needs: 'dotnet',
       },
       {
         id: 'dotnet-api',
@@ -51,8 +43,6 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'API integration tests',
         acceptance: 'every endpoint answers as its contract says (status, shape, auth)',
         command: 'dotnet test --nologo --logger trx --filter Category=Integration',
-        needs: 'dotnet',
-        appliesTo: ['api'],
       },
       {
         id: 'dotnet-http',
@@ -62,8 +52,6 @@ export const TEST_STACKS: readonly TestStack[] = [
           'the running API answers real requests correctly, checked against real rows',
         command:
           "start the API, take real identifiers from the project's database MCP server, call the endpoints with them (plus the project's .http file if present), and check each response back against the data",
-        needs: 'dotnet',
-        appliesTo: ['api'],
       },
       {
         id: 'dotnet-arch',
@@ -71,7 +59,6 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Architecture rules',
         acceptance: 'no layer depends on something it may not depend on',
         command: 'dotnet test --nologo --logger trx --filter Category=Architecture',
-        needs: 'dotnet',
       },
       {
         id: 'dotnet-format',
@@ -79,7 +66,6 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Format and analyzers',
         acceptance: 'formatting and analyzer rules are clean',
         command: 'dotnet format --verify-no-changes && dotnet build --nologo -warnaserror',
-        needs: 'dotnet',
       },
       {
         id: 'dotnet-sonar',
@@ -91,7 +77,6 @@ export const TEST_STACKS: readonly TestStack[] = [
           'project through the SonarQube MCP server, and name the server as the source. If the ' +
           'gate has never been computed for this branch, say so — do not report the main branch ' +
           "figures as though they were this branch's.",
-        needs: 'dotnet',
         mcp: 'sonarqube',
       },
       {
@@ -104,7 +89,6 @@ export const TEST_STACKS: readonly TestStack[] = [
           'anti-patterns and circular dependencies, and find dead code. Report errors and ' +
           'warnings separately, and count only what this working tree introduced — compare ' +
           'against the diff rather than reporting the solution\'s whole backlog as a failure.',
-        needs: 'dotnet',
         mcp: 'roslyn-navigator',
       },
       {
@@ -113,7 +97,6 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Mutation testing (Stryker)',
         acceptance: 'the tests fail when the code is broken on purpose',
         command: 'dotnet stryker',
-        needs: 'dotnet',
         heavy: true,
       },
     ],
@@ -129,7 +112,6 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Unit tests (Karma/Jasmine)',
         acceptance: 'every component and service spec passes',
         command: 'npx ng test --watch=false --browsers=ChromeHeadless',
-        needs: 'browser',
       },
       {
         id: 'ng-coverage',
@@ -137,7 +119,6 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Coverage',
         acceptance: 'the changed components are covered',
         command: 'npx ng test --watch=false --code-coverage --browsers=ChromeHeadless',
-        needs: 'browser',
       },
       {
         id: 'ng-build',
@@ -145,7 +126,6 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Production build',
         acceptance: 'the production build succeeds with no new warnings',
         command: 'npx ng build',
-        needs: 'node',
       },
       {
         id: 'ng-lint',
@@ -153,7 +133,6 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'Lint',
         acceptance: 'lint is clean',
         command: 'npx ng lint',
-        needs: 'node',
       },
       {
         id: 'ng-e2e',
@@ -161,7 +140,6 @@ export const TEST_STACKS: readonly TestStack[] = [
         label: 'UI end-to-end',
         acceptance: 'the affected screens work end to end in a real browser',
         command: 'npx playwright test',
-        needs: 'browser',
       },
     ],
   },
@@ -205,10 +183,10 @@ export interface AvailableSuites {
   suites: readonly TestSuite[]
 }
 
-function detectApiShape(
+function detectApi(
   entries: readonly string[],
   read: (entry: string) => string | null,
-): AppShape[] {
+): boolean {
   const MAX_READS = 12
   const lower = entries.map((entry) => entry.replace(/\\/g, '/').toLowerCase())
   let api = lower.some(
@@ -226,7 +204,7 @@ function detectApiShape(
     if (/MapControllers|AddControllers|MapOpenApi|AddOpenApi|AddSwaggerGen/.test(text)) api = true
   }
 
-  return api ? ['api'] : []
+  return api
 }
 
 function angularHasLintTarget(
@@ -253,7 +231,6 @@ function angularHasE2e(
 
 function suitesFor(
   stack: TestStack,
-  shapes: readonly AppShape[],
   angularLint: boolean,
   angularE2e: boolean,
   scanned: boolean,
@@ -262,9 +239,7 @@ function suitesFor(
   return stack.suites.filter((suite) => {
     if (suite.id === 'ng-lint') return angularLint
     if (suite.id === 'ng-e2e') return angularE2e
-    if (!suite.appliesTo) return true
-    if (suite.appliesTo.some((shape) => shapes.includes(shape))) return true
-    return shapes.length === 0
+    return true
   })
 }
 
@@ -279,18 +254,14 @@ export function detectStacks(
       ? lower.some((entry) => entry.endsWith(needle.slice(1)))
       : lower.some((entry) => entry === needle || entry.endsWith(`/${needle}`))
   }
-  const shapes = read ? detectApiShape(entries, read) : []
+  const api = read ? detectApi(entries, read) : false
   const angularLint = read ? angularHasLintTarget(entries, read) : false
   const angularE2e = read ? angularHasE2e(entries, read) : false
   return TEST_STACKS.filter((stack) => stack.detect.some(present)).map((stack) => ({
     stackId: stack.id,
-    stackLabel: stack.id === 'dotnet' ? dotnetLabel(shapes) : stack.label,
-    suites: suitesFor(stack, shapes, angularLint, angularE2e, read !== undefined),
+    stackLabel: stack.id === 'dotnet' && api ? '.NET API' : stack.label,
+    suites: suitesFor(stack, angularLint, angularE2e, read !== undefined),
   }))
-}
-
-function dotnetLabel(shapes: readonly AppShape[]): string {
-  return shapes.includes('api') ? '.NET API' : '.NET'
 }
 
 export function stackEntries(root: string, list: (dir: string) => string[]): string[] {

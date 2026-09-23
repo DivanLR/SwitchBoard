@@ -33,13 +33,11 @@ interface DefaultRuleSeed {
   toolMatcher: string
   inputMatcher?: RiskInputMatcher
   risk: RiskLevel
-  label: string
 }
 
 const DEFAULT_RULE_SEEDS: DefaultRuleSeed[] = [
   {
     id: 'bash-destructive',
-    label: 'Destructive shell commands',
     toolMatcher: 'Bash',
     inputMatcher: {
       field: 'command',
@@ -50,7 +48,6 @@ const DEFAULT_RULE_SEEDS: DefaultRuleSeed[] = [
   },
   {
     id: 'bash-readonly',
-    label: 'Read-only shell commands',
     toolMatcher: 'Bash',
     inputMatcher: {
       field: 'command',
@@ -61,7 +58,6 @@ const DEFAULT_RULE_SEEDS: DefaultRuleSeed[] = [
   },
   {
     id: 'bash-build',
-    label: 'Package and build commands',
     toolMatcher: 'Bash',
     inputMatcher: {
       field: 'command',
@@ -70,26 +66,23 @@ const DEFAULT_RULE_SEEDS: DefaultRuleSeed[] = [
     },
     risk: 'medium',
   },
-  { id: 'tool-read', label: 'Read a file', toolMatcher: 'Read', risk: 'low' },
-  { id: 'tool-glob', label: 'Find files by name', toolMatcher: 'Glob', risk: 'low' },
-  { id: 'tool-grep', label: 'Search file contents', toolMatcher: 'Grep', risk: 'low' },
-  { id: 'tool-notebook-read', label: 'Read a notebook', toolMatcher: 'NotebookRead', risk: 'low' },
-  { id: 'tool-todowrite', label: 'Update the task list', toolMatcher: 'TodoWrite', risk: 'low' },
-  { id: 'tool-edit', label: 'Edit a file', toolMatcher: 'Edit', risk: 'medium' },
-  { id: 'tool-write', label: 'Write a file', toolMatcher: 'Write', risk: 'medium' },
-  { id: 'tool-notebook-edit', label: 'Edit a notebook', toolMatcher: 'NotebookEdit', risk: 'medium' },
-  { id: 'tool-webfetch', label: 'Fetch a URL', toolMatcher: 'WebFetch', risk: 'high' },
-  { id: 'tool-websearch', label: 'Search the web', toolMatcher: 'WebSearch', risk: 'high' },
+  { id: 'tool-read', toolMatcher: 'Read', risk: 'low' },
+  { id: 'tool-glob', toolMatcher: 'Glob', risk: 'low' },
+  { id: 'tool-grep', toolMatcher: 'Grep', risk: 'low' },
+  { id: 'tool-notebook-read', toolMatcher: 'NotebookRead', risk: 'low' },
+  { id: 'tool-todowrite', toolMatcher: 'TodoWrite', risk: 'low' },
+  { id: 'tool-edit', toolMatcher: 'Edit', risk: 'medium' },
+  { id: 'tool-write', toolMatcher: 'Write', risk: 'medium' },
+  { id: 'tool-notebook-edit', toolMatcher: 'NotebookEdit', risk: 'medium' },
+  { id: 'tool-webfetch', toolMatcher: 'WebFetch', risk: 'high' },
+  { id: 'tool-websearch', toolMatcher: 'WebSearch', risk: 'high' },
 ]
 
 export function defaultRiskRules(): RiskClassificationRule[] {
-  return DEFAULT_RULE_SEEDS.map((seed, index) => ({
+  return DEFAULT_RULE_SEEDS.map((seed) => ({
     id: `builtin:${seed.id}`,
-    scope: 'global',
-    position: index,
     toolMatcher: seed.toolMatcher,
     inputMatcher: seed.inputMatcher ?? null,
     risk: seed.risk,
-    builtin: true,
   }))
 }

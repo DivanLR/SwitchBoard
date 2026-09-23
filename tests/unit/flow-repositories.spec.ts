@@ -171,29 +171,6 @@ describe('FlowStagesRepo round trip', () => {
     expect(stage?.sessionId).toBe('s-1')
     expect(stage?.report?.verdict).toBe('needs_fixes')
     expect(stage?.report?.findings).toHaveLength(1)
-    expect(repos.flowStages.bySessionId('s-1')?.stage).toBe('review')
-  })
-
-  it('finds the run a session belongs to', () => {
-    const { repos, project } = setup()
-    const run = repos.flowRuns.start({
-      projectId: project.id,
-      title: 'X',
-      source: 'text',
-      sourceRef: null,
-      sourceUrl: null,
-      description: '',
-      stacks: ['dotnet'],
-      stage: 'spec',
-      autopilot: false,
-      autoShip: false,
-      baseBranch: 'main',
-    })
-    repos.flowStages.ensureAll(run.id)
-    repos.flowStages.update(run.id, 'spec', { sessionId: 's-9' })
-
-    expect(repos.flowRuns.bySessionId('s-9')?.id).toBe(run.id)
-    expect(repos.flowRuns.bySessionId('unknown')).toBeNull()
   })
 
   it('cascades deletion when a run is pruned away', () => {

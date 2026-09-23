@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { isSpecKitInstalled, readSpecKitState, readSpecDetail } from '@main/specs/spec-kit'
+import { isSpecKitInstalled, readSpecKitState } from '@main/specs/spec-kit'
 
 const dirs: string[] = []
 afterEach(() => {
@@ -24,8 +24,8 @@ describe('isSpecKitInstalled', () => {
   })
 })
 
-describe('readSpecKitState + readSpecDetail', () => {
-  it('lists specs and parses title, tasks, sections, clarifications', async () => {
+describe('readSpecKitState', () => {
+  it('lists specs with their title and task counts', async () => {
     const p = makeProject()
     mkdirSync(join(p, '.specify'))
     const specDir = join(p, 'specs', '001-feature-x')
@@ -66,44 +66,6 @@ describe('readSpecKitState + readSpecDetail', () => {
     expect(state.specs[0].tasksTotal).toBe(3)
     expect(state.specs[0].tasksDone).toBe(1)
     expect(state.specs[0].status).toBe('in_progress')
-
-    const detail = await readSpecDetail(p, '001-feature-x')
-    expect(detail).not.toBeNull()
-    expect(detail!.description).toContain('Does the X thing')
-    expect(detail!.sections.map((s) => s.title)).toEqual(['Summary', 'Requirements', 'Assumptions'])
-    expect(detail!.phases).toHaveLength(2)
-    expect(detail!.phases[0].label).toContain('Phase 1')
-    expect(detail!.phases[0].tasks[0]).toMatchObject({ id: 'T001', done: true })
-    expect(detail!.phases[0].tasks[1]).toMatchObject({ id: 'T002', done: false })
-    expect(detail!.clarifications).toEqual(['which X?'])
-  })
-
-  it('parses already-answered clarifications from the ## Clarifications section', async () => {
-    const p = makeProject()
-    mkdirSync(join(p, '.specify'))
-    const specDir = join(p, 'specs', '003-clar')
-    mkdirSync(specDir, { recursive: true })
-    writeFileSync(
-      join(specDir, 'spec.md'),
-      [
-        '# Feature Specification: Clar',
-        '',
-        '## Clarifications',
-        '',
-        '### Session 2026-07-19',
-        '',
-        '- Q: How should it connect? → A: In-app hosting only.',
-        '- Q: One session per project? → A: Yes, exactly one.',
-        '',
-        '## Requirements',
-        '- FR-001: MUST connect',
-      ].join('\n'),
-    )
-    const detail = await readSpecDetail(p, '003-clar')
-    expect(detail!.resolvedClarifications).toEqual([
-      { question: 'How should it connect?', answer: 'In-app hosting only.' },
-      { question: 'One session per project?', answer: 'Yes, exactly one.' },
-    ])
   })
 
   it('reports ready when tasks exist but none are done', async () => {
@@ -112,12 +74,9 @@ describe('readSpecKitState + readSpecDetail', () => {
     const specDir = join(p, 'specs', '004-ready')
     mkdirSync(specDir, { recursive: true })
     writeFileSync(join(specDir, 'spec.md'), '# Feature Specification: Ready Feature\n')
-    writeFileSync(join(specDir, 'plan.md'), '# Plan\n\n## Approach\nDo the thing.\n')
     writeFileSync(join(specDir, 'tasks.md'), '## Phase 1\n- [ ] T001 A\n')
     const state = await readSpecKitState(p)
     expect(state.specs[0].status).toBe('ready')
-    const detail = await readSpecDetail(p, '004-ready')
-    expect(detail!.plan).toEqual([{ title: 'Approach', body: 'Do the thing.' }])
   })
 
   it('reports complete when all tasks are done', async () => {

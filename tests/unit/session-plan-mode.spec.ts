@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { openDatabase, type AppDatabase } from '@main/store/db'
 import { createRepositories, newId, nowIso, type Repositories } from '@main/store/repositories'
-import { HostedSession, resolvePermissionMode } from '@main/sessions/session'
+import { HostedSession } from '@main/sessions/session'
 import { DEFAULT_SESSION_MODE, SESSION_MODES } from '@shared/domain'
 import type { Session } from '@shared/domain'
 
@@ -87,17 +87,7 @@ describe('the plan-mode flag a session starts with', () => {
 })
 
 describe('the mode a session spawns with', () => {
-  it('passes every app mode through under the SDK name for it', () => {
-    expect(resolvePermissionMode('default')).toBe('default')
-    expect(resolvePermissionMode('auto')).toBe('auto')
-    expect(resolvePermissionMode('acceptEdits')).toBe('acceptEdits')
-    expect(resolvePermissionMode('plan')).toBe('plan')
-  })
-
-  it('covers every mode the app offers, so a new one cannot be added silently', () => {
-    for (const { value } of SESSION_MODES) {
-      expect(resolvePermissionMode(value)).toBeTruthy()
-    }
+  it('offers exactly the modes the SDK spells, under its own names, so a new one cannot be added silently', () => {
     expect(SESSION_MODES.map((m) => m.value)).toEqual([
       'default',
       'dontAsk',
@@ -107,17 +97,8 @@ describe('the mode a session spawns with', () => {
     ])
   })
 
-  it('spells every mode exactly as the SDK does', () => {
-    const sdk = ['default', 'acceptEdits', 'plan', 'dontAsk', 'auto']
-    for (const { value } of SESSION_MODES) {
-      expect(sdk).toContain(resolvePermissionMode(value))
-    }
-    expect(new Set(SESSION_MODES.map((m) => resolvePermissionMode(m.value))).size).toBe(sdk.length)
-  })
-
   it('keeps auto as the app default, so migration 022 changed no behaviour', () => {
     expect(DEFAULT_SESSION_MODE).toBe('auto')
-    expect(resolvePermissionMode(DEFAULT_SESSION_MODE)).toBe('auto')
   })
 })
 

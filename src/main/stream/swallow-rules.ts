@@ -23,19 +23,12 @@ function isSwallowableKind(kind: string): kind is EventKind {
 
 export function classifyNoise(rules: SwallowRule[], event: SessionEvent): string | null {
   if (!isSwallowableKind(event.kind)) return null
-  const ordered = rules
-    .filter(
-      (rule) =>
-        rule.enabled &&
-        (rule.eventKindMatcher === '*' || rule.eventKindMatcher === event.kind),
-    )
-    .sort((a, b) => a.position - b.position)
   const text = displayTextOf(event).slice(0, 5000)
-  for (const rule of ordered) {
+  for (const rule of rules) {
+    if (rule.eventKindMatcher !== '*' && rule.eventKindMatcher !== event.kind) continue
     try {
       if (new RegExp(rule.pattern, 'im').test(text)) return rule.noiseKind
-    } catch {
-    }
+    } catch {}
   }
   return null
 }
@@ -76,12 +69,5 @@ const DEFAULT_SWALLOW_SEEDS: DefaultSwallowSeed[] = [
 ]
 
 export function defaultSwallowRules(): SwallowRule[] {
-  return DEFAULT_SWALLOW_SEEDS.map((seed, index) => ({
-    id: `builtin:${seed.id}`,
-    position: index,
-    eventKindMatcher: seed.eventKindMatcher,
-    pattern: seed.pattern,
-    noiseKind: seed.noiseKind,
-    enabled: true,
-  }))
+  return DEFAULT_SWALLOW_SEEDS.map((seed) => ({ ...seed, id: `builtin:${seed.id}` }))
 }

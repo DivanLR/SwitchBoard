@@ -8,7 +8,7 @@ import { createRepositories, type Repositories } from './store/repositories'
 import { runRetention, scheduleRetention } from './store/retention'
 import { SessionManager } from './sessions/session-manager'
 import { PermissionBroker } from './inbox/permission-broker'
-import { classifyNoise } from './stream/swallow-rules'
+import { classifyNoise, defaultSwallowRules } from './stream/swallow-rules'
 import { createNotifier } from './notifications'
 import { followDeepLink, PROTOCOL_SCHEME } from './deep-link'
 import { registerProject } from './projects/discovery'
@@ -237,7 +237,8 @@ async function main(): Promise<void> {
     onNeedsYou: (context) => notify(context),
   })
 
-  manager.setNoiseClassifier((event) => classifyNoise(broker.rules.swallowRules(), event))
+  const swallowRules = defaultSwallowRules()
+  manager.setNoiseClassifier((event) => classifyNoise(swallowRules, event))
 
   const dbProjectPath = join(app.getPath('userData'), 'database-mcp')
   mkdirSync(dbProjectPath, { recursive: true })

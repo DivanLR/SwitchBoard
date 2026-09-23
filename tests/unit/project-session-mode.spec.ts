@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { openDatabase, type AppDatabase } from '@main/store/db'
 import { createRepositories, type Repositories } from '@main/store/repositories'
 import { registerProject } from '@main/projects/discovery'
-import { resolvePermissionMode } from '@main/sessions/session'
 import { DEFAULT_SESSION_MODE, SESSION_MODES } from '@shared/domain'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -85,7 +84,7 @@ describe('the mode a project holds is the mode the SDK spawns in', () => {
         defaultSessionMode: value,
       })
       const stored = repos.projects.byId(project.id)!.defaultSessionMode
-      expect(resolvePermissionMode(stored)).toBe(value)
+      expect(stored).toBe(value)
     }
   })
 })

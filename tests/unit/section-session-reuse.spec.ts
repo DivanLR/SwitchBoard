@@ -111,7 +111,8 @@ describe('the session a section dispatch lands in', () => {
       cwd: worktree,
     })
 
-    expect(manager.workdirFor(session.id)).toBe(worktree)
+    const hosted = (manager as unknown as { hosted: Map<string, { projectPath: string }> }).hosted
+    expect(hosted.get(session.id)?.projectPath).toBe(worktree)
     expect(repos.projects.byId(project.id)?.path).toBe(project.path)
   })
 

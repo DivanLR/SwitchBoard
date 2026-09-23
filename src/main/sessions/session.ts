@@ -6,7 +6,6 @@ import {
   type HookInput,
   type HookJSONOutput,
   type McpServerConfig,
-  type PermissionMode,
   type PermissionResult,
   type Query,
   type SDKMessage,
@@ -150,10 +149,6 @@ function isFailedResult(message: SDKMessage): boolean {
   return msg.type === 'result' && (msg.subtype !== 'success' || msg.is_error === true)
 }
 
-export function resolvePermissionMode(mode: SessionMode): PermissionMode {
-  return mode
-}
-
 export class HostedSession implements SessionHost {
   readonly sessionId: string
   private readonly options: HostedSessionOptions
@@ -198,7 +193,7 @@ export class HostedSession implements SessionHost {
             : undefined,
         mcpServers: this.options.mcpServers,
         agents: this.options.agents,
-        permissionMode: resolvePermissionMode(this.options.mode),
+        permissionMode: this.options.mode,
         systemPrompt: this.options.systemPromptAppend
           ? { type: 'preset', preset: 'claude_code', append: this.options.systemPromptAppend }
           : undefined,
@@ -337,9 +332,7 @@ export class HostedSession implements SessionHost {
 
   setPlanMode(enabled: boolean): void {
     const own = this.options.mode
-    const mode = enabled
-      ? 'plan'
-      : resolvePermissionMode(own === 'plan' ? DEFAULT_SESSION_MODE : own)
+    const mode = enabled ? 'plan' : own === 'plan' ? DEFAULT_SESSION_MODE : own
     void this.q?.setPermissionMode(mode).catch(() => {
     })
   }

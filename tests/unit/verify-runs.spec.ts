@@ -201,15 +201,6 @@ describe('a verification run', () => {
     expect(list).toHaveLength(20)
     expect(repos.verifyRuns.byId(first.id)).toBeNull()
   })
-
-  it('reports the newest still-running run, so a late report cannot rewrite a finished one', () => {
-    const { repos, projectId, start } = setup()
-    const older = start()
-    repos.verifyRuns.finish(older.id, 'pass', null, null)
-    const newer = start()
-
-    expect(repos.verifyRuns.runningFor(projectId)?.id).toBe(newer.id)
-  })
 })
 
 describe('startup reconciliation of orphaned runs (FR-022)', () => {
@@ -230,7 +221,6 @@ describe('startup reconciliation of orphaned runs (FR-022)', () => {
     expect(after?.status).toBe('inconclusive')
     expect(after?.finishedAt).toBeTruthy()
     expect(after?.note).toContain('closed before this run reported')
-    expect(repos.verifyRuns.runningFor(projectId)).toBeNull()
   })
 
   it('leaves an already-finished run exactly as it was', () => {

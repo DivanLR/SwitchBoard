@@ -21,8 +21,6 @@ export type EventKind =
 
 export type RiskLevel = 'low' | 'medium' | 'high'
 
-export type RuleKind = 'risk' | 'swallow'
-
 type PermissionRequestType = 'tool_permission' | 'plan_approval'
 
 export type PermissionRequestStatus = 'pending' | 'approved' | 'denied' | 'expired' | 'rule_approved'
@@ -299,21 +297,16 @@ export interface RiskInputMatcher {
 
 export interface RiskClassificationRule {
   id: string
-  scope: 'global'
-  position: number
   toolMatcher: string
   inputMatcher: RiskInputMatcher | null
   risk: RiskLevel
-  builtin: boolean
 }
 
 export interface SwallowRule {
   id: string
-  position: number
   eventKindMatcher: string
   pattern: string
   noiseKind: string
-  enabled: boolean
 }
 
 export interface ProjectGroup {
@@ -744,37 +737,6 @@ export interface SpecSummary {
   tasksDone: number
 }
 
-export interface SpecSection {
-  title: string
-  body: string
-}
-
-export interface ResolvedClarification {
-  question: string
-  answer: string
-}
-
-export interface SpecTask {
-  id: string 
-  label: string
-  done: boolean
-}
-
-export interface SpecPhase {
-  label: string
-  tasks: SpecTask[]
-}
-
-export interface SpecDetail extends SpecSummary {
-  description: string
-  path: string
-  sections: SpecSection[]
-  plan?: SpecSection[]
-  phases: SpecPhase[]
-  clarifications: string[]
-  resolvedClarifications: ResolvedClarification[]
-}
-
 export interface SpecKitState {
   installed: boolean 
   specs: SpecSummary[]
@@ -807,7 +769,6 @@ export function sessionName(
     verifyRunSessionIds?: readonly string[]
     diagrams?: readonly { sessionId: string | null; description: string }[]
     kinds?: Readonly<Record<string, SectionKind>>
-    suites?: Readonly<Record<string, string>>
   },
   branch?: string | null,
   endReason?: SessionEndReason | null,
@@ -821,8 +782,6 @@ export function sessionName(
   const on = done ? ' - Complete' : branch ? ` - ${branch}` : ''
   const kind = work.kinds?.[sessionId]
   const label: string | undefined = kind && SECTION_LABELS[kind]
-  const suite = work.suites?.[sessionId]
-  if (label && suite) return `${label}: ${suite}${done ? ' - Complete' : ''}`
   if (label) return `${label}${on}`
   if (work.verifyRunSessionIds?.includes(sessionId)) return `Tests${on}`
   return null
