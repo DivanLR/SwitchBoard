@@ -227,3 +227,46 @@ test('the effort bar starts at xhigh and reveals the subagent bar only at max', 
   await expect(page.getByTestId('subagent-effort-bar')).toHaveCount(0)
 })
 
+test('at max the effort fill spans the whole track in both themes', async ({ page }) => {
+  const bar = page.getByTestId('effort-bar')
+  const span = async (testid: string): Promise<{ fill: number; track: number; gap: number }> => {
+    const fill = (await page.getByTestId(`${testid}-fill`).boundingBox())!
+    const track = (await page.getByTestId(`${testid}-track`).boundingBox())!
+    return { fill: fill.width, track: track.width, gap: track.x + track.width - (fill.x + fill.width) }
+  }
+
+  await bar.fill('2')
+  const partial = await span('effort-bar')
+  expect(partial.fill).toBeLessThan(partial.track * 0.75)
+
+  await bar.fill('4')
+  await page.getByTestId('subagent-effort-bar').fill('4')
+  for (const dark of [false, true]) {
+    if (dark) {
+      await page.getByTestId('theme-toggle').click()
+      await expect(page.locator('html')).not.toHaveClass(/sb-light/)
+    }
+    for (const testid of ['effort-bar', 'subagent-effort-bar']) {
+      const full = await span(testid)
+      expect(full.track).toBeGreaterThan(60)
+      expect(Math.abs(full.fill - full.track)).toBeLessThan(0.5)
+      expect(Math.abs(full.gap)).toBeLessThan(0.5)
+    }
+  }
+
+  await bar.focus()
+  await page.keyboard.press('ArrowLeft')
+  await expect(page.getByTestId('effort-bar-value')).toHaveText('xhigh')
+  await page.keyboard.press('End')
+  await expect(page.getByTestId('effort-bar-value')).toHaveText('max')
+
+  for (const [end, value] of [
+    ['start', 'low'],
+    ['end', 'max'],
+  ]) {
+    const box = (await bar.boundingBox())!
+    await page.mouse.click(end === 'start' ? box.x + 1 : box.x + box.width - 1, box.y + box.height / 2)
+    await expect(page.getByTestId('effort-bar-value')).toHaveText(value)
+  }
+})
+
