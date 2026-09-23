@@ -70,7 +70,6 @@ export function seedRealApp(): SeededApp {
     startedAt: new Date().toISOString(),
     endedAt: null,
     endReason: null,
-    bypassPermissions: false,
   })
 
   repos.events.insert({

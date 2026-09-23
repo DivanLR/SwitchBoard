@@ -7,8 +7,8 @@ const node = stackById('node')!
 
 describe('trimming the schema to what the plan can actually measure', () => {
   it('asks for none of coverage, quality gate, mutation or endpoints on a plan of unit suites alone', () => {
-    const plan = planSuites(dotnet.suites, ['dotnet-unit'], null)
-    const prompt = verifyPrompt(plan, '.NET', null)
+    const plan = planSuites(dotnet.suites, ['dotnet-unit'])
+    const prompt = verifyPrompt(plan, '.NET')
 
     expect(prompt).not.toContain('"coverage"')
     expect(prompt).not.toContain('"gate"')
@@ -20,8 +20,8 @@ describe('trimming the schema to what the plan can actually measure', () => {
   })
 
   it('asks for coverage fields, in the schema and the guidance, once a coverage suite is planned', () => {
-    const plan = planSuites(dotnet.suites, ['dotnet-unit', 'dotnet-coverage'], null)
-    const prompt = verifyPrompt(plan, '.NET', null)
+    const plan = planSuites(dotnet.suites, ['dotnet-unit', 'dotnet-coverage'])
+    const prompt = verifyPrompt(plan, '.NET')
 
     expect(prompt).toContain('"coverage"')
     expect(prompt).toContain('"line"')
@@ -33,8 +33,8 @@ describe('trimming the schema to what the plan can actually measure', () => {
   })
 
   it('asks for the quality gate block, in the schema and the guidance, once a quality suite is planned', () => {
-    const plan = planSuites(dotnet.suites, ['dotnet-unit', 'dotnet-arch'], null)
-    const prompt = verifyPrompt(plan, '.NET', null)
+    const plan = planSuites(dotnet.suites, ['dotnet-unit', 'dotnet-arch'])
+    const prompt = verifyPrompt(plan, '.NET')
 
     expect(prompt).toContain('"gate"')
     expect(prompt).toContain('"duplication"')
@@ -47,8 +47,8 @@ describe('trimming the schema to what the plan can actually measure', () => {
   })
 
   it('asks for the mutation fields, in the schema and the guidance, once a mutation suite is planned', () => {
-    const plan = planSuites(dotnet.suites, ['dotnet-unit', 'dotnet-mutation'], null)
-    const prompt = verifyPrompt(plan, '.NET', null)
+    const plan = planSuites(dotnet.suites, ['dotnet-unit', 'dotnet-mutation'])
+    const prompt = verifyPrompt(plan, '.NET')
 
     expect(prompt).toContain('"mutation"')
     expect(prompt).toContain('mutationKilled')
@@ -60,8 +60,8 @@ describe('trimming the schema to what the plan can actually measure', () => {
   })
 
   it('asks for endpoints, in the schema, once an api suite is planned', () => {
-    const plan = planSuites(dotnet.suites, ['dotnet-http'], null)
-    const prompt = verifyPrompt(plan, '.NET', null)
+    const plan = planSuites(dotnet.suites, ['dotnet-http'])
+    const prompt = verifyPrompt(plan, '.NET')
 
     expect(prompt).toContain('"endpoints"')
     expect(prompt).not.toContain('"coverage"')
@@ -73,9 +73,8 @@ describe('trimming the schema to what the plan can actually measure', () => {
     const plan = planSuites(
       dotnet.suites,
       ['dotnet-unit', 'dotnet-coverage', 'dotnet-arch', 'dotnet-mutation', 'dotnet-http'],
-      null,
     )
-    const prompt = verifyPrompt(plan, '.NET', null)
+    const prompt = verifyPrompt(plan, '.NET')
 
     expect(prompt).toContain('"coverage"')
     expect(prompt).toContain('"gate"')
@@ -84,11 +83,11 @@ describe('trimming the schema to what the plan can actually measure', () => {
   })
 
   it('a lint-only plan still pulls in the quality-gate block, because "quality" kind covers plain lint too', () => {
-    const dotnetPlan = planSuites(dotnet.suites, ['dotnet-format'], null)
-    expect(verifyPrompt(dotnetPlan, '.NET', null)).toContain('"gate"')
+    const dotnetPlan = planSuites(dotnet.suites, ['dotnet-format'])
+    expect(verifyPrompt(dotnetPlan, '.NET')).toContain('"gate"')
 
-    const nodePlan = planSuites(node.suites, ['node-unit', 'node-types'], null)
-    const nodePrompt = verifyPrompt(nodePlan, 'Node', null)
+    const nodePlan = planSuites(node.suites, ['node-unit', 'node-types'])
+    const nodePrompt = verifyPrompt(nodePlan, 'Node')
     expect(nodePrompt).toContain('"gate"')
     expect(nodePrompt).not.toContain('"coverage"')
     expect(nodePrompt).not.toContain('"endpoints"')

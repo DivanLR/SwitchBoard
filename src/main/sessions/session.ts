@@ -23,7 +23,6 @@ import {
   type SessionMode,
   type SessionStatus,
 } from '@shared/domain'
-import { sandboxSpawn, toContainerPaths, type SandboxPlan } from './wslc-sandbox'
 import { MessageMapper, type EventSink } from './message-mapper'
 import { toAvailableModels } from './model-catalog'
 import {
@@ -86,10 +85,7 @@ interface HostedSessionOptions {
   sessionId: string
   projectPath: string
   refDirs?: string[]
-  sandboxMemory?: string
   resumeSdkSessionId?: string
-  resumeFromSessionId?: string
-  nodeModulesVolumeKey?: string
   systemPromptAppend?: string
   claudeExecutablePath?: string
   mainModel?: string
@@ -110,7 +106,6 @@ interface HostedSessionOptions {
   }
   onTurnMode?: (mode: 'advisor' | 'orchestrator' | null) => void
   mode: SessionMode
-  containerised?: boolean
   onPlanModeChange?: (inPlanMode: boolean) => void
   summaries?: boolean
   sink: EventSink
@@ -150,21 +145,11 @@ export interface SessionHost {
   reloadPlugins(): Promise<void>
 }
 
-export function explainExit(raw: string, containerised: boolean): string {
+export function explainExit(raw: string): string {
   const code = /exited with code (\d+)/.exec(raw)?.[1]
   if (code === '137') {
-    return containerised
-      ? 'The sandbox container was killed from outside the process: exit 137 is ' +
-          'SIGKILL, so nothing inside it got to report why. It ran out of memory, and there ' +
-          'are two ceilings it could have hit. The container runs with a limit of its own ' +
-          '(6 GiB by default), so a build that genuinely needs more stops here rather than ' +
-          'taking every other session down with it: raise it in Settings → Terminals → ' +
-          'Sandbox memory (e.g. 12g; the SWITCHBOARD_SANDBOX_MEMORY environment variable ' +
-          'still overrides it). If that is not it, the shared WSL virtual machine itself is ' +
-          'too small — add a memory= line to %USERPROFILE%\\.wslconfig and restart Docker ' +
-          'Desktop. The conversation is kept and resumes on the next start.'
-      : 'The Claude Code process was killed from outside: exit 137 is SIGKILL, so it got ' +
-          'no chance to report a reason. The host most likely ran out of memory.'
+    return 'The Claude Code process was killed from outside: exit 137 is SIGKILL, so it got ' +
+      'no chance to report a reason. The host most likely ran out of memory.'
   }
   if (code === '13') {
     return 'The Claude Code process exited with code 13, which is Node reporting an ' +
@@ -175,7 +160,7 @@ export function explainExit(raw: string, containerised: boolean): string {
 }
 
 export function resolvePermissionMode(mode: SessionMode): PermissionMode {
-  return mode === 'bypass' ? 'bypassPermissions' : mode
+  return mode
 }
 
 export class HostedSession implements SessionHost {
@@ -193,15 +178,6 @@ export class HostedSession implements SessionHost {
   private stopping = false
   private fatal = false
   private runLoop: Promise<void> | undefined
-  private sandbox: SandboxPlan | null = null
-
-  private get bypassing(): boolean {
-    return this.options.mode === 'bypass'
-  }
-
-  private get containerised(): boolean {
-    return this.options.containerised === true || this.bypassing
-  }
 
   constructor(options: HostedSessionOptions) {
     this.sessionId = options.sessionId
@@ -215,17 +191,6 @@ export class HostedSession implements SessionHost {
   }
 
   start(): void {
-    const sandbox = this.containerised
-      ? sandboxSpawn({
-          sessionId: this.sessionId,
-          projectPath: this.options.projectPath,
-          refDirs: this.options.refDirs ?? [],
-          sandboxMemory: this.options.sandboxMemory,
-          resumeFromSessionId: this.options.resumeFromSessionId,
-          nodeModulesVolumeKey: this.options.nodeModulesVolumeKey,
-        })
-      : null
-    this.sandbox = sandbox
     this.q = query({
       prompt: this.input,
       options: {
@@ -233,18 +198,14 @@ export class HostedSession implements SessionHost {
         includePartialMessages: true,
         resume: this.options.resumeSdkSessionId,
         pathToClaudeCodeExecutable: this.options.claudeExecutablePath,
-        spawnClaudeCodeProcess: sandbox?.spawn,
         settingSources: ['user', 'project', 'local'],
-        additionalDirectories: sandbox
-          ? sandbox.additionalDirectories
-          : [this.options.projectPath, ...(this.options.refDirs ?? [])],
+        additionalDirectories: [this.options.projectPath, ...(this.options.refDirs ?? [])],
         model:
           this.options.mainModel && this.options.mainModel !== 'default'
             ? this.options.mainModel
             : undefined,
         mcpServers: this.options.mcpServers,
         permissionMode: resolvePermissionMode(this.options.mode),
-        allowDangerouslySkipPermissions: this.bypassing ? true : undefined,
         systemPrompt: this.options.systemPromptAppend
           ? { type: 'preset', preset: 'claude_code', append: this.options.systemPromptAppend }
           : undefined,
@@ -302,9 +263,7 @@ export class HostedSession implements SessionHost {
         return
       }
       const raw = error instanceof Error ? error.message : String(error)
-      let detail = explainExit(raw, this.containerised)
-      const sandboxTail = this.sandbox?.lastStderr().trim()
-      if (sandboxTail) detail += `\n\nSandbox stderr: ${sandboxTail.slice(-500)}`
+      const detail = explainExit(raw)
       this.fatal = true
       this.mapper.fatalError(detail)
       this.setStatus('error', detail)
@@ -585,7 +544,6 @@ export class HostedSession implements SessionHost {
   }
 
   private deliverNow(eventId: string, text: string): void {
-    if (this.sandbox) text = toContainerPaths(text, this.sandbox.mounts)
     this.refreshModelRouting()
     this.applyEffort(this.options.effort ?? DEFAULT_SETTINGS.effort)
     this.applyModelForTurn(text)

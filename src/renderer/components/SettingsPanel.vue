@@ -108,21 +108,6 @@ function save(patch: Partial<Settings>): void {
   void store.save(patch)
 }
 
-const sandboxMemVal = ref('')
-watch(
-  () => settings.value?.sandboxMemory,
-  (v) => {
-    sandboxMemVal.value = v ?? '6g'
-  },
-  { immediate: true },
-)
-
-function saveSandboxMemory(): void {
-  const value = sandboxMemVal.value.trim()
-  if (!value || value === settings.value?.sandboxMemory) return
-  save({ sandboxMemory: value })
-}
-
 const FONT_SIZES = [
   ['sm', 'Small'],
   ['md', 'Medium'],
@@ -460,10 +445,7 @@ const updateLine = computed(() => {
                       <div class="opt-name">{{ m.label }}</div>
                       <div class="opt-sub">{{ m.detail }}</div>
                     </div>
-                    <span class="opt-price mono">
-                      <Icon v-if="m.value === 'bypass'" name="warning" :size="12" />
-                      <template v-else>—</template>
-                    </span>
+                    <span class="opt-price mono">—</span>
                   </button>
                 </div>
               </div>
@@ -820,30 +802,6 @@ const updateLine = computed(() => {
                 @update:model-value="(subagentEffort) => save({ subagentEffort })"
               />
             </div>
-
-            <div class="ui-kicker group-label" style="margin-top: 8px">BYPASS SANDBOX</div>
-            <div class="group-desc">
-              Bypass sessions run in a WSL container capped at this much memory, so one
-              hungry build stops alone instead of killing every session (exit 137). A size
-              such as <span class="mono">6g</span> or <span class="mono">12g</span>, or
-              <span class="mono">0</span> for no cap. Applies from the next bypass session.
-            </div>
-            <div class="ui-card setting-row is-actionable">
-              <div class="sr-text">
-                <div class="sr-label">Sandbox memory</div>
-                <div class="sr-desc">
-                  Raise it if bypass sessions die with exit 137 during builds or test runs
-                </div>
-              </div>
-              <input
-                v-model="sandboxMemVal"
-                class="add-cmd-input mono sandbox-mem-input"
-                data-testid="setting-sandbox-memory"
-                spellcheck="false"
-                @keydown.enter="saveSandboxMemory"
-                @blur="saveSandboxMemory"
-              />
-            </div>
           </template>
 
           <template v-else>
@@ -1172,15 +1130,6 @@ html.sb-light .overlay {
   border: none;
   color: var(--text-name);
   outline: none;
-}
-
-.sandbox-mem-input {
-  flex: 0 0 72px;
-  text-align: right;
-  padding: 5px 9px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--rc);
 }
 
 .proj-card {

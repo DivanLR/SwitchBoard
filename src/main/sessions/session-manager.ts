@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { existsSync, readdirSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -25,13 +26,11 @@ import type {
   SessionEvent,
   SessionMode,
   SessionStatus,
-  SuiteResult,
   TranscriptSummary,
   VerifyReport,
 } from '@shared/domain'
 import {
   SWALLOWABLE_KINDS,
-  emptyVerifyReport,
   subagentsAllowed,
   verifyVerdict,
 } from '@shared/domain'
@@ -46,7 +45,6 @@ import {
   heavySubagentSystemPromptAppend,
   heavySubagentModelMode,
   modesSystemPromptAppend,
-  sandboxSystemPromptAppend,
 } from './session-shaping'
 import {
   TRANSCRIPT_EVENT_CAP,
@@ -59,27 +57,12 @@ import {
   parseSuiteProgress,
   parseVerifyReport,
   verifyMarkerBroken,
-  verifyPrompt,
-  type PlannedSuite,
 } from '@main/evals/verify-dispatch'
 import { parseDiagramPlan } from '@shared/diagram'
 import { reconcile } from '@main/evals/artefacts'
 import { scanArtefacts } from '@main/evals/artefact-scan'
-import type { SandboxEnv, TestSuite } from '@shared/test-catalog'
 import { mainLoopModel } from './model-routing'
 import { resolveClaudeExecutable } from './claude-executable'
-import {
-  ensureSandboxImage,
-  ensureSandboxVolumes,
-  gitNotice,
-  gitRoot,
-  hasNodeModulesVolume,
-  refMounts,
-  removeNodeModulesVolume,
-  sandboxVolumeNames,
-  sweepOrphanedContainers,
-  sweepStaleVolumes,
-} from './wslc-sandbox'
 
 type NoiseClassifier = (event: SessionEvent) => string | null
 
@@ -106,14 +89,10 @@ interface HostedEntry {
   projectPath: string
   seq: number
   live: Map<string, LiveEventEntry>
-  containerised: boolean
   background: boolean
   sectionKind?: SectionKind
   ranATurn: boolean
-  nodeModulesVolumeKey?: string
 }
-
-const MAX_CONTAINERS = 2
 
 const RUN_DEADLINE_MS = 45 * 60 * 1000
 const SWEEP_INTERVAL_MS = 60 * 1000
@@ -163,6 +142,34 @@ function evictStaleLive(entry: HostedEntry): void {
     toDrop--
   }
 }
+
+const GIT_CACHE_TTL_MS = 30_000
+
+function memoizeGitRead<T>(fn: (projectPath: string) => T): (projectPath: string) => T {
+  const cache = new Map<string, { value: T; expiresAt: number }>()
+  return (projectPath: string): T => {
+    const now = Date.now()
+    const hit = cache.get(projectPath)
+    if (hit && hit.expiresAt > now) return hit.value
+    const value = fn(projectPath)
+    cache.set(projectPath, { value, expiresAt: now + GIT_CACHE_TTL_MS })
+    return value
+  }
+}
+
+function gitRootImpl(projectPath: string): string | null {
+  try {
+    if (existsSync(join(projectPath, '.git'))) return projectPath
+    const sub = readdirSync(projectPath, { withFileTypes: true }).find(
+      (entry) => entry.isDirectory() && existsSync(join(projectPath, entry.name, '.git')),
+    )
+    return sub ? join(projectPath, sub.name) : null
+  } catch {
+    return null
+  }
+}
+
+export const gitRoot = memoizeGitRead(gitRootImpl)
 
 async function readGitBranch(projectPath: string): Promise<string | null> {
   try {
@@ -351,17 +358,8 @@ export async function readFileDiff(projectPath: string, path: string): Promise<F
   return parseUnifiedDiff(diffOut)
 }
 
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  if (typeof error === 'object' && error !== null && 'message' in error) {
-    return String((error as { message: unknown }).message)
-  }
-  return String(error)
-}
-
 export class SessionManager {
   private hosted = new Map<string, HostedEntry>()
-  private reservedContainerIds = new Set<string>()
   private classifier: NoiseClassifier | null = null
   private revivedAt = new Map<string, number>()
   private quitting = false
@@ -402,7 +400,6 @@ export class SessionManager {
   }
 
   reconcileOnStartup(): void {
-    const leftOpen = this.repos.sessions.listUnended().map((s) => s.id)
     this.repos.sessions.reconcileAllEnded(
       'app_exit',
       'Switchboard stopped without closing this session, so it was closed on the next launch. The conversation can be resumed.',
@@ -413,8 +410,6 @@ export class SessionManager {
     const note =
       'The application closed before this run reported a result, so nothing it measured is known.'
     this.repos.verifyRuns.reconcileRunning(note)
-    sweepOrphanedContainers(leftOpen)
-    sweepStaleVolumes((id) => this.repos.sessions.byId(id))
   }
 
   startWatchdog(deadlineMs = RUN_DEADLINE_MS, intervalMs = SWEEP_INTERVAL_MS): void {
@@ -463,9 +458,7 @@ export class SessionManager {
     requestedMode?: SessionMode,
     carryTranscriptFrom?: string,
     opts?: {
-      containerised?: boolean
       background?: boolean
-      nodeModulesVolumeKey?: string
       workerMainLoop?: boolean
       cwd?: string
       effort?: EffortLevel
@@ -474,47 +467,19 @@ export class SessionManager {
     const project = this.repos.projects.byId(projectId)
     if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
     const mode = requestedMode ?? project.defaultSessionMode
-    const bypassPermissions = mode === 'bypass'
-    const containerised = opts?.containerised === true || bypassPermissions
-    if (containerised && opts?.cwd) {
-      throw {
-        code: 'UNSUPPORTED',
-        message:
-          'A container session mounts the project folder itself, so it cannot run in a worktree. Untick the WSL box for this project, or choose a mode other than bypass.',
-      } satisfies IpcError
-    }
-    if (containerised) this.refuseWhenContainersFull()
     const sessionId = newId()
-    if (containerised) this.reservedContainerIds.add(sessionId)
-    try {
-      return await this.startSessionBody(
-        sessionId,
-        project,
-        mode,
-        bypassPermissions,
-        containerised,
-        resume,
-        carryTranscriptFrom,
-        opts,
-      )
-    } finally {
-      if (containerised) this.reservedContainerIds.delete(sessionId)
-    }
+    return this.startSessionBody(sessionId, project, mode, resume, carryTranscriptFrom, opts)
   }
 
   private async startSessionBody(
     sessionId: string,
     project: Project,
     mode: SessionMode,
-    bypassPermissions: boolean,
-    containerised: boolean,
     resume: boolean,
     carryTranscriptFrom: string | undefined,
     opts:
       | {
-          containerised?: boolean
           background?: boolean
-          nodeModulesVolumeKey?: string
           workerMainLoop?: boolean
           cwd?: string
           effort?: EffortLevel
@@ -522,38 +487,15 @@ export class SessionManager {
       | undefined,
   ): Promise<Session> {
     const projectId = project.id
-    if (containerised) {
-      try {
-        await ensureSandboxImage(project.path)
-      } catch (error) {
-        const escape = bypassPermissions
-          ? 'Bypass always runs in a container, so this cannot be turned off for a bypass session; start it in another mode to run on this machine.'
-          : `This is on because ${project.name} has its WSL box ticked in the project header. Untick it to run on this machine instead.`
-        throw new Error(`${(error as Error).message} ${escape}`, { cause: error })
-      }
-    }
     const claudeExecutablePath = resolveClaudeExecutable()
     if (!claudeExecutablePath) {
       throw { code: 'NOT_FOUND', message: 'Claude Code was not found. Install it from https://claude.com/claude-code, then start a session.' } satisfies IpcError
     }
 
     let resumeSdkSessionId: string | undefined
-    let resumeFromSessionId: string | undefined
     if (resume) {
       const previous = this.repos.sessions.latestEndedForProject(projectId)
       resumeSdkSessionId = previous?.sdkSessionId ?? undefined
-      resumeFromSessionId = previous?.id
-    }
-
-    if (containerised) {
-      await ensureSandboxVolumes(
-        sandboxVolumeNames({
-          projectPath: project.path,
-          sessionId,
-          resumeFromSessionId,
-          nodeModulesVolumeKey: opts?.nodeModulesVolumeKey,
-        }),
-      )
     }
 
     const row: Session = {
@@ -571,7 +513,6 @@ export class SessionManager {
       startedAt: nowIso(),
       endedAt: null,
       endReason: null,
-      bypassPermissions,
       planMode: mode === 'plan',
       inPlanMode: mode === 'plan',
     }
@@ -584,11 +525,9 @@ export class SessionManager {
       projectPath: workdir,
       seq: this.repos.events.maxSeq(row.id),
       live: new Map(),
-      containerised,
       background: opts?.background === true,
       ranATurn: false,
       session: null as unknown as SessionHost,
-      nodeModulesVolumeKey: opts?.nodeModulesVolumeKey,
     }
 
     const settings = this.repos.settings.get()
@@ -612,24 +551,14 @@ export class SessionManager {
     )
     const carried = carryTranscriptFrom ? transcriptFor(carryTranscriptFrom) : null
     const transcriptAppend = carried ? transcriptContextAppend(carried) : null
-    const sandboxAppend = containerised
-      ? sandboxSystemPromptAppend(
-          [{ container: '/workspace' }, ...refMounts(project.refs.map((r) => r.path))],
-          gitNotice(project.path),
-          hasNodeModulesVolume(project.path),
-        )
-      : null
     try {
       entry.session = new HostedSession({
         sessionId: row.id,
         projectPath: workdir,
         refDirs: project.refs.map((r) => r.path),
-        sandboxMemory: settings.sandboxMemory,
         resumeSdkSessionId,
-        resumeFromSessionId,
         systemPromptAppend:
           [
-            sandboxAppend,
             modesAppend,
             heavyAppend,
             schemaAppend,
@@ -656,8 +585,6 @@ export class SessionManager {
           this.pushStatus(entry)
         },
         mode,
-        containerised,
-        nodeModulesVolumeKey: opts?.nodeModulesVolumeKey,
         onPlanModeChange: (inPlanMode) => {
           if (entry.row.inPlanMode === inPlanMode) return
           entry.row.inPlanMode = inPlanMode
@@ -691,7 +618,6 @@ export class SessionManager {
           this.repos.sessions.update(row.id, { sdkSessionId })
         },
         onCommands: (commands) => {
-          if (containerised) return
           this.repos.projectCommands.set(projectId, commands)
           this.callbacks.onProjectCommands(projectId, commands)
         },
@@ -829,12 +755,6 @@ export class SessionManager {
 
   setPlanMode(sessionId: string, enabled: boolean): void {
     const entry = this.requireLive(sessionId)
-    if (entry.row.bypassPermissions) {
-      throw {
-        code: 'RULE_NOT_ALLOWED',
-        message: 'A bypass session approves everything, so it has nothing to plan against.',
-      } satisfies IpcError
-    }
     entry.session.setPlanMode(enabled)
     entry.row.inPlanMode = enabled
     this.pushStatus(entry)
@@ -864,10 +784,7 @@ export class SessionManager {
 
   private async startBackground(projectId: string, kind: SectionKind): Promise<Session> {
     const project = this.repos.projects.byId(projectId)
-    const containerised = project?.useContainers === true
-    const mode = project?.defaultSessionMode === 'bypass' ? 'acceptEdits' : project?.defaultSessionMode
-    const session = await this.startSession(projectId, false, mode, undefined, {
-      containerised,
+    const session = await this.startSession(projectId, false, project?.defaultSessionMode, undefined, {
       background: true,
       workerMainLoop: WORKER_KINDS.has(kind),
     })
@@ -886,15 +803,6 @@ export class SessionManager {
       }
     }
     return kinds
-  }
-
-  isolatedSuiteNamesFor(projectId: string): Record<string, string> {
-    const names: Record<string, string> = {}
-    for (const entry of this.hosted.values()) {
-      const suite = this.isolatedSuiteNames.get(entry.row.id)
-      if (suite && entry.row.projectId === projectId) names[entry.row.id] = suite
-    }
-    return names
   }
 
   private completing = new Set<string>()
@@ -924,14 +832,8 @@ export class SessionManager {
     const run = this.repos.verifyRuns.byId(runId)
     if (!run) throw { code: 'NOT_FOUND', message: 'Run not found' } satisfies IpcError
     if (run.status !== 'running') return
-    const isolated = this.isolatedRuns.get(runId)
-    if (isolated) {
-      isolated.cancelled = true
-      if (isolated.sessionId) await this.interruptSession(isolated.sessionId).catch(() => {})
-    } else {
-      if (run.sessionId) await this.interruptSession(run.sessionId).catch(() => {})
-      this.verifyWatch.delete(run.sessionId ?? '')
-    }
+    if (run.sessionId) await this.interruptSession(run.sessionId).catch(() => {})
+    this.verifyWatch.delete(run.sessionId ?? '')
     this.repos.verifyRuns.finish(runId, 'inconclusive', null, CANCEL_NOTE)
     this.callbacks.onVerifyChanged(run.projectId)
   }
@@ -1022,7 +924,6 @@ export class SessionManager {
   private scanMarkers(entry: HostedEntry, kind: EventKind, payload: unknown): void {
     this.scanVerifyReport(entry, kind, payload)
     this.scanFlowMarker(entry, kind, payload)
-    this.scanIsolatedSuiteReport(entry, kind, payload)
     this.scanDiagramPlan(entry, kind, payload)
   }
 
@@ -1146,145 +1047,6 @@ export class SessionManager {
     this.callbacks.onVerifyChanged(entry.row.projectId)
   }
 
-  private isolatedSuiteNames = new Map<string, string>()
-
-  private isolatedSuiteWatch = new Map<string, { suite: TestSuite; settle: (result: SuiteResult) => void }>()
-
-  private scanIsolatedSuiteReport(entry: HostedEntry, kind: EventKind, payload: unknown): void {
-    const watch = this.isolatedSuiteWatch.get(entry.row.id)
-    if (!watch || !SessionManager.TEXT_SCAN_KINDS.has(kind)) return
-    const text = (payload as { text?: string }).text
-    if (!text) return
-    const report = parseVerifyReport(text)
-    const result = report?.suites[0]
-    if (!result) return
-    watch.settle(result)
-  }
-
-  private closeUnreportedIsolatedSuite(entry: HostedEntry): void {
-    const watch = this.isolatedSuiteWatch.get(entry.row.id)
-    if (!watch) return
-    watch.settle({
-      id: watch.suite.id,
-      label: watch.suite.label,
-      status: 'not_run',
-      detail: 'The session ended before this suite reported a result — open its output to see what ran.',
-    })
-  }
-
-  private waitForIsolatedSuite(sessionId: string, suite: TestSuite): Promise<SuiteResult> {
-    return new Promise<SuiteResult>((resolve) => {
-      let settled = false
-      const settle = (result: SuiteResult): void => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        this.isolatedSuiteWatch.delete(sessionId)
-        resolve(result)
-      }
-      const timer = setTimeout(() => {
-        settle({
-          id: suite.id,
-          label: suite.label,
-          status: 'not_run',
-          detail:
-            'This suite went quiet for long enough that its session is presumed dead, so nothing it measured is known.',
-        })
-      }, RUN_DEADLINE_MS)
-      timer.unref?.()
-      this.isolatedSuiteWatch.set(sessionId, { suite, settle })
-    })
-  }
-
-  private isolatedRuns = new Map<string, { cancelled: boolean; sessionId: string | null }>()
-
-  async runSuitesIsolated(input: {
-    runId: string
-    projectId: string
-    plan: PlannedSuite[]
-    stackLabel: string
-    sandboxed: SandboxEnv
-    dbServers: readonly string[]
-  }): Promise<void> {
-    const { runId, projectId, plan, stackLabel, sandboxed, dbServers } = input
-    const control: { cancelled: boolean; sessionId: string | null } = { cancelled: false, sessionId: null }
-    this.isolatedRuns.set(runId, control)
-    const provedNothing: string[] = []
-    try {
-      for (const planned of plan) {
-        if (control.cancelled) break
-        if (planned.unavailable) continue
-        const result = await this.runOneIsolatedSuite(
-          runId,
-          projectId,
-          planned,
-          stackLabel,
-          sandboxed,
-          dbServers,
-          control,
-        )
-        this.repos.verifyRuns.noteSuite(runId, result)
-        this.callbacks.onVerifyChanged(projectId)
-        if (result.status === 'not_run') provedNothing.push(result.id)
-      }
-    } finally {
-      this.isolatedRuns.delete(runId)
-      removeNodeModulesVolume(runId)
-    }
-    const run = this.repos.verifyRuns.byId(runId)
-    if (!run || run.status !== 'running') return
-    const report = run.report ?? emptyVerifyReport()
-    const note =
-      provedNothing.length > 0
-        ? `${provedNothing.length === 1 ? 'This suite' : 'These suites'} proved nothing: ${provedNothing.join(', ')}.`
-        : null
-    this.repos.verifyRuns.finish(runId, verifyVerdict(report), report, note)
-    this.callbacks.onVerifyChanged(projectId)
-  }
-
-  private async runOneIsolatedSuite(
-    runId: string,
-    projectId: string,
-    planned: PlannedSuite,
-    stackLabel: string,
-    sandboxed: SandboxEnv,
-    dbServers: readonly string[],
-    control: { cancelled: boolean; sessionId: string | null },
-  ): Promise<SuiteResult> {
-    let session: Session
-    try {
-      session = await this.startSession(projectId, false, undefined, undefined, {
-        containerised: true,
-        background: true,
-        nodeModulesVolumeKey: runId,
-      })
-    } catch (error) {
-      return {
-        id: planned.suite.id,
-        label: planned.suite.label,
-        status: 'not_run',
-        detail: errorMessage(error),
-      }
-    }
-    control.sessionId = session.id
-    const suiteEntry = this.hosted.get(session.id)
-    if (suiteEntry) suiteEntry.sectionKind = 'tests'
-    this.repos.sessions.update(session.id, { sectionKind: 'tests' })
-    this.isolatedSuiteNames.set(session.id, planned.suite.label)
-    try {
-      if (control.cancelled) {
-        return { id: planned.suite.id, label: planned.suite.label, status: 'not_run', detail: CANCEL_NOTE }
-      }
-      const settle = this.waitForIsolatedSuite(session.id, planned.suite)
-      this.sendMessage(session.id, verifyPrompt([planned], stackLabel, sandboxed, dbServers))
-      return await settle
-    } finally {
-      control.sessionId = null
-      await this.stopSession(session.id, 'This suite ran in its own container, which closed when the suite finished.').catch(() => {
-      })
-    }
-  }
-
   sinkFor(sessionId: string): EventSink {
     const entry = this.hosted.get(sessionId)
     if (!entry) throw { code: 'SESSION_ENDED', message: 'Session is no longer active' } satisfies IpcError
@@ -1378,7 +1140,6 @@ export class SessionManager {
     if (!this.hosted.has(entry.row.id)) return
     if (status === 'done' || status === 'error') {
       this.closeUnreportedVerify(entry)
-      this.closeUnreportedIsolatedSuite(entry)
     }
     entry.row.status = status
     entry.row.statusDetail = detail ?? null
@@ -1433,7 +1194,6 @@ export class SessionManager {
     if (reason === 'stopped' && this.completing.delete(entry.row.id)) reason = 'completed'
     if (!this.hosted.has(entry.row.id)) return
     this.closeUnreportedVerify(entry)
-    this.closeUnreportedIsolatedSuite(entry)
     this.closeUnreportedFlow(entry, reason === 'crashed' ? 'crashed' : (entry.row.endReason ?? 'completed'))
     if (this.diagramWatch.delete(entry.row.id)) {
       this.callbacks.onDiagramsChanged(entry.row.projectId)
@@ -1513,25 +1273,11 @@ export class SessionManager {
       endReason: reason,
     })
     this.flushTranscript(entry.row.id)
-    if (entry.containerised && !entry.nodeModulesVolumeKey) removeNodeModulesVolume(entry.row.id)
     this.pushStatus(entry)
   }
 
   private pushStatus(entry: HostedEntry): void {
     this.callbacks.onSessionStatus({ ...entry.row })
-  }
-
-  private refuseWhenContainersFull(): void {
-    const hostedCount = [...this.hosted.values()].filter((e) => e.containerised && !e.row.endedAt).length
-    const total = hostedCount + this.reservedContainerIds.size
-    if (total < MAX_CONTAINERS) return
-    throw {
-      code: 'SANDBOX_FULL',
-      message:
-        `${total} sessions already run in a container, which is the limit: they share one ` +
-        'virtual machine, and one more can exhaust it and kill a session that did nothing wrong. ' +
-        'End one of them, then start this again.',
-    } satisfies IpcError
   }
 
   private failStart(row: Session, detail: string): void {

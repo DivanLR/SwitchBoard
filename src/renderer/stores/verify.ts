@@ -43,16 +43,11 @@ const store = reactive({
     this.byProject[projectId] = runs
   },
 
-  async start(
-    projectId: string,
-    stackId: string,
-    suiteIds: string[],
-    isolated = false,
-  ): Promise<boolean> {
+  async start(projectId: string, stackId: string, suiteIds: string[]): Promise<boolean> {
     this.error = null
     this.starting = true
     try {
-      const { runs } = await invoke('verify.start', { projectId, stackId, suiteIds, isolated })
+      const { runs } = await invoke('verify.start', { projectId, stackId, suiteIds })
       this.byProject[projectId] = runs
       await surfaceNewSessions()
       return true

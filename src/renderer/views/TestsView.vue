@@ -2,13 +2,9 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   defaultSelection,
-  sandboxNeedsDotnet,
-  sandboxTools,
   stackById,
   suiteById,
   TEST_STACKS,
-  unavailableReason,
-  type SandboxEnv,
   type TestSuite,
 } from '@shared/test-catalog'
 import { estimateRunMs, humanDuration, type SuiteResult, type VerifyRun } from '@shared/domain'
@@ -54,12 +50,6 @@ const stack = computed(() => stackById(chosenId.value))
 const latest = computed(() => verify.latestFor(props.projectId))
 const running = computed(() => latest.value?.status === 'running')
 
-const sandboxed = computed<SandboxEnv>(() =>
-  projectsStore.items.find((p) => p.id === props.projectId)?.session?.bypassPermissions === true
-    ? sandboxTools(sandboxNeedsDotnet(detected.value))
-    : null,
-)
-
 const suites = computed<TestSuite[]>(() => {
   const found = detected.value.find((d) => d.stackId === chosenId.value)
   const catalogue = [...(found?.suites ?? stack.value?.suites ?? [])]
@@ -68,7 +58,6 @@ const suites = computed<TestSuite[]>(() => {
     overrides[suite.id] ? { ...suite, command: overrides[suite.id] } : suite,
   )
 })
-const blockedReason = (suite: TestSuite): string | null => unavailableReason(suite, sandboxed.value)
 
 function isQueuedRetry(row: {
   suite: TestSuite
@@ -84,8 +73,6 @@ function chipTitle(row: {
   retrying: boolean
 }): string {
   if (row.retrying) return `${row.suite.label} — running now\n\ncommand: ${row.suite.command}`
-  const blocked = blockedReason(row.suite)
-  if (blocked) return `${row.suite.label} — ${blocked}`
   if (!row.result) return row.suite.command
   const detail = row.result.detail ? `\n${row.result.detail}` : ''
   const verified = row.result.verified ? '\nchecked against the runner’s own report file' : ''
@@ -123,8 +110,8 @@ const storedSelection = computed<string[] | null>(
 )
 
 watch(
-  [suites, sandboxed],
-  ([list, sandbox]) => {
+  suites,
+  (list) => {
     if (list.length === 0) {
       selected.value = null
       return
@@ -133,7 +120,7 @@ watch(
       const offered = new Set(list.map((suite) => suite.id))
       selected.value = storedSelection.value
         ? storedSelection.value.filter((id) => offered.has(id))
-        : defaultSelection(list, sandbox)
+        : defaultSelection(list)
       return
     }
     const offered = new Set(list.map((suite) => suite.id))
@@ -150,7 +137,6 @@ watch(selected, (ids) => {
 })
 
 function toggleSuite(suite: TestSuite): void {
-  if (blockedReason(suite)) return
   const current = selected.value ?? []
   selected.value = current.includes(suite.id)
     ? current.filter((id) => id !== suite.id)
@@ -171,17 +157,6 @@ const detectHint = computed(() =>
     ? `Looks like ${detected.value.map((s) => s.stackLabel).join(' + ')} from the project files — confirm that or pick another.`
     : 'Nothing conclusive in the project files — pick the stack yourself.',
 )
-
-const isolated = computed(() => settingsStore.settings?.projectIsolatedRuns?.[props.projectId] ?? false)
-
-function toggleIsolated(): void {
-  void settingsStore.save({
-    projectIsolatedRuns: {
-      ...(settingsStore.settings?.projectIsolatedRuns ?? {}),
-      [props.projectId]: !isolated.value,
-    },
-  })
-}
 
 function chooseStack(id: string): void {
   selected.value = null
@@ -237,7 +212,7 @@ const SUB_TABS: { id: SubTab; label: string; built: boolean }[] = [
 
 async function runVerify(): Promise<void> {
   if (!stack.value || (selected.value ?? []).length === 0) return
-  if (await verify.start(props.projectId, stack.value.id, selected.value ?? [], isolated.value)) {
+  if (await verify.start(props.projectId, stack.value.id, selected.value ?? [])) {
     subTab.value = 'evidence'
   }
 }
@@ -424,12 +399,10 @@ function statusWord(run: VerifyRun): string {
                 {
                   on: isSelected(row.suite),
                   'is-on': isSelected(row.suite),
-                  dev: !!blockedReason(row.suite),
                   'q-surface': isQueuedRetry(row),
                 },
                 row.retrying ? 'ran-retry' : row.result ? `ran-${row.result.status}` : '',
               ]"
-              :disabled="!!blockedReason(row.suite)"
               :title="chipTitle(row)"
               :data-testid="`tests-suite-${row.suite.id}`"
               role="switch"
@@ -459,10 +432,7 @@ function statusWord(run: VerifyRun): string {
                 <template v-else>–</template>
               </span>
               {{ row.suite.label }}
-              <span v-if="blockedReason(row.suite)" class="chip-risk medium dev-tag">{{
-                blockedReason(row.suite)
-              }}</span>
-              <span v-else-if="row.suite.heavy" class="chip-risk low heavy-tag">slow</span>
+              <span v-if="row.suite.heavy" class="chip-risk low heavy-tag">slow</span>
               <span v-if="commandOverrides[row.suite.id]" class="chip-risk low heavy-tag">edited</span>
             </button>
             <button
@@ -510,21 +480,6 @@ function statusWord(run: VerifyRun): string {
           >
             Cancel
           </button>
-          <span class="iso-inline">
-            <button
-              class="switch"
-              :class="{ on: isolated }"
-              data-testid="tests-isolated"
-              role="switch"
-              :aria-checked="isolated"
-              :disabled="verify.starting || running"
-              title="Each suite runs in its own fresh container, one at a time, so a heavy suite cannot exhaust the memory the others need. Only one suite runs at a time, so an isolated run takes longer than a combined one."
-              @click="toggleIsolated()"
-            >
-              <span class="knob"></span>
-            </button>
-            <span>Isolate each suite</span>
-          </span>
           <button
             class="run"
             :disabled="verify.starting || running || (selected ?? []).length === 0"
@@ -1042,14 +997,6 @@ function statusWord(run: VerifyRun): string {
   color: var(--text-body);
 }
 
-.iso-inline {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: var(--fs-meta);
-  color: var(--text-faint);
-}
-
 .run {
   flex-shrink: 0;
   padding: 6px 14px;
@@ -1172,11 +1119,6 @@ function statusWord(run: VerifyRun): string {
 
 .gate.none {
   opacity: 0.62;
-}
-
-.dev-tag {
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
 }
 
 .sub-tabs {

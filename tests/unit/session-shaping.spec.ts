@@ -4,7 +4,6 @@ import {
   heavySubagentSystemPromptAppend,
   modeAgents,
   modesSystemPromptAppend,
-  sandboxSystemPromptAppend,
 } from '@main/sessions/session-shaping'
 
 describe('heavySubagentSystemPromptAppend', () => {
@@ -94,14 +93,6 @@ describe('heavySubagentSystemPromptAppend prose', () => {
     expect(append).not.toContain('grinding through a list')
     expect(append).not.toContain('ask what the other four are')
     expect(append).toContain('fan-out spends more tokens')
-  })
-})
-
-describe('sandboxSystemPromptAppend prose', () => {
-  it('drops the build-per-platform mechanism aside, keeps the actionable instruction', () => {
-    const append = sandboxSystemPromptAppend([{ container: '/workspace' }], null, true) ?? ''
-    expect(append).not.toContain('ship a build per platform')
-    expect(append).toContain('npm ci')
   })
 })
 

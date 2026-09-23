@@ -89,17 +89,6 @@ const store = reactive({
     if (item) item.defaultSessionMode = mode
   },
 
-  async setUseContainers(projectId: string, on: boolean): Promise<void> {
-    const item = state.items.find((p) => p.id === projectId)
-    if (item) item.useContainers = on
-    try {
-      await invoke('projects.setUseContainers', { projectId, on })
-    } catch (e) {
-      await this.refresh()
-      throw e
-    }
-  },
-
   async renameSession(sessionId: string, label: string): Promise<void> {
     await invoke('sessions.rename', { sessionId, label })
     await this.refresh()
@@ -168,7 +157,6 @@ const store = reactive({
     resume = false,
     mode?: SessionMode,
     carryTranscriptFrom?: string,
-    containerised?: boolean,
   ): Promise<Session> {
     state.starting = true
     try {
@@ -177,8 +165,6 @@ const store = reactive({
         resume,
         mode,
         carryTranscriptFrom,
-        containerised:
-          containerised ?? state.items.find((p) => p.id === projectId)?.useContainers ?? false,
       })
       await this.refresh()
       this.focusSession(projectId, session.id)

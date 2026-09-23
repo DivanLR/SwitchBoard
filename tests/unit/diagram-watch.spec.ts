@@ -18,15 +18,6 @@ vi.mock('@main/sessions/claude-executable', () => ({
   resolveClaudeExecutable: () => 'C:\\fake\\claude.exe',
 }))
 
-vi.mock('@main/sessions/wslc-sandbox', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@main/sessions/wslc-sandbox')>()
-  return {
-    ...actual,
-    ensureSandboxImage: () => Promise.resolve(),
-    ensureSandboxVolumes: () => Promise.resolve(),
-  }
-})
-
 const { openDatabase } = await import('@main/store/db')
 const { createRepositories } = await import('@main/store/repositories')
 const { SessionManager } = await import('@main/sessions/session-manager')
@@ -133,17 +124,6 @@ describe('a diagram in flight keeps its session open', () => {
     expect(ids.has(again.id)).toBe(true)
   })
 
-  it('runs a section natively until the project asks for containers', async () => {
-    const { project, repos, manager } = setup()
-    const inner = manager as unknown as { hosted: Map<string, { containerised: boolean }> }
-    const native = await manager.backgroundSessionFor(project.id, 'spec')
-    expect(inner.hosted.get(native.id)?.containerised).toBe(false)
-
-    repos.projects.setUseContainers(project.id, true)
-    const boxed = await manager.backgroundSessionFor(project.id, 'flow')
-    expect(inner.hosted.get(boxed.id)?.containerised).toBe(true)
-  })
-
   it("names a session in the developer's own words, and clearing it restores the derived one", async () => {
     const { project, repos, manager } = setup()
     const session = await manager.backgroundSessionFor(project.id, 'tests')
@@ -152,17 +132,5 @@ describe('a diagram in flight keeps its session open', () => {
     expect(manager.liveSessionRow(session.id)?.label).toBe('release smoke')
     manager.renameSession(session.id, '   ')
     expect(repos.sessions.byId(session.id)?.label).toBe(null)
-  })
-
-  it('takes a fresh container per draw, and the machine-wide ceiling is what stops the next', async () => {
-    const { project, repos, manager } = setup()
-    repos.projects.setUseContainers(project.id, true)
-    const first = await manager.diagramSessionFor(project.id)
-    const second = await manager.diagramSessionFor(project.id)
-    expect(second.id).not.toBe(first.id)
-
-    await expect(manager.diagramSessionFor(project.id)).rejects.toMatchObject({
-      code: 'SANDBOX_FULL',
-    })
   })
 })

@@ -156,7 +156,6 @@ const terminalSession = computed(() => liveSession.value ?? endedSession.value)
 const terminalResumeId = computed(() => {
   const ended = endedSession.value
   if (liveSession.value || !ended?.sdkSessionId) return null
-  if (ended.bypassPermissions || props.project.useContainers) return null
   return ended.sdkSessionId
 })
 
@@ -347,9 +346,6 @@ const {
   startMode,
   modeOpen,
   resumeSession,
-  runInContainer,
-  containerForced,
-  containerOn,
   startError,
   modeChoices,
   startModeLabel,
@@ -563,10 +559,6 @@ function saveName(): void {
 
 function startAnother(): void {
   void projects.startSession(props.project.id)
-}
-
-function onContainersToggle(e: Event): void {
-  void projects.setUseContainers(props.project.id, (e.target as HTMLInputElement).checked)
 }
 
 const suggestGroups = computed<{ label: string; items: { cmd: string; index: number }[] }[]>(() => {
@@ -799,16 +791,8 @@ const {
           <span class="h-path code" data-testid="session-project-path">{{ project.path }}</span>
         </div>
         <span class="spacer"></span>
-        <span
-          v-if="liveSession?.bypassPermissions"
-          class="pill bypass-pill"
-          data-testid="bypass-pill"
-          title="Started with --dangerously-skip-permissions"
-        >
-          <Icon name="warning" :size="12" /> Bypass
-        </span>
         <button
-          v-if="liveSession && !liveSession.bypassPermissions"
+          v-if="liveSession"
           class="pill plan-pill"
           :class="{ on: liveSession.inPlanMode }"
           data-testid="plan-mode-toggle"
@@ -842,14 +826,6 @@ const {
             @update:model-value="(subagentEffort) => settingsStore.save({ subagentEffort })"
           />
         </template>
-        <span
-          v-if="liveSession?.bypassPermissions && project.gitNotice"
-          class="pill nogit-pill"
-          data-testid="nogit-pill"
-          :title="project.gitNotice"
-        >
-          <Icon name="warning" :size="12" /> No git
-        </span>
         <span
           v-if="liveSession?.heavySubagents"
           class="pill fanout-pill"
@@ -924,7 +900,7 @@ const {
           v-if="ending"
           testid="ending-overlay"
           :title="`Ending ${project.name}…`"
-          sub="Draining the session and tearing its container down."
+          sub="Draining the session."
           ring-testid="ending-bar"
         />
       </div>
@@ -952,23 +928,6 @@ const {
           >
             {{ (liveSession ?? endedSession)?.name ?? 'Name this session' }}
           </button>
-        </div>
-        <div class="run-block ui-chip">
-          <span class="run-cap" aria-hidden="true">run</span>
-          <label class="wsl-check" data-testid="project-containers">
-            <input
-              type="checkbox"
-              data-testid="project-containers-input"
-              :checked="project.useContainers"
-              :title="
-                project.useContainers
-                  ? 'This project runs its work inside WSL containers: the project folder is mounted read-write, and your Claude credentials, plugins and skills read-only. Nothing else of yours is. Slower to start, and only two containers may run at once machine-wide.'
-                  : 'This project runs its work on this machine. Tick to run it inside WSL containers instead: isolated from the rest of your drive, slower to start, two at a time. Needs WSL 2.9.3 or newer.'
-              "
-              @change="onContainersToggle"
-            />
-            Run in Container
-          </label>
         </div>
         <span style="white-space: nowrap"><Icon name="branch" :size="12" /> <span class="mono">{{ liveSession?.branch ?? endedSession?.branch ?? '—' }}</span></span>
         <span
@@ -1228,7 +1187,6 @@ const {
               <button
                 type="button"
                 class="mode-dd"
-                :class="{ armed: startMode === 'bypass' }"
                 data-testid="start-mode-picker"
                 :aria-expanded="modeOpen"
                 aria-haspopup="listbox"
@@ -1248,7 +1206,7 @@ const {
                   :key="m.value"
                   type="button"
                   class="mode-item"
-                  :class="{ sel: m.value === startMode, armed: m.value === 'bypass' }"
+                  :class="{ sel: m.value === startMode }"
                   role="option"
                   :aria-selected="m.value === startMode"
                   :data-testid="`start-mode-${m.value}`"
@@ -1258,11 +1216,6 @@ const {
                   <span class="mode-item-name">{{ m.label }}</span>
                   <span class="mode-item-detail">{{ m.detail }}</span>
                 </button>
-                <div v-if="resumeSession" class="mode-note">
-                  Resuming keeps the last session's sandbox: its transcript lives
-                  {{ endedSession.bypassPermissions ? 'inside the container' : 'on this machine' }},
-                  so only matching modes are offered.
-                </div>
               </div>
             </div>
 
@@ -1286,36 +1239,9 @@ const {
               <span :class="{ faint: !canResume }">Resume session</span>
             </span>
 
-            <span class="bypass-inline">
-              <button
-                class="switch"
-                :class="{ on: containerOn }"
-                data-testid="run-in-container"
-                role="switch"
-                :aria-checked="containerOn"
-                :disabled="containerForced"
-                :title="
-                  containerForced
-                    ? 'Bypass always runs in a container: it approves every tool call, so the container is the only thing left standing between it and your files.'
-                    : 'The same setting as the WSL box in the header, for the whole project: every session and every section run goes into a WSL container. Your project folder is mounted read-write, and your Claude credentials, plugins and skills read-only. Nothing else of yours is. Slower to start, only two containers at once, and it needs WSL 2.9.3 or newer.'
-                "
-                @click="containerForced || (runInContainer = !runInContainer)"
-              >
-                <span class="knob"></span>
-              </button>
-              <span :class="{ faint: containerForced }">Use WSL containers</span>
-            </span>
-
             <button class="btn-solid" data-testid="start-session" :disabled="busy" @click="start()">
               {{ resumeSession ? 'Resume' : 'Start session' }}
             </button>
-          </div>
-          <div
-            v-if="startMode === 'bypass'"
-            class="bypass-warn"
-            data-testid="bypass-warning"
-          >
-            <Icon name="warning" :size="12" /> Nothing will ask for approval — only use this in throwaway or fully trusted folders.
           </div>
           <div v-if="startError" class="ui-err" data-testid="start-error">
             <Icon name="cross" :size="12" /> {{ startError }}
@@ -1915,37 +1841,6 @@ const {
   cursor: default;
 }
 
-.wsl-check {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 3px 9px;
-  font-size: var(--fs-ui);
-  color: var(--text-tab);
-  border: 1px solid var(--border-seg);
-  border-radius: var(--rp);
-  cursor: pointer;
-  user-select: none;
-}
-
-.wsl-check:hover {
-  color: var(--text-strong);
-  border-color: var(--border-strong);
-}
-
-.wsl-check input {
-  accent-color: var(--green);
-  cursor: pointer;
-  margin: 0;
-}
-
-.wsl-check:has(input:checked) {
-  color: var(--green);
-  background: color-mix(in srgb, var(--green) 8%, transparent);
-  border-color: color-mix(in srgb, var(--green) 45%, transparent);
-}
-
 .name-btn {
   font-family: var(--sans);
   font-size: var(--fs-meta);
@@ -2021,12 +1916,6 @@ const {
   border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
 }
 
-.pill.bypass-pill {
-  color: var(--red);
-  background: color-mix(in srgb, var(--red) 9%, transparent);
-  border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
-}
-
 .pill.plan-pill {
   cursor: pointer;
   color: var(--text-tab);
@@ -2041,12 +1930,6 @@ const {
   color: var(--amber);
   background: color-mix(in srgb, var(--amber) 9%, transparent);
   border-color: color-mix(in srgb, var(--amber) 40%, transparent);
-}
-
-.pill.nogit-pill {
-  color: var(--amber);
-  background: color-mix(in srgb, var(--amber) 9%, transparent);
-  border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
 }
 
 .refs-row {
@@ -2237,16 +2120,10 @@ const {
   color: var(--text-body);
 }
 
-.ended-actions .bypass-inline:nth-of-type(1) {
+.ended-actions .bypass-inline {
   grid-row: 2;
   margin-top: 14px;
-  border-radius: var(--rc) var(--rc) 0 0;
-}
-
-.ended-actions .bypass-inline:nth-of-type(2) {
-  grid-row: 3;
-  border-top: none;
-  border-radius: 0 0 var(--rc) var(--rc);
+  border-radius: var(--rc);
 }
 
 .bypass-inline .switch {
@@ -2306,10 +2183,6 @@ const {
 .mode-dd:disabled {
   opacity: 0.6;
   cursor: default;
-}
-
-.mode-dd.armed .mode-dd-name {
-  color: var(--red);
 }
 
 .mode-dd-eyebrow {
@@ -2373,37 +2246,10 @@ const {
   color: var(--green);
 }
 
-.mode-item.armed .mode-item-name {
-  color: var(--red);
-}
-
 .mode-item-detail {
   font-size: var(--fs-micro);
   line-height: 1.45;
   color: var(--text-faint);
-}
-
-.mode-note {
-  padding: 7px 11px;
-  border-top: 1px solid var(--border-soft);
-  font-size: var(--fs-micro);
-  line-height: 1.45;
-  color: var(--text-ghost);
-}
-
-.bypass-warn {
-  margin-top: 8px;
-  padding: 8px 10px;
-  font-size: var(--fs-meta);
-  line-height: 1.5;
-  color: var(--red-hover);
-  border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
-  background: color-mix(in srgb, var(--red) 6%, transparent);
-  border-radius: var(--rc);
-}
-
-html.sb-light .bypass-warn {
-  color: var(--red);
 }
 
 .load-earlier {
@@ -2734,28 +2580,11 @@ html.sb-light .bypass-warn {
   border-radius: var(--rp);
 }
 
-.name-block,
-.run-block {
+.name-block {
   min-width: 0;
 }
 
-.run-block {
-  order: 9;
-  margin-left: auto;
-}
-
-.run-block .wsl-check {
-  padding: 0;
-  background: transparent;
-  border: 0;
-}
-
-.run-block .wsl-check:hover {
-  border-color: transparent;
-}
-
-.name-cap,
-.run-cap {
+.name-cap {
   flex: none;
   margin-right: 7px;
   font-family: var(--sans);

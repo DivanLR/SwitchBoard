@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { gitRoot } from '@main/sessions/wslc-sandbox'
+import { gitRoot } from '@main/sessions/session-manager'
 
 const made: string[] = []
 

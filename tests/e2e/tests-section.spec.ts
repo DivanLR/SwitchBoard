@@ -532,23 +532,6 @@ test('a run that reports nothing is inconclusive, never a pass', async ({ page }
   await expect(page.getByTestId('tests-gate-unit')).not.toContainText('passed')
 })
 
-test('a bypass session marks the suites its container cannot run, before the run', async ({ page }) => {
-  const scenario = twoProjectScenario()
-  scenario.projects[0].session!.bypassPermissions = true
-  await openTests(page, scenario)
-  await page.getByTestId('tests-stack-dotnet').click()
-
-  await expect(page.getByTestId('tests-suite-dotnet-unit')).toBeDisabled()
-  await expect(page.getByTestId('tests-suite-dotnet-unit')).toContainText('not in the bypass container')
-  await expect(page.getByTestId('tests-run')).toBeDisabled()
-
-  await page.getByTestId('tests-change-stack').click()
-  await page.getByTestId('tests-stack-node').click()
-  await expect(page.getByTestId('tests-suite-node-unit')).toBeEnabled()
-  await expect(page.getByTestId('tests-suite-node-e2e')).toBeDisabled()
-  await expect(page.getByTestId('tests-suite-node-e2e')).toContainText('browser is not in the bypass container')
-})
-
 test('slow suites are opt-in, and ticking one puts it in the next run', async ({ page }) => {
   await openTests(page)
   await page.getByTestId('tests-stack-node').click()

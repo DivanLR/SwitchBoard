@@ -23,15 +23,6 @@ vi.mock('@main/sessions/claude-executable', () => ({
   resolveClaudeExecutable: () => 'C:\\fake\\claude.exe',
 }))
 
-vi.mock('@main/sessions/wslc-sandbox', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@main/sessions/wslc-sandbox')>()
-  return {
-    ...actual,
-    ensureSandboxImage: () => Promise.resolve(),
-    ensureSandboxVolumes: () => Promise.resolve(),
-  }
-})
-
 const { openDatabase } = await import('@main/store/db')
 const { createRepositories } = await import('@main/store/repositories')
 const { SessionManager } = await import('@main/sessions/session-manager')
@@ -95,17 +86,6 @@ describe('the session a section dispatch lands in', () => {
     expect(spec.id).not.toBe(flow.id)
   })
 
-  it('leaves a bypass default behind, so a section session stays off the container', async () => {
-    const { repos, project, manager } = setup()
-    repos.projects.setSessionMode(project.id, 'bypass')
-
-    const session = await manager.backgroundSessionFor(project.id, 'diff')
-
-    expect(session.bypassPermissions).toBe(false)
-    const hosted = (manager as unknown as { hosted: Map<string, { containerised: boolean }> }).hosted
-    expect(hosted.get(session.id)?.containerised).toBe(false)
-  })
-
   it('runs a diff comment on the worker model and leaves other sections on the main one', async () => {
     const { project, manager } = setup()
 
@@ -133,20 +113,6 @@ describe('the session a section dispatch lands in', () => {
 
     expect(manager.workdirFor(session.id)).toBe(worktree)
     expect(repos.projects.byId(project.id)?.path).toBe(project.path)
-  })
-
-  it('refuses a container session in a worktree, because the container mounts the project', async () => {
-    const { project, manager } = setup()
-    const worktree = mkdtempSync(join(tmpdir(), 'section-worktree-b-'))
-    dirs.push(worktree)
-
-    await expect(
-      manager.startSession(project.id, false, undefined, undefined, {
-        background: true,
-        containerised: true,
-        cwd: worktree,
-      }),
-    ).rejects.toMatchObject({ code: 'UNSUPPORTED' })
   })
 
   it('never crosses projects', async () => {

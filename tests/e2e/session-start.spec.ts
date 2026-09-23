@@ -43,29 +43,9 @@ test('the mode picker offers every mode the SDK can spawn, each with its descrip
   const list = page.getByTestId('start-mode-list')
   await expect(list).toBeVisible()
 
-  for (const mode of ['default', 'dontAsk', 'auto', 'acceptEdits', 'plan', 'bypass']) {
+  for (const mode of ['default', 'dontAsk', 'auto', 'acceptEdits', 'plan']) {
     await expect(list.getByTestId(`start-mode-${mode}`)).toBeVisible()
   }
-
-  const bypass = list.getByTestId('start-mode-bypass')
-  await expect(bypass).toContainText('disposable WSL container')
-  await expect(bypass).toHaveAttribute('title', /disposable WSL container/)
-})
-
-test('choosing bypass states what it means, rather than only colouring the control', async ({
-  page,
-}) => {
-  await expect(page.getByTestId('bypass-warning')).toHaveCount(0)
-
-  await page.getByTestId('start-mode-picker').click()
-  await page.getByTestId('start-mode-bypass').click()
-
-  await expect(page.getByTestId('start-mode-list')).toHaveCount(0)
-  await expect(page.getByTestId('bypass-warning')).toContainText('Nothing will ask for approval')
-
-  await page.getByTestId('start-mode-picker').click()
-  await page.getByTestId('start-mode-plan').click()
-  await expect(page.getByTestId('bypass-warning')).toHaveCount(0)
 })
 
 test('picking a mode starts the next session in it', async ({ page }) => {
@@ -105,17 +85,6 @@ test('Resume is refused when there is no conversation to resume', async ({ page 
   const resume = page.getByTestId('resume-session')
   await expect(resume).toBeDisabled()
   await expect(resume).toHaveAttribute('aria-checked', 'false')
-})
-
-test('resuming a native session never offers bypass, because its transcript is on this machine', async ({
-  page,
-}) => {
-  await page.getByTestId('resume-session').click()
-  await page.getByTestId('start-mode-picker').click()
-  const list = page.getByTestId('start-mode-list')
-  await expect(list.getByTestId('start-mode-default')).toBeVisible()
-  await expect(list.getByTestId('start-mode-bypass')).toHaveCount(0)
-  await expect(list).toContainText('on this machine')
 })
 
 test('a start that crashes immediately surfaces its reason as the start error', async ({ page }) => {
@@ -180,38 +149,3 @@ test('the effort bar starts at xhigh and reveals the subagent bar only at max', 
   await expect(page.getByTestId('subagent-effort-bar')).toHaveCount(0)
 })
 
-test('a session can be asked to run in a container without choosing bypass', async ({ page }) => {
-  const toggle = page.getByTestId('run-in-container')
-  await expect(toggle).toBeVisible()
-  await expect(toggle).toHaveAttribute('aria-checked', 'false')
-
-  await toggle.click()
-  await expect(toggle).toHaveAttribute('aria-checked', 'true')
-
-  await page.getByTestId('start-session').click()
-  await expect
-    .poll(async () => (await page.evaluate(() => window.__mock.state().starts)).at(-1)?.containerised)
-    .toBe(true)
-  const last = (await page.evaluate(() => window.__mock.state().starts)).at(-1)
-  expect(last?.bypassPermissions).toBe(false)
-})
-
-test('a native start is what happens when the switch is left alone', async ({ page }) => {
-  await page.getByTestId('start-session').click()
-  await expect
-    .poll(async () => (await page.evaluate(() => window.__mock.state().starts)).at(-1)?.containerised)
-    .toBe(false)
-})
-
-test('bypass shows the switch on and locked, because it has never had a choice', async ({
-  page,
-}) => {
-  await page.getByTestId('start-mode-picker').click()
-  await page.getByTestId('start-mode-bypass').click()
-
-  const toggle = page.getByTestId('run-in-container')
-  await expect(toggle).toHaveAttribute('aria-checked', 'true')
-  await expect(toggle).toBeDisabled()
-  await toggle.click({ force: true })
-  await expect(toggle).toHaveAttribute('aria-checked', 'true')
-})

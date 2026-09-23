@@ -28,7 +28,6 @@ function sessionRow(projectId: string, planMode: boolean): Session {
     startedAt: nowIso(),
     endedAt: null,
     endReason: null,
-    bypassPermissions: false,
     planMode,
   }
 }
@@ -95,10 +94,6 @@ describe('the mode a session spawns with', () => {
     expect(resolvePermissionMode('plan')).toBe('plan')
   })
 
-  it('renames only bypass, which the SDK spells in full', () => {
-    expect(resolvePermissionMode('bypass')).toBe('bypassPermissions')
-  })
-
   it('covers every mode the app offers, so a new one cannot be added silently', () => {
     for (const { value } of SESSION_MODES) {
       expect(resolvePermissionMode(value)).toBeTruthy()
@@ -109,12 +104,11 @@ describe('the mode a session spawns with', () => {
       'auto',
       'acceptEdits',
       'plan',
-      'bypass',
     ])
   })
 
-  it('spells every mode exactly as the SDK does, except bypass', () => {
-    const sdk = ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk', 'auto']
+  it('spells every mode exactly as the SDK does', () => {
+    const sdk = ['default', 'acceptEdits', 'plan', 'dontAsk', 'auto']
     for (const { value } of SESSION_MODES) {
       expect(sdk).toContain(resolvePermissionMode(value))
     }

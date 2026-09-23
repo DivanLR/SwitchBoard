@@ -7,31 +7,6 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
 })
 
-test('the WSL checkbox is off until asked, and reaches the host', async ({ page }) => {
-  const box = page.getByTestId('project-containers-input')
-  await expect(box).not.toBeChecked()
-
-  await box.check()
-  await expect(box).toBeChecked()
-
-  await page.getByTestId('sidebar-project-beta').click()
-  await page.getByTestId('sidebar-project-alpha').click()
-  await expect(page.getByTestId('project-containers-input')).toBeChecked()
-})
-
-test('a session started from the header follows that checkbox', async ({ page }) => {
-  await page.getByTestId('new-session').click()
-  await expect
-    .poll(async () => (await page.evaluate(() => window.__mock.state().starts)).at(-1)?.containerised)
-    .toBe(false)
-
-  await page.getByTestId('project-containers-input').check()
-  await page.getByTestId('new-session').click()
-  await expect
-    .poll(async () => (await page.evaluate(() => window.__mock.state().starts)).at(-1)?.containerised)
-    .toBe(true)
-})
-
 test('the header starts another session in the same project', async ({ page }) => {
   await expect(page.getByTestId('sidebar-subsessions-alpha')).toHaveCount(0)
 

@@ -115,7 +115,7 @@ test('Run verification crosses the real boundary without the clone error', async
   await expect(banner).toBeVisible()
   const message = (await banner.textContent()) ?? ''
   expect(message).not.toMatch(/could not be cloned/i)
-  expect(message).toMatch(/Claude Code was not found|login not found|WSL container \(wslc\) was not found/i)
+  expect(message).toMatch(/Claude Code was not found/i)
 })
 
 test('a second sidebar group can be created, and both persist', async () => {

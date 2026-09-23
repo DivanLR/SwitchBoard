@@ -19,23 +19,11 @@ export function useSessionStart(opts: {
   const modeOpen = ref(false)
   const resumeSession = ref(false)
 
-  const runInContainer = computed({
-    get: () => project().useContainers,
-    set: (on: boolean) => {
-      void projects.setUseContainers(project().id, on)
-    },
-  })
-  const containerForced = computed(() => startMode.value === 'bypass')
-  const containerOn = computed(() => containerForced.value || runInContainer.value)
   const startError = ref<string | null>(null)
 
   const canResume = computed(() => !!endedSession()?.sdkSessionId)
 
-  const modeChoices = computed(() => {
-    if (!resumeSession.value) return SESSION_MODES
-    const wasBypass = endedSession()?.bypassPermissions === true
-    return SESSION_MODES.filter((m) => (m.value === 'bypass') === wasBypass)
-  })
+  const modeChoices = computed(() => SESSION_MODES)
 
   const startModeLabel = computed(
     () => SESSION_MODES.find((m) => m.value === startMode.value)?.label ?? 'Default',
@@ -57,23 +45,15 @@ export function useSessionStart(opts: {
     (id) => {
       if (!id) return
       const previous = endedSession()
-      startMode.value = previous?.bypassPermissions
-        ? 'bypass'
-        : previous?.planMode
-          ? 'plan'
-          : (project().defaultSessionMode ?? DEFAULT_SESSION_MODE)
+      startMode.value = previous?.planMode
+        ? 'plan'
+        : (project().defaultSessionMode ?? DEFAULT_SESSION_MODE)
     },
     { immediate: true },
   )
 
   watch(canResume, (possible) => {
     if (!possible) resumeSession.value = false
-  })
-
-  watch([resumeSession, modeChoices], () => {
-    if (!modeChoices.value.some((m) => m.value === startMode.value)) {
-      startMode.value = modeChoices.value[0]?.value ?? DEFAULT_SESSION_MODE
-    }
   })
 
   const pendingCrashWatches: (() => void)[] = []
@@ -109,13 +89,7 @@ export function useSessionStart(opts: {
     try {
       const previous = endedSession()
       if (wasResuming && previous) await terminals.close(previous.id).catch(() => {})
-      const session = await projects.startSession(
-        target,
-        wasResuming,
-        startMode.value,
-        undefined,
-        containerOn.value,
-      )
+      const session = await projects.startSession(target, wasResuming, startMode.value)
       watchForImmediateCrash(target, session.id, wasResuming)
     } catch (e) {
       if (project().id === target) {
@@ -132,9 +106,6 @@ export function useSessionStart(opts: {
     startMode,
     modeOpen,
     resumeSession,
-    runInContainer,
-    containerForced,
-    containerOn,
     startError,
     modeChoices,
     startModeLabel,

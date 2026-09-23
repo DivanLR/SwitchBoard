@@ -1,12 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { verifyVerdict } from '@shared/domain'
-import {
-  stackById,
-  defaultSelection,
-  sandboxNeedsDotnet,
-  sandboxTools,
-  unavailableReason,
-} from '@shared/test-catalog'
+import { stackById, defaultSelection } from '@shared/test-catalog'
 import {
   parseVerifyReport,
   planSuites,
@@ -18,41 +12,16 @@ import {
 const dotnet = stackById('dotnet')!
 const node = stackById('node')!
 
-const NODE_BOX = sandboxTools(false)
-const DOTNET_BOX = sandboxTools(true)
-
 describe('planning a run', () => {
-  it('marks the suites the bypass container cannot run, instead of attempting them', () => {
-    const plan = planSuites(dotnet.suites, ['dotnet-unit', 'dotnet-arch'], NODE_BOX)
-    expect(plan).toHaveLength(2)
-    expect(plan.every((p) => p.unavailable?.includes('dotnet'))).toBe(true)
-
-    expect(planSuites(dotnet.suites, ['dotnet-unit'], null)[0].unavailable).toBeNull()
-  })
-
-  it('runs dotnet suites in the .NET sandbox image, which a .NET project gets', () => {
-    expect(sandboxNeedsDotnet([{ stackId: 'dotnet', stackLabel: '.NET', suites: dotnet.suites }])).toBe(true)
-    expect(sandboxNeedsDotnet([{ stackId: 'node', stackLabel: 'Node', suites: node.suites }])).toBe(false)
-    expect(planSuites(dotnet.suites, ['dotnet-unit'], DOTNET_BOX)[0].unavailable).toBeNull()
-    expect(unavailableReason(node.suites.find((s) => s.id === 'node-e2e')!, DOTNET_BOX)).toContain('browser')
-  })
-
-  it('keeps node suites runnable in the container, but not browser ones', () => {
-    expect(unavailableReason(node.suites.find((s) => s.id === 'node-unit')!, NODE_BOX)).toBeNull()
-    expect(unavailableReason(node.suites.find((s) => s.id === 'node-e2e')!, NODE_BOX)).toContain('browser')
-  })
-
-  it('leaves slow suites out of the default selection, and unavailable ones too', () => {
-    const chosen = defaultSelection(node.suites, NODE_BOX)
+  it('leaves slow suites out of the default selection', () => {
+    const chosen = defaultSelection(node.suites)
     expect(chosen).toContain('node-unit')
-    expect(chosen).not.toContain('node-mutation') 
-    expect(chosen).not.toContain('node-e2e') 
+    expect(chosen).not.toContain('node-mutation')
   })
 
-  it('tells the session what not to attempt, and why', () => {
-    const prompt = verifyPrompt(planSuites(dotnet.suites, ['dotnet-unit'], NODE_BOX), '.NET', NODE_BOX)
-    expect(prompt).toContain('Do NOT attempt these')
-    expect(prompt).toContain('dotnet is not in the bypass container')
+  it('tells the session what to run and why, in order', () => {
+    const prompt = verifyPrompt(planSuites(dotnet.suites, ['dotnet-unit']), '.NET')
+    expect(prompt).toContain('STOP at the first one that fails')
     expect(prompt).toContain(VERIFY_MARKER)
   })
 })
@@ -145,7 +114,7 @@ describe('reading the report back', () => {
 
   it('is inconclusive when everything was skipped — a skip is not a pass', () => {
     const report = parseVerifyReport(
-      line('{"suites":[{"id":"dotnet-unit","status":"skipped","detail":"dotnet is not in the bypass container"}]}'),
+      line('{"suites":[{"id":"dotnet-unit","status":"skipped","detail":"the CI has no browser installed"}]}'),
     )
     expect(verifyVerdict(report!)).toBe('inconclusive')
   })
@@ -269,10 +238,10 @@ describe('reading the report back', () => {
 })
 
 describe('asking for real endpoint calls', () => {
-  const apiPlan = planSuites(dotnet.suites, ['dotnet-http'], null)
+  const apiPlan = planSuites(dotnet.suites, ['dotnet-http'])
 
   it('names the connected database servers, and what to draw from them', () => {
-    const prompt = verifyPrompt(apiPlan, '.NET', null, ['postgres-main', 'oracle-reporting'])
+    const prompt = verifyPrompt(apiPlan, '.NET', ['postgres-main', 'oracle-reporting'])
     expect(prompt).toContain('postgres-main')
     expect(prompt).toContain('oracle-reporting')
     expect(prompt).toContain('endpoints')
@@ -282,19 +251,19 @@ describe('asking for real endpoint calls', () => {
   })
 
   it('exempts the endpoint pass from the stop-at-first-failure rule', () => {
-    const plan = planSuites(dotnet.suites, ['dotnet-format', 'dotnet-http'], null)
-    const prompt = verifyPrompt(plan, '.NET', null, ['postgres-main'])
+    const plan = planSuites(dotnet.suites, ['dotnet-format', 'dotnet-http'])
+    const prompt = verifyPrompt(plan, '.NET', ['postgres-main'])
     expect(prompt).toContain('STOP at the first one that fails')
     expect(prompt).toContain('exception to that stop rule')
     expect(prompt).toContain('even if an earlier suite failed')
 
-    expect(verifyPrompt(planSuites(dotnet.suites, ['dotnet-format'], null), '.NET', null, [])).not.toContain(
+    expect(verifyPrompt(planSuites(dotnet.suites, ['dotnet-format']), '.NET', [])).not.toContain(
       'exception to that stop rule',
     )
   })
 
   it('says plainly that there is no real data source, rather than staying silent', () => {
-    const prompt = verifyPrompt(apiPlan, '.NET', null, [])
+    const prompt = verifyPrompt(apiPlan, '.NET', [])
     expect(prompt).toContain('No database MCP server is connected')
     expect(prompt).toContain('Still call the endpoints')
     expect(prompt).toMatch(/"dataSource" and "dataQuery" to null/)
@@ -302,40 +271,23 @@ describe('asking for real endpoint calls', () => {
   })
 
   it('does not ask for endpoint calls when no API suite is in the run', () => {
-    const prompt = verifyPrompt(planSuites(dotnet.suites, ['dotnet-unit'], null), '.NET', null, ['postgres-main'])
+    const prompt = verifyPrompt(planSuites(dotnet.suites, ['dotnet-unit']), '.NET', ['postgres-main'])
     expect(prompt).not.toContain('postgres-main')
-  })
-})
-
-describe('the bind-mount lock note', () => {
-  it('tells a containerised run what a denied bin path actually means', () => {
-    const plan = planSuites(stackById('dotnet')!.suites, ['dotnet-unit'], DOTNET_BOX)
-    const prompt = verifyPrompt(plan, '.NET', ['dotnet'], [])
-    expect(prompt).toContain('MSB3021')
-    expect(prompt).toMatch(/locked by a process on the host/i)
-    expect(prompt).toMatch(/RETRY IN THE OTHER CONFIGURATION/i)
-    expect(prompt).toContain('-c Release')
-    expect(prompt).toMatch(/Never delete bin\/ or obj\//i)
-  })
-
-  it('says nothing about it when the run is not containerised', () => {
-    const plan = planSuites(stackById('dotnet')!.suites, ['dotnet-unit'], null)
-    expect(verifyPrompt(plan, '.NET', null, [])).not.toContain('MSB3021')
   })
 })
 
 describe('the Stryker invocation note', () => {
   it('is present whenever a mutation suite is in the run', () => {
     const dotnet = stackById('dotnet')!
-    const plan = planSuites(dotnet.suites, ['dotnet-mutation'], DOTNET_BOX)
-    const prompt = verifyPrompt(plan, '.NET', ['dotnet'], [])
+    const plan = planSuites(dotnet.suites, ['dotnet-mutation'])
+    const prompt = verifyPrompt(plan, '.NET')
     expect(prompt).toMatch(/must be started from a directory holding a TEST project/i)
     expect(prompt).toContain('--project')
   })
 
   it('is absent from a run with no mutation suite', () => {
     const dotnet = stackById('dotnet')!
-    const plan = planSuites(dotnet.suites, ['dotnet-unit'], DOTNET_BOX)
-    expect(verifyPrompt(plan, '.NET', ['dotnet'], [])).not.toMatch(/Running Stryker/i)
+    const plan = planSuites(dotnet.suites, ['dotnet-unit'])
+    expect(verifyPrompt(plan, '.NET')).not.toMatch(/Running Stryker/i)
   })
 })

@@ -119,7 +119,7 @@ describe('a verification run', () => {
     manager.watchVerifyReport('s1', run.id, 'suites')
 
     const node = stackById('node')!
-    scan('prompt', { text: verifyPrompt(planSuites(node.suites, ['node-unit'], null), 'Node', null) })
+    scan('prompt', { text: verifyPrompt(planSuites(node.suites, ['node-unit']), 'Node') })
     expect(repos.verifyRuns.byId(run.id)?.status).toBe('running')
   })
 

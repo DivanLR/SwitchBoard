@@ -57,14 +57,13 @@ interface ProjectRow {
   archivedAt: string | null
   refs: string | null
   defaultSessionMode: SessionMode
-  useContainers: number
 }
 
 function toProject(row: ProjectRow): Project {
+  const { refs, ...rest } = row
   return {
-    ...row,
-    refs: row.refs ? (JSON.parse(row.refs) as ProjectRef[]) : [],
-    useContainers: row.useContainers === 1,
+    ...rest,
+    refs: refs ? (JSON.parse(refs) as ProjectRef[]) : [],
   }
 }
 
@@ -83,7 +82,6 @@ interface SessionRow {
   startedAt: string
   endedAt: string | null
   endReason: SessionEndReason | null
-  bypassPermissions: number | null
   planMode: number | null
   label: string | null
   sectionKind: SectionKind | null
@@ -96,7 +94,6 @@ function toSession(row: SessionRow | undefined): Session | undefined {
   if (!row) return undefined
   return {
     ...row,
-    bypassPermissions: row.bypassPermissions === 1,
     planMode: row.planMode === 1,
   }
 }
@@ -153,7 +150,6 @@ class ProjectsRepo {
       archivedAt: null,
       refs: [],
       defaultSessionMode: input.defaultSessionMode ?? DEFAULT_SESSION_MODE,
-      useContainers: false,
     }
     this.db
       .prepare(
@@ -175,10 +171,6 @@ class ProjectsRepo {
 
   setSessionMode(id: string, mode: SessionMode): void {
     this.db.prepare('UPDATE projects SET defaultSessionMode = ? WHERE id = ?').run(mode, id)
-  }
-
-  setUseContainers(id: string, on: boolean): void {
-    this.db.prepare('UPDATE projects SET useContainers = ? WHERE id = ?').run(on ? 1 : 0, id)
   }
 
   byId(id: string): Project | undefined {
@@ -258,8 +250,8 @@ class SessionsRepo {
   insert(session: Session): void {
     this.db
       .prepare(
-        `INSERT INTO sessions (id, projectId, sdkSessionId, status, statusDetail, branch, diffAdds, diffDels, usageUtilization, usageResetsAt, usageLimitType, startedAt, endedAt, endReason, bypassPermissions, planMode)
-         VALUES (@id, @projectId, @sdkSessionId, @status, @statusDetail, @branch, @diffAdds, @diffDels, @usageUtilization, @usageResetsAt, @usageLimitType, @startedAt, @endedAt, @endReason, @bypassPermissions, @planMode)`,
+        `INSERT INTO sessions (id, projectId, sdkSessionId, status, statusDetail, branch, diffAdds, diffDels, usageUtilization, usageResetsAt, usageLimitType, startedAt, endedAt, endReason, planMode)
+         VALUES (@id, @projectId, @sdkSessionId, @status, @statusDetail, @branch, @diffAdds, @diffDels, @usageUtilization, @usageResetsAt, @usageLimitType, @startedAt, @endedAt, @endReason, @planMode)`,
       )
       .run({
         id: session.id,
@@ -276,7 +268,6 @@ class SessionsRepo {
         startedAt: session.startedAt,
         endedAt: session.endedAt,
         endReason: session.endReason,
-        bypassPermissions: session.bypassPermissions ? 1 : 0,
         planMode: session.planMode ? 1 : 0,
       })
   }

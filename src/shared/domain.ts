@@ -29,7 +29,7 @@ export type PermissionRequestStatus = 'pending' | 'approved' | 'denied' | 'expir
 
 export type DecisionOutcome = Exclude<PermissionRequestStatus, 'pending'>
 
-export type SessionMode = 'default' | 'dontAsk' | 'auto' | 'acceptEdits' | 'plan' | 'bypass'
+export type SessionMode = 'default' | 'dontAsk' | 'auto' | 'acceptEdits' | 'plan'
 
 export const DEFAULT_SESSION_MODE: SessionMode = 'auto'
 
@@ -64,11 +64,6 @@ export const SESSION_MODES: readonly {
     label: 'Plan first',
     detail: 'Reads and researches without changing anything, then sends a plan to your inbox.',
   },
-  {
-    value: 'bypass',
-    label: 'Bypass',
-    detail: 'Nothing asks for approval. Runs inside a disposable WSL container.',
-  },
 ]
 
 export interface ProjectRef {
@@ -85,7 +80,6 @@ export interface Project {
   archivedAt: string | null
   refs: ProjectRef[]
   defaultSessionMode: SessionMode
-  useContainers: boolean
 }
 
 export interface CustomSkill {
@@ -127,7 +121,6 @@ export interface Session {
   derivedName?: string | null
   label?: string | null
   sectionKind?: SectionKind | null
-  bypassPermissions?: boolean
   planMode?: boolean
   inPlanMode?: boolean
   heavySubagents?: boolean
@@ -414,7 +407,6 @@ export interface Settings {
   projectTestStacks: Record<string, string>
   projectSuiteCommands: Record<string, Record<string, string>>
   projectTestSelection: Record<string, string[]>
-  projectIsolatedRuns: Record<string, boolean>
   projectAcceptedGates: Record<string, string[]>
   autoApproveLow: boolean
   autoApproveMedium: boolean
@@ -424,7 +416,6 @@ export interface Settings {
   databaseMcpServers: string[]
   diagramEngine: 'diagram-design' | 'archify'
   mcpActiveServers: string[]
-  sandboxMemory: string
   flowConcurrency: number
   flowWorktreeRoot: string
 }
@@ -448,7 +439,6 @@ export const DEFAULT_SETTINGS: Settings = {
   projectTestStacks: {},
   projectSuiteCommands: {},
   projectTestSelection: {},
-  projectIsolatedRuns: {},
   projectAcceptedGates: {},
   autoApproveLow: false,
   autoApproveMedium: false,
@@ -457,7 +447,6 @@ export const DEFAULT_SETTINGS: Settings = {
   disabledCommands: {},
   databaseMcpServers: [],
   mcpActiveServers: [],
-  sandboxMemory: '6g',
   flowConcurrency: 4,
   flowWorktreeRoot: '',
   diagramEngine: 'diagram-design',

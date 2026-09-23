@@ -7,24 +7,6 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
 })
 
-test('the session type is one choice, so plan and bypass cannot both be asked for', async ({
-  page,
-}) => {
-  await page.getByTestId('add-project').click()
-
-  await page.getByTestId('session-mode-plan').check()
-  await expect(page.getByTestId('session-mode-plan')).toBeChecked()
-
-  await page.getByTestId('session-mode-bypass').check()
-  await expect(page.getByTestId('session-mode-bypass')).toBeChecked()
-  await expect(page.getByTestId('session-mode-plan')).not.toBeChecked()
-  await expect(page.getByTestId('bypass-warning')).toBeVisible()
-
-  await page.getByTestId('session-mode-plan').check()
-  await expect(page.getByTestId('session-mode-bypass')).not.toBeChecked()
-  await expect(page.getByTestId('bypass-warning')).toBeHidden()
-})
-
 test('a session started with Plan on says it is planning, and asks for it', async ({ page }) => {
   await page.getByTestId('add-project').click()
   await page.getByTestId('folder-input').fill('C:\\work\\gamma')
@@ -34,7 +16,6 @@ test('a session started with Plan on says it is planning, and asks for it', asyn
   await expect(page.getByTestId('plan-mode-toggle')).toContainText('Planning')
   const start = await page.evaluate(() => window.__mock.state().starts.at(-1))
   expect(start?.planMode).toBe(true)
-  expect(start?.bypassPermissions).toBe(false)
 })
 
 test('the live pill switches a running session in and out of planning', async ({ page }) => {

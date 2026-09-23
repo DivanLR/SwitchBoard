@@ -598,6 +598,34 @@ const MIGRATIONS: Migration[] = [
       `)
     },
   },
+  {
+    name: '037-claude-only',
+    up: (db) => {
+      db.exec(`
+        CREATE TEMP TABLE mode_carry AS SELECT id, defaultSessionMode FROM projects;
+        ALTER TABLE projects DROP COLUMN defaultSessionMode;
+        ALTER TABLE projects ADD COLUMN defaultSessionMode TEXT NOT NULL DEFAULT 'auto'
+          CHECK (defaultSessionMode IN ('default', 'dontAsk', 'auto', 'acceptEdits', 'plan'));
+        UPDATE projects
+           SET defaultSessionMode = COALESCE(
+             (SELECT CASE WHEN defaultSessionMode = 'bypass' THEN 'auto' ELSE defaultSessionMode END
+                FROM mode_carry WHERE mode_carry.id = projects.id),
+             'auto'
+           );
+        DROP TABLE mode_carry;
+      `)
+      for (const statement of [
+        'ALTER TABLE sessions DROP COLUMN engine',
+        'ALTER TABLE sessions DROP COLUMN bypassPermissions',
+        'ALTER TABLE projects DROP COLUMN useContainers',
+      ]) {
+        try {
+          db.exec(statement)
+        } catch {
+        }
+      }
+    },
+  },
 ]
 
 export function transaction<T>(db: AppDatabase, work: () => T): T {

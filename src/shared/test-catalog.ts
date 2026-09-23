@@ -302,46 +302,8 @@ export const TEST_STACKS: readonly TestStack[] = [
   },
 ]
 
-export function sandboxNeedsDotnet(stacks: readonly AvailableSuites[]): boolean {
-  return stacks.some((s) => s.stackId === 'dotnet')
-}
-
-export function sandboxTools(dotnet: boolean, browser = false): readonly SuiteTool[] {
-  const tools: SuiteTool[] = ['node']
-  if (dotnet) tools.push('dotnet')
-  if (browser) tools.push('browser')
-  return tools
-}
-
-export function needsBrowser(
-  entries: readonly string[],
-  read?: (entry: string) => string | null,
-): boolean {
-  const lower = entries.map((entry) => entry.replace(/\\/g, '/').toLowerCase())
-  const named = lower.some(
-    (entry) =>
-      /(^|\/)playwright[.-]?[a-z0-9.-]*\.(config|conf)\.(ts|js|mjs|cjs)$/.test(entry) ||
-      /(^|\/)karma\.conf\.(js|ts)$/.test(entry) ||
-      /(^|\/)angular\.json$/.test(entry) ||
-      /(^|\/)(cypress|wdio)\.config\.(ts|js|mjs|cjs)$/.test(entry),
-  )
-  if (named || !read) return named
-  for (const entry of entries.filter((e) => /(^|[\\/])package\.json$/i.test(e)).slice(0, 8)) {
-    const text = read(entry)
-    if (text && /"@playwright\/test"|"playwright"|"karma"|"cypress"/.test(text)) return true
-  }
-  return false
-}
-
-export type SandboxEnv = readonly SuiteTool[] | null
-
-export function unavailableReason(suite: TestSuite, sandbox: SandboxEnv): string | null {
-  if (!sandbox || sandbox.includes(suite.needs)) return null
-  return `${suite.needs} is not in the bypass container`
-}
-
-export function defaultSelection(suites: readonly TestSuite[], sandbox: SandboxEnv): string[] {
-  return suites.filter((s) => !s.heavy && !unavailableReason(s, sandbox)).map((s) => s.id)
+export function defaultSelection(suites: readonly TestSuite[]): string[] {
+  return suites.filter((s) => !s.heavy).map((s) => s.id)
 }
 
 export interface VerifyGate {

@@ -40,7 +40,6 @@ type IpcErrorCode =
   | 'INVALID_PATH'
   | 'DUPLICATE'
   | 'NOT_LIVE'
-  | 'SANDBOX_FULL'
   | 'UNSUPPORTED'
   | 'INTERNAL'
 
@@ -67,7 +66,6 @@ const IPC_ERROR_CODE_KEYS: Record<IpcErrorCode, true> = {
   INVALID_PATH: true,
   DUPLICATE: true,
   NOT_LIVE: true,
-  SANDBOX_FULL: true,
   UNSUPPORTED: true,
   INTERNAL: true,
 }
@@ -94,7 +92,6 @@ export interface ProjectSuggestion {
 export interface ProjectListItem extends Project {
   session: Session | null
   sessions: Session[]
-  gitNotice: string | null
   drafts: Draft[]
   reserved: boolean
 }
@@ -121,7 +118,6 @@ export interface InvokeMap {
     res: Project
   }
   'projects.setSessionMode': { req: { projectId: string; mode: SessionMode }; res: void }
-  'projects.setUseContainers': { req: { projectId: string; on: boolean }; res: void }
   'projects.rename': { req: { projectId: string; name: string }; res: void }
   'projects.repoint': { req: { projectId: string; path: string }; res: Project }
   'projects.move': { req: { projectId: string; toIndex: number }; res: void }
@@ -151,7 +147,6 @@ export interface InvokeMap {
       projectId: string
       resume?: boolean
       mode?: SessionMode
-      containerised?: boolean
       carryTranscriptFrom?: string
     }
     res: Session
@@ -220,7 +215,6 @@ export interface InvokeMap {
       projectId: string
       stackId: string
       suiteIds: string[]
-      isolated?: boolean
     }
     res: { sessionId: string | null; runs: VerifyRun[] }
   }

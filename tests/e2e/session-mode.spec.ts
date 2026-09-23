@@ -12,7 +12,7 @@ test('a new project defaults to Auto, which is what every project ran as before'
 }) => {
   await page.getByTestId('add-project').click()
   await expect(page.getByTestId('session-mode-auto')).toBeChecked()
-  for (const mode of ['default', 'acceptEdits', 'plan', 'bypass']) {
+  for (const mode of ['default', 'acceptEdits', 'plan']) {
     await expect(page.getByTestId(`session-mode-${mode}`)).not.toBeChecked()
   }
 })
@@ -26,20 +26,6 @@ test('the mode chosen when adding a project is what its session starts in', asyn
   await expect(page.getByTestId('registration-dialog')).toBeHidden()
   const start = await page.evaluate(() => window.__mock.state().starts.at(-1))
   expect(start?.mode).toBe('acceptEdits')
-  expect(start?.bypassPermissions).toBe(false)
-  expect(start?.planMode).toBe(false)
-})
-
-test('choosing Bypass sends bypass, and the session records it', async ({ page }) => {
-  await page.getByTestId('add-project').click()
-  await page.getByTestId('folder-input').fill('C:\\work\\gamma')
-  await page.getByTestId('session-mode-bypass').check()
-  await page.getByTestId('start-session').click()
-
-  await expect(page.getByTestId('registration-dialog')).toBeHidden()
-  const start = await page.evaluate(() => window.__mock.state().starts.at(-1))
-  expect(start?.mode).toBe('bypass')
-  expect(start?.bypassPermissions).toBe(true)
   expect(start?.planMode).toBe(false)
 })
 

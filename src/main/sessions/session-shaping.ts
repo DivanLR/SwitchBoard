@@ -32,43 +32,6 @@ export function heavySubagentModelMode(enabled: boolean, chosen: ModelMode): Mod
   return chosen === 'auto' ? 'advisor' : chosen
 }
 
-export function sandboxSystemPromptAppend(
-  mounts: readonly { container: string }[] = [],
-  gitNote: string | null = null,
-  nodeModulesVolume = false,
-): string | null {
-  if (mounts.length === 0) return null
-  const refs = mounts.filter((m) => m.container !== '/workspace').map((m) => m.container)
-  return (
-    '## ENVIRONMENT — you are inside a Linux container, not on the host\n' +
-    'This session runs in a disposable container. The host is Windows; its drive is NOT mounted, ' +
-    'so `/mnt/c/...`, `C:\\...` and any other host path do not exist here and never will.\n' +
-    '- `/workspace` — this project, read-write. Your cwd.\n' +
-    (refs.length > 0
-      ? `- ${refs.map((r) => `\`${r}\``).join(', ')} — the referenced folders (REFS), read-only. ` +
-        'They are ALREADY here: read them directly. Never ask for a git clone or a pasted file ' +
-        'for anything under these paths, and never conclude a referenced repo is unreachable ' +
-        'before listing them.\n' +
-        'They sit OUTSIDE /workspace, so a repo-wide search from your cwd does not reach them and ' +
-        '"0 hits repo-wide" proves nothing about them. When a search is about where something is ' +
-        'defined, used, or called, pass them explicitly:\n' +
-        `  rg -n "pattern" /workspace ${refs.join(' ')}\n`
-      : '- No referenced folders are mounted. REFS chips added after the session started only ' +
-        'mount from the next session, so ask for a restart rather than a clone.\n') +
-    (gitNote ? `- Git: ${gitNote}\n` : '') +
-    (nodeModulesVolume
-      ? '- `/workspace/node_modules` is a volume of THIS session, not the host\'s folder and not ' +
-        'shared with any other session. The host installed its dependencies on Windows, and ' +
-        'those binaries cannot run here. If a command fails on a missing module, run `npm ci` ' +
-        '(or `npm install`) once; the download cache is shared, so it is faster than it looks. ' +
-        'Doing so is SAFE: it cannot disturb the host checkout, and no other session is ' +
-        'installing into the same folder.\n'
-      : '') +
-    'A path in the developer\'s message has already been translated to its container path, so use ' +
-    'it as given.'
-  )
-}
-
 const norm = (m?: string): string | undefined => (m && m !== 'default' ? m : undefined)
 
 export function modeAgents(options: {

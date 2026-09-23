@@ -27,7 +27,6 @@ function session(overrides: Partial<Session> = {}): Session {
     usageUtilization: null,
     usageResetsAt: null,
     usageLimitType: null,
-    bypassPermissions: false,
     planMode: false,
     inPlanMode: false,
     mcpServers: [],

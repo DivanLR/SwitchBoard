@@ -38,8 +38,8 @@ describe('a project carries its own session mode', () => {
   it('changes on request and applies to the project from then on', () => {
     const { repos } = setup()
     const project = repos.projects.insert({ name: 'a', path: 'C:\\a', source: 'manual' })
-    repos.projects.setSessionMode(project.id, 'bypass')
-    expect(repos.projects.byId(project.id)?.defaultSessionMode).toBe('bypass')
+    repos.projects.setSessionMode(project.id, 'acceptEdits')
+    expect(repos.projects.byId(project.id)?.defaultSessionMode).toBe('acceptEdits')
     repos.projects.setSessionMode(project.id, 'plan')
     expect(repos.projects.byId(project.id)?.defaultSessionMode).toBe('plan')
   })
@@ -85,7 +85,7 @@ describe('the mode a project holds is the mode the SDK spawns in', () => {
         defaultSessionMode: value,
       })
       const stored = repos.projects.byId(project.id)!.defaultSessionMode
-      expect(resolvePermissionMode(stored)).toBe(value === 'bypass' ? 'bypassPermissions' : value)
+      expect(resolvePermissionMode(stored)).toBe(value)
     }
   })
 })

@@ -7,7 +7,7 @@ import {
   type SuiteStatus,
   type VerifyReport,
 } from '@shared/domain'
-import { unavailableReason, type SandboxEnv, type TestSuite } from '@shared/test-catalog'
+import type { TestSuite } from '@shared/test-catalog'
 import { firstJsonObject, markerTail, str } from './parse'
 
 export const VERIFY_MARKER = 'SWB_VERIFY'
@@ -16,17 +16,10 @@ const SUITE_MARKER = 'SWB_SUITE'
 
 export interface PlannedSuite {
   suite: TestSuite
-  unavailable: string | null
 }
 
-export function planSuites(
-  suites: readonly TestSuite[],
-  chosen: readonly string[],
-  sandbox: SandboxEnv,
-): PlannedSuite[] {
-  return suites
-    .filter((s) => chosen.includes(s.id))
-    .map((suite) => ({ suite, unavailable: unavailableReason(suite, sandbox) }))
+export function planSuites(suites: readonly TestSuite[], chosen: readonly string[]): PlannedSuite[] {
+  return suites.filter((s) => chosen.includes(s.id)).map((suite) => ({ suite }))
 }
 
 interface SchemaFlags {
@@ -186,18 +179,15 @@ function qualitySection(flags: SchemaFlags): string {
 export function verifyPrompt(
   plan: PlannedSuite[],
   stackLabel: string,
-  sandbox: SandboxEnv,
   dbServers: readonly string[] = [],
 ): string {
-  const runnable = plan.filter((p) => !p.unavailable)
-  const blocked = plan.filter((p) => p.unavailable)
-  const apiSuites = runnable.filter((p) => p.suite.kind === 'api')
-  const flags = schemaFlags(runnable, apiSuites.length > 0)
+  const apiSuites = plan.filter((p) => p.suite.kind === 'api')
+  const flags = schemaFlags(plan, apiSuites.length > 0)
   return (
     `Verify the working tree of this ${stackLabel} project. This is a verification pass: ` +
     'run things and report what happened. Do not fix anything and do not edit any file.\n\n' +
     'Run these in order, and STOP at the first one that fails:\n' +
-    runnable
+    plan
       .map((p) =>
         p.suite.mcp
           ? `- ${p.suite.id} (${p.suite.label}) — through the ${p.suite.mcp} MCP server, not a ` +
@@ -208,28 +198,6 @@ export function verifyPrompt(
       .join('\n') +
     (apiSuites.length > 0
       ? '\n(The endpoint pass described below is the exception to that stop rule.)'
-      : '') +
-    (blocked.length > 0
-      ? '\n\nDo NOT attempt these — this environment cannot run them, which is not a ' +
-        'failure of the code. Report each with status "skipped" and the reason as its detail:\n' +
-        blocked.map((p) => `- ${p.suite.id}: ${p.unavailable}`).join('\n')
-      : '') +
-    (sandbox
-      ? `\n\nYou are inside the bypass container: it has git, ripgrep and ${sandbox.join(', ')}` +
-        ', and nothing else. Do not install a toolchain to work around that.' +
-        '\n\n/workspace is the developer\'s own folder, shared live with their machine. ' +
-        'If a build fails with MSB3021 or "Access to the path ... is denied" for a file ' +
-        'under bin/ or obj/, that file is LOCKED BY A PROCESS ON THE HOST — usually the ' +
-        'application itself running outside this container. It is not a permissions ' +
-        'problem here and not a fault in the code: this container can create NEW files in ' +
-        'that same directory, it just cannot replace one the host holds open.\n' +
-        'RETRY IN THE OTHER CONFIGURATION before giving up. The lock is on the ' +
-        'configuration the host is running, almost always Debug, and Release writes to ' +
-        'bin/Release instead — so `-c Release` (or `--configuration Release` for Stryker) ' +
-        'usually just works. Only if that fails too, report the suite as "skipped", name ' +
-        'the locked file and the process holding it so it can be stopped. Never delete ' +
-        "bin/ or obj/ to get around it: those are the developer's build outputs and " +
-        'something is using them.'
       : '') +
     endpointSection(apiSuites, dbServers) +
     qualitySection(flags) +
@@ -245,7 +213,7 @@ export function verifyPrompt(
   )
 }
 
-export function evidencePrompt(acceptanceHints: readonly string[], sandboxed: boolean): string {
+export function evidencePrompt(acceptanceHints: readonly string[]): string {
   return (
     'Capture evidence that the change in this working tree actually works. Execute the code — ' +
     'do not read it and describe what it would do.\n\n' +
@@ -253,11 +221,8 @@ export function evidencePrompt(acceptanceHints: readonly string[], sandboxed: bo
     '1. Exercise the changed behaviour with real inputs: call the endpoints, run the ' +
     'commands, or drive the screens that the change touched. Record the exact input you ' +
     'sent and the exact result that came back.\n' +
-    (sandboxed
-      ? '2. You are inside the bypass container — no browser and no display, so skip screenshots ' +
-        'and say so.\n'
-      : '2. If the change is visible, launch the app and screenshot the affected screen with ' +
-        'Playwright. Save each screenshot to a file and give its absolute path.\n') +
+    '2. If the change is visible, launch the app and screenshot the affected screen with ' +
+    'Playwright. Save each screenshot to a file and give its absolute path.\n' +
     '3. Include at least one case that SHOULD fail (bad input, missing auth) and what it did.\n' +
     (acceptanceHints.length > 0
       ? `\nThe change is meant to satisfy:\n${acceptanceHints.map((a) => `- ${a}`).join('\n')}\n`

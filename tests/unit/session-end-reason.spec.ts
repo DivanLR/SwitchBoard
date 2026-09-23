@@ -25,15 +25,6 @@ vi.mock('@main/sessions/claude-executable', () => ({
   resolveClaudeExecutable: () => 'C:\\fake\\claude.exe',
 }))
 
-vi.mock('@main/sessions/wslc-sandbox', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@main/sessions/wslc-sandbox')>()
-  return {
-    ...actual,
-    ensureSandboxImage: () => Promise.resolve(),
-    ensureSandboxVolumes: () => Promise.resolve(),
-  }
-})
-
 const { openDatabase } = await import('@main/store/db')
 const { createRepositories } = await import('@main/store/repositories')
 const { SessionManager } = await import('@main/sessions/session-manager')

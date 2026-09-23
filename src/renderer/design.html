@@ -16,9 +16,8 @@
       Electron preload provides, so http://localhost:5199/ renders the
       bridge-missing fallback and there is no interface to work on. Running the
       real Electron app instead is not a substitute while the installed
-      Switchboard is running: a second instance sweeps orphaned bypass
-      containers on startup (src/main/sessions/docker-sandbox.ts) and would kill
-      the live one.
+      Switchboard is running: it holds a single-instance lock, so a second
+      launch just quits and hands its arguments to the one already open.
 
       So this page installs the end-to-end mock host — the same one the
       Playwright suite runs against, so it cannot drift from the real IPC
@@ -87,14 +86,10 @@
           id: 'p-ml',
           name: 'ml-pipeline',
           path: 'C:\\work\\ml-pipeline',
-          defaultSessionMode: 'bypass',
           session: {
             id: 's-ml',
             status: 'working',
             branch: 'train/sweep-7',
-            // A bypass session runs in the sandbox container, which is what makes the
-            // Tests section name the suites that environment cannot run.
-            bypassPermissions: true,
           },
         },
         {

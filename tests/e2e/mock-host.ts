@@ -14,7 +14,6 @@ export interface MockSessionSeed {
   branch?: string
   startedAt?: string
   mcpServers?: { name: string; status: string }[]
-  bypassPermissions?: boolean
   planMode?: boolean
 }
 
@@ -26,7 +25,6 @@ export interface MockProjectSeed {
   session?: MockSessionSeed
   reserved?: boolean
   defaultSessionMode?: string
-  useContainers?: boolean
   diff?: { gitNotice: string | null; files: Record<string, unknown>[] }
 }
 
@@ -106,11 +104,9 @@ export interface MockDriver {
       projectId: string
       deniedMcpServers?: string[]
       mode?: string
-      bypassPermissions?: boolean
       planMode?: boolean
       resume?: boolean
       carryTranscriptFrom?: string
-      containerised?: boolean
     }[]
     planModeChanges: { sessionId: string; enabled: boolean }[]
     diagramOpens: { projectId: string; file: string }[]
@@ -144,7 +140,6 @@ export function installMockHost(scenario: MockScenario): void {
     usageUtilization: number | null
     usageResetsAt: number | null
     usageLimitType: string | null
-    bypassPermissions: boolean
     planMode: boolean
     inPlanMode: boolean
     mcpServers: { name: string; status: string }[]
@@ -277,7 +272,6 @@ export function installMockHost(scenario: MockScenario): void {
         usageUtilization: null,
         usageResetsAt: null,
         usageLimitType: null,
-        bypassPermissions: p.session.bypassPermissions ?? false,
         planMode: p.session.planMode ?? false,
         inPlanMode: p.session.planMode ?? false,
         mcpServers: p.session.mcpServers ?? [],
@@ -298,7 +292,6 @@ export function installMockHost(scenario: MockScenario): void {
       refs: [] as { path: string; label: string }[],
       reserved: !!p.reserved,
       defaultSessionMode: p.defaultSessionMode ?? 'auto',
-      useContainers: p.useContainers ?? false,
       session,
       sessions: session ? [session] : [],
     }
@@ -432,11 +425,9 @@ export function installMockHost(scenario: MockScenario): void {
     projectId: string
     deniedMcpServers?: string[]
     mode?: string
-    bypassPermissions?: boolean
     planMode?: boolean
     resume?: boolean
     carryTranscriptFrom?: string
-    containerised?: boolean
   }[] = []
   const planModeChanges: { sessionId: string; enabled: boolean }[] = []
   const answers: { eventId: string; choice: string }[] = []
@@ -581,7 +572,6 @@ export function installMockHost(scenario: MockScenario): void {
         refs: [] as { path: string; label: string }[],
         reserved: false,
         defaultSessionMode: String(req.defaultSessionMode ?? 'auto'),
-        useContainers: false,
         session: null as MockSession | null,
         sessions: [] as MockSession[],
       }
@@ -610,11 +600,6 @@ export function installMockHost(scenario: MockScenario): void {
       }
       customSkills.push(...imported.map((s) => ({ ...s, sourceUrl: url, enabled: true })))
       return { imported: customSkills.filter((c) => imported.some((i) => i.name === c.name)), skipped }
-    },
-    'projects.setUseContainers': (req) => {
-      const project = projects.find((p) => p.id === req.projectId)
-      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
-      project.useContainers = req.on === true
     },
     'sessions.rename': (req) => {
       const session = sessions.get(String(req.sessionId))
@@ -827,11 +812,9 @@ export function installMockHost(scenario: MockScenario): void {
         projectId: String(req.projectId),
         deniedMcpServers: req.deniedMcpServers as string[] | undefined,
         mode,
-        bypassPermissions: mode === 'bypass',
         planMode,
         resume: req.resume === true,
         carryTranscriptFrom: req.carryTranscriptFrom as string | undefined,
-        containerised: req.containerised === true,
       })
       const session: MockSession = {
         id: nextId('sess'),
@@ -845,7 +828,6 @@ export function installMockHost(scenario: MockScenario): void {
         usageUtilization: null,
         usageResetsAt: null,
         usageLimitType: null,
-        bypassPermissions: mode === 'bypass',
         planMode,
         inPlanMode: planMode,
         mcpServers: [],
@@ -891,12 +873,6 @@ export function installMockHost(scenario: MockScenario): void {
     'sessions.setPlanMode': (req) => {
       const session = sessions.get(String(req.sessionId))
       if (!session) throw { code: 'SESSION_ENDED', message: 'Session has ended' }
-      if (session.bypassPermissions) {
-        throw {
-          code: 'RULE_NOT_ALLOWED',
-          message: 'A bypass session approves everything, so it has nothing to plan against.',
-        }
-      }
       planModeChanges.push({ sessionId: session.id, enabled: req.enabled === true })
       session.inPlanMode = req.enabled === true
       push('push.sessionStatus', { ...session })
