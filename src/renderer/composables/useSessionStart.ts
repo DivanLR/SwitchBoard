@@ -31,34 +31,44 @@ export function useSessionStart(opts: {
       void projects.setUseContainers(project().id, on)
     },
   })
-  const containerForced = computed(() => startMode.value === 'bypass' || resumeSession.value)
-  const containerOn = computed(
-    () =>
-      startEngine.value === 'claude' &&
-      (resumeSession.value
-        ? endedSession()?.containerised === true
-        : startMode.value === 'bypass' || runInContainer.value),
-  )
   const startError = ref<string | null>(null)
+  const resumeFailed = ref(false)
 
   const canResume = computed(() => {
     const previous = endedSession()
-    return !!previous?.sdkSessionId && (previous.engine ?? DEFAULT_SESSION_ENGINE) === startEngine.value
+    return (
+      !resumeFailed.value &&
+      !!previous?.sdkSessionId &&
+      (previous.engine ?? DEFAULT_SESSION_ENGINE) === startEngine.value
+    )
   })
 
-  const carryTranscript = ref(false)
   const lastTranscript = computed(() => {
     const id = endedSession()?.id
     const transcript = id ? transcripts.bySession[id] : null
     return transcript && transcript.prompts > 0 ? transcript : null
   })
-  const canCarry = computed(
-    () => startEngine.value === 'claude' && !resumeSession.value && lastTranscript.value !== null,
+
+  const continueHow = computed<'resume' | 'carry' | null>(() => {
+    if (canResume.value) return 'resume'
+    if (startEngine.value === 'claude' && lastTranscript.value !== null) return 'carry'
+    return null
+  })
+  const canContinue = computed(() => continueHow.value !== null)
+  const resuming = computed(() => resumeSession.value && continueHow.value === 'resume')
+  const carrying = computed(() => resumeSession.value && continueHow.value === 'carry')
+
+  const containerForced = computed(() => startMode.value === 'bypass' || resuming.value)
+  const containerOn = computed(
+    () =>
+      startEngine.value === 'claude' &&
+      (resuming.value
+        ? endedSession()?.containerised === true
+        : startMode.value === 'bypass' || runInContainer.value),
   )
 
   const modeChoices = computed(() => {
-    const onHost =
-      startEngine.value === 'codex' || (resumeSession.value && !endedSession()?.containerised)
+    const onHost = startEngine.value === 'codex' || (resuming.value && !endedSession()?.containerised)
     return onHost ? SESSION_MODES.filter((m) => m.value !== 'bypass') : SESSION_MODES
   })
 
@@ -74,7 +84,7 @@ export function useSessionStart(opts: {
     busy.value = false
     modeOpen.value = false
     resumeSession.value = false
-    carryTranscript.value = false
+    resumeFailed.value = false
     startMode.value = project().defaultSessionMode ?? DEFAULT_SESSION_MODE
     startEngine.value = defaultEngine()
   }
@@ -82,7 +92,7 @@ export function useSessionStart(opts: {
   watch(
     () => endedSession()?.id ?? null,
     (id) => {
-      carryTranscript.value = false
+      resumeFailed.value = false
       if (!id) return
       void transcripts.load(id).catch(() => {})
       const previous = endedSession()
@@ -96,9 +106,19 @@ export function useSessionStart(opts: {
     { immediate: true },
   )
 
-  watch(canResume, (possible) => {
+  watch(canContinue, (possible) => {
     if (!possible) resumeSession.value = false
   })
+
+  function resumeDidNotWork(reason: string): void {
+    resumeFailed.value = true
+    resumeSession.value = false
+    const fallback =
+      continueHow.value === 'carry'
+        ? ' Turn Continue from last session back on to carry its transcript instead.'
+        : ''
+    startError.value = `Resume failed, starting fresh — ${reason}${fallback}`
+  }
 
   watch(
     [startMode, modeChoices],
@@ -126,8 +146,8 @@ export function useSessionStart(opts: {
         stop() 
         if (session.endReason !== 'crashed' || project().id !== projectId) return
         const reason = session.statusDetail ?? 'The session ended immediately after starting.'
-        startError.value = wasResuming ? `Resume failed, starting fresh — ${reason}` : reason
-        if (wasResuming) resumeSession.value = false
+        if (wasResuming) resumeDidNotWork(reason)
+        else startError.value = reason
       },
       { immediate: true },
     )
@@ -136,7 +156,8 @@ export function useSessionStart(opts: {
 
   async function start(): Promise<void> {
     const target = project().id
-    const wasResuming = resumeSession.value && canResume.value
+    const wasResuming = resuming.value
+    const carryFrom = carrying.value ? lastTranscript.value?.sessionId : undefined
     busy.value = true
     startError.value = null
     modeOpen.value = false
@@ -149,15 +170,15 @@ export function useSessionStart(opts: {
         startMode.value,
         containerOn.value,
         startEngine.value,
-        canCarry.value && carryTranscript.value ? lastTranscript.value?.sessionId : undefined,
+        carryFrom,
         wasResuming ? previous?.id : undefined,
       )
       watchForImmediateCrash(target, session.id, wasResuming)
     } catch (e) {
       if (project().id === target) {
         const message = isIpcError(e) ? e.message : String(e)
-        startError.value = wasResuming ? `Resume failed, starting fresh — ${message}` : message
-        if (wasResuming) resumeSession.value = false
+        if (wasResuming) resumeDidNotWork(message)
+        else startError.value = message
       }
     } finally {
       if (project().id === target) busy.value = false
@@ -176,10 +197,11 @@ export function useSessionStart(opts: {
     modeChoices,
     startModeLabel,
     startModeDetail,
-    canResume,
-    carryTranscript,
+    canContinue,
+    continueHow,
+    resuming,
+    carrying,
     lastTranscript,
-    canCarry,
     busy,
     start,
     reset,

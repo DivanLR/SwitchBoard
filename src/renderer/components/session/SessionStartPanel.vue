@@ -20,10 +20,11 @@ const {
   modeChoices,
   startModeLabel,
   startModeDetail,
-  canResume,
-  carryTranscript,
+  canContinue,
+  continueHow,
+  resuming,
+  carrying,
   lastTranscript,
-  canCarry,
   busy,
   start,
 } = props.starter
@@ -103,7 +104,7 @@ const {
               Codex runs on this machine in its own sandbox, so bypass, which always runs in a
               container, is not offered.
             </div>
-            <div v-else-if="resumeSession" class="mode-note">
+            <div v-else-if="resuming" class="mode-note">
               Resuming keeps the last session's sandbox: its transcript lives
               {{
                 session.containerised
@@ -118,37 +119,28 @@ const {
       <span class="resume-inline">
         <button
           class="switch"
-          :class="{ on: resumeSession }"
+          :class="{ on: resumeSession && canContinue }"
           data-testid="resume-session"
           role="switch"
-          :aria-checked="resumeSession"
-          :disabled="!canResume"
+          :aria-checked="resumeSession && canContinue"
+          :disabled="!canContinue || busy"
           :title="
-            canResume
-              ? 'Carry on the conversation that just ended: the new session opens with the previous one\'s context, so you can pick up mid-thought instead of re-explaining. Off starts an empty session in the same folder.'
-              : 'Nothing to resume — this session never reached the point of having a conversation to carry on.'
+            continueHow === 'resume'
+              ? 'Pick up where the last session left off: the conversation itself is resumed, with its full context. Off starts an empty session in the same folder.'
+              : continueHow === 'carry'
+                ? `The last conversation cannot be resumed here, so its transcript (${lastTranscript?.prompts ?? 0} ${lastTranscript?.prompts === 1 ? 'prompt' : 'prompts'}) is carried instead: its digest goes into the new session's instructions, and the full file stays on this machine for twelve hours after its last write.`
+                : 'Nothing to continue: the last session has no conversation this engine can resume and no transcript to carry.'
           "
-          @click="canResume && (resumeSession = !resumeSession)"
+          @click="canContinue && (resumeSession = !resumeSession)"
         >
           <span class="knob"></span>
         </button>
-        <span :class="{ faint: !canResume }">Resume session</span>
-      </span>
-
-      <span v-if="canCarry && lastTranscript" class="resume-inline carry-inline">
-        <button
-          class="switch"
-          :class="{ on: carryTranscript }"
-          data-testid="carry-transcript-toggle"
-          role="switch"
-          :aria-checked="carryTranscript"
-          :disabled="busy"
-          :title="`Seed the new session with this session's transcript (${lastTranscript.prompts} prompts). Its digest goes into the new session's instructions, and the full file stays on this machine for twelve hours after its last write.`"
-          @click="carryTranscript = !carryTranscript"
-        >
-          <span class="knob"></span>
-        </button>
-        <span>Carry last transcript</span>
+        <span class="continue-label">
+          <span :class="{ faint: !canContinue }">Continue from last session</span>
+          <span v-if="canContinue" class="continue-how" data-testid="continue-how">
+            {{ continueHow === 'resume' ? 'Resumes the conversation' : `Carries its transcript, ${lastTranscript?.prompts ?? 0} ${lastTranscript?.prompts === 1 ? 'prompt' : 'prompts'}` }}
+          </span>
+        </span>
       </span>
 
       <span v-if="startEngine === 'claude'" class="resume-inline container-inline">
@@ -160,7 +152,7 @@ const {
           :aria-checked="containerOn"
           :disabled="containerForced"
           :title="
-            resumeSession
+            resuming
               ? `Resuming carries on where the last session ran: ${session.containerised ? 'in a WSL container' : 'on this machine'}, which is where its transcript is.`
               : containerForced
               ? 'Bypass always runs in a container: it approves every tool call, so the container is the only thing left standing between it and your files.'
@@ -174,7 +166,7 @@ const {
       </span>
 
       <button class="btn-solid" data-testid="start-session" :disabled="busy" @click="start()">
-        {{ resumeSession ? 'Resume' : 'Start session' }}
+        {{ resuming ? 'Resume' : carrying ? 'Continue' : 'Start session' }}
       </button>
     </div>
     <div v-if="startMode === 'bypass'" class="bypass-warn" data-testid="bypass-warning">
@@ -244,15 +236,19 @@ const {
   border-radius: var(--rc);
 }
 
-.ended-actions .carry-inline {
-  grid-row: 3;
-  margin-top: 0;
-  border-top: none;
-  border-radius: 0;
+.continue-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.continue-how {
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
 }
 
 .ended-actions .container-inline {
-  grid-row: 4;
+  grid-row: 3;
   margin-top: 0;
   border-top: none;
   border-radius: 0 0 var(--rc) var(--rc);

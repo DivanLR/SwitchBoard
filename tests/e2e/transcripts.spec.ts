@@ -7,83 +7,80 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
 })
 
-async function endWithPrompt(page: import('@playwright/test').Page): Promise<void> {
-  await page.evaluate(() => {
-    window.__mock.emitEvent('s-alpha', 'prompt', { text: 'tighten the lane rows', pending: false })
-    window.__mock.emitEvent('s-alpha', 'assistant_text', { text: 'Rows are 40px now.', partial: false })
-    window.__mock.endSession('s-alpha')
-  })
+async function endWithPrompt(page: import('@playwright/test').Page, sessionId = 's-alpha'): Promise<void> {
+  await page.evaluate((id) => {
+    window.__mock.emitEvent(id, 'prompt', { text: 'tighten the lane rows', pending: false })
+    window.__mock.emitEvent(id, 'assistant_text', { text: 'Rows are 40px now.', partial: false })
+    window.__mock.endSession(id)
+  }, sessionId)
   await expect(page.getByTestId('ended-banner')).toBeVisible()
 }
 
-test('the ended session transcript can be carried into the next session as context', async ({ page }) => {
+async function lastStart(page: import('@playwright/test').Page) {
+  return (await page.evaluate(() => window.__mock.state().starts)).at(-1)
+}
+
+test('Continue resumes the conversation when it can be resumed, and carries nothing', async ({ page }) => {
   await endWithPrompt(page)
 
-  const carry = page.getByTestId('carry-transcript-toggle')
-  await expect(carry).toBeVisible()
-  await expect(carry).toHaveAttribute('aria-checked', 'false')
-  await carry.click()
-  await expect(carry).toHaveAttribute('aria-checked', 'true')
-
-  await page.getByTestId('start-session').click()
-  await expect(page.getByTestId('ended-banner')).toHaveCount(0)
-
-  const starts = await page.evaluate(() => window.__mock.state().starts)
-  expect(starts.at(-1)).toMatchObject({ projectId: 'p-alpha', resume: false, carryTranscriptFrom: 's-alpha' })
-})
-
-test('starting without the toggle carries nothing', async ({ page }) => {
-  await endWithPrompt(page)
-  await expect(page.getByTestId('carry-transcript-toggle')).toBeVisible()
-
-  await page.getByTestId('start-session').click()
-  await expect(page.getByTestId('ended-banner')).toHaveCount(0)
-
-  const starts = await page.evaluate(() => window.__mock.state().starts)
-  expect(starts.at(-1)?.carryTranscriptFrom).toBeUndefined()
-})
-
-test('a session that was never asked anything offers no transcript to carry', async ({ page }) => {
-  await page.evaluate(() => {
-    window.__mock.endSession('s-alpha')
-    window.__mock.emitEvent('s-beta', 'prompt', { text: 'rename the branch', pending: false })
-    window.__mock.endSession('s-beta')
-  })
-  await expect(page.getByTestId('ended-banner')).toBeVisible()
-  await page.getByTestId('sidebar-project-beta').click()
-  await expect(page.getByTestId('carry-transcript-toggle')).toBeVisible()
-  await page.getByTestId('sidebar-project-alpha').click()
-  await expect(page.getByTestId('ended-banner')).toBeVisible()
+  const cont = page.getByTestId('resume-session')
+  await expect(cont).toHaveAttribute('aria-checked', 'false')
+  await expect(page.getByTestId('continue-how')).toContainText('Resumes the conversation')
   await expect(page.getByTestId('carry-transcript-toggle')).toHaveCount(0)
-})
+  await cont.click()
+  await expect(cont).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByTestId('start-session')).toContainText('Resume')
 
-test('resuming withdraws the carry, because a resume already has the whole conversation', async ({ page }) => {
-  await endWithPrompt(page)
-  const carry = page.getByTestId('carry-transcript-toggle')
-  await carry.click()
-  await expect(carry).toHaveAttribute('aria-checked', 'true')
-
-  await page.getByTestId('resume-session').click()
-  await expect(carry).toHaveCount(0)
   await page.getByTestId('start-session').click()
   await expect(page.getByTestId('ended-banner')).toHaveCount(0)
-
-  const starts = await page.evaluate(() => window.__mock.state().starts)
-  expect(starts.at(-1)).toMatchObject({ resume: true })
-  expect(starts.at(-1)?.carryTranscriptFrom).toBeUndefined()
+  const start = await lastStart(page)
+  expect(start).toMatchObject({ projectId: 'p-alpha', resume: true })
+  expect(start?.carryTranscriptFrom).toBeUndefined()
 })
 
-test('a Codex start withdraws the carry, because Codex takes no carried instructions', async ({ page }) => {
+test('Continue carries the transcript when the conversation cannot be resumed', async ({ page }) => {
+  await page.evaluate(() => window.__mock.endSession('s-alpha'))
+  await expect(page.getByTestId('ended-banner')).toBeVisible()
+  await page.getByTestId('start-session').click()
+  await expect(page.getByTestId('ended-banner')).toHaveCount(0)
+  const freshId = await page.evaluate(async () => {
+    const { projects } = await window.switchboard.invoke('projects.list', undefined)
+    return projects.find((p) => p.id === 'p-alpha')?.session?.id ?? ''
+  })
+  await endWithPrompt(page, freshId)
+
+  await expect(page.getByTestId('continue-how')).toHaveText('Carries its transcript, 1 prompt')
+  await page.getByTestId('resume-session').click()
+  await expect(page.getByTestId('start-session')).toContainText('Continue')
+
+  await page.getByTestId('start-session').click()
+  await expect(page.getByTestId('ended-banner')).toHaveCount(0)
+  expect(await lastStart(page)).toMatchObject({ projectId: 'p-alpha', resume: false, carryTranscriptFrom: freshId })
+})
+
+test('starting with Continue off neither resumes nor carries', async ({ page }) => {
   await endWithPrompt(page)
-  const carry = page.getByTestId('carry-transcript-toggle')
-  await carry.click()
+
+  await page.getByTestId('start-session').click()
+  await expect(page.getByTestId('ended-banner')).toHaveCount(0)
+  const start = await lastStart(page)
+  expect(start).toMatchObject({ resume: false })
+  expect(start?.carryTranscriptFrom).toBeUndefined()
+})
+
+test('a Codex start cannot continue a Claude session', async ({ page }) => {
+  await endWithPrompt(page)
+  const cont = page.getByTestId('resume-session')
+  await cont.click()
 
   await page.getByTestId('start-engine-codex').click()
-  await expect(carry).toHaveCount(0)
+  await expect(cont).toBeDisabled()
+  await expect(cont).toHaveAttribute('aria-checked', 'false')
+  await expect(page.getByTestId('continue-how')).toHaveCount(0)
   await page.getByTestId('start-session').click()
   await expect(page.getByTestId('ended-banner')).toHaveCount(0)
 
-  const starts = await page.evaluate(() => window.__mock.state().starts)
-  expect(starts.at(-1)).toMatchObject({ engine: 'codex' })
-  expect(starts.at(-1)?.carryTranscriptFrom).toBeUndefined()
+  const start = await lastStart(page)
+  expect(start).toMatchObject({ engine: 'codex', resume: false })
+  expect(start?.carryTranscriptFrom).toBeUndefined()
 })
