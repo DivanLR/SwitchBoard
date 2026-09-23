@@ -165,7 +165,11 @@ Confirmed functionality:
   (`/speckit-assess-*`) in the project's own checkout, with no worktree and no
   branch, and a go decision offers to start a feature seeded with the decision.
   A run starts from an Azure DevOps Feature, a written description, or an
-  existing Spec Kit folder. When the ado MCP server is not connected, Flow says
+  existing Spec Kit folder. The Azure DevOps list shows the open Features
+  assigned to you across every project, with the listing session's output and
+  a Cancel while it loads (it waits up to 10 minutes); a pasted Feature link or
+  id starts a run at once, named "Feature <id>" until the spec stage reports the
+  real title. When the ado MCP server is not connected, Flow says
   whether it is still starting (it waits up to 90 seconds, since npx can be
   slow), needs sign in, or failed with its own error, and offers Reconnect,
   which reconnects it on the same session and asks for the Features again.

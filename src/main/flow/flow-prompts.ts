@@ -10,6 +10,7 @@ import type {
   VerifyReport,
 } from '@shared/domain'
 import { FLOW_STACK_LABELS } from '@shared/domain'
+import { parseAdoFeatureLink } from '@shared/ado-link'
 import { sddCommand, sddDocPath } from '@shared/sdd'
 import { HONESTY } from '@main/verify/verify-dispatch'
 import { FLOW_MARKER } from './flow-markers'
@@ -58,32 +59,68 @@ function markerLine(stage: FlowStage, extra = ''): string {
   ].join('\n')
 }
 
-export function featuresPrompt(query: string): string {
-  const filter = query.trim()
+const PROJECT_PROMPT =
+  'Pass project on every wit_query and wit_work_item call: a call without one stops for a project selection prompt.'
+
+function featuresWiql(filter: string): string {
+  const title = filter.replace(/\s+/g, ' ').trim().replace(/'/g, "''")
   return [
-    'List the Features I could work on next in Azure DevOps.',
+    "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project AND [System.WorkItemType] = 'Feature'",
+    "AND [System.AssignedTo] = @Me AND [System.State] NOT IN ('Closed', 'Removed', 'Done')",
+    title ? `AND [System.Title] CONTAINS '${title}'` : '',
+    'ORDER BY [System.ChangedDate] DESC',
+  ]
+    .filter((part) => part !== '')
+    .join(' ')
+}
+
+export function featuresPrompt(query: string): string {
+  const filter = query.replace(/\s+/g, ' ').trim()
+  return [
+    'List the Azure DevOps Features assigned to me that are not closed, removed or done, newest change first, at most 25.',
+    ...(filter ? [`Only Features matching: ${filter}. The query below already filters on it.`] : []),
     '',
     ADO_RULE,
-    filter
-      ? `Only Features matching: ${filter}`
-      : 'Return the Features that are active or new, most recently changed first.',
-    'At most 25. Read only: create nothing, update nothing.',
+    'Read only: create nothing, update nothing. Make exactly these three rounds of calls and no others:',
+    '1. Call core_list_projects once, with top 100.',
+    '2. In ONE parallel batch, call wit_query for every project at once, each with action "wiql", top 25, project set to',
+    '   that project\'s name, and this wiql:',
+    `   ${featuresWiql(filter)}`,
+    '3. In ONE parallel batch, call wit_work_item for every project that returned ids, each with action "get_batch", that',
+    '   project, its ids, and fields ["System.Title","System.State","System.WorkItemType","System.ChangedDate"].',
+    'wit_query returns only ids and urls, so the titles and states come from round 3. Skip round 3 when no project',
+    'returned an id. Do not use search_workitem or wit_work_item "my" for this.',
+    PROJECT_PROMPT,
+    'Keep the 25 most recently changed across every project. An empty list is a correct answer.',
+    'Build each url with the organisation named in the work item urls the server returned.',
     '',
     HONESTY,
     '',
     `Finish your reply with one line, on its own, starting with ${FLOW_MARKER}: followed by JSON:`,
     '',
-    '{"kind":"features","features":[{"id":"<work item id>","title":"<title>","state":"<state>","url":"<browser url or null>"}]}',
+    '{"kind":"features","features":[{"id":"<work item id>","title":"<title>","state":"<state>","project":"<project name>","url":"https://dev.azure.com/<organisation>/<project>/_workitems/edit/<id>"}]}',
     '',
     'Nothing after that line. No code fence around it.',
   ].join('\n')
 }
 
+function adoProjectLine(sourceUrl: string | null): string {
+  const project = parseAdoFeatureLink(sourceUrl ?? '')?.project
+  if (project) return `It is in project "${project}". ${PROJECT_PROMPT}`
+  return (
+    'Its project is not known yet: call core_list_projects once, then in ONE parallel batch call wit_work_item with ' +
+    'action "get_batch", this id and each project, and use the project that returns it. ' +
+    PROJECT_PROMPT
+  )
+}
+
 export function specDescription(run: Pick<FlowRun, 'source' | 'sourceRef' | 'sourceUrl' | 'title' | 'description'>): string {
   if (run.source === 'ado') {
+    const named = run.title === `Feature ${run.sourceRef}` ? '' : `: ${run.title}`
     return [
-      `Azure DevOps Feature ${run.sourceRef}: ${run.title}. Read it with the ado MCP server`,
+      `Azure DevOps Feature ${run.sourceRef}${named}. Read it with the ado MCP server`,
       '(description, acceptance criteria, child items, linked wiki) and specify exactly that.',
+      adoProjectLine(run.sourceUrl),
       run.sourceUrl ?? '',
     ]
       .filter((line) => line !== '')
@@ -126,8 +163,12 @@ export function constitutionPrompt(autopilot: boolean): string {
   )
 }
 
-export function specHandshake(): string {
-  return markerLine('spec', ',"specDir":"<specs/NNN-slug, the folder .specify/feature.json or the newest specs folder names>"')
+export function specHandshake(ado = false): string {
+  const title = ado ? ',"title":"<the Feature\'s title exactly as the ado server returned it>"' : ''
+  return markerLine(
+    'spec',
+    `,"specDir":"<specs/NNN-slug, the folder .specify/feature.json or the newest specs folder names>"${title}`,
+  )
 }
 
 function featureLine(specDir: string | null): string {

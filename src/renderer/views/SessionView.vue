@@ -142,7 +142,7 @@ onMounted(() => {
     if (push.projectId === props.project.id) setSuggestionCommands(push.commands)
   })
   unsubscribeFlow = window.switchboard.on('push.flowChanged', (push) => {
-    if (push.projectId === props.project.id) flow.applyPush(push.projectId, push.runs, push.stages)
+    if (push.projectId === props.project.id) flow.applyPush(push.projectId, push.runs, push.stages, push.listing)
   })
 })
 onUnmounted(() => {

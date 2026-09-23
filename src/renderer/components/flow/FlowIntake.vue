@@ -2,10 +2,12 @@
 import { computed, onMounted, ref } from 'vue'
 import { FLOW_KIND_LABELS, FLOW_STACK_LABELS, type FlowFeature, type FlowKind, type FlowStackId } from '@shared/domain'
 import type { FlowStartSource } from '@shared/ipc-types'
+import { parseAdoFeatureLink } from '@shared/ado-link'
 import { sddSlug } from '@shared/sdd'
 import { useFlowStore } from '@renderer/stores/flow'
 import { useProjectsStore } from '@renderer/stores/projects'
 import Icon from '@renderer/components/Icon.vue'
+import MiniTerminal from '@renderer/components/MiniTerminal.vue'
 
 type Source = 'text' | 'ado' | 'spec'
 
@@ -35,6 +37,7 @@ const description = ref('')
 const seededSlug = ref<string | null>(null)
 const checklist = ref(false)
 const query = ref('')
+const link = ref('')
 const feature = ref<FlowFeature | null>(null)
 const specId = ref('')
 const baseBranch = ref('')
@@ -81,6 +84,17 @@ function toggleCompanion(projectId: string): void {
   companions.value = picked === undefined ? { ...companions.value, [projectId]: '' } : rest
 }
 
+const linked = computed(() => (link.value.trim() ? parseAdoFeatureLink(link.value) : null))
+const listing = computed(() => (flow.searching ? (flow.listingByProject[props.projectId] ?? null) : null))
+const emptyLine = computed(() => {
+  if (flow.searching === 'reconnect') {
+    return 'Reconnecting the Azure DevOps MCP server, then asking it for the Features assigned to you…'
+  }
+  if (flow.searching) return 'Asking Azure DevOps for the Features assigned to you…'
+  const scope = 'This list shows the Features assigned to you that are not closed, removed or done.'
+  return flow.featuresNote ? `${flow.featuresNote} ${scope}` : scope
+})
+
 const slug = computed(() => seededSlug.value ?? sddSlug(title.value))
 const changesCode = computed(() => kind.value !== 'idea')
 
@@ -94,6 +108,8 @@ const chosen = computed<FlowStartSource | null>(() => {
     return named ? { kind: 'text', title: named, description: text } : null
   }
   if (source.value === 'ado') {
+    const pasted = linked.value
+    if (pasted) return { kind: 'ado', featureId: pasted.id, featureTitle: `Feature ${pasted.id}`, url: pasted.url }
     const picked = feature.value
     return picked
       ? { kind: 'ado', featureId: picked.id, featureTitle: picked.title, url: picked.url }
@@ -131,9 +147,15 @@ async function reconnect(): Promise<void> {
   await flow.searchFeatures(props.projectId, query.value, true)
 }
 
+function pickFeature(item: FlowFeature): void {
+  feature.value = item
+  link.value = ''
+}
+
 async function start(): Promise<void> {
   const picked = chosen.value
   if (!picked) return
+  if (flow.searching) void flow.cancelFeatures(props.projectId)
   const others = changesCode.value
     ? Object.entries(companions.value).map(([projectId, base]) => ({
         projectId,
@@ -246,69 +268,105 @@ async function start(): Promise<void> {
       </label>
     </template>
 
-    <div v-else-if="kind === 'feature' && source === 'ado'" class="fin-field">
-      <span class="fin-label">Feature</span>
-      <div class="fin-search">
+    <template v-else-if="kind === 'feature' && source === 'ado'">
+      <label class="fin-field">
+        <span class="fin-label">Paste a Feature link or id</span>
         <input
-          v-model="query"
-          data-testid="flow-feature-search"
-          placeholder="Search Features, or leave blank for the most recent"
-          @keydown.enter="search()"
+          v-model="link"
+          data-testid="flow-feature-link"
+          placeholder="https://dev.azure.com/org/project/_workitems/edit/123, or 123"
         />
-        <button
-          type="button"
-          class="btn-quiet"
-          data-testid="flow-feature-refresh"
-          :disabled="flow.searching !== null"
-          @click="search()"
-        >
-          {{ flow.searching === 'search' ? 'Asking DevOps…' : 'Find features' }}
-        </button>
-      </div>
-      <div v-if="flow.adoDown" class="ui-err-banner is-warn fin-ado" role="alert" data-testid="flow-ado-state">
-        <span class="fin-ado-text">{{ flow.adoDown }}</span>
-        <button
-          type="button"
-          class="btn-outline"
-          data-testid="flow-ado-reconnect"
-          :disabled="flow.searching !== null"
-          @click="reconnect()"
-        >
-          {{ flow.searching === 'reconnect' ? 'Reconnecting…' : 'Reconnect' }}
-        </button>
-      </div>
-      <div class="fin-list" role="radiogroup" aria-label="Feature">
-        <button
-          v-for="item in flow.features"
-          :key="item.id"
-          type="button"
-          role="radio"
-          class="ui-row"
-          :class="{ 'is-selected': feature?.id === item.id }"
-          :aria-checked="feature?.id === item.id"
-          :data-testid="`flow-feature-${item.id}`"
-          @click="feature = item"
-        >
-          <Icon :name="feature?.id === item.id ? 'check' : 'circle'" :size="11" class="fin-mark" />
-          <span class="ui-desc fin-name">{{ item.title }}</span>
-          <span class="ui-meta">{{ item.id }}</span>
-          <span v-if="item.state" class="ui-chip">{{ item.state }}</span>
-        </button>
-        <div
-          v-if="flow.features.length === 0"
-          class="ui-empty-line"
-          data-testid="flow-features-empty"
-        >
-          {{
-            flow.searching === 'reconnect'
-              ? 'Reconnecting the Azure DevOps MCP server, then asking it for Features…'
-              : flow.searching
-                ? 'Asking Azure DevOps for Features…'
-                : (flow.featuresNote ?? 'No Features loaded yet.')
-          }}
+        <span v-if="linked" class="fin-hint" data-testid="flow-feature-link-recognised">
+          Feature <span class="mono">{{ linked.id }}</span>
+          <template v-if="linked.project">
+            in project <span class="mono">{{ linked.project }}</span>, organisation
+            <span class="mono">{{ linked.organisation }}</span>.
+          </template>
+          <template v-else>, project and organisation from the ado server.</template>
+          Start begins the run from it straight away.
+        </span>
+        <span v-else-if="link.trim()" class="fin-hint fin-bad" data-testid="flow-feature-link-invalid">
+          That is not a Feature link or id. Paste a dev.azure.com or visualstudio.com work item link, or its number.
+        </span>
+      </label>
+
+      <div class="fin-field">
+        <span class="fin-label">Or pick one of your Features</span>
+        <div class="fin-search">
+          <input
+            v-model="query"
+            data-testid="flow-feature-search"
+            placeholder="Filter your Features by title, or leave blank for all of them"
+            @keydown.enter="search()"
+          />
+          <button
+            type="button"
+            class="btn-quiet"
+            data-testid="flow-feature-refresh"
+            :disabled="flow.searching !== null"
+            @click="search()"
+          >
+            {{ flow.searching === 'search' ? 'Asking DevOps…' : 'Find features' }}
+          </button>
+        </div>
+        <div v-if="flow.searching" class="fin-progress" data-testid="flow-features-progress">
+          <div class="fin-progress-bar">
+            <span class="fin-hint">
+              Querying every project for the Features assigned to you. One Azure DevOps call can take minutes.
+            </span>
+            <button
+              type="button"
+              class="btn-outline"
+              data-testid="flow-features-cancel"
+              @click="flow.cancelFeatures(projectId)"
+            >
+              Cancel
+            </button>
+          </div>
+          <MiniTerminal v-if="listing" :session-id="listing" label="ado session" data-testid="flow-features-session" />
+        </div>
+        <div v-if="flow.adoDown" class="ui-err-banner is-warn fin-ado" role="alert" data-testid="flow-ado-state">
+          <span class="fin-ado-text">{{ flow.adoDown }}</span>
+          <button
+            type="button"
+            class="btn-outline"
+            data-testid="flow-ado-reconnect"
+            :disabled="flow.searching !== null"
+            @click="reconnect()"
+          >
+            {{ flow.searching === 'reconnect' ? 'Reconnecting…' : 'Reconnect' }}
+          </button>
+        </div>
+        <div class="fin-list" role="radiogroup" aria-label="Feature">
+          <button
+            v-for="item in flow.features"
+            :key="item.id"
+            type="button"
+            role="radio"
+            class="ui-row"
+            :class="{ 'is-selected': !linked && feature?.id === item.id }"
+            :aria-checked="!linked && feature?.id === item.id"
+            :data-testid="`flow-feature-${item.id}`"
+            @click="pickFeature(item)"
+          >
+            <Icon :name="!linked && feature?.id === item.id ? 'check' : 'circle'" :size="11" class="fin-mark" />
+            <span class="ui-desc fin-name">{{ item.title }}</span>
+            <span class="ui-meta">{{ item.id }}</span>
+            <span v-if="item.project" class="ui-meta" :data-testid="`flow-feature-${item.id}-project`">
+              {{ item.project }}
+            </span>
+            <span v-if="item.state" class="ui-chip">{{ item.state }}</span>
+          </button>
+          <div
+            v-if="flow.features.length === 0"
+            class="ui-empty-line"
+            data-testid="flow-features-empty"
+          >
+            {{ emptyLine }}
+          </div>
         </div>
       </div>
-    </div>
+    </template>
 
     <div v-else-if="kind === 'feature'" class="fin-field">
       <span class="fin-label">Spec</span>
@@ -530,6 +588,22 @@ async function start(): Promise<void> {
 
 .fin-search .btn-quiet {
   flex-shrink: 0;
+}
+
+.fin-bad {
+  color: var(--red);
+}
+
+.fin-progress {
+  display: flex;
+  flex-direction: column;
+}
+
+.fin-progress-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
 }
 
 .fin-ado {

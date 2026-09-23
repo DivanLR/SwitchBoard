@@ -266,6 +266,7 @@ async function main(): Promise<void> {
         projectId,
         runs: repos.flowRuns.listForProject(projectId),
         stages: repos.flowStages.listForProject(projectId),
+        listing: flow.listingSession(projectId),
       }),
   })
   manager.setFlowHooks({

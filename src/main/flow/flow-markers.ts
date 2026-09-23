@@ -7,6 +7,7 @@ import type {
   FlowStage,
 } from '@shared/domain'
 import { FLOW_STAGE_LABELS } from '@shared/domain'
+import { adoProjectName, adoTitle, isAdoId, parseAdoFeatureLink } from '@shared/ado-link'
 import { firstJsonObject, markerTail, str } from '@main/verify/parse'
 
 export const FLOW_MARKER = 'SWB_FLOW'
@@ -23,6 +24,7 @@ export interface FlowStageMarker {
   summary: string
   why: string | null
   specDir: string | null
+  title: string | null
   tasksDone: number | null
   tasksTotal: number | null
   verdict: 'ready' | 'needs_fixes' | null
@@ -67,9 +69,12 @@ function features(value: unknown): FlowFeature[] {
     if (typeof entry !== 'object' || entry === null) continue
     const record = entry as Record<string, unknown>
     const id = idOf(record.id)
-    const title = str(record.title)
-    if (!id || !title) continue
-    found.push({ id, title, state: str(record.state), url: str(record.url) })
+    const title = adoTitle(record.title)
+    if (!id || !isAdoId(id) || !title) continue
+    const parsed = parseAdoFeatureLink(str(record.url) ?? '')
+    const link = parsed?.id === id ? parsed : null
+    const project = adoProjectName(str(record.project)) ?? link?.project ?? null
+    found.push({ id, title, state: adoTitle(record.state), project, url: link?.url ?? null })
   }
   return found
 }
@@ -146,6 +151,7 @@ export function parseFlowMarker(text: string): FlowMarker | null {
       summary: str(record.summary) ?? '',
       why: str(record.why),
       specDir: str(record.specDir),
+      title: adoTitle(record.title),
       tasksDone: num(record.tasksDone),
       tasksTotal: num(record.tasksTotal),
       verdict: rawVerdict === 'ready' || rawVerdict === 'needs_fixes' ? rawVerdict : null,

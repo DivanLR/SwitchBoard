@@ -5,6 +5,7 @@ import { errorMessage, invoke } from '@renderer/ipc'
 import { useProjectsStore } from '@renderer/stores/projects'
 
 let requestToken = 0
+let listToken = 0
 
 const state = reactive({
   runsByProject: {} as Record<string, FlowRun[]>,
@@ -13,6 +14,7 @@ const state = reactive({
   features: [] as FlowFeature[],
   featuresNote: null as string | null,
   searching: null as 'search' | 'reconnect' | null,
+  listingByProject: {} as Record<string, string | null>,
   adoDown: null as string | null,
   existingSpecs: [] as { id: string; title: string }[],
   stacksByProject: {} as Record<string, FlowStackId[]>,
@@ -64,27 +66,46 @@ const store = reactive({
     }
   },
 
-  applyPush(projectId: string, runs: FlowRun[], stages: FlowStageRecord[]): void {
+  applyPush(projectId: string, runs: FlowRun[], stages: FlowStageRecord[], listing: string | null = null): void {
     state.runsByProject[projectId] = runs
     state.stagesByProject[projectId] = stages
+    state.listingByProject[projectId] = listing
   },
 
   async searchFeatures(projectId: string, query: string, reconnect = false): Promise<void> {
+    const token = ++listToken
     state.error = null
     state.adoDown = null
     state.featuresNote = null
     state.searching = reconnect ? 'reconnect' : 'search'
     try {
-      state.features = await invoke(reconnect ? 'flow.reconnectAdo' : 'flow.features', { projectId, query })
-      if (state.features.length === 0) {
-        state.featuresNote = 'No Feature matched that.'
+      const features = await invoke(reconnect ? 'flow.reconnectAdo' : 'flow.features', { projectId, query })
+      if (token !== listToken) return
+      state.features = features
+      if (features.length === 0) {
+        state.featuresNote = query.trim()
+          ? 'No open Feature assigned to you matches that.'
+          : 'No open Feature is assigned to you.'
       }
     } catch (error) {
+      if (token !== listToken) return
       state.features = []
       if (isIpcError(error) && error.code === 'MCP_NOT_CONNECTED') state.adoDown = error.message
       else state.error = errorMessage(error)
     } finally {
-      state.searching = null
+      if (token === listToken) state.searching = null
+    }
+  },
+
+  async cancelFeatures(projectId: string): Promise<void> {
+    listToken += 1
+    state.searching = null
+    state.listingByProject[projectId] = null
+    state.featuresNote = 'You cancelled the list.'
+    try {
+      await invoke('flow.cancelFeatures', { projectId })
+    } catch (error) {
+      state.error = errorMessage(error)
     }
   },
 

@@ -137,6 +137,16 @@ describe('the invoke channel', () => {
     expect(listed).toMatchObject({ ok: true, value: { archived: [{ id: project.id, keptBy: 'flow_worktree' }] } })
   })
 
+  it.each([
+    { kind: 'ado', featureId: 'F-1', featureTitle: 'x', url: null },
+    { kind: 'ado', featureId: '40235', featureTitle: 'x', url: 'https://evil.example/A/_workitems/edit/40235' },
+    { kind: 'ado', featureId: '40235', featureTitle: 'x', url: 'https://dev.azure.com/PepkorPL/A%20Plus/_workitems/edit/1' },
+  ])('refuses a Flow start from an Azure DevOps source that is not a Feature link or id: %o', async (source) => {
+    const project = harness.repos.projects.insert({ name: 'a', path: 'C:\\a', source: 'manual' })
+    const result = await harness.call('flow.start', { projectId: project.id, source, autopilot: false, autoShip: false })
+    expect(result).toMatchObject({ ok: false, error: { code: 'INVALID_PATH' } })
+  })
+
   it('deletes a project only once none of its sessions is live', async () => {
     const project = harness.repos.projects.insert({ name: 'a', path: 'C:\\a', source: 'manual' })
     harness.repos.sessions.insert({

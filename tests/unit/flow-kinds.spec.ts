@@ -84,6 +84,7 @@ function marker(stage: FlowStage, overrides: Partial<FlowStageMarker> = {}): Flo
     summary: `Did ${stage}.`,
     why: null,
     specDir: null,
+    title: null,
     tasksDone: null,
     tasksTotal: null,
     verdict: null,

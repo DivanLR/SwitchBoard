@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { allowedPullRequestUrl, flowMarkerBroken, parseFlowMarker } from '@main/flow/flow-markers'
-import { clarifyPrompt, featuresPrompt, planSteps, specifyPrompt } from '@main/flow/flow-prompts'
+import { clarifyPrompt, featuresPrompt, planSteps, specHandshake, specifyPrompt } from '@main/flow/flow-prompts'
 
 function line(json: unknown): string {
   return `Here is my report.\nSWB_FLOW: ${JSON.stringify(json)}`
@@ -129,7 +129,61 @@ describe('the features marker', () => {
     )
     expect(marker?.kind).toBe('features')
     if (marker?.kind !== 'features') return
-    expect(marker.features).toEqual([{ id: '91', title: 'Checkout v2', state: null, url: null }])
+    expect(marker.features).toEqual([{ id: '91', title: 'Checkout v2', state: null, project: null, url: null }])
+  })
+
+  it('keeps the project and the canonical link, and drops a link to another item or an id that is not a number', () => {
+    const marker = parseFlowMarker(
+      line({
+        kind: 'features',
+        features: [
+          {
+            id: '40235',
+            title: 'A+ Facial Biometrics Exemption Enhancement',
+            state: 'Testing',
+            project: 'A Plus',
+            url: 'https://dev.azure.com/PepkorPL/A%20Plus/_workitems/edit/40235/',
+          },
+          {
+            id: 40921,
+            title: 'Workforce Attendance Management Module',
+            state: 'Analysis',
+            url: 'https://dev.azure.com/PepkorPL/Einstein/_workitems/edit/40921',
+          },
+          { id: '40542', title: 'Other', state: 'Testing', project: 'A Plus', url: 'https://dev.azure.com/PepkorPL/A%20Plus/_workitems/edit/1' },
+          { id: 'F-1', title: 'Not a work item' },
+        ],
+      }),
+    )
+    if (marker?.kind !== 'features') throw new Error('no features marker')
+    expect(marker.features).toEqual([
+      {
+        id: '40235',
+        title: 'A+ Facial Biometrics Exemption Enhancement',
+        state: 'Testing',
+        project: 'A Plus',
+        url: 'https://dev.azure.com/PepkorPL/A%20Plus/_workitems/edit/40235',
+      },
+      {
+        id: '40921',
+        title: 'Workforce Attendance Management Module',
+        state: 'Analysis',
+        project: 'Einstein',
+        url: 'https://dev.azure.com/PepkorPL/Einstein/_workitems/edit/40921',
+      },
+      { id: '40542', title: 'Other', state: 'Testing', project: 'A Plus', url: null },
+    ])
+  })
+})
+
+describe('the spec marker title', () => {
+  it('reads the Feature title as one line, and leaves it null when absent', () => {
+    const marker = parseFlowMarker(
+      line({ kind: 'stage', stage: 'spec', outcome: 'done', summary: 's', title: ' A+ Facial Biometrics\nExemption ' }),
+    )
+    expect(marker?.kind === 'stage' && marker.title).toBe('A+ Facial Biometrics Exemption')
+    const bare = parseFlowMarker(line({ kind: 'stage', stage: 'spec', outcome: 'done', summary: 's' }))
+    expect(bare?.kind === 'stage' && bare.title).toBeNull()
   })
 })
 
@@ -185,6 +239,49 @@ describe('the prompts', () => {
     expect(prompt).toContain('checkout')
     expect(prompt).toContain('Read only: create nothing, update nothing.')
     expect(prompt).toContain('SWB_FLOW:')
+  })
+
+  it('lists only my open Features, in one project listing and two parallel batches, with project on every call', () => {
+    const prompt = featuresPrompt('')
+    expect(prompt).toContain('assigned to me')
+    expect(prompt).toContain('1. Call core_list_projects once, with top 100.')
+    expect(prompt).toContain('2. In ONE parallel batch, call wit_query for every project')
+    expect(prompt).toContain('3. In ONE parallel batch, call wit_work_item for every project that returned ids')
+    expect(prompt).toContain('"get_batch"')
+    expect(prompt).toContain('["System.Title","System.State","System.WorkItemType","System.ChangedDate"]')
+    expect(prompt).toContain(
+      "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project AND [System.WorkItemType] = 'Feature' " +
+        "AND [System.AssignedTo] = @Me AND [System.State] NOT IN ('Closed', 'Removed', 'Done') ORDER BY [System.ChangedDate] DESC",
+    )
+    expect(prompt).toContain('Pass project on every wit_query and wit_work_item call')
+    expect(prompt).toContain('Do not use search_workitem')
+    expect(prompt).toContain('"project":"<project name>"')
+    expect(prompt).not.toContain('CONTAINS')
+  })
+
+  it('adds the free-text filter to the wiql as a title clause, with its quotes escaped', () => {
+    const prompt = featuresPrompt("  O'Brien   loyalty ")
+    expect(prompt).toContain("AND [System.Title] CONTAINS 'O''Brien loyalty' ORDER BY [System.ChangedDate] DESC")
+    expect(prompt).toContain("Only Features matching: O'Brien loyalty.")
+  })
+
+  it('tells the spec stage the project from the link, or how to find it for a bare id', () => {
+    const run = { source: 'ado' as const, sourceRef: '40235', description: '', autopilot: true }
+    const linked = specifyPrompt({
+      ...run,
+      title: 'Feature 40235',
+      sourceUrl: 'https://dev.azure.com/PepkorPL/A%20Plus/_workitems/edit/40235',
+    })
+    expect(linked.startsWith('/speckit-specify Azure DevOps Feature 40235. Read it')).toBe(true)
+    expect(linked).toContain('It is in project "A Plus".')
+    expect(linked).toContain('Pass project on every wit_query and wit_work_item call')
+    const bare = specifyPrompt({ ...run, title: 'Feature 40235', sourceUrl: null })
+    expect(bare).toContain('Its project is not known yet: call core_list_projects once')
+  })
+
+  it('asks the spec stage of an ado run for the Feature title, and no other run', () => {
+    expect(specHandshake(true)).toContain('"title":"<the Feature\'s title exactly as the ado server returned it>"')
+    expect(specHandshake(false)).not.toContain('"title"')
   })
 
   it('starts an ADO spec step with the slash command and carries the ado rule in its argument', () => {

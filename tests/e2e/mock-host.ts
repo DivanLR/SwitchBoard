@@ -78,7 +78,8 @@ export interface MockDriver {
   completeTurn: (sessionId: string, costUsd?: number) => void
   setStatus: (sessionId: string, status: string) => void
   reportVerifyResult: (projectId: string, status: string, report: unknown) => void
-  setAdoFeatures: (features: { id: string; title: string; state?: string | null }[]) => void
+  setAdoFeatures: (features: { id: string; title: string; state?: string | null; project?: string | null }[]) => void
+  holdAdoFeatures: (held: boolean) => void
   setAdoConnected: (on: boolean, why?: string) => void
   reportFlowStage: (
     runId: string,
@@ -124,6 +125,7 @@ export interface MockDriver {
     pluginInstalls: { marketplace: string; pkg: string }[]
     diffApplies: { projectId: string; path: string; lines: string[]; instruction: string }[]
     adoReconnects: number
+    adoCancels: number
   }
 }
 
@@ -465,6 +467,9 @@ export function installMockHost(scenario: MockScenario): void {
   let adoConnected = true
   let adoWhy = 'it failed to start'
   let adoReconnects = 0
+  let adoCancels = 0
+  let adoHeld = false
+  let adoListing: { projectId: string; sessionId: string; settle: (cancelled: boolean) => void } | null = null
 
   const FLOW_KIND_ORDER: Record<string, readonly string[]> = {
     feature: ['spec', 'plan', 'build', 'clean', 'test', 'review', 'ship'],
@@ -488,7 +493,11 @@ export function installMockHost(scenario: MockScenario): void {
   }
 
   const pushFlow = (projectId: string): void => {
-    push('push.flowChanged', { projectId, ...flowSnapshot(projectId) })
+    push('push.flowChanged', {
+      projectId,
+      ...flowSnapshot(projectId),
+      listing: adoListing?.projectId === projectId ? adoListing.sessionId : null,
+    })
   }
 
   function flowRun(runId: string): AnyRecord | undefined {
@@ -1229,10 +1238,26 @@ export function installMockHost(scenario: MockScenario): void {
         }
       }
       const session = await sectionSession(projectId, 'flow')
-      const text = `List the Features I could work on next in Azure DevOps.\n${String(req.query ?? '')}\nSWB_FLOW`
+      const text = `List the Azure DevOps Features assigned to me.\n${String(req.query ?? '')}\nSWB_FLOW`
       sends.push({ sessionId: session.id, text })
       appendEvent(session.id, 'prompt', { text, pending: false })
+      if (adoHeld) {
+        const cancelled = await new Promise<boolean>((settle) => {
+          adoListing = { projectId, sessionId: session.id, settle }
+          pushFlow(projectId)
+        })
+        adoListing = null
+        pushFlow(projectId)
+        if (cancelled) {
+          void invokeHandlers['sessions.stop']({ sessionId: session.id })
+          throw { code: 'NOT_LIVE', message: 'The Feature list was cancelled.' }
+        }
+      }
       return [...adoFeatures]
+    },
+    'flow.cancelFeatures': () => {
+      adoCancels += 1
+      adoListing?.settle(true)
     },
     'flow.existingSpecs': (req) => {
       const state = specKitByProject.get(String(req.projectId)) as { specs?: AnyRecord[] } | undefined
@@ -1881,8 +1906,13 @@ export function installMockHost(scenario: MockScenario): void {
         id: feature.id,
         title: feature.title,
         state: feature.state ?? 'Active',
+        project: feature.project ?? null,
         url: null,
       }))
+    },
+    holdAdoFeatures: (held) => {
+      adoHeld = held
+      if (!held) adoListing?.settle(false)
     },
     setAdoConnected: (on, why) => {
       adoConnected = on
@@ -2002,6 +2032,7 @@ export function installMockHost(scenario: MockScenario): void {
       pluginInstalls: [...pluginInstalls],
       diffApplies: [...diffApplies],
       adoReconnects,
+      adoCancels,
     }),
   }
 }

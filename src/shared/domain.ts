@@ -681,6 +681,7 @@ export interface FlowFeature {
   id: string
   title: string
   state: string | null
+  project: string | null
   url: string | null
 }
 

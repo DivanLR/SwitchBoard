@@ -93,6 +93,15 @@ const ADO_HOLD_MS = 10 * 60_000
 
 const ADO_LISTED_MS = 10_000
 
+export const FEATURES_TIMEOUT_MS = 10 * 60_000
+
+const LISTING_CANCELLED: IpcError = { code: 'NOT_LIVE', message: 'The Feature list was cancelled.' }
+
+const LISTING_TIMED_OUT: IpcError = {
+  code: 'NOT_LIVE',
+  message: 'The session did not answer with a Feature list in time.',
+}
+
 function adoProblem(
   state: { status: string; error: string | null } | null,
   waitMs: number,
@@ -221,6 +230,7 @@ export class FlowSupervisor {
   private rounds = new Map<string, number>()
   private looped = new Set<string>()
   private adoSessions = new Map<string, { sessionId: string; timer: ReturnType<typeof setTimeout> }>()
+  private listings = new Map<string, string>()
 
   constructor(
     private repos: Repositories,
@@ -243,9 +253,13 @@ export class FlowSupervisor {
     }
   }
 
-  async features(projectId: string, query: string, timeoutMs = 120_000): Promise<FlowFeature[]> {
+  listingSession(projectId: string): string | null {
+    return this.listings.get(projectId) ?? null
+  }
+
+  async features(projectId: string, query: string, timeoutMs = FEATURES_TIMEOUT_MS): Promise<FlowFeature[]> {
     const project = this.requireProject(projectId)
-    this.dropAdoSession(projectId)
+    this.cancelFeatures(projectId)
     const session = await this.manager.startSession(project.id, false, project.defaultSessionMode, {
       background: true,
       section: 'flow',
@@ -253,7 +267,7 @@ export class FlowSupervisor {
     return this.listFeatures(projectId, session.id, query, timeoutMs)
   }
 
-  async reconnectAdo(projectId: string, query: string, timeoutMs = 120_000): Promise<FlowFeature[]> {
+  async reconnectAdo(projectId: string, query: string, timeoutMs = FEATURES_TIMEOUT_MS): Promise<FlowFeature[]> {
     this.requireProject(projectId)
     const held = this.adoSessions.get(projectId)
     if (!held || !this.manager.liveSessionIds().includes(held.sessionId)) return this.features(projectId, query, timeoutMs)
@@ -263,28 +277,65 @@ export class FlowSupervisor {
     return this.listFeatures(projectId, held.sessionId, query, timeoutMs)
   }
 
+  cancelFeatures(projectId: string): void {
+    this.dropAdoSession(projectId)
+    const sessionId = this.listings.get(projectId)
+    if (sessionId) this.settleListing(sessionId, LISTING_CANCELLED, 'stop')
+  }
+
   private async listFeatures(projectId: string, sessionId: string, query: string, timeoutMs: number): Promise<FlowFeature[]> {
+    this.listings.set(projectId, sessionId)
+    this.callbacks.onFlowChanged(projectId)
     try {
       await this.requireAdo(sessionId)
     } catch (error) {
+      if (this.listings.get(projectId) !== sessionId) throw LISTING_CANCELLED
+      this.listings.delete(projectId)
+      this.callbacks.onFlowChanged(projectId)
       if ((error as Partial<IpcError>).code === 'MCP_NOT_CONNECTED') this.holdAdoSession(projectId, sessionId)
       else this.manager.endFlowSession(sessionId)
       throw error
     }
+    if (this.listings.get(projectId) !== sessionId) throw LISTING_CANCELLED
     return new Promise<FlowFeature[]>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.featuresWaiters.delete(sessionId)
-        this.manager.endFlowSession(sessionId)
-        reject({
-          code: 'NOT_LIVE',
-          message: 'The session did not answer with a Feature list in time.',
-        } satisfies IpcError)
-      }, timeoutMs)
+      const timer = setTimeout(() => this.settleListing(sessionId, LISTING_TIMED_OUT, 'stop'), timeoutMs)
       timer.unref?.()
       this.featuresWaiters.set(sessionId, { resolve, reject, timer })
-      this.manager.watchFlow(sessionId)
-      this.manager.sendMessage(sessionId, featuresPrompt(query))
+      try {
+        this.manager.watchFlow(sessionId)
+        this.manager.sendMessage(sessionId, featuresPrompt(query))
+      } catch (error) {
+        this.settleListing(
+          sessionId,
+          { code: 'NOT_LIVE', message: `The session could not take the Feature list request: ${errorText(error)}` },
+          'end',
+        )
+      }
     })
+  }
+
+  private isListing(sessionId: string): boolean {
+    return this.featuresWaiters.has(sessionId) || [...this.listings.values()].includes(sessionId)
+  }
+
+  private settleListing(sessionId: string, outcome: FlowFeature[] | IpcError, close: 'end' | 'stop' | 'gone'): void {
+    const waiter = this.featuresWaiters.get(sessionId)
+    if (waiter) {
+      this.featuresWaiters.delete(sessionId)
+      clearTimeout(waiter.timer)
+    }
+    for (const [projectId, listed] of [...this.listings]) {
+      if (listed !== sessionId) continue
+      this.listings.delete(projectId)
+      this.callbacks.onFlowChanged(projectId)
+    }
+    if (close === 'end') this.manager.endFlowSession(sessionId)
+    if (close === 'stop') {
+      void this.manager.stopSession(sessionId, 'The Feature list was stopped before it finished.').catch(() => {})
+    }
+    if (!waiter) return
+    if (Array.isArray(outcome)) waiter.resolve(outcome)
+    else waiter.reject(outcome)
   }
 
   private holdAdoSession(projectId: string, sessionId: string): void {
@@ -737,12 +788,7 @@ export class FlowSupervisor {
 
   onFlowMarker(sessionId: string, marker: FlowMarker): void {
     if (marker.kind === 'features') {
-      const waiter = this.featuresWaiters.get(sessionId)
-      if (!waiter) return
-      this.featuresWaiters.delete(sessionId)
-      clearTimeout(waiter.timer)
-      this.manager.endFlowSession(sessionId)
-      waiter.resolve(marker.features)
+      if (this.featuresWaiters.has(sessionId)) this.settleListing(sessionId, marker.features, 'end')
       return
     }
     const ctx = this.sessionStage.get(sessionId)
@@ -795,14 +841,8 @@ export class FlowSupervisor {
   }
 
   onSessionEnded(sessionId: string, _reason: SessionEndReason | 'crashed'): void {
-    const waiter = this.featuresWaiters.get(sessionId)
-    if (waiter) {
-      this.featuresWaiters.delete(sessionId)
-      clearTimeout(waiter.timer)
-      waiter.reject({
-        code: 'NOT_LIVE',
-        message: 'The session ended before it listed any Features.',
-      } satisfies IpcError)
+    if (this.isListing(sessionId)) {
+      this.settleListing(sessionId, { code: 'NOT_LIVE', message: 'The session ended before it listed any Features.' }, 'gone')
     }
     const ctx = this.sessionStage.get(sessionId)
     if (!ctx) return
@@ -817,17 +857,17 @@ export class FlowSupervisor {
   }
 
   onTurnEnded(sessionId: string, error: string | null = null): void {
-    const waiter = this.featuresWaiters.get(sessionId)
-    if (waiter) {
-      this.featuresWaiters.delete(sessionId)
-      clearTimeout(waiter.timer)
-      this.manager.endFlowSession(sessionId)
-      waiter.reject({
-        code: 'NOT_LIVE',
-        message: error
-          ? `The session could not list the Features: ${error}`
-          : 'The session answered without a Feature list. Open its output to see what it said.',
-      } satisfies IpcError)
+    if (this.featuresWaiters.has(sessionId)) {
+      this.settleListing(
+        sessionId,
+        {
+          code: 'NOT_LIVE',
+          message: error
+            ? `The session could not list the Features: ${error}`
+            : 'The session answered without a Feature list. Open its output to see what it said.',
+        },
+        'end',
+      )
       return
     }
     const ctx = this.sessionStage.get(sessionId)
@@ -1106,7 +1146,7 @@ export class FlowSupervisor {
       case 'spec': {
         const root = this.rootOf(run) ?? this.requireProject(run.projectId).path
         const constitution = (await readConstitutionState(root)) === 'written' ? [] : [constitutionPrompt(run.autopilot)]
-        return { steps: [...constitution, specifyPrompt(run), clarifyPrompt(run.autopilot)], handshake: specHandshake() }
+        return { steps: [...constitution, specifyPrompt(run), clarifyPrompt(run.autopilot)], handshake: specHandshake(run.source === 'ado') }
       }
       case 'plan':
         return {
@@ -1276,6 +1316,7 @@ export class FlowSupervisor {
     }
     const patch: Parameters<Repositories['flowRuns']['update']>[1] = {}
     if (stage === 'spec') patch.specDir = this.resolveSpecDir(run, marker.specDir)
+    if (stage === 'spec' && run.source === 'ado' && marker.title) patch.title = marker.title
     let prUrl = marker.prUrl
     let prId = marker.prId
     let summary = [marker.summary, ...found.notes].filter(Boolean).join(' ') || null

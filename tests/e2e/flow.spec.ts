@@ -120,6 +120,82 @@ test('an unconnected ado server says which state it is in, and Reconnect retries
   expect((await page.evaluate(() => window.__mock.state())).adoReconnects).toBe(2)
 })
 
+test('the Feature list says it shows the Features assigned to you, with each one’s project', async ({ page }) => {
+  await openFlow(page)
+  await page.getByTestId('flow-new').click()
+  await page.getByTestId('flow-source-ado').click()
+  await expect(page.getByTestId('flow-features-empty')).toHaveText(
+    'No open Feature is assigned to you. This list shows the Features assigned to you that are not closed, removed or done.',
+  )
+
+  await page.evaluate(() =>
+    window.__mock.setAdoFeatures([
+      { id: '40235', title: 'A+ Facial Biometrics Exemption Enhancement', state: 'Testing', project: 'A Plus' },
+      { id: '40921', title: 'Workforce Attendance Management Module', state: 'Analysis', project: 'Einstein' },
+    ]),
+  )
+  await page.getByTestId('flow-feature-refresh').click()
+  await expect(page.getByTestId('flow-feature-40235-project')).toHaveText('A Plus')
+  await expect(page.getByTestId('flow-feature-40921')).toContainText('Analysis')
+  await expect(page.getByTestId('flow-features-empty')).toHaveCount(0)
+})
+
+test('a pasted Feature link or id shows what it names, and Start begins the run from it with no listing', async ({ page }) => {
+  await openFlow(page)
+  await page.getByTestId('flow-new').click()
+  await page.getByTestId('flow-source-ado').click()
+  await expect(page.getByTestId('flow-features-empty')).toBeVisible()
+
+  const link = page.getByTestId('flow-feature-link')
+  await link.fill('https://dev.azure.com/PepkorPL/A%20Plus/_workitems/edit')
+  await expect(page.getByTestId('flow-feature-link-invalid')).toBeVisible()
+  await expect(page.getByTestId('flow-start')).toBeDisabled()
+
+  await link.fill('40542')
+  await expect(page.getByTestId('flow-feature-link-recognised')).toContainText('Feature 40542')
+  await expect(page.getByTestId('flow-feature-link-recognised')).toContainText('project and organisation from the ado server')
+
+  await link.fill('https://pepkorpl.visualstudio.com/A%20Plus/_workitems/edit/40235/?src=WorkItemMention')
+  const recognised = page.getByTestId('flow-feature-link-recognised')
+  await expect(recognised).toContainText('Feature 40235 in project A Plus, organisation pepkorpl.')
+  await expect(page.getByTestId('flow-feature-link-invalid')).toHaveCount(0)
+  await expect(page.getByTestId('flow-start-reason')).toHaveCount(0)
+  const listings = (await page.evaluate(() => window.__mock.state().sends)).length
+
+  await page.getByTestId('flow-start').click()
+  await expect(page.getByTestId('flow-run')).toContainText('Feature 40235')
+  await expect(page.getByTestId('flow-stage-spec')).toContainText('running')
+  const sends = await page.evaluate(() => window.__mock.state().sends)
+  expect(sends.slice(listings).some((send) => send.text.includes('Features assigned to me'))).toBe(false)
+})
+
+test('while the list loads it shows the listing session, and Cancel ends it', async ({ page }) => {
+  await openFlow(page)
+  await page.evaluate(() => window.__mock.holdAdoFeatures(true))
+  await page.getByTestId('flow-new').click()
+  await page.getByTestId('flow-source-ado').click()
+
+  await expect(page.getByTestId('flow-features-progress')).toContainText('Querying every project')
+  await expect(page.getByTestId('flow-features-session')).toContainText('List the Azure DevOps Features assigned to me.')
+  await expect(page.getByTestId('flow-features-empty')).toHaveText('Asking Azure DevOps for the Features assigned to you…')
+
+  await page.getByTestId('flow-features-cancel').click()
+  await expect(page.getByTestId('flow-features-progress')).toHaveCount(0)
+  await expect(page.getByTestId('flow-features-empty')).toHaveText(
+    'You cancelled the list. This list shows the Features assigned to you that are not closed, removed or done.',
+  )
+  await expect(page.getByTestId('flow-error')).toHaveCount(0)
+  await expect(page.getByTestId('flow-feature-refresh')).toBeEnabled()
+  expect((await page.evaluate(() => window.__mock.state())).adoCancels).toBe(1)
+
+  await page.evaluate((features) => {
+    window.__mock.setAdoFeatures(features)
+    window.__mock.holdAdoFeatures(false)
+  }, FEATURES)
+  await page.getByTestId('flow-feature-refresh').click()
+  await expect(page.getByTestId('flow-feature-4711')).toContainText('Checkout v2')
+})
+
 test('starts a run from a written description', async ({ page }) => {
   await openFlow(page)
   await page.getByTestId('flow-new').click()

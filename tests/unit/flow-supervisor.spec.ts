@@ -10,7 +10,7 @@ import type { FlowStartSource } from '@shared/ipc-types'
 
 const { openDatabase } = await import('@main/store/db')
 const { createRepositories } = await import('@main/store/repositories')
-const { FlowSupervisor } = await import('@main/flow/flow-supervisor')
+const { FEATURES_TIMEOUT_MS, FlowSupervisor } = await import('@main/flow/flow-supervisor')
 
 type Repos = ReturnType<typeof createRepositories>
 
@@ -268,6 +268,7 @@ function specMarker(overrides: Partial<FlowStageMarker> = {}): FlowStageMarker {
     summary: 'Wrote the spec.',
     why: null,
     specDir: 'specs/001-checkout',
+    title: null,
     tasksDone: null,
     tasksTotal: null,
     verdict: null,
@@ -526,8 +527,9 @@ describe('the Feature list', () => {
     const h = setup({ mcp: () => (++polls < 5 ? { status: 'pending', error: null } : { status: 'connected', error: null }) })
     const listing = h.flow.features(h.project.id, '')
     await vi.waitFor(() => expect(h.sent).toHaveLength(1))
-    h.flow.onFlowMarker(h.sent[0].sessionId, { kind: 'features', features: [{ id: '1', title: 'A', state: null, url: null }] })
-    await expect(listing).resolves.toEqual([{ id: '1', title: 'A', state: null, url: null }])
+    const found = [{ id: '1', title: 'A', state: null, project: null, url: null }]
+    h.flow.onFlowMarker(h.sent[0].sessionId, { kind: 'features', features: found })
+    await expect(listing).resolves.toEqual(found)
     expect(polls).toBe(5)
   })
 
@@ -557,6 +559,85 @@ describe('the Feature list', () => {
     expect(h.manager.reconnectMcpServer).toHaveBeenLastCalledWith('session-2', 'ado')
   })
 
+  it('names the listing session while it runs, and ends it once the Features arrive', async () => {
+    const h = setup()
+    const listing = h.flow.features(h.project.id, '')
+    await vi.waitFor(() => expect(h.sent).toHaveLength(1))
+    const sid = h.sent[0].sessionId
+    expect(h.flow.listingSession(h.project.id)).toBe(sid)
+    expect(h.changed).toContain(h.project.id)
+    h.changed.length = 0
+    h.flow.onFlowMarker(sid, { kind: 'features', features: [] })
+    await expect(listing).resolves.toEqual([])
+    expect(h.flow.listingSession(h.project.id)).toBeNull()
+    expect(h.changed).toEqual([h.project.id])
+    expect(h.ended).toEqual([sid])
+  })
+
+  it('waits ten minutes by default, then stops the listing session', async () => {
+    expect(FEATURES_TIMEOUT_MS).toBe(10 * 60_000)
+    const h = setup()
+    const listing = h.flow.features(h.project.id, '', 30)
+    await expect(listing).rejects.toEqual({ code: 'NOT_LIVE', message: 'The session did not answer with a Feature list in time.' })
+    expect(h.stopped).toEqual(['session-1'])
+    expect(h.flow.listingSession(h.project.id)).toBeNull()
+  })
+
+  it('stops the listing session when the Feature list is cancelled', async () => {
+    const h = setup()
+    const listing = h.flow.features(h.project.id, '')
+    await vi.waitFor(() => expect(h.sent).toHaveLength(1))
+    h.flow.cancelFeatures(h.project.id)
+    await expect(listing).rejects.toMatchObject({ code: 'NOT_LIVE', message: 'The Feature list was cancelled.' })
+    expect(h.stopped).toEqual(['session-1'])
+    expect(h.flow.listingSession(h.project.id)).toBeNull()
+    h.flow.onSessionEnded('session-1', 'stopped')
+    h.flow.onFlowMarker('session-1', { kind: 'features', features: [] })
+    expect(h.ended).toEqual([])
+  })
+
+  it('stops the listing session when it is cancelled while ado is still starting, and sends it nothing', async () => {
+    let gone = false
+    const h = setup({ mcp: () => (gone ? null : { status: 'pending', error: null }) })
+    const listing = h.flow.features(h.project.id, '')
+    await vi.waitFor(() => expect(h.flow.listingSession(h.project.id)).toBe('session-1'))
+    h.flow.cancelFeatures(h.project.id)
+    gone = true
+    await expect(listing).rejects.toMatchObject({ message: 'The Feature list was cancelled.' })
+    expect(h.stopped).toEqual(['session-1'])
+    expect(h.sent).toEqual([])
+  })
+
+  it('ends the listing session when its turn fails, or when it cannot take the request', async () => {
+    const h = setup()
+    const failing = h.flow.features(h.project.id, '')
+    await vi.waitFor(() => expect(h.sent).toHaveLength(1))
+    h.flow.onTurnEnded('session-1', 'Overloaded')
+    await expect(failing).rejects.toMatchObject({ message: 'The session could not list the Features: Overloaded' })
+    expect(h.ended).toEqual(['session-1'])
+
+    h.manager.sendMessage = () => {
+      throw new Error('That session has ended.')
+    }
+    await expect(h.flow.features(h.project.id, '')).rejects.toMatchObject({
+      message: 'The session could not take the Feature list request: That session has ended.',
+    })
+    expect(h.ended).toEqual(['session-1', 'session-2'])
+    expect(h.flow.listingSession(h.project.id)).toBeNull()
+  })
+
+  it('cancels a running listing when a new one starts', async () => {
+    const h = setup()
+    const first = h.flow.features(h.project.id, '')
+    await vi.waitFor(() => expect(h.sent).toHaveLength(1))
+    const second = h.flow.features(h.project.id, 'checkout')
+    await expect(first).rejects.toMatchObject({ message: 'The Feature list was cancelled.' })
+    await vi.waitFor(() => expect(h.sent).toHaveLength(2))
+    expect(h.stopped).toEqual(['session-1'])
+    h.flow.onFlowMarker('session-2', { kind: 'features', features: [] })
+    await expect(second).resolves.toEqual([])
+  })
+
   it('checks the ado state again when the spec stage of an ado run is retried', async () => {
     let state: McpState = { status: 'pending', error: null }
     const h = setup({ mcp: () => state })
@@ -576,6 +657,44 @@ describe('the Feature list', () => {
     await h.flow.retry(run.id)
     expect(h.repos.flowStages.get(run.id, 'spec')?.status).toBe('running')
     expect(h.sent.at(-1)?.text).toContain('/speckit-specify')
+  })
+})
+
+describe('an ado run started from a pasted link', () => {
+  const linked: FlowStartSource = {
+    kind: 'ado',
+    featureId: '40235',
+    featureTitle: 'Feature 40235',
+    url: 'https://dev.azure.com/PepkorPL/A%20Plus/_workitems/edit/40235',
+  }
+
+  it('starts as "Feature <id>", asks the spec stage for the real title, and shows that title once it reports', async () => {
+    const h = setup()
+    const run = await h.flow.start({ projectId: h.project.id, source: linked, autopilot: false, autoShip: false })
+    expect(run.title).toBe('Feature 40235')
+    expect(h.manager.startSession).toHaveBeenCalledTimes(1)
+    const sid = sessionOf(h, run.id)
+    expect(h.sent[0].text).toContain('It is in project "A Plus".')
+    h.flow.onTurnEnded(sid)
+    h.flow.onTurnEnded(sid)
+    expect(h.sent.at(-1)?.text).toContain('"title":"<the Feature\'s title exactly as the ado server returned it>"')
+    h.flow.onFlowMarker(sid, specMarker({ title: 'A+ Facial Biometrics Exemption Enhancement' }))
+    expect(h.repos.flowRuns.byId(run.id)?.title).toBe('A+ Facial Biometrics Exemption Enhancement')
+  })
+
+  it('keeps the title of a written run whatever the spec stage reports', async () => {
+    const h = setup()
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+    const sid = sessionOf(h, run.id)
+    h.flow.onFlowMarker(sid, specMarker({ title: 'Something else' }))
+    expect(h.repos.flowRuns.byId(run.id)?.title).toBe('Checkout v2')
+  })
+
+  it('keeps "Feature <id>" when the spec stage reports no title', async () => {
+    const h = setup()
+    const run = await h.flow.start({ projectId: h.project.id, source: linked, autopilot: false, autoShip: false })
+    h.flow.onFlowMarker(sessionOf(h, run.id), specMarker())
+    expect(h.repos.flowRuns.byId(run.id)?.title).toBe('Feature 40235')
   })
 })
 

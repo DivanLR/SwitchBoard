@@ -12,6 +12,7 @@ import {
   isDiagramFilePick,
 } from '@shared/diagram'
 import { applyToRegionPrompt } from '@shared/diff-apply'
+import { checkedAdoSource } from '@shared/ado-link'
 import type {
   Counters,
   FlowSnapshot,
@@ -691,6 +692,10 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       requireProject(req.projectId)
       return flow.reconnectAdo(req.projectId, req.query ?? '')
     },
+    'flow.cancelFeatures': async (req) => {
+      requireProject(req.projectId)
+      flow.cancelFeatures(req.projectId)
+    },
     'flow.existingSpecs': async (req) => {
       requireProject(req.projectId)
       return flow.existingSpecs(req.projectId)
@@ -704,9 +709,16 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       if (req.companions?.some((companion) => companion.projectId === dbProjectId)) {
         throw { code: 'RULE_NOT_ALLOWED', message: 'The Database project cannot be part of a Flow run.' } satisfies IpcError
       }
+      const source = req.source.kind === 'ado' ? checkedAdoSource(req.source) : req.source
+      if (!source) {
+        throw {
+          code: 'INVALID_PATH',
+          message: 'That is not an Azure DevOps Feature link or id. Paste a link to the Feature, or its number.',
+        } satisfies IpcError
+      }
       const run = await flow.start({
         projectId: req.projectId,
-        source: req.source,
+        source,
         autopilot: req.autopilot,
         autoShip: req.autoShip,
         checklist: req.checklist,

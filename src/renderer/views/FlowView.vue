@@ -19,7 +19,7 @@ onMounted(() => {
   if (flow.seed?.projectId === props.projectId) creating.value = true
   void flow.load(props.projectId)
   stopPush = window.switchboard.on('push.flowChanged', (push) => {
-    if (push.projectId === props.projectId) flow.applyPush(push.projectId, push.runs, push.stages)
+    if (push.projectId === props.projectId) flow.applyPush(push.projectId, push.runs, push.stages, push.listing)
   })
 })
 onUnmounted(() => stopPush?.())

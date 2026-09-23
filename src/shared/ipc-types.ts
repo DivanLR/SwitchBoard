@@ -274,6 +274,7 @@ export interface InvokeMap {
   'flow.list': { req: { projectId: string }; res: FlowSnapshot }
   'flow.features': { req: { projectId: string; query?: string }; res: FlowFeature[] }
   'flow.reconnectAdo': { req: { projectId: string; query?: string }; res: FlowFeature[] }
+  'flow.cancelFeatures': { req: { projectId: string }; res: void }
   'flow.existingSpecs': { req: { projectId: string }; res: SpecSummary[] }
   'flow.detectStacks': { req: { projectId: string }; res: FlowStackId[] }
   'flow.start': {
@@ -379,6 +380,7 @@ interface VerifyChangedPush {
 
 interface FlowChangedPush extends FlowSnapshot {
   projectId: string
+  listing: string | null
 }
 
 interface DiagramsChangedPush {

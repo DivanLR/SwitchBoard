@@ -1023,11 +1023,13 @@ class FlowRunsRepo {
         | 'note'
         | 'finishedAt'
         | 'repos'
+        | 'title'
       >
     >,
   ): void {
     const columns = (
       [
+        'title',
         'stage',
         'status',
         'baseBranch',
