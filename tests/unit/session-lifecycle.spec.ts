@@ -172,7 +172,7 @@ describe('the queue belongs to the foreground session', () => {
     const { project, manager } = setup()
     manager.enqueueTask(project.id, 'queued work')
 
-    await manager.startSession(project.id, false, undefined, undefined, { background: true })
+    await manager.startSession(project.id, false, undefined, { background: true })
 
     expect(manager.listQueue(project.id)).toHaveLength(1)
     expect(queries[0].sent).toEqual([])

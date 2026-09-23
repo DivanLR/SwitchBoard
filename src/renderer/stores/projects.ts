@@ -152,20 +152,10 @@ const store = reactive({
     if (item) item.refs = refs
   },
 
-  async startSession(
-    projectId: string,
-    resume = false,
-    mode?: SessionMode,
-    carryTranscriptFrom?: string,
-  ): Promise<Session> {
+  async startSession(projectId: string, resume = false, mode?: SessionMode): Promise<Session> {
     state.starting = true
     try {
-      const session = await invoke('sessions.start', {
-        projectId,
-        resume,
-        mode,
-        carryTranscriptFrom,
-      })
+      const session = await invoke('sessions.start', { projectId, resume, mode })
       await this.refresh()
       this.focusSession(projectId, session.id)
       return session

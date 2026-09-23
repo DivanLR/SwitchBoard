@@ -129,7 +129,6 @@ describe('starting a run', () => {
       h.project.id,
       false,
       h.project.defaultSessionMode,
-      undefined,
       expect.objectContaining({ background: true, cwd: run.worktreePath }),
     )
     expect(h.watched).toEqual([sessionOf(h, run.id)])
@@ -497,7 +496,7 @@ describe('the stage sessions', () => {
       await h.flow.approve(run.id)
     }
     await h.flow.ship(run.id)
-    const opts = h.manager.startSession.mock.calls.map((call) => (call as unknown[])[4] as Record<string, unknown>)
+    const opts = h.manager.startSession.mock.calls.map((call) => (call as unknown[])[3] as Record<string, unknown>)
     expect(opts.map((o) => o.effort)).toEqual([undefined, undefined, 'max', undefined, undefined, undefined, undefined])
     expect(opts.map((o) => o.section)).toEqual(Array(7).fill('flow'))
     expect(opts.slice(0, 6).every((o) => o.denyTool === undefined)).toBe(true)

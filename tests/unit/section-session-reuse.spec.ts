@@ -106,7 +106,7 @@ describe('the session a section dispatch lands in', () => {
     const worktree = mkdtempSync(join(tmpdir(), 'section-worktree-'))
     dirs.push(worktree)
 
-    const session = await manager.startSession(project.id, false, undefined, undefined, {
+    const session = await manager.startSession(project.id, false, undefined, {
       background: true,
       cwd: worktree,
     })

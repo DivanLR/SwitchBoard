@@ -172,7 +172,7 @@ describe.runIf(enabled)('a section dispatching to a session it just started', ()
         gate: async () => ({ behavior: 'allow', updatedInput: {} }) as never,
       })
 
-      const session = await manager.startSession(project.id, false, undefined, undefined, {
+      const session = await manager.startSession(project.id, false, undefined, {
         background: true,
       })
       manager.sendMessage(session.id, 'Reply with the single word DRAWN and nothing else.')

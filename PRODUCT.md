@@ -154,14 +154,6 @@ Confirmed functionality:
 - A session can hand work to another open project; the receiving session is
   started and shown, never left in an invisible queue.
 
-Present but provisional, recorded so future work knows it exists and knows it is
-not yet load bearing:
-
-- **Session transcripts.** Each session exports a markdown copy of its prompt and
-  reply spine to a temporary file that expires twelve hours after its last write.
-  The newest one can be carried into a new session. The export reads the already
-  persisted events rather than keeping a second live log.
-
 Terminology and standing rules the code enforces:
 
 - A figure no run measured is reported as unmeasured. The application never

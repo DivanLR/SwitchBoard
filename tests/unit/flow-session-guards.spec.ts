@@ -83,7 +83,7 @@ function setup() {
 describe('a session started at a pinned effort', () => {
   it('still applies max and allows the Agent tool after its first send, whatever the Settings effort', async () => {
     const h = setup()
-    const session = await h.manager.startSession(h.project.id, false, undefined, undefined, {
+    const session = await h.manager.startSession(h.project.id, false, undefined, {
       background: true,
       effort: 'max',
     })
@@ -94,7 +94,7 @@ describe('a session started at a pinned effort', () => {
 
   it('leaves a session without one on the Settings effort', async () => {
     const h = setup()
-    const session = await h.manager.startSession(h.project.id, false, undefined, undefined, { background: true })
+    const session = await h.manager.startSession(h.project.id, false, undefined, { background: true })
     h.manager.sendMessage(session.id, 'Write the spec.')
     expect(flagCalls).toEqual([{ effortLevel: 'xhigh' }])
     expect((await h.hosted(session.id).gateSubagents()).hookSpecificOutput?.permissionDecision).toBe('deny')
@@ -104,7 +104,7 @@ describe('a session started at a pinned effort', () => {
 describe('the project task queue', () => {
   it('never drains a queued task or handover into a Flow stage session', async () => {
     const h = setup()
-    const flowSession = await h.manager.startSession(h.project.id, false, undefined, undefined, {
+    const flowSession = await h.manager.startSession(h.project.id, false, undefined, {
       background: true,
       section: 'flow',
     })
@@ -121,7 +121,7 @@ describe('the project task queue', () => {
 describe('a Flow stage session', () => {
   it('reports a turn that ended in an error with that error', async () => {
     const h = setup()
-    const session = await h.manager.startSession(h.project.id, false, undefined, undefined, { background: true })
+    const session = await h.manager.startSession(h.project.id, false, undefined, { background: true })
     h.manager.watchFlow(session.id)
     h.manager.sendMessage(session.id, 'Build it.')
     h.hosted(session.id).handleMessage({
@@ -136,7 +136,7 @@ describe('a Flow stage session', () => {
 
   it('reports neither a turn end nor a session end while the app is quitting', async () => {
     const h = setup()
-    const session = await h.manager.startSession(h.project.id, false, undefined, undefined, { background: true })
+    const session = await h.manager.startSession(h.project.id, false, undefined, { background: true })
     h.manager.watchFlow(session.id)
     h.manager.sendMessage(session.id, 'Build it.')
     h.inner.quitting = true

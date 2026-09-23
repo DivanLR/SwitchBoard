@@ -343,8 +343,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'terminal.resize': (req) => ptyHost.resize(req.id, req.cols, req.rows),
     'terminal.close': (req) => ptyHost.close(req.id),
     'sessions.rename': (req) => manager.renameSession(req.sessionId, req.label),
-    'sessions.start': (req) =>
-      manager.startSession(req.projectId, req.resume ?? false, req.mode, req.carryTranscriptFrom),
+    'sessions.start': (req) => manager.startSession(req.projectId, req.resume ?? false, req.mode),
     'clipboard.write': (req) => {
       clipboard.writeText(req.text)
     },

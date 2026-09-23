@@ -95,7 +95,6 @@ export interface MockDriver {
       mode?: string
       planMode?: boolean
       resume?: boolean
-      carryTranscriptFrom?: string
     }[]
     planModeChanges: { sessionId: string; enabled: boolean }[]
     diagramOpens: { projectId: string; file: string }[]
@@ -414,7 +413,6 @@ export function installMockHost(scenario: MockScenario): void {
     mode?: string
     planMode?: boolean
     resume?: boolean
-    carryTranscriptFrom?: string
   }[] = []
   const planModeChanges: { sessionId: string; enabled: boolean }[] = []
   const answers: { eventId: string; choice: string }[] = []
@@ -883,7 +881,6 @@ export function installMockHost(scenario: MockScenario): void {
         mode,
         planMode,
         resume: req.resume === true,
-        carryTranscriptFrom: req.carryTranscriptFrom as string | undefined,
       })
       const session: MockSession = {
         id: nextId('sess'),

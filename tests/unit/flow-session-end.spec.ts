@@ -61,7 +61,7 @@ async function setup() {
     onVerifyReport: () => {},
     onTurnEnded: (sessionId) => turnsEnded.push(sessionId),
   })
-  const session = await manager.startSession(project.id, false, undefined, undefined, {
+  const session = await manager.startSession(project.id, false, undefined, {
     background: true,
   })
   manager.watchFlow(session.id)

@@ -150,7 +150,7 @@ export class FlowSupervisor {
 
   async features(projectId: string, query: string, timeoutMs = 120_000): Promise<FlowFeature[]> {
     const project = this.requireProject(projectId)
-    const session = await this.manager.startSession(project.id, false, project.defaultSessionMode, undefined, {
+    const session = await this.manager.startSession(project.id, false, project.defaultSessionMode, {
       background: true,
       section: 'flow',
     })
@@ -576,7 +576,7 @@ export class FlowSupervisor {
   }
 
   private async startStageSession(run: FlowRun, project: Project, stage: FlowStage): Promise<{ id: string }> {
-    const session = await this.manager.startSession(project.id, false, project.defaultSessionMode, undefined, {
+    const session = await this.manager.startSession(project.id, false, project.defaultSessionMode, {
       background: true,
       cwd: run.worktreePath ?? project.path,
       effort: stage === 'build' ? 'max' : undefined,

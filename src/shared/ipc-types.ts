@@ -157,7 +157,6 @@ export interface InvokeMap {
       projectId: string
       resume?: boolean
       mode?: SessionMode
-      carryTranscriptFrom?: string
     }
     res: Session
   }

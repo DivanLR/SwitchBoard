@@ -25,7 +25,6 @@ import type {
   SessionEvent,
   SessionMode,
   SessionStatus,
-  TranscriptSummary,
   VerifyReport,
 } from '@shared/domain'
 import {
@@ -41,12 +40,6 @@ import { switchboardMcp } from './inter-session'
 import { probeAvailableModels } from './model-catalog'
 import { foldModelTotals, type EventSink } from './message-mapper'
 import { heavySubagentSystemPromptAppend, workerAgents } from './session-shaping'
-import {
-  TRANSCRIPT_EVENT_CAP,
-  transcriptContextAppend,
-  transcriptFor,
-  writeTranscript,
-} from './transcript'
 import { parseFlowMarker, type FlowMarker } from '@main/flow/flow-markers'
 import {
   parseSuiteProgress,
@@ -133,10 +126,6 @@ const STREAM_LOCAL_KINDS: ReadonlySet<EventKind> = new Set([
 ])
 
 const MAX_LIVE_STREAM_EVENTS = 200
-
-const TRANSCRIBED_KINDS: ReadonlySet<EventKind> = new Set(['prompt', 'assistant_text', 'summary'])
-
-const TRANSCRIPT_DEBOUNCE_MS = 3000
 
 function evictable(event: SessionEvent): boolean {
   if (!STREAM_LOCAL_KINDS.has(event.kind)) return false
@@ -381,7 +370,6 @@ export class SessionManager {
   private classifier: NoiseClassifier | null = null
   private revivedAt = new Map<string, number>()
   private quitting = false
-  private transcriptTimers = new Map<string, ReturnType<typeof setTimeout>>()
   availableModels: AvailableModel[] = []
   private probingModels: Promise<AvailableModel[]> | null = null
   private modelsProbedAt = 0
@@ -468,14 +456,13 @@ export class SessionManager {
     projectId: string,
     resume = false,
     requestedMode?: SessionMode,
-    carryTranscriptFrom?: string,
     opts?: StartOptions,
   ): Promise<Session> {
     const project = this.repos.projects.byId(projectId)
     if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
     const mode = requestedMode ?? project.defaultSessionMode
     const sessionId = newId()
-    return this.startSessionBody(sessionId, project, mode, resume, carryTranscriptFrom, opts)
+    return this.startSessionBody(sessionId, project, mode, resume, opts)
   }
 
   private async startSessionBody(
@@ -483,7 +470,6 @@ export class SessionManager {
     project: Project,
     mode: SessionMode,
     resume: boolean,
-    carryTranscriptFrom: string | undefined,
     opts: StartOptions | undefined,
   ): Promise<Session> {
     const projectId = project.id
@@ -545,8 +531,6 @@ export class SessionManager {
     const heavySubagents = subagents && settings.subagentEffort === 'max'
     row.heavySubagents = heavySubagents
     const heavyAppend = heavySubagentSystemPromptAppend(heavySubagents)
-    const carried = carryTranscriptFrom ? transcriptFor(carryTranscriptFrom) : null
-    const transcriptAppend = carried ? transcriptContextAppend(carried) : null
     try {
       entry.session = new HostedSession({
         sessionId: row.id,
@@ -554,13 +538,7 @@ export class SessionManager {
         refDirs: project.refs.map((r) => r.path),
         resumeSdkSessionId,
         systemPromptAppend:
-          [
-            heavyAppend,
-            schemaAppend,
-            transcriptAppend,
-          ]
-            .filter((s): s is string => Boolean(s))
-            .join('\n\n') || undefined,
+          [heavyAppend, schemaAppend].filter((s): s is string => Boolean(s)).join('\n\n') || undefined,
         claudeExecutablePath: claudeExecutablePath ?? undefined,
         mainModel: sessionModel,
         effort,
@@ -768,7 +746,7 @@ export class SessionManager {
 
   private async startBackground(projectId: string, kind: SectionKind): Promise<Session> {
     const project = this.repos.projects.byId(projectId)
-    const session = await this.startSession(projectId, false, project?.defaultSessionMode, undefined, {
+    const session = await this.startSession(projectId, false, project?.defaultSessionMode, {
       background: true,
     })
     const entry = this.hosted.get(session.id)
@@ -1102,7 +1080,6 @@ export class SessionManager {
           evictStaleLive(entry)
         }
         this.scanMarkers(entry, kind, payload)
-        if (persist && TRANSCRIBED_KINDS.has(kind)) this.scheduleTranscript(entry.row.id)
         this.callbacks.onEvent({ ...event })
         return event as SessionEvent<K>
       },
@@ -1231,7 +1208,7 @@ export class SessionManager {
     this.revivedAt.set(projectId, Date.now())
     void (async () => {
       try {
-        const revived = await this.startSession(projectId, false, undefined, undefined, {
+        const revived = await this.startSession(projectId, false, undefined, {
           resumeSdkSessionId: entry.row.sdkSessionId ?? undefined,
         })
         this.sendMessage(
@@ -1246,38 +1223,6 @@ export class SessionManager {
     })()
   }
 
-  saveTranscript(sessionId: string): TranscriptSummary {
-    const row = this.hosted.get(sessionId)?.row ?? this.repos.sessions.byId(sessionId)
-    if (!row) throw { code: 'NOT_FOUND', message: 'Session not found' } satisfies IpcError
-    const project = this.repos.projects.byId(row.projectId)
-    const events = this.repos.events.page(sessionId, undefined, TRANSCRIPT_EVENT_CAP)
-    return writeTranscript(row, project?.name ?? row.projectId, events)
-  }
-
-  private scheduleTranscript(sessionId: string): void {
-    const pending = this.transcriptTimers.get(sessionId)
-    if (pending) clearTimeout(pending)
-    const timer = setTimeout(() => {
-      this.transcriptTimers.delete(sessionId)
-      try {
-        this.saveTranscript(sessionId)
-      } catch {
-      }
-    }, TRANSCRIPT_DEBOUNCE_MS)
-    timer.unref?.()
-    this.transcriptTimers.set(sessionId, timer)
-  }
-
-  private flushTranscript(sessionId: string): void {
-    const pending = this.transcriptTimers.get(sessionId)
-    if (pending) clearTimeout(pending)
-    this.transcriptTimers.delete(sessionId)
-    try {
-      this.saveTranscript(sessionId)
-    } catch {
-    }
-  }
-
   private finaliseRow(entry: HostedEntry, reason: Session['endReason']): void {
     if (entry.row.endedAt) return
     entry.row.endedAt = nowIso()
@@ -1288,7 +1233,6 @@ export class SessionManager {
       endedAt: entry.row.endedAt,
       endReason: reason,
     })
-    this.flushTranscript(entry.row.id)
     this.pushStatus(entry)
   }
 
