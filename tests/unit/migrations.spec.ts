@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openDatabase } from '@main/store/db'
+import { createRepositories } from '@main/store/repositories'
 
 const dirs: string[] = []
 afterEach(() => {
@@ -68,6 +69,56 @@ describe('reopening a database', () => {
     ])
     expect(project).toEqual({ defaultSessionMode: 'bypass', useContainers: 1 })
     expect(applied).toEqual([])
+  })
+})
+
+describe('a database another branch migrated', () => {
+  it('gets back the engine, bypass and container columns, the bypass mode and the skills table 037 and 040 dropped', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'migrate-foreign-'))
+    dirs.push(dir)
+    const path = join(dir, 'switchboard.db')
+    const before = openDatabase(path)
+    before.exec(`
+      INSERT INTO projects (id, name, path, source, createdAt, position, defaultSessionMode)
+        VALUES ('p', 'p', 'C:/p', 'manual', '2026-09-01T00:00:00.000Z', 0, 'plan');
+      DELETE FROM migrations WHERE name = '042-session-container-home';
+      ALTER TABLE sessions DROP COLUMN containerised;
+      ALTER TABLE sessions DROP COLUMN homeVolumeOf;
+      CREATE TEMP TABLE mode_carry AS SELECT id, defaultSessionMode FROM projects;
+      ALTER TABLE projects DROP COLUMN defaultSessionMode;
+      ALTER TABLE projects ADD COLUMN defaultSessionMode TEXT NOT NULL DEFAULT 'auto'
+        CHECK (defaultSessionMode IN ('default', 'dontAsk', 'auto', 'acceptEdits', 'plan'));
+      UPDATE projects SET defaultSessionMode = (SELECT defaultSessionMode FROM mode_carry WHERE mode_carry.id = projects.id);
+      DROP TABLE mode_carry;
+      ALTER TABLE sessions DROP COLUMN engine;
+      ALTER TABLE sessions DROP COLUMN bypassPermissions;
+      ALTER TABLE projects DROP COLUMN useContainers;
+      DROP TABLE custom_skills;
+      INSERT INTO migrations (name, appliedAt)
+        VALUES ('037-claude-only', '2026-09-22'), ('040-drop-custom-skills', '2026-09-22');
+    `)
+    before.close()
+
+    openDatabase(path).close()
+    const after = openDatabase(path)
+    after.exec(`
+      UPDATE projects SET defaultSessionMode = 'bypass', useContainers = 1;
+      INSERT INTO sessions (id, projectId, sdkSessionId, status, startedAt, endedAt, engine, bypassPermissions, containerised)
+        VALUES ('codex', 'p', 'thread', 'done', '2026-09-23T00:00:00.000Z', '2026-09-23T01:00:00.000Z', 'codex', 0, 0);
+      INSERT INTO custom_skills (name, description, sourceUrl, sourcePath, importedAt)
+        VALUES ('research', 'Researches.', 'https://github.com/a/b', 'skills/research', '2026-09-23');
+    `)
+    const repos = createRepositories(after)
+    const project = after.prepare('SELECT defaultSessionMode, useContainers FROM projects').get()
+    const resumed = repos.sessions.latestEndedForProject('p', 'codex')?.sdkSessionId
+    const skills = repos.customSkills.list().map((s) => s.name)
+    const applied = after.prepare(`SELECT name FROM migrations WHERE name = '042-session-container-home'`).all()
+    after.close()
+
+    expect(project).toEqual({ defaultSessionMode: 'bypass', useContainers: 1 })
+    expect(resumed).toBe('thread')
+    expect(skills).toEqual(['research'])
+    expect(applied).toHaveLength(1)
   })
 })
 

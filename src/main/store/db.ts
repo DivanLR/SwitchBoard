@@ -737,6 +737,49 @@ const MIGRATIONS: Migration[] = [
   },
 ]
 
+const FOREIGN_DROPS = ['037-claude-only', '040-drop-custom-skills']
+
+function restoreForeignDrops(db: AppDatabase): void {
+  const columns = (table: string): Set<string> =>
+    new Set((db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name))
+  const sessions = columns('sessions')
+  const projects = columns('projects')
+  if (!sessions.has('engine')) db.exec(`ALTER TABLE sessions ADD COLUMN engine TEXT NOT NULL DEFAULT 'claude';`)
+  if (!sessions.has('bypassPermissions')) db.exec(`ALTER TABLE sessions ADD COLUMN bypassPermissions INTEGER;`)
+  if (!projects.has('useContainers')) {
+    db.exec(`ALTER TABLE projects ADD COLUMN useContainers INTEGER NOT NULL DEFAULT 0;`)
+  }
+  const table = db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'projects'`).get() as {
+    sql: string
+  }
+  if (!table.sql.includes(`'bypass'`)) {
+    db.exec(`
+      CREATE TEMP TABLE mode_carry AS SELECT id, defaultSessionMode FROM projects;
+      ALTER TABLE projects DROP COLUMN defaultSessionMode;
+      ALTER TABLE projects ADD COLUMN defaultSessionMode TEXT NOT NULL DEFAULT 'auto'
+        CHECK (defaultSessionMode IN ('default', 'dontAsk', 'auto', 'acceptEdits', 'plan', 'bypass'));
+      UPDATE projects
+         SET defaultSessionMode = COALESCE(
+           (SELECT defaultSessionMode FROM mode_carry WHERE mode_carry.id = projects.id),
+           'auto'
+         );
+      DROP TABLE mode_carry;
+    `)
+  }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS custom_skills (
+      name TEXT PRIMARY KEY,
+      description TEXT NOT NULL,
+      sourceUrl TEXT NOT NULL,
+      sourcePath TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      fileCount INTEGER NOT NULL DEFAULT 0,
+      importedAt TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_custom_skills_source ON custom_skills (sourceUrl);
+  `)
+}
+
 export function transaction<T>(db: AppDatabase, work: () => T): T {
   db.exec('BEGIN')
   try {
@@ -771,6 +814,7 @@ function migrate(db: AppDatabase): void {
   const applied = new Set(
     (db.prepare('SELECT name FROM migrations').all() as { name: string }[]).map((r) => r.name),
   )
+  if (FOREIGN_DROPS.some((name) => applied.has(name))) transaction(db, () => restoreForeignDrops(db))
   const record = db.prepare('INSERT INTO migrations (name, appliedAt) VALUES (?, ?)')
   for (const migration of MIGRATIONS) {
     if (applied.has(migration.name)) continue
