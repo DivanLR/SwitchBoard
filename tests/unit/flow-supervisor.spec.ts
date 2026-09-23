@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -18,7 +18,10 @@ function fakeGit(): FlowGit {
   return {
     create: vi.fn(async (input) => {
       const slug = input.title.toLowerCase().replace(/\s+/g, '-')
-      return { path: join(input.root, slug), branch: `feature/${slug}`, head: 'abc123', locked: false, prunable: false }
+      const path = join(input.root, slug)
+      mkdirSync(join(path, 'specs', '001-checkout'), { recursive: true })
+      writeFileSync(join(path, 'specs', '001-checkout', 'spec.md'), '# Checkout\n')
+      return { path, branch: `feature/${slug}`, head: 'abc123', locked: false, prunable: false }
     }),
     remove: vi.fn(async () => ({ removed: true, dirty: [] })),
     branch: vi.fn<FlowGit['branch']>(async () => 'main'),
@@ -45,6 +48,15 @@ function dotnetProject(): string {
   return dir
 }
 
+function specProject(): string {
+  const dir = dotnetProject()
+  mkdirSync(join(dir, '.specify', 'scripts'), { recursive: true })
+  writeFileSync(join(dir, '.specify', 'feature.json'), JSON.stringify({ feature_directory: 'specs/004-orders', pinned: 1 }))
+  mkdirSync(join(dir, 'specs', '001-cart'), { recursive: true })
+  writeFileSync(join(dir, 'specs', '001-cart', 'spec.md'), '# Cart\n')
+  return dir
+}
+
 function setup(options?: { ado?: boolean; projectPath?: string }) {
   const repos: Repos = createRepositories(openDatabase(':memory:'))
   const project = repos.projects.insert({
@@ -64,7 +76,9 @@ function setup(options?: { ado?: boolean; projectPath?: string }) {
       sessionCount += 1
       return { id: `session-${sessionCount}` }
     }),
-    connectedMcpServers: vi.fn(async () => (options?.ado === false ? [] : ['ado'])),
+    connectedMcpServers: vi.fn(async (_sessionId: string, wanted: readonly string[]) =>
+      options?.ado === false ? [] : [...wanted],
+    ),
     sendMessage: (sessionId: string, text: string) => sent.push({ sessionId, text }),
     watchFlow: (sessionId: string) => watched.push(sessionId),
     endFlowSession: (sessionId: string) => ended.push(sessionId),
@@ -180,14 +194,6 @@ describe('starting a run', () => {
       rmSync(dir, { recursive: true, force: true })
     }
   })
-
-  function specProject(): string {
-    const dir = dotnetProject()
-    mkdirSync(join(dir, '.specify', 'scripts'), { recursive: true })
-    mkdirSync(join(dir, 'specs', '001-cart'), { recursive: true })
-    writeFileSync(join(dir, 'specs', '001-cart', 'spec.md'), '# Cart\n')
-    return dir
-  }
 
   it('refuses a spec id that is not one of the spec folders, before making a worktree', async () => {
     const h = setup({ projectPath: specProject() })
@@ -310,6 +316,67 @@ describe('a stage marker resolving the stage', () => {
     const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
     h.flow.onFlowMarker('stranger', specMarker())
     expect(h.repos.flowStages.get(run.id, 'spec')?.status).toBe('running')
+  })
+})
+
+describe('the spec folder', () => {
+  it('takes specDir from the worktree feature.json after the spec stage, and keeps none without a spec.md', async () => {
+    const h = setup()
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+    const wt = run.worktreePath!
+    mkdirSync(join(wt, '.specify'), { recursive: true })
+    mkdirSync(join(wt, 'specs', '007-real'), { recursive: true })
+    writeFileSync(join(wt, 'specs', '007-real', 'spec.md'), '# Real\n')
+    writeFileSync(join(wt, '.specify', 'feature.json'), JSON.stringify({ feature_directory: join(wt, 'specs', '007-real') }))
+    h.flow.onFlowMarker(sessionOf(h, run.id), specMarker({ specDir: 'specs/001-checkout/spec.md' }))
+    expect(h.repos.flowRuns.byId(run.id)?.specDir).toBe('specs/007-real')
+
+    const other = await h.flow.start({ projectId: h.project.id, source: textSource('Loyalty'), autopilot: false, autoShip: false })
+    h.flow.onFlowMarker(sessionOf(h, other.id), specMarker({ specDir: 'specs/404-missing' }))
+    expect(h.repos.flowRuns.byId(other.id)?.specDir).toBeNull()
+  })
+
+  it('pins a run from an existing spec to that spec in feature.json and names it in the plan steps', async () => {
+    const h = setup({ projectPath: specProject() })
+    const run = await h.flow.start({
+      projectId: h.project.id,
+      source: { kind: 'spec', specId: '001-cart' },
+      autopilot: false,
+      autoShip: false,
+    })
+    const pinned = JSON.parse(readFileSync(join(run.worktreePath!, '.specify', 'feature.json'), 'utf8'))
+    expect(pinned).toEqual({ feature_directory: 'specs/001-cart', pinned: 1 })
+    expect(h.sent[0].text.startsWith('/speckit-plan ')).toBe(true)
+    expect(h.sent[0].text).toContain('specs/001-cart')
+  })
+})
+
+describe('the test stage plan', () => {
+  it('plans from the detection the Tests section uses, with the project overrides and database servers', async () => {
+    const dir = dotnetProject()
+    writeFileSync(join(dir, 'angular.json'), '{"projects":{}}')
+    const h = setup({ projectPath: dir })
+    h.repos.settings.set({
+      projectSuiteCommands: { [h.project.id]: { 'dotnet-unit': 'dotnet test Only.sln' } },
+      databaseMcpServers: ['oracle'],
+    })
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+    writeFileSync(join(run.worktreePath!, 'App.sln'), '')
+    writeFileSync(join(run.worktreePath!, 'angular.json'), '{"projects":{}}')
+    writeFileSync(join(run.worktreePath!, 'package.json'), '{"devDependencies":{}}')
+    writeFileSync(join(run.worktreePath!, 'Program.cs'), 'app.MapControllers();')
+    for (const stage of ['spec', 'plan', 'build', 'clean'] as const) {
+      h.flow.onFlowMarker(sessionOf(h, run.id, stage), specMarker({ stage }))
+      await h.flow.approve(run.id)
+    }
+    const sid = sessionOf(h, run.id, 'test')
+    h.flow.onTurnEnded(sid)
+    const verify = h.sent.at(-1)!.text
+    expect(verify).toContain('- dotnet-unit (Unit tests): dotnet test Only.sln')
+    expect(verify).toContain('ng-unit')
+    expect(verify).not.toContain('ng-lint')
+    expect(verify).not.toContain('ng-e2e')
+    expect(verify).toContain('connected database MCP server(s): oracle')
   })
 })
 

@@ -37,10 +37,10 @@ import {
   suggestProjects,
 } from '@main/projects/discovery'
 import { existsSync, readdirSync } from 'node:fs'
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
-import { detectStacks, stackById, stackEntries } from '@shared/test-catalog'
-import { evidencePrompt, planSuites, verifyPrompt } from '@main/evals/verify-dispatch'
+import { stackById } from '@shared/test-catalog'
+import { detectProjectSuites, evidencePrompt, planSuites, verifyPrompt } from '@main/evals/verify-dispatch'
 import { readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
 import { readDiffList, readFileDiff } from '@main/sessions/session-manager'
 import { readDiagramList } from '@main/diagrams/list'
@@ -181,24 +181,6 @@ function diagramPath(repos: Repositories, projectId: string, file: string): stri
     throw { code: 'INVALID_PATH', message: 'That file is outside the diagrams folder' } satisfies IpcError
   }
   return target
-}
-
-async function preReadStackEntries(root: string): Promise<Map<string, string[]>> {
-  const SKIP = new Set(['node_modules', '.git', 'bin', 'obj', 'dist', 'out', 'release', '.vs'])
-  const listing = new Map<string, string[]>()
-  const top = await readdir(root)
-  listing.set(root, top)
-  await Promise.all(
-    top
-      .filter((name) => !SKIP.has(name.toLowerCase()) && !name.startsWith('.'))
-      .map(async (name) => {
-        try {
-          listing.set(`${root}/${name}`, await readdir(join(root, name)))
-        } catch {
-        }
-      }),
-  )
-  return listing
 }
 
 const ALLOWED_PLUGINS: ReadonlySet<string> = new Set([
@@ -521,32 +503,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'verify.suites': async (req) => {
       const project = repos.projects.byId(req.projectId)
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
-      try {
-        const listing = await preReadStackEntries(project.path)
-        const entries = stackEntries(project.path, (dir) => {
-          const found = listing.get(dir)
-          if (found === undefined) throw new Error(`not listed: ${dir}`)
-          return found
-        })
-        const candidates = entries.filter((entry) => {
-          const lower = entry.toLowerCase()
-          return (
-            lower.endsWith('.csproj') ||
-            lower.endsWith('program.cs') ||
-            lower.endsWith('startup.cs') ||
-            /(^|[/\\])package\.json$/.test(lower)
-          )
-        })
-        const contents = new Map<string, string | null>()
-        await Promise.all(
-          candidates.map(async (entry) => {
-            contents.set(entry, await readFile(join(project.path, entry), 'utf8').catch(() => null))
-          }),
-        )
-        return detectStacks(entries, (entry) => contents.get(entry) ?? null)
-      } catch {
-        return []
-      }
+      return detectProjectSuites(project.path).catch(() => [])
     },
     'verify.start': async (req) => {
       const stack = stackById(req.stackId)

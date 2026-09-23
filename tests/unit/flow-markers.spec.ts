@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { flowMarkerBroken, parseFlowMarker } from '@main/flow/flow-markers'
-import { featuresPrompt, planPrompt, specifyPrompt } from '@main/flow/flow-prompts'
+import { clarifyPrompt, featuresPrompt, planSteps, specifyPrompt } from '@main/flow/flow-prompts'
 
 function line(json: unknown): string {
   return `Here is my report.\nSWB_FLOW: ${JSON.stringify(json)}`
@@ -118,36 +118,46 @@ describe('the prompts', () => {
     expect(prompt).toContain('SWB_FLOW:')
   })
 
-  it('sends an ADO feature description built from the source, with the ado rule first', () => {
+  it('starts an ADO spec step with the slash command and carries the ado rule in its argument', () => {
     const prompt = specifyPrompt({
       source: 'ado',
       sourceRef: '4711',
       sourceUrl: 'https://dev.azure.com/x/_workitems/edit/4711',
       title: 'Checkout v2',
       description: '',
+      autopilot: false,
     })
+    expect(prompt.startsWith('/speckit-specify Azure DevOps Feature 4711: Checkout v2')).toBe(true)
     expect(prompt).toContain('Azure DevOps MCP server')
-    expect(prompt).toContain('/speckit-specify Azure DevOps Feature 4711: Checkout v2')
     expect(prompt).toContain('https://dev.azure.com/x/_workitems/edit/4711')
   })
 
-  it('sends a written description as-is for a text source', () => {
-    const prompt = specifyPrompt({
-      source: 'text',
+  it('asks the human through AskUserQuestion without autopilot, and answers itself with it', () => {
+    const run = {
+      source: 'text' as const,
       sourceRef: null,
       sourceUrl: null,
       title: 'Checkout v2',
       description: 'Let a guest pay without an account.',
-    })
-    expect(prompt).toBe('/speckit-specify Checkout v2: Let a guest pay without an account.')
+    }
+    const manual = specifyPrompt({ ...run, autopilot: false })
+    expect(manual.startsWith('/speckit-specify Checkout v2: Let a guest pay without an account.')).toBe(true)
+    expect(manual).toContain('AskUserQuestion')
+    expect(clarifyPrompt(false).startsWith('/speckit-clarify ')).toBe(true)
+    expect(clarifyPrompt(false)).toContain('AskUserQuestion')
+
+    const auto = specifyPrompt({ ...run, autopilot: true })
+    expect(auto).not.toContain('AskUserQuestion')
+    expect(auto).toContain('Answer each question yourself with your recommended option')
+    expect(clarifyPrompt(true)).toContain('Answer each question yourself with your recommended option')
   })
 
   it('mentions only the stacks the run actually detected', () => {
-    expect(planPrompt(['dotnet'])).toContain('.NET:')
-    expect(planPrompt(['dotnet'])).not.toContain('Angular:')
-    expect(planPrompt(['angular'])).toContain('Angular:')
-    expect(planPrompt(['angular'])).not.toContain('.NET:')
-    const both = planPrompt(['dotnet', 'angular'])
+    expect(planSteps(['dotnet'], null)[0]).toContain('.NET:')
+    expect(planSteps(['dotnet'], null)[0]).not.toContain('Angular:')
+    expect(planSteps(['angular'], null)[0]).toContain('Angular:')
+    expect(planSteps(['angular'], null)[0]).not.toContain('.NET:')
+    const both = planSteps(['dotnet', 'angular'], null)[0]
     expect(both).toContain('.NET:')
     expect(both).toContain('Angular:')
   })

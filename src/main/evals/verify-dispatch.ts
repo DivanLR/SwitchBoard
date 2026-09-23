@@ -7,8 +7,53 @@ import {
   type SuiteStatus,
   type VerifyReport,
 } from '@shared/domain'
-import type { TestSuite } from '@shared/test-catalog'
+import { readdir, readFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { detectStacks, stackEntries, type AvailableSuites, type TestSuite } from '@shared/test-catalog'
 import { firstJsonObject, markerTail, str } from './parse'
+
+async function preReadStackEntries(root: string): Promise<Map<string, string[]>> {
+  const SKIP = new Set(['node_modules', '.git', 'bin', 'obj', 'dist', 'out', 'release', '.vs'])
+  const listing = new Map<string, string[]>()
+  const top = await readdir(root)
+  listing.set(root, top)
+  await Promise.all(
+    top
+      .filter((name) => !SKIP.has(name.toLowerCase()) && !name.startsWith('.'))
+      .map(async (name) => {
+        try {
+          listing.set(`${root}/${name}`, await readdir(join(root, name)))
+        } catch {
+        }
+      }),
+  )
+  return listing
+}
+
+export async function detectProjectSuites(root: string): Promise<AvailableSuites[]> {
+  const listing = await preReadStackEntries(root)
+  const entries = stackEntries(root, (dir) => {
+    const found = listing.get(dir)
+    if (found === undefined) throw new Error(`not listed: ${dir}`)
+    return found
+  })
+  const candidates = entries.filter((entry) => {
+    const lower = entry.toLowerCase()
+    return (
+      lower.endsWith('.csproj') ||
+      lower.endsWith('program.cs') ||
+      lower.endsWith('startup.cs') ||
+      /(^|[/\\])package\.json$/.test(lower)
+    )
+  })
+  const contents = new Map<string, string | null>()
+  await Promise.all(
+    candidates.map(async (entry) => {
+      contents.set(entry, await readFile(join(root, entry), 'utf8').catch(() => null))
+    }),
+  )
+  return detectStacks(entries, (entry) => contents.get(entry) ?? null)
+}
 
 export const VERIFY_MARKER = 'SWB_VERIFY'
 

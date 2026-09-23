@@ -1,6 +1,6 @@
-import { existsSync } from 'node:fs'
-import { cp, readFile, readdir } from 'node:fs/promises'
-import { join } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
+import { cp, readFile, readdir, writeFile } from 'node:fs/promises'
+import { isAbsolute, join, relative } from 'node:path'
 import type {
   FlowRun,
   FlowStage,
@@ -23,8 +23,6 @@ import type { FlowArtefactKind, FlowStartSource, IpcError } from '@shared/ipc-ty
 import { nowIso, type Repositories } from '@main/store/repositories'
 import type { SessionManager } from '@main/sessions/session-manager'
 import {
-  ANALYZE_PROMPT,
-  TASKS_PROMPT,
   buildHandshake,
   buildSteps,
   cleanHandshake,
@@ -32,7 +30,7 @@ import {
   clarifyPrompt,
   fixFindingsPrompt,
   planHandshake,
-  planPrompt,
+  planSteps,
   reviewHandshake,
   reviewSteps,
   revisePrompt,
@@ -47,7 +45,12 @@ import { artefactRelPath, defaultArtefactKind, resolveArtefactPath } from './art
 import { detectFlowStacks } from './stacks'
 import { readSpecKitState } from '@main/specs/spec-kit'
 import { defaultSelection, stackById } from '@shared/test-catalog'
-import { planSuites, verifyPrompt as buildVerifyPrompt, type PlannedSuite } from '@main/evals/verify-dispatch'
+import {
+  detectProjectSuites,
+  planSuites,
+  verifyPrompt as buildVerifyPrompt,
+  type PlannedSuite,
+} from '@main/evals/verify-dispatch'
 import { createWorktree, currentBranch, removeWorktree, resolvesToCommit, worktreeRoot } from './worktrees'
 import type { FlowFeature } from '@shared/domain'
 
@@ -548,44 +551,92 @@ export class FlowSupervisor {
     this.callbacks.onFlowChanged(project.id)
     this.manager.watchFlow(session.id)
     this.sessionStage.set(session.id, { runId: run.id, stage: run.stage })
-    this.pending.set(session.id, this.tailFor(run, run.stage))
+    await this.pinFeature(run, run.stage)
+    this.pending.set(session.id, await this.tailFor(run, run.stage, session.id))
     this.manager.sendMessage(session.id, prompt)
   }
 
-  private verifyStepPrompt(run: FlowRun): string {
-    const plans: PlannedSuite[] = []
-    for (const stackId of run.stacks) {
-      const stack = stackById(stackId)
-      if (!stack) continue
-      plans.push(...planSuites(stack.suites, defaultSelection(stack.suites)))
-    }
-    const label = run.stacks.map((id) => stackById(id)?.label ?? id).join(' + ') || 'project'
-    return buildVerifyPrompt(plans, label)
+  private async pinFeature(run: FlowRun, stage: FlowStage): Promise<void> {
+    if (stage === 'spec' || !run.specDir || !run.worktreePath) return
+    const specify = join(run.worktreePath, '.specify')
+    if (!existsSync(specify)) return
+    const file = join(specify, 'feature.json')
+    let current: Record<string, unknown> = {}
+    try {
+      current = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
+    } catch {}
+    await writeFile(file, `${JSON.stringify({ ...current, feature_directory: run.specDir }, null, 2)}\n`, 'utf8').catch(() => {})
   }
 
-  private planFor(run: FlowRun, stage: FlowStage): StagePlan {
+  private resolveSpecDir(run: FlowRun, reported: string | null): string | null {
+    const root = run.worktreePath
+    if (!root) return null
+    let pinned: string | null = null
+    try {
+      const raw = (JSON.parse(readFileSync(join(root, '.specify', 'feature.json'), 'utf8')) as { feature_directory?: unknown })
+        .feature_directory
+      pinned = typeof raw === 'string' ? raw : null
+    } catch {}
+    for (const candidate of [pinned, reported]) {
+      if (!candidate) continue
+      const rel = (isAbsolute(candidate) ? relative(root, candidate) : candidate).replace(/\\/g, '/').replace(/\/+$/, '')
+      const spec = resolveArtefactPath(root, join(rel, 'spec.md'))
+      if (rel && spec && existsSync(spec)) return rel
+    }
+    return null
+  }
+
+  private async verifyStepPrompt(run: FlowRun, sessionId: string): Promise<string> {
+    const settings = this.repos.settings.get()
+    const overrides = settings.projectSuiteCommands?.[run.projectId] ?? {}
+    const detected = await detectProjectSuites(run.worktreePath ?? this.requireProject(run.projectId).path).catch(() => [])
+    const plans: PlannedSuite[] = []
+    const labels: string[] = []
+    for (const stackId of run.stacks) {
+      const found = detected.find((stack) => stack.stackId === stackId)
+      const suites = (found?.suites ?? stackById(stackId)?.suites ?? []).map((suite) =>
+        overrides[suite.id] ? { ...suite, command: overrides[suite.id] } : suite,
+      )
+      if (suites.length === 0) continue
+      plans.push(...planSuites(suites, defaultSelection(suites)))
+      labels.push(found?.stackLabel ?? stackById(stackId)?.label ?? stackId)
+    }
+    const dbServers = await this.manager.connectedMcpServers(sessionId, settings.databaseMcpServers ?? [])
+    return buildVerifyPrompt(plans, labels.join(' + ') || 'project', dbServers)
+  }
+
+  private async shipTest(run: FlowRun): Promise<{ verify: VerifyReport | null; postman: string | null }> {
+    const verify = this.repos.flowStages.get(run.id, 'test')?.report?.verify ?? null
+    const postman = (await this.artefact(run.id, 'test', 'postman'))?.path?.replace(/\\/g, '/') ?? null
+    return { verify, postman }
+  }
+
+  private async planFor(run: FlowRun, stage: FlowStage, sessionId: string): Promise<StagePlan> {
     const base = run.baseBranch ?? 'main'
     switch (stage) {
       case 'spec':
         return { steps: [specifyPrompt(run), clarifyPrompt(run.autopilot)], handshake: specHandshake() }
       case 'plan':
-        return { steps: [planPrompt(run.stacks), TASKS_PROMPT, ANALYZE_PROMPT], handshake: planHandshake() }
+        return { steps: planSteps(run.stacks, run.specDir), handshake: planHandshake() }
       case 'build':
-        return { steps: buildSteps(run.stacks), handshake: buildHandshake() }
+        return { steps: buildSteps(run.stacks, run.specDir), handshake: buildHandshake() }
       case 'clean':
         return { steps: cleanSteps(run.stacks, base), handshake: cleanHandshake() }
       case 'test':
-        return { steps: [testWritePrompt(run, run.stacks), this.verifyStepPrompt(run)], handshake: null }
+        return {
+          steps: [testWritePrompt(run, run.stacks), await this.verifyStepPrompt(run, sessionId)],
+          handshake: null,
+        }
       case 'review':
-        return { steps: reviewSteps(run.stacks, base), handshake: reviewHandshake(base) }
+        return { steps: reviewSteps(run.stacks, base), handshake: reviewHandshake(base, run.specDir, run.stacks) }
       case 'ship':
-        return { steps: [], handshake: shipPrompt(run) }
+        return { steps: [], handshake: shipPrompt(run, await this.shipTest(run)) }
     }
   }
 
-  private tailFor(run: FlowRun, stage: FlowStage): string[] {
-    if (stage === 'test') return [this.verifyStepPrompt(run)]
-    const plan = this.planFor(run, stage)
+  private async tailFor(run: FlowRun, stage: FlowStage, sessionId: string): Promise<string[]> {
+    if (stage === 'test') return [await this.verifyStepPrompt(run, sessionId)]
+    const plan = await this.planFor(run, stage, sessionId)
     return plan.handshake ? [plan.handshake] : []
   }
 
@@ -623,7 +674,8 @@ export class FlowSupervisor {
         return
       }
     }
-    const plan = this.planFor(run, stage)
+    await this.pinFeature(run, stage)
+    const plan = await this.planFor(run, stage, session.id)
     const queue = [...plan.steps]
     if (plan.handshake) queue.push(plan.handshake)
     const first = queue.shift()
@@ -633,7 +685,10 @@ export class FlowSupervisor {
 
   private completeStage(runId: string, stage: FlowStage, marker: FlowStageMarker): void {
     const patch: Parameters<Repositories['flowRuns']['update']>[1] = {}
-    if (stage === 'spec' && marker.specDir) patch.specDir = marker.specDir
+    if (stage === 'spec') {
+      const run = this.repos.flowRuns.byId(runId)
+      if (run) patch.specDir = this.resolveSpecDir(run, marker.specDir)
+    }
     if (stage === 'ship') {
       patch.prUrl = marker.prUrl
       patch.prId = marker.prId

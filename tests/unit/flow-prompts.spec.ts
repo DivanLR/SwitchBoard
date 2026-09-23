@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
+import { emptyVerifyReport } from '@shared/domain'
 import {
   buildSteps,
   cleanSteps,
   fixFindingsPrompt,
+  planHandshake,
+  planSteps,
+  reviewHandshake,
   reviewSteps,
   revisePrompt,
   shipPrompt,
@@ -55,44 +59,78 @@ describe('the revise prompt, sent to a fresh session', () => {
   })
 })
 
+describe('the plan steps', () => {
+  it('name the spec folder in every Spec Kit command, each starting with its slash command', () => {
+    const steps = planSteps(['dotnet'], 'specs/005-invoices')
+    expect(steps.map((step) => step.split(' ')[0])).toEqual(['/speckit-plan', '/speckit-tasks', '/speckit-analyze'])
+    for (const step of steps) expect(step).toContain('specs/005-invoices')
+  })
+
+  it('ask the handshake to report blocked with the CRITICAL analyze issues', () => {
+    expect(planHandshake()).toContain('CRITICAL issue, the outcome is blocked')
+  })
+})
+
 describe('the build steps', () => {
   it('scaffolds .NET only for a dotnet-only run', () => {
-    expect(buildSteps(['dotnet'])).toEqual(['/speckit-implement-scaffold'])
+    const steps = buildSteps(['dotnet'], 'specs/001-cart')
+    expect(steps).toHaveLength(1)
+    expect(steps[0].startsWith('/speckit-implement-scaffold ')).toBe(true)
   })
 
   it('implements everything for an angular-only run', () => {
-    expect(buildSteps(['angular'])).toEqual(['/speckit-implement'])
+    const steps = buildSteps(['angular'], null)
+    expect(steps).toHaveLength(1)
+    expect(steps[0].startsWith('/speckit-implement ')).toBe(true)
+    expect(steps[0]).not.toContain('still unchecked')
   })
 
   it('scaffolds .NET then finishes the remaining tasks for a mixed run', () => {
-    expect(buildSteps(['dotnet', 'angular'])).toEqual([
-      '/speckit-implement-scaffold',
-      '/speckit-implement Complete every task still unchecked in tasks.md.',
-    ])
+    const steps = buildSteps(['dotnet', 'angular'], null)
+    expect(steps[0].startsWith('/speckit-implement-scaffold ')).toBe(true)
+    expect(steps[1].startsWith('/speckit-implement Complete every task still unchecked in tasks.md.')).toBe(true)
+  })
+
+  it('tells each implement skill the run is unattended, names the spec folder and carries the conventions', () => {
+    for (const step of buildSteps(['dotnet', 'angular'], 'specs/001-cart')) {
+      expect(step).toContain('unattended')
+      expect(step).toContain('if a checklist is incomplete, proceed and list the open items')
+      expect(step).toContain('use the one plan.md names')
+      expect(step).toContain('how many tasks are done and the total')
+      expect(step).toContain('specs/001-cart')
+      expect(step).toContain('IOptionsMonitor for feature flags')
+      expect(step).toContain('OnPush')
+    }
   })
 })
 
 describe('the clean steps', () => {
-  it('runs de-sloppify before ponytail for .NET', () => {
+  it('runs de-sloppify before ponytail for .NET, told to create no issues and add no comments', () => {
     const steps = cleanSteps(['dotnet'], 'main')
-    expect(steps[0]).toContain('/dotnet-claude-kit:de-sloppify')
+    expect(steps[0].startsWith('/dotnet-claude-kit:de-sloppify ')).toBe(true)
     expect(steps[0]).toContain('against main')
-    expect(steps[1]).toContain('/ponytail:ponytail-review')
-    expect(steps[1]).not.toContain('lint')
+    expect(steps[0]).toContain('Skip the step that creates issues')
+    expect(steps[0]).toContain('resolve or delete each TODO')
+    expect(steps[0]).toContain('Add no comments.')
+    expect(steps[1].startsWith('/ponytail:ponytail-review ')).toBe(true)
+    expect(steps[2]).not.toContain('lint')
   })
 
-  it('has no de-sloppify step for angular-only, and asks for lint --fix', () => {
+  it('lists with ponytail-review, then applies the safe findings in a plain follow-up that tests and commits', () => {
     const steps = cleanSteps(['angular'], 'develop')
-    expect(steps).toHaveLength(1)
-    expect(steps[0]).toContain('/ponytail:ponytail-review')
-    expect(steps[0]).toContain('against develop')
-    expect(steps[0]).toContain("lint script with --fix")
+    expect(steps).toHaveLength(2)
+    expect(steps[0]).toBe('/ponytail:ponytail-review Review the diff of this branch against develop.')
+    expect(steps[1].startsWith('/')).toBe(false)
+    expect(steps[1]).toContain('Apply every finding from that review that is safe')
+    expect(steps[1]).toContain('lint script with --fix')
+    expect(steps[1]).toContain('Run the tests')
+    expect(steps[1]).toContain('commit the result')
   })
 
-  it('runs both for a mixed run', () => {
+  it('runs all three for a mixed run', () => {
     const steps = cleanSteps(['dotnet', 'angular'], 'main')
-    expect(steps).toHaveLength(2)
-    expect(steps[1]).toContain('lint script with --fix')
+    expect(steps).toHaveLength(3)
+    expect(steps[2]).toContain('lint script with --fix')
   })
 })
 
@@ -126,6 +164,15 @@ describe('the review steps', () => {
   it('has no dotnet-specific steps for angular-only, leaving it to the handshake turn', () => {
     expect(reviewSteps(['angular'], 'main')).toEqual([])
   })
+
+  it('checks the conventions and the named spec, and keeps a completed review done whatever it found', () => {
+    const prompt = reviewHandshake('main', 'specs/001-cart', ['dotnet'])
+    expect(prompt).toContain('specs/001-cart/spec.md')
+    expect(prompt).toContain('every violation is a must_fix finding')
+    expect(prompt).toContain('IOptionsMonitor for feature flags')
+    expect(prompt).toContain('Every Critical or High security finding is a must_fix finding.')
+    expect(prompt).toContain('The outcome is done whenever you completed the review')
+  })
 })
 
 describe('the ship prompt', () => {
@@ -139,6 +186,22 @@ describe('the ship prompt', () => {
     })
     expect(prompt).toContain('link Azure DevOps work item 4711')
     expect(prompt).toContain('Do not merge, approve, or add reviewers.')
+  })
+
+  it('carries the stored test report figures and the Postman path, and says so when there is no report', () => {
+    const run = { title: 'Cart', branch: 'feature/cart', baseBranch: 'main', source: 'text' as const, sourceRef: null }
+    const verify = {
+      ...emptyVerifyReport(),
+      suites: [{ id: 'dotnet-unit', label: 'Unit tests', status: 'pass' as const, detail: '42 passed' }],
+    }
+    verify.coverage.line = { value: 81, source: 'coverage.cobertura.xml' }
+    const prompt = shipPrompt(run, { verify, postman: 'specs/001-cart/postman/cart.postman_collection.json' })
+    expect(prompt).toContain('- dotnet-unit (Unit tests): pass, 42 passed')
+    expect(prompt).toContain('- Line coverage: 81% (coverage.cobertura.xml)')
+    expect(prompt).not.toContain('Changed-line coverage')
+    expect(prompt).toContain('Postman collection: specs/001-cart/postman/cart.postman_collection.json')
+
+    expect(shipPrompt(run, { verify: null, postman: null })).toContain('The Test stage left no report')
   })
 
   it('never mentions a work item for a text source', () => {

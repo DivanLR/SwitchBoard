@@ -1,4 +1,4 @@
-import type { FlowReviewFinding, FlowRun, FlowStage, FlowStageReport } from '@shared/domain'
+import type { FlowReviewFinding, FlowRun, FlowStage, FlowStageReport, Measured, VerifyReport } from '@shared/domain'
 import { HONESTY } from '@main/evals/verify-dispatch'
 import { FLOW_MARKER } from './flow-markers'
 
@@ -52,22 +52,42 @@ export function specDescription(run: Pick<FlowRun, 'source' | 'sourceRef' | 'sou
   return run.description ? `${run.title}: ${run.description}` : run.title
 }
 
-export function specifyPrompt(run: Pick<FlowRun, 'source' | 'sourceRef' | 'sourceUrl' | 'title' | 'description'>): string {
-  const base = `/speckit-specify ${specDescription(run)}`
-  return run.source === 'ado' ? [ADO_RULE, '', base].join('\n') : base
+const ASK_ME =
+  'Ask me each clarification question through the AskUserQuestion tool, with its options and ' +
+  'your recommended option first, and wait for my answer before you go on.'
+
+const ANSWER_YOURSELF =
+  'Answer each question yourself with your recommended option, record the answer in the spec, and do not wait for me.'
+
+export function specifyPrompt(
+  run: Pick<FlowRun, 'source' | 'sourceRef' | 'sourceUrl' | 'title' | 'description' | 'autopilot'>,
+): string {
+  return [
+    `/speckit-specify ${specDescription(run)}`,
+    run.autopilot ? ANSWER_YOURSELF : ASK_ME,
+    run.source === 'ado' ? ADO_RULE : '',
+  ]
+    .filter((line) => line !== '')
+    .join('\n')
 }
 
 export function clarifyPrompt(autopilot: boolean): string {
-  return autopilot
-    ? '/speckit-clarify Answer each question yourself with your recommended option, record the answer in the spec, and do not wait for me.'
-    : '/speckit-clarify'
+  return `/speckit-clarify ${autopilot ? ANSWER_YOURSELF : ASK_ME}`
 }
 
 export function specHandshake(): string {
   return markerLine('spec', ',"specDir":"<specs/NNN-slug, the folder .specify/feature.json or the newest specs folder names>"')
 }
 
-function stackContext(stacks: readonly string[]): string {
+function featureLine(specDir: string | null): string {
+  return specDir ? `The feature is ${specDir}; its spec is ${specDir}/spec.md.` : ''
+}
+
+function args(...parts: string[]): string {
+  return parts.filter((part) => part !== '').join(' ')
+}
+
+export function stackContext(stacks: readonly string[]): string {
   const parts: string[] = []
   if (stacks.includes('dotnet')) {
     parts.push(
@@ -86,24 +106,34 @@ function stackContext(stacks: readonly string[]): string {
   return parts.join(' ')
 }
 
-export function planPrompt(stacks: readonly string[]): string {
-  return `/speckit-plan ${stackContext(stacks)}`
+export function planSteps(stacks: readonly string[], specDir: string | null): string[] {
+  const feature = featureLine(specDir)
+  return [
+    `/speckit-plan ${args(feature, stackContext(stacks))}`.trim(),
+    `/speckit-tasks ${feature}`.trim(),
+    `/speckit-analyze ${feature}`.trim(),
+  ]
 }
-
-export const TASKS_PROMPT = '/speckit-tasks'
-export const ANALYZE_PROMPT = '/speckit-analyze'
 
 export function planHandshake(): string {
-  return markerLine('plan', ',"tasksDone":<checked task count or null>,"tasksTotal":<total task count or null>')
+  return [
+    markerLine('plan', ',"tasksDone":<checked task count or null>,"tasksTotal":<total task count or null>'),
+    '',
+    'If /speckit-analyze reported any CRITICAL issue, the outcome is blocked and why lists every CRITICAL issue.',
+  ].join('\n')
 }
 
-export function buildSteps(stacks: readonly string[]): string[] {
+const UNATTENDED =
+  'This run is unattended: if a checklist is incomplete, proceed and list the open items in your report; ' +
+  'if the architecture is ambiguous, use the one plan.md names. Report how many tasks are done and the total.'
+
+export function buildSteps(stacks: readonly string[], specDir: string | null): string[] {
   const steps: string[] = []
   const dotnet = stacks.includes('dotnet')
-  const angular = stacks.includes('angular')
-  if (dotnet) steps.push('/speckit-implement-scaffold')
-  if (angular) {
-    steps.push(dotnet ? '/speckit-implement Complete every task still unchecked in tasks.md.' : '/speckit-implement')
+  const context = args(UNATTENDED, featureLine(specDir), stackContext(stacks))
+  if (dotnet) steps.push(`/speckit-implement-scaffold ${context}`)
+  if (stacks.includes('angular')) {
+    steps.push(`/speckit-implement ${args(dotnet ? 'Complete every task still unchecked in tasks.md.' : '', context)}`)
   }
   return steps
 }
@@ -115,16 +145,19 @@ export function buildHandshake(): string {
 export function cleanSteps(stacks: readonly string[], base: string): string[] {
   const steps: string[] = []
   if (stacks.includes('dotnet')) {
-    steps.push(`/dotnet-claude-kit:de-sloppify Only touch files changed on this branch against ${base}.`)
+    steps.push(
+      `/dotnet-claude-kit:de-sloppify Only touch files changed on this branch against ${base}. ` +
+        'Skip the step that creates issues: resolve or delete each TODO instead. Add no comments.',
+    )
   }
-  const ponytail = [
-    `/ponytail:ponytail-review Review the diff of this branch against ${base} and apply every`,
-    'finding that is safe. Keep behaviour and tests green. Commit the result.',
-    stacks.includes('angular')
-      ? " Also run the project's lint script with --fix if it has one."
-      : '',
-  ].join(' ')
-  steps.push(ponytail.trim())
+  steps.push(`/ponytail:ponytail-review Review the diff of this branch against ${base}.`)
+  steps.push(
+    args(
+      'Apply every finding from that review that is safe, keeping behaviour the same. Add no comments.',
+      stacks.includes('angular') ? "Also run the project's lint script with --fix if it has one." : '',
+      'Run the tests and keep them green, then commit the result.',
+    ),
+  )
   return steps
 }
 
@@ -172,18 +205,27 @@ export function reviewSteps(stacks: readonly string[], base: string): string[] {
   return steps
 }
 
-export function reviewHandshake(base: string): string {
-  return [
+export function reviewHandshake(base: string, specDir: string | null, stacks: readonly string[]): string {
+  const conventions = stackContext(stacks)
+  const lines = [
     `Review the changes on this branch against ${base}, if you have not already. Check them`,
-    "against every acceptance criterion in this feature's spec.md.",
+    `against every acceptance criterion in ${specDir ? `${specDir}/spec.md` : "this feature's spec.md"}.`,
+  ]
+  if (conventions) {
+    lines.push(`Check them against these conventions too; every violation is a must_fix finding: ${conventions}`)
+  }
+  lines.push(
+    'Every Critical or High security finding is a must_fix finding.',
     '',
     markerLine(
       'review',
       ',"verdict":"ready|needs_fixes","findings":[{"severity":"must_fix|should_fix|nit","file":"<path or null>","line":<line or null>,"what":"<what is wrong>"}],"unmet":["<acceptance criterion the code does not meet>"]',
     ),
     '',
+    'The outcome is done whenever you completed the review, whatever it found; blocked only means the review itself could not run.',
     'needs_fixes when any must_fix finding or any unmet criterion exists, ready otherwise.',
-  ].join('\n')
+  )
+  return lines.join('\n')
 }
 
 function findingLine(finding: FlowReviewFinding): string {
@@ -239,7 +281,27 @@ export function revisePrompt(
   return lines.join('\n')
 }
 
-export function shipPrompt(run: Pick<FlowRun, 'title' | 'branch' | 'baseBranch' | 'source' | 'sourceRef'>): string {
+function measured(label: string, value: Measured): string[] {
+  return value.value === null ? [] : [`- ${label}: ${value.value}%${value.source ? ` (${value.source})` : ''}`]
+}
+
+export function testReportLines(verify: VerifyReport | null, postman: string | null): string[] {
+  const lines = verify
+    ? [
+        'The Test stage reported this. Quote these figures as they are and add none of your own:',
+        ...verify.suites.map((suite) => `- ${suite.id} (${suite.label}): ${suite.status}${suite.detail ? `, ${suite.detail}` : ''}`),
+        ...measured('Line coverage', verify.coverage.line),
+        ...measured('Changed-line coverage', verify.coverage.changed),
+      ]
+    : ['The Test stage left no report, so say that in the description instead of giving figures.']
+  lines.push(postman ? `Postman collection: ${postman}` : 'No Postman collection was written.')
+  return lines
+}
+
+export function shipPrompt(
+  run: Pick<FlowRun, 'title' | 'branch' | 'baseBranch' | 'source' | 'sourceRef'>,
+  test: { verify: VerifyReport | null; postman: string | null } = { verify: null, postman: null },
+): string {
   return [
     `Commit anything uncommitted, naming the feature "${run.title}". Push the branch` +
       `${run.branch ? ` (${run.branch})` : ''}.`,
@@ -253,8 +315,10 @@ export function shipPrompt(run: Pick<FlowRun, 'title' | 'branch' | 'baseBranch' 
     'For a GitHub remote, use gh pr create.',
     '',
     `Title the pull request after the feature. In the description: a short summary of the spec,`,
-    'what changed, the test report gates, and the Postman collection path if one was written.',
+    'what changed, the test report below, and the Postman collection path if one was written.',
     `Base it on ${run.baseBranch ?? 'the base branch'}. Do not merge, approve, or add reviewers.`,
+    '',
+    ...testReportLines(test.verify, test.postman),
     '',
     ADO_RULE,
     HONESTY,
