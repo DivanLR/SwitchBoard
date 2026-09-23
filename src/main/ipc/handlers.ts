@@ -808,6 +808,14 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       await flow.removeWorktree(req.runId, req.force === true)
       return flowSnapshotForRun(req.runId)
     },
+    'flow.openPullRequest': async (req) => {
+      const url = repos.flowRuns.byId(req.runId)?.prUrl
+      if (!url) throw { code: 'NOT_FOUND', message: 'This run has no pull request yet.' } satisfies IpcError
+      if (!URL.canParse(url) || new URL(url).protocol !== 'https:') {
+        throw { code: 'INVALID_PATH', message: 'That pull request link is not an https address.' } satisfies IpcError
+      }
+      await shell.openExternal(url)
+    },
     'flow.artefact': async (req) => flow.artefact(req.runId, req.stage, req.kind),
     'security.list': (req) => repos.securityRuns.listForProject(req.projectId),
     'security.start': async (req) => {

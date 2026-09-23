@@ -1190,6 +1190,29 @@ export class SessionManager {
     this.flowWatch.add(sessionId)
   }
 
+  private flowEnding = new Set<string>()
+
+  endFlowSession(sessionId: string): void {
+    this.flowWatch.delete(sessionId)
+    const entry = this.hosted.get(sessionId)
+    if (!entry) return
+    if (entry.session.isMidTask) {
+      this.flowEnding.add(sessionId)
+      return
+    }
+    void this.closeFlowSession(sessionId)
+  }
+
+  private async closeFlowSession(sessionId: string): Promise<void> {
+    this.flowEnding.delete(sessionId)
+    if (this.completing.has(sessionId) || !this.hosted.has(sessionId)) return
+    this.completing.add(sessionId)
+    await this.stopSession(
+      sessionId,
+      'This session did one piece of Flow work, and closed itself when that work finished.',
+    ).catch(() => {})
+  }
+
   hasFlowWatch(sessionId: string): boolean {
     return this.flowWatch.has(sessionId)
   }
@@ -1601,7 +1624,8 @@ export class SessionManager {
     this.pushStatus(entry)
     this.callbacks.onCountersChanged()
     if (status === 'done') {
-      if (this.flowWatch.has(entry.row.id)) this.flowHooks?.onTurnEnded(entry.row.id)
+      if (this.flowEnding.has(entry.row.id)) void this.closeFlowSession(entry.row.id)
+      else if (this.flowWatch.has(entry.row.id)) this.flowHooks?.onTurnEnded(entry.row.id)
       void this.endIfIdleBackground(entry)
     }
   }
@@ -1610,6 +1634,7 @@ export class SessionManager {
     if (!entry.background) return
     if (!entry.ranATurn) return
     const id = entry.row.id
+    if (this.completing.has(id)) return
     if (
       this.verifyWatch.has(id) ||
       this.apiWatch.has(id) ||
@@ -1653,6 +1678,7 @@ export class SessionManager {
 
   private handleExit(entry: HostedEntry, reason: 'completed' | 'stopped' | 'crashed', detail?: string): void {
     if (reason === 'stopped' && this.completing.delete(entry.row.id)) reason = 'completed'
+    this.flowEnding.delete(entry.row.id)
     if (!this.hosted.has(entry.row.id)) return
     this.closeUnreportedVerify(entry)
     this.closeUnreportedApi(entry)

@@ -4,13 +4,21 @@ import { join } from 'node:path'
 import type {
   FlowRun,
   FlowStage,
+  FlowStageAction,
+  FlowStageRecord,
   FlowStageReport,
   Project,
   SessionEndReason,
   SpecSummary,
   VerifyReport,
 } from '@shared/domain'
-import { FLOW_STAGE_LABELS, FLOW_STAGES, emptyFlowStageReport, verifyVerdict } from '@shared/domain'
+import {
+  FLOW_STAGE_LABELS,
+  FLOW_STAGES,
+  emptyFlowStageReport,
+  flowStageActions,
+  verifyVerdict,
+} from '@shared/domain'
 import type { FlowArtefactKind, FlowStartSource, IpcError } from '@shared/ipc-types'
 import { nowIso, type Repositories } from '@main/store/repositories'
 import type { SessionManager } from '@main/sessions/session-manager'
@@ -82,15 +90,18 @@ const defaultGit: FlowGit = {
   uniqueBranch: uniqueBranchName,
 }
 
-const ARTEFACT_NAME: Record<FlowStage, string> = {
-  spec: 'the spec',
-  plan: 'the plan',
-  build: 'the implementation',
-  clean: 'the cleanup',
-  test: 'the tests',
-  review: 'the review',
-  ship: 'the pull request',
+const REFUSED: Record<FlowStageAction, string> = {
+  approve: 'This stage is not waiting for approval.',
+  fix: 'Fix only applies to a review that found something to fix.',
+  revise: 'This stage is not waiting for approval.',
+  retry: 'This stage has not failed.',
+  ship: 'This run is not waiting to raise its pull request.',
+  skip: 'This stage cannot be skipped now.',
 }
+
+const NO_REPORT = 'The stage finished without reporting its result.'
+const NO_VERIFY_REPORT = 'The verification step did not return a report.'
+const SESSION_ENDED = 'The session ended before this stage reported.'
 
 function errorText(error: unknown): string {
   if (error instanceof Error) return error.message
@@ -135,10 +146,16 @@ export class FlowSupervisor {
       engine: 'claude',
     })
     this.manager.markSection(session.id, 'flow')
-    await this.requireAdo(session.id)
+    try {
+      await this.requireAdo(session.id)
+    } catch (error) {
+      this.manager.endFlowSession(session.id)
+      throw error
+    }
     return new Promise<FlowFeature[]>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.featuresWaiters.delete(session.id)
+        this.manager.endFlowSession(session.id)
         reject({
           code: 'NOT_LIVE',
           message: 'The session did not answer with a Feature list in time.',
@@ -231,10 +248,8 @@ export class FlowSupervisor {
 
   async approve(runId: string): Promise<FlowRun> {
     const run = this.requireRun(runId)
-    const stageRow = this.repos.flowStages.get(runId, run.stage)
-    if (!stageRow || stageRow.status !== 'review') {
-      throw { code: 'RULE_NOT_ALLOWED', message: 'This stage is not waiting for approval.' } satisfies IpcError
-    }
+    const stageRow = this.requireAction(run, 'approve')
+    this.release(stageRow.sessionId)
     this.repos.flowStages.update(runId, run.stage, { status: 'approved' })
     this.callbacks.onFlowChanged(run.projectId)
     await this.advance(runId)
@@ -243,22 +258,15 @@ export class FlowSupervisor {
 
   async retry(runId: string): Promise<FlowRun> {
     const run = this.requireRun(runId)
-    const stageRow = this.repos.flowStages.get(runId, run.stage)
-    if (!stageRow || stageRow.status !== 'failed') {
-      throw { code: 'RULE_NOT_ALLOWED', message: 'This stage has not failed.' } satisfies IpcError
-    }
+    this.requireAction(run, 'retry')
     await this.beginStage(runId, run.stage)
     return this.requireRun(runId)
   }
 
   async skip(runId: string): Promise<FlowRun> {
     const run = this.requireRun(runId)
-    const stageRow = this.repos.flowStages.get(runId, run.stage)
-    if (stageRow?.status === 'running' && stageRow.sessionId) {
-      await this.manager.interruptSession(stageRow.sessionId).catch(() => {})
-      this.sessionStage.delete(stageRow.sessionId)
-      this.pending.delete(stageRow.sessionId)
-    }
+    const stageRow = this.requireAction(run, 'skip')
+    await this.stopStageSession(stageRow)
     this.repos.flowStages.update(runId, run.stage, { status: 'skipped', finishedAt: nowIso() })
     this.callbacks.onFlowChanged(run.projectId)
     if (run.stage === 'ship') {
@@ -272,71 +280,21 @@ export class FlowSupervisor {
 
   async fix(runId: string): Promise<FlowRun> {
     const run = this.requireRun(runId)
-    if (run.stage !== 'review') {
-      throw { code: 'RULE_NOT_ALLOWED', message: 'Fix only applies to the review stage.' } satisfies IpcError
-    }
-    const stageRow = this.repos.flowStages.get(runId, 'review')
-    if (!stageRow || stageRow.status !== 'review') {
-      throw { code: 'RULE_NOT_ALLOWED', message: 'This stage is not waiting for a fix.' } satisfies IpcError
-    }
-    const project = this.requireProject(run.projectId)
-    const session = await this.sessionFor(run, project, 'review')
-    this.repos.flowStages.update(runId, 'review', {
-      status: 'running',
-      sessionId: session.id,
-      attempts: stageRow.attempts + 1,
-      startedAt: nowIso(),
-      finishedAt: null,
-    })
-    this.repos.flowRuns.update(runId, { status: 'running' })
-    this.callbacks.onFlowChanged(project.id)
-    this.manager.watchFlow(session.id)
-    this.sessionStage.set(session.id, { runId, stage: 'review' })
-    this.pending.set(session.id, this.tailFor(run, 'review'))
-    this.manager.sendMessage(session.id, fixFindingsPrompt())
+    const stageRow = this.requireAction(run, 'fix')
+    await this.restartStage(run, stageRow, fixFindingsPrompt(stageRow.report, run), stageRow.feedback)
     return this.requireRun(runId)
   }
 
   async revise(runId: string, feedback: string): Promise<FlowRun> {
     const run = this.requireRun(runId)
-    const stageRow = this.repos.flowStages.get(runId, run.stage)
-    if (!stageRow || stageRow.status !== 'review') {
-      throw { code: 'RULE_NOT_ALLOWED', message: 'This stage is not waiting for approval.' } satisfies IpcError
-    }
-    const project = this.requireProject(run.projectId)
-    const session = await this.sessionFor(run, project, run.stage)
-    this.repos.flowStages.update(runId, run.stage, {
-      status: 'running',
-      sessionId: session.id,
-      attempts: stageRow.attempts + 1,
-      startedAt: nowIso(),
-      finishedAt: null,
-      feedback,
-    })
-    this.repos.flowRuns.update(runId, { status: 'running' })
-    this.callbacks.onFlowChanged(project.id)
-    this.manager.watchFlow(session.id)
-    this.sessionStage.set(session.id, { runId, stage: run.stage })
-    this.pending.set(session.id, this.tailFor(run, run.stage))
-    this.manager.sendMessage(session.id, revisePrompt(ARTEFACT_NAME[run.stage], feedback))
+    const stageRow = this.requireAction(run, 'revise')
+    await this.restartStage(run, stageRow, revisePrompt(run, run.stage, feedback), feedback)
     return this.requireRun(runId)
   }
 
   async ship(runId: string): Promise<FlowRun> {
     const run = this.requireRun(runId)
-    if (run.stage !== 'ship') {
-      throw {
-        code: 'RULE_NOT_ALLOWED',
-        message: 'This run has not reached the ship stage yet.',
-      } satisfies IpcError
-    }
-    const stageRow = this.repos.flowStages.get(runId, 'ship')
-    if (stageRow?.status === 'running') {
-      throw {
-        code: 'RULE_NOT_ALLOWED',
-        message: 'The pull request step is already running.',
-      } satisfies IpcError
-    }
+    this.requireAction(run, 'ship')
     await this.beginStage(runId, 'ship')
     return this.requireRun(runId)
   }
@@ -345,11 +303,7 @@ export class FlowSupervisor {
     const run = this.requireRun(runId)
     if (run.finishedAt) return run
     const stageRow = this.repos.flowStages.get(runId, run.stage)
-    if (stageRow?.sessionId) {
-      await this.manager.interruptSession(stageRow.sessionId).catch(() => {})
-      this.sessionStage.delete(stageRow.sessionId)
-      this.pending.delete(stageRow.sessionId)
-    }
+    if (stageRow) await this.stopStageSession(stageRow)
     if (stageRow && stageRow.status === 'running') {
       this.repos.flowStages.update(runId, run.stage, {
         status: 'failed',
@@ -372,6 +326,12 @@ export class FlowSupervisor {
   async removeWorktree(runId: string, force: boolean): Promise<FlowRun> {
     const run = this.requireRun(runId)
     if (!run.worktreePath) return run
+    if (!run.finishedAt) {
+      throw {
+        code: 'RULE_NOT_ALLOWED',
+        message: 'This run still uses its worktree. Cancel the run or let it finish first.',
+      } satisfies IpcError
+    }
     const project = this.requireProject(run.projectId)
     const outcome = await this.git.remove(project.path, run.worktreePath, { force })
     if (!outcome.removed) {
@@ -429,6 +389,7 @@ export class FlowSupervisor {
       if (!waiter) return
       this.featuresWaiters.delete(sessionId)
       clearTimeout(waiter.timer)
+      this.manager.endFlowSession(sessionId)
       waiter.resolve(marker.features)
       return
     }
@@ -436,8 +397,6 @@ export class FlowSupervisor {
     if (!ctx || ctx.stage !== marker.stage) return
     const stageRow = this.repos.flowStages.get(ctx.runId, ctx.stage)
     if (!stageRow || stageRow.status !== 'running') return
-    this.pending.delete(sessionId)
-    this.sessionStage.delete(sessionId)
     if (marker.outcome === 'blocked') {
       this.failStage(ctx.runId, ctx.stage, marker.why ?? marker.summary ?? 'The session reported it was blocked.', {
         retryOnce: false,
@@ -452,20 +411,12 @@ export class FlowSupervisor {
     if (!ctx || ctx.stage !== 'test') return
     const stageRow = this.repos.flowStages.get(ctx.runId, ctx.stage)
     if (!stageRow || stageRow.status !== 'running') return
-    this.pending.delete(sessionId)
-    this.sessionStage.delete(sessionId)
     const flowReport: FlowStageReport = { ...emptyFlowStageReport(), verify: report }
     if (report.suites.length > 0 && verifyVerdict(report) === 'pass') {
-      this.repos.flowStages.update(ctx.runId, ctx.stage, {
-        status: 'review',
+      this.toReview(ctx.runId, ctx.stage, {
         summary: `${report.suites.length} suite${report.suites.length === 1 ? '' : 's'} passed.`,
         report: flowReport,
-        finishedAt: nowIso(),
       })
-      this.repos.flowRuns.update(ctx.runId, { status: 'waiting' })
-      const run = this.repos.flowRuns.byId(ctx.runId)
-      if (run) this.callbacks.onFlowChanged(run.projectId)
-      this.maybeAutopilot(ctx.runId, ctx.stage)
       return
     }
     const failed = report.suites.filter((s) => s.status === 'fail').map((s) => s.id)
@@ -492,7 +443,7 @@ export class FlowSupervisor {
     this.pending.delete(sessionId)
     const stageRow = this.repos.flowStages.get(ctx.runId, ctx.stage)
     if (!stageRow || stageRow.status !== 'running') return
-    this.failStage(ctx.runId, ctx.stage, 'The session ended before this stage reported.', { retryOnce: true })
+    this.failStage(ctx.runId, ctx.stage, SESSION_ENDED, { retryOnce: true })
   }
 
   onTurnEnded(sessionId: string): void {
@@ -506,9 +457,7 @@ export class FlowSupervisor {
     }
     const stageRow = this.repos.flowStages.get(ctx.runId, ctx.stage)
     if (!stageRow || stageRow.status !== 'running') return
-    this.sessionStage.delete(sessionId)
-    this.pending.delete(sessionId)
-    this.failStage(ctx.runId, ctx.stage, 'The session ended before this stage reported.', { retryOnce: true })
+    this.failStage(ctx.runId, ctx.stage, ctx.stage === 'test' ? NO_VERIFY_REPORT : NO_REPORT, { retryOnce: true })
   }
 
   private deriveTitle(source: FlowStartSource): string {
@@ -535,10 +484,53 @@ export class FlowSupervisor {
     return session
   }
 
-  private async sessionFor(run: FlowRun, project: Project, stage: FlowStage): Promise<{ id: string }> {
-    const stageRow = this.repos.flowStages.get(run.id, stage)
-    if (stageRow?.sessionId && this.manager.workdirFor(stageRow.sessionId)) return { id: stageRow.sessionId }
-    return this.startStageSession(run, project, stage)
+  private release(sessionId: string | null): void {
+    if (!sessionId) return
+    this.sessionStage.delete(sessionId)
+    this.pending.delete(sessionId)
+    this.manager.endFlowSession(sessionId)
+  }
+
+  private async stopStageSession(stageRow: FlowStageRecord): Promise<void> {
+    this.release(stageRow.sessionId)
+    if (stageRow.status === 'running' && stageRow.sessionId) {
+      await this.manager
+        .stopSession(stageRow.sessionId, 'This Flow stage was stopped before it finished.')
+        .catch(() => {})
+    }
+  }
+
+  private requireAction(run: FlowRun, action: FlowStageAction): FlowStageRecord {
+    const stageRow = this.repos.flowStages.get(run.id, run.stage)
+    if (!stageRow || !flowStageActions(run, stageRow).includes(action)) {
+      throw { code: 'RULE_NOT_ALLOWED', message: REFUSED[action] } satisfies IpcError
+    }
+    return stageRow
+  }
+
+  private async restartStage(
+    run: FlowRun,
+    stageRow: FlowStageRecord,
+    prompt: string,
+    feedback: string | null,
+  ): Promise<void> {
+    const project = this.requireProject(run.projectId)
+    this.release(stageRow.sessionId)
+    const session = await this.startStageSession(run, project, run.stage)
+    this.repos.flowStages.update(run.id, run.stage, {
+      status: 'running',
+      sessionId: session.id,
+      attempts: stageRow.attempts + 1,
+      startedAt: nowIso(),
+      finishedAt: null,
+      feedback,
+    })
+    this.repos.flowRuns.update(run.id, { status: 'running' })
+    this.callbacks.onFlowChanged(project.id)
+    this.manager.watchFlow(session.id)
+    this.sessionStage.set(session.id, { runId: run.id, stage: run.stage })
+    this.pending.set(session.id, this.tailFor(run, run.stage))
+    this.manager.sendMessage(session.id, prompt)
   }
 
   private verifyStepPrompt(run: FlowRun): string {
@@ -581,8 +573,16 @@ export class FlowSupervisor {
   private async beginStage(runId: string, stage: FlowStage): Promise<void> {
     const run = this.requireRun(runId)
     const project = this.requireProject(run.projectId)
-    const session = await this.startStageSession(run, project, stage)
     const stageRow = this.repos.flowStages.get(runId, stage)
+    this.release(stageRow?.sessionId ?? null)
+    let session: { id: string }
+    try {
+      session = await this.startStageSession(run, project, stage)
+    } catch (error) {
+      this.repos.flowRuns.update(runId, { stage })
+      this.failStage(runId, stage, errorText(error), { retryOnce: false })
+      return
+    }
     this.repos.flowStages.update(runId, stage, {
       status: 'running',
       sessionId: session.id,
@@ -600,7 +600,6 @@ export class FlowSupervisor {
       try {
         await this.requireAdo(session.id)
       } catch (error) {
-        this.sessionStage.delete(session.id)
         this.failStage(runId, stage, errorText(error), { retryOnce: false })
         return
       }
@@ -614,31 +613,48 @@ export class FlowSupervisor {
   }
 
   private completeStage(runId: string, stage: FlowStage, marker: FlowStageMarker): void {
-    const run = this.repos.flowRuns.byId(runId)
-    if (!run) return
-    const report: FlowStageReport = {
-      tasksDone: marker.tasksDone,
-      tasksTotal: marker.tasksTotal,
-      verdict: marker.verdict,
-      findings: marker.findings,
-      unmet: marker.unmet,
-      prUrl: marker.prUrl,
-      prId: marker.prId,
-      verify: null,
-    }
-    this.repos.flowStages.update(runId, stage, {
-      status: 'review',
-      summary: marker.summary || null,
-      report,
-      finishedAt: nowIso(),
-    })
-    const patch: Parameters<Repositories['flowRuns']['update']>[1] = { status: 'waiting' }
+    const patch: Parameters<Repositories['flowRuns']['update']>[1] = {}
     if (stage === 'spec' && marker.specDir) patch.specDir = marker.specDir
     if (stage === 'ship') {
       patch.prUrl = marker.prUrl
       patch.prId = marker.prId
     }
-    this.repos.flowRuns.update(runId, patch)
+    this.toReview(
+      runId,
+      stage,
+      {
+        summary: marker.summary || null,
+        report: {
+          tasksDone: marker.tasksDone,
+          tasksTotal: marker.tasksTotal,
+          verdict: marker.verdict,
+          findings: marker.findings,
+          unmet: marker.unmet,
+          prUrl: marker.prUrl,
+          prId: marker.prId,
+          verify: null,
+        },
+      },
+      patch,
+    )
+  }
+
+  private toReview(
+    runId: string,
+    stage: FlowStage,
+    result: { summary: string | null; report: FlowStageReport },
+    runPatch: Parameters<Repositories['flowRuns']['update']>[1] = {},
+  ): void {
+    const run = this.repos.flowRuns.byId(runId)
+    if (!run) return
+    this.release(this.repos.flowStages.get(runId, stage)?.sessionId ?? null)
+    this.repos.flowStages.update(runId, stage, {
+      status: 'review',
+      summary: result.summary,
+      report: result.report,
+      finishedAt: nowIso(),
+    })
+    this.repos.flowRuns.update(runId, { ...runPatch, status: 'waiting' })
     this.callbacks.onFlowChanged(run.projectId)
     this.maybeAutopilot(runId, stage)
   }
@@ -653,6 +669,7 @@ export class FlowSupervisor {
     const run = this.repos.flowRuns.byId(runId)
     if (!run) return
     const stageRow = this.repos.flowStages.get(runId, stage)
+    this.release(stageRow?.sessionId ?? null)
     this.repos.flowStages.update(runId, stage, {
       status: 'failed',
       summary: why,
@@ -662,7 +679,7 @@ export class FlowSupervisor {
     this.repos.flowRuns.update(runId, { status: 'waiting' })
     this.callbacks.onFlowChanged(run.projectId)
     if (opts.retryOnce && run.autopilot && stageRow?.attempts === 1) {
-      void this.retry(runId)
+      void this.retry(runId).catch(() => {})
     }
   }
 
@@ -672,11 +689,10 @@ export class FlowSupervisor {
     const stageRow = this.repos.flowStages.get(runId, stage)
     if (!stageRow || stageRow.status !== 'review') return
     if (stage === 'review' && stageRow.report?.verdict === 'needs_fixes') {
-      // Never auto-approve unresolved findings: fix up to the round cap, then leave it for a human.
-      if (stageRow.attempts <= MAX_FIX_ROUNDS) void this.fix(runId)
+      if (stageRow.attempts <= MAX_FIX_ROUNDS) void this.fix(runId).catch(() => {})
       return
     }
-    void this.approve(runId)
+    void this.approve(runId).catch(() => {})
   }
 
   private async advance(runId: string): Promise<void> {

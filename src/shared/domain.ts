@@ -786,6 +786,22 @@ export interface FlowRun {
   finishedAt: string | null
 }
 
+export type FlowStageAction = 'approve' | 'fix' | 'revise' | 'retry' | 'ship' | 'skip'
+
+export function flowStageActions(
+  run: Pick<FlowRun, 'stage' | 'finishedAt'>,
+  row: Pick<FlowStageRecord, 'stage' | 'status' | 'report'>,
+): FlowStageAction[] {
+  if (run.finishedAt || row.stage !== run.stage) return []
+  if (row.status === 'running') return ['skip']
+  if (row.status === 'failed') return ['retry', 'skip']
+  if (row.status === 'pending') return row.stage === 'ship' ? ['ship', 'skip'] : ['skip']
+  if (row.status !== 'review') return []
+  if (row.stage === 'ship') return ['approve', 'revise']
+  if (row.stage === 'review' && row.report?.verdict === 'needs_fixes') return ['fix', 'approve', 'revise', 'skip']
+  return ['approve', 'revise', 'skip']
+}
+
 export interface SecurityRun {
   id: string
   projectId: string

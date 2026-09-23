@@ -1,4 +1,4 @@
-import type { FlowRun, FlowStage } from '@shared/domain'
+import type { FlowReviewFinding, FlowRun, FlowStage, FlowStageReport } from '@shared/domain'
 import { HONESTY } from '@main/evals/verify-dispatch'
 import { FLOW_MARKER } from './flow-markers'
 
@@ -186,12 +186,57 @@ export function reviewHandshake(base: string): string {
   ].join('\n')
 }
 
-export function fixFindingsPrompt(): string {
-  return 'Fix every must_fix finding and every unmet acceptance criterion above, keep tests green, commit.'
+function findingLine(finding: FlowReviewFinding): string {
+  const where = finding.file ? `${finding.file}${finding.line ? `:${finding.line}` : ''}: ` : ''
+  return `- ${where}${finding.what}`
 }
 
-export function revisePrompt(artefact: string, feedback: string): string {
-  return `Revise ${artefact} per this feedback: ${feedback}`
+export function fixFindingsPrompt(
+  report: Pick<FlowStageReport, 'findings' | 'unmet'> | null,
+  run: Pick<FlowRun, 'baseBranch' | 'specDir'>,
+): string {
+  const mustFix = (report?.findings ?? []).filter((finding) => finding.severity === 'must_fix')
+  const unmet = report?.unmet ?? []
+  const lines = [
+    `A review of the changes on this branch against ${run.baseBranch ?? 'the base branch'} found the problems below.`,
+    'Fix every must_fix finding and every unmet acceptance criterion listed here, keep the tests green, and commit.',
+  ]
+  if (run.specDir) lines.push(`The acceptance criteria are in ${run.specDir}/spec.md.`)
+  if (mustFix.length > 0) lines.push('', 'Must fix:', ...mustFix.map(findingLine))
+  if (unmet.length > 0) lines.push('', 'Unmet acceptance criteria:', ...unmet.map((line) => `- ${line}`))
+  return lines.join('\n')
+}
+
+const REVISE_TARGET: Record<FlowStage, string> = {
+  spec: 'the spec',
+  plan: 'the plan and its tasks',
+  build: 'the implementation on this branch',
+  clean: 'the cleanup on this branch',
+  test: 'the tests on this branch',
+  review: 'the review of this branch',
+  ship: 'the pull request for this branch',
+}
+
+export function artefactPathFor(run: Pick<FlowRun, 'specDir' | 'prUrl'>, stage: FlowStage): string | null {
+  if (stage === 'ship') return run.prUrl
+  if (!run.specDir) return null
+  if (stage === 'spec') return `${run.specDir}/spec.md`
+  if (stage === 'plan') return `${run.specDir}/plan.md`
+  return null
+}
+
+export function revisePrompt(
+  run: Pick<FlowRun, 'specDir' | 'prUrl' | 'baseBranch'>,
+  stage: FlowStage,
+  feedback: string,
+): string {
+  const path = artefactPathFor(run, stage)
+  const lines = [`Revise ${REVISE_TARGET[stage]}${path ? ` (${path})` : ''} per this feedback:`, '', feedback.trim()]
+  if (!path && run.specDir) lines.push('', `The feature's spec is ${run.specDir}/spec.md.`)
+  if (stage !== 'spec' && stage !== 'plan') {
+    lines.push(`Compare this branch against ${run.baseBranch ?? 'the base branch'} to see what it changed so far.`)
+  }
+  return lines.join('\n')
 }
 
 export function shipPrompt(run: Pick<FlowRun, 'title' | 'branch' | 'baseBranch' | 'source' | 'sourceRef'>): string {
