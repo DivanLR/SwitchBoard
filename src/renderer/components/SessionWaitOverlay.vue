@@ -25,8 +25,6 @@ defineProps<{
 
 <style scoped>
 .wait {
-  /* z-index 100, above the base .overlay's 40: this is a blocking wait state and
-     must outrank ToastHost (60) and the command palette (45) too. */
   z-index: 100;
   flex-direction: column;
   gap: 14px;

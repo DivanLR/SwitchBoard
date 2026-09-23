@@ -57,9 +57,6 @@ function paint(line: RawLine): string {
   return `${stamp}${tone}${line.text}${tone ? RESET : ''}`
 }
 
-// The input block is always the last thing on screen, so erasing it means going
-// back to the row it started on and clearing to the end of the screen. A long
-// prompt soft-wraps, so the row count is remembered from the last draw.
 function rowsFor(instance: Terminal, text: string): number {
   const cols = Math.max(1, instance.cols)
   return text
@@ -104,8 +101,6 @@ function append(instance: Terminal): void {
   drawInputLine(instance)
 }
 
-// Streamed assistant text grows in place: same event, same row count, a longer
-// last line. Only the tail can change under an unchanged count.
 function tailChanged(): boolean {
   return props.lines.length === written && (props.lines.at(-1)?.text ?? null) !== lastTailText
 }
@@ -272,7 +267,6 @@ onBeforeUnmount(() => {
   term.value = null
 })
 
-// A send that did not reach the session hands the text back, so nothing typed is lost.
 function restore(text: string): void {
   buffer.value = text
   redrawInput()

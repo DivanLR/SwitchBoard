@@ -1037,11 +1037,6 @@ html.sb-light .btn-solid {
   }
 }
 
-/* Shared page primitives. One anatomy for every section: ui-body canvas,
-   ui-head meaning row, optional ui-toolbar, ui-tabs strip, then cards,
-   rows, empty and error states, footer. Built only from existing tokens.
-   Prefixed ui- so no scoped class in any view can collide with them. */
-
 .ui-body {
   flex: 1;
   min-height: 0;

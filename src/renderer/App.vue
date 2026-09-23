@@ -124,8 +124,6 @@ onUnmounted(() => {
 })
 
 const selectedProject = computed(() => projects.selected)
-// Flow belongs to the project it was opened for. A selection change from anywhere
-// (a notification click, a focus request) closes it rather than retargeting it.
 watch(selectedProject, (next, prev) => {
   if (showFlow.value && prev && next?.id !== prev.id) showFlow.value = false
 })
