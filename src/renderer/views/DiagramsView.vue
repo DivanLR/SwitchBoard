@@ -65,7 +65,7 @@ function setEngine(next: 'diagram-design' | 'archify'): void {
 
 const archify = ref<ArchifyOptions>({ ...DEFAULT_ARCHIFY })
 
-const archifyInstalled = computed(() => skills.enabled.some((s) => s.name === ARCHIFY.skill))
+const archifyInstalled = computed(() => skills.installed.includes(ARCHIFY.skill))
 
 const importingArchify = computed(() => skills.importing)
 

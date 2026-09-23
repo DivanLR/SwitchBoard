@@ -8,7 +8,7 @@ import {
   parseSkillFrontmatter,
   parseSkillSource,
 } from '@main/skills/import'
-import { readSkillSource } from '@shared/skill-source'
+import { readSkillSource } from '@main/skills/skill-source'
 
 describe('parseSkillSource', () => {
   it('reads the folder URL a developer actually pastes', () => {
@@ -172,7 +172,7 @@ describe('importSkills download policy', () => {
     const root = await mkdtemp(join(tmpdir(), 'sb-skills-'))
     try {
       const result = await importSkills(SOURCE, root, new Set())
-      expect(result.imported).toMatchObject([{ name: 'archify', fileCount: 2 }])
+      expect(result.imported).toEqual(['archify'])
       expect(await readFile(join(root, 'archify', 'bin', 'archify.mjs'), 'utf8')).toContain('export const x')
       expect(calls.filter((url) => url.endsWith('archify.mjs'))).toHaveLength(2)
     } finally {
@@ -199,7 +199,7 @@ describe('importSkills download policy', () => {
     const root = await mkdtemp(join(tmpdir(), 'sb-skills-'))
     try {
       const result = await importSkills(SOURCE, root, new Set())
-      expect(result.imported).toMatchObject([{ name: 'archify', fileCount: 2 }])
+      expect(result.imported).toEqual(['archify'])
       expect(result.skipped).toMatchObject([{ name: 'archify/assets/music.mp3' }])
       expect(calls.some((url) => url.endsWith('music.mp3'))).toBe(false)
     } finally {

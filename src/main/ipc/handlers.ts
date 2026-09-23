@@ -3,6 +3,7 @@ import type { Project, Session, SessionEvent } from '@shared/domain'
 import type { SectionKind } from '@shared/domain'
 import { isDangerousCommand, sessionName } from '@shared/domain'
 import {
+  ARCHIFY,
   DIAGRAM_FILE_PICKS,
   DIAGRAM_PLUGIN,
   DIAGRAMS_DIR,
@@ -46,7 +47,7 @@ import { readDiffList, readFileDiff } from '@main/sessions/session-manager'
 import { readDiagramList } from '@main/diagrams/list'
 import { importSkills } from '@main/skills/import'
 import type { FlowSupervisor } from '@main/flow/flow-supervisor'
-import { enableSkill } from '@main/skills/install'
+import { enableSkill, installedSkillNames } from '@main/skills/install'
 import { detectFlowStacks } from '@main/flow/stacks'
 import { check as checkForUpdates, installNow } from '@main/updater'
 
@@ -382,17 +383,16 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'sessions.events': (req) => repos.events.page(req.sessionId, req.beforeSeq, req.limit),
     'sessions.promptHistory': (req) => repos.commandHistory.recent(req.projectId, req.limit),
     'projects.commands': (req) => repos.projectCommands.get(req.projectId),
-    'skills.list': () => repos.customSkills.list(),
+    'skills.list': () => installedSkillNames(),
     'skills.import': async (req) => {
-      const result = await importSkills(req.url, skillsStagingRoot, repos.customSkills.names())
-      repos.customSkills.insertMany(result.imported)
-      for (const skill of result.imported) {
-        try {
-          await enableSkill(skillsStagingRoot, skill.name)
-        } catch {
-          repos.customSkills.setEnabled(skill.name, false)
-        }
+      if (req.url.trim() !== ARCHIFY.source) {
+        throw {
+          code: 'RULE_NOT_ALLOWED',
+          message: 'That skill is not one this app offers to import.',
+        } satisfies IpcError
       }
+      const result = await importSkills(req.url, skillsStagingRoot, new Set(await installedSkillNames()))
+      for (const name of result.imported) await enableSkill(skillsStagingRoot, name)
       await manager.reloadPlugins()
       return result
     },

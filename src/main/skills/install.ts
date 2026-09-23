@@ -1,4 +1,4 @@
-import { cp, mkdir, rm, stat } from 'node:fs/promises'
+import { cp, mkdir, readdir, rm, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -24,4 +24,18 @@ export async function enableSkill(stagingRoot: string, name: string): Promise<vo
   await mkdir(liveSkillsRoot(), { recursive: true })
   await rm(to, { recursive: true, force: true })
   await cp(from, to, { recursive: true })
+}
+
+export async function installedSkillNames(): Promise<string[]> {
+  const root = liveSkillsRoot()
+  const names = await readdir(root).catch(() => [] as string[])
+  const live = await Promise.all(
+    names.map((name) =>
+      stat(join(root, name, 'SKILL.md')).then(
+        () => name,
+        () => null,
+      ),
+    ),
+  )
+  return live.filter((name): name is string => name !== null).sort()
 }

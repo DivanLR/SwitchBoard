@@ -1,7 +1,9 @@
 import type { PtyHost } from '@main/terminal/pty-host'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ARCHIFY } from '@shared/diagram'
 import type { IpcError, WireResult } from '@shared/ipc-types'
 import { INVOKE_CHANNEL, isIpcErrorCode } from '@shared/ipc-types'
 
@@ -312,5 +314,50 @@ describe('diagrams.generate chooses its engine from the request', () => {
     const { file } = result.value as { file: string }
     expect(file).toBe('the-auth-flow.html')
     expect([...harness.repos.diagramRequests.forProject(id).keys()]).toContain(file)
+  })
+})
+
+describe('the archify skill import Diagrams offers', () => {
+  let home: string
+  const previousProfile = process.env.USERPROFILE
+  const previousHome = process.env.HOME
+
+  beforeEach(async () => {
+    home = await mkdtemp(join(tmpdir(), 'sb-home-'))
+    process.env.USERPROFILE = home
+    process.env.HOME = home
+    vi.stubGlobal('fetch', async (url: string) => {
+      if (url.startsWith('https://api.github.com/')) {
+        return new Response(JSON.stringify({ tree: [{ path: 'archify/SKILL.md', type: 'blob', size: 64 }] }))
+      }
+      return new Response('---\nname: archify\ndescription: Draws architecture.\n---\n')
+    })
+  })
+
+  afterEach(async () => {
+    process.env.USERPROFILE = previousProfile
+    process.env.HOME = previousHome
+    vi.unstubAllGlobals()
+    await rm(home, { recursive: true, force: true })
+  })
+
+  it('refuses any source other than the archify skill', async () => {
+    const { call } = setup()
+    const result = await call('skills.import', { url: 'https://github.com/someone/skills' })
+    expect(result).toMatchObject({ ok: false, error: { code: 'RULE_NOT_ALLOWED' } })
+  })
+
+  it('counts the skill installed only while its live folder exists, and a repeat import repairs it', async () => {
+    const { call } = setup()
+    expect(await call('skills.list')).toEqual({ ok: true, value: [] })
+
+    expect((await call('skills.import', { url: ARCHIFY.source })).ok).toBe(true)
+    expect(await call('skills.list')).toEqual({ ok: true, value: ['archify'] })
+
+    await rm(join(home, '.claude', 'skills', 'archify'), { recursive: true, force: true })
+    expect(await call('skills.list')).toEqual({ ok: true, value: [] })
+
+    expect((await call('skills.import', { url: ARCHIFY.source })).ok).toBe(true)
+    expect(await call('skills.list')).toEqual({ ok: true, value: ['archify'] })
   })
 })

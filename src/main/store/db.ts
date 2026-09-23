@@ -680,6 +680,12 @@ const MIGRATIONS: Migration[] = [
       `)
     },
   },
+  {
+    name: '040-drop-custom-skills',
+    up: (db) => {
+      db.exec(`DROP TABLE IF EXISTS custom_skills;`)
+    },
+  },
 ]
 
 export function transaction<T>(db: AppDatabase, work: () => T): T {

@@ -2,15 +2,7 @@ import { expect, test } from '@playwright/test'
 import { installMockHost, twoProjectScenario, type MockScenario } from './mock-host'
 import { ARCHIFY, DIAGRAMS_DIR } from '../../src/shared/diagram'
 
-const ARCHIFY_SKILL = {
-  name: ARCHIFY.skill,
-  description: 'Create polished, validated diagrams as explorable standalone HTML.',
-  sourceUrl: ARCHIFY.source,
-  sourcePath: 'archify',
-  enabled: true,
-  fileCount: 190,
-  importedAt: '2026-08-30T09:00:00.000Z',
-}
+const ARCHIFY_SKILL = ARCHIFY.skill
 
 function scenario(skills: MockScenario['skills'] = []): MockScenario {
   return { ...twoProjectScenario(), skills }

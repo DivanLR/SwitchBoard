@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto'
 import { transaction, type AppDatabase } from './db'
 import type { DiagramPlan } from '@shared/diagram'
 import type {
-  CustomSkill,
   DecisionOutcome,
   DecisionRecord,
   Draft,
@@ -1253,46 +1252,6 @@ export class DiagramRequestsRepo {
   }
 }
 
-class CustomSkillsRepo {
-  constructor(private db: AppDatabase) {}
-
-  list(): CustomSkill[] {
-    return (
-      this.db
-        .prepare('SELECT * FROM custom_skills ORDER BY name')
-        .all() as (Omit<CustomSkill, 'enabled'> & { enabled: number })[]
-    ).map((row) => ({ ...row, enabled: row.enabled === 1 }))
-  }
-
-  names(): Set<string> {
-    return new Set(this.list().map((skill) => skill.name))
-  }
-
-  insertMany(skills: readonly CustomSkill[]): void {
-    const insert = this.db.prepare(
-      `INSERT INTO custom_skills (name, description, sourceUrl, sourcePath, enabled, fileCount, importedAt)
-       VALUES (@name, @description, @sourceUrl, @sourcePath, @enabled, @fileCount, @importedAt)`,
-    )
-    for (const skill of skills) {
-      insert.run({
-        name: skill.name,
-        description: skill.description,
-        sourceUrl: skill.sourceUrl,
-        sourcePath: skill.sourcePath,
-        enabled: skill.enabled ? 1 : 0,
-        fileCount: skill.fileCount,
-        importedAt: skill.importedAt,
-      })
-    }
-  }
-
-  setEnabled(name: string, enabled: boolean): void {
-    this.db
-      .prepare('UPDATE custom_skills SET enabled = ? WHERE name = ?')
-      .run(enabled ? 1 : 0, name)
-  }
-}
-
 export interface Repositories {
   projects: ProjectsRepo
   sessions: SessionsRepo
@@ -1308,7 +1267,6 @@ export interface Repositories {
   flowRuns: FlowRunsRepo
   flowStages: FlowStagesRepo
   diagramRequests: DiagramRequestsRepo
-  customSkills: CustomSkillsRepo
 }
 
 export function createRepositories(db: AppDatabase): Repositories {
@@ -1327,6 +1285,5 @@ export function createRepositories(db: AppDatabase): Repositories {
     flowRuns: new FlowRunsRepo(db),
     flowStages: new FlowStagesRepo(db),
     diagramRequests: new DiagramRequestsRepo(db),
-    customSkills: new CustomSkillsRepo(db),
   }
 }

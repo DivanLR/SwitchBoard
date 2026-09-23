@@ -1,6 +1,5 @@
 import {
   DEFAULT_SETTINGS,
-  type CustomSkill,
   type DiagramEntry,
   type SectionKind,
   type Settings,
@@ -30,7 +29,7 @@ export interface MockProjectSeed {
 
 export interface MockScenario {
   projects: MockProjectSeed[]
-  skills?: CustomSkill[]
+  skills?: string[]
   settings: Settings
   suites?: AvailableSuites[]
 }
@@ -84,7 +83,6 @@ export interface MockDriver {
   addDiagram: (projectId: string, entry: DiagramEntry) => void
   startFlood: (intervalMs: number, perTick: number) => void
   stopFlood: () => void
-  setSkillImport: (skills: CustomSkill[]) => void
   setClipboardFails: (fails: boolean) => void
   state: () => {
     sends: { sessionId: string; text: string }[]
@@ -612,8 +610,7 @@ export function installMockHost(scenario: MockScenario): void {
     return { delivered: true }
   }
 
-  const customSkills: CustomSkill[] = [...(scenario.skills ?? [])]
-  let nextSkillImport: CustomSkill[] | null = null
+  const installedSkills: string[] = [...(scenario.skills ?? [])]
 
   let clipboardFails = false
 
@@ -684,23 +681,10 @@ export function installMockHost(scenario: MockScenario): void {
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' }
       project.defaultSessionMode = String(req.mode)
     },
-    'skills.list': () => [...customSkills],
-    'skills.import': (req) => {
-      const url = String(req.url)
-      if (!/^https:\/\/(www\.)?github\.com\//.test(url)) {
-        throw { code: 'INVALID_PATH', message: 'Only https://github.com URLs can be imported.' }
-      }
-      const found = nextSkillImport ?? []
-      nextSkillImport = null
-      const imported = found.filter((s) => !customSkills.some((c) => c.name === s.name))
-      const skipped = found
-        .filter((s) => customSkills.some((c) => c.name === s.name))
-        .map((s) => ({ name: s.name, reason: 'A skill of that name is already imported.' }))
-      if (imported.length === 0 && skipped.length === 0) {
-        throw { code: 'NOT_FOUND', message: 'No SKILL.md found there. Link the folder that holds the skills.' }
-      }
-      customSkills.push(...imported.map((s) => ({ ...s, sourceUrl: url, enabled: true })))
-      return { imported: customSkills.filter((c) => imported.some((i) => i.name === c.name)), skipped }
+    'skills.list': () => [...installedSkills],
+    'skills.import': () => {
+      if (!installedSkills.includes('archify')) installedSkills.push('archify')
+      return { imported: ['archify'], skipped: [] }
     },
     'sessions.rename': (req) => {
       const session = sessions.get(String(req.sessionId))
@@ -1707,9 +1691,6 @@ export function installMockHost(scenario: MockScenario): void {
     stopFlood: () => {
       if (floodTimer !== null) window.clearInterval(floodTimer)
       floodTimer = null
-    },
-    setSkillImport: (skills: CustomSkill[]) => {
-      nextSkillImport = skills
     },
     setClipboardFails: (fails: boolean) => {
       clipboardFails = fails

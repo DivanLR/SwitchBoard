@@ -82,18 +82,8 @@ export interface Project {
   defaultSessionMode: SessionMode
 }
 
-export interface CustomSkill {
-  name: string
-  description: string
-  sourceUrl: string
-  sourcePath: string
-  enabled: boolean
-  fileCount: number
-  importedAt: string
-}
-
 export interface SkillImportResult {
-  imported: CustomSkill[]
+  imported: string[]
   skipped: { name: string; reason: string }[]
 }
 
