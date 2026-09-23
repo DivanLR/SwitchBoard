@@ -47,7 +47,8 @@ function setup() {
     onCountersChanged: () => {},
     onSessionExit: () => {},
     onQueueChanged: () => {},
-    onVerifyChanged: () => {},    onDiagramsChanged: () => {},
+    onVerifyChanged: () => {},
+    onDiagramsChanged: () => {},
     onProjectCommands: () => {},
     gate: (async () => ({ behavior: 'allow', updatedInput: {} })) as never,
   })
@@ -63,8 +64,15 @@ function setup() {
     broker,
     getWindow: () => window as never,
     dbProjectId: 'db-project',
-    skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),    flow: { reconcileOnStartup: () => {} } as never,
-    ptyHost: { open: () => ({ scrollback: '', reused: false }), write: () => {}, resize: () => {}, close: () => {}, closeAll: () => {} } as unknown as PtyHost,
+    skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),
+    flow: { reconcileOnStartup: () => {} } as never,
+    ptyHost: {
+      open: () => ({ scrollback: '', reused: false }),
+      write: () => {},
+      resize: () => {},
+      close: () => {},
+      closeAll: () => {},
+    } as unknown as PtyHost,
   })
 
   const listener = registered.get(INVOKE_CHANNEL)
@@ -120,7 +128,9 @@ describe('diff.list', () => {
       if (!result.ok) return
       expect(result.value).toEqual({
         gitNotice: null,
-        files: [{ path: 'new.txt', status: 'untracked', addedLines: 1, removedLines: 0, binary: false }],
+        files: [
+          { path: 'new.txt', status: 'untracked', addedLines: 1, removedLines: 0, binary: false },
+        ],
       })
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -153,7 +163,10 @@ describe('diff.file', () => {
     const dir = mkdtempSync(join(tmpdir(), 'diff-tab-ipc-'))
     try {
       execSync('git init', { cwd: dir, stdio: 'ignore' })
-      execSync('git config user.email t@t.t && git config user.name t', { cwd: dir, stdio: 'ignore' })
+      execSync('git config user.email t@t.t && git config user.name t', {
+        cwd: dir,
+        stdio: 'ignore',
+      })
       const original = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join('\n')
       writeFileSync(join(dir, 'big.txt'), `${original}\n`)
       execSync('git add big.txt && git commit -m one', { cwd: dir, stdio: 'ignore' })

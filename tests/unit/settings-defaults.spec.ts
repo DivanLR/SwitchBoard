@@ -33,9 +33,7 @@ describe('migrating a settings row from before the model rename', () => {
   it('carries an old intelligentModel value forward as model, and drops the routing keys', () => {
     const db = openDatabase(':memory:')
     const settings = createRepositories(db).settings
-    db.prepare(
-      `INSERT INTO settings (key, value) VALUES ('settings', @value)`,
-    ).run({
+    db.prepare(`INSERT INTO settings (key, value) VALUES ('settings', @value)`).run({
       value: JSON.stringify({
         intelligentModel: 'claude-fable-5',
         workerModel: 'claude-sonnet-5',
@@ -54,15 +52,22 @@ describe('migrating a settings row from before the model rename', () => {
     expect(migrated).not.toHaveProperty('autoModelRouting')
   })
 
-  it.each(['basic', 'advisor'])('keeps a %s mode user on the worker model their main loop actually ran', (modelMode) => {
-    const db = openDatabase(':memory:')
-    const settings = createRepositories(db).settings
-    db.prepare(`INSERT INTO settings (key, value) VALUES ('settings', @value)`).run({
-      value: JSON.stringify({ intelligentModel: 'claude-opus-5', workerModel: 'claude-sonnet-5', modelMode }),
-    })
+  it.each(['basic', 'advisor'])(
+    'keeps a %s mode user on the worker model their main loop actually ran',
+    (modelMode) => {
+      const db = openDatabase(':memory:')
+      const settings = createRepositories(db).settings
+      db.prepare(`INSERT INTO settings (key, value) VALUES ('settings', @value)`).run({
+        value: JSON.stringify({
+          intelligentModel: 'claude-opus-5',
+          workerModel: 'claude-sonnet-5',
+          modelMode,
+        }),
+      })
 
-    expect(settings.get().model).toBe('claude-sonnet-5')
-  })
+      expect(settings.get().model).toBe('claude-sonnet-5')
+    },
+  )
 
   it('drops every key the settings no longer have, on read and so on the next write', () => {
     const db = openDatabase(':memory:')
@@ -81,7 +86,8 @@ describe('migrating a settings row from before the model rename', () => {
     expect(Object.keys(settings.get()).sort()).toEqual(Object.keys(DEFAULT_SETTINGS).sort())
     settings.set({ effort: 'high' })
     const stored = JSON.parse(
-      (db.prepare(`SELECT value FROM settings WHERE key = 'settings'`).get() as { value: string }).value,
+      (db.prepare(`SELECT value FROM settings WHERE key = 'settings'`).get() as { value: string })
+        .value,
     ) as Record<string, unknown>
     for (const key of Object.keys(retired)) expect(stored).not.toHaveProperty(key)
   })

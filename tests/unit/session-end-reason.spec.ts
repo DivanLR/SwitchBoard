@@ -35,8 +35,7 @@ afterEach(() => {
   for (const d of dirs.splice(0)) {
     try {
       rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
-    } catch {
-    }
+    } catch {}
   }
 })
 
@@ -52,7 +51,8 @@ function setup() {
     onCountersChanged: () => {},
     onSessionExit: () => {},
     onQueueChanged: () => {},
-    onVerifyChanged: () => {},    onDiagramsChanged: () => {},
+    onVerifyChanged: () => {},
+    onDiagramsChanged: () => {},
     onProjectCommands: () => {},
     gate: (() => {}) as never,
   })
@@ -60,7 +60,9 @@ function setup() {
 }
 
 function finishTurn(manager: unknown, sessionId: string): void {
-  const m = manager as { hosted: Map<string, { session: { options: { onTurnComplete: () => void } } }> }
+  const m = manager as {
+    hosted: Map<string, { session: { options: { onTurnComplete: () => void } } }>
+  }
   m.hosted.get(sessionId)?.session.options.onTurnComplete()
 }
 
@@ -120,7 +122,10 @@ describe('a session that ends says why', () => {
     }
     repos.sessions.insert(row)
 
-    const closed = repos.sessions.reconcileAllEnded('app_exit', 'Switchboard stopped without closing this session.')
+    const closed = repos.sessions.reconcileAllEnded(
+      'app_exit',
+      'Switchboard stopped without closing this session.',
+    )
 
     expect(closed).toBe(1)
     const after = repos.sessions.byId('left-open')
@@ -147,7 +152,10 @@ describe('a session that ends says why', () => {
       endReason: null,
     })
 
-    repos.sessions.reconcileAllEnded('app_exit', 'Switchboard stopped without closing this session.')
+    repos.sessions.reconcileAllEnded(
+      'app_exit',
+      'Switchboard stopped without closing this session.',
+    )
 
     const after = repos.sessions.byId('already-explained')
     expect(after?.statusDetail).toBe('The sandbox container was killed from outside.')

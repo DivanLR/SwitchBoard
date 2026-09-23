@@ -4,17 +4,26 @@ import { artefactRelPath, defaultArtefactKind, resolveArtefactPath } from '@main
 
 describe('artefact path containment', () => {
   it('resolves a plain relative path inside the worktree', () => {
-    const resolved = resolveArtefactPath('C:\\work\\alpha.worktrees\\checkout', 'specs/001-x/spec.md')
+    const resolved = resolveArtefactPath(
+      'C:\\work\\alpha.worktrees\\checkout',
+      'specs/001-x/spec.md',
+    )
     expect(resolved).toBe(resolve('C:\\work\\alpha.worktrees\\checkout', 'specs/001-x/spec.md'))
   })
 
   it('refuses a path that climbs out of the worktree', () => {
-    expect(resolveArtefactPath('C:\\work\\alpha.worktrees\\checkout', '../../../etc/passwd')).toBeNull()
-    expect(resolveArtefactPath('C:\\work\\alpha.worktrees\\checkout', '..\\..\\secrets.txt')).toBeNull()
+    expect(
+      resolveArtefactPath('C:\\work\\alpha.worktrees\\checkout', '../../../etc/passwd'),
+    ).toBeNull()
+    expect(
+      resolveArtefactPath('C:\\work\\alpha.worktrees\\checkout', '..\\..\\secrets.txt'),
+    ).toBeNull()
   })
 
   it('refuses an absolute path that names somewhere else entirely', () => {
-    expect(resolveArtefactPath('C:\\work\\alpha.worktrees\\checkout', 'C:\\Windows\\System32')).toBeNull()
+    expect(
+      resolveArtefactPath('C:\\work\\alpha.worktrees\\checkout', 'C:\\Windows\\System32'),
+    ).toBeNull()
   })
 
   it('allows the worktree root itself', () => {

@@ -101,7 +101,13 @@ const store = reactive({
   ): Promise<string | null> {
     let runId: string | null = null
     await this.act('start', async () => {
-      const snapshot = await invoke('flow.start', { projectId, source, autopilot, autoShip, baseBranch })
+      const snapshot = await invoke('flow.start', {
+        projectId,
+        source,
+        autopilot,
+        autoShip,
+        baseBranch,
+      })
       runId = snapshot.runId
       state.runsByProject[projectId] = snapshot.runs
       state.stagesByProject[projectId] = snapshot.stages
@@ -111,7 +117,9 @@ const store = reactive({
   },
 
   async approve(runId: string): Promise<boolean> {
-    return this.act('approve', async () => this.applySnapshot(await invoke('flow.approve', { runId })))
+    return this.act('approve', async () =>
+      this.applySnapshot(await invoke('flow.approve', { runId })),
+    )
   },
 
   async retry(runId: string): Promise<boolean> {
@@ -131,11 +139,15 @@ const store = reactive({
   },
 
   async cancel(runId: string): Promise<boolean> {
-    return this.act('cancel', async () => this.applySnapshot(await invoke('flow.cancel', { runId })))
+    return this.act('cancel', async () =>
+      this.applySnapshot(await invoke('flow.cancel', { runId })),
+    )
   },
 
   async revise(runId: string, feedback: string): Promise<boolean> {
-    return this.act('revise', async () => this.applySnapshot(await invoke('flow.revise', { runId, feedback })))
+    return this.act('revise', async () =>
+      this.applySnapshot(await invoke('flow.revise', { runId, feedback })),
+    )
   },
 
   async setAutopilot(runId: string, autopilot: boolean): Promise<boolean> {

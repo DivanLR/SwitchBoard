@@ -33,8 +33,7 @@ afterEach(() => {
   for (const d of dirs.splice(0)) {
     try {
       rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
-    } catch {
-    }
+    } catch {}
   }
 })
 
@@ -50,7 +49,8 @@ function setup() {
     onCountersChanged: () => {},
     onSessionExit: () => {},
     onQueueChanged: () => {},
-    onVerifyChanged: () => {},    onDiagramsChanged: () => {},
+    onVerifyChanged: () => {},
+    onDiagramsChanged: () => {},
     onProjectCommands: () => {},
     gate: (() => {}) as never,
   })

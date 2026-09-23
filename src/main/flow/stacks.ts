@@ -31,7 +31,8 @@ export async function detectFlowStacks(projectPath: string): Promise<FlowStackId
   let angular = false
   await walk(projectPath, 0, (name) => {
     const lower = name.toLowerCase()
-    if (lower.endsWith('.sln') || lower.endsWith('.slnx') || lower.endsWith('.csproj')) dotnet = true
+    if (lower.endsWith('.sln') || lower.endsWith('.slnx') || lower.endsWith('.csproj'))
+      dotnet = true
     if (lower === 'angular.json') angular = true
   })
   const stacks: FlowStackId[] = []

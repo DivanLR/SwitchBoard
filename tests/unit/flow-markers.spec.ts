@@ -9,7 +9,12 @@ function line(json: unknown): string {
 describe('the stage marker', () => {
   it('reads a plain done outcome', () => {
     const marker = parseFlowMarker(
-      line({ kind: 'stage', stage: 'plan', outcome: 'done', summary: 'Wrote plan.md and tasks.md.' }),
+      line({
+        kind: 'stage',
+        stage: 'plan',
+        outcome: 'done',
+        summary: 'Wrote plan.md and tasks.md.',
+      }),
     )
     expect(marker?.kind).toBe('stage')
     if (marker?.kind !== 'stage') return
@@ -26,7 +31,13 @@ describe('the stage marker', () => {
 
   it('reads a blocked outcome with why', () => {
     const marker = parseFlowMarker(
-      line({ kind: 'stage', stage: 'build', outcome: 'blocked', summary: '', why: 'the API key is missing' }),
+      line({
+        kind: 'stage',
+        stage: 'build',
+        outcome: 'blocked',
+        summary: '',
+        why: 'the API key is missing',
+      }),
     )
     expect(marker?.kind).toBe('stage')
     if (marker?.kind !== 'stage') return
@@ -36,7 +47,13 @@ describe('the stage marker', () => {
 
   it('reads the spec extras', () => {
     const marker = parseFlowMarker(
-      line({ kind: 'stage', stage: 'spec', outcome: 'done', summary: 'ok', specDir: 'specs/003-checkout' }),
+      line({
+        kind: 'stage',
+        stage: 'spec',
+        outcome: 'done',
+        summary: 'ok',
+        specDir: 'specs/003-checkout',
+      }),
     )
     if (marker?.kind !== 'stage') throw new Error('expected a stage marker')
     expect(marker.specDir).toBe('specs/003-checkout')
@@ -68,7 +85,14 @@ describe('the stage marker', () => {
 
   it('reads the ship extras', () => {
     const marker = parseFlowMarker(
-      line({ kind: 'stage', stage: 'ship', outcome: 'done', summary: 'pushed', prUrl: 'https://x/pr/9', prId: '9' }),
+      line({
+        kind: 'stage',
+        stage: 'ship',
+        outcome: 'done',
+        summary: 'pushed',
+        prUrl: 'https://x/pr/9',
+        prId: '9',
+      }),
     )
     if (marker?.kind !== 'stage') throw new Error('expected a stage marker')
     expect(marker.prUrl).toBe('https://x/pr/9')
@@ -112,10 +136,18 @@ describe('malformed hand-backs', () => {
 
 describe('the pull request link a ship marker reports', () => {
   it('is kept only as https on GitHub, Azure DevOps or the origin host, without credentials', () => {
-    expect(allowedPullRequestUrl('https://github.com/o/r/pull/7', null)).toBe('https://github.com/o/r/pull/7')
-    expect(allowedPullRequestUrl('https://dev.azure.com/o/p/_git/r/pullrequest/9', null)).not.toBeNull()
-    expect(allowedPullRequestUrl('https://contoso.visualstudio.com/p/_git/r/pullrequest/9', null)).not.toBeNull()
-    expect(allowedPullRequestUrl('https://git.corp.example/o/r/pulls/3', 'git.corp.example')).not.toBeNull()
+    expect(allowedPullRequestUrl('https://github.com/o/r/pull/7', null)).toBe(
+      'https://github.com/o/r/pull/7',
+    )
+    expect(
+      allowedPullRequestUrl('https://dev.azure.com/o/p/_git/r/pullrequest/9', null),
+    ).not.toBeNull()
+    expect(
+      allowedPullRequestUrl('https://contoso.visualstudio.com/p/_git/r/pullrequest/9', null),
+    ).not.toBeNull()
+    expect(
+      allowedPullRequestUrl('https://git.corp.example/o/r/pulls/3', 'git.corp.example'),
+    ).not.toBeNull()
     expect(allowedPullRequestUrl('https://git.corp.example/o/r/pulls/3', null)).toBeNull()
     expect(allowedPullRequestUrl('http://github.com/o/r/pull/7', null)).toBeNull()
     expect(allowedPullRequestUrl('https://token@github.com/o/r/pull/7', null)).toBeNull()
@@ -156,7 +188,9 @@ describe('the prompts', () => {
       description: 'Let a guest pay without an account.',
     }
     const manual = specifyPrompt({ ...run, autopilot: false })
-    expect(manual.startsWith('/speckit-specify Checkout v2: Let a guest pay without an account.')).toBe(true)
+    expect(
+      manual.startsWith('/speckit-specify Checkout v2: Let a guest pay without an account.'),
+    ).toBe(true)
     expect(manual).toContain('AskUserQuestion')
     expect(clarifyPrompt(false).startsWith('/speckit-clarify ')).toBe(true)
     expect(clarifyPrompt(false)).toContain('AskUserQuestion')
@@ -164,7 +198,9 @@ describe('the prompts', () => {
     const auto = specifyPrompt({ ...run, autopilot: true })
     expect(auto).not.toContain('AskUserQuestion')
     expect(auto).toContain('Answer each question yourself with your recommended option')
-    expect(clarifyPrompt(true)).toContain('Answer each question yourself with your recommended option')
+    expect(clarifyPrompt(true)).toContain(
+      'Answer each question yourself with your recommended option',
+    )
   })
 
   it('mentions only the stacks the run actually detected', () => {

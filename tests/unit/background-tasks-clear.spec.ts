@@ -52,8 +52,7 @@ afterEach(() => {
   for (const d of dirs.splice(0)) {
     try {
       rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
-    } catch {
-    }
+    } catch {}
   }
 })
 
@@ -69,7 +68,8 @@ function setup() {
     onCountersChanged: () => {},
     onSessionExit: () => {},
     onQueueChanged: () => {},
-    onVerifyChanged: () => {},    onDiagramsChanged: () => {},
+    onVerifyChanged: () => {},
+    onDiagramsChanged: () => {},
     onProjectCommands: () => {},
     gate: (() => {}) as never,
   })
@@ -93,9 +93,7 @@ describe('clearing background tasks the CLI never closed', () => {
     manager.clearBackgroundTasks(session.id)
 
     expect(repos.taskQueue.listForProject(project.id)).toHaveLength(0)
-    const prompts = repos.events
-      .page(session.id, undefined, 50)
-      .filter((e) => e.kind === 'prompt')
+    const prompts = repos.events.page(session.id, undefined, 50).filter((e) => e.kind === 'prompt')
     expect(prompts).toHaveLength(1)
     expect(JSON.stringify(prompts[0].payload)).toContain('the task that was waiting')
     expect(repos.sessions.byId(session.id)?.statusDetail).toBeNull()

@@ -72,7 +72,9 @@ async function sendRevise(): Promise<void> {
   <div class="ui-card flow-stage-card" data-testid="flow-stage-detail">
     <div class="fsd-head">
       <span class="fsd-name">{{ FLOW_STAGE_LABELS[stage.stage] }}</span>
-      <span class="pill" :class="STATUS_PILL[stage.status]" data-testid="flow-stage-status">{{ stage.status }}</span>
+      <span class="pill" :class="STATUS_PILL[stage.status]" data-testid="flow-stage-status">{{
+        stage.status
+      }}</span>
       <span v-if="stage.attempts > 1" class="ui-chip">{{ stage.attempts }} attempts</span>
       <span v-if="!current" class="fsd-readonly" data-testid="flow-stage-readonly">Read only</span>
     </div>
@@ -98,7 +100,11 @@ async function sendRevise(): Promise<void> {
         <Icon :name="terminalOpen ? 'minus' : 'plus'" :size="11" />
         {{ terminalOpen ? 'Hide session output' : 'Show session output' }}
       </button>
-      <MiniTerminal v-if="terminalOpen" :session-id="stage.sessionId" data-testid="flow-stage-session" />
+      <MiniTerminal
+        v-if="terminalOpen"
+        :session-id="stage.sessionId"
+        data-testid="flow-stage-session"
+      />
     </div>
 
     <div v-if="canRevise" class="fsd-revise">

@@ -5,7 +5,11 @@ const { createRepositories } = await import('@main/store/repositories')
 
 function setup() {
   const repos = createRepositories(openDatabase(':memory:'))
-  const project = repos.projects.insert({ name: 'alpha', path: 'C:\\work\\alpha', source: 'manual' })
+  const project = repos.projects.insert({
+    name: 'alpha',
+    path: 'C:\\work\\alpha',
+    source: 'manual',
+  })
   return { repos, project }
 }
 
@@ -31,7 +35,15 @@ describe('FlowRunsRepo round trip', () => {
     expect(repos.flowRuns.byId(run.id)).toMatchObject({ title: 'Checkout v2', stage: 'spec' })
 
     const stages = repos.flowStages.ensureAll(run.id)
-    expect(stages.map((s) => s.stage)).toEqual(['spec', 'plan', 'build', 'clean', 'test', 'review', 'ship'])
+    expect(stages.map((s) => s.stage)).toEqual([
+      'spec',
+      'plan',
+      'build',
+      'clean',
+      'test',
+      'review',
+      'ship',
+    ])
     expect(stages.every((s) => s.status === 'pending')).toBe(true)
   })
 
@@ -51,7 +63,11 @@ describe('FlowRunsRepo round trip', () => {
       baseBranch: 'main',
     })
 
-    repos.flowRuns.update(run.id, { branch: 'feature/x', worktreePath: 'C:\\wt\\x', autopilot: true })
+    repos.flowRuns.update(run.id, {
+      branch: 'feature/x',
+      worktreePath: 'C:\\wt\\x',
+      autopilot: true,
+    })
     const after = repos.flowRuns.byId(run.id)
     expect(after?.branch).toBe('feature/x')
     expect(after?.worktreePath).toBe('C:\\wt\\x')
@@ -218,7 +234,9 @@ describe('reconcileRunning', () => {
     repos.flowStages.ensureAll(run.id)
     repos.flowStages.update(run.id, 'build', { status: 'running', sessionId: 's-1', attempts: 1 })
 
-    const affected = repos.flowRuns.reconcileRunning('Switchboard closed while this stage was running. Retry it.')
+    const affected = repos.flowRuns.reconcileRunning(
+      'Switchboard closed while this stage was running. Retry it.',
+    )
 
     expect(affected).toEqual([project.id])
     expect(repos.flowRuns.byId(run.id)?.status).toBe('waiting')

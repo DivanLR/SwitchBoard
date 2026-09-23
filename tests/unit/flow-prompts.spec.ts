@@ -17,8 +17,18 @@ import {
 describe('the fix prompt, sent to a fresh session', () => {
   const report = {
     findings: [
-      { severity: 'must_fix' as const, file: 'Cart.cs', line: 12, what: 'Off-by-one in the total.' },
-      { severity: 'must_fix' as const, file: null, line: null, what: 'No test covers the empty cart.' },
+      {
+        severity: 'must_fix' as const,
+        file: 'Cart.cs',
+        line: 12,
+        what: 'Off-by-one in the total.',
+      },
+      {
+        severity: 'must_fix' as const,
+        file: null,
+        line: null,
+        what: 'No test covers the empty cart.',
+      },
       { severity: 'should_fix' as const, file: 'Cart.cs', line: 40, what: 'Extract the rounding.' },
     ],
     unmet: ['A guest can pay without an account.'],
@@ -35,16 +45,24 @@ describe('the fix prompt, sent to a fresh session', () => {
   })
 
   it('still reads on its own without a stored report', () => {
-    expect(fixFindingsPrompt(null, { baseBranch: null, specDir: null })).toContain('the base branch')
+    expect(fixFindingsPrompt(null, { baseBranch: null, specDir: null })).toContain(
+      'the base branch',
+    )
   })
 })
 
 describe('the revise prompt, sent to a fresh session', () => {
-  const run = { specDir: 'specs/002-cart', prUrl: 'https://dev.azure.com/x/_git/y/pullrequest/9', baseBranch: 'main' }
+  const run = {
+    specDir: 'specs/002-cart',
+    prUrl: 'https://dev.azure.com/x/_git/y/pullrequest/9',
+    baseBranch: 'main',
+  }
 
   it('names the artefact file and the feedback', () => {
     const prompt = revisePrompt(run, 'plan', 'Split the migration into its own task.')
-    expect(prompt).toContain('Revise the plan and its tasks (specs/002-cart/plan.md) per this feedback')
+    expect(prompt).toContain(
+      'Revise the plan and its tasks (specs/002-cart/plan.md) per this feedback',
+    )
     expect(prompt).toContain('Split the migration into its own task.')
   })
 
@@ -63,7 +81,11 @@ describe('the revise prompt, sent to a fresh session', () => {
 describe('the plan steps', () => {
   it('name the spec folder in every Spec Kit command, each starting with its slash command', () => {
     const steps = planSteps(['dotnet'], 'specs/005-invoices')
-    expect(steps.map((step) => step.split(' ')[0])).toEqual(['/speckit-plan', '/speckit-tasks', '/speckit-analyze'])
+    expect(steps.map((step) => step.split(' ')[0])).toEqual([
+      '/speckit-plan',
+      '/speckit-tasks',
+      '/speckit-analyze',
+    ])
     for (const step of steps) expect(step).toContain('specs/005-invoices')
   })
 
@@ -89,7 +111,9 @@ describe('the build steps', () => {
   it('scaffolds .NET then finishes the remaining tasks for a mixed run', () => {
     const steps = buildSteps(['dotnet', 'angular'], null)
     expect(steps[0].startsWith('/speckit-implement-scaffold ')).toBe(true)
-    expect(steps[1].startsWith('/speckit-implement Complete every task still unchecked in tasks.md.')).toBe(true)
+    expect(
+      steps[1].startsWith('/speckit-implement Complete every task still unchecked in tasks.md.'),
+    ).toBe(true)
   })
 
   it('tells each implement skill the run is unattended, names the spec folder and carries the conventions', () => {
@@ -120,7 +144,9 @@ describe('the clean steps', () => {
   it('lists with ponytail-review, then applies the safe findings in a plain follow-up that tests and commits', () => {
     const steps = cleanSteps(['angular'], 'develop')
     expect(steps).toHaveLength(2)
-    expect(steps[0]).toBe('/ponytail:ponytail-review Review the diff of this branch against develop.')
+    expect(steps[0]).toBe(
+      '/ponytail:ponytail-review Review the diff of this branch against develop.',
+    )
     expect(steps[1].startsWith('/')).toBe(false)
     expect(steps[1]).toContain('Apply every finding from that review that is safe')
     expect(steps[1]).toContain('lint script with --fix')
@@ -190,19 +216,34 @@ describe('the ship prompt', () => {
   })
 
   it('carries the stored test report figures and the Postman path, and says so when there is no report', () => {
-    const run = { title: 'Cart', branch: 'feature/cart', baseBranch: 'main', source: 'text' as const, sourceRef: null }
+    const run = {
+      title: 'Cart',
+      branch: 'feature/cart',
+      baseBranch: 'main',
+      source: 'text' as const,
+      sourceRef: null,
+    }
     const verify = {
       ...emptyVerifyReport(),
-      suites: [{ id: 'dotnet-unit', label: 'Unit tests', status: 'pass' as const, detail: '42 passed' }],
+      suites: [
+        { id: 'dotnet-unit', label: 'Unit tests', status: 'pass' as const, detail: '42 passed' },
+      ],
     }
     verify.coverage.line = { value: 81, source: 'coverage.cobertura.xml' }
-    const prompt = shipPrompt(run, { verify, postman: 'specs/001-cart/postman/cart.postman_collection.json' })
+    const prompt = shipPrompt(run, {
+      verify,
+      postman: 'specs/001-cart/postman/cart.postman_collection.json',
+    })
     expect(prompt).toContain('- dotnet-unit (Unit tests): pass, 42 passed')
     expect(prompt).toContain('- Line coverage: 81% (coverage.cobertura.xml)')
     expect(prompt).not.toContain('Changed-line coverage')
-    expect(prompt).toContain('Postman collection: specs/001-cart/postman/cart.postman_collection.json')
+    expect(prompt).toContain(
+      'Postman collection: specs/001-cart/postman/cart.postman_collection.json',
+    )
 
-    expect(shipPrompt(run, { verify: null, postman: null })).toContain('The Test stage left no report')
+    expect(shipPrompt(run, { verify: null, postman: null })).toContain(
+      'The Test stage left no report',
+    )
   })
 
   it('is backed by a hard deny for merging, approving, voting and adding reviewers', () => {
@@ -218,8 +259,12 @@ describe('the ship prompt', () => {
       expect(shipForbidden('PowerShell', { command }), command).not.toBeNull()
     }
     expect(shipForbidden('mcp__ado__repo_update_pull_request_reviewers', {})).not.toBeNull()
-    expect(shipForbidden('mcp__ado__repo_update_pull_request', { pullRequestId: 9, autoComplete: true })).not.toBeNull()
-    expect(shipForbidden('mcp__ado__repo_update_pull_request', { pullRequestId: 9, description: 'x' })).toBeNull()
+    expect(
+      shipForbidden('mcp__ado__repo_update_pull_request', { pullRequestId: 9, autoComplete: true }),
+    ).not.toBeNull()
+    expect(
+      shipForbidden('mcp__ado__repo_update_pull_request', { pullRequestId: 9, description: 'x' }),
+    ).toBeNull()
     expect(shipForbidden('Bash', { command: 'git push -u origin feature/cart' })).toBeNull()
     expect(shipForbidden('Bash', { command: 'gh pr create --base main --fill' })).toBeNull()
     expect(shipForbidden('mcp__ado__repo_create_pull_request', {})).toBeNull()

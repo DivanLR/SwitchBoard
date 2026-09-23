@@ -52,8 +52,7 @@ afterEach(() => {
   for (const d of dirs.splice(0)) {
     try {
       rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
-    } catch {
-    }
+    } catch {}
   }
 })
 
@@ -70,7 +69,8 @@ function setup() {
     onCountersChanged: () => {},
     onSessionExit: () => {},
     onQueueChanged: () => {},
-    onVerifyChanged: () => {},    onDiagramsChanged: () => {},
+    onVerifyChanged: () => {},
+    onDiagramsChanged: () => {},
     onProjectCommands: () => {},
     gate: (async () => ({ behavior: 'allow', updatedInput: {} })) as never,
   })
@@ -86,8 +86,15 @@ function setup() {
     broker,
     getWindow: () => window as never,
     dbProjectId: 'db-project',
-    skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),    flow: { reconcileOnStartup: () => {} } as never,
-    ptyHost: { open: () => ({ scrollback: '', reused: false }), write: () => {}, resize: () => {}, close: () => {}, closeAll: () => {} } as unknown as PtyHost,
+    skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),
+    flow: { reconcileOnStartup: () => {} } as never,
+    ptyHost: {
+      open: () => ({ scrollback: '', reused: false }),
+      write: () => {},
+      resize: () => {},
+      close: () => {},
+      closeAll: () => {},
+    } as unknown as PtyHost,
   })
   const listener = registered.get(INVOKE_CHANNEL)
   if (!listener) throw new Error(`nothing registered on ${INVOKE_CHANNEL}`)
@@ -104,8 +111,13 @@ function setup() {
   return { repos, manager, project, nameNow }
 }
 
-function liveRow(manager: unknown, sessionId: string): { branch: string | null; endReason: string | null } {
-  const m = manager as { hosted: Map<string, { row: { branch: string | null; endReason: string | null } }> }
+function liveRow(
+  manager: unknown,
+  sessionId: string,
+): { branch: string | null; endReason: string | null } {
+  const m = manager as {
+    hosted: Map<string, { row: { branch: string | null; endReason: string | null } }>
+  }
   const entry = m.hosted.get(sessionId)
   if (!entry) throw new Error('session is not live')
   return entry.row

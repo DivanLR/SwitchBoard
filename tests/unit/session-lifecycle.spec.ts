@@ -16,9 +16,16 @@ const queries: FakeQuery[] = []
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   createSdkMcpServer: () => ({ type: 'sdk', name: 'switchboard', instance: {} }),
   tool: () => ({}),
-  query: ({ prompt, options }: { prompt: AsyncIterable<{ message: { content: string } }>; options: Record<string, unknown> }) => {
+  query: ({
+    prompt,
+    options,
+  }: {
+    prompt: AsyncIterable<{ message: { content: string } }>
+    options: Record<string, unknown>
+  }) => {
     const values: unknown[] = []
-    const waiters: { resolve: (r: IteratorResult<unknown>) => void; reject: (e: Error) => void }[] = []
+    const waiters: { resolve: (r: IteratorResult<unknown>) => void; reject: (e: Error) => void }[] =
+      []
     let done = false
     const fake: FakeQuery = {
       options,
@@ -93,7 +100,11 @@ function setup() {
   return { repos, project, manager }
 }
 
-const init = (sdkSessionId: string): unknown => ({ type: 'system', subtype: 'status', session_id: sdkSessionId })
+const init = (sdkSessionId: string): unknown => ({
+  type: 'system',
+  subtype: 'status',
+  session_id: sdkSessionId,
+})
 
 const result = (extra: Record<string, unknown> = {}): unknown => ({
   type: 'result',
@@ -112,11 +123,15 @@ describe('crash revive and Resume', () => {
     const { repos, project, manager } = setup()
     const foreground = await manager.startSession(project.id)
     queries[0].push(init('sdk-FOREGROUND'))
-    await vi.waitFor(() => expect(repos.sessions.byId(foreground.id)?.sdkSessionId).toBe('sdk-FOREGROUND'))
+    await vi.waitFor(() =>
+      expect(repos.sessions.byId(foreground.id)?.sdkSessionId).toBe('sdk-FOREGROUND'),
+    )
 
     const background = await manager.backgroundSessionFor(project.id, 'diff')
     queries[1].push(init('sdk-BACKGROUND'))
-    await vi.waitFor(() => expect(repos.sessions.byId(background.id)?.sdkSessionId).toBe('sdk-BACKGROUND'))
+    await vi.waitFor(() =>
+      expect(repos.sessions.byId(background.id)?.sdkSessionId).toBe('sdk-BACKGROUND'),
+    )
     await manager.stopSession(background.id)
 
     queries[0].crash(new Error('Claude Code process exited with code 1'))
@@ -147,7 +162,11 @@ describe('crash revive and Resume', () => {
         inPlanMode: false,
       }
       repos.sessions.insert(row)
-      repos.sessions.update(id, { endedAt, endReason: 'completed', ...(sectionKind ? { sectionKind } : {}) })
+      repos.sessions.update(id, {
+        endedAt,
+        endReason: 'completed',
+        ...(sectionKind ? { sectionKind } : {}),
+      })
     }
     add('long', '2026-09-01T01:00:00.000Z', '2026-09-01T05:00:00.000Z')
     add('short', '2026-09-01T02:00:00.000Z', '2026-09-01T03:00:00.000Z')
@@ -212,7 +231,12 @@ describe('a queued prompt during a long turn', () => {
     expect(queued).toBe(true)
     const sink = manager.sinkFor(session.id)
     for (let i = 0; i < 205; i++) {
-      sink.append('tool_activity', { toolUseId: `t${i}`, toolName: 'Read', summary: 'read', status: 'done' } as never)
+      sink.append('tool_activity', {
+        toolUseId: `t${i}`,
+        toolName: 'Read',
+        summary: 'read',
+        status: 'done',
+      } as never)
     }
 
     queries[0].push(result())

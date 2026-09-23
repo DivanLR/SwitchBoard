@@ -80,7 +80,10 @@ describe('ending the session of a finished Flow stage', () => {
 
     manager.endFlowSession(session.id)
 
-    expect(stopped).toHaveBeenCalledWith(session.id, expect.stringContaining('one piece of Flow work'))
+    expect(stopped).toHaveBeenCalledWith(
+      session.id,
+      expect.stringContaining('one piece of Flow work'),
+    )
     expect(manager.hasFlowWatch(session.id)).toBe(false)
   })
 

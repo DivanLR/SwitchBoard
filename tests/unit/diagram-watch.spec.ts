@@ -27,8 +27,7 @@ afterEach(() => {
   for (const d of dirs.splice(0)) {
     try {
       rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
-    } catch {
-    }
+    } catch {}
   }
 })
 
@@ -45,7 +44,8 @@ function setup() {
     onCountersChanged: () => {},
     onSessionExit: () => {},
     onQueueChanged: () => {},
-    onVerifyChanged: () => {},    onDiagramsChanged: (projectId) => changed.push(projectId),
+    onVerifyChanged: () => {},
+    onDiagramsChanged: (projectId) => changed.push(projectId),
     onProjectCommands: () => {},
     gate: (() => {}) as never,
   })
@@ -53,7 +53,9 @@ function setup() {
 }
 
 function finishTurn(manager: unknown, sessionId: string): void {
-  const m = manager as { hosted: Map<string, { session: { options: { onTurnComplete: () => void } } }> }
+  const m = manager as {
+    hosted: Map<string, { session: { options: { onTurnComplete: () => void } } }>
+  }
   m.hosted.get(sessionId)?.session.options.onTurnComplete()
 }
 

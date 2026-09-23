@@ -15,7 +15,11 @@ const showTasks = ref(false)
 
 const TASK_LINE = /^\s*-\s*\[( |x|X)\]\s*(?:T\d+\s*)?(.*)$/
 
-const SEVERITY_CHIP: Record<FlowReviewSeverity, string> = { must_fix: 'high', should_fix: 'medium', nit: 'low' }
+const SEVERITY_CHIP: Record<FlowReviewSeverity, string> = {
+  must_fix: 'high',
+  should_fix: 'medium',
+  nit: 'low',
+}
 const SEVERITY_LABEL: Record<FlowReviewSeverity, string> = {
   must_fix: 'must fix',
   should_fix: 'should fix',
@@ -85,12 +89,22 @@ function toggleTasks(): void {
 <template>
   <div class="flow-artefact-view" data-testid="flow-artefact">
     <template v-if="stage.stage === 'spec' || stage.stage === 'plan'">
-      <MarkdownText v-if="markdown" :text="markdown" class="flow-doc" data-testid="flow-artefact-markdown" />
-      <div v-else class="ui-empty-line">No {{ stage.stage === 'spec' ? 'spec.md' : 'plan.md' }} written yet.</div>
+      <MarkdownText
+        v-if="markdown"
+        :text="markdown"
+        class="flow-doc"
+        data-testid="flow-artefact-markdown"
+      />
+      <div v-else class="ui-empty-line">
+        No {{ stage.stage === 'spec' ? 'spec.md' : 'plan.md' }} written yet.
+      </div>
       <template v-if="stage.stage === 'plan'">
         <div v-if="progress" class="flow-progress" data-testid="flow-tasks-progress">
           <div class="flow-progress-bar">
-            <div class="flow-progress-fill" :style="{ width: `${(progress.done / progress.total) * 100}%` }"></div>
+            <div
+              class="flow-progress-fill"
+              :style="{ width: `${(progress.done / progress.total) * 100}%` }"
+            ></div>
           </div>
           <span class="ui-chip">{{ progress.done }} / {{ progress.total }} tasks</span>
         </div>
@@ -104,7 +118,11 @@ function toggleTasks(): void {
           <Icon :name="showTasks ? 'minus' : 'plus'" :size="11" />
           {{ showTasks ? 'Hide tasks' : 'View tasks' }}
         </button>
-        <ul v-if="showTasks && taskItems.length > 0" class="flow-tasks" data-testid="flow-tasks-checklist">
+        <ul
+          v-if="showTasks && taskItems.length > 0"
+          class="flow-tasks"
+          data-testid="flow-tasks-checklist"
+        >
           <li v-for="(task, at) in taskItems" :key="at" :class="{ done: task.done }">
             <Icon :name="task.done ? 'check' : 'circle'" :size="11" />
             {{ task.label }}
@@ -116,7 +134,10 @@ function toggleTasks(): void {
     <template v-else-if="stage.stage === 'build'">
       <div v-if="progress" class="flow-progress" data-testid="flow-tasks-progress">
         <div class="flow-progress-bar">
-          <div class="flow-progress-fill" :style="{ width: `${(progress.done / progress.total) * 100}%` }"></div>
+          <div
+            class="flow-progress-fill"
+            :style="{ width: `${(progress.done / progress.total) * 100}%` }"
+          ></div>
         </div>
         <span class="ui-chip">{{ progress.done }} / {{ progress.total }} tasks</span>
       </div>
@@ -130,9 +151,16 @@ function toggleTasks(): void {
     </template>
 
     <template v-else-if="stage.stage === 'test'">
-      <div v-if="stage.report?.verify?.suites.length" class="flow-gates" data-testid="flow-test-gates">
+      <div
+        v-if="stage.report?.verify?.suites.length"
+        class="flow-gates"
+        data-testid="flow-test-gates"
+      >
         <div v-for="suite in stage.report.verify.suites" :key="suite.id" class="flow-gate-row">
-          <span class="chip-risk" :class="suite.status === 'pass' ? 'low' : suite.status === 'fail' ? 'high' : 'medium'">
+          <span
+            class="chip-risk"
+            :class="suite.status === 'pass' ? 'low' : suite.status === 'fail' ? 'high' : 'medium'"
+          >
             {{ suite.status }}
           </span>
           <span class="fg-label">{{ suite.label }}</span>
@@ -140,11 +168,24 @@ function toggleTasks(): void {
         </div>
       </div>
       <div v-else class="ui-empty-line">No test report yet.</div>
-      <button type="button" class="btn-quiet fa-toggle" data-testid="flow-postman-load" @click="loadPostman()">
+      <button
+        type="button"
+        class="btn-quiet fa-toggle"
+        data-testid="flow-postman-load"
+        @click="loadPostman()"
+      >
         View Postman collection
       </button>
-      <pre v-if="postman && postman !== 'missing'" class="flow-code" data-testid="flow-postman-content">{{ postman.content }}</pre>
-      <div v-else-if="postman === 'missing'" class="ui-empty-sub" data-testid="flow-postman-missing">
+      <pre
+        v-if="postman && postman !== 'missing'"
+        class="flow-code"
+        data-testid="flow-postman-content"
+        >{{ postman.content }}</pre>
+      <div
+        v-else-if="postman === 'missing'"
+        class="ui-empty-sub"
+        data-testid="flow-postman-missing"
+      >
         No Postman collection for this feature.
       </div>
     </template>
@@ -160,14 +201,22 @@ function toggleTasks(): void {
             {{ stage.report.verdict === 'needs_fixes' ? 'Needs fixes' : 'Ready' }}
           </span>
         </div>
-        <table v-if="stage.report.findings?.length" class="flow-findings-table" data-testid="flow-findings">
+        <table
+          v-if="stage.report.findings?.length"
+          class="flow-findings-table"
+          data-testid="flow-findings"
+        >
           <tbody>
             <tr v-for="(finding, at) in stage.report.findings" :key="at">
               <td>
-                <span class="chip-risk" :class="SEVERITY_CHIP[finding.severity]">{{ SEVERITY_LABEL[finding.severity] }}</span>
+                <span class="chip-risk" :class="SEVERITY_CHIP[finding.severity]">{{
+                  SEVERITY_LABEL[finding.severity]
+                }}</span>
               </td>
               <td>{{ finding.what }}</td>
-              <td class="mono fg-where">{{ finding.file }}{{ finding.line ? `:${finding.line}` : '' }}</td>
+              <td class="mono fg-where">
+                {{ finding.file }}{{ finding.line ? `:${finding.line}` : '' }}
+              </td>
             </tr>
           </tbody>
         </table>
@@ -177,7 +226,10 @@ function toggleTasks(): void {
             <li v-for="line in stage.report.unmet" :key="line">{{ line }}</li>
           </ul>
         </div>
-        <div v-if="!stage.report.findings?.length && !stage.report.unmet?.length" class="ui-empty-line">
+        <div
+          v-if="!stage.report.findings?.length && !stage.report.unmet?.length"
+          class="ui-empty-line"
+        >
           No findings, and every acceptance criterion is met.
         </div>
       </template>

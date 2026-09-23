@@ -17,14 +17,20 @@ function setup() {
     onCountersChanged: () => {},
     onSessionExit: () => {},
     onQueueChanged: () => {},
-    onVerifyChanged: (projectId) => changed.push(projectId),    onDiagramsChanged: () => {},
+    onVerifyChanged: (projectId) => changed.push(projectId),
+    onDiagramsChanged: () => {},
     onProjectCommands: () => {},
     gate: (async () => ({ behavior: 'allow', updatedInput: {} })) as never,
   })
   const entry = { row: { id: 's1', projectId: project.id } }
-  const drive = (name: 'scanVerifyReport' | 'closeUnreportedVerify') =>
+  const drive =
+    (name: 'scanVerifyReport' | 'closeUnreportedVerify') =>
     (kind?: string, payload?: unknown): void =>
-      (manager as unknown as Record<string, (...args: unknown[]) => void>)[name](entry, kind, payload)
+      (manager as unknown as Record<string, (...args: unknown[]) => void>)[name](
+        entry,
+        kind,
+        payload,
+      )
   const start = () =>
     repos.verifyRuns.start({
       projectId,
@@ -63,7 +69,9 @@ describe('a verification run', () => {
 
     scan(
       'assistant_text',
-      line('{"suites":[{"id":"node-unit","status":"pass","detail":"142 passed"}],"coverage":{"line":{"value":81,"source":"vitest"}}}'),
+      line(
+        '{"suites":[{"id":"node-unit","status":"pass","detail":"142 passed"}],"coverage":{"line":{"value":81,"source":"vitest"}}}',
+      ),
     )
 
     const stored = repos.verifyRuns.byId(run.id)
@@ -108,7 +116,10 @@ describe('a verification run', () => {
     manager.watchVerifyReport('s1', run.id, 'suites')
 
     scan('assistant_text', line('{"suites": [oops}'))
-    scan('assistant_text', line('{"suites":[{"id":"node-unit","status":"pass","detail":"142 passed"}]}'))
+    scan(
+      'assistant_text',
+      line('{"suites":[{"id":"node-unit","status":"pass","detail":"142 passed"}]}'),
+    )
 
     expect(repos.verifyRuns.byId(run.id)?.status).toBe('pass')
   })
@@ -127,7 +138,10 @@ describe('a verification run', () => {
     const { repos, manager, start, scan } = setup()
     const run = start()
     manager.watchVerifyReport('s1', run.id, 'suites')
-    scan('assistant_text', line('{"suites":[{"id":"node-unit","status":"pass","detail":"142 passed"}]}'))
+    scan(
+      'assistant_text',
+      line('{"suites":[{"id":"node-unit","status":"pass","detail":"142 passed"}]}'),
+    )
 
     manager.watchVerifyReport('s1', run.id, 'evidence')
     scan(
@@ -238,7 +252,6 @@ describe('startup reconciliation of orphaned runs (FR-022)', () => {
     expect(after?.status).toBe('fail')
     expect(after?.note).toBe('one suite failed')
   })
-
 })
 
 describe('a second pass started before the first reported', () => {

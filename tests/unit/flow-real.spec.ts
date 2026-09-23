@@ -32,9 +32,12 @@ describe.runIf(enabled)('a real Flow run (spec stage smoke)', () => {
       writeFileSync(join(repo, 'HealthApi.csproj'), CSPROJ)
       execSync('git init', { cwd: repo })
       execSync('git add HealthApi.csproj', { cwd: repo })
-      execSync('git -c user.name=Switchboard -c user.email=flow-smoke@example.invalid commit -m "Initial commit"', {
-        cwd: repo,
-      })
+      execSync(
+        'git -c user.name=Switchboard -c user.email=flow-smoke@example.invalid commit -m "Initial commit"',
+        {
+          cwd: repo,
+        },
+      )
 
       const db = openDatabase(':memory:')
       const repos = createRepositories(db)
@@ -75,7 +78,11 @@ describe.runIf(enabled)('a real Flow run (spec stage smoke)', () => {
       try {
         const run = await flow.start({
           projectId: project.id,
-          source: { kind: 'text', title: 'Health endpoint', description: 'Add a GET /health endpoint that returns ok' },
+          source: {
+            kind: 'text',
+            title: 'Health endpoint',
+            description: 'Add a GET /health endpoint that returns ok',
+          },
           autopilot: true,
           autoShip: false,
         })

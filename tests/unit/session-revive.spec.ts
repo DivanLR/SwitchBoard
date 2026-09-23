@@ -39,8 +39,7 @@ afterEach(() => {
   for (const d of dirs.splice(0)) {
     try {
       rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
-    } catch {
-    }
+    } catch {}
   }
 })
 
@@ -56,7 +55,8 @@ function setup() {
     onCountersChanged: () => {},
     onSessionExit: () => {},
     onQueueChanged: () => {},
-    onVerifyChanged: () => {},    onDiagramsChanged: () => {},
+    onVerifyChanged: () => {},
+    onDiagramsChanged: () => {},
     onProjectCommands: () => {},
     gate: (() => {}) as never,
   })
@@ -77,9 +77,7 @@ describe('a crashed session is restarted by the app', () => {
     expect(repos.sessions.byId(crashed.id)?.endedAt).toBeTruthy()
 
     await vi.waitFor(() => {
-      const prompts = repos.events
-        .page(revived, undefined, 50)
-        .filter((e) => e.kind === 'prompt')
+      const prompts = repos.events.page(revived, undefined, 50).filter((e) => e.kind === 'prompt')
       expect(prompts).toHaveLength(1)
       expect(JSON.stringify(prompts[0].payload)).toMatch(/Switchboard restarted this session/)
       expect(JSON.stringify(prompts[0].payload)).toMatch(/exited with code 1/)

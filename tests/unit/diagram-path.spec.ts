@@ -51,7 +51,8 @@ function setup() {
     onCountersChanged: () => {},
     onSessionExit: () => {},
     onQueueChanged: () => {},
-    onVerifyChanged: () => {},    onDiagramsChanged: () => {},
+    onVerifyChanged: () => {},
+    onDiagramsChanged: () => {},
     onProjectCommands: () => {},
     gate: (async () => ({ behavior: 'allow', updatedInput: {} })) as never,
   })
@@ -67,8 +68,15 @@ function setup() {
     broker,
     getWindow: () => window as never,
     dbProjectId: 'db-project',
-    skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),    flow: { reconcileOnStartup: () => {} } as never,
-    ptyHost: { open: () => ({ scrollback: '', reused: false }), write: () => {}, resize: () => {}, close: () => {}, closeAll: () => {} } as unknown as PtyHost,
+    skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),
+    flow: { reconcileOnStartup: () => {} } as never,
+    ptyHost: {
+      open: () => ({ scrollback: '', reused: false }),
+      write: () => {},
+      resize: () => {},
+      close: () => {},
+      closeAll: () => {},
+    } as unknown as PtyHost,
   })
 
   const listener = registered.get(INVOKE_CHANNEL)
@@ -103,19 +111,28 @@ describe('diagramPath, the guard behind diagrams.open and diagrams.read', () => 
 
   it('reads back a plain file name that sits directly inside docs/diagrams', async () => {
     const project = projectWithDiagram('auth-flow.html', '<svg>ok</svg>')
-    const result = await harness.call('diagrams.read', { projectId: project.id, file: 'auth-flow.html' })
+    const result = await harness.call('diagrams.read', {
+      projectId: project.id,
+      file: 'auth-flow.html',
+    })
     expect(result).toEqual({ ok: true, value: { html: '<svg>ok</svg>' } })
   })
 
   it('opens a plain file name at the exact path resolved inside the diagrams folder', async () => {
     const project = projectWithDiagram('auth-flow.html', '<svg>ok</svg>')
-    const result = await harness.call('diagrams.open', { projectId: project.id, file: 'auth-flow.html' })
+    const result = await harness.call('diagrams.open', {
+      projectId: project.id,
+      file: 'auth-flow.html',
+    })
     expect(result).toEqual({ ok: true, value: null })
     expect(openPath).toHaveBeenCalledWith(resolve(project.path, DIAGRAMS_DIR, 'auth-flow.html'))
   })
 
   it('gives NOT_FOUND for an unknown project, before it ever looks at the file name', async () => {
-    const result = await harness.call('diagrams.open', { projectId: 'no-such-project', file: 'auth-flow.html' })
+    const result = await harness.call('diagrams.open', {
+      projectId: 'no-such-project',
+      file: 'auth-flow.html',
+    })
     expect(result.ok).toBe(false)
     if (result.ok) return
     expect(result.error.code).toBe('NOT_FOUND')
@@ -128,7 +145,11 @@ describe('diagramPath, the guard behind diagrams.open and diagrams.read', () => 
     ['a parent segment', '../evil.html'],
     ['an absolute Windows path', 'C:\\Windows\\System32\\evil.html'],
   ])('refuses a file name containing %s with INVALID_PATH', async (_label, file) => {
-    const project = harness.repos.projects.insert({ name: 'p', path: 'C:\\fake\\project', source: 'manual' })
+    const project = harness.repos.projects.insert({
+      name: 'p',
+      path: 'C:\\fake\\project',
+      source: 'manual',
+    })
     const result = await harness.call('diagrams.open', { projectId: project.id, file })
     expect(result.ok).toBe(false)
     if (result.ok) return
@@ -158,8 +179,15 @@ describe('diagramPath, the guard behind diagrams.open and diagrams.read', () => 
   })
 
   it('refuses a bare name with none of those characters that still resolves outside the diagrams folder', async () => {
-    const project = harness.repos.projects.insert({ name: 'p', path: 'C:\\fake\\project', source: 'manual' })
-    const result = await harness.call('diagrams.open', { projectId: project.id, file: 'D:evil.html' })
+    const project = harness.repos.projects.insert({
+      name: 'p',
+      path: 'C:\\fake\\project',
+      source: 'manual',
+    })
+    const result = await harness.call('diagrams.open', {
+      projectId: project.id,
+      file: 'D:evil.html',
+    })
     expect(result.ok).toBe(false)
     if (result.ok) return
     expect(result.error.code).toBe('INVALID_PATH')

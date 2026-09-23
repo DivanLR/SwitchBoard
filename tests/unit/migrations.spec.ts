@@ -8,7 +8,8 @@ import { openDatabase } from '@main/store/db'
 
 const dirs: string[] = []
 afterEach(() => {
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
+  for (const d of dirs.splice(0))
+    rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
 })
 
 describe('npm run prune -- --dry-run', () => {
@@ -20,13 +21,19 @@ describe('npm run prune -- --dry-run', () => {
     db.exec(`DELETE FROM migrations WHERE name = '037-claude-only'`)
     db.close()
 
-    const out = execFileSync(process.execPath, ['src/main/store/prune-cli.ts', '--dry-run', '--db', path], {
-      encoding: 'utf8',
-    })
+    const out = execFileSync(
+      process.execPath,
+      ['src/main/store/prune-cli.ts', '--dry-run', '--db', path],
+      {
+        encoding: 'utf8',
+      },
+    )
 
     expect(out).toContain('[dry run] Would delete 0 event rows')
     const after = new DatabaseSync(path, { readOnly: true })
-    const applied = after.prepare(`SELECT name FROM migrations WHERE name = '037-claude-only'`).all()
+    const applied = after
+      .prepare(`SELECT name FROM migrations WHERE name = '037-claude-only'`)
+      .all()
     after.close()
     expect(applied).toEqual([])
   })

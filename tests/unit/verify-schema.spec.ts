@@ -70,10 +70,13 @@ describe('trimming the schema to what the plan can actually measure', () => {
   })
 
   it('asks for every block at once when the plan carries all four kinds', () => {
-    const plan = planSuites(
-      dotnet.suites,
-      ['dotnet-unit', 'dotnet-coverage', 'dotnet-arch', 'dotnet-mutation', 'dotnet-http'],
-    )
+    const plan = planSuites(dotnet.suites, [
+      'dotnet-unit',
+      'dotnet-coverage',
+      'dotnet-arch',
+      'dotnet-mutation',
+      'dotnet-http',
+    ])
     const prompt = verifyPrompt(plan, '.NET')
 
     expect(prompt).toContain('"coverage"')

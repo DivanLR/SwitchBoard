@@ -1,5 +1,11 @@
 <script setup lang="ts">
-import { FLOW_STAGES, FLOW_STAGE_LABELS, type FlowStage, type FlowStageRecord, type FlowStageStatus } from '@shared/domain'
+import {
+  FLOW_STAGES,
+  FLOW_STAGE_LABELS,
+  type FlowStage,
+  type FlowStageRecord,
+  type FlowStageStatus,
+} from '@shared/domain'
 import Icon from '@renderer/components/Icon.vue'
 
 const props = defineProps<{
@@ -23,7 +29,12 @@ const STATUS_ICON: Record<FlowStageStatus, string> = {
 </script>
 
 <template>
-  <div class="ui-tabs flow-stage-rail" role="tablist" aria-label="Stages" data-testid="flow-stage-rail">
+  <div
+    class="ui-tabs flow-stage-rail"
+    role="tablist"
+    aria-label="Stages"
+    data-testid="flow-stage-rail"
+  >
     <button
       v-for="s in FLOW_STAGES"
       :key="s"

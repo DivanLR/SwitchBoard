@@ -3,9 +3,7 @@ import { installMockHost, twoProjectScenario } from './mock-host'
 
 test.skip(!process.env.SHOTS, 'screenshot pass; set SHOTS=1 to capture')
 
-test('the project header, with + Session, and a named session', async ({
-  page,
-}) => {
+test('the project header, with + Session, and a named session', async ({ page }) => {
   await page.addInitScript(installMockHost, twoProjectScenario())
   await page.goto('/')
   await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()

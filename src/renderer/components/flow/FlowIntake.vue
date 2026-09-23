@@ -40,7 +40,9 @@ const chosen = computed<FlowStartSource | null>(() => {
   }
   if (source.value === 'ado') {
     const picked = feature.value
-    return picked ? { kind: 'ado', featureId: picked.id, featureTitle: picked.title, url: picked.url } : null
+    return picked
+      ? { kind: 'ado', featureId: picked.id, featureTitle: picked.title, url: picked.url }
+      : null
   }
   return specId.value ? { kind: 'spec', specId: specId.value } : null
 })
@@ -102,7 +104,11 @@ async function start(): Promise<void> {
     <template v-if="source === 'text'">
       <label class="fin-field">
         <span class="fin-label">Title</span>
-        <input v-model="title" data-testid="flow-text-title" placeholder="Name the feature in a few words" />
+        <input
+          v-model="title"
+          data-testid="flow-text-title"
+          placeholder="Name the feature in a few words"
+        />
       </label>
       <label class="fin-field">
         <span class="fin-label">What should it do?</span>
@@ -151,8 +157,16 @@ async function start(): Promise<void> {
           <span class="ui-meta">{{ item.id }}</span>
           <span v-if="item.state" class="ui-chip">{{ item.state }}</span>
         </button>
-        <div v-if="flow.features.length === 0" class="ui-empty-line" data-testid="flow-features-empty">
-          {{ flow.searching ? 'Asking Azure DevOps for Features…' : (flow.featuresNote ?? 'No Features loaded yet.') }}
+        <div
+          v-if="flow.features.length === 0"
+          class="ui-empty-line"
+          data-testid="flow-features-empty"
+        >
+          {{
+            flow.searching
+              ? 'Asking Azure DevOps for Features…'
+              : (flow.featuresNote ?? 'No Features loaded yet.')
+          }}
         </div>
       </div>
     </div>
@@ -175,7 +189,11 @@ async function start(): Promise<void> {
           <span class="ui-desc fin-name">{{ spec.title }}</span>
           <span class="ui-meta">{{ spec.id }}</span>
         </button>
-        <div v-if="flow.existingSpecs.length === 0" class="ui-empty-line" data-testid="flow-specs-empty">
+        <div
+          v-if="flow.existingSpecs.length === 0"
+          class="ui-empty-line"
+          data-testid="flow-specs-empty"
+        >
           No spec folders found under specs/ in this project.
         </div>
       </div>
@@ -185,17 +203,31 @@ async function start(): Promise<void> {
       <div class="fin-field">
         <span class="fin-label">Stacks</span>
         <div class="fin-stacks" data-testid="flow-stack-chips">
-          <span v-for="stackId in flow.detectedStacks" :key="stackId" class="ui-chip" :data-testid="`flow-stack-${stackId}`">
+          <span
+            v-for="stackId in flow.detectedStacks"
+            :key="stackId"
+            class="ui-chip"
+            :data-testid="`flow-stack-${stackId}`"
+          >
             {{ FLOW_STACK_LABELS[stackId] }}
           </span>
-          <span v-if="flow.detectedStacks.length === 0" class="fin-hint" data-testid="flow-stack-none">
+          <span
+            v-if="flow.detectedStacks.length === 0"
+            class="fin-hint"
+            data-testid="flow-stack-none"
+          >
             No .NET or Angular project detected here.
           </span>
         </div>
       </div>
       <label class="fin-field">
         <span class="fin-label">Base branch</span>
-        <input v-model="baseBranch" class="fin-branch" data-testid="flow-base-branch" placeholder="Leave blank for the current branch" />
+        <input
+          v-model="baseBranch"
+          class="fin-branch"
+          data-testid="flow-base-branch"
+          placeholder="Leave blank for the current branch"
+        />
       </label>
       <label class="fin-switch">
         <span class="fin-switch-text">
@@ -244,7 +276,13 @@ async function start(): Promise<void> {
       >
         {{ flow.busy === 'start' ? 'Starting…' : 'Start' }}
       </button>
-      <span v-if="missing" id="flow-start-reason" class="fin-hint" data-testid="flow-start-reason">{{ missing }}</span>
+      <span
+        v-if="missing"
+        id="flow-start-reason"
+        class="fin-hint"
+        data-testid="flow-start-reason"
+        >{{ missing }}</span
+      >
     </div>
   </div>
 </template>

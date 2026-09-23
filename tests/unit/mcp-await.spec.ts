@@ -13,11 +13,14 @@ function setup() {
     onCountersChanged: () => {},
     onSessionExit: () => {},
     onQueueChanged: () => {},
-    onVerifyChanged: () => {},    onDiagramsChanged: () => {},
+    onVerifyChanged: () => {},
+    onDiagramsChanged: () => {},
     onProjectCommands: () => {},
     gate: (async () => ({ behavior: 'allow', updatedInput: {} })) as never,
   })
-  const hosted = (manager as unknown as { hosted: Map<string, { row: { mcpServers?: McpServer[] } }> }).hosted
+  const hosted = (
+    manager as unknown as { hosted: Map<string, { row: { mcpServers?: McpServer[] } }> }
+  ).hosted
   const entry = { row: {} as { mcpServers?: McpServer[] } }
   hosted.set('s1', entry)
   const report = (servers: McpServer[]): void => {
@@ -40,7 +43,9 @@ describe('waiting for a session to report its MCP servers', () => {
     report([{ name: 'oracle-claims', status: 'pending' }])
     setTimeout(() => report([{ name: 'oracle-claims', status: 'connected' }]), 200)
 
-    expect(await manager.connectedMcpServers('s1', ['oracle-claims'], 3000)).toEqual(['oracle-claims'])
+    expect(await manager.connectedMcpServers('s1', ['oracle-claims'], 3000)).toEqual([
+      'oracle-claims',
+    ])
   })
 
   it('returns at once, without waiting, when no server is configured', async () => {
@@ -57,7 +62,11 @@ describe('waiting for a session to report its MCP servers', () => {
       { name: 'oracle-claims', status: 'failed' },
     ])
 
-    const found = await manager.connectedMcpServers('s1', ['postgres-reporting', 'oracle-claims'], 400)
+    const found = await manager.connectedMcpServers(
+      's1',
+      ['postgres-reporting', 'oracle-claims'],
+      400,
+    )
     expect(found).toEqual(['postgres-reporting'])
   })
 
