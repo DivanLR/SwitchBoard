@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, useTemplateRef, watch } from 'vue'
-import type { ConstitutionState, SddProcess } from '@shared/domain'
+import type { ConstitutionState, SddEntry, SddProcess } from '@shared/domain'
 import { SPEC_KIT_COMMANDS, sddCommand, type SddCommand } from '@shared/sdd'
 import { errorMessage } from '@renderer/ipc'
 import { useSpecsStore } from '@renderer/stores/specs'
@@ -114,6 +114,15 @@ function openSpecInFlow(specId: string): void {
   flow.seedIntake(props.projectId, { kind: 'spec', specId })
   emit('open-flow')
 }
+
+function openEntryInFlow(process: SddProcess, entry: SddEntry): void {
+  const { title, slug } = entry
+  flow.seedIntake(
+    props.projectId,
+    process === 'bug' ? { kind: 'bug', title, symptom: title, slug } : { kind: 'idea', title, idea: title, slug },
+  )
+  emit('open-flow')
+}
 </script>
 
 <template>
@@ -220,6 +229,7 @@ function openSpecInFlow(specId: string): void {
         @select="(slug) => kind && specs.selectEntry(projectId, kind, slug)"
         @open-report="(slug, file) => kind && specs.openReport(projectId, kind, slug, file)"
         @run="(c) => kind && run(c, specs.selectedSlugs[kind])"
+        @open-flow="(entry) => kind && openEntryInFlow(kind, entry)"
       />
     </template>
 

@@ -111,6 +111,7 @@ const store = reactive({
     autoShip: boolean,
     baseBranch?: string,
     companions?: FlowCompanionRequest[],
+    checklist?: boolean,
   ): Promise<string | null> {
     let runId: string | null = null
     await this.act('start', async () => {
@@ -119,6 +120,7 @@ const store = reactive({
         source,
         autopilot,
         autoShip,
+        checklist,
         baseBranch,
         companions,
       })
@@ -150,6 +152,13 @@ const store = reactive({
 
   async ship(runId: string): Promise<boolean> {
     return this.act('ship', async () => this.applySnapshot(await invoke('flow.ship', { runId })))
+  },
+
+  async featureFrom(projectId: string, runId: string): Promise<boolean> {
+    return this.act('feature', async () => {
+      const seed = await invoke('flow.feature', { runId })
+      state.seed = { projectId, source: { kind: 'text', title: seed.title, description: seed.description } }
+    })
   },
 
   async cancel(runId: string): Promise<boolean> {

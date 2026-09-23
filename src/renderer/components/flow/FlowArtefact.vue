@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { FlowReviewSeverity, FlowRun, FlowStageRecord } from '@shared/domain'
+import { sddDocPath } from '@shared/sdd'
 import { useFlowStore } from '@renderer/stores/flow'
 import MarkdownText from '@renderer/components/MarkdownText.vue'
 import Icon from '@renderer/components/Icon.vue'
@@ -42,6 +43,30 @@ const progress = computed(() => {
   return { done: report.tasksDone ?? 0, total: report.tasksTotal }
 })
 
+const docPath = computed(() => sddDocPath(props.run.kind, props.run.slug, props.stage.stage))
+const doc = ref<string | null>(null)
+
+const converge = computed(() => {
+  const report = props.stage.report
+  if (props.stage.stage !== 'build' || !report?.rounds) return null
+  const rounds = `${report.rounds} round${report.rounds === 1 ? '' : 's'}`
+  return report.converged ? `Converged after ${rounds}` : `Not converged after ${rounds}`
+})
+
+const VERDICT_CHIP: Record<string, string> = {
+  verified: 'is-on',
+  go: 'is-on',
+  partial: 'is-warn',
+  'needs-clarification': 'is-warn',
+  failed: 'is-danger',
+}
+
+async function loadDoc(): Promise<void> {
+  const key = viewKey()
+  const result = await flow.artefact(props.run.id, props.stage.stage, 'doc')
+  if (key === viewKey()) doc.value = result?.content ?? null
+}
+
 function viewKey(): string {
   return `${props.run.id}/${props.stage.stage}`
 }
@@ -72,8 +97,10 @@ watch(
       markdown.value = null
       tasksText.value = null
       postman.value = null
+      doc.value = null
     }
-    if (stage === 'spec') void loadMarkdown('spec')
+    if (docPath.value) void loadDoc()
+    else if (stage === 'spec') void loadMarkdown('spec')
     else if (stage === 'plan') void loadMarkdown('plan')
     if (stage === 'build' || (stage === 'plan' && showTasks.value)) void loadTasks()
   },
@@ -88,7 +115,20 @@ function toggleTasks(): void {
 
 <template>
   <div class="flow-artefact-view" data-testid="flow-artefact">
-    <template v-if="stage.stage === 'spec' || stage.stage === 'plan'">
+    <template v-if="docPath">
+      <div v-if="stage.report?.bugResult || stage.report?.decision" class="fa-line">
+        <span v-if="stage.report?.bugResult" class="ui-chip" :class="VERDICT_CHIP[stage.report.bugResult]" data-testid="flow-bug-result">
+          {{ stage.report.bugResult }}
+        </span>
+        <span v-if="stage.report?.decision" class="ui-chip" :class="VERDICT_CHIP[stage.report.decision]" data-testid="flow-decision">
+          {{ stage.report.decision }}
+        </span>
+      </div>
+      <MarkdownText v-if="doc" :text="doc" class="flow-doc" data-testid="flow-artefact-doc" />
+      <div v-else class="ui-empty-line">No <span class="mono">{{ docPath }}</span> written yet.</div>
+    </template>
+
+    <template v-else-if="stage.stage === 'spec' || stage.stage === 'plan'">
       <MarkdownText
         v-if="markdown"
         :text="markdown"
@@ -99,6 +139,15 @@ function toggleTasks(): void {
         No {{ stage.stage === 'spec' ? 'spec.md' : 'plan.md' }} written yet.
       </div>
       <template v-if="stage.stage === 'plan'">
+        <div v-if="stage.report?.checklistOpen != null" class="fa-line">
+          <span class="ui-chip" :class="{ 'is-warn': stage.report.checklistOpen > 0 }" data-testid="flow-checklist">
+            {{
+              stage.report.checklistOpen > 0
+                ? `${stage.report.checklistOpen} checklist item${stage.report.checklistOpen === 1 ? '' : 's'} open`
+                : 'Checklist clear'
+            }}
+          </span>
+        </div>
         <div v-if="progress" class="flow-progress" data-testid="flow-tasks-progress">
           <div class="flow-progress-bar">
             <div
@@ -132,6 +181,9 @@ function toggleTasks(): void {
     </template>
 
     <template v-else-if="stage.stage === 'build'">
+      <div v-if="converge" class="fa-line">
+        <span class="ui-chip" :class="{ 'is-warn': !stage.report?.converged }" data-testid="flow-converge">{{ converge }}</span>
+      </div>
       <div v-if="progress" class="flow-progress" data-testid="flow-tasks-progress">
         <div class="flow-progress-bar">
           <div

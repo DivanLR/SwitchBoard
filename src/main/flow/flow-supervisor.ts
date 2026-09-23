@@ -1,7 +1,8 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { cp, readFile, readdir, writeFile } from 'node:fs/promises'
 import { basename, isAbsolute, join, relative } from 'node:path'
 import type {
+  FlowKind,
   FlowRepo,
   FlowRun,
   FlowStage,
@@ -9,32 +10,52 @@ import type {
   FlowStageRecord,
   FlowStageReport,
   Project,
+  SddProcess,
   SessionEndReason,
   SpecSummary,
   VerifyReport,
 } from '@shared/domain'
 import {
   FLOW_STAGE_LABELS,
-  FLOW_STAGES,
   emptyFlowStageReport,
   flowStageActions,
+  flowStagesOf,
   verifyVerdict,
 } from '@shared/domain'
 import type { FlowArtefactKind, FlowCompanionRequest, FlowStartSource, IpcError } from '@shared/ipc-types'
+import {
+  SDD_COMMANDS,
+  bugResultOf,
+  decisionOf,
+  handoffOf,
+  isSddSlug,
+  sddDirOf,
+  sddDocPath,
+  sddProcessOf,
+  sddSlug,
+} from '@shared/sdd'
 import { nowIso, type Repositories } from '@main/store/repositories'
 import type { SessionManager } from '@main/sessions/session-manager'
 import {
+  bugAssessPrompt,
+  bugFixPrompt,
+  bugTestPrompt,
   buildHandshake,
   buildSteps,
+  checklistSteps,
   cleanHandshake,
   cleanSteps,
   clarifyPrompt,
+  constitutionPrompt,
+  convergePrompt,
   fixFindingsPrompt,
+  ideaPrompt,
   planHandshake,
   planSteps,
   reviewHandshake,
   reviewSteps,
   revisePrompt,
+  sddHandshake,
   shipForbidden,
   shipPrompt,
   specHandshake,
@@ -42,11 +63,17 @@ import {
   testWritePrompt,
   featuresPrompt,
   withRepos,
+  type ShipTest,
 } from './flow-prompts'
 import { allowedPullRequestUrl, type FlowMarker, type FlowStageMarker } from './flow-markers'
 import { artefactRelPath, defaultArtefactKind, resolveArtefactPath } from './artefacts'
 import { STACK_ORDER, detectFlowStacks } from './stacks'
-import { readSpecKitState } from '@main/specs/spec-kit'
+import {
+  isExtensionInstalled,
+  isSpecKitInstalled,
+  readConstitutionState,
+  readSpecKitState,
+} from '@main/specs/spec-kit'
 import { defaultSelection, stackById, type TestSuite } from '@shared/test-catalog'
 import {
   detectProjectSuites,
@@ -62,6 +89,8 @@ export const ADO_SERVER = 'ado'
 const ADO_WAIT_MS = 30_000
 
 const MAX_FIX_ROUNDS = 2
+
+export const MAX_CONVERGE_ROUNDS = 3
 
 interface FlowCallbacks {
   onFlowChanged: (projectId: string) => void
@@ -98,6 +127,23 @@ const REFUSED: Record<FlowStageAction, string> = {
   retry: 'This stage has not failed.',
   ship: 'This run is not waiting to raise its pull request.',
   skip: 'This stage cannot be skipped now.',
+  feature: 'A feature starts from the Flow intake.',
+}
+
+function kindOf(source: FlowStartSource): FlowKind {
+  return source.kind === 'bug' ? 'bug' : source.kind === 'idea' ? 'idea' : 'feature'
+}
+
+function openChecklistItems(worktreePath: string, specDir: string): number | null {
+  const dir = resolveArtefactPath(worktreePath, join(specDir, 'checklists'))
+  if (!dir) return null
+  try {
+    return readdirSync(dir)
+      .filter((name) => name.endsWith('.md'))
+      .reduce((sum, name) => sum + (readFileSync(join(dir, name), 'utf8').match(/^\s*-\s*\[ \]/gm)?.length ?? 0), 0)
+  } catch {
+    return null
+  }
 }
 
 const NO_REPORT = 'The stage finished without reporting its result.'
@@ -138,6 +184,8 @@ export class FlowSupervisor {
   private current = new Map<string, { text: string; resent: boolean }>()
   private busy = new Set<string>()
   private origins = new Map<string, Record<string, string | null>>()
+  private rounds = new Map<string, number>()
+  private looped = new Set<string>()
 
   constructor(
     private repos: Repositories,
@@ -198,19 +246,32 @@ export class FlowSupervisor {
     source: FlowStartSource
     autopilot: boolean
     autoShip: boolean
+    checklist?: boolean
     baseBranch?: string
     companions?: readonly FlowCompanionRequest[]
   }): Promise<FlowRun> {
     const project = this.requireProject(input.projectId)
+    const kind = kindOf(input.source)
     const stacks = await detectFlowStacks(project.path)
-    if (stacks.length === 0) {
+    if (stacks.length === 0 && kind !== 'idea') {
       throw { code: 'UNSUPPORTED', message: 'Flow supports .NET and Angular projects.' } satisfies IpcError
     }
+    if (kind === 'idea' && (input.companions?.length ?? 0) > 0) {
+      throw {
+        code: 'RULE_NOT_ALLOWED',
+        message: 'An idea run changes no code, so it takes no other repositories.',
+      } satisfies IpcError
+    }
+    const process = sddProcessOf(kind)
+    if (process) await this.requireExtension(project.path, process)
+    const slug = process ? this.slugFor(project, process, input.source) : null
     const companions = await this.companionsFor(project, input.companions ?? [])
     if (input.source.kind === 'spec') await this.requireSpec(project.path, input.source.specId)
-    const base = await this.baseFor(project.path, input.baseBranch)
-
     const title = this.deriveTitle(input.source)
+
+    if (kind === 'idea') return this.startIdea(project, input, title, slug ?? sddSlug(title), stacks)
+
+    const base = await this.baseFor(project.path, input.baseBranch)
     const override = this.settings().flowWorktreeRoot.trim()
     const root = this.git.root(project.path, override)
     const taken = new Set<string>()
@@ -242,19 +303,24 @@ export class FlowSupervisor {
       }
     }
     await copyMissing(project.path, worktreePath, '.specify')
+    if (process && slug) await this.carrySdd(project.path, worktreePath, process, slug)
 
     let specDir: string | null = null
-    let startStage: FlowStage = 'spec'
+    let startStage: FlowStage = flowStagesOf(kind)[0]
     if (input.source.kind === 'spec') {
       specDir = `specs/${input.source.specId}`
       await copyMissing(project.path, worktreePath, specDir)
       startStage = existsSync(join(worktreePath, specDir, 'tasks.md')) ? 'build' : 'plan'
     }
+    if (slug) startStage = this.firstUndone(kind, worktreePath, slug)
 
     const run = this.repos.flowRuns.start({
       projectId: project.id,
+      kind,
+      slug,
+      checklist: kind === 'feature' && input.checklist === true,
       title,
-      source: input.source.kind,
+      source: input.source.kind === 'ado' || input.source.kind === 'spec' ? input.source.kind : 'text',
       sourceRef:
         input.source.kind === 'ado'
           ? input.source.featureId
@@ -262,23 +328,14 @@ export class FlowSupervisor {
             ? input.source.specId
             : null,
       sourceUrl: input.source.kind === 'ado' ? input.source.url : null,
-      description: input.source.kind === 'text' ? input.source.description : '',
+      description: this.describe(input.source),
       stacks: STACK_ORDER.filter((id) => [stacks, ...made.map((repo) => repo.stacks)].some((list) => list.includes(id))),
       stage: startStage,
       autopilot: input.autopilot,
       autoShip: input.autoShip,
       baseBranch: base,
     })
-    this.repos.flowStages.ensureAll(run.id)
-    for (const stage of FLOW_STAGES) {
-      if (FLOW_STAGES.indexOf(stage) < FLOW_STAGES.indexOf(startStage)) {
-        this.repos.flowStages.update(run.id, stage, {
-          status: 'skipped',
-          summary: 'Started from an existing spec.',
-          finishedAt: nowIso(),
-        })
-      }
-    }
+    this.skipBefore(run, startStage)
     const primary: FlowRepo = {
       projectId: project.id,
       name: project.name,
@@ -294,6 +351,94 @@ export class FlowSupervisor {
     this.repos.flowRuns.update(run.id, { branch: tree.branch, worktreePath, specDir, repos })
     this.callbacks.onFlowChanged(project.id)
     return this.exclusive(run.id, () => this.beginStage(run.id, startStage))
+  }
+
+  private async startIdea(
+    project: Project,
+    input: { source: FlowStartSource; autopilot: boolean },
+    title: string,
+    slug: string,
+    stacks: readonly string[],
+  ): Promise<FlowRun> {
+    const startStage = this.firstUndone('idea', project.path, slug)
+    const run = this.repos.flowRuns.start({
+      projectId: project.id,
+      kind: 'idea',
+      slug,
+      title,
+      source: 'text',
+      sourceRef: null,
+      sourceUrl: null,
+      description: this.describe(input.source),
+      stacks: STACK_ORDER.filter((id) => stacks.includes(id)),
+      stage: startStage,
+      autopilot: input.autopilot,
+      autoShip: false,
+      baseBranch: null,
+    })
+    this.skipBefore(run, startStage)
+    this.callbacks.onFlowChanged(project.id)
+    return this.exclusive(run.id, () => this.beginStage(run.id, startStage))
+  }
+
+  private skipBefore(run: FlowRun, startStage: FlowStage): void {
+    this.repos.flowStages.ensureAll(run.id)
+    const stages = flowStagesOf(run.kind)
+    for (const stage of stages.slice(0, stages.indexOf(startStage))) {
+      const doc = sddDocPath(run.kind, run.slug, stage)
+      this.repos.flowStages.update(run.id, stage, {
+        status: 'skipped',
+        summary: doc ? `Already written in ${doc}.` : 'Started from an existing spec.',
+        finishedAt: nowIso(),
+      })
+    }
+  }
+
+  private firstUndone(kind: FlowKind, root: string, slug: string): FlowStage {
+    const docs = flowStagesOf(kind).filter((stage) => sddDocPath(kind, slug, stage) !== null)
+    const open = docs.find((stage) => !existsSync(join(root, sddDocPath(kind, slug, stage) ?? '')))
+    return open ?? docs[docs.length - 1] ?? flowStagesOf(kind)[0]
+  }
+
+  private async carrySdd(from: string, to: string, process: SddProcess, slug: string): Promise<void> {
+    await copyMissing(from, to, join('.specify', 'extensions', process))
+    for (const command of SDD_COMMANDS[process]) await copyMissing(from, to, join('.claude', 'skills', command.command))
+    await copyMissing(from, to, sddDirOf(process, slug))
+  }
+
+  private describe(source: FlowStartSource): string {
+    if (source.kind === 'text') return source.description
+    if (source.kind === 'bug') return source.symptom.trim()
+    if (source.kind === 'idea') return source.idea.trim()
+    return ''
+  }
+
+  private slugFor(project: Project, process: SddProcess, source: FlowStartSource): string {
+    const explicit = source.kind === 'bug' || source.kind === 'idea' ? source.slug?.trim() : undefined
+    if (explicit) {
+      if (!isSddSlug(explicit)) {
+        throw {
+          code: 'INVALID_PATH',
+          message: `"${explicit}" is not a slug. Use lowercase letters, digits and hyphens.`,
+        } satisfies IpcError
+      }
+      return explicit
+    }
+    const taken = new Set(this.repos.flowRuns.listForProject(project.id).map((run) => run.slug))
+    const base = sddSlug(this.deriveTitle(source))
+    let slug = base
+    for (let n = 2; taken.has(slug) || existsSync(join(project.path, sddDirOf(process, slug))); n += 1) {
+      slug = `${base}-${n}`
+    }
+    return slug
+  }
+
+  private async requireExtension(projectPath: string, process: SddProcess): Promise<void> {
+    if ((await isSpecKitInstalled(projectPath)) && (await isExtensionInstalled(projectPath, process))) return
+    throw {
+      code: 'UNSUPPORTED',
+      message: `The ${process} extension is not installed in this project. Install it from the SDD tab first.`,
+    } satisfies IpcError
   }
 
   approve(runId: string): Promise<FlowRun> {
@@ -323,11 +468,6 @@ export class FlowSupervisor {
       this.callbacks.onFlowChanged(run.projectId)
       await this.stopStageSession(stageRow)
       if (this.movedOn(runId, run.stage)) return
-      if (run.stage === 'ship') {
-        this.repos.flowRuns.finish(runId, 'done', null)
-        this.callbacks.onFlowChanged(run.projectId)
-        return
-      }
       await this.advance(runId, run.stage)
     })
   }
@@ -346,6 +486,13 @@ export class FlowSupervisor {
       const stageRow = this.requireAction(run, 'revise')
       await this.restartStage(run, stageRow, revisePrompt(run, run.stage, feedback), feedback)
     })
+  }
+
+  async feature(runId: string): Promise<{ title: string; description: string }> {
+    const run = this.requireRun(runId)
+    this.requireAction(run, 'feature')
+    const decision = this.readDoc(run, sddDocPath(run.kind, run.slug, 'decide') ?? '')
+    return { title: run.title, description: handoffOf(decision) ?? run.description }
   }
 
   ship(runId: string): Promise<FlowRun> {
@@ -456,11 +603,16 @@ export class FlowSupervisor {
     kind?: FlowArtefactKind,
   ): Promise<{ path: string | null; content: string } | null> {
     const run = this.requireRun(runId)
-    const resolvedKind = kind ?? defaultArtefactKind(stage)
+    const resolvedKind = kind ?? defaultArtefactKind(stage, run.kind)
     if (resolvedKind === 'report') {
       const stageRow = this.repos.flowStages.get(runId, stage)
       if (!stageRow?.report) return null
       return { path: null, content: JSON.stringify(stageRow.report, null, 2) }
+    }
+    if (resolvedKind === 'doc') {
+      const rel = sddDocPath(run.kind, run.slug, stage)
+      const content = rel ? this.readDoc(run, rel) : null
+      return rel && content !== null ? { path: rel, content } : null
     }
     if (!run.worktreePath) return null
     const rel = artefactRelPath(run.specDir, resolvedKind)
@@ -511,9 +663,24 @@ export class FlowSupervisor {
     this.completeStage(ctx.runId, ctx.stage, marker)
   }
 
+  private rootOf(run: FlowRun): string | null {
+    return run.worktreePath ?? (run.kind === 'idea' ? (this.repos.projects.byId(run.projectId)?.path ?? null) : null)
+  }
+
+  private readDoc(run: FlowRun, rel: string): string | null {
+    const root = this.rootOf(run)
+    const abs = root ? resolveArtefactPath(root, rel) : null
+    if (!abs) return null
+    try {
+      return readFileSync(abs, 'utf8')
+    } catch {
+      return null
+    }
+  }
+
   onVerifyReport(sessionId: string, report: VerifyReport): void {
     const ctx = this.sessionStage.get(sessionId)
-    if (!ctx || ctx.stage !== 'test') return
+    if (!ctx || ctx.stage !== 'test' || this.repos.flowRuns.byId(ctx.runId)?.kind === 'bug') return
     const stageRow = this.repos.flowStages.get(ctx.runId, ctx.stage)
     if (!stageRow || stageRow.status !== 'running') return
     const flowReport: FlowStageReport = { ...emptyFlowStageReport(), verify: report }
@@ -547,6 +714,8 @@ export class FlowSupervisor {
     this.sessionStage.delete(sessionId)
     this.pending.delete(sessionId)
     this.current.delete(sessionId)
+    this.rounds.delete(sessionId)
+    this.looped.delete(sessionId)
     const stageRow = this.repos.flowStages.get(ctx.runId, ctx.stage)
     if (!stageRow || stageRow.status !== 'running') return
     this.failStage(ctx.runId, ctx.stage, SESSION_ENDED, { retryOnce: true })
@@ -586,10 +755,12 @@ export class FlowSupervisor {
     }
     const stageRow = this.repos.flowStages.get(ctx.runId, ctx.stage)
     if (!stageRow || stageRow.status !== 'running') return
-    this.failStage(ctx.runId, ctx.stage, ctx.stage === 'test' ? NO_VERIFY_REPORT : NO_REPORT, { retryOnce: true })
+    const verifying = ctx.stage === 'test' && this.repos.flowRuns.byId(ctx.runId)?.kind !== 'bug'
+    this.failStage(ctx.runId, ctx.stage, verifying ? NO_VERIFY_REPORT : NO_REPORT, { retryOnce: true })
   }
 
   private sendStep(sessionId: string, text: string): void {
+    this.looped.delete(sessionId)
     this.current.set(sessionId, { text, resent: false })
     this.manager.sendMessage(sessionId, text)
   }
@@ -685,8 +856,8 @@ export class FlowSupervisor {
 
   private deriveTitle(source: FlowStartSource): string {
     if (source.kind === 'ado') return source.featureTitle
-    if (source.kind === 'text') return source.title
-    return source.specId
+    if (source.kind === 'spec') return source.specId
+    return source.title.trim()
   }
 
   private async startStageSession(run: FlowRun, project: Project, stage: FlowStage): Promise<{ id: string }> {
@@ -707,6 +878,8 @@ export class FlowSupervisor {
     this.sessionStage.delete(sessionId)
     this.pending.delete(sessionId)
     this.current.delete(sessionId)
+    this.rounds.delete(sessionId)
+    this.looped.delete(sessionId)
     this.manager.endFlowSession(sessionId)
   }
 
@@ -824,25 +997,39 @@ export class FlowSupervisor {
     return buildVerifyPrompt(plans, labels.join(' + ') || 'project', dbServers)
   }
 
-  private async shipTest(run: FlowRun): Promise<{ verify: VerifyReport | null; postman: string | null }> {
-    const verify = this.repos.flowStages.get(run.id, 'test')?.report?.verify ?? null
+  private async shipTest(run: FlowRun): Promise<ShipTest> {
+    const test = this.repos.flowStages.get(run.id, 'test')?.report ?? null
+    if (run.kind === 'bug') {
+      return { verify: null, postman: null, bug: { doc: sddDocPath('bug', run.slug, 'test') ?? '', result: test?.bugResult ?? null } }
+    }
     const postman = (await this.artefact(run.id, 'test', 'postman'))?.path?.replace(/\\/g, '/') ?? null
-    return { verify, postman }
+    return { verify: test?.verify ?? null, postman }
+  }
+
+  private buildRound(run: FlowRun): string[] {
+    return [...buildSteps(run.stacks, run.specDir, run.repos), convergePrompt(run.specDir)]
   }
 
   private async planFor(run: FlowRun, stage: FlowStage, sessionId: string): Promise<StagePlan> {
     const base = run.baseBranch ?? 'main'
     const repos = run.repos
     switch (stage) {
-      case 'spec':
-        return { steps: [specifyPrompt(run), clarifyPrompt(run.autopilot)], handshake: specHandshake() }
+      case 'spec': {
+        const root = this.rootOf(run) ?? this.requireProject(run.projectId).path
+        const constitution = (await readConstitutionState(root)) === 'written' ? [] : [constitutionPrompt(run.autopilot)]
+        return { steps: [...constitution, specifyPrompt(run), clarifyPrompt(run.autopilot)], handshake: specHandshake() }
+      }
       case 'plan':
-        return { steps: planSteps(run.stacks, run.specDir, repos), handshake: planHandshake() }
+        return {
+          steps: [...planSteps(run.stacks, run.specDir, repos), ...(run.checklist ? checklistSteps(run.specDir) : [])],
+          handshake: planHandshake(),
+        }
       case 'build':
-        return { steps: buildSteps(run.stacks, run.specDir, repos), handshake: buildHandshake() }
+        return { steps: this.buildRound(run), handshake: buildHandshake() }
       case 'clean':
         return { steps: cleanSteps(run.stacks, base, repos), handshake: cleanHandshake() }
       case 'test':
+        if (run.kind === 'bug') return { steps: [bugTestPrompt(run)], handshake: sddHandshake(stage) }
         return {
           steps: [testWritePrompt(run, run.stacks, repos), await this.verifyStepPrompt(run, sessionId)],
           handshake: null,
@@ -850,15 +1037,31 @@ export class FlowSupervisor {
       case 'review':
         return {
           steps: reviewSteps(run.stacks, base, repos),
-          handshake: reviewHandshake(base, run.specDir, run.stacks, repos),
+          handshake: reviewHandshake(
+            base,
+            run.specDir,
+            run.stacks,
+            repos,
+            run.kind === 'bug' ? sddDocPath('bug', run.slug, 'assess') : null,
+          ),
         }
       case 'ship':
         return { steps: [], handshake: shipPrompt(run, await this.shipTest(run), repos) }
+      case 'assess':
+        return { steps: [bugAssessPrompt(run)], handshake: sddHandshake(stage) }
+      case 'fix':
+        return { steps: [bugFixPrompt(run, run.stacks, repos)], handshake: sddHandshake(stage) }
+      case 'intake':
+      case 'research':
+      case 'define':
+      case 'shape':
+      case 'decide':
+        return { steps: [ideaPrompt(stage, run)], handshake: sddHandshake(stage) }
     }
   }
 
   private async tailFor(run: FlowRun, stage: FlowStage, sessionId: string): Promise<string[]> {
-    if (stage === 'test') return [await this.verifyStepPrompt(run, sessionId)]
+    if (stage === 'test' && run.kind !== 'bug') return [await this.verifyStepPrompt(run, sessionId)]
     const plan = await this.planFor(run, stage, sessionId)
     return plan.handshake ? [plan.handshake] : []
   }
@@ -911,14 +1114,81 @@ export class FlowSupervisor {
     if (first) this.sendStep(session.id, withRepos(first, run.repos))
   }
 
+  private convergeAgain(run: FlowRun, marker: FlowStageMarker): boolean {
+    const sessionId = this.repos.flowStages.get(run.id, 'build')?.sessionId
+    if (!sessionId || run.kind !== 'feature') return false
+    if (this.looped.has(sessionId)) return true
+    const round = this.rounds.get(sessionId) ?? 1
+    if (marker.converged !== false || round >= MAX_CONVERGE_ROUNDS) return false
+    this.rounds.set(sessionId, round + 1)
+    this.looped.add(sessionId)
+    const [first, ...rest] = this.buildRound(run)
+    this.pending.set(sessionId, [withRepos(first, run.repos), ...rest, buildHandshake()])
+    this.repos.flowStages.update(run.id, 'build', {
+      summary: `Converge round ${round} appended unbuilt work, so round ${round + 1} of ${MAX_CONVERGE_ROUNDS} is running.`,
+    })
+    this.callbacks.onFlowChanged(run.projectId)
+    return true
+  }
+
+  private stageFindings(
+    run: FlowRun,
+    stage: FlowStage,
+    marker: FlowStageMarker,
+  ): { fail: { why: string; report: FlowStageReport | null } | null; extra: Partial<FlowStageReport>; notes: string[] } {
+    const extra: Partial<FlowStageReport> = {}
+    const notes: string[] = []
+    const doc = sddDocPath(run.kind, run.slug, stage)
+    const text = doc ? this.readDoc(run, doc) : null
+    const verifying = run.kind === 'bug' && stage === 'test'
+    if (doc && text === null) {
+      const why = verifying
+        ? `The bug test wrote no ${doc}, and a fix nobody verified is not a successful fix.`
+        : `The ${FLOW_STAGE_LABELS[stage]} stage finished without writing ${doc}.`
+      return { fail: { why, report: null }, extra, notes }
+    }
+    if (verifying) {
+      const result = bugResultOf(text)
+      if (result !== 'verified') {
+        const why = result
+          ? `The bug test reported ${result}, not verified, so the fix is not done.`
+          : `${doc} records no verified, partial or failed result, and a fix nobody verified is not a successful fix.`
+        return { fail: { why, report: { ...emptyFlowStageReport(), bugResult: result } }, extra, notes }
+      }
+      extra.bugResult = result
+    }
+    if (stage === 'decide') extra.decision = decisionOf(text) ?? marker.decision
+    if (stage === 'build' && run.kind === 'feature') {
+      const sessionId = this.repos.flowStages.get(run.id, 'build')?.sessionId ?? ''
+      extra.rounds = this.rounds.get(sessionId) ?? 1
+      extra.converged = marker.converged === true
+      if (marker.converged === null) notes.push('The build did not say whether /speckit-converge reported Converged.')
+      else if (!marker.converged) {
+        notes.push(`Converge still found unbuilt work after ${extra.rounds} round${extra.rounds === 1 ? '' : 's'}.`)
+      }
+    }
+    if (stage === 'plan' && run.checklist && run.specDir && run.worktreePath) {
+      const open = openChecklistItems(run.worktreePath, run.specDir)
+      extra.checklistOpen = open
+      if (open) notes.push(`The checklist has ${open} open item${open === 1 ? '' : 's'}.`)
+    }
+    return { fail: null, extra, notes }
+  }
+
   private completeStage(runId: string, stage: FlowStage, marker: FlowStageMarker): void {
     const run = this.repos.flowRuns.byId(runId)
     if (!run) return
+    if (stage === 'build' && this.convergeAgain(run, marker)) return
+    const found = this.stageFindings(run, stage, marker)
+    if (found.fail) {
+      this.failStage(runId, stage, found.fail.why, { retryOnce: false }, found.fail.report)
+      return
+    }
     const patch: Parameters<Repositories['flowRuns']['update']>[1] = {}
     if (stage === 'spec') patch.specDir = this.resolveSpecDir(run, marker.specDir)
     let prUrl = marker.prUrl
     let prId = marker.prId
-    let summary = marker.summary || null
+    let summary = [marker.summary, ...found.notes].filter(Boolean).join(' ') || null
     if (stage === 'ship') {
       const hosts = this.origins.get(runId) ?? {}
       const dropped: string[] = []
@@ -977,6 +1247,7 @@ export class FlowSupervisor {
           prUrl,
           prId,
           verify: null,
+          ...found.extra,
         },
       },
       patch,
@@ -1036,6 +1307,8 @@ export class FlowSupervisor {
     if (stage === 'build' && report?.tasksDone != null && report.tasksTotal != null && report.tasksDone < report.tasksTotal) {
       return
     }
+    if (stage === 'build' && report?.converged === false) return
+    if (stage === 'plan' && (report?.checklistOpen ?? 0) > 0) return
     if (stage === 'review' && report?.verdict !== 'ready') {
       if (report?.verdict === 'needs_fixes' && stageRow.attempts <= MAX_FIX_ROUNDS) void this.fix(runId).catch(() => {})
       return
@@ -1046,7 +1319,8 @@ export class FlowSupervisor {
   private async advance(runId: string, from: FlowStage): Promise<void> {
     if (this.movedOn(runId, from)) return
     const run = this.requireRun(runId)
-    const next = FLOW_STAGES[FLOW_STAGES.indexOf(from) + 1]
+    const stages = flowStagesOf(run.kind)
+    const next = stages[stages.indexOf(from) + 1]
     if (!next) {
       this.repos.flowRuns.finish(runId, 'done', null)
       this.callbacks.onFlowChanged(run.projectId)

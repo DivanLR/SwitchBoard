@@ -123,13 +123,15 @@ export type FlowStartSource =
   | { kind: 'ado'; featureId: string; featureTitle: string; url: string | null }
   | { kind: 'text'; title: string; description: string }
   | { kind: 'spec'; specId: string }
+  | { kind: 'bug'; title: string; symptom: string; slug?: string }
+  | { kind: 'idea'; title: string; idea: string; slug?: string }
 
 export interface FlowCompanionRequest {
   projectId: string
   baseBranch?: string
 }
 
-export type FlowArtefactKind ='spec' | 'plan' | 'tasks' | 'postman' | 'report'
+export type FlowArtefactKind = 'spec' | 'plan' | 'tasks' | 'postman' | 'report' | 'doc'
 
 export interface InvokeMap {
   'projects.list': { req: void; res: ProjectsSnapshot }
@@ -265,6 +267,7 @@ export interface InvokeMap {
       source: FlowStartSource
       autopilot: boolean
       autoShip: boolean
+      checklist?: boolean
       baseBranch?: string
       companions?: FlowCompanionRequest[]
     }
@@ -275,6 +278,7 @@ export interface InvokeMap {
   'flow.skip': { req: { runId: string }; res: FlowSnapshot }
   'flow.fix': { req: { runId: string }; res: FlowSnapshot }
   'flow.ship': { req: { runId: string }; res: FlowSnapshot }
+  'flow.feature': { req: { runId: string }; res: { title: string; description: string } }
   'flow.cancel': { req: { runId: string }; res: FlowSnapshot }
   'flow.revise': { req: { runId: string; feedback: string }; res: FlowSnapshot }
   'flow.setAutopilot': { req: { runId: string; autopilot: boolean }; res: FlowSnapshot }

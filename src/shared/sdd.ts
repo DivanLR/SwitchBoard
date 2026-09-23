@@ -1,4 +1,4 @@
-import type { FlowBugResult, FlowDecision, SddProcess } from './domain'
+import type { FlowBugResult, FlowDecision, FlowKind, FlowStage, SddProcess } from './domain'
 
 export interface SddCommand {
   command: string
@@ -36,19 +36,38 @@ export const SDD_COMMANDS: Readonly<Record<SddProcess, readonly SddCommand[]>> =
 
 export const SDD_DIRS: Readonly<Record<SddProcess, string>> = { bug: 'bugs', assess: 'assessments' }
 
-export const SDD_REPORTS: Readonly<Record<SddProcess, readonly { file: string; label: string }[]>> = {
+export const SDD_REPORTS: Readonly<Record<SddProcess, readonly { file: string; label: string; stage: FlowStage }[]>> = {
   bug: [
-    { file: 'assessment.md', label: 'Assessment' },
-    { file: 'fix.md', label: 'Fix' },
-    { file: 'test.md', label: 'Verification' },
+    { file: 'assessment.md', label: 'Assessment', stage: 'assess' },
+    { file: 'fix.md', label: 'Fix', stage: 'fix' },
+    { file: 'test.md', label: 'Verification', stage: 'test' },
   ],
   assess: [
-    { file: 'intake.md', label: 'Intake' },
-    { file: 'research.md', label: 'Research' },
-    { file: 'problem.md', label: 'Problem' },
-    { file: 'concept.md', label: 'Concept' },
-    { file: 'decision.md', label: 'Decision' },
+    { file: 'intake.md', label: 'Intake', stage: 'intake' },
+    { file: 'research.md', label: 'Research', stage: 'research' },
+    { file: 'problem.md', label: 'Problem', stage: 'define' },
+    { file: 'concept.md', label: 'Concept', stage: 'shape' },
+    { file: 'decision.md', label: 'Decision', stage: 'decide' },
   ],
+}
+
+export function sddProcessOf(kind: FlowKind): SddProcess | null {
+  return kind === 'bug' ? 'bug' : kind === 'idea' ? 'assess' : null
+}
+
+export function sddDirOf(process: SddProcess, slug: string): string {
+  return `.specify/${SDD_DIRS[process]}/${slug}`
+}
+
+export function sddReportOf(kind: FlowKind, stage: FlowStage): { file: string; label: string } | null {
+  const process = sddProcessOf(kind)
+  return (process && SDD_REPORTS[process].find((entry) => entry.stage === stage)) || null
+}
+
+export function sddDocPath(kind: FlowKind, slug: string | null, stage: FlowStage): string | null {
+  const process = sddProcessOf(kind)
+  const report = sddReportOf(kind, stage)
+  return process && report && slug ? `${sddDirOf(process, slug)}/${report.file}` : null
 }
 
 export function sddCommand(command: string, arg: string, slug: string | null): string {

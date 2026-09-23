@@ -46,6 +46,8 @@ function dotnetProject(): string {
   const dir = mkdtempSync(join(tmpdir(), 'flow-sup-'))
   tempDirs.push(dir)
   writeFileSync(join(dir, 'App.sln'), '')
+  mkdirSync(join(dir, '.specify', 'memory'), { recursive: true })
+  writeFileSync(join(dir, '.specify', 'memory', 'constitution.md'), '# Alpha Constitution\n')
   return dir
 }
 
@@ -261,6 +263,9 @@ function specMarker(overrides: Partial<FlowStageMarker> = {}): FlowStageMarker {
     prUrl: null,
     prId: null,
     pullRequests: [],
+    converged: true,
+    result: null,
+    decision: null,
     ...overrides,
   }
 }

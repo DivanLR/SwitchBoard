@@ -20,6 +20,7 @@ import type {
   QueuedTask,
   SectionKind,
   Session,
+  FlowKind,
   FlowRepo,
   FlowRun,
   FlowSource,
@@ -40,7 +41,7 @@ import {
   DEFAULT_SESSION_MODE,
   DEFAULT_SETTINGS,
   emptyVerifyReport,
-  FLOW_STAGES,
+  flowStagesOf,
 } from '@shared/domain'
 
 export function newId(): string {
@@ -920,11 +921,17 @@ class FlowRunsRepo {
     autopilot: boolean
     autoShip: boolean
     baseBranch: string | null
+    kind?: FlowKind
+    slug?: string | null
+    checklist?: boolean
   }): FlowRun {
     const now = nowIso()
     const run: FlowRun = {
       id: newId(),
       projectId: input.projectId,
+      kind: input.kind ?? 'feature',
+      slug: input.slug ?? null,
+      checklist: input.checklist === true,
       repos: [],
       title: input.title,
       source: input.source,
@@ -950,14 +957,17 @@ class FlowRunsRepo {
     this.db
       .prepare(
         `INSERT INTO flow_runs
-           (id, projectId, title, source, sourceRef, sourceUrl, description, stacks, stage, status,
-            autopilot, autoShip, baseBranch, branch, worktreePath, specDir, prUrl, prId, note,
+           (id, projectId, kind, slug, checklist, title, source, sourceRef, sourceUrl, description, stacks, stage,
+            status, autopilot, autoShip, baseBranch, branch, worktreePath, specDir, prUrl, prId, note,
             createdAt, updatedAt, finishedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, NULL)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, NULL)`,
       )
       .run(
         run.id,
         run.projectId,
+        run.kind,
+        run.slug,
+        run.checklist ? 1 : 0,
         run.title,
         run.source,
         run.sourceRef,
@@ -1073,11 +1083,18 @@ class FlowRunsRepo {
 class FlowStagesRepo {
   constructor(private db: AppDatabase) {}
 
+  private stagesOf(runId: string): readonly FlowStage[] {
+    const row = this.db.prepare('SELECT kind FROM flow_runs WHERE id = ?').get(runId) as
+      | { kind: FlowKind | null }
+      | undefined
+    return flowStagesOf(row?.kind)
+  }
+
   ensureAll(runId: string): FlowStageRecord[] {
     const insert = this.db.prepare(
       `INSERT OR IGNORE INTO flow_stages (runId, stage, status, attempts) VALUES (?, ?, 'pending', 0)`,
     )
-    for (const stage of FLOW_STAGES) insert.run(runId, stage)
+    for (const stage of this.stagesOf(runId)) insert.run(runId, stage)
     return this.listForRun(runId)
   }
 
@@ -1086,9 +1103,9 @@ class FlowStagesRepo {
       .prepare('SELECT * FROM flow_stages WHERE runId = ?')
       .all(runId) as FlowStageRow[]
     const byStage = new Map(rows.map((row) => [row.stage, hydrateFlowStage(row)]))
-    return FLOW_STAGES.map((stage) => byStage.get(stage)).filter(
-      (record): record is FlowStageRecord => record !== undefined,
-    )
+    return this.stagesOf(runId)
+      .map((stage) => byStage.get(stage))
+      .filter((record): record is FlowStageRecord => record !== undefined)
   }
 
   listForProject(projectId: string): FlowStageRecord[] {
@@ -1139,6 +1156,9 @@ class FlowStagesRepo {
 interface FlowRunRow {
   id: string
   projectId: string
+  kind: FlowKind | null
+  slug: string | null
+  checklist: number
   repos: string
   title: string
   source: FlowSource
@@ -1178,6 +1198,8 @@ interface FlowStageRow {
 function hydrateFlowRun(row: FlowRunRow): FlowRun {
   return {
     ...row,
+    kind: row.kind ?? 'feature',
+    checklist: row.checklist === 1,
     repos: parseJson<FlowRepo[]>(row.repos) ?? [],
     stacks: parseJson<string[]>(row.stacks) ?? [],
     autopilot: row.autopilot === 1,

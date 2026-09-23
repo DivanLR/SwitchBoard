@@ -1,4 +1,12 @@
-import type { FlowFeature, FlowReviewFinding, FlowReviewSeverity, FlowStage } from '@shared/domain'
+import type {
+  FlowBugResult,
+  FlowDecision,
+  FlowFeature,
+  FlowReviewFinding,
+  FlowReviewSeverity,
+  FlowStage,
+} from '@shared/domain'
+import { FLOW_STAGE_LABELS } from '@shared/domain'
 import { firstJsonObject, markerTail, str } from '@main/verify/parse'
 
 export const FLOW_MARKER = 'SWB_FLOW'
@@ -23,6 +31,9 @@ export interface FlowStageMarker {
   prUrl: string | null
   prId: string | null
   pullRequests: FlowPullRequestMarker[]
+  converged: boolean | null
+  result: FlowBugResult | null
+  decision: FlowDecision | null
 }
 
 export interface FlowPullRequestMarker {
@@ -96,7 +107,17 @@ function findings(value: unknown): FlowReviewFinding[] {
   return found
 }
 
-const STAGES: ReadonlySet<string> = new Set(['spec', 'plan', 'build', 'clean', 'test', 'review', 'ship'])
+const STAGES: ReadonlySet<string> = new Set(Object.keys(FLOW_STAGE_LABELS))
+
+function bool(value: unknown): boolean | null {
+  if (typeof value === 'boolean') return value
+  return value === 'true' ? true : value === 'false' ? false : null
+}
+
+function oneOf<T extends string>(value: unknown, allowed: readonly T[]): T | null {
+  const text = str(value)?.toLowerCase()
+  return allowed.find((entry) => entry === text) ?? null
+}
 
 export function parseFlowMarker(text: string): FlowMarker | null {
   const tail = markerTail(text, FLOW_MARKER)
@@ -133,6 +154,9 @@ export function parseFlowMarker(text: string): FlowMarker | null {
       prUrl: str(record.prUrl),
       prId: str(record.prId),
       pullRequests: pullRequests(record.pullRequests),
+      converged: bool(record.converged),
+      result: oneOf(record.result, ['verified', 'partial', 'failed'] as const),
+      decision: oneOf(record.decision, ['go', 'needs-clarification', 'kill'] as const),
     }
   }
   return null

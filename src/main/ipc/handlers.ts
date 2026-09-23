@@ -649,6 +649,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         source: req.source,
         autopilot: req.autopilot,
         autoShip: req.autoShip,
+        checklist: req.checklist,
         baseBranch: req.baseBranch,
         companions: req.companions,
       })
@@ -674,6 +675,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       await flow.ship(req.runId)
       return flowSnapshotForRun(req.runId)
     },
+    'flow.feature': (req) => flow.feature(req.runId),
     'flow.cancel': async (req) => {
       await flow.cancel(req.runId)
       return flowSnapshotForRun(req.runId)

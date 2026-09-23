@@ -21,6 +21,7 @@ const emit = defineEmits<{
   (e: 'select', slug: string): void
   (e: 'open-report', slug: string, file: string): void
   (e: 'run', command: SddCommand): void
+  (e: 'open-flow', entry: SddEntry): void
 }>()
 
 const NOUN: Record<SddProcess, { one: string; many: string; empty: string }> = {
@@ -118,6 +119,10 @@ function verdictText(entry: SddEntry): string {
               data-testid="sdd-verdict"
               >{{ verdictText(selected) }}</span
             >
+            <span class="spacer"></span>
+            <button type="button" class="btn-outline" data-testid="sdd-open-flow" @click="emit('open-flow', selected)">
+              Open in Flow
+            </button>
           </div>
           <div class="ui-tabs" role="tablist" aria-label="Reports">
             <button

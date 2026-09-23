@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { FLOW_STACK_LABELS, type FlowFeature, type FlowStackId } from '@shared/domain'
+import { FLOW_KIND_LABELS, FLOW_STACK_LABELS, type FlowFeature, type FlowKind, type FlowStackId } from '@shared/domain'
 import type { FlowStartSource } from '@shared/ipc-types'
+import { sddSlug } from '@shared/sdd'
 import { useFlowStore } from '@renderer/stores/flow'
 import { useProjectsStore } from '@renderer/stores/projects'
 import Icon from '@renderer/components/Icon.vue'
@@ -14,14 +15,25 @@ const SOURCES: readonly { id: Source; label: string }[] = [
   { id: 'spec', label: 'Existing spec' },
 ]
 
+const KINDS: readonly FlowKind[] = ['feature', 'bug', 'idea']
+
+const KIND_HINT: Record<FlowKind, string> = {
+  feature: 'Spec, plan, build with converge, clean, test, review and a pull request.',
+  bug: 'Assess the symptom, fix it, verify the fix, then clean, review and a pull request.',
+  idea: 'Intake, research, define, shape and decide. It changes no code.',
+}
+
 const props = defineProps<{ projectId: string }>()
 const emit = defineEmits<{ (e: 'started', runId: string): void }>()
 const flow = useFlowStore()
 const projects = useProjectsStore()
 
+const kind = ref<FlowKind>('feature')
 const source = ref<Source>('text')
 const title = ref('')
 const description = ref('')
+const seededSlug = ref<string | null>(null)
+const checklist = ref(false)
 const query = ref('')
 const feature = ref<FlowFeature | null>(null)
 const specId = ref('')
@@ -50,6 +62,14 @@ onMounted(() => {
   if (seed?.kind === 'spec') {
     source.value = 'spec'
     specId.value = seed.specId
+  } else if (seed?.kind === 'text') {
+    title.value = seed.title
+    description.value = seed.description
+  } else if (seed?.kind === 'bug' || seed?.kind === 'idea') {
+    kind.value = seed.kind
+    title.value = seed.title
+    description.value = seed.kind === 'bug' ? seed.symptom : seed.idea
+    seededSlug.value = seed.slug ?? null
   }
   void flow.loadExistingSpecs(props.projectId)
   void flow.detectStacks(props.projectId)
@@ -61,10 +81,17 @@ function toggleCompanion(projectId: string): void {
   companions.value = picked === undefined ? { ...companions.value, [projectId]: '' } : rest
 }
 
+const slug = computed(() => seededSlug.value ?? sddSlug(title.value))
+const changesCode = computed(() => kind.value !== 'idea')
+
 const chosen = computed<FlowStartSource | null>(() => {
+  const named = title.value.trim()
+  const text = description.value.trim()
+  const pinned = seededSlug.value ?? undefined
+  if (kind.value === 'bug') return named ? { kind: 'bug', title: named, symptom: text || named, slug: pinned } : null
+  if (kind.value === 'idea') return named ? { kind: 'idea', title: named, idea: text || named, slug: pinned } : null
   if (source.value === 'text') {
-    const named = title.value.trim()
-    return named ? { kind: 'text', title: named, description: description.value.trim() } : null
+    return named ? { kind: 'text', title: named, description: text } : null
   }
   if (source.value === 'ado') {
     const picked = feature.value
@@ -77,10 +104,16 @@ const chosen = computed<FlowStartSource | null>(() => {
 
 const missing = computed(() => {
   if (chosen.value) return null
+  if (kind.value !== 'feature') return `Give the ${kind.value} a title to start.`
   if (source.value === 'text') return 'Give the feature a title to start.'
   if (source.value === 'ado') return 'Pick a Feature from Azure DevOps to start.'
   return 'Pick an existing spec to start.'
 })
+
+function pickKind(next: FlowKind): void {
+  kind.value = next
+  seededSlug.value = null
+}
 
 function pickSource(next: Source): void {
   source.value = next
@@ -96,17 +129,20 @@ async function search(): Promise<void> {
 async function start(): Promise<void> {
   const picked = chosen.value
   if (!picked) return
-  const others = Object.entries(companions.value).map(([projectId, base]) => ({
-    projectId,
-    baseBranch: base.trim() || undefined,
-  }))
+  const others = changesCode.value
+    ? Object.entries(companions.value).map(([projectId, base]) => ({
+        projectId,
+        baseBranch: base.trim() || undefined,
+      }))
+    : []
   const runId = await flow.start(
     props.projectId,
     picked,
     autopilot.value,
-    autopilot.value && autoShip.value,
-    baseBranch.value.trim() || undefined,
+    changesCode.value && autopilot.value && autoShip.value,
+    changesCode.value ? baseBranch.value.trim() || undefined : undefined,
     others.length > 0 ? others : undefined,
+    kind.value === 'feature' && checklist.value,
   )
   if (runId) emit('started', runId)
 }
@@ -115,6 +151,57 @@ async function start(): Promise<void> {
 <template>
   <div class="flow-intake" data-testid="flow-create">
     <div class="fin-field">
+      <span id="flow-kind-label" class="fin-label">What is it</span>
+      <div class="ui-segments" role="radiogroup" aria-labelledby="flow-kind-label">
+        <button
+          v-for="item in KINDS"
+          :key="item"
+          type="button"
+          role="radio"
+          class="ui-seg"
+          :class="{ 'is-on': kind === item }"
+          :aria-checked="kind === item"
+          :data-testid="`flow-kind-${item}`"
+          @click="pickKind(item)"
+        >
+          <Icon v-if="kind === item" name="check" :size="11" />
+          {{ FLOW_KIND_LABELS[item] }}
+        </button>
+      </div>
+      <span class="fin-hint" data-testid="flow-kind-hint">{{ KIND_HINT[kind] }}</span>
+    </div>
+
+    <template v-if="kind !== 'feature'">
+      <label class="fin-field">
+        <span class="fin-label">Title</span>
+        <input
+          v-model="title"
+          :data-testid="`flow-${kind}-title`"
+          :placeholder="kind === 'bug' ? 'Name the bug in a few words' : 'Name the idea in a few words'"
+        />
+      </label>
+      <label class="fin-field">
+        <span class="fin-label">{{ kind === 'bug' ? 'Symptom' : 'The idea' }}</span>
+        <textarea
+          v-model="description"
+          :data-testid="`flow-${kind}-text`"
+          rows="4"
+          :placeholder="
+            kind === 'bug'
+              ? 'What happens, what should happen, a stack trace or an issue link. Blank uses the title.'
+              : 'The idea in a sentence or two, or a link to it. Blank uses the title.'
+          "
+        ></textarea>
+      </label>
+      <div class="fin-hint" :data-testid="`flow-${kind}-slug`">
+        Reports go to <span class="mono">.specify/{{ kind === 'bug' ? 'bugs' : 'assessments' }}/{{ slug }}/</span>.
+      </div>
+      <div v-if="kind === 'idea'" class="fin-hint" data-testid="flow-idea-note">
+        An idea runs in this project’s own checkout, with no worktree and no branch, because it changes no code.
+      </div>
+    </template>
+
+    <div v-if="kind === 'feature'" class="fin-field">
       <span id="flow-source-label" class="fin-label">Start from</span>
       <div class="ui-segments" role="radiogroup" aria-labelledby="flow-source-label">
         <button
@@ -134,7 +221,7 @@ async function start(): Promise<void> {
       </div>
     </div>
 
-    <template v-if="source === 'text'">
+    <template v-if="kind === 'feature' && source === 'text'">
       <label class="fin-field">
         <span class="fin-label">Title</span>
         <input
@@ -154,7 +241,7 @@ async function start(): Promise<void> {
       </label>
     </template>
 
-    <div v-else-if="source === 'ado'" class="fin-field">
+    <div v-else-if="kind === 'feature' && source === 'ado'" class="fin-field">
       <span class="fin-label">Feature</span>
       <div class="fin-search">
         <input
@@ -204,7 +291,7 @@ async function start(): Promise<void> {
       </div>
     </div>
 
-    <div v-else class="fin-field">
+    <div v-else-if="kind === 'feature'" class="fin-field">
       <span class="fin-label">Spec</span>
       <div class="fin-list" role="radiogroup" aria-label="Spec">
         <button
@@ -233,7 +320,7 @@ async function start(): Promise<void> {
     </div>
 
     <div class="fin-options">
-      <div class="fin-field">
+      <div v-if="changesCode" class="fin-field">
         <span class="fin-label">Stacks</span>
         <div class="fin-stacks" data-testid="flow-stack-chips">
           <span
@@ -254,7 +341,7 @@ async function start(): Promise<void> {
         </div>
         <div v-if="hostNote" class="fin-hint" data-testid="flow-host-note">{{ hostNote }}</div>
       </div>
-      <label class="fin-field">
+      <label v-if="changesCode" class="fin-field">
         <span class="fin-label">Base branch</span>
         <input
           v-model="baseBranch"
@@ -263,7 +350,7 @@ async function start(): Promise<void> {
           placeholder="Leave blank for the current branch"
         />
       </label>
-      <div v-if="candidates.length > 0" class="fin-field">
+      <div v-if="changesCode && candidates.length > 0" class="fin-field">
         <span id="flow-companions-label" class="fin-label">Also change</span>
         <div class="fin-list" role="group" aria-labelledby="flow-companions-label" data-testid="flow-companions">
           <div v-for="item in candidates" :key="item.id" class="fin-companion">
@@ -300,6 +387,25 @@ async function start(): Promise<void> {
           </div>
         </div>
       </div>
+      <label v-if="kind === 'feature'" class="fin-switch">
+        <span class="fin-switch-text">
+          <span class="fin-switch-name">Checklist gate</span>
+          <span class="fin-hint">
+            Run /speckit-checklist after the plan, and hold the plan while checklist items stay open.
+          </span>
+        </span>
+        <button
+          type="button"
+          role="switch"
+          class="switch"
+          :class="{ on: checklist }"
+          :aria-checked="checklist"
+          data-testid="flow-checklist-new"
+          @click="checklist = !checklist"
+        >
+          <span class="knob"></span>
+        </button>
+      </label>
       <label class="fin-switch">
         <span class="fin-switch-text">
           <span class="fin-switch-name">Autopilot</span>
@@ -317,7 +423,7 @@ async function start(): Promise<void> {
           <span class="knob"></span>
         </button>
       </label>
-      <label v-if="autopilot" class="fin-switch">
+      <label v-if="autopilot && changesCode" class="fin-switch">
         <span class="fin-switch-text">
           <span class="fin-switch-name">Raise the pull request at the end</span>
           <span class="fin-hint">Without this, autopilot stops before the pull request.</span>

@@ -449,7 +449,13 @@ export function installMockHost(scenario: MockScenario): void {
   let adoFeatures: AnyRecord[] = []
   let adoConnected = true
 
-  const FLOW_STAGE_ORDER = ['spec', 'plan', 'build', 'clean', 'test', 'review', 'ship'] as const
+  const FLOW_KIND_ORDER: Record<string, readonly string[]> = {
+    feature: ['spec', 'plan', 'build', 'clean', 'test', 'review', 'ship'],
+    bug: ['assess', 'fix', 'test', 'clean', 'review', 'ship'],
+    idea: ['intake', 'research', 'define', 'shape', 'decide'],
+  }
+  const stagesOfRun = (run: AnyRecord | undefined): readonly string[] =>
+    FLOW_KIND_ORDER[String(run?.kind ?? 'feature')] ?? FLOW_KIND_ORDER.feature
   const MAX_FLOW_FIX_ROUNDS = 2
 
   function emptyFlowReport(): AnyRecord {
@@ -532,8 +538,8 @@ export function installMockHost(scenario: MockScenario): void {
   function advanceFlow(projectId: string, runId: string): void {
     const run = flowRun(runId)
     if (!run) return
-    const index = FLOW_STAGE_ORDER.indexOf(run.stage as (typeof FLOW_STAGE_ORDER)[number])
-    const next = FLOW_STAGE_ORDER[index + 1]
+    const order = stagesOfRun(run)
+    const next = order[order.indexOf(String(run.stage)) + 1]
     if (!next) {
       updateRun(runId, { status: 'done', finishedAt: new Date().toISOString() })
       pushFlow(projectId)
@@ -1207,32 +1213,45 @@ export function installMockHost(scenario: MockScenario): void {
           prId: null,
         }
       }
+      const kind = source.kind === 'bug' || source.kind === 'idea' ? String(source.kind) : 'feature'
+      const extension = kind === 'bug' ? 'bug' : 'assess'
+      const kit = specKitOf(projectId).extensions as AnyRecord
+      if (kind !== 'feature' && kit[extension] !== true) {
+        throw {
+          code: 'UNSUPPORTED',
+          message: `The ${extension} extension is not installed in this project. Install it from the SDD tab first.`,
+        }
+      }
+      const idea = kind === 'idea'
       const repos =
-        companions.length > 0
+        companions.length > 0 && !idea
           ? [repoOf(projectId, req.baseBranch as string | undefined), ...companions.map((c) => repoOf(c.projectId, c.baseBranch))]
           : []
+      const title =
+        source.kind === 'ado' ? String(source.featureTitle) : source.kind === 'spec' ? String(source.specId) : String(source.title)
       const run: AnyRecord = {
         id,
         projectId,
+        kind,
+        slug:
+          kind === 'feature'
+            ? null
+            : String(source.slug ?? title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')),
+        checklist: kind === 'feature' && req.checklist === true,
         repos,
-        title:
-          source.kind === 'ado'
-            ? String(source.featureTitle)
-            : source.kind === 'text'
-              ? String(source.title)
-              : String(source.specId),
-        source: source.kind,
+        title,
+        source: source.kind === 'ado' || source.kind === 'spec' ? source.kind : 'text',
         sourceRef: source.kind === 'ado' ? String(source.featureId) : source.kind === 'spec' ? String(source.specId) : null,
         sourceUrl: source.kind === 'ado' ? (source.url ?? null) : null,
-        description: source.kind === 'text' ? String(source.description ?? '') : '',
+        description: String(source.description ?? source.symptom ?? source.idea ?? ''),
         stacks: ['dotnet', 'angular'].filter((s) => [stacks, ...repos.map((r) => r.stacks as string[])].some((l) => l.includes(s))),
-        stage: 'spec',
+        stage: FLOW_KIND_ORDER[kind][0],
         status: 'running',
         autopilot: req.autopilot === true,
-        autoShip: req.autoShip === true,
-        baseBranch: (req.baseBranch as string | undefined) ?? 'main',
-        branch: `feature/${id}`,
-        worktreePath: repos[0]?.worktreePath ?? `C:\\work\\${id}`,
+        autoShip: req.autoShip === true && !idea,
+        baseBranch: idea ? null : ((req.baseBranch as string | undefined) ?? 'main'),
+        branch: idea ? null : `feature/${id}`,
+        worktreePath: idea ? null : (repos[0]?.worktreePath ?? `C:\\work\\${id}`),
         specDir: null,
         prUrl: null,
         prId: null,
@@ -1245,7 +1264,7 @@ export function installMockHost(scenario: MockScenario): void {
       flowRunsByProject.set(projectId, runs)
       flowStagesByRun.set(
         id,
-        FLOW_STAGE_ORDER.map((stage) => ({
+        FLOW_KIND_ORDER[kind].map((stage) => ({
           runId: id,
           stage,
           status: 'pending',
@@ -1258,7 +1277,7 @@ export function installMockHost(scenario: MockScenario): void {
           finishedAt: null,
         })),
       )
-      beginFlowStage(projectId, id, 'spec')
+      beginFlowStage(projectId, id, FLOW_KIND_ORDER[kind][0])
       return { runId: id, ...flowSnapshot(projectId) }
     },
     'flow.approve': (req) => {
@@ -1284,7 +1303,7 @@ export function installMockHost(scenario: MockScenario): void {
       const run = flowRun(runId)
       if (!run) throw { code: 'NOT_FOUND', message: 'Run not found' }
       updateStage(runId, run.stage as string, { status: 'skipped', finishedAt: new Date().toISOString() })
-      if (run.stage === 'ship') {
+      if (run.stage === stagesOfRun(run).at(-1)) {
         updateRun(runId, { status: 'done', finishedAt: new Date().toISOString() })
         pushFlow(run.projectId as string)
       } else {
@@ -1301,6 +1320,15 @@ export function installMockHost(scenario: MockScenario): void {
       }
       continueFlowStage(runId, 'review', fixText(row))
       return flowSnapshot(run.projectId as string)
+    },
+    'flow.feature': (req) => {
+      const run = flowRun(String(req.runId))
+      const decide = run ? flowStage(String(run.id), 'decide') : undefined
+      const go = (decide?.report as AnyRecord | null | undefined)?.decision === 'go'
+      if (!run || run.kind !== 'idea' || run.status !== 'done' || decide?.status !== 'approved' || !go) {
+        throw { code: 'RULE_NOT_ALLOWED', message: 'A feature starts from the Flow intake.' }
+      }
+      return { title: String(run.title), description: 'Build the offline cart from the decision.' }
     },
     'flow.ship': (req) => {
       const runId = String(req.runId)
@@ -1366,6 +1394,10 @@ export function installMockHost(scenario: MockScenario): void {
       if (!run) return null
       const stageName = String(req.stage)
       const kind = String(req.kind ?? (stageName === 'spec' ? 'spec' : stageName === 'test' ? 'report' : 'tasks'))
+      if (kind === 'doc') {
+        const dir = run.kind === 'bug' ? 'bugs' : 'assessments'
+        return { path: `.specify/${dir}/${String(run.slug)}/${stageName}.md`, content: `# ${stageName} report\n\nMock ${stageName} body.\n` }
+      }
       if (kind === 'report') {
         const stage = flowStage(run.id as string, stageName)
         return { path: null, content: JSON.stringify(stage?.report ?? {}, null, 2) }

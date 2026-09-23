@@ -147,6 +147,15 @@ Confirmed functionality:
   7. Ship: commit, push and open the pull request (Azure Repos through the ado
      MCP server, or GitHub through `gh`), never merged, approved or given
      reviewers.
+  A feature writes the constitution first when the project has none, builds
+  with implement then `/speckit-converge`, repeated until converge reports
+  Converged (at most three rounds), and may hold the plan on a checklist gate.
+  A run is one of three kinds, chosen first in the intake. A bug runs assess,
+  fix and test (`/speckit-bug-assess`, `-fix`, `-test` on one slug), then the
+  same clean, review and ship; its test stage fails unless the bug test records
+  verified. An idea runs intake, research, define, shape and decide
+  (`/speckit-assess-*`) in the project's own checkout, with no worktree and no
+  branch, and a go decision offers to start a feature seeded with the decision.
   A run starts from an Azure DevOps Feature, a written description, or an
   existing Spec Kit folder. Each stage waits for approval unless autopilot is on;
   autopilot allows at most two automatic fix rounds on review, retries a lost
@@ -158,7 +167,8 @@ Confirmed functionality:
   verdict; Ideas (`.specify/assessments/<slug>/`) shows each assessment and its
   decision. It says whether the constitution is written, offers to write it,
   runs every command of each process in a fresh session, installs the bug and
-  assess extensions with `specify extension add`, and opens a feature in Flow.
+  assess extensions with `specify extension add`, and opens a feature, bug or
+  idea in Flow.
 - A Tests section that dispatches the .NET or Angular suites through a session
   and reports what the run measured, gate by gate.
 - A Diff tab, live session only, listing every changed file in the working tree

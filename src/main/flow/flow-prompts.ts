@@ -1,4 +1,5 @@
 import type {
+  FlowBugResult,
   FlowRepo,
   FlowReviewFinding,
   FlowRun,
@@ -9,6 +10,7 @@ import type {
   VerifyReport,
 } from '@shared/domain'
 import { FLOW_STACK_LABELS } from '@shared/domain'
+import { sddCommand, sddDocPath } from '@shared/sdd'
 import { HONESTY } from '@main/verify/verify-dispatch'
 import { FLOW_MARKER } from './flow-markers'
 import { STACK_ORDER } from './stacks'
@@ -113,6 +115,17 @@ export function clarifyPrompt(autopilot: boolean): string {
   return `/speckit-clarify ${autopilot ? ANSWER_YOURSELF : ASK_ME}`
 }
 
+function answerYourself(where: string): string {
+  return `Answer each question yourself with your recommended option, write the answer into ${where}, and do not wait for me.`
+}
+
+export function constitutionPrompt(autopilot: boolean): string {
+  return (
+    "/speckit-constitution Write this project's constitution from its own conventions: CLAUDE.md, the README " +
+    `and the code as it stands. ${autopilot ? answerYourself('the constitution') : ASK_ME}`
+  )
+}
+
 export function specHandshake(): string {
   return markerLine('spec', ',"specDir":"<specs/NNN-slug, the folder .specify/feature.json or the newest specs folder names>"')
 }
@@ -157,6 +170,15 @@ export function planSteps(stacks: readonly string[], specDir: string | null, rep
   ]
 }
 
+export function checklistSteps(specDir: string | null): string[] {
+  const where = specDir ? `${specDir}/checklists/` : "the feature's checklists folder"
+  return [
+    `/speckit-checklist ${featureLine(specDir)}`.trim(),
+    `Go through every item in ${where}: mark [x] each item the spec, plan and tasks already satisfy, fix the spec ` +
+      'or plan where that makes an item pass, and leave the rest unchecked. Do not tick an item you have not checked.',
+  ]
+}
+
 export function planHandshake(): string {
   return [
     markerLine('plan', ',"tasksDone":<checked task count or null>,"tasksTotal":<total task count or null>'),
@@ -187,8 +209,60 @@ export function buildSteps(stacks: readonly string[], specDir: string | null, re
   return steps
 }
 
+export function convergePrompt(specDir: string | null): string {
+  return `/speckit-converge ${args(
+    featureLine(specDir),
+    'This run is unattended: append what is still unbuilt to tasks.md as the command says, and do not ask.',
+  )}`
+}
+
 export function buildHandshake(): string {
-  return markerLine('build', ',"tasksDone":<checked task count or null>,"tasksTotal":<total task count or null>')
+  return [
+    markerLine(
+      'build',
+      ',"tasksDone":<checked task count or null>,"tasksTotal":<total task count or null>,"converged":<true or false>',
+    ),
+    '',
+    'converged is true only when /speckit-converge reported Converged in this round, and false when it appended tasks.',
+  ].join('\n')
+}
+
+function sddRules(run: Pick<FlowRun, 'slug' | 'autopilot'>): string {
+  return [
+    `Use slug=${run.slug ?? ''} exactly: do not ask me for a slug and do not pick another.`,
+    run.autopilot ? answerYourself('the report') : ASK_ME,
+  ].join(' ')
+}
+
+type SddRun = Pick<FlowRun, 'slug' | 'autopilot' | 'title' | 'description'>
+
+export function bugAssessPrompt(run: SddRun): string {
+  return `${sddCommand('speckit-bug-assess', run.description || run.title, run.slug)}\n${sddRules(run)}`
+}
+
+export function bugFixPrompt(run: SddRun, stacks: readonly string[], repos: readonly Repo[] = []): string {
+  const where = repos.length > 1 ? 'Change each repository the assessment names, and commit in each one.' : 'Commit the fix.'
+  return `${sddCommand('speckit-bug-fix', '', run.slug)} ${args(stackContext(stacks), 'Keep the tests green.', where)}\n${sddRules(run)}`
+}
+
+export function bugTestPrompt(run: SddRun): string {
+  return (
+    `${sddCommand('speckit-bug-test', '', run.slug)} Run every check you can, and record a check you cannot run as ` +
+    `not-run rather than guessing its result.\n${sddRules(run)}`
+  )
+}
+
+export function ideaPrompt(stage: FlowStage, run: SddRun): string {
+  const text = stage === 'intake' ? run.description || run.title : ''
+  return `${sddCommand(`speckit-assess-${stage}`, text, run.slug)}\n${sddRules(run)}`
+}
+
+export function sddHandshake(stage: FlowStage): string {
+  if (stage === 'test') return markerLine('test', ',"result":"<verified|partial|failed, as test.md records it>"')
+  if (stage === 'decide') {
+    return markerLine('decide', ',"decision":"<go|needs-clarification|kill, as decision.md records it>"')
+  }
+  return markerLine(stage)
 }
 
 interface Scope {
@@ -298,12 +372,15 @@ export function reviewHandshake(
   specDir: string | null,
   stacks: readonly string[],
   repos: readonly Repo[] = [],
+  bugDoc: string | null = null,
 ): string {
   const conventions = stackContext(stacks)
   const multi = repos.length > 1
   const lines = [
     `Review the changes on this branch ${againstBase(base, repos)}, if you have not already. Check them`,
-    `against every acceptance criterion in ${specDir ? `${specDir}/spec.md` : "this feature's spec.md"}.`,
+    bugDoc
+      ? `against the expected behaviour and the remediation in ${bugDoc}; list each part the fix does not deliver as an unmet criterion.`
+      : `against every acceptance criterion in ${specDir ? `${specDir}/spec.md` : "this feature's spec.md"}.`,
   ]
   if (multi) lines.push("Give each finding's file as <repository name>/<path inside that repository>.")
   if (conventions) {
@@ -352,9 +429,20 @@ const REVISE_TARGET: Record<FlowStage, string> = {
   test: 'the tests on this branch',
   review: 'the review of this branch',
   ship: 'the pull request for this branch',
+  assess: 'the bug assessment',
+  fix: 'the fix on this branch',
+  intake: 'the intake note',
+  research: 'the research',
+  define: 'the problem definition',
+  shape: 'the concept',
+  decide: 'the decision',
 }
 
-export function artefactPathFor(run: Pick<FlowRun, 'specDir' | 'prUrl'>, stage: FlowStage): string | null {
+type Located = Pick<FlowRun, 'specDir' | 'prUrl'> & Partial<Pick<FlowRun, 'kind' | 'slug'>>
+
+export function artefactPathFor(run: Located, stage: FlowStage): string | null {
+  const doc = sddDocPath(run.kind ?? 'feature', run.slug ?? null, stage)
+  if (doc) return doc
   if (stage === 'ship') return run.prUrl
   if (!run.specDir) return null
   if (stage === 'spec') return `${run.specDir}/spec.md`
@@ -363,14 +451,14 @@ export function artefactPathFor(run: Pick<FlowRun, 'specDir' | 'prUrl'>, stage: 
 }
 
 export function revisePrompt(
-  run: Pick<FlowRun, 'specDir' | 'prUrl' | 'baseBranch'> & { repos?: readonly Repo[] },
+  run: Located & Pick<FlowRun, 'baseBranch'> & { repos?: readonly Repo[] },
   stage: FlowStage,
   feedback: string,
 ): string {
   const path = artefactPathFor(run, stage)
   const lines = [`Revise ${REVISE_TARGET[stage]}${path ? ` (${path})` : ''} per this feedback:`, '', feedback.trim()]
   if (!path && run.specDir) lines.push('', `The feature's spec is ${run.specDir}/spec.md.`)
-  if (stage !== 'spec' && stage !== 'plan') {
+  if (stage !== 'spec' && stage !== 'plan' && run.kind !== 'idea') {
     lines.push(`Compare this branch ${againstBase(run.baseBranch ?? 'the base branch', run.repos ?? [])} to see what it changed so far.`)
   }
   return lines.join('\n')
@@ -402,7 +490,18 @@ function measured(label: string, value: Measured): string[] {
   return value.value === null ? [] : [`- ${label}: ${value.value}%${value.source ? ` (${value.source})` : ''}`]
 }
 
-export function testReportLines(verify: VerifyReport | null, postman: string | null): string[] {
+export interface ShipTest {
+  verify: VerifyReport | null
+  postman: string | null
+  bug?: { doc: string; result: FlowBugResult | null } | null
+}
+
+export function testReportLines(verify: VerifyReport | null, postman: string | null, bug?: ShipTest['bug']): string[] {
+  if (bug) {
+    return [
+      `The Test stage ran /speckit-bug-test, and ${bug.doc} records the result ${bug.result ?? 'as missing'}. Quote that result as it is.`,
+    ]
+  }
   const lines = verify
     ? [
         'The Test stage reported this. Quote these figures as they are and add none of your own:',
@@ -421,7 +520,7 @@ function workItemLink(run: Pick<FlowRun, 'source' | 'sourceRef'>): string {
 
 function shipEveryPrompt(
   run: Pick<FlowRun, 'title' | 'branch' | 'source' | 'sourceRef'>,
-  test: { verify: VerifyReport | null; postman: string | null },
+  test: ShipTest,
   repos: readonly Repo[],
 ): string {
   return [
@@ -440,7 +539,7 @@ function shipEveryPrompt(
     'what changed in that repository, the test report below, and the Postman collection path if one was written.',
     'Once every pull request exists, edit each description to link the others. Do not merge, approve, or add reviewers.',
     '',
-    ...testReportLines(test.verify, test.postman),
+    ...testReportLines(test.verify, test.postman, test.bug),
     '',
     ADO_RULE,
     HONESTY,
@@ -455,7 +554,7 @@ function shipEveryPrompt(
 
 export function shipPrompt(
   run: Pick<FlowRun, 'title' | 'branch' | 'baseBranch' | 'source' | 'sourceRef'>,
-  test: { verify: VerifyReport | null; postman: string | null } = { verify: null, postman: null },
+  test: ShipTest = { verify: null, postman: null },
   repos: readonly Repo[] = [],
 ): string {
   if (repos.length > 1) return shipEveryPrompt(run, test, repos)
@@ -472,7 +571,7 @@ export function shipPrompt(
     'what changed, the test report below, and the Postman collection path if one was written.',
     `Base it on ${run.baseBranch ?? 'the base branch'}. Do not merge, approve, or add reviewers.`,
     '',
-    ...testReportLines(test.verify, test.postman),
+    ...testReportLines(test.verify, test.postman, test.bug),
     '',
     ADO_RULE,
     HONESTY,
