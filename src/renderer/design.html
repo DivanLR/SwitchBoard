@@ -32,10 +32,11 @@
       shows a stack picker rather than six gates, and Inbox zero shows none of the
       risk tiers that carry the most important colour decisions in the product.
       So every surface here is populated: six projects across every lane state,
-      a session stream carrying each event kind, specs with phases, a finished
-      verification run filling all six gates, a working-tree diff across folders,
-      diagrams, project commands for the suggestion dropdown, a queue, and an
-      inbox holding all three risk tiers at once.
+      a session stream carrying each event kind, two Flow runs at different
+      stages (one needing a fix, one shipped), a finished verification run
+      filling all six gates, a working-tree diff across folders, diagrams,
+      project commands for the suggestion dropdown, a queue, and an inbox
+      holding all three risk tiers at once.
 
       Runs cannot simply be handed to the driver: reportVerifyResult finishes a
       run that is already in flight, exactly as the main process does. So this
@@ -278,68 +279,136 @@
         risk: 'medium',
       })
 
-      // ---- SPECS -------------------------------------------------------------
+      // ---- FLOW's "existing spec" intake source -------------------------------
+      // Only id/title reach flow.existingSpecs, so this stays a short list rather
+      // than the full spec.md/plan.md/tasks.md fixture the old Specs tab needed.
       m.setSpecKit('p-alpha', {
         installed: true,
         specs: [
-          { id: '003-empty-cart', title: 'Empty cart placeholder', status: 'in_progress', tasksTotal: 4, tasksDone: 2 },
-          { id: '002-cart-totals', title: 'Cart totals rounding', status: 'complete', tasksTotal: 3, tasksDone: 3 },
-          { id: '001-checkout-guards', title: 'Checkout guard rails', status: 'complete', tasksTotal: 5, tasksDone: 5 },
+          { id: '003-empty-cart', title: 'Empty cart placeholder' },
+          { id: '002-cart-totals', title: 'Cart totals rounding' },
         ],
-        details: {
-          '003-empty-cart': {
-            id: '003-empty-cart',
-            title: 'Empty cart placeholder',
-            status: 'in_progress',
-            tasksTotal: 4,
-            tasksDone: 2,
-            description:
-              'An empty cart returns null and renders nothing, so the page looks broken rather than empty. Render a placeholder that names the state and offers the catalogue.',
-            path: 'specs/003-empty-cart',
-            sections: [
-              {
-                title: 'Summary',
-                body: 'The reducer bails out on an empty item list before it reaches the placeholder branch. Move the guard and render a real empty state.',
-              },
-              {
-                title: 'Acceptance',
-                body: '- An empty cart renders CartPlaceholder\n- The placeholder links to the catalogue\n- The legacy null branch is unreachable and removed',
-              },
-            ],
-            plan: [
-              {
-                title: 'Approach',
-                body: 'Reducer first, then the component, then the e2e pass. No API change: the empty state is entirely client-side.',
-              },
-            ],
-            clarifications: [
-              'Should a cart emptied by the user read differently from one that was never filled?',
-            ],
-            resolvedClarifications: [
-              {
-                question: 'Does the placeholder need to survive a page reload?',
-                answer: 'No — the cart is server-held, so an empty cart is empty on reload too.',
-              },
-            ],
-            phases: [
-              {
-                label: 'Phase 1: Reducer',
-                tasks: [
-                  { id: 'T001', label: 'Reproduce the empty-cart null return', done: true },
-                  { id: 'T002', label: 'Return placeholder state from the reducer', done: true },
-                ],
-              },
-              {
-                label: 'Phase 2: Component',
-                tasks: [
-                  { id: 'T003', label: 'CartPlaceholder with a catalogue link', done: false },
-                  { id: 'T004', label: 'Remove the legacy null branch', done: false },
-                ],
-              },
-            ],
-          },
+      })
+
+      // ---- FLOW ----------------------------------------------------------------
+      // Driven through the real IPC methods (flow.start / flow.approve / flow.ship),
+      // exactly like verify.start below: report*() only ever finishes a stage that
+      // is already running, and flow.start begins the next one on a real, if mock,
+      // session with a short async delay. The wait after each stage keeps this
+      // seed from reporting a stage moments before the app's own start overwrites
+      // it back to "running".
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+      async function driveFlowStage(runId, stage, patch) {
+        await wait(350)
+        m.reportFlowStage(runId, stage, patch)
+        await window.switchboard.invoke('flow.approve', { runId })
+      }
+
+      m.setFlowStacks('p-alpha', ['dotnet', 'angular'])
+
+      const cart = await window.switchboard.invoke('flow.start', {
+        projectId: 'p-alpha',
+        source: {
+          kind: 'text',
+          title: 'Empty cart placeholder',
+          description:
+            'An empty cart returns null and renders nothing, so the page looks broken rather than empty. Render a placeholder that names the state and offers the catalogue.',
+        },
+        autopilot: false,
+        autoShip: false,
+      })
+      await driveFlowStage(cart.runId, 'spec', { status: 'review', summary: 'Spec drafted from the description.' })
+      await driveFlowStage(cart.runId, 'plan', {
+        status: 'review',
+        summary: 'Plan and 6 tasks written.',
+        report: { tasksDone: null, tasksTotal: 6 },
+      })
+      await driveFlowStage(cart.runId, 'build', {
+        status: 'review',
+        summary: 'All 6 tasks complete.',
+        report: { tasksDone: 6, tasksTotal: 6 },
+      })
+      await driveFlowStage(cart.runId, 'clean', {
+        status: 'review',
+        summary: 'de-sloppify and ponytail-review applied — nothing left to change.',
+      })
+      await wait(350)
+      m.reportFlowVerify(cart.runId, {
+        suites: [
+          { id: 'dotnet-build', label: 'Build', status: 'pass', detail: 'dotnet build, 0 warnings' },
+          { id: 'dotnet-unit', label: 'Unit tests', status: 'pass', detail: '128 passed' },
+          { id: 'dotnet-coverage', label: 'Coverage', status: 'pass', detail: '84% line' },
+          { id: 'dotnet-format', label: 'Format', status: 'pass', detail: 'dotnet format --verify-no-changes' },
+        ],
+      })
+      await window.switchboard.invoke('flow.approve', { runId: cart.runId })
+      await wait(350)
+      m.reportFlowStage(cart.runId, 'review', {
+        status: 'review',
+        summary: 'Needs one fix before this ships.',
+        report: {
+          verdict: 'needs_fixes',
+          findings: [
+            {
+              severity: 'must_fix',
+              file: 'src/cart/reducer.ts',
+              line: 44,
+              what: 'The legacy null branch is still reachable through the API, not only the reducer.',
+            },
+            {
+              severity: 'nit',
+              file: 'src/cart/CartPlaceholder.tsx',
+              line: 12,
+              what: 'Prefer the shared EmptyState primitive over a bespoke div.',
+            },
+          ],
+          unmet: ['Clearing a full cart does not flash the old items'],
         },
       })
+
+      // A second, further-along run, so the Ship stage and a raised pull request
+      // have somewhere to be seen too.
+      const totals = await window.switchboard.invoke('flow.start', {
+        projectId: 'p-alpha',
+        source: {
+          kind: 'text',
+          title: 'Cart totals rounding',
+          description: "Round to the cent with banker's rounding instead of truncating.",
+        },
+        autopilot: false,
+        autoShip: false,
+      })
+      await driveFlowStage(totals.runId, 'spec', { status: 'review', summary: 'Spec drafted.' })
+      await driveFlowStage(totals.runId, 'plan', {
+        status: 'review',
+        summary: 'Plan and 3 tasks written.',
+        report: { tasksDone: null, tasksTotal: 3 },
+      })
+      await driveFlowStage(totals.runId, 'build', {
+        status: 'review',
+        summary: 'All 3 tasks complete.',
+        report: { tasksDone: 3, tasksTotal: 3 },
+      })
+      await driveFlowStage(totals.runId, 'clean', { status: 'review', summary: 'Nothing to change.' })
+      await wait(350)
+      m.reportFlowVerify(totals.runId, {
+        suites: [
+          { id: 'dotnet-build', label: 'Build', status: 'pass', detail: 'dotnet build, 0 warnings' },
+          { id: 'dotnet-unit', label: 'Unit tests', status: 'pass', detail: '46 passed' },
+        ],
+      })
+      await window.switchboard.invoke('flow.approve', { runId: totals.runId })
+      await wait(350)
+      m.reportFlowStage(totals.runId, 'review', { status: 'review', report: { verdict: 'ready', findings: [], unmet: [] } })
+      await window.switchboard.invoke('flow.approve', { runId: totals.runId })
+      await wait(350)
+      await window.switchboard.invoke('flow.ship', { runId: totals.runId })
+      await wait(350)
+      m.reportFlowShip(
+        totals.runId,
+        'https://dev.azure.com/example/storefront/_git/storefront/pullrequest/482',
+        '482',
+      )
 
       // ---- PROJECT COMMANDS ----------------------------------------------------
       // Namespaced exactly as a session reports plugin commands, which is what feeds

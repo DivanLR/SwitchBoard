@@ -97,7 +97,7 @@ const CANCEL_NOTE = 'You stopped this run before it reported, so nothing it meas
 
 const MODELS_TTL_MS = 10 * 60_000
 
-const NEVER_REUSED: ReadonlySet<SectionKind> = new Set(['diagram', 'spec'])
+const NEVER_REUSED: ReadonlySet<SectionKind> = new Set(['diagram'])
 
 const UPDATABLE_KINDS: ReadonlySet<EventKind> = new Set([
   'prompt',
@@ -907,11 +907,15 @@ export class SessionManager {
   private flowHooks: {
     onMarker: (sessionId: string, marker: FlowMarker) => void
     onSessionEnded: (sessionId: string, reason: SessionEndReason | 'crashed') => void
+    onVerifyReport: (sessionId: string, report: VerifyReport) => void
+    onTurnEnded: (sessionId: string) => void
   } | null = null
 
   setFlowHooks(hooks: {
     onMarker: (sessionId: string, marker: FlowMarker) => void
     onSessionEnded: (sessionId: string, reason: SessionEndReason | 'crashed') => void
+    onVerifyReport: (sessionId: string, report: VerifyReport) => void
+    onTurnEnded: (sessionId: string) => void
   }): void {
     this.flowHooks = hooks
   }
@@ -929,8 +933,12 @@ export class SessionManager {
     const text = (payload as { text?: string }).text
     if (!text) return
     const marker = parseFlowMarker(text)
-    if (!marker) return
-    this.flowHooks?.onMarker(entry.row.id, marker)
+    if (marker) {
+      this.flowHooks?.onMarker(entry.row.id, marker)
+      return
+    }
+    const report = parseVerifyReport(text)
+    if (report) this.flowHooks?.onVerifyReport(entry.row.id, report)
   }
 
   private closeUnreportedFlow(entry: HostedEntry, reason: SessionEndReason | 'crashed'): void {
@@ -1110,7 +1118,10 @@ export class SessionManager {
     this.repos.sessions.update(entry.row.id, { status, statusDetail: detail ?? null })
     this.pushStatus(entry)
     this.callbacks.onCountersChanged()
-    if (status === 'done') void this.endIfIdleBackground(entry)
+    if (status === 'done') {
+      if (this.flowWatch.has(entry.row.id)) this.flowHooks?.onTurnEnded(entry.row.id)
+      void this.endIfIdleBackground(entry)
+    }
   }
 
   private async endIfIdleBackground(entry: HostedEntry): Promise<void> {
@@ -1120,8 +1131,6 @@ export class SessionManager {
     if (this.verifyWatch.has(id) || this.diagramWatch.has(id)) {
       return
     }
-    // A flow session stays open for the supervisor's next step, and is closed by the
-    // supervisor rather than by the project queue.
     if (this.flowWatch.has(id)) return
     if (this.repos.taskQueue.listForProject(entry.row.projectId).length > 0) return
     if (!this.hosted.has(id)) return

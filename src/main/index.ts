@@ -270,12 +270,14 @@ async function main(): Promise<void> {
       pusher.push('push.flowChanged', {
         projectId,
         runs: repos.flowRuns.listForProject(projectId),
-        items: repos.flowItems.listForProject(projectId),
+        stages: repos.flowStages.listForProject(projectId),
       }),
   })
   manager.setFlowHooks({
     onMarker: (sessionId, marker) => flow.onFlowMarker(sessionId, marker),
     onSessionEnded: (sessionId, reason) => flow.onSessionEnded(sessionId, reason),
+    onVerifyReport: (sessionId, report) => flow.onVerifyReport(sessionId, report),
+    onTurnEnded: (sessionId) => flow.onTurnEnded(sessionId),
   })
   flow.reconcileOnStartup()
 

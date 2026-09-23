@@ -626,6 +626,60 @@ const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    name: '039-flow-pipeline',
+    up: (db) => {
+      db.exec(`
+        DROP TABLE IF EXISTS flow_items;
+        DROP TABLE IF EXISTS flow_lessons;
+        DROP TABLE IF EXISTS flow_runs;
+
+        CREATE TABLE flow_runs (
+          id TEXT PRIMARY KEY,
+          projectId TEXT NOT NULL REFERENCES projects(id),
+          title TEXT NOT NULL,
+          source TEXT NOT NULL CHECK (source IN ('ado', 'text', 'spec')),
+          sourceRef TEXT,
+          sourceUrl TEXT,
+          description TEXT NOT NULL DEFAULT '',
+          stacks TEXT NOT NULL DEFAULT '[]',
+          stage TEXT NOT NULL CHECK (stage IN (
+            'spec', 'plan', 'build', 'clean', 'test', 'review', 'ship')),
+          status TEXT NOT NULL CHECK (status IN (
+            'running', 'waiting', 'done', 'failed', 'cancelled')),
+          autopilot INTEGER NOT NULL DEFAULT 0,
+          autoShip INTEGER NOT NULL DEFAULT 0,
+          baseBranch TEXT,
+          branch TEXT,
+          worktreePath TEXT,
+          specDir TEXT,
+          prUrl TEXT,
+          prId TEXT,
+          note TEXT,
+          createdAt TEXT NOT NULL,
+          updatedAt TEXT NOT NULL,
+          finishedAt TEXT
+        );
+        CREATE INDEX idx_flow_runs_project ON flow_runs (projectId, createdAt DESC);
+
+        CREATE TABLE flow_stages (
+          runId TEXT NOT NULL REFERENCES flow_runs(id) ON DELETE CASCADE,
+          stage TEXT NOT NULL CHECK (stage IN (
+            'spec', 'plan', 'build', 'clean', 'test', 'review', 'ship')),
+          status TEXT NOT NULL CHECK (status IN (
+            'pending', 'running', 'review', 'approved', 'skipped', 'failed')),
+          sessionId TEXT,
+          attempts INTEGER NOT NULL DEFAULT 0,
+          summary TEXT,
+          report TEXT,
+          feedback TEXT,
+          startedAt TEXT,
+          finishedAt TEXT,
+          PRIMARY KEY (runId, stage)
+        );
+      `)
+    },
+  },
 ]
 
 export function transaction<T>(db: AppDatabase, work: () => T): T {

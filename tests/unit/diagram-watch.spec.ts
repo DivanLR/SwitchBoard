@@ -116,7 +116,7 @@ describe('a diagram in flight keeps its session open', () => {
 
   it('gives every section kind its own session, and reuses within a kind', async () => {
     const { project, manager } = setup()
-    const kinds = ['spec', 'tests', 'diff', 'flow'] as const
+    const kinds = ['tests', 'diff', 'flow'] as const
     const ids = new Set<string>()
     for (const kind of kinds) ids.add((await manager.backgroundSessionFor(project.id, kind)).id)
     expect(ids.size).toBe(kinds.length)

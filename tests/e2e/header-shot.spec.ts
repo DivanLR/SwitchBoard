@@ -3,7 +3,7 @@ import { installMockHost, twoProjectScenario } from './mock-host'
 
 test.skip(!process.env.SHOTS, 'screenshot pass; set SHOTS=1 to capture')
 
-test('the project header, with the container switch, + Session, and a named session', async ({
+test('the project header, with + Session, and a named session', async ({
   page,
 }) => {
   await page.addInitScript(installMockHost, twoProjectScenario())
@@ -12,7 +12,6 @@ test('the project header, with the container switch, + Session, and a named sess
 
   await page.locator('header.head').screenshot({ path: '.impeccable/shots/header-default.png' })
 
-  await page.getByTestId('project-containers-input').check()
   await page.getByTestId('new-session').click()
   await expect(page.getByTestId('sidebar-subsessions-alpha')).toBeVisible()
 

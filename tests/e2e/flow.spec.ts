@@ -6,16 +6,6 @@ const FEATURES = [
   { id: '4712', title: 'Loyalty points' },
 ]
 
-const ITEMS = [
-  {
-    localId: 'cart-race',
-    title: 'Version the cart state',
-    body: 'Reconcile optimistic updates by version.',
-    acceptance: ['Two fast adds keep both items'],
-  },
-  { localId: 'cart-tests', title: 'Cover the two-add race', body: 'One regression test.' },
-]
-
 async function openFlow(page: Page): Promise<void> {
   await page.addInitScript(installMockHost, twoProjectScenario())
   await page.goto('/')
@@ -25,261 +15,277 @@ async function openFlow(page: Page): Promise<void> {
   await expect(page.getByTestId('flow-view')).toBeVisible()
 }
 
-async function scopedRun(page: Page): Promise<void> {
-  await openFlow(page)
-  await page.evaluate((features) => window.__mock.setAdoFeatures(features), FEATURES)
-  await page.getByTestId('flow-feature-refresh').click()
-  await page.getByTestId('flow-feature-4711').click()
-  await expect(page.getByTestId('flow-scoping')).toBeVisible()
-  await page.evaluate((items) => window.__mock.reportFlowScope('p-alpha', items), ITEMS)
-  await expect(page.getByTestId('flow-run-status')).toHaveText('crosscheck')
-  await page.evaluate(() => window.__mock.reportFlowSignoff('p-alpha', 'approve', []))
-  await expect(page.getByTestId('flow-items')).toBeVisible()
+async function currentRunId(page: Page): Promise<string> {
+  const id = await page.getByTestId('flow-run').getAttribute('data-run-id')
+  return id ?? ''
 }
 
-test('a feature is picked from DevOps and scoped in plan mode', async ({ page }) => {
+test('a feature from Azure DevOps starts a run, with the detected stack chips shown', async ({ page }) => {
   await openFlow(page)
-  await expect(page.getByTestId('flow-features-empty')).toBeVisible()
+  await page.evaluate(() => window.__mock.setFlowStacks('p-alpha', ['dotnet', 'angular']))
+  await page.getByTestId('flow-new').click()
+  await page.getByTestId('flow-source-ado').click()
+  await expect(page.getByTestId('flow-stack-dotnet')).toHaveText('.NET')
+  await expect(page.getByTestId('flow-stack-angular')).toHaveText('Angular')
 
   await page.evaluate((features) => window.__mock.setAdoFeatures(features), FEATURES)
   await page.getByTestId('flow-feature-refresh').click()
   await expect(page.getByTestId('flow-feature-4712')).toContainText('Loyalty points')
-
   await page.getByTestId('flow-feature-4711').click()
 
-  await expect(page.getByTestId('flow-run-status')).toHaveText('scoping')
-  await expect(page.getByTestId('flow-scoping')).toBeVisible()
-  await expect
-    .poll(async () => (await page.evaluate(() => window.__mock.state().sends)).at(-1)?.text)
-    .toContain('4711')
+  await expect(page.getByTestId('flow-run')).toBeVisible()
+  await expect(page.getByTestId('flow-run-status')).toHaveText('running')
+  await expect(page.getByTestId('flow-stage-spec')).toContainText('running')
 })
 
-test('the tab says so when the DevOps server is not connected, and starts nothing', async ({
-  page,
-}) => {
+test('starts a run from a written description', async ({ page }) => {
   await openFlow(page)
-  await page.evaluate(() => window.__mock.setAdoConnected(false))
+  await page.getByTestId('flow-new').click()
+  await page.getByTestId('flow-text-title').fill('Guest checkout')
+  await page.getByTestId('flow-text-description').fill('Let a guest complete checkout without an account.')
+  await page.getByTestId('flow-text-start').click()
 
-  await page.getByTestId('flow-feature-refresh').click()
-
-  await expect(page.getByTestId('flow-error')).toContainText('Azure DevOps MCP server is not connected')
-  await expect(page.getByTestId('flow-run')).toHaveCount(0)
+  await expect(page.getByTestId('flow-run')).toContainText('Guest checkout')
+  await expect(page.getByTestId('flow-stage-spec')).toContainText('running')
 })
 
-test('the breakdown is shown for approval, and nothing reaches DevOps until it is armed', async ({
-  page,
-}) => {
-  await scopedRun(page)
-
-  await expect(page.getByTestId('flow-item-cart-race')).toContainText('Version the cart state')
-  await expect(page.getByTestId('flow-item-cart-race-nowid')).toContainText('not in DevOps yet')
-  await expect(page.getByTestId('flow-publish')).toContainText('Write these to DevOps')
-  expect(await page.evaluate(() => window.__mock.state().flowPublishes)).toEqual([])
-
-  await page.getByTestId('flow-publish').click()
-  await expect(page.getByTestId('flow-publish')).toContainText('Create 2 in DevOps')
-  expect(await page.evaluate(() => window.__mock.state().flowPublishes)).toEqual([])
-
-  await page.getByTestId('flow-publish').click()
-  await expect
-    .poll(async () => (await page.evaluate(() => window.__mock.state().flowPublishes)).at(-1))
-    .toEqual({ runId: 'flow-1', count: 2 })
-})
-
-test('an item dropped from the breakdown is not published', async ({ page }) => {
-  await scopedRun(page)
-
-  await page.getByTestId('flow-item-cart-tests-drop').click()
-  await expect(page.getByTestId('flow-item-cart-tests')).toHaveCount(0)
-
-  await page.getByTestId('flow-publish').click()
-  await page.getByTestId('flow-publish').click()
-
-  await expect
-    .poll(async () => (await page.evaluate(() => window.__mock.state().flowPublishes)).at(-1)?.count)
-    .toBe(1)
-})
-
-test('created work items show their id, and a failed one says why', async ({ page }) => {
-  await scopedRun(page)
-  await page.getByTestId('flow-publish').click()
-  await page.getByTestId('flow-publish').click()
-
+test('starts a run from an existing spec folder, at plan or build depending on tasks.md', async ({ page }) => {
+  await openFlow(page)
   await page.evaluate(() =>
-    window.__mock.reportFlowPublished(
-      'p-alpha',
-      [{ localId: 'cart-race', workItemId: '5001' }],
-      [{ localId: 'cart-tests', why: 'the area path was rejected' }],
-    ),
-  )
-
-  await expect(page.getByTestId('flow-item-cart-race-wid')).toHaveText('#5001')
-  await expect(page.getByTestId('flow-item-cart-tests')).toContainText('the area path was rejected')
-  await expect(page.getByTestId('flow-run-note')).toContainText('could not be created')
-})
-
-async function publishedRun(page: Page): Promise<void> {
-  await scopedRun(page)
-  await page.getByTestId('flow-publish').click()
-  await page.getByTestId('flow-publish').click()
-  await page.evaluate(() =>
-    window.__mock.reportFlowPublished('p-alpha', [
-      { localId: 'cart-race', workItemId: '5001' },
-      { localId: 'cart-tests', workItemId: '5002' },
-    ]),
-  )
-  await expect(page.getByTestId('flow-item-cart-race-wid')).toHaveText('#5001')
-}
-
-test('work is refused while the main checkout is dirty, and says how many changes', async ({
-  page,
-}) => {
-  await publishedRun(page)
-  await page.evaluate(() => window.__mock.setFlowDirty([' M src/app.ts']))
-
-  await page.getByTestId('flow-start-work').click()
-
-  await expect(page.getByTestId('flow-error')).toContainText('1 uncommitted change')
-  expect(await page.evaluate(() => window.__mock.state().flowWorkStarts)).toEqual([])
-})
-
-test('starting work puts every item in its own worktree and shows what is running', async ({
-  page,
-}) => {
-  await publishedRun(page)
-
-  await page.getByTestId('flow-start-work').click()
-
-  await expect(page.getByTestId('flow-item-cart-race-status')).toHaveText('implementing')
-  await expect(page.getByTestId('flow-work-counts')).toContainText('2 running')
-  await expect
-    .poll(async () => (await page.evaluate(() => window.__mock.state().flowWorkStarts)).length)
-    .toBe(1)
-})
-
-test('a raised pull request is shown, and a blocked item can be retried', async ({ page }) => {
-  await publishedRun(page)
-  await page.getByTestId('flow-start-work').click()
-
-  await page.evaluate(() =>
-    window.__mock.reportFlowItem('p-alpha', 'cart-race', 'pr_open', { prId: '312' }),
-  )
-  await page.evaluate(() =>
-    window.__mock.reportFlowItem('p-alpha', 'cart-tests', 'blocked', {
-      note: 'the API it needs does not exist yet',
+    window.__mock.setSpecKit('p-alpha', {
+      installed: true,
+      specs: [{ id: '001-cart', title: 'Cart race fix' }],
     }),
   )
+  await page.getByTestId('flow-new').click()
+  await page.getByTestId('flow-source-spec').click()
+  await expect(page.getByTestId('flow-existing-spec-001-cart')).toContainText('Cart race fix')
+  await page.getByTestId('flow-existing-spec-001-cart').click()
+  await page.getByTestId('flow-spec-start').click()
 
-  await expect(page.getByTestId('flow-item-cart-race-pr')).toContainText('PR #312')
-  await expect(page.getByTestId('flow-item-cart-tests')).toContainText('does not exist yet')
-  await expect(page.getByTestId('flow-work-counts')).toContainText('1 with a PR')
-  await expect(page.getByTestId('flow-work-counts')).toContainText('1 stuck')
-
-  await page.getByTestId('flow-item-cart-tests-retry').click()
-  await expect
-    .poll(async () => (await page.evaluate(() => window.__mock.state().flowRetries)).length)
-    .toBe(1)
+  await expect(page.getByTestId('flow-run')).toContainText('001-cart')
 })
 
-test('the breakdown goes to a second session before it reaches you', async ({ page }) => {
+async function startTextRun(page: Page, title = 'Cart totals'): Promise<void> {
   await openFlow(page)
-  await page.evaluate((features) => window.__mock.setAdoFeatures(features), FEATURES)
-  await page.getByTestId('flow-feature-refresh').click()
-  await page.getByTestId('flow-feature-4711').click()
-  await page.evaluate((items) => window.__mock.reportFlowScope('p-alpha', items), ITEMS)
+  await page.getByTestId('flow-new').click()
+  await page.getByTestId('flow-text-title').fill(title)
+  await page.getByTestId('flow-text-description').fill('Fix the cart totals race.')
+  await page.getByTestId('flow-text-start').click()
+  await expect(page.getByTestId('flow-run')).toBeVisible()
+}
 
-  await expect(page.getByTestId('flow-run-status')).toHaveText('crosscheck')
-  await expect(page.getByTestId('flow-scoping')).toContainText('did not write it')
-  await expect(page.getByTestId('flow-publish')).toHaveCount(0)
+test('the stage rail advances stage by stage on approve, and revise/retry/skip act on the running stage', async ({
+  page,
+}) => {
+  await startTextRun(page)
+  const runId = await currentRunId(page)
+  await expect(page.getByTestId('flow-stage-spec')).toContainText('running')
 
-  await page.evaluate(() =>
-    window.__mock.reportFlowSignoff('p-alpha', 'approve', ['the second item leans on a missing endpoint']),
-  )
+  await page.evaluate((id) => window.__mock.reportFlowStage(id, 'spec', { status: 'review', summary: 'Spec drafted.' }), runId)
+  await expect(page.getByTestId('flow-stage-status')).toHaveText('review')
 
-  await expect(page.getByTestId('flow-run-status')).toHaveText('awaiting_approval')
-  await expect(page.getByTestId('flow-concerns')).toContainText('missing endpoint')
-  await expect(page.getByTestId('flow-run-note')).toContainText('approved it, with notes')
-})
-
-test('a revision goes back for rescoping rather than to you', async ({ page }) => {
-  await openFlow(page)
-  await page.evaluate((features) => window.__mock.setAdoFeatures(features), FEATURES)
-  await page.getByTestId('flow-feature-refresh').click()
-  await page.getByTestId('flow-feature-4711').click()
-  await page.evaluate((items) => window.__mock.reportFlowScope('p-alpha', items), ITEMS)
-
-  await page.evaluate(() =>
-    window.__mock.reportFlowSignoff('p-alpha', 'revise', ['item two is half of item one']),
-  )
-
-  await expect(page.getByTestId('flow-run-status')).toHaveText('scoping')
-  await expect(page.getByTestId('flow-concerns')).toContainText('half of item one')
-  await expect(page.getByTestId('flow-publish')).toHaveCount(0)
-})
-
-test('review comments become rules you accept or reject, one at a time', async ({ page }) => {
-  await publishedRun(page)
-  await page.getByTestId('flow-start-work').click()
-  await page.evaluate(() =>
-    window.__mock.reportFlowItem('p-alpha', 'cart-race', 'pr_open', { prId: '312' }),
-  )
-
-  await page.getByTestId('flow-learn').click()
-  await page.evaluate(() =>
-    window.__mock.reportFlowLessons('p-alpha', [
-      {
-        rule: 'Name the work item in every commit message.',
-        section: null,
-        quote: 'which work item is this?',
-      },
-      { rule: 'Always use tabs.', section: null, quote: 'tabs please' },
-    ]),
-  )
-
-  await expect(page.getByTestId('flow-lessons')).toContainText('Name the work item')
-  await expect(page.getByTestId('flow-lessons')).toContainText('which work item is this?')
-
-  await page.getByTestId('flow-lesson-lesson-1-accept').click()
-  await expect(page.getByTestId('flow-lesson-written')).toContainText('Wrote 1 line')
-
-  await page.getByTestId('flow-lesson-lesson-2-reject').click()
-  await expect(page.getByTestId('flow-lessons')).toHaveCount(0)
+  await page.getByTestId('flow-feedback').fill('Cover the guest checkout path too.')
+  await page.getByTestId('flow-revise').click()
   await expect
-    .poll(async () => (await page.evaluate(() => window.__mock.state().flowLessonDecisions)))
-    .toEqual([
-      { lessonId: 'lesson-1', accept: true },
-      { lessonId: 'lesson-2', accept: false },
-    ])
+    .poll(async () => (await page.evaluate(() => window.__mock.state().sends)).at(-1)?.text)
+    .toContain('Cover the guest checkout path too.')
+  await expect(page.getByTestId('flow-stage-status')).toHaveText('running')
+
+  await page.evaluate((id) => window.__mock.reportFlowStage(id, 'spec', { status: 'failed', summary: 'It crashed.' }), runId)
+  await expect(page.getByTestId('flow-stage-status')).toHaveText('failed')
+  await page.getByTestId('flow-retry').click()
+  await expect(page.getByTestId('flow-stage-status')).toHaveText('running')
+
+  await page.evaluate((id) => window.__mock.reportFlowStage(id, 'spec', { status: 'review', summary: 'Spec drafted.' }), runId)
+  await page.getByTestId('flow-approve').click()
+  await expect(page.getByTestId('flow-stage-plan')).toContainText('running')
+
+  await page.getByTestId('flow-skip').click()
+  await expect(page.getByTestId('flow-stage-plan')).toContainText('skipped')
+  await expect(page.getByTestId('flow-stage-build')).toContainText('running')
 })
 
-test('stopping a flow says who stopped it and frees the project for another', async ({ page }) => {
-  await scopedRun(page)
+test('fix findings sends every must_fix item back to the session, only when review needs fixes', async ({ page }) => {
+  await startTextRun(page)
+  const runId = await currentRunId(page)
+
+  for (const stage of ['spec', 'plan', 'build', 'clean'] as const) {
+    await expect(page.getByTestId(`flow-stage-${stage}`)).toContainText('running')
+    await page.evaluate(
+      ({ runId, stage }) => window.__mock.reportFlowStage(runId, stage, { status: 'review' }),
+      { runId, stage },
+    )
+    await page.getByTestId('flow-approve').click()
+  }
+  await expect(page.getByTestId('flow-stage-test')).toContainText('running')
+  await page.evaluate((id) => window.__mock.reportFlowVerify(id, { suites: [{ id: 'unit', label: 'Unit', status: 'pass', detail: 'ok' }] }), runId)
+  await page.getByTestId('flow-approve').click()
+  await expect(page.getByTestId('flow-stage-review')).toContainText('running')
+
+  await page.evaluate(
+    (id) =>
+      window.__mock.reportFlowStage(id, 'review', {
+        status: 'review',
+        report: {
+          verdict: 'needs_fixes',
+          findings: [{ severity: 'must_fix', file: 'Cart.cs', line: 12, what: 'Off-by-one in the total.' }],
+          unmet: ['The regression test still fails.'],
+        },
+      }),
+    runId,
+  )
+
+  await expect(page.getByTestId('flow-findings')).toContainText('Off-by-one in the total.')
+  await expect(page.getByTestId('flow-unmet')).toContainText('regression test still fails')
+  await page.getByTestId('flow-fix').click()
+  await expect
+    .poll(async () => (await page.evaluate(() => window.__mock.state().sends)).at(-1)?.text)
+    .toContain('Fix every must_fix finding')
+  await expect(page.getByTestId('flow-stage-status')).toHaveText('running')
+})
+
+test('the ship stage never starts on its own, and needs an explicit click', async ({ page }) => {
+  await startTextRun(page)
+  const runId = await currentRunId(page)
+
+  for (const stage of ['spec', 'plan', 'build', 'clean'] as const) {
+    await expect(page.getByTestId(`flow-stage-${stage}`)).toContainText('running')
+    await page.evaluate(
+      ({ runId, stage }) => window.__mock.reportFlowStage(runId, stage, { status: 'review' }),
+      { runId, stage },
+    )
+    await page.getByTestId('flow-approve').click()
+  }
+  await expect(page.getByTestId('flow-stage-test')).toContainText('running')
+  await page.evaluate((id) => window.__mock.reportFlowVerify(id, { suites: [{ id: 'unit', label: 'Unit', status: 'pass', detail: 'ok' }] }), runId)
+  await page.getByTestId('flow-approve').click()
+  await expect(page.getByTestId('flow-stage-review')).toContainText('running')
+  await page.evaluate((id) => window.__mock.reportFlowStage(id, 'review', { status: 'review', report: { verdict: 'ready', findings: [], unmet: [] } }), runId)
+  await page.getByTestId('flow-approve').click()
+
+  await expect(page.getByTestId('flow-stage-ship')).toContainText('pending')
+  await expect(page.getByTestId('flow-ship')).toBeVisible()
+
+  await page.getByTestId('flow-ship').click()
+  await expect(page.getByTestId('flow-stage-ship')).toContainText('running')
+
+  await page.evaluate((id) => window.__mock.reportFlowShip(id, 'https://dev.azure.com/x/_git/y/pullrequest/9', '9'), runId)
+  await expect(page.getByTestId('flow-pr-link')).toContainText('PR 9')
+})
+
+test('autopilot advances every stage without a click, and stops before ship unless autoShip is on', async ({
+  page,
+}) => {
+  await openFlow(page)
+  await page.getByTestId('flow-new').click()
+  await page.getByTestId('flow-text-title').fill('Autopilot feature')
+  await page.getByTestId('flow-text-description').fill('Should run itself.')
+  await page.getByTestId('flow-autopilot-new').click()
+  await expect(page.getByTestId('flow-autoship-new')).toBeVisible()
+  await page.getByTestId('flow-text-start').click()
+  const runId = await currentRunId(page)
+
+  for (const stage of ['spec', 'plan', 'build', 'clean'] as const) {
+    await expect(page.getByTestId('flow-stage-status')).toHaveText('running')
+    await page.evaluate(
+      ({ runId, stage }) => window.__mock.reportFlowStage(runId, stage, { status: 'review' }),
+      { runId, stage },
+    )
+    await expect(page.getByTestId(`flow-stage-${stage}`)).toContainText('approved')
+  }
+  await expect(page.getByTestId('flow-stage-test')).toContainText('running')
+  await page.evaluate((id) => window.__mock.reportFlowVerify(id, { suites: [{ id: 'unit', label: 'Unit', status: 'pass', detail: 'ok' }] }), runId)
+  await expect(page.getByTestId('flow-stage-test')).toContainText('approved')
+  await expect(page.getByTestId('flow-stage-review')).toContainText('running')
+  await page.evaluate((id) => window.__mock.reportFlowStage(id, 'review', { status: 'review', report: { verdict: 'ready', findings: [], unmet: [] } }), runId)
+  await expect(page.getByTestId('flow-stage-review')).toContainText('approved')
+
+  await expect(page.getByTestId('flow-stage-ship')).toContainText('pending')
+  await expect(page.getByTestId('flow-ship')).toBeVisible()
+})
+
+test('autopilot with autoShip on raises the pull request stage automatically too', async ({ page }) => {
+  await openFlow(page)
+  await page.getByTestId('flow-new').click()
+  await page.getByTestId('flow-text-title').fill('Autoship feature')
+  await page.getByTestId('flow-text-description').fill('Should ship itself.')
+  await page.getByTestId('flow-autopilot-new').click()
+  await page.getByTestId('flow-autoship-new').click()
+  await page.getByTestId('flow-text-start').click()
+  const runId = await currentRunId(page)
+
+  for (const stage of ['spec', 'plan', 'build', 'clean'] as const) {
+    await expect(page.getByTestId(`flow-stage-${stage}`)).toContainText('running')
+    await page.evaluate(
+      ({ runId, stage }) => window.__mock.reportFlowStage(runId, stage, { status: 'review' }),
+      { runId, stage },
+    )
+  }
+  await expect(page.getByTestId('flow-stage-test')).toContainText('running')
+  await page.evaluate((id) => window.__mock.reportFlowVerify(id, { suites: [{ id: 'unit', label: 'Unit', status: 'pass', detail: 'ok' }] }), runId)
+  await expect(page.getByTestId('flow-stage-review')).toContainText('running')
+  await page.evaluate((id) => window.__mock.reportFlowStage(id, 'review', { status: 'review', report: { verdict: 'ready', findings: [], unmet: [] } }), runId)
+
+  await expect(page.getByTestId('flow-stage-ship')).toContainText('running')
+})
+
+test('a question from the stage session is answered inline', async ({ page }) => {
+  await startTextRun(page)
+  const runId = await currentRunId(page)
+  await expect(page.getByTestId('flow-stage-session')).toBeVisible()
+
+  await page.evaluate((id) => window.__mock.askFlowQuestion(id, 'Which option?', ['Option A', 'Option B']), runId)
+  await expect(page.getByTestId('mini-terminal-question')).toBeVisible()
+  await expect(page.getByTestId('mini-terminal-question')).toContainText('Which option?')
+
+  await page.getByTestId('question-option-Option A').click()
+  await expect(page.getByTestId('mini-terminal-question')).toHaveCount(0)
+  await expect
+    .poll(async () => (await page.evaluate(() => window.__mock.state().sends)).at(-1)?.text)
+    .toBe('Option A')
+})
+
+test('cancel interrupts the running stage session and ends the run', async ({ page }) => {
+  await startTextRun(page)
+  await expect(page.getByTestId('flow-stage-session')).toBeVisible()
 
   await page.getByTestId('flow-cancel').click()
-
   await expect(page.getByTestId('flow-run-status')).toHaveText('cancelled')
-  await expect(page.getByTestId('flow-run-note')).toContainText('You stopped this flow')
+  expect(await page.evaluate(() => window.__mock.state().interrupts.length)).toBeGreaterThan(0)
 })
 
-test('Flow is a popup over the session, closed by Escape or its close button', async ({ page }) => {
+test('removing the worktree needs a second click to confirm', async ({ page }) => {
+  await startTextRun(page)
+  await expect(page.getByTestId('flow-stage-spec')).toContainText('running')
+
+  await expect(page.getByTestId('flow-run-worktree')).toBeVisible()
+  await page.getByTestId('flow-remove-worktree').click()
+  await expect(page.getByTestId('flow-remove-worktree')).toHaveText('Confirm remove worktree')
+  await expect(page.getByTestId('flow-run-worktree')).toBeVisible()
+
+  await page.getByTestId('flow-remove-worktree').click()
+  await expect(page.getByTestId('flow-run-worktree')).toHaveCount(0)
+})
+
+test('Escape and the close button both dismiss the popup, and it can be reopened', async ({ page }) => {
   await openFlow(page)
-  await expect(page.getByTestId('tab-flow')).toHaveCount(0)
-  await expect(page.getByTestId('view-toggle')).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('flow-popup')).toHaveCount(0)
   await expect(page.getByTestId('open-flow')).toBeFocused()
+
   await page.getByTestId('open-flow').click()
   await expect(page.getByTestId('flow-popup')).toBeVisible()
   await page.getByTestId('flow-popup-close').click()
   await expect(page.getByTestId('flow-popup')).toHaveCount(0)
-  await expect(page.getByTestId('open-flow')).toBeFocused()
 })
 
-test('a request raised while Flow is open is counted in the popup, and answering it closes Flow', async ({
+test('the popup shows the pending inbox count for this project, and answering it closes the popup', async ({
   page,
 }) => {
   await openFlow(page)
   await expect(page.getByTestId('flow-popup-inbox')).toHaveCount(0)
+
   await page.evaluate(() =>
     window.__mock.raisePermission({
       projectId: 'p-alpha',
@@ -289,41 +295,13 @@ test('a request raised while Flow is open is counted in the popup, and answering
     }),
   )
   await expect(page.getByTestId('flow-popup-inbox')).toHaveText(/1 waiting/)
+
   await page.evaluate(() =>
-    window.__mock.raisePermission({
-      projectId: 'p-beta',
-      title: 'Run: git status',
-      risk: 'low',
-    }),
+    window.__mock.raisePermission({ projectId: 'p-beta', title: 'Run: git status', risk: 'low' }),
   )
   await expect(page.getByTestId('flow-popup-inbox')).toHaveText(/1 waiting/)
+
   await page.getByTestId('flow-popup-inbox').click()
   await expect(page.getByTestId('flow-popup')).toHaveCount(0)
   await expect(page.getByTestId('inbox-badge')).toBeVisible()
-})
-
-test('Flow closes rather than following a selection change to another project', async ({ page }) => {
-  await openFlow(page)
-  await page.evaluate(() => window.__mock.focusSession('s-beta'))
-  await expect(page.getByTestId('flow-popup')).toHaveCount(0)
-  await expect(page.getByTestId('sidebar-project-beta')).toHaveAttribute('aria-selected', 'true')
-})
-
-test('one spec is written for the whole feature through Spec Kit, from the approved items', async ({ page }) => {
-  await scopedRun(page)
-  await expect(page.getByTestId('flow-spec-foot')).toBeVisible()
-  await page.getByTestId('flow-spec').click()
-  await expect(page.getByTestId('flow-error')).toContainText('Install Spec Kit')
-  await page.evaluate(() =>
-    window.__mock.setSpecKit('p-alpha', { installed: true, specs: [] }),
-  )
-  await page.getByTestId('flow-spec').click()
-  await expect(page.getByTestId('flow-spec-session')).toBeVisible()
-  await expect(page.getByTestId('flow-spec')).toHaveText('Write it again')
-  const sends = await page.evaluate(() => window.__mock.state().sends.map((s) => s.text))
-  expect(sends.some((text) => text.startsWith('/speckit-specify Feature 4711: Checkout v2'))).toBe(true)
-  await page.getByTestId('flow-spec').click()
-  await expect(page.getByTestId('flow-error')).toContainText('already being written')
-  const after = await page.evaluate(() => window.__mock.state().sends.map((s) => s.text))
-  expect(after.filter((text) => text.startsWith('/speckit-specify')).length).toBe(1)
 })

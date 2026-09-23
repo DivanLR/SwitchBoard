@@ -35,15 +35,15 @@ import { useStopConfirm } from '@renderer/composables/useStopConfirm'
 import { useNow } from '@renderer/composables/useNow'
 import { elapsedClock } from '@renderer/relative-time'
 import { toRawLines } from '@shared/stream-lines'
-import { useSpecsStore } from '@renderer/stores/specs'
+import { useSectionsStore } from '@renderer/stores/sections'
 import { useDiffStore } from '@renderer/stores/diff'
+import { useFlowStore } from '@renderer/stores/flow'
 import { accentFor } from '@renderer/project-accent'
 import StreamEvent from '@renderer/components/StreamEvent.vue'
 import SwallowedBlock from '@renderer/components/SwallowedBlock.vue'
 import QuestionEvent from '@renderer/components/QuestionEvent.vue'
 import Icon from '@renderer/components/Icon.vue'
 import EffortBar from '@renderer/components/EffortBar.vue'
-import SpecsView from '@renderer/views/SpecsView.vue'
 import TestsView from '@renderer/views/TestsView.vue'
 import DiffView from '@renderer/views/DiffView.vue'
 import DiagramsView from '@renderer/views/DiagramsView.vue'
@@ -59,8 +59,9 @@ const active = useActiveSessionStore()
 const inbox = useInboxStore()
 const queue = useQueueStore()
 const settingsStore = useSettingsStore()
-const specs = useSpecsStore()
+const sections = useSectionsStore()
 const diff = useDiffStore()
+const flow = useFlowStore()
 
 const queuedTasks = computed(() => queue.forProject(props.project.id))
 
@@ -93,16 +94,16 @@ const shellEverOpened = ref(false)
 const mainTab = ref<
   | 'session'
   | 'terminal'
-  | 'specs'
   | 'tests'
   | 'diff'
   | 'diagrams'
 >('session')
-const specCount = computed(() => specs.stateFor(props.project.id).specs.length)
 const diffCount = computed(() => diff.resultFor(props.project.id).files.length)
+const flowActiveCount = computed(
+  () => flow.runsFor(props.project.id).filter((r) => r.status === 'running' || r.status === 'waiting').length,
+)
 
 const composer = ref('')
-const editTarget = ref<string | null>(null)
 const restoredDraft = ref<string | null>(null)
 const streamEl = ref<HTMLElement | null>(null)
 const composerEl = ref<HTMLTextAreaElement | null>(null)
@@ -168,13 +169,18 @@ const { stopConfirm, cancelStop, confirmStop } = useStopConfirm({
 })
 
 let unsubscribeCommands: (() => void) | undefined
+let unsubscribeFlow: (() => void) | undefined
 onMounted(() => {
   unsubscribeCommands = window.switchboard.on('push.projectCommands', (push) => {
     if (push.projectId === props.project.id) setSuggestionCommands(push.commands)
   })
+  unsubscribeFlow = window.switchboard.on('push.flowChanged', (push) => {
+    if (push.projectId === props.project.id) flow.applyPush(push.projectId, push.runs, push.stages)
+  })
 })
 onUnmounted(() => {
   unsubscribeCommands?.()
+  unsubscribeFlow?.()
   composerDrafts.set(props.project.id, composer.value)
 })
 
@@ -243,12 +249,11 @@ const sendTo = computed(
   () => selectedAgent.value?.task || selectedAgent.value?.name || props.project.name,
 )
 
-const composerPlaceholder = computed(() => {
-  if (editTarget.value) return `Describe the change for ${editTarget.value}…`
-  return liveSession.value ? `Send a message to ${sendTo.value}…` : 'Start a session first'
-})
+const composerPlaceholder = computed(() =>
+  liveSession.value ? `Send a message to ${sendTo.value}…` : 'Start a session first',
+)
 
-const composerDead = computed(() => !liveSession.value && !editTarget.value)
+const composerDead = computed(() => !liveSession.value)
 
 const composerEmpty = computed(() => composer.value.trim().length === 0)
 
@@ -308,16 +313,15 @@ watch(
     terminalEverOpened.value = false
     shellEverOpened.value = false
     terminalMode.value = 'chat'
-    editTarget.value = null
     sessionStart?.reset()
     cancelStop()
     deriveWindow.value = DERIVE_WINDOW
     followTail.value = true
     resetSuggestions()
     void loadHistory(projectId)
-    void specs.loadState(projectId)
     void diff.loadList(projectId)
     void queue.load(projectId)
+    void flow.load(projectId)
   },
   { immediate: true },
 )
@@ -473,7 +477,6 @@ function switchView(view: 'clean' | 'raw'): void {
 }
 
 function openTerminal(): void {
-  editTarget.value = null
   terminalEverOpened.value = true
   mainTab.value = 'terminal'
 }
@@ -587,25 +590,16 @@ function matchParts(cmd: string): { before: string; hit: string; after: string }
   return { before: cmd.slice(0, at), hit: cmd.slice(at, at + token.length), after: cmd.slice(at + token.length) }
 }
 
-function onSetTarget(label: string): void {
-  editTarget.value = label
-  void nextTick(() => composerEl.value?.focus())
-}
-
 const sectionSessionIds = ref<Partial<Record<SectionKind, string>>>({})
 
 function runPluginCommand(text: string, kind: SectionKind, watchDiagrams = false): void {
-  void specs.runInSession(props.project.id, text, true, watchDiagrams, kind).then((id) => {
+  void sections.runInSession(props.project.id, text, true, watchDiagrams, kind).then((id) => {
     sectionSessionIds.value = { ...sectionSessionIds.value, [kind]: id }
   })
 }
 
 function runDiagramCommand(text: string): void {
   runPluginCommand(text, 'diagram', true)
-}
-
-function onRanInSection(): void {
-  scrollToBottom()
 }
 
 const installing = ref<string | null>(null)
@@ -633,26 +627,12 @@ async function send(): Promise<void> {
   if (!text) return
   busy.value = true
   try {
-    if (editTarget.value) {
-      const target = editTarget.value
-      composer.value = ''
-      editTarget.value = null
-      await specs.runSpecCommand(
-        props.project.id,
-        `✎ Spec edit → ${target}: ${text}`,
-        'spec-edit',
-        'Applying your edit',
-      )
-      return
-    }
     if (await deliver(text)) composer.value = ''
   } finally {
     busy.value = false
   }
 }
 
-// The one path a message takes to the live session, from the composer or the
-// Terminal view alike, so agent addressing and @refs cannot drift between them.
 async function deliver(text: string): Promise<boolean> {
   if (!liveSession.value) return false
   const agent = selectedAgent.value
@@ -871,10 +851,11 @@ const {
         <button
           class="ctl"
           data-testid="open-flow"
-          title="Take an Azure DevOps feature from scoping to pull requests"
+          title="Take a feature from spec to shipped pull request"
           @click="emit('open-flow')"
         >
           Flow
+          <span v-if="flowActiveCount > 0" class="mt-badge" data-testid="flow-badge">{{ flowActiveCount }}</span>
         </button>
         <button
           v-if="liveSession?.status === 'working'"
@@ -1010,10 +991,6 @@ const {
       >
         Session
       </button>
-      <button class="ui-tab" :class="{ sel: mainTab === 'specs', 'is-selected': mainTab === 'specs' }" data-testid="tab-specs" @click="mainTab = 'specs'">
-        Specs
-        <span v-if="specCount > 0" class="mt-badge">{{ specCount }}</span>
-      </button>
       <button
         class="ui-tab"
         :class="{ sel: mainTab === 'tests', 'is-selected': mainTab === 'tests' }"
@@ -1108,14 +1085,8 @@ const {
       @chat="terminalMode = 'chat'"
     />
 
-    <SpecsView
-      v-if="mainTab === 'specs'"
-      :project-id="project.id"
-      @set-target="onSetTarget"
-      @ran="onRanInSection"
-    />
     <TestsView
-      v-else-if="mainTab === 'tests'"
+      v-if="mainTab === 'tests'"
       :project-id="project.id"
       :project-name="project.name"
       :branch="liveSession?.branch ?? endedSession?.branch ?? null"
@@ -1417,7 +1388,7 @@ const {
     </div>
 
         <footer
-          v-if="mainTab === 'session' || editTarget"
+          v-if="mainTab === 'session'"
           class="composer"
           :class="{ dead: composerDead, term: mainTab === 'session' && active.view === 'raw' }"
           :data-testid="composerDead ? 'composer-dead' : 'composer-live'"
@@ -1529,24 +1500,7 @@ const {
       </div>
 
       <div class="composer-row">
-        <span v-if="editTarget" class="caret target mono"><Icon name="pencil" :size="12" /></span>
-        <span v-else class="caret mono"><Icon name="chevron-right" :size="14" /></span>
-        <span
-          v-if="editTarget"
-          class="target-chip ui-chip is-on"
-          data-testid="composer-target"
-          title="Spec edit target — your message rewrites this file"
-        >
-          <Icon name="arrow-right" :size="11" /> <span class="mono">{{ editTarget }}</span>
-          <button
-            class="target-x"
-            data-testid="composer-target-clear"
-            aria-label="Clear spec edit target"
-            @click="editTarget = null"
-          >
-            <Icon name="close" :size="11" />
-          </button>
-        </span>
+        <span class="caret mono"><Icon name="chevron-right" :size="14" /></span>
         <div class="input-wrap">
           <div
             v-if="suggestions.length > 0"
@@ -1603,7 +1557,6 @@ const {
         </div>
         <span class="to-inline" data-testid="composer-to">to {{ sendTo }}</span>
         <button
-          v-if="!editTarget"
           class="queue-btn"
           data-testid="composer-queue"
           title="Add to the queue — runs after the current goal finishes"
@@ -2538,26 +2491,6 @@ const {
   color: var(--green);
   font-weight: var(--w-em);
 }
-
-.caret.target {
-  color: var(--amber);
-}
-
-.target-chip {
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.target-x {
-  cursor: pointer;
-  color: var(--text-faint);
-  background: transparent;
-}
-
-.target-x:hover {
-  color: var(--red);
-}
-
 
 .ident {
   min-width: 0;

@@ -58,11 +58,11 @@ function setup() {
 }
 
 describe('the session a section dispatch lands in', () => {
-  it('gives every Spec Kit command a session of its own', async () => {
+  it('gives every diagram command a session of its own', async () => {
     const { project, manager } = setup()
 
-    const first = await manager.backgroundSessionFor(project.id, 'spec')
-    const second = await manager.backgroundSessionFor(project.id, 'spec')
+    const first = await manager.backgroundSessionFor(project.id, 'diagram')
+    const second = await manager.backgroundSessionFor(project.id, 'diagram')
 
     expect(first.id).toBeTruthy()
     expect(second.id).not.toBe(first.id)
@@ -77,13 +77,13 @@ describe('the session a section dispatch lands in', () => {
     expect(second.id).toBe(first.id)
   })
 
-  it('never crosses kinds, so a spec command cannot land in the flow session', async () => {
+  it('never crosses kinds, so a tests command cannot land in the flow session', async () => {
     const { project, manager } = setup()
 
     const flow = await manager.backgroundSessionFor(project.id, 'flow')
-    const spec = await manager.backgroundSessionFor(project.id, 'spec')
+    const tests = await manager.backgroundSessionFor(project.id, 'tests')
 
-    expect(spec.id).not.toBe(flow.id)
+    expect(tests.id).not.toBe(flow.id)
   })
 
   it('runs every background section on the one session model', async () => {

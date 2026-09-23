@@ -2,16 +2,13 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 
 const execFileAsync = promisify(execFile)
 const GIT_OPTS = { timeout: 30_000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 } as const
 
-export const WORKTREE_DIR = '.worktrees'
-
-const EXCLUDE_LINE = `/${WORKTREE_DIR}/`
-const SLUG_MAX = 24
+const SLUG_MAX = 40
 
 export interface Worktree {
   path: string
@@ -23,21 +20,23 @@ export interface Worktree {
 
 export function worktreeRoot(projectPath: string, override?: string | null): string {
   const root = override?.trim()
-  return root ? resolve(root) : join(projectPath, WORKTREE_DIR)
+  if (root) return resolve(root)
+  const abs = resolve(projectPath)
+  return join(dirname(abs), `${basename(abs)}.worktrees`)
 }
 
-export function branchNameFor(workItemId: string, title: string): string {
+export function slugify(title: string, max = SLUG_MAX): string {
   const slug = title
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-    .slice(0, SLUG_MAX)
+    .slice(0, max)
     .replace(/-+$/g, '')
-  return slug ? `flow/${workItemId}-${slug}` : `flow/${workItemId}`
+  return slug || 'feature'
 }
 
 export function worktreePathFor(root: string, branch: string): string {
-  return join(root, branch.replace(/^flow\//, '').toLowerCase())
+  return join(root, branch.replace(/^feature\//, '').toLowerCase())
 }
 
 async function git(cwd: string, args: string[]): Promise<string> {
@@ -50,7 +49,31 @@ export async function currentBranch(repoRoot: string): Promise<string> {
   return name === 'HEAD' || name.length === 0 ? 'HEAD' : name
 }
 
-export async function ensureWorktreeIgnore(repoRoot: string): Promise<void> {
+async function branchExists(repoRoot: string, branch: string): Promise<boolean> {
+  try {
+    await git(repoRoot, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`])
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function uniqueBranchName(repoRoot: string, title: string): Promise<string> {
+  const slug = slugify(title)
+  const base = `feature/${slug}`
+  let candidate = base
+  let n = 2
+  while (await branchExists(repoRoot, candidate)) {
+    candidate = `${base}-${n}`
+    n += 1
+  }
+  return candidate
+}
+
+export async function ensureWorktreeIgnore(repoRoot: string, root: string): Promise<void> {
+  const rel = relative(resolve(repoRoot), resolve(root))
+  if (rel.startsWith('..') || rel === '') return
+  const excludeLine = `/${rel.replace(/\\/g, '/')}/`
   const gitDir = (await git(repoRoot, ['rev-parse', '--git-common-dir'])).trim()
   const excludePath = resolve(repoRoot, gitDir, 'info', 'exclude')
   let current = ''
@@ -59,9 +82,9 @@ export async function ensureWorktreeIgnore(repoRoot: string): Promise<void> {
   } catch {
     await mkdir(resolve(excludePath, '..'), { recursive: true })
   }
-  if (current.split(/\r?\n/).some((line) => line.trim() === EXCLUDE_LINE)) return
+  if (current.split(/\r?\n/).some((line) => line.trim() === excludeLine)) return
   const prefix = current.length > 0 && !current.endsWith('\n') ? '\n' : ''
-  await appendFile(excludePath, `${prefix}${EXCLUDE_LINE}\n`, 'utf8')
+  await appendFile(excludePath, `${prefix}${excludeLine}\n`, 'utf8')
 }
 
 export async function listWorktrees(repoRoot: string): Promise<Worktree[]> {
@@ -118,7 +141,7 @@ export async function createWorktree(input: {
     if (existing.some((tree) => tree.branch === input.branch)) {
       throw new Error(`The branch ${input.branch} is already checked out in another worktree.`)
     }
-    await ensureWorktreeIgnore(input.repoRoot)
+    await ensureWorktreeIgnore(input.repoRoot, dirname(input.path))
     await mkdir(resolve(input.path, '..'), { recursive: true })
     await git(input.repoRoot, ['worktree', 'add', '-b', input.branch, input.path, input.base])
     await git(input.path, ['config', 'core.longpaths', 'true']).catch(() => '')

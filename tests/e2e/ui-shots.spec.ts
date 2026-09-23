@@ -6,7 +6,7 @@ import { detectStacks } from '../../src/shared/test-catalog'
 test.skip(!process.env.SHOTS, 'design screenshots; set SHOTS=1 to capture')
 
 const OUT = process.env.SHOTS_OUT ?? '.impeccable/shots/ui'
-const TABS = ['session', 'specs', 'tests', 'diff', 'diagrams'] as const
+const TABS = ['session', 'tests', 'diff', 'diagrams'] as const
 
 function scenario(): MockScenario {
   const base = twoProjectScenario()
@@ -67,30 +67,6 @@ async function seed(page: Page, theme: 'dark' | 'light'): Promise<void> {
       detail: 'rm -rf data/cache/*',
       risk: 'high',
     })
-    m.setSpecKit('p-alpha', {
-      installed: true,
-      specs: [{ id: '001-cart-race', title: 'Cart race', status: 'in_progress', tasksTotal: 6, tasksDone: 2 }],
-      details: {
-        '001-cart-race': {
-          id: '001-cart-race',
-          title: 'Cart race',
-          status: 'in_progress',
-          tasksTotal: 6,
-          tasksDone: 2,
-          description: 'Version the cart state so a late response cannot overwrite a newer local state.',
-          path: 'specs/001-cart-race',
-          sections: [{ title: 'Summary', body: 'Reconcile optimistic updates by version.' }],
-          plan: [{ title: 'Technical Context', body: 'Vue, Vitest.' }],
-          phases: [
-            { label: 'Phase 1: Setup', tasks: [{ id: 'T001', label: 'scaffold', done: true }, { id: 'T002', label: 'tokens', done: true }] },
-            { label: 'Phase 2: Fix', tasks: [{ id: 'T003', label: 'version field', done: false }, { id: 'T004', label: 'reducer guard', done: false }] },
-            { label: 'Phase 3: Verify', tasks: [{ id: 'T005', label: 'regression test', done: false }, { id: 'T006', label: 'docs', done: false }] },
-          ],
-          clarifications: [],
-          resolvedClarifications: [],
-        },
-      },
-    })
   })
   await page.waitForTimeout(400)
 }
@@ -130,7 +106,7 @@ for (const theme of ['dark', 'light'] as const) {
     await page.getByTestId('sidebar-project-beta').click()
     await page.waitForTimeout(300)
     await page.screenshot({ path: `${OUT}/${theme}-ended.png` })
-    for (const tab of ['specs', 'tests', 'diff', 'skills', 'security'] as const) {
+    for (const tab of ['tests', 'diff'] as const) {
       await page.getByTestId(`tab-${tab}`).click()
       await page.waitForTimeout(250)
       await page.screenshot({ path: `${OUT}/${theme}-empty-${tab}.png` })

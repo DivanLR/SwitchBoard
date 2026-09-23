@@ -1,72 +1,78 @@
 import { describe, expect, it } from 'vitest'
 import { flowMarkerBroken, parseFlowMarker } from '@main/flow/flow-markers'
-import { featuresPrompt, publishPrompt, scopePrompt } from '@main/flow/flow-prompts'
+import { featuresPrompt, planPrompt, specifyPrompt } from '@main/flow/flow-prompts'
 
 function line(json: unknown): string {
-  return `Here is the breakdown.\nSWB_FLOW: ${JSON.stringify(json)}`
+  return `Here is my report.\nSWB_FLOW: ${JSON.stringify(json)}`
 }
 
-describe('the scope marker', () => {
-  it('reads the items, risks and what was left out', () => {
+describe('the stage marker', () => {
+  it('reads a plain done outcome', () => {
+    const marker = parseFlowMarker(
+      line({ kind: 'stage', stage: 'plan', outcome: 'done', summary: 'Wrote plan.md and tasks.md.' }),
+    )
+    expect(marker?.kind).toBe('stage')
+    if (marker?.kind !== 'stage') return
+    expect(marker.stage).toBe('plan')
+    expect(marker.outcome).toBe('done')
+    expect(marker.summary).toBe('Wrote plan.md and tasks.md.')
+    expect(marker.why).toBeNull()
+  })
+
+  it('refuses an unknown stage or outcome, so a run never advances on nothing', () => {
+    expect(parseFlowMarker(line({ kind: 'stage', stage: 'nonsense', outcome: 'done' }))).toBeNull()
+    expect(parseFlowMarker(line({ kind: 'stage', stage: 'spec', outcome: 'maybe' }))).toBeNull()
+  })
+
+  it('reads a blocked outcome with why', () => {
+    const marker = parseFlowMarker(
+      line({ kind: 'stage', stage: 'build', outcome: 'blocked', summary: '', why: 'the API key is missing' }),
+    )
+    expect(marker?.kind).toBe('stage')
+    if (marker?.kind !== 'stage') return
+    expect(marker.outcome).toBe('blocked')
+    expect(marker.why).toBe('the API key is missing')
+  })
+
+  it('reads the spec extras', () => {
+    const marker = parseFlowMarker(
+      line({ kind: 'stage', stage: 'spec', outcome: 'done', summary: 'ok', specDir: 'specs/003-checkout' }),
+    )
+    if (marker?.kind !== 'stage') throw new Error('expected a stage marker')
+    expect(marker.specDir).toBe('specs/003-checkout')
+  })
+
+  it('reads the review extras and keeps only known severities', () => {
     const marker = parseFlowMarker(
       line({
-        kind: 'scope',
-        items: [
-          {
-            localId: 'cart-race',
-            title: 'Version the cart state',
-            body: 'Reconcile optimistic updates by version.',
-            acceptance: ['Two fast adds keep both items'],
-            estimate: 'm',
-          },
+        kind: 'stage',
+        stage: 'review',
+        outcome: 'done',
+        summary: 'reviewed',
+        verdict: 'needs_fixes',
+        findings: [
+          { severity: 'must_fix', file: 'Cart.cs', line: 42, what: 'no null check' },
+          { severity: 'nonsense', file: null, line: null, what: 'defaults to should_fix' },
         ],
-        risks: ['The reducer is shared with checkout'],
-        outOfScope: ['The pricing service'],
+        unmet: ['Two fast adds keep both items'],
       }),
     )
-
-    expect(marker?.kind).toBe('scope')
-    if (marker?.kind !== 'scope') return
-    expect(marker.items).toHaveLength(1)
-    expect(marker.items[0].localId).toBe('cart-race')
-    expect(marker.items[0].acceptance).toEqual(['Two fast adds keep both items'])
-    expect(marker.risks).toEqual(['The reducer is shared with checkout'])
-    expect(marker.outOfScope).toEqual(['The pricing service'])
-  })
-
-  it('gives an item without a localId a positional one rather than dropping it', () => {
-    const marker = parseFlowMarker(line({ kind: 'scope', items: [{ title: 'Nameless' }] }))
-    expect(marker?.kind).toBe('scope')
-    if (marker?.kind !== 'scope') return
-    expect(marker.items[0].localId).toBe('item-1')
-    expect(marker.items[0].estimate).toBe('m')
-  })
-
-  it('refuses a scope marker with no usable item, so a run never advances on nothing', () => {
-    expect(parseFlowMarker(line({ kind: 'scope', items: [] }))).toBeNull()
-    expect(parseFlowMarker(line({ kind: 'scope', items: [{ body: 'no title' }] }))).toBeNull()
-  })
-})
-
-describe('the published marker', () => {
-  it('keeps only the records that name both a local id and a work item id', () => {
-    const marker = parseFlowMarker(
-      line({
-        kind: 'published',
-        created: [
-          { localId: 'a', workItemId: 4711, url: 'https://dev.azure.com/x/_workitems/edit/4711' },
-          { localId: 'b' },
-        ],
-        failed: [{ localId: 'c', why: 'the area path was rejected' }],
-      }),
-    )
-
-    expect(marker?.kind).toBe('published')
-    if (marker?.kind !== 'published') return
-    expect(marker.created).toEqual([
-      { localId: 'a', workItemId: '4711', url: 'https://dev.azure.com/x/_workitems/edit/4711' },
+    if (marker?.kind !== 'stage') throw new Error('expected a stage marker')
+    expect(marker.verdict).toBe('needs_fixes')
+    expect(marker.findings).toEqual([
+      { severity: 'must_fix', file: 'Cart.cs', line: 42, what: 'no null check' },
+      { severity: 'should_fix', file: null, line: null, what: 'defaults to should_fix' },
     ])
-    expect(marker.failed).toEqual([{ localId: 'c', why: 'the area path was rejected' }])
+    expect(marker.unmet).toEqual(['Two fast adds keep both items'])
+  })
+
+  it('reads the ship extras', () => {
+    const marker = parseFlowMarker(
+      line({ kind: 'stage', stage: 'ship', outcome: 'done', summary: 'pushed', prUrl: 'https://x/pr/9', prId: '9' }),
+    )
+    if (marker?.kind !== 'stage') throw new Error('expected a stage marker')
+    expect(marker.prUrl).toBe('https://x/pr/9')
+    expect(marker.prId).toBe('9')
   })
 })
 
@@ -83,8 +89,8 @@ describe('the features marker', () => {
 
 describe('malformed hand-backs', () => {
   it('reads nothing when there is no marker at all', () => {
-    expect(parseFlowMarker('I finished the breakdown.')).toBeNull()
-    expect(flowMarkerBroken('I finished the breakdown.')).toBe(false)
+    expect(parseFlowMarker('I finished the work.')).toBeNull()
+    expect(flowMarkerBroken('I finished the work.')).toBe(false)
   })
 
   it('reports a marker it cannot parse, rather than staying silent', () => {
@@ -95,80 +101,54 @@ describe('malformed hand-backs', () => {
 
   it('takes the last marker when a session printed more than one', () => {
     const text = [
-      line({ kind: 'scope', items: [{ localId: 'first', title: 'First' }] }),
-      line({ kind: 'scope', items: [{ localId: 'second', title: 'Second' }] }),
+      line({ kind: 'stage', stage: 'spec', outcome: 'done', summary: 'first' }),
+      line({ kind: 'stage', stage: 'spec', outcome: 'done', summary: 'second' }),
     ].join('\n')
     const marker = parseFlowMarker(text)
-    if (marker?.kind !== 'scope') return
-    expect(marker.items[0].localId).toBe('second')
+    if (marker?.kind !== 'stage') return
+    expect(marker.summary).toBe('second')
   })
 })
 
 describe('the prompts', () => {
-  it('tells the scoping session to change nothing and hand back a marker', () => {
-    const prompt = scopePrompt({ featureId: '4711', featureTitle: 'Checkout v2' })
-    expect(prompt).toContain('4711')
-    expect(prompt).toContain('Create nothing in Azure DevOps')
-    expect(prompt).toContain('SWB_FLOW:')
-    expect(prompt).toContain('Do not call ExitPlanMode')
-  })
-
-  it('tells the publisher to look for existing children before creating duplicates', () => {
-    const prompt = publishPrompt({
-      run: {
-        id: 'r1',
-        projectId: 'p1',
-        featureId: '4711',
-        featureTitle: 'Checkout v2',
-        status: 'publishing',
-        sessionId: 's1',
-        risks: [],
-        outOfScope: [],
-        concurrency: 4,
-        baseBranch: null,
-        worktreeRoot: null,
-        crosscheckRound: 0,
-        concerns: [],
-        specSessionId: null,
-        note: null,
-        startedAt: '2026-09-17T00:00:00.000Z',
-        finishedAt: null,
-      },
-      items: [
-        {
-          id: 'i1',
-          runId: 'r1',
-          projectId: 'p1',
-          position: 0,
-          localId: 'cart-race',
-          title: 'Version the cart state',
-          body: 'Reconcile by version.',
-          acceptance: ['Two fast adds keep both items'],
-          estimate: 'm',
-          workItemId: null,
-          workItemUrl: null,
-          branch: null,
-          worktreePath: null,
-          sessionId: null,
-          status: 'proposed',
-          attempts: 0,
-          prId: null,
-          prUrl: null,
-          note: null,
-          startedAt: null,
-          finishedAt: null,
-        },
-      ],
-    })
-
-    expect(prompt).toContain('list the existing children')
-    expect(prompt).toContain('cart-race')
-    expect(prompt).toContain('Report only ids Azure DevOps actually returned to you.')
-  })
-
   it('keeps the feature search read-only', () => {
     const prompt = featuresPrompt('checkout')
     expect(prompt).toContain('checkout')
     expect(prompt).toContain('Read only: create nothing, update nothing.')
+    expect(prompt).toContain('SWB_FLOW:')
+  })
+
+  it('sends an ADO feature description built from the source, with the ado rule first', () => {
+    const prompt = specifyPrompt({
+      source: 'ado',
+      sourceRef: '4711',
+      sourceUrl: 'https://dev.azure.com/x/_workitems/edit/4711',
+      title: 'Checkout v2',
+      description: '',
+    })
+    expect(prompt).toContain('Azure DevOps MCP server')
+    expect(prompt).toContain('/speckit-specify Azure DevOps Feature 4711: Checkout v2')
+    expect(prompt).toContain('https://dev.azure.com/x/_workitems/edit/4711')
+  })
+
+  it('sends a written description as-is for a text source', () => {
+    const prompt = specifyPrompt({
+      source: 'text',
+      sourceRef: null,
+      sourceUrl: null,
+      title: 'Checkout v2',
+      description: 'Let a guest pay without an account.',
+    })
+    expect(prompt).toBe('/speckit-specify Checkout v2: Let a guest pay without an account.')
+  })
+
+  it('mentions only the stacks the run actually detected', () => {
+    expect(planPrompt(['dotnet'])).toContain('.NET:')
+    expect(planPrompt(['dotnet'])).not.toContain('Angular:')
+    expect(planPrompt(['angular'])).toContain('Angular:')
+    expect(planPrompt(['angular'])).not.toContain('.NET:')
+    const both = planPrompt(['dotnet', 'angular'])
+    expect(both).toContain('.NET:')
+    expect(both).toContain('Angular:')
   })
 })

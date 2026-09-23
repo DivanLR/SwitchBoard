@@ -1,5 +1,5 @@
 import { clipboard, dialog, ipcMain, shell, type BrowserWindow } from 'electron'
-import type { FlowItem, FlowRun, Project, Session, SessionEvent } from '@shared/domain'
+import type { Project, Session, SessionEvent } from '@shared/domain'
 import type { SectionKind } from '@shared/domain'
 import { isDangerousCommand, sessionName } from '@shared/domain'
 import {
@@ -14,6 +14,7 @@ import {
 import { applyToRegionPrompt } from '@shared/diff-apply'
 import type {
   Counters,
+  FlowSnapshot,
   InvokeMap,
   InvokeMethod,
   IpcError,
@@ -41,12 +42,12 @@ import { join, resolve, sep } from 'node:path'
 import { detectStacks, stackById, stackEntries } from '@shared/test-catalog'
 import { evidencePrompt, planSuites, verifyPrompt } from '@main/evals/verify-dispatch'
 import { readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
-import { installSpecKit, readSpecDetail, readSpecKitState } from '@main/specs/spec-kit'
 import { readDiffList, readFileDiff } from '@main/sessions/session-manager'
 import { readDiagramList } from '@main/diagrams/list'
 import { importSkills } from '@main/skills/import'
 import type { FlowSupervisor } from '@main/flow/flow-supervisor'
 import { enableSkill } from '@main/skills/install'
+import { detectFlowStacks } from '@main/flow/stacks'
 import { check as checkForUpdates, installNow } from '@main/updater'
 
 const EVENT_FLUSH_INTERVAL_MS = 33 
@@ -213,10 +214,16 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     return project
   }
 
-  const flowSnapshot = (projectId: string): { runs: FlowRun[]; items: FlowItem[] } => ({
+  const flowSnapshot = (projectId: string): FlowSnapshot => ({
     runs: repos.flowRuns.listForProject(projectId),
-    items: repos.flowItems.listForProject(projectId),
+    stages: repos.flowStages.listForProject(projectId),
   })
+
+  const flowSnapshotForRun = (runId: string): FlowSnapshot => {
+    const run = repos.flowRuns.byId(runId)
+    if (!run) throw { code: 'NOT_FOUND', message: 'Run not found' } satisfies IpcError
+    return flowSnapshot(run.projectId)
+  }
 
   const frozenName = (session: Session, work: Parameters<typeof sessionName>[1]): string | null => {
     if (session.derivedName) return session.derivedName
@@ -407,22 +414,6 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       await manager.reloadPlugins()
       return result
     },
-    'specs.state': (req) => {
-      const project = repos.projects.byId(req.projectId)
-      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
-      return readSpecKitState(project.path)
-    },
-    'specs.detail': (req) => {
-      const project = repos.projects.byId(req.projectId)
-      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
-      return readSpecDetail(project.path, req.specId)
-    },
-    'specs.install': async (req) => {
-      const project = repos.projects.byId(req.projectId)
-      if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
-      await installSpecKit(project.path)
-      return readSpecKitState(project.path)
-    },
     'diff.list': (req) => {
       const project = repos.projects.byId(req.projectId)
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
@@ -517,9 +508,9 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         : readSchemaDoc(project.path)
       return { content }
     },
-    'specs.runInSession': async (req) => {
+    'sections.runInSession': async (req) => {
       const session = req.background
-        ? await manager.backgroundSessionFor(req.projectId, req.kind ?? 'spec')
+        ? await manager.backgroundSessionFor(req.projectId, req.kind)
         : (repos.sessions.activeForProject(req.projectId) ??
           (await manager.startSession(req.projectId)))
       if (req.watchDiagrams) manager.watchDiagram(session.id)
@@ -605,57 +596,64 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       requireProject(req.projectId)
       return flow.features(req.projectId, req.query ?? '')
     },
+    'flow.existingSpecs': async (req) => {
+      requireProject(req.projectId)
+      return flow.existingSpecs(req.projectId)
+    },
+    'flow.detectStacks': async (req) => {
+      const project = requireProject(req.projectId)
+      return detectFlowStacks(project.path)
+    },
     'flow.start': async (req) => {
       requireProject(req.projectId)
-      const featureId = req.featureId.trim()
-      const featureTitle = req.featureTitle.trim()
-      if (!featureId || !featureTitle) {
-        throw { code: 'INVALID_PATH', message: 'Pick a Feature first.' } satisfies IpcError
-      }
-      const run = await flow.start({ projectId: req.projectId, featureId, featureTitle })
+      const run = await flow.start({
+        projectId: req.projectId,
+        source: req.source,
+        autopilot: req.autopilot,
+        autoShip: req.autoShip,
+        baseBranch: req.baseBranch,
+      })
       return { runId: run.id, ...flowSnapshot(req.projectId) }
     },
-    'flow.saveItems': (req) => {
-      requireProject(req.projectId)
-      flow.saveItems(req.runId, req.items)
-      return flowSnapshot(req.projectId)
+    'flow.approve': async (req) => {
+      await flow.approve(req.runId)
+      return flowSnapshotForRun(req.runId)
     },
-    'flow.publish': async (req) => {
-      requireProject(req.projectId)
-      await flow.publish(req.runId)
-      return flowSnapshot(req.projectId)
+    'flow.retry': async (req) => {
+      await flow.retry(req.runId)
+      return flowSnapshotForRun(req.runId)
     },
-    'flow.startWork': async (req) => {
-      requireProject(req.projectId)
-      await flow.startWork(req.runId)
-      return flowSnapshot(req.projectId)
+    'flow.skip': async (req) => {
+      await flow.skip(req.runId)
+      return flowSnapshotForRun(req.runId)
     },
-    'flow.retryItem': async (req) => {
-      requireProject(req.projectId)
-      await flow.retryItem(req.itemId)
-      return flowSnapshot(req.projectId)
+    'flow.fix': async (req) => {
+      await flow.fix(req.runId)
+      return flowSnapshotForRun(req.runId)
     },
-    'flow.learn': async (req) => {
-      requireProject(req.projectId)
-      await flow.learn(req.runId)
-      return flowSnapshot(req.projectId)
-    },
-    'flow.spec': async (req) => {
-      requireProject(req.projectId)
-      await flow.writeSpec(req.runId)
-      return flowSnapshot(req.projectId)
-    },
-    'flow.lessons': (req) => repos.flowLessons.listForProject(req.projectId),
-    'flow.decideLesson': async (req) => {
-      requireProject(req.projectId)
-      const written = await flow.decideLesson(req.lessonId, req.accept, req.reason ?? null)
-      return { lessons: repos.flowLessons.listForProject(req.projectId), ...written }
+    'flow.ship': async (req) => {
+      await flow.ship(req.runId)
+      return flowSnapshotForRun(req.runId)
     },
     'flow.cancel': async (req) => {
-      requireProject(req.projectId)
       await flow.cancel(req.runId)
-      return flowSnapshot(req.projectId)
+      return flowSnapshotForRun(req.runId)
     },
+    'flow.revise': async (req) => {
+      const feedback = req.feedback.trim()
+      if (!feedback) throw { code: 'INVALID_PATH', message: 'Say what should change.' } satisfies IpcError
+      await flow.revise(req.runId, feedback)
+      return flowSnapshotForRun(req.runId)
+    },
+    'flow.setAutopilot': (req) => {
+      flow.setAutopilot(req.runId, req.autopilot)
+      return flowSnapshotForRun(req.runId)
+    },
+    'flow.removeWorktree': async (req) => {
+      await flow.removeWorktree(req.runId, req.force === true)
+      return flowSnapshotForRun(req.runId)
+    },
+    'flow.artefact': async (req) => flow.artefact(req.runId, req.stage, req.kind),
     'queue.list': (req) => manager.listQueue(req.projectId),
     'queue.add': (req) => {
       manager.enqueueTask(req.projectId, req.text)

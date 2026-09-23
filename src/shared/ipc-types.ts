@@ -16,16 +16,15 @@ import type {
   SectionKind,
   Session,
   FlowFeature,
-  FlowItem,
-  FlowLesson,
   FlowRun,
-  ScopedItem,
+  FlowStackId,
+  FlowStage,
+  FlowStageRecord,
   SessionEvent,
   SessionMode,
   Settings,
   SkillImportResult,
-  SpecDetail,
-  SpecKitState,
+  SpecSummary,
   VerifyRun,
 } from './domain'
 import type { AvailableSuites } from './test-catalog'
@@ -109,6 +108,18 @@ interface ProjectsSnapshot {
   counters: Counters
 }
 
+export interface FlowSnapshot {
+  runs: FlowRun[]
+  stages: FlowStageRecord[]
+}
+
+export type FlowStartSource =
+  | { kind: 'ado'; featureId: string; featureTitle: string; url: string | null }
+  | { kind: 'text'; title: string; description: string }
+  | { kind: 'spec'; specId: string }
+
+export type FlowArtefactKind = 'spec' | 'plan' | 'tasks' | 'postman' | 'report'
+
 export interface InvokeMap {
   'projects.list': { req: void; res: ProjectsSnapshot }
   'dialog.pickFolder': { req: void; res: { path: string | null } }
@@ -175,9 +186,6 @@ export interface InvokeMap {
   'projects.commands': { req: { projectId: string }; res: ProjectCommand[] }
   'skills.list': { req: void; res: CustomSkill[] }
   'skills.import': { req: { url: string }; res: SkillImportResult }
-  'specs.state': { req: { projectId: string }; res: SpecKitState }
-  'specs.detail': { req: { projectId: string; specId: string }; res: SpecDetail | null }
-  'specs.install': { req: { projectId: string }; res: SpecKitState }
   'diff.list': { req: { projectId: string }; res: DiffListResult }
   'diff.file': { req: { projectId: string; path: string }; res: FileDiffContent | null }
   'diff.apply': {
@@ -198,12 +206,12 @@ export interface InvokeMap {
   'diagrams.open': { req: { projectId: string; file: string }; res: void }
   'diagrams.read': { req: { projectId: string; file: string }; res: { html: string } }
   'mcp.readSchema': { req: { projectId: string; servers?: string[] }; res: { content: string | null } }
-  'specs.runInSession': {
+  'sections.runInSession': {
     req: {
       projectId: string
       text: string
       background?: boolean
-      kind?: SectionKind
+      kind: SectionKind
       watchDiagrams?: boolean
     }
     res: { sessionId: string }
@@ -223,44 +231,32 @@ export interface InvokeMap {
     res: { sessionId: string; runs: VerifyRun[] }
   }
   'verify.cancel': { req: { projectId: string; runId: string }; res: VerifyRun[] }
-  'flow.list': { req: { projectId: string }; res: { runs: FlowRun[]; items: FlowItem[] } }
+  'flow.list': { req: { projectId: string }; res: FlowSnapshot }
   'flow.features': { req: { projectId: string; query?: string }; res: FlowFeature[] }
+  'flow.existingSpecs': { req: { projectId: string }; res: SpecSummary[] }
+  'flow.detectStacks': { req: { projectId: string }; res: FlowStackId[] }
   'flow.start': {
-    req: { projectId: string; featureId: string; featureTitle: string }
-    res: { runId: string; runs: FlowRun[]; items: FlowItem[] }
+    req: {
+      projectId: string
+      source: FlowStartSource
+      autopilot: boolean
+      autoShip: boolean
+      baseBranch?: string
+    }
+    res: { runId: string } & FlowSnapshot
   }
-  'flow.saveItems': {
-    req: { projectId: string; runId: string; items: ScopedItem[] }
-    res: { runs: FlowRun[]; items: FlowItem[] }
-  }
-  'flow.publish': {
-    req: { projectId: string; runId: string }
-    res: { runs: FlowRun[]; items: FlowItem[] }
-  }
-  'flow.startWork': {
-    req: { projectId: string; runId: string }
-    res: { runs: FlowRun[]; items: FlowItem[] }
-  }
-  'flow.retryItem': {
-    req: { projectId: string; itemId: string }
-    res: { runs: FlowRun[]; items: FlowItem[] }
-  }
-  'flow.learn': {
-    req: { projectId: string; runId: string }
-    res: { runs: FlowRun[]; items: FlowItem[] }
-  }
-  'flow.spec': {
-    req: { projectId: string; runId: string }
-    res: { runs: FlowRun[]; items: FlowItem[] }
-  }
-  'flow.lessons': { req: { projectId: string }; res: FlowLesson[] }
-  'flow.decideLesson': {
-    req: { projectId: string; lessonId: string; accept: boolean; reason?: string }
-    res: { lessons: FlowLesson[]; appliedLines: number; path: string | null }
-  }
-  'flow.cancel': {
-    req: { projectId: string; runId: string }
-    res: { runs: FlowRun[]; items: FlowItem[] }
+  'flow.approve': { req: { runId: string }; res: FlowSnapshot }
+  'flow.retry': { req: { runId: string }; res: FlowSnapshot }
+  'flow.skip': { req: { runId: string }; res: FlowSnapshot }
+  'flow.fix': { req: { runId: string }; res: FlowSnapshot }
+  'flow.ship': { req: { runId: string }; res: FlowSnapshot }
+  'flow.cancel': { req: { runId: string }; res: FlowSnapshot }
+  'flow.revise': { req: { runId: string; feedback: string }; res: FlowSnapshot }
+  'flow.setAutopilot': { req: { runId: string; autopilot: boolean }; res: FlowSnapshot }
+  'flow.removeWorktree': { req: { runId: string; force?: boolean }; res: FlowSnapshot }
+  'flow.artefact': {
+    req: { runId: string; stage: FlowStage; kind?: FlowArtefactKind }
+    res: { path: string | null; content: string } | null
   }
   'queue.list': { req: { projectId: string }; res: QueuedTask[] }
   'queue.add': { req: { projectId: string; text: string }; res: QueuedTask[] }
@@ -336,10 +332,8 @@ interface VerifyChangedPush {
   runs: VerifyRun[]
 }
 
-interface FlowChangedPush {
+interface FlowChangedPush extends FlowSnapshot {
   projectId: string
-  runs: FlowRun[]
-  items: FlowItem[]
 }
 
 interface DiagramsChangedPush {
