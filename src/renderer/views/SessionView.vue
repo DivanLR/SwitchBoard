@@ -113,7 +113,7 @@ const terminalSession = computed(() => liveSession.value ?? endedSession.value)
 const terminalResumeId = computed(() => {
   const ended = endedSession.value
   if (liveSession.value || !ended?.sdkSessionId) return null
-  if (ended.bypassPermissions || props.project.useContainers) return null
+  if (ended.containerised) return null
   return ended.sdkSessionId
 })
 
@@ -720,6 +720,7 @@ const { dragKind, onPaneDragOver, onPaneDragLeave, onPaneDrop } = projectRefs
       :cwd="project.path"
       :resume-session-id="terminalResumeId"
       :live="!!liveSession"
+      :can-take-over="!liveSession?.containerised"
       :visible="mainTab === 'terminal' && terminalMode === 'shell'"
       @takeover="stop()"
       @chat="terminalMode = 'chat'"

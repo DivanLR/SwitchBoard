@@ -102,7 +102,7 @@ interface HostedEntry {
   sectionKind?: SectionKind
   ranATurn: boolean
   nodeModulesVolumeKey?: string
-  homeVolumeOf: string
+  mode: SessionMode
 }
 
 interface FlowHooks {
@@ -461,7 +461,10 @@ export class SessionManager {
     this.repos.verifyRuns.reconcileRunning(note)
     if (!sweepContainers) return
     sweepOrphanedContainers(leftOpen)
-    sweepStaleVolumes((id) => this.repos.sessions.byId(id))
+    sweepStaleVolumes((owner) => {
+      const run = this.repos.verifyRuns.byId(owner)
+      return this.repos.sessions.lastVolumeUse(owner) ?? (run ? { endedAt: run.finishedAt } : undefined)
+    })
   }
 
   startWatchdog(deadlineMs = RUN_DEADLINE_MS, intervalMs = SWEEP_INTERVAL_MS): void {
@@ -504,7 +507,7 @@ export class SessionManager {
       opts?.section === 'flow' || (opts?.cwd !== undefined && relative(project.path, opts.cwd) !== '')
     const chosen = requestedMode ?? project.defaultSessionMode
     const mode = onHost ? nativeMode(chosen) : chosen
-    const containerised = !onHost && (opts?.containerised === true || mode === 'bypass')
+    const containerised = !onHost && ((opts?.containerised ?? project.useContainers) === true || mode === 'bypass')
     if (containerised) this.refuseWhenContainersFull()
     const sessionId = newId()
     if (containerised) this.reservedContainerIds.add(sessionId)
@@ -543,7 +546,7 @@ export class SessionManager {
     const previous =
       resume && !opts?.resumeSdkSessionId ? this.repos.sessions.latestEndedForProject(projectId) : undefined
     const resumeSdkSessionId = opts?.resumeSdkSessionId ?? previous?.sdkSessionId ?? undefined
-    const resumeFromSessionId = opts?.resumeFromSessionId ?? previous?.id
+    const resumeFromSessionId = opts?.resumeFromSessionId ?? (previous ? (previous.homeVolumeOf ?? previous.id) : undefined)
 
     if (containerised) {
       await ensureSandboxVolumes(
@@ -572,6 +575,8 @@ export class SessionManager {
       endedAt: null,
       endReason: null,
       bypassPermissions,
+      containerised,
+      homeVolumeOf: resumeFromSessionId ?? null,
       planMode: mode === 'plan',
       inPlanMode: mode === 'plan',
     }
@@ -594,7 +599,7 @@ export class SessionManager {
       ranATurn: false,
       session: null as unknown as SessionHost,
       nodeModulesVolumeKey: opts?.nodeModulesVolumeKey,
-      homeVolumeOf: resumeFromSessionId ?? sessionId,
+      mode,
     }
 
     const settings = this.repos.settings.get()
@@ -1454,19 +1459,13 @@ export class SessionManager {
     const since = Date.now() - (this.revivedAt.get(projectId) ?? 0)
     if (since < REVIVE_COOLDOWN_MS) return
     this.revivedAt.set(projectId, Date.now())
-    const project = this.repos.projects.byId(projectId)
     void (async () => {
       try {
-        const revived = await this.startSession(
-          projectId,
-          false,
-          entry.row.bypassPermissions ? 'bypass' : project && nativeMode(project.defaultSessionMode),
-          {
-            resumeSdkSessionId: entry.row.sdkSessionId ?? undefined,
-            resumeFromSessionId: entry.homeVolumeOf,
-            containerised: entry.containerised,
-          },
-        )
+        const revived = await this.startSession(projectId, false, entry.mode, {
+          resumeSdkSessionId: entry.row.sdkSessionId ?? undefined,
+          resumeFromSessionId: entry.row.homeVolumeOf ?? entry.row.id,
+          containerised: entry.containerised,
+        })
         this.sendMessage(
           revived.id,
           'Switchboard restarted this session: the previous process ended unexpectedly ' +

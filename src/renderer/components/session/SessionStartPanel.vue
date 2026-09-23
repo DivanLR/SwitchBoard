@@ -68,8 +68,11 @@ const {
           </button>
           <div v-if="resumeSession" class="mode-note">
             Resuming keeps the last session's sandbox: its transcript lives
-            {{ session.bypassPermissions ? 'inside the container' : 'on this machine' }}, so only
-            matching modes are offered.
+            {{
+              session.containerised
+                ? 'inside the container, so the resumed session runs in one too.'
+                : 'on this machine, so bypass, which always runs in a container, is not offered.'
+            }}
           </div>
         </div>
       </div>
@@ -103,9 +106,11 @@ const {
           :aria-checked="containerOn"
           :disabled="containerForced"
           :title="
-            containerForced
+            resumeSession
+              ? `Resuming carries on where the last session ran: ${session.containerised ? 'in a WSL container' : 'on this machine'}, which is where its transcript is.`
+              : containerForced
               ? 'Bypass always runs in a container: it approves every tool call, so the container is the only thing left standing between it and your files.'
-              : 'The same setting as Run in Container in the header, for the whole project: every session and every section run goes into a WSL container. Your project folder is mounted read-write, and your Claude credentials, plugins and skills read-only. Nothing else of yours is. Slower to start, only two containers at once, and it needs WSL 2.9.3 or newer.'
+              :'The same setting as Run in Container in the header, for the whole project: every session and every section run goes into a WSL container. Your project folder is mounted read-write, and your Claude credentials, plugins and skills read-only. Nothing else of yours is. Slower to start, only two containers at once, and it needs WSL 2.9.3 or newer.'
           "
           @click="containerForced || (runInContainer = !runInContainer)"
         >

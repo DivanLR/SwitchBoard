@@ -88,6 +88,8 @@ interface SessionRow {
   endedAt: string | null
   endReason: SessionEndReason | null
   bypassPermissions: number | null
+  containerised: number
+  homeVolumeOf: string | null
   planMode: number | null
   label: string | null
   sectionKind: SectionKind | null
@@ -101,6 +103,7 @@ function toSession(row: SessionRow | undefined): Session | undefined {
   return {
     ...row,
     bypassPermissions: row.bypassPermissions === 1,
+    containerised: row.containerised === 1,
     planMode: row.planMode === 1,
   }
 }
@@ -262,8 +265,8 @@ class SessionsRepo {
   insert(session: Session): void {
     this.db
       .prepare(
-        `INSERT INTO sessions (id, projectId, sdkSessionId, status, statusDetail, branch, diffAdds, diffDels, usageUtilization, usageResetsAt, usageLimitType, startedAt, endedAt, endReason, bypassPermissions, planMode)
-         VALUES (@id, @projectId, @sdkSessionId, @status, @statusDetail, @branch, @diffAdds, @diffDels, @usageUtilization, @usageResetsAt, @usageLimitType, @startedAt, @endedAt, @endReason, @bypassPermissions, @planMode)`,
+        `INSERT INTO sessions (id, projectId, sdkSessionId, status, statusDetail, branch, diffAdds, diffDels, usageUtilization, usageResetsAt, usageLimitType, startedAt, endedAt, endReason, bypassPermissions, containerised, homeVolumeOf, planMode)
+         VALUES (@id, @projectId, @sdkSessionId, @status, @statusDetail, @branch, @diffAdds, @diffDels, @usageUtilization, @usageResetsAt, @usageLimitType, @startedAt, @endedAt, @endReason, @bypassPermissions, @containerised, @homeVolumeOf, @planMode)`,
       )
       .run({
         id: session.id,
@@ -281,6 +284,8 @@ class SessionsRepo {
         endedAt: session.endedAt,
         endReason: session.endReason,
         bypassPermissions: session.bypassPermissions ? 1 : 0,
+        containerised: session.containerised ? 1 : 0,
+        homeVolumeOf: session.homeVolumeOf ?? null,
         planMode: session.planMode ? 1 : 0,
       })
   }
@@ -342,6 +347,14 @@ class SessionsRepo {
       )
       .get(projectId)
     return toSession(row as SessionRow | undefined)
+  }
+
+  lastVolumeUse(owner: string): { endedAt: string | null } | undefined {
+    return this.db
+      .prepare(
+        'SELECT endedAt FROM sessions WHERE id = ? OR homeVolumeOf = ? ORDER BY endedAt IS NULL DESC, endedAt DESC LIMIT 1',
+      )
+      .get(owner, owner) as { endedAt: string | null } | undefined
   }
 
   listUnended(): Session[] {

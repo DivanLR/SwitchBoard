@@ -303,28 +303,24 @@ export function removeNodeModulesVolume(sessionId: string): void {
 
 const STALE_VOLUME_AGE_MS = 7 * 24 * 60 * 60 * 1000
 
-export function sweepStaleVolumes(
-  sessionById: (sessionId: string) => { endedAt: string | null } | undefined,
-): void {
+export function staleVolumes(
+  names: readonly string[],
+  lastUse: (owner: string) => { endedAt: string | null } | undefined,
+  now = Date.now(),
+): string[] {
+  return names.filter((name) => {
+    const prefix = [HOME_VOLUME_PREFIX, NODE_MODULES_VOLUME_PREFIX].find((p) => name.startsWith(p))
+    if (!prefix) return false
+    const endedAt = lastUse(name.slice(prefix.length))?.endedAt
+    return typeof endedAt === 'string' && now - Date.parse(endedAt) > STALE_VOLUME_AGE_MS
+  })
+}
+
+export function sweepStaleVolumes(lastUse: (owner: string) => { endedAt: string | null } | undefined): void {
   execFile(WSLC, ['volume', 'list', '--quiet'], { windowsHide: true }, (error, stdout) => {
     if (error) return
-    const stale: string[] = []
-    for (const name of stdout.split('\n').map((line) => line.trim()).filter(Boolean)) {
-      const prefix = name.startsWith(HOME_VOLUME_PREFIX)
-        ? HOME_VOLUME_PREFIX
-        : name.startsWith(NODE_MODULES_VOLUME_PREFIX)
-          ? NODE_MODULES_VOLUME_PREFIX
-          : null
-      if (!prefix) continue
-      const session = sessionById(name.slice(prefix.length))
-      if (!session) {
-        stale.push(name)
-        continue
-      }
-      if (session.endedAt === null) continue
-      if (Date.now() - Date.parse(session.endedAt) > STALE_VOLUME_AGE_MS) stale.push(name)
-    }
-    for (const name of stale) {
+    const names = stdout.split('\n').map((line) => line.trim()).filter(Boolean)
+    for (const name of staleVolumes(names, lastUse)) {
       execFile(WSLC, ['volume', 'remove', '--force', name], { windowsHide: true }, () => {})
     }
   })

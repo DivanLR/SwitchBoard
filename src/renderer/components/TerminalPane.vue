@@ -15,6 +15,7 @@ const props = defineProps<{
   cwd: string
   resumeSessionId: string | null
   live: boolean
+  canTakeOver: boolean
   visible: boolean
 }>()
 const emit = defineEmits<{ (e: 'takeover'): void; (e: 'chat'): void }>()
@@ -328,6 +329,7 @@ async function restart(): Promise<void> {
         <template v-if="live">
           <span class="tb-note" data-testid="terminal-live-note">Session running in Clean and Raw</span>
           <button
+            v-if="canTakeOver"
             type="button"
             class="btn-quiet"
             data-testid="terminal-takeover"

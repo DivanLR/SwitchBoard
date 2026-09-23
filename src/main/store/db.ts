@@ -671,6 +671,17 @@ const MIGRATIONS: Migration[] = [
       db.exec(`ALTER TABLE flow_runs ADD COLUMN repos TEXT NOT NULL DEFAULT '[]';`)
     },
   },
+  {
+    name: '042-session-container-home',
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE sessions ADD COLUMN containerised INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE sessions ADD COLUMN homeVolumeOf TEXT;
+        UPDATE sessions SET containerised = 1
+          WHERE bypassPermissions = 1 OR projectId IN (SELECT id FROM projects WHERE useContainers = 1);
+      `)
+    },
+  },
 ]
 
 export function transaction<T>(db: AppDatabase, work: () => T): T {

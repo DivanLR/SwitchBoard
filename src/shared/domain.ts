@@ -126,6 +126,8 @@ export interface Session {
   label?: string | null
   sectionKind?: SectionKind | null
   bypassPermissions?: boolean
+  containerised?: boolean
+  homeVolumeOf?: string | null
   planMode?: boolean
   inPlanMode?: boolean
   heavySubagents?: boolean

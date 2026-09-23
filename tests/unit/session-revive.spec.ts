@@ -109,4 +109,16 @@ describe('a crashed session is restarted by the app', () => {
     expect(manager.runsInContainer(revived)).toBe(false)
     expect(repos.sessions.byId(revived)?.bypassPermissions).toBe(false)
   })
+
+  it('brings a session back in the mode it was started in, not the project default', async () => {
+    const { repos, project, manager } = setup()
+    repos.projects.setSessionMode(project.id, 'acceptEdits')
+    await manager.startSession(project.id, false, 'plan')
+
+    crashLoops()
+
+    await vi.waitFor(() => expect(manager.liveSessionIds()).toHaveLength(1))
+    const revived = manager.liveSessionIds()[0]
+    expect(repos.sessions.byId(revived)?.planMode).toBe(true)
+  })
 })

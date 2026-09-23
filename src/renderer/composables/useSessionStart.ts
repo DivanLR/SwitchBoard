@@ -25,16 +25,19 @@ export function useSessionStart(opts: {
       void projects.setUseContainers(project().id, on)
     },
   })
-  const containerForced = computed(() => startMode.value === 'bypass')
-  const containerOn = computed(() => containerForced.value || runInContainer.value)
+  const containerForced = computed(() => startMode.value === 'bypass' || resumeSession.value)
+  const containerOn = computed(() =>
+    resumeSession.value
+      ? endedSession()?.containerised === true
+      : startMode.value === 'bypass' || runInContainer.value,
+  )
   const startError = ref<string | null>(null)
 
   const canResume = computed(() => !!endedSession()?.sdkSessionId)
 
   const modeChoices = computed(() => {
-    if (!resumeSession.value) return SESSION_MODES
-    const wasBypass = endedSession()?.bypassPermissions === true
-    return SESSION_MODES.filter((m) => (m.value === 'bypass') === wasBypass)
+    if (!resumeSession.value || endedSession()?.containerised) return SESSION_MODES
+    return SESSION_MODES.filter((m) => m.value !== 'bypass')
   })
 
   const startModeLabel = computed(
