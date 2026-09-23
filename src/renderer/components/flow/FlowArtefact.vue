@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { FlowRun, FlowStageRecord } from '@shared/domain'
+import type { FlowReviewSeverity, FlowRun, FlowStageRecord } from '@shared/domain'
 import { useFlowStore } from '@renderer/stores/flow'
 import MarkdownText from '@renderer/components/MarkdownText.vue'
 import Icon from '@renderer/components/Icon.vue'
@@ -14,6 +14,13 @@ const postman = ref<{ path: string | null; content: string } | null | 'missing'>
 const showTasks = ref(false)
 
 const TASK_LINE = /^\s*-\s*\[( |x|X)\]\s*(?:T\d+\s*)?(.*)$/
+
+const SEVERITY_CHIP: Record<FlowReviewSeverity, string> = { must_fix: 'high', should_fix: 'medium', nit: 'low' }
+const SEVERITY_LABEL: Record<FlowReviewSeverity, string> = {
+  must_fix: 'must fix',
+  should_fix: 'should fix',
+  nit: 'nit',
+}
 
 const taskItems = computed(() => {
   if (!tasksText.value) return []
@@ -31,34 +38,40 @@ const progress = computed(() => {
   return { done: report.tasksDone ?? 0, total: report.tasksTotal }
 })
 
+function viewKey(): string {
+  return `${props.run.id}/${props.stage.stage}`
+}
+
 async function loadMarkdown(kind: 'spec' | 'plan'): Promise<void> {
-  markdown.value = null
+  const key = viewKey()
   const result = await flow.artefact(props.run.id, props.stage.stage, kind)
-  markdown.value = result?.content ?? null
+  if (key === viewKey()) markdown.value = result?.content ?? null
 }
 
 async function loadTasks(): Promise<void> {
-  tasksText.value = null
+  const key = viewKey()
   const result = await flow.artefact(props.run.id, props.stage.stage, 'tasks')
-  tasksText.value = result?.content ?? null
+  if (key === viewKey()) tasksText.value = result?.content ?? null
 }
 
 async function loadPostman(): Promise<void> {
-  postman.value = null
+  const key = viewKey()
   const result = await flow.artefact(props.run.id, props.stage.stage, 'postman')
-  postman.value = result ?? 'missing'
+  if (key === viewKey()) postman.value = result ?? 'missing'
 }
 
 watch(
-  () => [props.run.id, props.stage.stage] as const,
-  ([, stage]) => {
-    showTasks.value = false
-    tasksText.value = null
-    postman.value = null
+  [() => props.run.id, () => props.stage.stage, () => props.stage.status],
+  ([runId, stage], previous) => {
+    if (!previous || previous[0] !== runId || previous[1] !== stage) {
+      showTasks.value = false
+      markdown.value = null
+      tasksText.value = null
+      postman.value = null
+    }
     if (stage === 'spec') void loadMarkdown('spec')
     else if (stage === 'plan') void loadMarkdown('plan')
-    else if (stage === 'build') void loadTasks()
-    else markdown.value = null
+    if (stage === 'build' || (stage === 'plan' && showTasks.value)) void loadTasks()
   },
   { immediate: true },
 )
@@ -72,8 +85,8 @@ function toggleTasks(): void {
 <template>
   <div class="flow-artefact-view" data-testid="flow-artefact">
     <template v-if="stage.stage === 'spec' || stage.stage === 'plan'">
-      <MarkdownText v-if="markdown" :text="markdown" data-testid="flow-artefact-markdown" />
-      <div v-else class="ui-empty-sub">No spec.md written yet.</div>
+      <MarkdownText v-if="markdown" :text="markdown" class="flow-doc" data-testid="flow-artefact-markdown" />
+      <div v-else class="ui-empty-line">No {{ stage.stage === 'spec' ? 'spec.md' : 'plan.md' }} written yet.</div>
       <template v-if="stage.stage === 'plan'">
         <div v-if="progress" class="flow-progress" data-testid="flow-tasks-progress">
           <div class="flow-progress-bar">
@@ -81,7 +94,14 @@ function toggleTasks(): void {
           </div>
           <span class="ui-chip">{{ progress.done }} / {{ progress.total }} tasks</span>
         </div>
-        <button type="button" class="btn-outline" data-testid="flow-tasks-toggle" @click="toggleTasks()">
+        <button
+          type="button"
+          class="btn-quiet fa-toggle"
+          data-testid="flow-tasks-toggle"
+          :aria-expanded="showTasks"
+          @click="toggleTasks()"
+        >
+          <Icon :name="showTasks ? 'minus' : 'plus'" :size="11" />
           {{ showTasks ? 'Hide tasks' : 'View tasks' }}
         </button>
         <ul v-if="showTasks && taskItems.length > 0" class="flow-tasks" data-testid="flow-tasks-checklist">
@@ -106,7 +126,7 @@ function toggleTasks(): void {
           {{ task.label }}
         </li>
       </ul>
-      <div v-else class="ui-empty-sub">No tasks.md yet.</div>
+      <div v-else class="ui-empty-line">No tasks.md yet.</div>
     </template>
 
     <template v-else-if="stage.stage === 'test'">
@@ -119,8 +139,8 @@ function toggleTasks(): void {
           <span class="fg-detail">{{ suite.detail }}</span>
         </div>
       </div>
-      <div v-else class="ui-empty-sub">No test report yet.</div>
-      <button type="button" class="btn-outline" data-testid="flow-postman-load" @click="loadPostman()">
+      <div v-else class="ui-empty-line">No test report yet.</div>
+      <button type="button" class="btn-quiet fa-toggle" data-testid="flow-postman-load" @click="loadPostman()">
         View Postman collection
       </button>
       <pre v-if="postman && postman !== 'missing'" class="flow-code" data-testid="flow-postman-content">{{ postman.content }}</pre>
@@ -130,31 +150,55 @@ function toggleTasks(): void {
     </template>
 
     <template v-else-if="stage.stage === 'review'">
-      <div v-if="stage.report?.verdict" class="ui-chip" data-testid="flow-review-verdict">
-        verdict: {{ stage.report.verdict }}
-      </div>
-      <table v-if="stage.report?.findings?.length" class="flow-findings-table" data-testid="flow-findings">
-        <tbody>
-          <tr v-for="(finding, at) in stage.report.findings" :key="at">
-            <td><span class="chip-risk" :class="finding.severity === 'must_fix' ? 'high' : finding.severity === 'should_fix' ? 'medium' : 'low'">{{ finding.severity }}</span></td>
-            <td>{{ finding.what }}</td>
-            <td class="mono fg-detail">{{ finding.file }}{{ finding.line ? `:${finding.line}` : '' }}</td>
-          </tr>
-        </tbody>
-      </table>
-      <ul v-if="stage.report?.unmet?.length" class="fi-acceptance" data-testid="flow-unmet">
-        <li v-for="line in stage.report.unmet" :key="line">{{ line }}</li>
-      </ul>
-      <div v-if="!stage.report?.findings?.length && !stage.report?.unmet?.length" class="ui-empty-sub">
-        No findings and every acceptance criterion is met.
-      </div>
+      <template v-if="stage.report">
+        <div v-if="stage.report.verdict" class="fa-line">
+          <span
+            class="ui-chip"
+            :class="{ 'is-warn': stage.report.verdict === 'needs_fixes' }"
+            data-testid="flow-review-verdict"
+          >
+            {{ stage.report.verdict === 'needs_fixes' ? 'Needs fixes' : 'Ready' }}
+          </span>
+        </div>
+        <table v-if="stage.report.findings?.length" class="flow-findings-table" data-testid="flow-findings">
+          <tbody>
+            <tr v-for="(finding, at) in stage.report.findings" :key="at">
+              <td>
+                <span class="chip-risk" :class="SEVERITY_CHIP[finding.severity]">{{ SEVERITY_LABEL[finding.severity] }}</span>
+              </td>
+              <td>{{ finding.what }}</td>
+              <td class="mono fg-where">{{ finding.file }}{{ finding.line ? `:${finding.line}` : '' }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-if="stage.report.unmet?.length" class="fa-unmet" data-testid="flow-unmet">
+          <span class="fa-label">Unmet acceptance criteria</span>
+          <ul class="fi-acceptance">
+            <li v-for="line in stage.report.unmet" :key="line">{{ line }}</li>
+          </ul>
+        </div>
+        <div v-if="!stage.report.findings?.length && !stage.report.unmet?.length" class="ui-empty-line">
+          No findings, and every acceptance criterion is met.
+        </div>
+      </template>
+      <div v-else class="ui-empty-line">No review yet.</div>
     </template>
 
     <template v-else-if="stage.stage === 'ship'">
-      <a v-if="stage.report?.prUrl" :href="stage.report.prUrl" class="ui-chip" data-testid="flow-pr-link">
-        <Icon name="external" :size="11" /> PR {{ stage.report.prId }}
-      </a>
-      <div v-else class="ui-empty-sub">No pull request yet.</div>
+      <div v-if="stage.report?.prUrl" class="fa-line">
+        <span class="fa-label">Pull request</span>
+        <button
+          type="button"
+          class="ui-chip fa-pr"
+          data-testid="flow-pr-link"
+          :title="stage.report.prUrl"
+          @click="flow.openPullRequest(run.id)"
+        >
+          <Icon name="external" :size="11" />
+          PR {{ stage.report.prId ?? '' }}
+        </button>
+      </div>
+      <div v-else class="ui-empty-line">No pull request yet.</div>
     </template>
   </div>
 </template>
@@ -163,18 +207,54 @@ function toggleTasks(): void {
 .flow-artefact-view {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--sp-3);
 }
 
-.flow-artefact-view > .ui-chip,
-.flow-artefact-view > .btn-outline {
+.flow-doc {
+  max-height: 420px;
+  overflow-y: auto;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-row);
+}
+
+.fa-toggle {
   align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-meta);
+  padding: 4px 10px;
+}
+
+.fa-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+
+.fa-label {
+  font: var(--w-em) var(--fs-meta) / 1.2 var(--sans);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--text-meta);
+}
+
+.fa-pr {
+  color: var(--green);
+}
+
+.fa-unmet {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
 }
 
 .flow-progress {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--sp-3);
 }
 
 .flow-progress-bar {
@@ -241,31 +321,43 @@ function toggleTasks(): void {
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
-  font-size: var(--fs-meta);
+  font-size: var(--fs-ui);
 }
 
 .flow-findings-table td {
-  padding: 4px 8px 4px 0;
+  padding: var(--sp-2) var(--sp-3) var(--sp-2) 0;
   vertical-align: top;
+  line-height: 1.5;
   color: var(--text-body);
+  border-top: 1px solid var(--border-soft);
+}
+
+.flow-findings-table tr:first-child td {
+  border-top: none;
 }
 
 .flow-findings-table td:first-child {
-  width: 76px;
+  width: 92px;
 }
 
 .flow-findings-table td:last-child {
-  width: 240px;
+  width: 34%;
   padding-right: 0;
   text-align: right;
+}
+
+.fg-where {
+  font-size: var(--fs-meta);
   color: var(--text-meta);
+  overflow-wrap: anywhere;
 }
 
 .fi-acceptance {
   margin: 0;
   padding-left: 18px;
-  font-size: var(--fs-micro);
-  color: var(--text-meta);
+  font-size: var(--fs-ui);
+  line-height: 1.5;
+  color: var(--text-body);
 }
 
 .flow-code {

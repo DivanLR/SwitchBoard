@@ -23,29 +23,43 @@ const runs = computed<FlowRun[]>(() =>
   state.projectId ? (state.runsByProject[state.projectId] ?? []) : [],
 )
 
+const stagesByRun = computed(() => {
+  const byRun = new Map<string, FlowStageRecord[]>()
+  const stages = state.projectId ? (state.stagesByProject[state.projectId] ?? []) : []
+  for (const stage of stages) {
+    const list = byRun.get(stage.runId)
+    if (list) list.push(stage)
+    else byRun.set(stage.runId, [stage])
+  }
+  return byRun
+})
+
 const store = reactive({
   ...toRefs(state),
   runs,
 
-  // A record index, not a scan: a getter is enough and does not need caching.
   runsFor(projectId: string): FlowRun[] {
     return state.runsByProject[projectId] ?? []
   },
 
-  // Same: filtering one project's own small stage list, not building anything.
   stagesFor(runId: string): FlowStageRecord[] {
-    const projectId = state.projectId
-    if (!projectId) return []
-    return (state.stagesByProject[projectId] ?? []).filter((stage) => stage.runId === runId)
+    return stagesByRun.value.get(runId) ?? []
   },
 
   async load(projectId: string): Promise<void> {
     const token = ++requestToken
     state.projectId = projectId
-    const snapshot = await invoke('flow.list', { projectId })
-    if (token !== requestToken) return
-    state.runsByProject[projectId] = snapshot.runs
-    state.stagesByProject[projectId] = snapshot.stages
+    state.error = null
+    try {
+      const snapshot = await invoke('flow.list', { projectId })
+      if (token !== requestToken) return
+      state.runsByProject[projectId] = snapshot.runs
+      state.stagesByProject[projectId] = snapshot.stages
+    } catch (error) {
+      if (token !== requestToken) return
+      state.error = errorMessage(error)
+      state.runsByProject[projectId] ??= []
+    }
   },
 
   applyPush(projectId: string, runs: FlowRun[], stages: FlowStageRecord[]): void {
@@ -71,7 +85,7 @@ const store = reactive({
   },
 
   async loadExistingSpecs(projectId: string): Promise<void> {
-    state.existingSpecs = await invoke('flow.existingSpecs', { projectId })
+    state.existingSpecs = await invoke('flow.existingSpecs', { projectId }).catch(() => [])
   },
 
   async detectStacks(projectId: string): Promise<void> {
@@ -134,6 +148,10 @@ const store = reactive({
     return this.act('removeWorktree', async () =>
       this.applySnapshot(await invoke('flow.removeWorktree', { runId, force })),
     )
+  },
+
+  async openPullRequest(runId: string): Promise<boolean> {
+    return this.act('openPullRequest', async () => invoke('flow.openPullRequest', { runId }))
   },
 
   async artefact(
