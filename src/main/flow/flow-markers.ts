@@ -115,6 +115,17 @@ export function parseFlowMarker(text: string): FlowMarker | null {
   return null
 }
 
+const PULL_REQUEST_HOSTS: ReadonlySet<string> = new Set(['github.com', 'dev.azure.com'])
+
+export function allowedPullRequestUrl(raw: string | null, originHost: string | null): string | null {
+  if (!raw || !URL.canParse(raw)) return null
+  const url = new URL(raw)
+  if (url.protocol !== 'https:' || url.username !== '' || url.password !== '') return null
+  const host = url.hostname.toLowerCase()
+  const allowed = PULL_REQUEST_HOSTS.has(host) || host.endsWith('.visualstudio.com') || host === originHost
+  return allowed ? url.href : null
+}
+
 export function flowMarkerBroken(text: string): boolean {
   return markerTail(text, FLOW_MARKER) !== null && parseFlowMarker(text) === null
 }

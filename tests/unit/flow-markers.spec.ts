@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { flowMarkerBroken, parseFlowMarker } from '@main/flow/flow-markers'
+import { allowedPullRequestUrl, flowMarkerBroken, parseFlowMarker } from '@main/flow/flow-markers'
 import { clarifyPrompt, featuresPrompt, planSteps, specifyPrompt } from '@main/flow/flow-prompts'
 
 function line(json: unknown): string {
@@ -107,6 +107,21 @@ describe('malformed hand-backs', () => {
     const marker = parseFlowMarker(text)
     if (marker?.kind !== 'stage') return
     expect(marker.summary).toBe('second')
+  })
+})
+
+describe('the pull request link a ship marker reports', () => {
+  it('is kept only as https on GitHub, Azure DevOps or the origin host, without credentials', () => {
+    expect(allowedPullRequestUrl('https://github.com/o/r/pull/7', null)).toBe('https://github.com/o/r/pull/7')
+    expect(allowedPullRequestUrl('https://dev.azure.com/o/p/_git/r/pullrequest/9', null)).not.toBeNull()
+    expect(allowedPullRequestUrl('https://contoso.visualstudio.com/p/_git/r/pullrequest/9', null)).not.toBeNull()
+    expect(allowedPullRequestUrl('https://git.corp.example/o/r/pulls/3', 'git.corp.example')).not.toBeNull()
+    expect(allowedPullRequestUrl('https://git.corp.example/o/r/pulls/3', null)).toBeNull()
+    expect(allowedPullRequestUrl('http://github.com/o/r/pull/7', null)).toBeNull()
+    expect(allowedPullRequestUrl('https://token@github.com/o/r/pull/7', null)).toBeNull()
+    expect(allowedPullRequestUrl('https://github.com.evil.example/o/r/pull/7', null)).toBeNull()
+    expect(allowedPullRequestUrl('javascript:alert(1)', null)).toBeNull()
+    expect(allowedPullRequestUrl(null, null)).toBeNull()
   })
 })
 

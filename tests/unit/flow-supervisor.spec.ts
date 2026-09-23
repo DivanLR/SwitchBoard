@@ -27,6 +27,7 @@ function fakeGit(): FlowGit {
     branch: vi.fn<FlowGit['branch']>(async () => 'main'),
     root: vi.fn((projectPath: string, override?: string | null) => override || join(projectPath, '.worktrees')),
     resolves: vi.fn(async () => true),
+    origin: vi.fn<FlowGit['origin']>(async () => 'git.example.internal'),
   }
 }
 
@@ -316,6 +317,135 @@ describe('a stage marker resolving the stage', () => {
     const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
     h.flow.onFlowMarker('stranger', specMarker())
     expect(h.repos.flowStages.get(run.id, 'spec')?.status).toBe('running')
+  })
+})
+
+describe('actions racing each other', () => {
+  function slowStop(h: ReturnType<typeof setup>) {
+    h.manager.stopSession.mockImplementation(async (sessionId: string) => {
+      h.stopped.push(sessionId)
+      await new Promise((resolve) => setTimeout(resolve, 30))
+    })
+  }
+
+  it('refuses a second Skip while the first is still stopping the session', async () => {
+    const h = setup()
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+    slowStop(h)
+    const first = h.flow.skip(run.id)
+    await expect(h.flow.skip(run.id)).rejects.toMatchObject({ code: 'RULE_NOT_ALLOWED' })
+    await first
+    const stages = h.repos.flowStages.listForRun(run.id)
+    expect(stages.filter((s) => s.status === 'running').map((s) => s.stage)).toEqual(['plan'])
+    expect(h.manager.startSession).toHaveBeenCalledTimes(2)
+  })
+
+  it('starts nothing once Cancel lands while a Skip is still stopping the session', async () => {
+    const h = setup()
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+    slowStop(h)
+    const skipping = h.flow.skip(run.id)
+    await h.flow.cancel(run.id)
+    await skipping
+    const after = h.repos.flowRuns.byId(run.id)!
+    expect(after.status).toBe('cancelled')
+    expect(h.repos.flowStages.listForRun(run.id).filter((s) => s.status === 'running')).toEqual([])
+    expect(h.manager.startSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('ends a stage session that finished starting after the run was cancelled', async () => {
+    const h = setup()
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+    h.flow.onFlowMarker(sessionOf(h, run.id), specMarker())
+    let release: () => void = () => {}
+    h.manager.startSession.mockImplementationOnce(
+      () => new Promise((resolve) => (release = () => resolve({ id: 'late-session' }))),
+    )
+    const approving = h.flow.approve(run.id)
+    await vi.waitFor(() => expect(h.manager.startSession).toHaveBeenCalledTimes(2))
+    await h.flow.cancel(run.id)
+    release()
+    await approving
+    expect(h.repos.flowStages.get(run.id, 'plan')?.status).toBe('pending')
+    expect(h.ended).toContain('late-session')
+    expect(h.sent.filter((send) => send.sessionId === 'late-session')).toEqual([])
+  })
+})
+
+describe('autopilot', () => {
+  async function toStage(h: ReturnType<typeof setup>, stop: FlowStage) {
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: true, autoShip: true })
+    for (const stage of FLOW_STAGES.slice(0, FLOW_STAGES.indexOf(stop))) {
+      await vi.waitFor(() => expect(h.repos.flowStages.get(run.id, stage)?.status).toBe('running'))
+      h.flow.onFlowMarker(sessionOf(h, run.id, stage), specMarker({ stage }))
+    }
+    await vi.waitFor(() => expect(h.repos.flowStages.get(run.id, stop)?.status).toBe('running'))
+    return run
+  }
+
+  it('holds a build that reports fewer tasks done than planned', async () => {
+    const h = setup()
+    const run = await toStage(h, 'build')
+    h.flow.onFlowMarker(sessionOf(h, run.id), specMarker({ stage: 'build', tasksDone: 6, tasksTotal: 14 }))
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(h.repos.flowRuns.byId(run.id)?.stage).toBe('build')
+    expect(h.repos.flowStages.get(run.id, 'build')?.status).toBe('review')
+  })
+
+  it('treats a review without a clean ready verdict as needing fixes, and never ships it', async () => {
+    const h = setup()
+    const run = await toStage(h, 'review')
+    const before = h.repos.flowStages.get(run.id, 'review')!.attempts
+    h.flow.onFlowMarker(
+      sessionOf(h, run.id),
+      specMarker({ stage: 'review', verdict: null, findings: [{ severity: 'must_fix', file: 'A.cs', line: 3, what: 'SQL injection' }] }),
+    )
+    await vi.waitFor(() => expect(h.repos.flowStages.get(run.id, 'review')?.attempts).toBe(before + 1))
+    expect(h.repos.flowStages.get(run.id, 'ship')?.status).toBe('pending')
+
+    h.flow.onFlowMarker(sessionOf(h, run.id), specMarker({ stage: 'review', verdict: 'ready', unmet: ['Guests can pay.'] }))
+    expect(h.repos.flowStages.get(run.id, 'review')?.report?.verdict).toBe('needs_fixes')
+  })
+
+  it('acts on a stage already waiting for approval when it is switched on', async () => {
+    const h = setup()
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+    h.flow.onFlowMarker(sessionOf(h, run.id), specMarker())
+    expect(h.repos.flowStages.get(run.id, 'spec')?.status).toBe('review')
+    h.flow.setAutopilot(run.id, true)
+    await vi.waitFor(() => expect(h.repos.flowStages.get(run.id, 'plan')?.status).toBe('running'))
+  })
+})
+
+describe('the pull request link', () => {
+  async function toShip(h: ReturnType<typeof setup>) {
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+    for (const stage of ['spec', 'plan', 'build', 'clean', 'test', 'review'] as const) {
+      h.flow.onFlowMarker(sessionOf(h, run.id, stage), specMarker({ stage, verdict: stage === 'review' ? 'ready' : null }))
+      await h.flow.approve(run.id)
+    }
+    await h.flow.ship(run.id)
+    return run
+  }
+
+  it('keeps a GitHub, Azure DevOps or origin-host https link and drops any other', async () => {
+    const h = setup()
+    const run = await toShip(h)
+    h.flow.onFlowMarker(sessionOf(h, run.id), specMarker({ stage: 'ship', prUrl: 'https://git.example.internal/x/y/pulls/3', prId: '3' }))
+    expect(h.repos.flowRuns.byId(run.id)?.prUrl).toBe('https://git.example.internal/x/y/pulls/3')
+    expect(await h.flow.pullRequestUrl(run.id)).toBe('https://git.example.internal/x/y/pulls/3')
+
+    const other = await toShip(h)
+    h.flow.onFlowMarker(sessionOf(h, other.id), specMarker({ stage: 'ship', prUrl: 'https://github.com.evil.example/pr/1', prId: '1' }))
+    expect(h.repos.flowRuns.byId(other.id)?.prUrl).toBeNull()
+    expect(h.repos.flowStages.get(other.id, 'ship')?.summary).toContain('not kept')
+  })
+
+  it('refuses to open a stored link that is not allowed', async () => {
+    const h = setup()
+    const run = await toShip(h)
+    h.repos.flowRuns.update(run.id, { prUrl: 'https://user:pw@github.com/o/r/pull/1' })
+    await expect(h.flow.pullRequestUrl(run.id)).rejects.toMatchObject({ code: 'INVALID_PATH' })
   })
 })
 

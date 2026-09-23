@@ -9,6 +9,7 @@ import {
   createWorktree,
   currentBranch,
   listWorktrees,
+  remoteHost,
   removeWorktree,
   resolvesToCommit,
   slugify,
@@ -97,6 +98,14 @@ describe('branch and path naming', () => {
     expect(await resolvesToCommit(root, '--no-checkout')).toBe(false)
     expect(await resolvesToCommit(root, 'main')).toBe(true)
     expect(await resolvesToCommit(root, 'no-such-branch')).toBe(false)
+  })
+
+  it('reads the host of an https, ssh or scp-style remote', () => {
+    expect(remoteHost('https://github.com/o/r.git\n')).toBe('github.com')
+    expect(remoteHost('https://org@dev.azure.com/org/p/_git/r')).toBe('dev.azure.com')
+    expect(remoteHost('ssh://git@ssh.dev.azure.com/v3/org/p/r')).toBe('ssh.dev.azure.com')
+    expect(remoteHost('git@GitHub.com:o/r.git')).toBe('github.com')
+    expect(remoteHost('C:\\repos\\local')).toBeNull()
   })
 
   it('reports no branch for a detached checkout', async () => {

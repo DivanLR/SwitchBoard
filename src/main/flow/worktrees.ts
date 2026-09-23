@@ -58,6 +58,20 @@ export async function resolvesToCommit(repoRoot: string, ref: string): Promise<b
   }
 }
 
+export function remoteHost(remote: string): string | null {
+  const url = remote.trim()
+  if (URL.canParse(url)) return new URL(url).hostname.toLowerCase() || null
+  return /^[^@\s/]+@([^:\s/]+):/.exec(url)?.[1]?.toLowerCase() ?? null
+}
+
+export async function originHost(repoRoot: string): Promise<string | null> {
+  try {
+    return remoteHost(await git(repoRoot, ['remote', 'get-url', 'origin']))
+  } catch {
+    return null
+  }
+}
+
 async function branchTaken(repoRoot: string, branch: string): Promise<boolean> {
   const refs = await git(repoRoot, [
     'for-each-ref',
