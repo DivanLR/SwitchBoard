@@ -9,10 +9,7 @@ export const MATCHER_KIND_LABEL: Record<string, string> = {
   tool_only: 'Any use of this tool',
 }
 
-export function useAllowedRules(opts: {
-  projectId: () => string | undefined
-  active: () => boolean
-}) {
+export function useAllowedRules(opts: { projectId: () => string | undefined }) {
   const inbox = useInboxStore()
 
   const allowedRules = ref<PermissionRule[]>([])
@@ -26,13 +23,7 @@ export function useAllowedRules(opts: {
     if (ticket === load) allowedRules.value = rules
   }
 
-  watch(
-    [opts.projectId, opts.active] as [() => string | undefined, () => boolean],
-    () => {
-      if (opts.active()) void loadAllowedRules()
-    },
-    { immediate: true },
-  )
+  watch(opts.projectId, () => void loadAllowedRules(), { immediate: true })
 
   async function setRuleMode(rule: PermissionRule, mode: 'ask' | 'auto'): Promise<void> {
     if (mode === 'ask' && rule.revokedAt === null) {
