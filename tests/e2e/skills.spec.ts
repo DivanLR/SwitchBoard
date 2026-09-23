@@ -186,3 +186,73 @@ test('a skill of a name already switched on is skipped, and the skip says why', 
   await expect(skipped).toContainText('code-review')
   await expect(skipped).toContainText('already imported')
 })
+
+async function openSkillsSection(page: Page, scenario: MockScenario): Promise<void> {
+  await page.addInitScript(installMockHost, scenario)
+  await page.goto('/')
+  await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
+  await page.getByTestId('tab-skills').click()
+  await expect(page.getByTestId('skills-view')).toBeVisible()
+}
+
+const ON_SOURCE = FOUND.map((s) => ({ ...s, sourceUrl: 'https://github.com/o/r' }))
+
+test('the Skills tab sits beside Session, Tests, Diff and Diagrams', async ({ page }) => {
+  await openSkillsSection(page, scenarioWith(ON_SOURCE))
+  const tabs = page.locator('.main-tabs .ui-tab')
+  await expect(tabs).toHaveText(['Session', 'Tests', 'Diff', 'Diagrams', 'Skills'])
+  await expect(page.getByTestId('tab-skills')).toHaveClass(/sel/)
+})
+
+test('a skill switched off in Settings leaves the section immediately', async ({ page }) => {
+  await openSkillsSection(page, scenarioWith(ON_SOURCE))
+  await expect(page.getByTestId('skill-run-code-review')).toBeVisible()
+  await expect(page.getByTestId('skill-run-write-tests')).toBeVisible()
+
+  await page.getByTestId('skills-manage').click()
+  const panel = page.getByTestId('settings-panel')
+  await expect(panel.getByTestId('skill-row-write-tests')).toBeVisible()
+  await panel.getByTestId('skill-toggle-write-tests').click()
+  await expect(panel.getByTestId('skill-toggle-write-tests')).toHaveAttribute('aria-checked', 'false')
+  await panel.getByTestId('settings-close').click()
+
+  await expect(page.getByTestId('skill-run-code-review')).toBeVisible()
+  await expect(page.getByTestId('skill-run-write-tests')).toHaveCount(0)
+})
+
+test('running a skill sends its slash command to the Skills section session', async ({ page }) => {
+  await openSkillsSection(page, scenarioWith(ON_SOURCE))
+  await page.getByTestId('skill-run-code-review').click()
+
+  const sends = async () => page.evaluate(() => window.__mock.state().sends)
+  await expect.poll(async () => (await sends()).at(-1)?.text).toBe('/code-review')
+  expect((await sends()).at(-1)?.sessionId).not.toBe('s-alpha')
+  await expect(page.getByTestId('skills-view').getByTestId('mini-terminal')).toBeVisible()
+})
+
+test('a skill can be given an argument, the way a slash command takes one', async ({ page }) => {
+  await openSkillsSection(page, scenarioWith(ON_SOURCE))
+  await page.getByTestId('skill-arg-code-review').click()
+  await page.getByTestId('skill-arg-input-code-review').fill('only the diff store')
+  await page.getByTestId('skill-arg-input-code-review').press('Enter')
+
+  await expect
+    .poll(async () => (await page.evaluate(() => window.__mock.state().sends)).at(-1)?.text)
+    .toBe('/code-review only the diff store')
+})
+
+test('with nothing imported the section says so', async ({ page }) => {
+  await openSkillsSection(page, twoProjectScenario())
+  await expect(page.getByTestId('skills-empty')).toBeVisible()
+  await expect(page.getByTestId('skills-all-off')).toHaveCount(0)
+})
+
+test('with every skill switched off the section says that instead, and opens Settings to fix it', async ({
+  page,
+}) => {
+  await openSkillsSection(page, scenarioWith(ON_SOURCE.map((s) => ({ ...s, enabled: false }))))
+  await expect(page.getByTestId('skills-all-off')).toContainText('2 imported skills are switched off')
+  await expect(page.getByTestId('skills-empty')).toHaveCount(0)
+  await page.getByTestId('skills-manage').click()
+  await expect(page.getByTestId('settings-panel').getByTestId('skill-row-code-review')).toBeVisible()
+})

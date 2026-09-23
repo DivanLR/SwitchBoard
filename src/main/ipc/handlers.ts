@@ -456,6 +456,21 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       await manager.reloadPlugins()
       return listSkills()
     },
+    'skills.run': async (req) => {
+      requireProject(req.projectId)
+      const skill = (await listSkills()).find((s) => s.name === req.name)
+      if (!skill) throw { code: 'NOT_FOUND', message: 'No such skill.' } satisfies IpcError
+      if (!skill.enabled) {
+        throw {
+          code: 'RULE_NOT_ALLOWED',
+          message: 'That skill is switched off. Turn it on in Settings, Skills, then run it.',
+        } satisfies IpcError
+      }
+      const session = await manager.backgroundSessionFor(req.projectId, 'skills')
+      const argument = req.argument?.trim()
+      manager.sendMessage(session.id, argument ? `/${skill.name} ${argument}` : `/${skill.name}`)
+      return { sessionId: session.id }
+    },
     'diff.list': (req) => {
       const project = repos.projects.byId(req.projectId)
       if (!project) throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError

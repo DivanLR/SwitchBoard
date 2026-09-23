@@ -439,6 +439,7 @@ export interface Settings {
   flowWorktreeRoot: string
   keepCurrent: boolean
   keepCurrentLast: KeepCurrentReport | null
+  favouriteSkills: string[]
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -471,6 +472,7 @@ export const DEFAULT_SETTINGS: Settings = {
   diagramEngine: 'diagram-design',
   keepCurrent: true,
   keepCurrentLast: null,
+  favouriteSkills: [],
 }
 
 export interface ProjectCommand {
@@ -823,6 +825,7 @@ export type SectionKind =
   | 'tests'
   | 'diff'
   | 'diagram'
+  | 'skills'
   | 'flow'
 
 export function sessionName(
@@ -856,6 +859,7 @@ const SECTION_LABELS: Record<SectionKind, string> = {
   tests: 'Tests',
   diff: 'Diff',
   diagram: 'Diagram',
+  skills: 'Skills',
   flow: 'Flow',
 }
 

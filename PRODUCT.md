@@ -213,8 +213,10 @@ to import their own skills - its a feature allowing people to use their own
 stuff". Settings, Skills imports from any GitHub skills folder, groups the
 imported skills by source with an all on or all off switch per source, and
 switches or removes each one. An imported skill is a slash command in every
-session and appears in the composer suggestions, so it has no section of its
-own.
+session and appears in the composer suggestions. On the owner's review of the
+redesign the Skills section tab came back beside Session, Tests, Diff and
+Diagrams: it runs a switched on skill in the Skills section's own background
+session, with an optional argument, and starred favourites sit at the top.
 
 This supersedes the constraint recorded on 2026-08-13 that "all six sections"
 (Session, Specs, Tests, Diff, Cleanup, Diagrams) must survive. The sections now

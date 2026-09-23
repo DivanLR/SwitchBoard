@@ -109,7 +109,11 @@ describe('sessionName', () => {
     expect(sessionName('s1', { kinds: { s1: 'tests' } }, 'main')).toBe('Tests - main')
   })
 
-  it.each(['spec', 'cleanup', 'skills', 'security'])(
+  it('names a Skills section session after its section', () => {
+    expect(sessionName('s1', { kinds: { s1: 'skills' } }, 'main')).toBe('Skills - main')
+  })
+
+  it.each(['spec', 'cleanup', 'security'])(
     'gives no name to a session from the retired %s section, rather than "undefined"',
     (retired) => {
       const kinds = { s1: retired } as never

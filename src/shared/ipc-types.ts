@@ -200,6 +200,7 @@ export interface InvokeMap {
   'skills.import': { req: { url: string }; res: SkillImportResult }
   'skills.setEnabled': { req: { name: string; enabled: boolean }; res: CustomSkill[] }
   'skills.remove': { req: { name: string }; res: CustomSkill[] }
+  'skills.run': { req: { projectId: string; name: string; argument?: string }; res: { sessionId: string } }
   'diff.list': { req: { projectId: string }; res: DiffListResult }
   'diff.file': { req: { projectId: string; path: string }; res: FileDiffContent | null }
   'diff.apply': {

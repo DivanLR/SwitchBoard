@@ -759,6 +759,19 @@ export function installMockHost(scenario: MockScenario): void {
       customSkills.splice(at, 1)
       return customSkills.map((s) => ({ ...s }))
     },
+    'skills.run': async (req) => {
+      const skill = customSkills.find((s) => s.name === String(req.name))
+      if (!skill) throw { code: 'NOT_FOUND', message: 'No such skill.' }
+      if (!skill.enabled) {
+        throw { code: 'RULE_NOT_ALLOWED', message: 'That skill is switched off. Turn it on in Settings, Skills, then run it.' }
+      }
+      const session = await sectionSession(String(req.projectId), 'skills')
+      const argument = typeof req.argument === 'string' ? req.argument.trim() : ''
+      const text = argument ? `/${skill.name} ${argument}` : `/${skill.name}`
+      sends.push({ sessionId: session.id, text })
+      appendEvent(session.id, 'prompt', { text, pending: false })
+      return { sessionId: session.id }
+    },
     'sessions.rename': (req) => {
       const session = sessions.get(String(req.sessionId))
       if (!session) throw { code: 'NOT_FOUND', message: 'Session not found' }
