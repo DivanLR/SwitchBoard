@@ -30,6 +30,7 @@ import type { Repositories } from '@main/store/repositories'
 import type { SessionManager } from '@main/sessions/session-manager'
 import { installPlugin } from '@main/sessions/plugin-install'
 import type { PermissionBroker } from '@main/inbox/permission-broker'
+import type { ElicitationBroker } from '@main/inbox/elicitation-broker'
 import {
   addProjectRef,
   registerProject,
@@ -144,6 +145,7 @@ interface HandlerDeps {
   skillsStagingRoot: string
   flow: FlowSupervisor
   broker: PermissionBroker
+  elicitations: ElicitationBroker
   getWindow: () => BrowserWindow | null
   dbProjectId: string
   ptyHost: PtyHost
@@ -200,7 +202,7 @@ const ALLOWED_PLUGINS: ReadonlySet<string> = new Set([
 ])
 
 export function registerIpcHandlers(deps: HandlerDeps): void {
-  const { repos, manager, broker, dbProjectId, skillsStagingRoot, ptyHost, flow } = deps
+  const { repos, manager, broker, elicitations, dbProjectId, skillsStagingRoot, ptyHost, flow } = deps
 
   const requireProject = (projectId: string): Project => {
     const project = repos.projects.byId(projectId)
@@ -792,6 +794,9 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'inbox.approveAlways': (req) => broker.approveAlways(req.requestId, req.confirmHighRisk ?? false),
     'inbox.approveAllForProject': (req) =>
       broker.approveAllForProject(req.projectId, req.includeHighRisk ?? false),
+    'elicitations.pending': () => elicitations.pending(),
+    'elicitations.respond': (req) => elicitations.respond(req.id, req.action, req.values),
+    'elicitations.openAgain': (req) => elicitations.openAgain(req.id),
     'inbox.history': (req) => repos.requests.history(req),
     'inbox.deleteHistory': (req) => {
       repos.requests.deleteHistory(req.requestId)

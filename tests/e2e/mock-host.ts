@@ -83,7 +83,10 @@ export interface MockDriver {
     note?: string | null,
   ) => void
   holdAdoFeatures: (held: boolean) => void
-  setAdoConnected: (on: boolean, why?: string) => void
+  setAdoConnected: (on: boolean, why?: string, code?: string) => void
+  holdAdoSignIn: (held: boolean) => void
+  raiseElicitation: (item: Record<string, unknown> & { sessionId: string; projectId: string }) => string
+  completeElicitation: (id: string) => void
   reportFlowStage: (
     runId: string,
     stage: string,
@@ -129,6 +132,9 @@ export interface MockDriver {
     diffApplies: { projectId: string; path: string; lines: string[]; instruction: string }[]
     adoReconnects: number
     adoCancels: number
+    elicitationAnswers: { id: string; action: string; values?: Record<string, unknown> }[]
+    elicitationOpens: string[]
+    terminalOpens: Record<string, unknown>[]
   }
 }
 
@@ -474,6 +480,14 @@ export function installMockHost(scenario: MockScenario): void {
   let adoCancels = 0
   let adoHeld = false
   let adoListing: { projectId: string; sessionId: string; settle: (cancelled: boolean) => void } | null = null
+  let adoCode = 'MCP_NOT_CONNECTED'
+  let adoSignInHeld = false
+  let adoSigningIn: string | null = null
+  let releaseAdoSignIn: (() => void) | null = null
+  let elicitations: AnyRecord[] = []
+  const elicitationAnswers: { id: string; action: string; values?: Record<string, unknown> }[] = []
+  const elicitationOpens: string[] = []
+  const terminalOpens: AnyRecord[] = []
 
   const FLOW_KIND_ORDER: Record<string, readonly string[]> = {
     feature: ['spec', 'plan', 'build', 'clean', 'test', 'review', 'ship'],
@@ -501,6 +515,7 @@ export function installMockHost(scenario: MockScenario): void {
       projectId,
       ...flowSnapshot(projectId),
       listing: adoListing?.projectId === projectId ? adoListing.sessionId : null,
+      signingIn: adoSigningIn === projectId,
     })
   }
 
@@ -1036,7 +1051,10 @@ export function installMockHost(scenario: MockScenario): void {
     },
     'updates.check': () => ({ status: 'none' }),
     'updates.install': () => undefined,
-    'terminal.open': () => ({ scrollback: '', reused: false }),
+    'terminal.open': (req) => {
+      terminalOpens.push({ ...req })
+      return { scrollback: '', reused: false }
+    },
     'terminal.write': () => undefined,
     'terminal.resize': () => undefined,
     'terminal.close': () => undefined,
@@ -1230,6 +1248,14 @@ export function installMockHost(scenario: MockScenario): void {
     'flow.list': (req) => flowSnapshot(String(req.projectId)),
     'flow.reconnectAdo': async (req) => {
       adoReconnects += 1
+      if (adoConnected && adoSignInHeld) {
+        const projectId = String(req.projectId)
+        adoSigningIn = projectId
+        pushFlow(projectId)
+        await new Promise<void>((resolve) => (releaseAdoSignIn = resolve))
+        adoSigningIn = null
+        pushFlow(projectId)
+      }
       return invokeHandlers['flow.features'](req)
     },
     'flow.features': async (req) => {
@@ -1237,7 +1263,7 @@ export function installMockHost(scenario: MockScenario): void {
       if (!adoConnected) {
         await new Promise((resolve) => setTimeout(resolve, 150))
         throw {
-          code: 'MCP_NOT_CONNECTED',
+          code: adoCode,
           message: `The Azure DevOps MCP server is not connected for this session: ${adoWhy}.`,
         }
       }
@@ -1623,6 +1649,25 @@ export function installMockHost(scenario: MockScenario): void {
       push('push.queueChanged', { projectId, items: [...list] })
       return [...list]
     },
+    'elicitations.pending': () => [...elicitations],
+    'elicitations.respond': (req) => {
+      const found = elicitations.find((item) => item.id === req.id)
+      if (!found) throw { code: 'NOT_FOUND', message: 'That request was already answered, or its session ended.' }
+      const values = (req.values ?? {}) as Record<string, unknown>
+      if (req.action === 'accept' && found.mode === 'form') {
+        const missing = (found.fields as AnyRecord[]).find(
+          (field) => field.required && (values[String(field.name)] === undefined || values[String(field.name)] === ''),
+        )
+        if (missing) throw { code: 'INVALID_PATH', message: `${String(missing.label)} is required.` }
+      }
+      elicitationAnswers.push({ id: String(req.id), action: String(req.action), values: req.values as Record<string, unknown> | undefined })
+      elicitations = elicitations.filter((item) => item.id !== req.id)
+      push('push.elicitations', [...elicitations])
+      setStatus(String(found.sessionId), 'working')
+    },
+    'elicitations.openAgain': (req) => {
+      elicitationOpens.push(String(req.id))
+    },
     'inbox.pending': () => [...pending],
     'inbox.decide': (req) =>
       decide(String(req.requestId), String(req.decision), Boolean(req.confirmHighRisk)),
@@ -1919,9 +1964,43 @@ export function installMockHost(scenario: MockScenario): void {
       adoHeld = held
       if (!held) adoListing?.settle(false)
     },
-    setAdoConnected: (on, why) => {
+    setAdoConnected: (on, why, code) => {
       adoConnected = on
       if (why) adoWhy = why
+      adoCode = code ?? 'MCP_NOT_CONNECTED'
+    },
+    holdAdoSignIn: (held) => {
+      adoSignInHeld = held
+      if (!held) releaseAdoSignIn?.()
+    },
+    raiseElicitation: (item) => {
+      const id = nextId('eli')
+      elicitations.push({
+        id,
+        flow: false,
+        server: 'ado',
+        serverName: 'ado',
+        mode: 'form',
+        message: '',
+        title: null,
+        description: null,
+        intent: null,
+        host: null,
+        path: null,
+        refused: null,
+        fields: [],
+        createdAt: now(),
+        ...item,
+      })
+      push('push.elicitations', [...elicitations])
+      setStatus(item.sessionId, 'needs_you')
+      return id
+    },
+    completeElicitation: (id) => {
+      const found = elicitations.find((item) => item.id === id)
+      elicitations = elicitations.filter((item) => item.id !== id)
+      push('push.elicitations', [...elicitations])
+      if (found) setStatus(String(found.sessionId), 'working')
     },
     reportFlowStage: (runId, stage, patch) => {
       const run = flowRun(runId)
@@ -2038,6 +2117,9 @@ export function installMockHost(scenario: MockScenario): void {
       diffApplies: [...diffApplies],
       adoReconnects,
       adoCancels,
+      elicitationAnswers: [...elicitationAnswers],
+      elicitationOpens: [...elicitationOpens],
+      terminalOpens: [...terminalOpens],
     }),
   }
 }

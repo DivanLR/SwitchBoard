@@ -3,6 +3,8 @@ import {
   query,
   type AgentDefinition,
   type CanUseTool,
+  type ElicitationRequest,
+  type ElicitationResult,
   type HookInput,
   type HookJSONOutput,
   type McpServerConfig,
@@ -71,7 +73,7 @@ class AsyncPushQueue<T> implements AsyncIterable<T> {
 
 type CanUseToolOptions = Parameters<CanUseTool>[2]
 
-export type { PermissionResult }
+export type { ElicitationRequest, ElicitationResult, PermissionResult }
 
 export type PermissionGate = (context: {
   sessionId: string
@@ -79,6 +81,27 @@ export type PermissionGate = (context: {
   input: Record<string, unknown>
   options: CanUseToolOptions
 }) => Promise<PermissionResult>
+
+export interface ToolCall {
+  toolUseId: string
+  tool: string
+  input: Record<string, unknown>
+}
+
+export interface ElicitationGate {
+  request(context: {
+    sessionId: string
+    request: ElicitationRequest
+    signal: AbortSignal
+    trigger: ToolCall | null
+  }): Promise<ElicitationResult>
+  completed(sessionId: string, serverName: string, elicitationId: string): void
+  toolFinished(sessionId: string, toolUseId: string): void
+}
+
+export function mcpToolPrefix(serverName: string): string {
+  return `mcp__${serverName.replace(/[^A-Za-z0-9_-]/g, '_')}__`
+}
 
 interface HostedSessionOptions {
   sessionId: string
@@ -113,6 +136,7 @@ interface HostedSessionOptions {
   summaries?: boolean
   sink: EventSink
   gate: PermissionGate
+  elicit?: ElicitationGate
   onStatusChange: (status: SessionStatus, detail?: string | null) => void
   onSdkSessionId: (sdkSessionId: string) => void
   onCommands?: (commands: ProjectCommand[]) => void
@@ -237,6 +261,7 @@ export class HostedSession implements SessionHost {
         })
       : null
     this.sandbox = sandbox
+    const elicit = this.options.elicit
     this.q = query({
       prompt: this.input,
       options: {
@@ -268,6 +293,7 @@ export class HostedSession implements SessionHost {
             input,
             options: canUseToolOptions,
           }),
+        onElicitation: elicit ? (request, { signal }) => this.handleElicitation(elicit, request, signal) : undefined,
         hooks: {
           PreToolUse: [
             { matcher: 'Agent|Task', hooks: [() => this.gateSubagents()] },
@@ -330,6 +356,7 @@ export class HostedSession implements SessionHost {
     this.captureModel(message)
     this.captureUsage(message)
     this.maybeDowngradeOnLimit(message)
+    this.trackMcpCalls(message)
     this.mapper.handle(message)
     if (message.type === 'result') {
       const failed = message as { subtype: string; result?: string; errors?: string[] }
@@ -341,6 +368,44 @@ export class HostedSession implements SessionHost {
       this.recomputeStatus()
       this.options.onTurnComplete()
     }
+  }
+
+  private mcpCalls = new Map<string, ToolCall>()
+
+  private trackMcpCalls(message: SDKMessage): void {
+    const msg = message as {
+      type?: string
+      subtype?: string
+      mcp_server_name?: string
+      elicitation_id?: string
+      message?: { content?: unknown }
+    }
+    if (msg.type === 'system' && msg.subtype === 'elicitation_complete') {
+      if (msg.mcp_server_name && msg.elicitation_id) {
+        this.options.elicit?.completed(this.sessionId, msg.mcp_server_name, msg.elicitation_id)
+      }
+      return
+    }
+    const content = Array.isArray(msg.message?.content) ? msg.message.content : []
+    for (const block of content as { type?: string; id?: string; name?: string; input?: unknown; tool_use_id?: string }[]) {
+      if (msg.type === 'assistant' && block.type === 'tool_use' && block.id && block.name?.startsWith('mcp__')) {
+        const input = typeof block.input === 'object' && block.input !== null ? (block.input as Record<string, unknown>) : {}
+        this.mcpCalls.set(block.id, { toolUseId: block.id, tool: block.name, input })
+      }
+      if (msg.type === 'user' && block.type === 'tool_result' && block.tool_use_id && this.mcpCalls.delete(block.tool_use_id)) {
+        this.options.elicit?.toolFinished(this.sessionId, block.tool_use_id)
+      }
+    }
+  }
+
+  private handleElicitation(
+    elicit: ElicitationGate,
+    request: ElicitationRequest,
+    signal: AbortSignal,
+  ): Promise<ElicitationResult> {
+    const prefix = mcpToolPrefix(request.serverName)
+    const trigger = [...this.mcpCalls.values()].findLast((call) => call.tool.startsWith(prefix)) ?? null
+    return elicit.request({ sessionId: this.sessionId, request, signal, trigger })
   }
 
   private appliedModel: string | null = null

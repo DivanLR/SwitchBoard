@@ -44,7 +44,13 @@ export interface FlowPullRequestMarker {
   prId: string | null
 }
 
-export type FlowMarker = FlowFeaturesMarker | FlowStageMarker
+export interface FlowAdoMarker {
+  kind: 'ado'
+  ok: boolean
+  error: string | null
+}
+
+export type FlowMarker = FlowFeaturesMarker | FlowStageMarker | FlowAdoMarker
 
 function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : []
@@ -139,6 +145,7 @@ export function parseFlowMarker(text: string): FlowMarker | null {
   const record = body as Record<string, unknown>
   const kind = str(record.kind)
   if (kind === 'features') return { kind: 'features', features: features(record.features), note: adoTitle(record.note, 500) }
+  if (kind === 'ado') return { kind: 'ado', ok: bool(record.ok) === true, error: adoTitle(record.error, 500) }
   if (kind === 'stage') {
     const stage = str(record.stage)
     const outcome = str(record.outcome)

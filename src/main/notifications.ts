@@ -13,7 +13,7 @@ interface NotifierDeps {
 interface NeedsYouContext {
   projectId: string
   sessionId: string
-  kind: 'permission' | 'plan' | 'question'
+  kind: 'permission' | 'plan' | 'question' | 'sign_in' | 'input'
   requestId?: string
   eventId?: string
   title: string
@@ -23,6 +23,8 @@ const KIND_LABEL: Record<NeedsYouContext['kind'], string> = {
   permission: 'Permission request',
   plan: 'Plan approval',
   question: 'Question',
+  sign_in: 'Sign in',
+  input: 'Input request',
 }
 
 export function createNotifier(deps: NotifierDeps): (context: NeedsYouContext) => void {

@@ -31,6 +31,7 @@ const { openDatabase } = await import('@main/store/db')
 const { createRepositories } = await import('@main/store/repositories')
 const { SessionManager } = await import('@main/sessions/session-manager')
 const { PermissionBroker } = await import('@main/inbox/permission-broker')
+const { ElicitationBroker } = await import('@main/inbox/elicitation-broker')
 const { registerIpcHandlers } = await import('@main/ipc/handlers')
 
 function fakeWindow() {
@@ -58,11 +59,17 @@ function setup() {
     onCountersChanged: () => {},
     onNeedsYou: () => {},
   })
+  const elicitations = new ElicitationBroker(repos, manager, {
+    onChanged: () => {},
+    onNeedsYou: () => {},
+    openExternal: () => {},
+  })
   const window = fakeWindow()
   registerIpcHandlers({
     repos,
     manager,
     broker,
+    elicitations,
     getWindow: () => window as never,
     dbProjectId: 'db-project',
     skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),
@@ -79,7 +86,7 @@ function setup() {
   const call = (method: string, req?: unknown, event: unknown = trustedEvent) =>
     listener(event, method, req) as Promise<WireResult<unknown>>
 
-  return { repos, manager, call, window, trustedEvent }
+  return { repos, manager, elicitations, call, window, trustedEvent }
 }
 
 describe('the invoke channel', () => {
@@ -259,6 +266,38 @@ describe('sessions.start', () => {
   })
 })
 
+describe('elicitations over the invoke channel', () => {
+  it('lists a pending sign-in, answers it, and names an answered one NOT_FOUND', async () => {
+    const { repos, elicitations, call } = setup()
+    const project = repos.projects.insert({ name: 'a', path: 'C:\\a', source: 'manual' })
+    const session = await startedRow(repos, project.id)
+    const answer = elicitations.request({
+      sessionId: session,
+      request: { serverName: 'ado', message: 'Pick a project', mode: 'form', requestedSchema: { type: 'object', properties: { project: { type: 'string' } } } },
+      signal: new AbortController().signal,
+      trigger: null,
+    })
+    const listed = await call('elicitations.pending')
+    expect(listed).toMatchObject({ ok: true, value: [{ serverName: 'ado', mode: 'form' }] })
+    const id = (listed as { value: { id: string }[] }).value[0].id
+
+    expect(await call('elicitations.respond', { id, action: 'accept', values: { project: 'Einstein' } })).toEqual({ ok: true, value: null })
+    await expect(answer).resolves.toEqual({ action: 'accept', content: { project: 'Einstein' } })
+    expect(await call('elicitations.respond', { id, action: 'decline' })).toMatchObject({ ok: false, error: { code: 'NOT_FOUND' } })
+  })
+})
+
+async function startedRow(repos: ReturnType<typeof setup>['repos'], projectId: string): Promise<string> {
+  const { newId, nowIso } = await import('@main/store/repositories')
+  const id = newId()
+  repos.sessions.insert({
+    id, projectId, engine: 'claude', sdkSessionId: null, status: 'working', statusDetail: null, branch: null,
+    diffAdds: null, diffDels: null, usageUtilization: null, usageResetsAt: null, usageLimitType: null,
+    startedAt: nowIso(), endedAt: null, endReason: null,
+  })
+  return id
+}
+
 describe('isIpcErrorCode', () => {
   it('accepts every real code', () => {
     for (const code of [
@@ -269,6 +308,8 @@ describe('isIpcErrorCode', () => {
       'RULE_NOT_ALLOWED',
       'INVALID_PATH',
       'DUPLICATE',
+      'MCP_NOT_CONNECTED',
+      'MCP_NEEDS_AUTH',
       'INTERNAL',
     ]) {
       expect(isIpcErrorCode(code)).toBe(true)
@@ -351,6 +392,7 @@ describe('the sender-trust check', () => {
       repos,
       manager,
       broker,
+      elicitations: {} as never,
       getWindow: () => null,
       dbProjectId: 'db-project',
       skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),

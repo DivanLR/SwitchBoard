@@ -300,6 +300,47 @@ export interface PermissionRequest {
   deliveryFailed: boolean
 }
 
+export type ElicitationFieldKind = 'string' | 'number' | 'integer' | 'boolean' | 'enum' | 'unsupported'
+
+export interface ElicitationField {
+  name: string
+  label: string
+  description: string | null
+  kind: ElicitationFieldKind
+  required: boolean
+  options: { value: string; label: string }[]
+  initial: string | number | boolean | null
+  why: string | null
+}
+
+export interface ToolIntent {
+  tool: string
+  summary: string
+}
+
+export interface Elicitation {
+  id: string
+  sessionId: string
+  projectId: string
+  flow: boolean
+  server: string
+  serverName: string
+  mode: 'form' | 'url'
+  message: string
+  title: string | null
+  description: string | null
+  intent: ToolIntent | null
+  host: string | null
+  path: string | null
+  refused: string | null
+  fields: ElicitationField[]
+  createdAt: string
+}
+
+export type ElicitationAnswer = 'accept' | 'decline' | 'cancel'
+
+export type ElicitationValues = Record<string, string | number | boolean>
+
 export interface DecisionRecord extends Omit<PermissionRequest, 'status' | 'resolvedAt'> {
   status: DecisionOutcome
   resolvedAt: string

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, Menu, nativeImage, net, protocol, session, Tray } from 'electron'
+import { app, BrowserWindow, dialog, Menu, nativeImage, net, protocol, session, shell, Tray } from 'electron'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { mkdirSync, renameSync } from 'node:fs'
@@ -8,6 +8,7 @@ import { createRepositories, type Repositories } from './store/repositories'
 import { runRetention, scheduleRetention } from './store/retention'
 import { SessionManager } from './sessions/session-manager'
 import { PermissionBroker } from './inbox/permission-broker'
+import { ElicitationBroker } from './inbox/elicitation-broker'
 import { classifyNoise, defaultSwallowRules } from './stream/swallow-rules'
 import { createNotifier } from './notifications'
 import { followDeepLink, PROTOCOL_SCHEME } from './deep-link'
@@ -182,6 +183,7 @@ async function main(): Promise<void> {
   repos.projects.clearAllRefs()
 
   let broker: PermissionBroker | null = null
+  let elicitations: ElicitationBroker | null = null
 
   const pusher = new RendererPush(
     () => mainWindow,
@@ -197,7 +199,10 @@ async function main(): Promise<void> {
     onEvent: (event) => pusher.event(event),
     onSessionStatus: (push) => pusher.push('push.sessionStatus', push),
     onCountersChanged: () => pusher.countersChanged(),
-    onSessionExit: (sessionId) => broker?.expireForSession(sessionId),
+    onSessionExit: (sessionId) => {
+      broker?.expireForSession(sessionId)
+      elicitations?.endForSession(sessionId)
+    },
     onQueueChanged: (projectId) =>
       pusher.push('push.queueChanged', { projectId, items: repos.taskQueue.listForProject(projectId) }),
     onVerifyChanged: (projectId) =>
@@ -237,6 +242,12 @@ async function main(): Promise<void> {
     onCountersChanged: () => pusher.countersChanged(),
     onNeedsYou: (context) => notify(context),
   })
+  elicitations = new ElicitationBroker(repos, manager, {
+    onChanged: (pending) => pusher.push('push.elicitations', pending),
+    onNeedsYou: (context) => notify(context),
+    openExternal: (url) => shell.openExternal(url),
+  })
+  manager.setElicitation(elicitations)
 
   const swallowRules = defaultSwallowRules()
   manager.setNoiseClassifier((event) => classifyNoise(swallowRules, event))
@@ -267,6 +278,7 @@ async function main(): Promise<void> {
         runs: repos.flowRuns.listForProject(projectId),
         stages: repos.flowStages.listForProject(projectId),
         listing: flow.listingSession(projectId),
+        signingIn: flow.signingIn(projectId),
       }),
   })
   manager.setFlowHooks({
@@ -286,6 +298,7 @@ async function main(): Promise<void> {
     repos,
     manager,
     broker,
+    elicitations,
     flow,
     getWindow: () => mainWindow,
     dbProjectId: dbProject.id,

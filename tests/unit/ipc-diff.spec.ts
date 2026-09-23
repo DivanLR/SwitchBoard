@@ -62,6 +62,7 @@ function setup() {
     repos,
     manager,
     broker,
+    elicitations: {} as never,
     getWindow: () => window as never,
     dbProjectId: 'db-project',
     skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { allowedPullRequestUrl, flowMarkerBroken, parseFlowMarker } from '@main/flow/flow-markers'
-import { clarifyPrompt, featuresPrompt, planSteps, specHandshake, specifyPrompt } from '@main/flow/flow-prompts'
+import { adoSignInPrompt, clarifyPrompt, featuresPrompt, planSteps, specHandshake, specifyPrompt } from '@main/flow/flow-prompts'
 
 function line(json: unknown): string {
   return `Here is my report.\nSWB_FLOW: ${JSON.stringify(json)}`
@@ -193,6 +193,28 @@ describe('the features marker', () => {
       },
       { id: '40542', title: 'Other', state: 'Testing', project: 'A Plus', url: null },
     ])
+  })
+})
+
+describe('the ado sign-in marker', () => {
+  it('reads ok, or the error as one line of plain text, and treats anything but true as a failure', () => {
+    expect(parseFlowMarker(line({ kind: 'ado', ok: true }))).toEqual({ kind: 'ado', ok: true, error: null })
+    expect(parseFlowMarker(line({ kind: 'ado', ok: false, error: 'TF400813:\n`not authorised`' }))).toEqual({
+      kind: 'ado',
+      ok: false,
+      error: 'TF400813: not authorised',
+    })
+    expect(parseFlowMarker(line({ kind: 'ado', ok: 'yes' }))).toMatchObject({ ok: false })
+  })
+
+  it('is what the sign-in prompt asks for', () => {
+    const text = adoSignInPrompt()
+    expect(text).toContain('SWB_FLOW: followed by JSON')
+    expect(parseFlowMarker(`Done.\nSWB_FLOW: ${text.split('\n').find((l) => l.startsWith('{"kind":"ado"'))}`)).toEqual({
+      kind: 'ado',
+      ok: true,
+      error: null,
+    })
   })
 })
 

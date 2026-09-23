@@ -6,6 +6,9 @@ import type {
   DiagramEntry,
   DiffListResult,
   Draft,
+  Elicitation,
+  ElicitationAnswer,
+  ElicitationValues,
   FileDiffContent,
   KeepCurrentReport,
   PermissionRequest,
@@ -49,6 +52,7 @@ type IpcErrorCode =
   | 'SANDBOX_FULL'
   | 'UNSUPPORTED'
   | 'MCP_NOT_CONNECTED'
+  | 'MCP_NEEDS_AUTH'
   | 'INTERNAL'
 
 export interface IpcError {
@@ -77,6 +81,7 @@ const IPC_ERROR_CODE_KEYS: Record<IpcErrorCode, true> = {
   SANDBOX_FULL: true,
   UNSUPPORTED: true,
   MCP_NOT_CONNECTED: true,
+  MCP_NEEDS_AUTH: true,
   INTERNAL: true,
 }
 
@@ -325,6 +330,12 @@ export interface InvokeMap {
     req: { projectId: string; includeHighRisk?: boolean }
     res: { approved: number; skippedHighRisk: number }
   }
+  'elicitations.pending': { req: void; res: Elicitation[] }
+  'elicitations.respond': {
+    req: { id: string; action: ElicitationAnswer; values?: ElicitationValues }
+    res: void
+  }
+  'elicitations.openAgain': { req: { id: string }; res: void }
   'inbox.history': { req: { projectId?: string; limit?: number }; res: DecisionRecord[] }
   'inbox.deleteHistory': { req: { requestId: string }; res: void }
   'inbox.clearHistory': { req: void; res: void }
@@ -381,6 +392,7 @@ interface VerifyChangedPush {
 interface FlowChangedPush extends FlowSnapshot {
   projectId: string
   listing: string | null
+  signingIn?: boolean
 }
 
 interface DiagramsChangedPush {
@@ -403,6 +415,7 @@ export interface PushMap {
   'push.sessionStatus': SessionStatusPush
   'push.counters': Counters
   'push.inboxChanged': InboxChangedPush
+  'push.elicitations': Elicitation[]
   'push.queueChanged': QueueChangedPush
   'push.verifyChanged': VerifyChangedPush
   'push.flowChanged': FlowChangedPush
@@ -423,6 +436,7 @@ const PUSH_CHANNEL_KEYS: Record<PushChannel, true> = {
   'push.sessionStatus': true,
   'push.counters': true,
   'push.inboxChanged': true,
+  'push.elicitations': true,
   'push.queueChanged': true,
   'push.verifyChanged': true,
   'push.flowChanged': true,

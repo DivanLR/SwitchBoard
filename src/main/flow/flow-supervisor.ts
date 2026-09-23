@@ -63,6 +63,7 @@ import {
   specHandshake,
   specifyPrompt,
   testWritePrompt,
+  adoSignInPrompt,
   featuresPrompt,
   withRepos,
   type ShipTest,
@@ -118,10 +119,12 @@ function adoProblem(
     missing: `no MCP server named ado is configured for it. Add the ado server to your Claude Code configuration, then ${again}`,
   }
   return {
-    code: 'MCP_NOT_CONNECTED',
+    code: state.status === 'needs-auth' ? 'MCP_NEEDS_AUTH' : 'MCP_NOT_CONNECTED',
     message: `The Azure DevOps MCP server is not connected for this session: ${why[state.status] ?? `it reports ${state.status}. ${again} to try again`}.`,
   }
 }
+
+const ADO_DOWN: ReadonlySet<unknown> = new Set(['MCP_NOT_CONNECTED', 'MCP_NEEDS_AUTH'])
 
 const MAX_FIX_ROUNDS = 2
 
@@ -135,9 +138,10 @@ type FeaturesWaiter = {
   resolve: (list: FlowFeatureList) => void
   reject: (error: unknown) => void
   timer: ReturnType<typeof setTimeout>
+  thenList: string | null
 }
 
-type Listing = { sessionId: string | null }
+type Listing = { sessionId: string | null; signingIn?: boolean }
 
 export interface FlowGit {
   create: typeof createWorktree
@@ -261,6 +265,10 @@ export class FlowSupervisor {
     return this.listings.get(projectId)?.sessionId ?? null
   }
 
+  signingIn(projectId: string): boolean {
+    return this.listings.get(projectId)?.signingIn === true
+  }
+
   async features(projectId: string, query: string, timeoutMs = FEATURES_TIMEOUT_MS): Promise<FlowFeatureList> {
     const project = this.requireProject(projectId)
     const listing = this.beginListing(projectId, null)
@@ -286,7 +294,7 @@ export class FlowSupervisor {
     this.adoSessions.delete(projectId)
     const listing = this.beginListing(projectId, held.sessionId)
     await this.manager.reconnectMcpServer(held.sessionId, ADO_SERVER).catch(() => {})
-    return this.listFeatures(projectId, listing, held.sessionId, query, timeoutMs)
+    return this.listFeatures(projectId, listing, held.sessionId, query, timeoutMs, true)
   }
 
   cancelFeatures(projectId: string): void {
@@ -317,6 +325,7 @@ export class FlowSupervisor {
     sessionId: string,
     query: string,
     timeoutMs: number,
+    signIn = false,
   ): Promise<FlowFeatureList> {
     if (this.listings.get(projectId) !== listing) {
       if (listing.sessionId !== sessionId) this.settleListing(sessionId, LISTING_CANCELLED, 'stop')
@@ -331,7 +340,7 @@ export class FlowSupervisor {
     } catch (error) {
       if (this.listings.get(projectId) !== listing) throw LISTING_CANCELLED
       this.dropListing(projectId, listing)
-      if ((error as Partial<IpcError>).code === 'MCP_NOT_CONNECTED') this.holdAdoSession(projectId, sessionId)
+      if (ADO_DOWN.has((error as Partial<IpcError>).code)) this.holdAdoSession(projectId, sessionId)
       else this.manager.endFlowSession(sessionId)
       throw error
     }
@@ -339,18 +348,50 @@ export class FlowSupervisor {
     return new Promise<FlowFeatureList>((resolve, reject) => {
       const timer = setTimeout(() => this.settleListing(sessionId, LISTING_TIMED_OUT, 'stop'), timeoutMs)
       timer.unref?.()
-      this.featuresWaiters.set(sessionId, { resolve, reject, timer })
-      try {
-        this.manager.watchFlow(sessionId)
-        this.manager.sendMessage(sessionId, featuresPrompt(query))
-      } catch (error) {
-        this.settleListing(
-          sessionId,
-          { code: 'NOT_LIVE', message: `The session could not take the Feature list request: ${errorText(error)}` },
-          'end',
-        )
+      this.featuresWaiters.set(sessionId, { resolve, reject, timer, thenList: signIn ? query : null })
+      if (signIn) {
+        listing.signingIn = true
+        this.callbacks.onFlowChanged(projectId)
       }
+      this.askListing(sessionId, signIn ? adoSignInPrompt() : featuresPrompt(query))
     })
+  }
+
+  private askListing(sessionId: string, text: string): void {
+    try {
+      this.manager.watchFlow(sessionId)
+      this.manager.sendMessage(sessionId, text)
+    } catch (error) {
+      this.settleListing(
+        sessionId,
+        { code: 'NOT_LIVE', message: `The session could not take the Feature list request: ${errorText(error)}` },
+        'end',
+      )
+    }
+  }
+
+  private listAfterSignIn(sessionId: string, waiter: FeaturesWaiter): void {
+    const query = waiter.thenList ?? ''
+    waiter.thenList = null
+    for (const [projectId, listed] of this.listings) {
+      if (listed.sessionId !== sessionId || !listed.signingIn) continue
+      listed.signingIn = false
+      this.callbacks.onFlowChanged(projectId)
+    }
+    this.askListing(sessionId, featuresPrompt(query))
+  }
+
+  private failSignIn(sessionId: string, error: string | null): void {
+    const projectId = [...this.listings].find(([, listed]) => listed.sessionId === sessionId)?.[0]
+    this.settleListing(
+      sessionId,
+      {
+        code: 'MCP_NOT_CONNECTED',
+        message: `Azure DevOps did not sign in: ${error ?? 'the call failed and gave no reason'}. Reconnect to try again.`,
+      },
+      'gone',
+    )
+    if (projectId) this.holdAdoSession(projectId, sessionId)
   }
 
   private isListing(sessionId: string): boolean {
@@ -832,6 +873,13 @@ export class FlowSupervisor {
       }
       return
     }
+    if (marker.kind === 'ado') {
+      const waiter = this.featuresWaiters.get(sessionId)
+      if (!waiter || waiter.thenList === null) return
+      if (marker.ok) this.listAfterSignIn(sessionId, waiter)
+      else this.failSignIn(sessionId, marker.error)
+      return
+    }
     const ctx = this.sessionStage.get(sessionId)
     if (!ctx || ctx.stage !== marker.stage) return
     const stageRow = this.repos.flowStages.get(ctx.runId, ctx.stage)
@@ -898,7 +946,12 @@ export class FlowSupervisor {
   }
 
   onTurnEnded(sessionId: string, error: string | null = null): void {
-    if (this.featuresWaiters.has(sessionId)) {
+    const waiter = this.featuresWaiters.get(sessionId)
+    if (waiter && waiter.thenList !== null && !error) {
+      this.listAfterSignIn(sessionId, waiter)
+      return
+    }
+    if (waiter) {
       this.settleListing(
         sessionId,
         {

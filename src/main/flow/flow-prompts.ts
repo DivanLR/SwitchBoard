@@ -74,6 +74,20 @@ function featuresWiql(filter: string): string {
     .join(' ')
 }
 
+export function adoSignInPrompt(): string {
+  return [
+    'Call the ado MCP tool core_list_projects exactly once, with top 1, and call no other tool.',
+    'It checks that Azure DevOps is signed in. If it opens a sign-in, wait for it: the developer is signing in in their browser.',
+    '',
+    `Finish your reply with one line, on its own, starting with ${FLOW_MARKER}: followed by JSON:`,
+    '',
+    '{"kind":"ado","ok":true}',
+    '',
+    'When the call failed, send {"kind":"ado","ok":false,"error":"<what the call returned>"} instead.',
+    'Nothing after that line. No code fence around it.',
+  ].join('\n')
+}
+
 export function featuresPrompt(query: string): string {
   const filter = query.replace(/\s+/g, ' ').trim()
   return [

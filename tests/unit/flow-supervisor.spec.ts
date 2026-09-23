@@ -507,15 +507,15 @@ describe('the Feature list', () => {
   })
 
   it.each([
-    [{ status: 'pending', error: null }, 'it is still starting after 1 seconds, and npx may still be fetching it'],
-    [{ status: 'needs-auth', error: null }, 'it needs you to sign in'],
-    [{ status: 'failed', error: 'spawn npx ENOENT' }, 'it failed to start: spawn npx ENOENT'],
-    [{ status: 'disabled', error: null }, 'it is disabled'],
-    [{ status: 'missing', error: null }, 'no MCP server named ado is configured'],
-  ])('names the ado server state %o, and keeps the session for Reconnect', async (state, why) => {
+    [{ status: 'pending', error: null }, 'it is still starting after 1 seconds, and npx may still be fetching it', 'MCP_NOT_CONNECTED'],
+    [{ status: 'needs-auth', error: null }, 'it needs you to sign in', 'MCP_NEEDS_AUTH'],
+    [{ status: 'failed', error: 'spawn npx ENOENT' }, 'it failed to start: spawn npx ENOENT', 'MCP_NOT_CONNECTED'],
+    [{ status: 'disabled', error: null }, 'it is disabled', 'MCP_NOT_CONNECTED'],
+    [{ status: 'missing', error: null }, 'no MCP server named ado is configured', 'MCP_NOT_CONNECTED'],
+  ])('names the ado server state %o, and keeps the session for Reconnect', async (state, why, code) => {
     const h = setup({ mcp: () => state })
     await expect(h.flow.features(h.project.id, '')).rejects.toEqual({
-      code: 'MCP_NOT_CONNECTED',
+      code,
       message: expect.stringContaining(`The Azure DevOps MCP server is not connected for this session: ${why}`),
     })
     expect(h.ended).toEqual([])
@@ -595,7 +595,7 @@ describe('the Feature list', () => {
   it('stops the held session when a reconnect is cancelled before ado answers', async () => {
     let state: McpState = { status: 'needs-auth', error: null }
     const h = setup({ mcp: () => state })
-    await expect(h.flow.features(h.project.id, '')).rejects.toMatchObject({ code: 'MCP_NOT_CONNECTED' })
+    await expect(h.flow.features(h.project.id, '')).rejects.toMatchObject({ code: 'MCP_NEEDS_AUTH' })
     let reconnected!: () => void
     h.manager.reconnectMcpServer.mockImplementationOnce(() => new Promise<void>((resolve) => (reconnected = resolve)))
     const listing = h.flow.reconnectAdo(h.project.id, '')
@@ -610,7 +610,7 @@ describe('the Feature list', () => {
     expect(h.sent).toEqual([])
   })
 
-  it('reconnects ado on the same session and retries the Feature list there', async () => {
+  it('reconnects ado on the same session, signs in with one cheap call, then lists the Features there', async () => {
     let state: McpState = { status: 'failed', error: 'npm ERR! 404' }
     const h = setup({ mcp: () => state })
     await expect(h.flow.features(h.project.id, 'checkout')).rejects.toMatchObject({ code: 'MCP_NOT_CONNECTED' })
@@ -619,20 +619,76 @@ describe('the Feature list', () => {
     await vi.waitFor(() => expect(h.sent).toHaveLength(1))
     expect(h.manager.reconnectMcpServer).toHaveBeenCalledWith('session-1', 'ado')
     expect(h.manager.startSession).toHaveBeenCalledTimes(1)
-    expect(h.sent[0]).toMatchObject({ sessionId: 'session-1', text: expect.stringContaining('Only Features matching: checkout') })
+    expect(h.sent[0].sessionId).toBe('session-1')
+    expect(h.sent[0].text).toContain('Call the ado MCP tool core_list_projects exactly once, with top 1, and call no other tool.')
+    expect(h.sent[0].text).not.toContain('wit_query')
+    expect(h.flow.signingIn(h.project.id)).toBe(true)
+    expect(h.watched).toContain('session-1')
+
+    h.changed.length = 0
+    h.flow.onFlowMarker('session-1', parseFlowMarker('Signed in.\nSWB_FLOW: {"kind":"ado","ok":true}')!)
+    expect(h.flow.signingIn(h.project.id)).toBe(false)
+    expect(h.changed).toEqual([h.project.id])
+    expect(h.sent).toHaveLength(2)
+    expect(h.sent[1]).toMatchObject({ sessionId: 'session-1', text: expect.stringContaining('Only Features matching: checkout') })
     h.flow.onFlowMarker('session-1', { kind: 'features', features: [], note: null })
     await expect(listing).resolves.toEqual({ features: [], note: null })
   })
 
+  it('lists the Features when the sign-in turn ends without its line, and never signs in on a plain list', async () => {
+    const h = setup({ mcp: () => ({ status: 'needs-auth', error: null }) })
+    await expect(h.flow.features(h.project.id, '')).rejects.toMatchObject({ code: 'MCP_NEEDS_AUTH' })
+    h.manager.mcpStatus.mockImplementation(async () => ({ status: 'connected', error: null }))
+    const listing = h.flow.reconnectAdo(h.project.id, '')
+    await vi.waitFor(() => expect(h.sent).toHaveLength(1))
+    h.flow.onTurnEnded('session-1', null)
+    expect(h.sent[1].text).toContain('List the Azure DevOps Features assigned to me')
+    h.flow.onFlowMarker('session-1', { kind: 'features', features: [], note: null })
+    await expect(listing).resolves.toEqual({ features: [], note: null })
+
+    const plain = h.flow.features(h.project.id, '')
+    await vi.waitFor(() => expect(h.sent).toHaveLength(3))
+    expect(h.flow.signingIn(h.project.id)).toBe(false)
+    expect(h.sent[2].text).toContain('List the Azure DevOps Features assigned to me')
+    h.flow.onFlowMarker(h.sent[2].sessionId, { kind: 'ado', ok: false, error: 'ignored' })
+    h.flow.onFlowMarker(h.sent[2].sessionId, { kind: 'features', features: [], note: null })
+    await expect(plain).resolves.toEqual({ features: [], note: null })
+  })
+
+  it('says the sign-in failed and keeps the session for another Reconnect when the call fails', async () => {
+    const h = setup({ mcp: () => ({ status: 'needs-auth', error: null }) })
+    await expect(h.flow.features(h.project.id, '')).rejects.toMatchObject({ code: 'MCP_NEEDS_AUTH' })
+    h.manager.mcpStatus.mockImplementation(async () => ({ status: 'connected', error: null }))
+    const listing = h.flow.reconnectAdo(h.project.id, '')
+    await vi.waitFor(() => expect(h.sent).toHaveLength(1))
+    h.flow.onFlowMarker('session-1', { kind: 'ado', ok: false, error: 'AADSTS50058: the sign-in was cancelled' })
+    await expect(listing).rejects.toEqual({
+      code: 'MCP_NOT_CONNECTED',
+      message: 'Azure DevOps did not sign in: AADSTS50058: the sign-in was cancelled. Reconnect to try again.',
+    })
+    expect(h.flow.signingIn(h.project.id)).toBe(false)
+    expect(h.ended).toEqual([])
+    expect(h.stopped).toEqual([])
+
+    const again = h.flow.reconnectAdo(h.project.id, '')
+    await vi.waitFor(() => expect(h.sent).toHaveLength(2))
+    expect(h.manager.startSession).toHaveBeenCalledTimes(1)
+    expect(h.sent[1]).toMatchObject({ sessionId: 'session-1', text: expect.stringContaining('core_list_projects exactly once') })
+    h.flow.cancelFeatures(h.project.id)
+    await expect(again).rejects.toMatchObject({ message: 'The Feature list was cancelled.' })
+    expect(h.flow.signingIn(h.project.id)).toBe(false)
+    expect(h.stopped).toEqual(['session-1'])
+  })
+
   it('keeps the session again when a reconnect still leaves ado down, and starts afresh once it is gone', async () => {
     const h = setup({ mcp: () => ({ status: 'needs-auth', error: null }) })
-    await expect(h.flow.features(h.project.id, '')).rejects.toMatchObject({ code: 'MCP_NOT_CONNECTED' })
-    await expect(h.flow.reconnectAdo(h.project.id, '')).rejects.toMatchObject({ code: 'MCP_NOT_CONNECTED' })
+    await expect(h.flow.features(h.project.id, '')).rejects.toMatchObject({ code: 'MCP_NEEDS_AUTH' })
+    await expect(h.flow.reconnectAdo(h.project.id, '')).rejects.toMatchObject({ code: 'MCP_NEEDS_AUTH' })
     expect(h.manager.startSession).toHaveBeenCalledTimes(1)
     expect(h.ended).toEqual([])
-    await expect(h.flow.features(h.project.id, '')).rejects.toMatchObject({ code: 'MCP_NOT_CONNECTED' })
+    await expect(h.flow.features(h.project.id, '')).rejects.toMatchObject({ code: 'MCP_NEEDS_AUTH' })
     expect(h.ended).toEqual(['session-1'])
-    await expect(h.flow.reconnectAdo(h.project.id, '')).rejects.toMatchObject({ code: 'MCP_NOT_CONNECTED' })
+    await expect(h.flow.reconnectAdo(h.project.id, '')).rejects.toMatchObject({ code: 'MCP_NEEDS_AUTH' })
     expect(h.manager.reconnectMcpServer).toHaveBeenLastCalledWith('session-2', 'ado')
   })
 

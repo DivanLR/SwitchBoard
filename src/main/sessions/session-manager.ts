@@ -41,7 +41,7 @@ import {
 import type { IpcError, SessionStatusPush } from '@shared/ipc-types'
 import { newId, nowIso, type Repositories } from '@main/store/repositories'
 import { readComboDoc, readSchemaDoc } from '@main/mcp/schema-doc'
-import { HostedSession, type PermissionGate, type SessionHost } from './session'
+import { HostedSession, type ElicitationGate, type PermissionGate, type SessionHost } from './session'
 import { switchboardMcp } from './inter-session'
 import { probeAvailableModels } from './model-catalog'
 import { CODEX_MISSING_MESSAGE, codexInstalled } from './codex-executable'
@@ -492,6 +492,12 @@ export class SessionManager {
     this.classifier = classifier
   }
 
+  private elicitation: ElicitationGate | undefined
+
+  setElicitation(gate: ElicitationGate): void {
+    this.elicitation = gate
+  }
+
   reconcileOnStartup(sweepContainers = false): void {
     const leftOpen = this.repos.sessions.listUnended().map((s) => s.id)
     this.repos.sessions.reconcileAllEnded(
@@ -792,6 +798,7 @@ export class SessionManager {
         },
         sink: this.makeSink(entry),
         gate: this.callbacks.gate,
+        elicit: this.elicitation,
         onStatusChange: (status, detail) => this.handleStatusChange(entry, status, detail),
         onSdkSessionId: (sdkSessionId) => {
           entry.row.sdkSessionId = sdkSessionId

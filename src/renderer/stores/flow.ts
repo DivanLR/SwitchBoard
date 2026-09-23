@@ -93,7 +93,9 @@ const store = reactive({
     } catch (error) {
       if (token !== listToken) return
       state.features = []
-      if (isIpcError(error) && error.code === 'MCP_NOT_CONNECTED') state.adoDown = error.message
+      if (isIpcError(error) && (error.code === 'MCP_NOT_CONNECTED' || error.code === 'MCP_NEEDS_AUTH')) {
+        state.adoDown = error.message
+      }
       else state.error = errorMessage(error)
     } finally {
       if (token === listToken) state.searching = null
