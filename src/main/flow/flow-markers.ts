@@ -2,6 +2,7 @@ import type {
   FlowBugResult,
   FlowDecision,
   FlowFeature,
+  FlowFeatureList,
   FlowReviewFinding,
   FlowReviewSeverity,
   FlowStage,
@@ -12,9 +13,8 @@ import { firstJsonObject, markerTail, str } from '@main/verify/parse'
 
 export const FLOW_MARKER = 'SWB_FLOW'
 
-export interface FlowFeaturesMarker {
+export interface FlowFeaturesMarker extends FlowFeatureList {
   kind: 'features'
-  features: FlowFeature[]
 }
 
 export interface FlowStageMarker {
@@ -138,7 +138,7 @@ export function parseFlowMarker(text: string): FlowMarker | null {
   if (typeof body !== 'object' || body === null) return null
   const record = body as Record<string, unknown>
   const kind = str(record.kind)
-  if (kind === 'features') return { kind: 'features', features: features(record.features) }
+  if (kind === 'features') return { kind: 'features', features: features(record.features), note: adoTitle(record.note, 500) }
   if (kind === 'stage') {
     const stage = str(record.stage)
     const outcome = str(record.outcome)

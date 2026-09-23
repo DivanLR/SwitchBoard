@@ -685,6 +685,11 @@ export interface FlowFeature {
   url: string | null
 }
 
+export interface FlowFeatureList {
+  features: FlowFeature[]
+  note: string | null
+}
+
 export type FlowReviewSeverity = 'must_fix' | 'should_fix' | 'nit'
 
 export interface FlowReviewFinding {

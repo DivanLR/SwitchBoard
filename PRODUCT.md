@@ -167,9 +167,14 @@ Confirmed functionality:
   A run starts from an Azure DevOps Feature, a written description, or an
   existing Spec Kit folder. The Azure DevOps list shows the open Features
   assigned to you across every project, with the listing session's output and
-  a Cancel while it loads (it waits up to 10 minutes); a pasted Feature link or
-  id starts a run at once, named "Feature <id>" until the spec stage reports the
-  real title. When the ado MCP server is not connected, Flow says
+  a Cancel while it loads (it waits up to 10 minutes). One ado call that sends
+  nothing for two minutes is abandoned, and a project whose query fails or times
+  out is skipped and named above the list while the other projects' Features
+  still show. A pasted work item, board or backlog link (dev.azure.com or
+  visualstudio.com), or the id with or without `#`, starts a run at once, named
+  "Feature <id>" until the spec stage reports the real title. Titles and project
+  names from Azure DevOps reach a stage only as quoted data, never inside an
+  instruction. When the ado MCP server is not connected, Flow says
   whether it is still starting (it waits up to 90 seconds, since npx can be
   slow), needs sign in, or failed with its own error, and offers Reconnect,
   which reconnects it on the same session and asks for the Features again.

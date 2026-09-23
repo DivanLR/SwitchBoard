@@ -85,7 +85,7 @@ import {
   type PlannedSuite,
 } from '@main/verify/verify-dispatch'
 import { createWorktree, currentBranch, originHost, removeWorktree, resolvesToCommit, worktreeRoot } from './worktrees'
-import type { FlowFeature } from '@shared/domain'
+import type { FlowFeatureList } from '@shared/domain'
 
 export const ADO_SERVER = 'ado'
 
@@ -94,6 +94,8 @@ const ADO_HOLD_MS = 10 * 60_000
 const ADO_LISTED_MS = 10_000
 
 export const FEATURES_TIMEOUT_MS = 10 * 60_000
+
+export const LISTING_ENV = { CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT: '120000' }
 
 const LISTING_CANCELLED: IpcError = { code: 'NOT_LIVE', message: 'The Feature list was cancelled.' }
 
@@ -130,10 +132,12 @@ interface FlowCallbacks {
 }
 
 type FeaturesWaiter = {
-  resolve: (features: FlowFeature[]) => void
+  resolve: (list: FlowFeatureList) => void
   reject: (error: unknown) => void
   timer: ReturnType<typeof setTimeout>
 }
+
+type Listing = { sessionId: string | null }
 
 export interface FlowGit {
   create: typeof createWorktree
@@ -230,7 +234,7 @@ export class FlowSupervisor {
   private rounds = new Map<string, number>()
   private looped = new Set<string>()
   private adoSessions = new Map<string, { sessionId: string; timer: ReturnType<typeof setTimeout> }>()
-  private listings = new Map<string, string>()
+  private listings = new Map<string, Listing>()
 
   constructor(
     private repos: Repositories,
@@ -254,50 +258,85 @@ export class FlowSupervisor {
   }
 
   listingSession(projectId: string): string | null {
-    return this.listings.get(projectId) ?? null
+    return this.listings.get(projectId)?.sessionId ?? null
   }
 
-  async features(projectId: string, query: string, timeoutMs = FEATURES_TIMEOUT_MS): Promise<FlowFeature[]> {
+  async features(projectId: string, query: string, timeoutMs = FEATURES_TIMEOUT_MS): Promise<FlowFeatureList> {
     const project = this.requireProject(projectId)
-    this.cancelFeatures(projectId)
-    const session = await this.manager.startSession(project.id, false, project.defaultSessionMode, {
-      background: true,
-      section: 'flow',
-    })
-    return this.listFeatures(projectId, session.id, query, timeoutMs)
+    const listing = this.beginListing(projectId, null)
+    let session: { id: string }
+    try {
+      session = await this.manager.startSession(project.id, false, project.defaultSessionMode, {
+        background: true,
+        section: 'flow',
+        env: LISTING_ENV,
+      })
+    } catch (error) {
+      this.dropListing(projectId, listing)
+      throw error
+    }
+    return this.listFeatures(projectId, listing, session.id, query, timeoutMs)
   }
 
-  async reconnectAdo(projectId: string, query: string, timeoutMs = FEATURES_TIMEOUT_MS): Promise<FlowFeature[]> {
+  async reconnectAdo(projectId: string, query: string, timeoutMs = FEATURES_TIMEOUT_MS): Promise<FlowFeatureList> {
     this.requireProject(projectId)
     const held = this.adoSessions.get(projectId)
     if (!held || !this.manager.liveSessionIds().includes(held.sessionId)) return this.features(projectId, query, timeoutMs)
     clearTimeout(held.timer)
     this.adoSessions.delete(projectId)
+    const listing = this.beginListing(projectId, held.sessionId)
     await this.manager.reconnectMcpServer(held.sessionId, ADO_SERVER).catch(() => {})
-    return this.listFeatures(projectId, held.sessionId, query, timeoutMs)
+    return this.listFeatures(projectId, listing, held.sessionId, query, timeoutMs)
   }
 
   cancelFeatures(projectId: string): void {
     this.dropAdoSession(projectId)
-    const sessionId = this.listings.get(projectId)
-    if (sessionId) this.settleListing(sessionId, LISTING_CANCELLED, 'stop')
+    const listing = this.listings.get(projectId)
+    if (!listing) return
+    this.dropListing(projectId, listing)
+    if (listing.sessionId) this.settleListing(listing.sessionId, LISTING_CANCELLED, 'stop')
   }
 
-  private async listFeatures(projectId: string, sessionId: string, query: string, timeoutMs: number): Promise<FlowFeature[]> {
-    this.listings.set(projectId, sessionId)
+  private beginListing(projectId: string, sessionId: string | null): Listing {
+    this.cancelFeatures(projectId)
+    const listing: Listing = { sessionId }
+    this.listings.set(projectId, listing)
     this.callbacks.onFlowChanged(projectId)
+    return listing
+  }
+
+  private dropListing(projectId: string, listing: Listing): void {
+    if (this.listings.get(projectId) !== listing) return
+    this.listings.delete(projectId)
+    this.callbacks.onFlowChanged(projectId)
+  }
+
+  private async listFeatures(
+    projectId: string,
+    listing: Listing,
+    sessionId: string,
+    query: string,
+    timeoutMs: number,
+  ): Promise<FlowFeatureList> {
+    if (this.listings.get(projectId) !== listing) {
+      if (listing.sessionId !== sessionId) this.settleListing(sessionId, LISTING_CANCELLED, 'stop')
+      throw LISTING_CANCELLED
+    }
+    if (listing.sessionId !== sessionId) {
+      listing.sessionId = sessionId
+      this.callbacks.onFlowChanged(projectId)
+    }
     try {
       await this.requireAdo(sessionId)
     } catch (error) {
-      if (this.listings.get(projectId) !== sessionId) throw LISTING_CANCELLED
-      this.listings.delete(projectId)
-      this.callbacks.onFlowChanged(projectId)
+      if (this.listings.get(projectId) !== listing) throw LISTING_CANCELLED
+      this.dropListing(projectId, listing)
       if ((error as Partial<IpcError>).code === 'MCP_NOT_CONNECTED') this.holdAdoSession(projectId, sessionId)
       else this.manager.endFlowSession(sessionId)
       throw error
     }
-    if (this.listings.get(projectId) !== sessionId) throw LISTING_CANCELLED
-    return new Promise<FlowFeature[]>((resolve, reject) => {
+    if (this.listings.get(projectId) !== listing) throw LISTING_CANCELLED
+    return new Promise<FlowFeatureList>((resolve, reject) => {
       const timer = setTimeout(() => this.settleListing(sessionId, LISTING_TIMED_OUT, 'stop'), timeoutMs)
       timer.unref?.()
       this.featuresWaiters.set(sessionId, { resolve, reject, timer })
@@ -315,17 +354,17 @@ export class FlowSupervisor {
   }
 
   private isListing(sessionId: string): boolean {
-    return this.featuresWaiters.has(sessionId) || [...this.listings.values()].includes(sessionId)
+    return this.featuresWaiters.has(sessionId) || [...this.listings.values()].some((listing) => listing.sessionId === sessionId)
   }
 
-  private settleListing(sessionId: string, outcome: FlowFeature[] | IpcError, close: 'end' | 'stop' | 'gone'): void {
+  private settleListing(sessionId: string, outcome: FlowFeatureList | IpcError, close: 'end' | 'stop' | 'gone'): void {
     const waiter = this.featuresWaiters.get(sessionId)
     if (waiter) {
       this.featuresWaiters.delete(sessionId)
       clearTimeout(waiter.timer)
     }
     for (const [projectId, listed] of [...this.listings]) {
-      if (listed !== sessionId) continue
+      if (listed.sessionId !== sessionId) continue
       this.listings.delete(projectId)
       this.callbacks.onFlowChanged(projectId)
     }
@@ -334,7 +373,7 @@ export class FlowSupervisor {
       void this.manager.stopSession(sessionId, 'The Feature list was stopped before it finished.').catch(() => {})
     }
     if (!waiter) return
-    if (Array.isArray(outcome)) waiter.resolve(outcome)
+    if ('features' in outcome) waiter.resolve(outcome)
     else waiter.reject(outcome)
   }
 
@@ -788,7 +827,9 @@ export class FlowSupervisor {
 
   onFlowMarker(sessionId: string, marker: FlowMarker): void {
     if (marker.kind === 'features') {
-      if (this.featuresWaiters.has(sessionId)) this.settleListing(sessionId, marker.features, 'end')
+      if (this.featuresWaiters.has(sessionId)) {
+        this.settleListing(sessionId, { features: marker.features, note: marker.note }, 'end')
+      }
       return
     }
     const ctx = this.sessionStage.get(sessionId)

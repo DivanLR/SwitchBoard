@@ -337,6 +337,14 @@ async function start(): Promise<void> {
             {{ flow.searching === 'reconnect' ? 'Reconnecting…' : 'Reconnect' }}
           </button>
         </div>
+        <div
+          v-if="flow.featuresSkipped && !flow.searching"
+          class="ui-err-banner is-warn"
+          role="status"
+          data-testid="flow-features-skipped"
+        >
+          Some projects were skipped, so this list may be incomplete: {{ flow.featuresSkipped }}
+        </div>
         <div class="fin-list" role="radiogroup" aria-label="Feature">
           <button
             v-for="item in flow.features"

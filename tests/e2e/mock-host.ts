@@ -78,7 +78,10 @@ export interface MockDriver {
   completeTurn: (sessionId: string, costUsd?: number) => void
   setStatus: (sessionId: string, status: string) => void
   reportVerifyResult: (projectId: string, status: string, report: unknown) => void
-  setAdoFeatures: (features: { id: string; title: string; state?: string | null; project?: string | null }[]) => void
+  setAdoFeatures: (
+    features: { id: string; title: string; state?: string | null; project?: string | null }[],
+    note?: string | null,
+  ) => void
   holdAdoFeatures: (held: boolean) => void
   setAdoConnected: (on: boolean, why?: string) => void
   reportFlowStage: (
@@ -464,6 +467,7 @@ export function installMockHost(scenario: MockScenario): void {
   const flowStagesByRun = new Map<string, AnyRecord[]>()
   const flowStacksByProject = new Map<string, string[]>()
   let adoFeatures: AnyRecord[] = []
+  let adoNote: string | null = null
   let adoConnected = true
   let adoWhy = 'it failed to start'
   let adoReconnects = 0
@@ -1253,7 +1257,7 @@ export function installMockHost(scenario: MockScenario): void {
           throw { code: 'NOT_LIVE', message: 'The Feature list was cancelled.' }
         }
       }
-      return [...adoFeatures]
+      return { features: [...adoFeatures], note: adoNote }
     },
     'flow.cancelFeatures': () => {
       adoCancels += 1
@@ -1901,7 +1905,8 @@ export function installMockHost(scenario: MockScenario): void {
       if (!hadComposerQueue && session) maybeDrainQueue(session.projectId)
     },
     setStatus: (sessionId, status) => setStatus(sessionId, status),
-    setAdoFeatures: (features) => {
+    setAdoFeatures: (features, note = null) => {
+      adoNote = note
       adoFeatures = features.map((feature) => ({
         id: feature.id,
         title: feature.title,

@@ -128,16 +128,23 @@ test('the Feature list says it shows the Features assigned to you, with each one
     'No open Feature is assigned to you. This list shows the Features assigned to you that are not closed, removed or done.',
   )
 
+  await expect(page.getByTestId('flow-features-skipped')).toHaveCount(0)
   await page.evaluate(() =>
-    window.__mock.setAdoFeatures([
-      { id: '40235', title: 'A+ Facial Biometrics Exemption Enhancement', state: 'Testing', project: 'A Plus' },
-      { id: '40921', title: 'Workforce Attendance Management Module', state: 'Analysis', project: 'Einstein' },
-    ]),
+    window.__mock.setAdoFeatures(
+      [
+        { id: '40235', title: 'A+ Facial Biometrics Exemption Enhancement', state: 'Testing', project: 'A Plus' },
+        { id: '40921', title: 'Workforce Attendance Management Module', state: 'Analysis', project: 'Einstein' },
+      ],
+      'Legacy: wit_query timed out.',
+    ),
   )
   await page.getByTestId('flow-feature-refresh').click()
   await expect(page.getByTestId('flow-feature-40235-project')).toHaveText('A Plus')
   await expect(page.getByTestId('flow-feature-40921')).toContainText('Analysis')
   await expect(page.getByTestId('flow-features-empty')).toHaveCount(0)
+  await expect(page.getByTestId('flow-features-skipped')).toHaveText(
+    'Some projects were skipped, so this list may be incomplete: Legacy: wit_query timed out.',
+  )
 })
 
 test('a pasted Feature link or id shows what it names, and Start begins the run from it with no listing', async ({ page }) => {

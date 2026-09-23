@@ -144,6 +144,7 @@ interface StartOptions {
   engine?: SessionEngine
   carryTranscriptFrom?: string
   mainModel?: string
+  env?: Readonly<Record<string, string>>
 }
 
 const MAX_CONTAINERS = 2
@@ -762,6 +763,7 @@ export class SessionManager {
           effort: settings.subagentEffort,
         }),
         denyTool: opts?.denyTool,
+        env: opts?.env,
         onPlanModeChange: (inPlanMode) => {
           if (entry.row.inPlanMode === inPlanMode) return
           entry.row.inPlanMode = inPlanMode

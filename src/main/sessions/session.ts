@@ -108,6 +108,7 @@ interface HostedSessionOptions {
   mode: SessionMode
   containerised?: boolean
   denyTool?: (toolName: string, input: unknown) => string | null
+  env?: Readonly<Record<string, string>>
   onPlanModeChange?: (inPlanMode: boolean) => void
   summaries?: boolean
   sink: EventSink
@@ -243,6 +244,7 @@ export class HostedSession implements SessionHost {
         includePartialMessages: true,
         resume: this.options.resumeSdkSessionId,
         pathToClaudeCodeExecutable: this.options.claudeExecutablePath,
+        env: this.options.env ? { ...process.env, ...this.options.env } : undefined,
         spawnClaudeCodeProcess: sandbox?.spawn,
         settingSources: ['user', 'project', 'local'],
         additionalDirectories: sandbox

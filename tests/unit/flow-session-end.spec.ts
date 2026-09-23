@@ -3,17 +3,22 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+const queries = vi.hoisted(() => [] as { options: Record<string, unknown> }[])
+
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   createSdkMcpServer: () => ({ type: 'sdk', name: 'switchboard', instance: {} }),
   tool: () => ({}),
-  query: () => ({
-    [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
-    supportedCommands: () => Promise.resolve([]),
-    supportedModels: () => Promise.resolve([]),
-    interrupt: () => Promise.resolve(),
-    applyFlagSettings: () => Promise.resolve(),
-    setModel: () => Promise.resolve(),
-  }),
+  query: (args: { options: Record<string, unknown> }) => {
+    queries.push(args)
+    return {
+      [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
+      supportedCommands: () => Promise.resolve([]),
+      supportedModels: () => Promise.resolve([]),
+      interrupt: () => Promise.resolve(),
+      applyFlagSettings: () => Promise.resolve(),
+      setModel: () => Promise.resolve(),
+    }
+  },
 }))
 
 vi.mock('@main/sessions/claude-executable', () => ({
@@ -71,8 +76,30 @@ async function setup() {
     inner.hosted.get(session.id)?.session.options.onTurnComplete()
     inner.handleStatusChange(inner.hosted.get(session.id), 'done')
   }
-  return { manager, session, stopped, turnDone, turnsEnded }
+  return { manager, project, session, stopped, turnDone, turnsEnded }
 }
+
+describe('the environment of the Claude Code process', () => {
+  afterEach(() => {
+    delete process.env.SWB_TEST_INHERITED
+  })
+
+  it('adds the variables a session is given to the inherited environment, and leaves any other session on the default', async () => {
+    process.env.SWB_TEST_INHERITED = 'kept'
+    queries.length = 0
+    const { manager, project } = await setup()
+    await manager.startSession(project.id, false, undefined, {
+      background: true,
+      section: 'flow',
+      env: { CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT: '120000' },
+    })
+    expect(queries).toHaveLength(2)
+    expect(queries[0].options.env).toBeUndefined()
+    expect(queries[0].options.pathToClaudeCodeExecutable).toBe('C:\\fake\\claude.exe')
+    expect(queries[1].options.env).toMatchObject({ CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT: '120000', SWB_TEST_INHERITED: 'kept' })
+    expect(queries[1].options.pathToClaudeCodeExecutable).toBe('C:\\fake\\claude.exe')
+  })
+})
 
 describe('ending the session of a finished Flow stage', () => {
   it('stops an idle stage session at once and stops watching it', async () => {

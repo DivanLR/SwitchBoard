@@ -13,6 +13,7 @@ const state = reactive({
   projectId: null as string | null,
   features: [] as FlowFeature[],
   featuresNote: null as string | null,
+  featuresSkipped: null as string | null,
   searching: null as 'search' | 'reconnect' | null,
   listingByProject: {} as Record<string, string | null>,
   adoDown: null as string | null,
@@ -77,11 +78,13 @@ const store = reactive({
     state.error = null
     state.adoDown = null
     state.featuresNote = null
+    state.featuresSkipped = null
     state.searching = reconnect ? 'reconnect' : 'search'
     try {
-      const features = await invoke(reconnect ? 'flow.reconnectAdo' : 'flow.features', { projectId, query })
+      const { features, note } = await invoke(reconnect ? 'flow.reconnectAdo' : 'flow.features', { projectId, query })
       if (token !== listToken) return
       state.features = features
+      state.featuresSkipped = note
       if (features.length === 0) {
         state.featuresNote = query.trim()
           ? 'No open Feature assigned to you matches that.'

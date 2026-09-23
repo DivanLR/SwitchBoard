@@ -17,7 +17,7 @@ import type {
   QueuedTask,
   SectionKind,
   Session,
-  FlowFeature,
+  FlowFeatureList,
   FlowRun,
   FlowStackId,
   FlowStage,
@@ -272,8 +272,8 @@ export interface InvokeMap {
   }
   'verify.cancel': { req: { projectId: string; runId: string }; res: VerifyRun[] }
   'flow.list': { req: { projectId: string }; res: FlowSnapshot }
-  'flow.features': { req: { projectId: string; query?: string }; res: FlowFeature[] }
-  'flow.reconnectAdo': { req: { projectId: string; query?: string }; res: FlowFeature[] }
+  'flow.features': { req: { projectId: string; query?: string }; res: FlowFeatureList }
+  'flow.reconnectAdo': { req: { projectId: string; query?: string }; res: FlowFeatureList }
   'flow.cancelFeatures': { req: { projectId: string }; res: void }
   'flow.existingSpecs': { req: { projectId: string }; res: SpecSummary[] }
   'flow.detectStacks': { req: { projectId: string }; res: FlowStackId[] }
