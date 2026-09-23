@@ -70,6 +70,7 @@ function setup() {
     dbProjectId: 'db-project',
     skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),
     flow: { reconcileOnStartup: () => {} } as never,
+    keepCurrent: async () => ({ checkedAt: '', results: [] }),
     ptyHost: {
       open: () => ({ scrollback: '', reused: false }),
       write: () => {},

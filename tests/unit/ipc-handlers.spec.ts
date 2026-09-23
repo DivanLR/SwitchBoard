@@ -67,6 +67,7 @@ function setup() {
     dbProjectId: 'db-project',
     skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),
     flow: { reconcileOnStartup: () => {} } as never,
+    keepCurrent: async () => ({ checkedAt: '', results: [] }),
     ptyHost: { open: () => ({ scrollback: '', reused: false }), write: () => {}, resize: () => {}, close: () => {}, closeAll: () => {} } as unknown as PtyHost,
   })
 
@@ -109,6 +110,35 @@ describe('the invoke channel', () => {
     listed = await harness.call('projects.list', undefined)
     if (!listed.ok) throw new Error(listed.error.message)
     expect(listed.value).toMatchObject({ projects: [{ id: project.id }], archived: [] })
+  })
+
+  it('deletes a project only once none of its sessions is live', async () => {
+    const project = harness.repos.projects.insert({ name: 'a', path: 'C:\\a', source: 'manual' })
+    harness.repos.sessions.insert({
+      id: 'live',
+      projectId: project.id,
+      engine: 'claude',
+      sdkSessionId: null,
+      status: 'working',
+      statusDetail: null,
+      branch: null,
+      diffAdds: null,
+      diffDels: null,
+      usageUtilization: null,
+      usageResetsAt: null,
+      usageLimitType: null,
+      startedAt: '2026-09-01T10:00:00.000Z',
+      endedAt: null,
+      endReason: null,
+    })
+    const refused = await harness.call('projects.delete', { projectId: project.id })
+    expect(refused).toMatchObject({ ok: false, error: { code: 'ALREADY_ACTIVE' } })
+    expect(harness.repos.projects.byId(project.id)).toBeDefined()
+
+    harness.repos.sessions.reconcileAllEnded('stopped')
+    expect(await harness.call('projects.delete', { projectId: project.id })).toEqual({ ok: true, value: null })
+    expect(harness.repos.projects.byId(project.id)).toBeUndefined()
+    expect(harness.repos.sessions.byId('live')).toBeUndefined()
   })
 
   it('returns null rather than undefined for a void handler', async () => {
@@ -241,6 +271,7 @@ describe('the sender-trust check', () => {
       dbProjectId: 'db-project',
       skillsStagingRoot: join(tmpdir(), 'switchboard-test-skills'),
       flow: { reconcileOnStartup: () => {} } as never,
+      keepCurrent: async () => ({ checkedAt: '', results: [] }),
       ptyHost: { open: () => ({ scrollback: '', reused: false }), write: () => {}, resize: () => {}, close: () => {}, closeAll: () => {} } as unknown as PtyHost,
     })
     const listener = registered.get(INVOKE_CHANNEL)!

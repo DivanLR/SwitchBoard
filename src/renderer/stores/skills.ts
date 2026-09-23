@@ -1,35 +1,42 @@
-import { reactive } from 'vue'
+import { computed, reactive, toRefs } from 'vue'
 import type { CustomSkill, SkillImportResult } from '@shared/domain'
 import { errorMessage, invoke } from '@renderer/ipc'
 import { useToastsStore } from '@renderer/stores/toasts'
 
-const store = reactive({
+const state = reactive({
   items: [] as CustomSkill[],
   installed: [] as string[],
   loading: false,
   importing: false,
   error: null as string | null,
   lastImport: null as SkillImportResult | null,
+})
+
+const enabled = computed((): CustomSkill[] => state.items.filter((skill) => skill.enabled))
+
+const store = reactive({
+  ...toRefs(state),
+  enabled,
 
   async load(): Promise<void> {
-    store.loading = true
+    state.loading = true
     try {
-      ;[store.items, store.installed] = await Promise.all([
+      ;[state.items, state.installed] = await Promise.all([
         invoke('skills.list', undefined),
         invoke('skills.installed', undefined),
       ])
     } finally {
-      store.loading = false
+      state.loading = false
     }
   },
 
   async import(url: string): Promise<boolean> {
-    store.importing = true
-    store.error = null
-    store.lastImport = null
+    state.importing = true
+    state.error = null
+    state.lastImport = null
     try {
       const result = await invoke('skills.import', { url })
-      store.lastImport = result
+      state.lastImport = result
       await store.load()
       const n = result.imported.length
       if (n > 0) {
@@ -42,21 +49,21 @@ const store = reactive({
       }
       return n > 0
     } catch (e) {
-      store.error = errorMessage(e)
+      state.error = errorMessage(e)
       useToastsStore().error('That import failed', errorMessage(e))
       return false
     } finally {
-      store.importing = false
+      state.importing = false
     }
   },
 
   async setEnabled(name: string, on: boolean): Promise<void> {
-    store.error = null
+    state.error = null
     try {
-      store.items = await invoke('skills.setEnabled', { name, enabled: on })
-      store.installed = await invoke('skills.installed', undefined)
+      state.items = await invoke('skills.setEnabled', { name, enabled: on })
+      state.installed = await invoke('skills.installed', undefined)
     } catch (e) {
-      store.error = errorMessage(e)
+      state.error = errorMessage(e)
     }
   },
 
@@ -65,12 +72,22 @@ const store = reactive({
   },
 
   async remove(name: string): Promise<void> {
-    store.error = null
+    state.error = null
     try {
-      store.items = await invoke('skills.remove', { name })
-      store.installed = await invoke('skills.installed', undefined)
+      state.items = await invoke('skills.remove', { name })
+      state.installed = await invoke('skills.installed', undefined)
     } catch (e) {
-      store.error = errorMessage(e)
+      state.error = errorMessage(e)
+    }
+  },
+
+  async run(projectId: string, name: string, argument?: string): Promise<string | null> {
+    state.error = null
+    try {
+      return (await invoke('skills.run', { projectId, name, argument })).sessionId
+    } catch (e) {
+      state.error = errorMessage(e)
+      return null
     }
   },
 })

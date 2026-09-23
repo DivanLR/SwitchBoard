@@ -36,6 +36,7 @@ import Icon from '@renderer/components/Icon.vue'
 import TestsView from '@renderer/views/TestsView.vue'
 import DiffView from '@renderer/views/DiffView.vue'
 import DiagramsView from '@renderer/views/DiagramsView.vue'
+import SkillsView from '@renderer/views/SkillsView.vue'
 import TerminalPane from '@renderer/components/TerminalPane.vue'
 import ConversationTerminal from '@renderer/components/ConversationTerminal.vue'
 import SessionHeader from '@renderer/components/session/SessionHeader.vue'
@@ -44,7 +45,7 @@ import SessionStartPanel from '@renderer/components/session/SessionStartPanel.vu
 import SessionComposer from '@renderer/components/session/SessionComposer.vue'
 
 const props = defineProps<{ project: ProjectListItem }>()
-const emit = defineEmits<{ (e: 'open-flow'): void }>()
+const emit = defineEmits<{ (e: 'open-flow'): void; (e: 'open-settings', tab: 'skills'): void }>()
 
 const projects = useProjectsStore()
 const active = useActiveSessionStore()
@@ -74,6 +75,7 @@ const mainTab = ref<
   | 'tests'
   | 'diff'
   | 'diagrams'
+  | 'skills'
 >('session')
 const diffCount = computed(() => diff.resultFor(props.project.id).files.length)
 
@@ -651,6 +653,14 @@ const { dragKind, onPaneDragOver, onPaneDragLeave, onPaneDrop } = projectRefs
       >
         Diagrams
       </button>
+      <button
+        class="ui-tab"
+        :class="{ sel: mainTab === 'skills', 'is-selected': mainTab === 'skills' }"
+        data-testid="tab-skills"
+        @click="mainTab = 'skills'"
+      >
+        Skills
+      </button>
     </div>
     <div v-if="!active.fullScreenSection && (mainTab === 'session' || mainTab === 'terminal')" class="view-toolbar ui-toolbar">
       <span class="view-label">Workspace</span>
@@ -744,6 +754,14 @@ const { dragKind, onPaneDragOver, onPaneDragLeave, onPaneDrop } = projectRefs
       :install-error="installError"
       @install="installDiagramPlugin"
       @run="runDiagramCommand"
+    />
+    <SkillsView
+      v-else-if="mainTab === 'skills'"
+      :project-id="project.id"
+      :project-name="project.name"
+      :session-id="sectionSessionIds.skills ?? null"
+      @ran="(id: string) => (sectionSessionIds = { ...sectionSessionIds, skills: id })"
+      @manage="emit('open-settings', 'skills')"
     />
     <SessionStream
       v-else-if="mainTab === 'session'"

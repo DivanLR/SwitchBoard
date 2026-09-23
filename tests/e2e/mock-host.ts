@@ -27,6 +27,7 @@ export interface MockProjectSeed {
   path: string
   session?: MockSessionSeed
   reserved?: boolean
+  archivedAt?: string
   defaultSessionMode?: string
   useContainers?: boolean
   diff?: { gitNotice: string | null; files: Record<string, unknown>[] }
@@ -298,7 +299,7 @@ export function installMockHost(scenario: MockScenario): void {
       path: p.path,
       source: 'manual',
       createdAt: now(),
-      archivedAt: null as string | null,
+      archivedAt: p.archivedAt ?? (null as string | null),
       refs: [] as { path: string; label: string }[],
       reserved: !!p.reserved,
       defaultSessionMode: p.defaultSessionMode ?? 'auto',
@@ -767,6 +768,19 @@ export function installMockHost(scenario: MockScenario): void {
       customSkills.splice(at, 1)
       return customSkills.map((s) => ({ ...s }))
     },
+    'skills.run': async (req) => {
+      const skill = customSkills.find((s) => s.name === String(req.name))
+      if (!skill) throw { code: 'NOT_FOUND', message: 'No such skill.' }
+      if (!skill.enabled) {
+        throw { code: 'RULE_NOT_ALLOWED', message: 'That skill is switched off. Turn it on in Settings, Skills, then run it.' }
+      }
+      const session = await sectionSession(String(req.projectId), 'skills')
+      const argument = typeof req.argument === 'string' ? req.argument.trim() : ''
+      const text = argument ? `/${skill.name} ${argument}` : `/${skill.name}`
+      sends.push({ sessionId: session.id, text })
+      appendEvent(session.id, 'prompt', { text, pending: false })
+      return { sessionId: session.id }
+    },
     'sessions.rename': (req) => {
       const session = sessions.get(String(req.sessionId))
       if (!session) throw { code: 'NOT_FOUND', message: 'Session not found' }
@@ -836,6 +850,14 @@ export function installMockHost(scenario: MockScenario): void {
     'projects.unarchive': (req) => {
       const project = projects.find((p) => p.id === req.projectId)
       if (project) project.archivedAt = null
+    },
+    'projects.delete': (req) => {
+      const at = projects.findIndex((p) => p.id === req.projectId)
+      if (at < 0) throw { code: 'NOT_FOUND', message: 'Project not found' }
+      if (projects[at].sessions.some((s) => !s.endedAt)) {
+        throw { code: 'ALREADY_ACTIVE', message: 'It has a live session. End every session in it first.' }
+      }
+      projects.splice(at, 1)
     },
     'projects.commands': (req) => projectCommands.get(String(req.projectId)) ?? [],
     'diff.list': (req) => {
@@ -925,6 +947,19 @@ export function installMockHost(scenario: MockScenario): void {
         projectCommands.set(project.id, shaped)
         push('push.projectCommands', { projectId: project.id, commands: shaped })
       }
+    },
+    'plugins.keepCurrent': () => {
+      const report = {
+        checkedAt: now(),
+        results: [
+          { kind: 'marketplace', name: 'ponytail', status: 'current', detail: 'Catalogue refreshed.' },
+          { kind: 'plugin', name: 'ponytail@ponytail', status: 'updated', detail: 'Plugin "ponytail" updated from 4.8.4 to 4.9.0.' },
+          { kind: 'plugin', name: 'brag@brag (project)', status: 'needs_confirmation', detail: 'The marketplace declares a command to fetch it.' },
+          { kind: 'skill', name: 'research', status: 'failed', detail: 'GitHub is rate-limiting this machine.' },
+        ],
+      }
+      settings = { ...settings, keepCurrentLast: report }
+      return report
     },
     'diagrams.read': (req) => ({
       html: `<!doctype html><title>${String(req.file)}</title><body><svg role="img" aria-label="${String(req.file)}"><text x="4" y="16">${String(req.file)}</text></svg></body>`,

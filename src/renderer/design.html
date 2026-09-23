@@ -59,6 +59,12 @@
         { id: 'p-infra', name: 'infra', path: 'C:\\work\\infra' },
         { id: 'p-webext', name: 'web-ext', path: 'C:\\work\\web-ext' },
         {
+          id: 'p-legacy',
+          name: 'legacy-portal',
+          path: 'C:\\work\\legacy-portal',
+          archivedAt: new Date(Date.now() - 26 * 24 * 60 * 60 * 1000).toISOString(),
+        },
+        {
           id: 'p-db',
           name: 'Database',
           path: 'C:\\userdata\\database-mcp',
@@ -119,6 +125,16 @@
         ...scenario.settings,
         databaseMcpServers: ['postgres — production', 'mssql — reporting'],
         projectTestStacks: { 'p-alpha': 'dotnet' },
+        favouriteSkills: ['ponytail'],
+        keepCurrentLast: {
+          checkedAt: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+          results: [
+            { kind: 'marketplace', name: 'ponytail', status: 'current', detail: 'Catalogue refreshed.' },
+            { kind: 'plugin', name: 'ponytail@ponytail', status: 'updated', detail: 'Plugin "ponytail" updated from 4.8.4 to 4.9.0.' },
+            { kind: 'skill', name: 'grilling', status: 'current', detail: 'The source has not changed.' },
+            { kind: 'speckit', name: 'git', status: 'failed', detail: 'GitHub is rate-limiting this machine.' },
+          ],
+        },
       }
 
       installMockHost(scenario)

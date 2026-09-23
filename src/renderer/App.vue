@@ -198,6 +198,7 @@ const dbProject = computed(() => projects.dbProject)
           v-else-if="selectedProject"
           :project="selectedProject"
           @open-flow="showFlow = true"
+          @open-settings="openSettings"
         />
         <div v-else class="no-project ui-empty">
           <div class="ui-empty-icon"><Icon name="folder" :size="24" /></div>

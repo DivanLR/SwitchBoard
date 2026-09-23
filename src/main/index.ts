@@ -15,6 +15,7 @@ import { registerProject } from './projects/discovery'
 import { computeCounters, registerIpcHandlers, RendererPush } from './ipc/handlers'
 import { readDiagramList } from './diagrams/list'
 import { reconcileSkills, stagingSkillsRoot } from './skills/install'
+import { keepCurrentService } from './keep-current'
 import { FlowSupervisor } from './flow/flow-supervisor'
 import { initUpdater } from './updater'
 import { PtyHost } from './terminal/pty-host'
@@ -275,6 +276,7 @@ async function main(): Promise<void> {
   })
   flow.reconcileOnStartup()
 
+  const keeper = keepCurrentService({ repos, stagingRoot: stagingSkillsRoot(app.getPath('userData')) })
   registerIpcHandlers({
     repos,
     manager,
@@ -284,12 +286,14 @@ async function main(): Promise<void> {
     dbProjectId: dbProject.id,
     skillsStagingRoot: stagingSkillsRoot(app.getPath('userData')),
     ptyHost,
+    keepCurrent: keeper.check,
   })
   void reconcileSkills(stagingSkillsRoot(app.getPath('userData')), repos.customSkills.list())
   scheduleRetention(() => {
     repos.events.flush()
     runRetention(db)
   })
+  keeper.schedule()
   initUpdater({ onStatus: (status) => pusher.push('push.updateStatus', status) })
 
   createWindow()

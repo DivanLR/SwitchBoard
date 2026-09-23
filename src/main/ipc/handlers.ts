@@ -1,5 +1,5 @@
 import { clipboard, dialog, ipcMain, shell, type BrowserWindow } from 'electron'
-import type { CustomSkill, Project, Session, SessionEvent } from '@shared/domain'
+import type { CustomSkill, KeepCurrentReport, Project, Session, SessionEvent } from '@shared/domain'
 import type { SectionKind } from '@shared/domain'
 import { isDangerousCommand, sessionName } from '@shared/domain'
 import {
@@ -138,6 +138,7 @@ interface HandlerDeps {
   getWindow: () => BrowserWindow | null
   dbProjectId: string
   ptyHost: PtyHost
+  keepCurrent: () => Promise<KeepCurrentReport>
 }
 
 function localMidnightIso(): string {
@@ -348,6 +349,27 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       }
       repos.projects.unarchive(req.projectId)
     },
+    'projects.delete': (req) => {
+      requireProject(req.projectId)
+      if (req.projectId === dbProjectId) {
+        throw { code: 'RULE_NOT_ALLOWED', message: 'The Database project cannot be deleted.' } satisfies IpcError
+      }
+      const blocker = repos.projects.deleteBlocker(req.projectId)
+      if (blocker === 'live_session') {
+        throw {
+          code: 'ALREADY_ACTIVE',
+          message: 'It has a live session. End every session in it first.',
+        } satisfies IpcError
+      }
+      if (blocker === 'flow_worktree') {
+        throw {
+          code: 'RULE_NOT_ALLOWED',
+          message: 'A Flow run still owns a worktree in it. Remove that worktree from the Flow run first.',
+        } satisfies IpcError
+      }
+      repos.events.flush()
+      repos.projects.delete(req.projectId)
+    },
     'projects.setUseContainers': (req) => {
       if (!repos.projects.byId(req.projectId)) {
         throw { code: 'NOT_FOUND', message: 'Project not found' } satisfies IpcError
@@ -437,6 +459,21 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       repos.customSkills.remove(req.name)
       await manager.reloadPlugins()
       return listSkills()
+    },
+    'skills.run': async (req) => {
+      requireProject(req.projectId)
+      const skill = (await listSkills()).find((s) => s.name === req.name)
+      if (!skill) throw { code: 'NOT_FOUND', message: 'No such skill.' } satisfies IpcError
+      if (!skill.enabled) {
+        throw {
+          code: 'RULE_NOT_ALLOWED',
+          message: 'That skill is switched off. Turn it on in Settings, Skills, then run it.',
+        } satisfies IpcError
+      }
+      const session = await manager.backgroundSessionFor(req.projectId, 'skills')
+      const argument = req.argument?.trim()
+      manager.sendMessage(session.id, argument ? `/${skill.name} ${argument}` : `/${skill.name}`)
+      return { sessionId: session.id }
     },
     'diff.list': (req) => {
       const project = repos.projects.byId(req.projectId)
@@ -745,6 +782,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       await installPlugin(req.marketplace, req.pkg)
       await manager.reloadPlugins()
     },
+    'plugins.keepCurrent': () => deps.keepCurrent(),
     'settings.get': () => repos.settings.get(),
     'settings.set': (req) => repos.settings.set(req),
     'models.available': () => manager.models(),

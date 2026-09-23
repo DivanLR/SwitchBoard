@@ -97,8 +97,11 @@ verification report) and never invents a figure it did not measure.
   directories, and the Ship stage raises one pull request per repository.
 - Retention runs automatically: raw output for the twelve most recent sessions
   per project, decision history for 30 days, and the twenty most recent Flow runs
-  per project.
-- Updates arrive in-app from the GitHub release feed.
+  per project. A project archived more than 30 days ago is deleted from
+  Switchboard, never from disk.
+- Updates arrive in-app from the GitHub release feed. Plugins, imported skills
+  and Spec Kit extensions are checked shortly after start and then daily, unless
+  Settings, General switches it off.
 
 ## Capabilities and Constraints
 
@@ -208,8 +211,8 @@ Removed, each on the evidence of the application's own database on that date:
   Restored the same day at the owner's direction: "I no longer have the option to
   have both Claude and Codex in use". Settings, Models picks the engine for new
   sessions and the Codex model, and the start panel picks it per session. Codex
-  never runs in a container or in bypass, and Flow, Tests, Diff and Diagrams
-  sessions always run on Claude Code.
+  never runs in a container or in bypass, and Flow, Tests, Diff, Diagrams and
+  Skills sessions always run on Claude Code.
 - Model routing (auto, advisor and orchestrator modes, a worker model, per turn
   classification): the owner ran basic mode, one model, for cost reasons.
   Restored the same day at the owner's direction, with the four modes, both
@@ -236,12 +239,14 @@ to import their own skills - its a feature allowing people to use their own
 stuff". Settings, Skills imports from any GitHub skills folder, groups the
 imported skills by source with an all on or all off switch per source, and
 switches or removes each one. An imported skill is a slash command in every
-session and appears in the composer suggestions, so it has no section of its
-own.
+session and appears in the composer suggestions. On the owner's review of the
+redesign the Skills section tab came back beside Session, Tests, Diff and
+Diagrams: it runs a switched on skill in the Skills section's own background
+session, with an optional argument, and starred favourites sit at the top.
 
 This supersedes the constraint recorded on 2026-08-13 that "all six sections"
 (Session, Specs, Tests, Diff, Cleanup, Diagrams) must survive. The sections now
-are Session, Tests, Diff and Diagrams, with Flow as a popup and the Database MCP
+are Session, Tests, Diff, Diagrams and Skills, with Flow as a popup and the Database MCP
 view alongside. Anything reading the six section rule as binding is reading a
 superseded document.
 

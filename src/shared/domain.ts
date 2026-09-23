@@ -90,6 +90,14 @@ export interface Project {
   useContainers: boolean
 }
 
+export const ARCHIVE_DELETE_DAYS = 30
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+export function archiveDaysLeft(archivedAt: string, now: number): number {
+  return Math.max(0, Math.ceil(ARCHIVE_DELETE_DAYS - (now - Date.parse(archivedAt)) / DAY_MS))
+}
+
 export interface CustomSkill {
   name: string
   description: string
@@ -400,6 +408,20 @@ export function subagentsAllowed(effort: EffortLevel): boolean {
   return effort === 'max'
 }
 
+export type KeepCurrentStatus = 'updated' | 'current' | 'failed' | 'needs_confirmation'
+
+export interface KeepCurrentResult {
+  kind: 'marketplace' | 'plugin' | 'skill' | 'speckit'
+  name: string
+  status: KeepCurrentStatus
+  detail: string
+}
+
+export interface KeepCurrentReport {
+  checkedAt: string
+  results: KeepCurrentResult[]
+}
+
 export interface Settings {
   defaultView: 'clean' | 'raw'
   notificationsEnabled: boolean
@@ -433,6 +455,9 @@ export interface Settings {
   mcpActiveServers: string[]
   sandboxMemory: string
   flowWorktreeRoot: string
+  keepCurrent: boolean
+  keepCurrentLast: KeepCurrentReport | null
+  favouriteSkills: string[]
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -468,6 +493,9 @@ export const DEFAULT_SETTINGS: Settings = {
   sandboxMemory: '6g',
   flowWorktreeRoot: '',
   diagramEngine: 'diagram-design',
+  keepCurrent: true,
+  keepCurrentLast: null,
+  favouriteSkills: [],
 }
 
 export interface TranscriptSummary {
@@ -833,6 +861,7 @@ export type SectionKind =
   | 'tests'
   | 'diff'
   | 'diagram'
+  | 'skills'
   | 'flow'
 
 export function sessionName(
@@ -866,6 +895,7 @@ const SECTION_LABELS: Record<SectionKind, string> = {
   tests: 'Tests',
   diff: 'Diff',
   diagram: 'Diagram',
+  skills: 'Skills',
   flow: 'Flow',
 }
 
