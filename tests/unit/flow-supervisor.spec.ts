@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -16,17 +16,14 @@ type Repos = ReturnType<typeof createRepositories>
 
 function fakeGit(): FlowGit {
   return {
-    create: vi.fn(async (input) => ({
-      path: input.path,
-      branch: input.branch,
-      head: 'abc123',
-      locked: false,
-      prunable: false,
-    })),
+    create: vi.fn(async (input) => {
+      const slug = input.title.toLowerCase().replace(/\s+/g, '-')
+      return { path: join(input.root, slug), branch: `feature/${slug}`, head: 'abc123', locked: false, prunable: false }
+    }),
     remove: vi.fn(async () => ({ removed: true, dirty: [] })),
-    branch: vi.fn(async () => 'main'),
-    root: vi.fn((projectPath: string, override?: string | null) => override || `${projectPath}.worktrees`),
-    uniqueBranch: vi.fn(async (_repo: string, title: string) => `feature/${title.toLowerCase().replace(/\s+/g, '-')}`),
+    branch: vi.fn<FlowGit['branch']>(async () => 'main'),
+    root: vi.fn((projectPath: string, override?: string | null) => override || join(projectPath, '.worktrees')),
+    resolves: vi.fn(async () => true),
   }
 }
 
@@ -112,7 +109,7 @@ describe('starting a run', () => {
     expect(run.branch).toBe('feature/checkout-v2')
     expect(run.baseBranch).toBe('main')
     expect(h.git.create).toHaveBeenCalledWith(
-      expect.objectContaining({ repoRoot: h.project.path, branch: 'feature/checkout-v2', base: 'main' }),
+      expect.objectContaining({ repoRoot: h.project.path, title: 'Checkout v2', base: 'main' }),
     )
     expect(h.manager.startSession).toHaveBeenCalledWith(
       h.project.id,
@@ -182,6 +179,64 @@ describe('starting a run', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  function specProject(): string {
+    const dir = dotnetProject()
+    mkdirSync(join(dir, '.specify', 'scripts'), { recursive: true })
+    mkdirSync(join(dir, 'specs', '001-cart'), { recursive: true })
+    writeFileSync(join(dir, 'specs', '001-cart', 'spec.md'), '# Cart\n')
+    return dir
+  }
+
+  it('refuses a spec id that is not one of the spec folders, before making a worktree', async () => {
+    const h = setup({ projectPath: specProject() })
+    for (const specId of ['..', '../..', '', '002-missing', '001-cart/..']) {
+      await expect(
+        h.flow.start({ projectId: h.project.id, source: { kind: 'spec', specId }, autopilot: false, autoShip: false }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    }
+    expect(h.git.create).not.toHaveBeenCalled()
+  })
+
+  it('copies an untracked .specify into the worktree alongside the spec folder', async () => {
+    const h = setup({ projectPath: specProject() })
+    const run = await h.flow.start({
+      projectId: h.project.id,
+      source: { kind: 'spec', specId: '001-cart' },
+      autopilot: false,
+      autoShip: false,
+    })
+    expect(existsSync(join(run.worktreePath!, '.specify', 'scripts'))).toBe(true)
+    expect(existsSync(join(run.worktreePath!, 'specs', '001-cart', 'spec.md'))).toBe(true)
+  })
+
+  it('refuses a base branch that starts with a dash or does not resolve, before making a worktree', async () => {
+    const h = setup()
+    await expect(
+      h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false, baseBranch: '--no-checkout' }),
+    ).rejects.toMatchObject({ code: 'INVALID_PATH' })
+    h.git.resolves = vi.fn(async () => false)
+    await expect(
+      h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false, baseBranch: 'nope' }),
+    ).rejects.toMatchObject({ code: 'INVALID_PATH' })
+    expect(h.git.create).not.toHaveBeenCalled()
+  })
+
+  it('refuses a detached HEAD without a named base branch, and accepts one with it', async () => {
+    const h = setup()
+    h.git.branch = vi.fn(async () => null)
+    await expect(
+      h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false }),
+    ).rejects.toMatchObject({ code: 'INVALID_PATH', message: expect.stringContaining('detached HEAD') })
+    const run = await h.flow.start({
+      projectId: h.project.id,
+      source: textSource(),
+      autopilot: false,
+      autoShip: false,
+      baseBranch: 'release/1.2',
+    })
+    expect(run.baseBranch).toBe('release/1.2')
   })
 })
 

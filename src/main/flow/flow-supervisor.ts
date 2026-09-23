@@ -45,17 +45,10 @@ import {
 import type { FlowMarker, FlowStageMarker } from './flow-markers'
 import { artefactRelPath, defaultArtefactKind, resolveArtefactPath } from './artefacts'
 import { detectFlowStacks } from './stacks'
-import { isSpecKitInstalled, readSpecKitState } from '@main/specs/spec-kit'
+import { readSpecKitState } from '@main/specs/spec-kit'
 import { defaultSelection, stackById } from '@shared/test-catalog'
 import { planSuites, verifyPrompt as buildVerifyPrompt, type PlannedSuite } from '@main/evals/verify-dispatch'
-import {
-  createWorktree,
-  currentBranch,
-  removeWorktree,
-  uniqueBranchName,
-  worktreePathFor,
-  worktreeRoot,
-} from './worktrees'
+import { createWorktree, currentBranch, removeWorktree, resolvesToCommit, worktreeRoot } from './worktrees'
 import type { FlowFeature } from '@shared/domain'
 
 export const ADO_SERVER = 'ado'
@@ -79,7 +72,7 @@ export interface FlowGit {
   remove: typeof removeWorktree
   branch: typeof currentBranch
   root: typeof worktreeRoot
-  uniqueBranch: typeof uniqueBranchName
+  resolves: typeof resolvesToCommit
 }
 
 const defaultGit: FlowGit = {
@@ -87,7 +80,7 @@ const defaultGit: FlowGit = {
   remove: removeWorktree,
   branch: currentBranch,
   root: worktreeRoot,
-  uniqueBranch: uniqueBranchName,
+  resolves: resolvesToCommit,
 }
 
 const REFUSED: Record<FlowStageAction, string> = {
@@ -102,6 +95,13 @@ const REFUSED: Record<FlowStageAction, string> = {
 const NO_REPORT = 'The stage finished without reporting its result.'
 const NO_VERIFY_REPORT = 'The verification step did not return a report.'
 const SESSION_ENDED = 'The session ended before this stage reported.'
+
+async function copyMissing(fromRoot: string, toRoot: string, rel: string): Promise<void> {
+  const from = join(fromRoot, rel)
+  const to = join(toRoot, rel)
+  if (!existsSync(from) || existsSync(to)) return
+  await cp(from, to, { recursive: true }).catch(() => {})
+}
 
 function errorText(error: unknown): string {
   if (error instanceof Error) return error.message
@@ -185,30 +185,21 @@ export class FlowSupervisor {
     if (stacks.length === 0) {
       throw { code: 'UNSUPPORTED', message: 'Flow supports .NET and Angular projects.' } satisfies IpcError
     }
-    if (input.source.kind === 'spec' && !(await isSpecKitInstalled(project.path))) {
-      throw {
-        code: 'UNSUPPORTED',
-        message: 'Spec Kit is not set up in this project yet.',
-      } satisfies IpcError
-    }
+    if (input.source.kind === 'spec') await this.requireSpec(project.path, input.source.specId)
+    const base = await this.baseFor(project.path, input.baseBranch)
 
     const title = this.deriveTitle(input.source)
-    const base = input.baseBranch?.trim() || (await this.git.branch(project.path))
     const root = this.git.root(project.path, this.settings().flowWorktreeRoot)
-    const branch = await this.git.uniqueBranch(project.path, title)
-    const worktreePath = worktreePathFor(root, branch)
-    await this.git.create({ repoRoot: project.path, path: worktreePath, branch, base })
+    const tree = await this.git.create({ repoRoot: project.path, root, title, base })
+    const worktreePath = tree.path
+    await copyMissing(project.path, worktreePath, '.specify')
 
     let specDir: string | null = null
     let startStage: FlowStage = 'spec'
     if (input.source.kind === 'spec') {
-      const dstDir = join(worktreePath, 'specs', input.source.specId)
-      if (!existsSync(dstDir)) {
-        const srcDir = join(project.path, 'specs', input.source.specId)
-        await cp(srcDir, dstDir, { recursive: true }).catch(() => {})
-      }
       specDir = `specs/${input.source.specId}`
-      startStage = existsSync(join(dstDir, 'tasks.md')) ? 'build' : 'plan'
+      await copyMissing(project.path, worktreePath, specDir)
+      startStage = existsSync(join(worktreePath, specDir, 'tasks.md')) ? 'build' : 'plan'
     }
 
     const run = this.repos.flowRuns.start({
@@ -239,7 +230,7 @@ export class FlowSupervisor {
         })
       }
     }
-    this.repos.flowRuns.update(run.id, { branch, worktreePath, specDir })
+    this.repos.flowRuns.update(run.id, { branch: tree.branch, worktreePath, specDir })
     this.callbacks.onFlowChanged(project.id)
     await this.beginStage(run.id, startStage)
     return this.requireRun(run.id)
@@ -457,6 +448,40 @@ export class FlowSupervisor {
     const stageRow = this.repos.flowStages.get(ctx.runId, ctx.stage)
     if (!stageRow || stageRow.status !== 'running') return
     this.failStage(ctx.runId, ctx.stage, ctx.stage === 'test' ? NO_VERIFY_REPORT : NO_REPORT, { retryOnce: true })
+  }
+
+  private async requireSpec(projectPath: string, specId: string): Promise<void> {
+    const state = await readSpecKitState(projectPath)
+    if (!state.installed) {
+      throw { code: 'UNSUPPORTED', message: 'Spec Kit is not set up in this project yet.' } satisfies IpcError
+    }
+    if (!state.specs.some((spec) => spec.id === specId) || !existsSync(join(projectPath, 'specs', specId, 'spec.md'))) {
+      throw {
+        code: 'NOT_FOUND',
+        message: 'That spec is not a folder with a spec.md in this project’s specs folder.',
+      } satisfies IpcError
+    }
+  }
+
+  private async baseFor(repoRoot: string, requested: string | undefined): Promise<string> {
+    const named = requested?.trim()
+    if (named) {
+      if (named.startsWith('-') || !(await this.git.resolves(repoRoot, named))) {
+        throw {
+          code: 'INVALID_PATH',
+          message: `The base branch "${named}" is not a branch or commit in this repository.`,
+        } satisfies IpcError
+      }
+      return named
+    }
+    const current = await this.git.branch(repoRoot)
+    if (!current) {
+      throw {
+        code: 'INVALID_PATH',
+        message: 'This checkout is on a detached HEAD, so Flow cannot tell which branch to build on. Name a base branch and start again.',
+      } satisfies IpcError
+    }
+    return current
   }
 
   private deriveTitle(source: FlowStartSource): string {

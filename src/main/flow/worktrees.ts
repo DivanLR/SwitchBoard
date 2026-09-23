@@ -44,30 +44,28 @@ async function git(cwd: string, args: string[]): Promise<string> {
   return stdout
 }
 
-export async function currentBranch(repoRoot: string): Promise<string> {
+export async function currentBranch(repoRoot: string): Promise<string | null> {
   const name = (await git(repoRoot, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim()
-  return name === 'HEAD' || name.length === 0 ? 'HEAD' : name
+  return name === 'HEAD' || name.length === 0 ? null : name
 }
 
-async function branchExists(repoRoot: string, branch: string): Promise<boolean> {
+export async function resolvesToCommit(repoRoot: string, ref: string): Promise<boolean> {
   try {
-    await git(repoRoot, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`])
+    await git(repoRoot, ['rev-parse', '--verify', '--quiet', '--end-of-options', `${ref}^{commit}`])
     return true
   } catch {
     return false
   }
 }
 
-export async function uniqueBranchName(repoRoot: string, title: string): Promise<string> {
-  const slug = slugify(title)
-  const base = `feature/${slug}`
-  let candidate = base
-  let n = 2
-  while (await branchExists(repoRoot, candidate)) {
-    candidate = `${base}-${n}`
-    n += 1
-  }
-  return candidate
+async function branchTaken(repoRoot: string, branch: string): Promise<boolean> {
+  const refs = await git(repoRoot, [
+    'for-each-ref',
+    '--format=%(refname)',
+    `refs/heads/${branch}`,
+    `refs/remotes/*/${branch}`,
+  ])
+  return refs.trim().length > 0
 }
 
 export async function ensureWorktreeIgnore(repoRoot: string, root: string): Promise<void> {
@@ -128,27 +126,29 @@ function serialise<T>(work: () => Promise<T>): Promise<T> {
 
 export async function createWorktree(input: {
   repoRoot: string
-  path: string
-  branch: string
+  root: string
+  title: string
   base: string
 }): Promise<Worktree> {
   return serialise(async () => {
-    const existing = await listWorktrees(input.repoRoot)
-    const taken = existing.find(
-      (tree) => tree.path.toLowerCase() === resolve(input.path).toLowerCase(),
-    )
-    if (taken) return taken
-    if (existing.some((tree) => tree.branch === input.branch)) {
-      throw new Error(`The branch ${input.branch} is already checked out in another worktree.`)
+    const held = new Set((await listWorktrees(input.repoRoot)).map((tree) => tree.path.toLowerCase()))
+    const free = async (branch: string): Promise<boolean> => {
+      const path = worktreePathFor(input.root, branch)
+      if (held.has(resolve(path).toLowerCase()) || existsSync(path)) return false
+      return !(await branchTaken(input.repoRoot, branch))
     }
-    await ensureWorktreeIgnore(input.repoRoot, dirname(input.path))
-    await mkdir(resolve(input.path, '..'), { recursive: true })
-    await git(input.repoRoot, ['worktree', 'add', '-b', input.branch, input.path, input.base])
-    await git(input.path, ['config', 'core.longpaths', 'true']).catch(() => '')
+    const slug = slugify(input.title)
+    let branch = `feature/${slug}`
+    for (let n = 2; !(await free(branch)); n += 1) branch = `feature/${slug}-${n}`
+    const path = worktreePathFor(input.root, branch)
+    await ensureWorktreeIgnore(input.repoRoot, input.root)
+    await mkdir(input.root, { recursive: true })
+    await git(input.repoRoot, ['-c', 'core.longpaths=true', 'worktree', 'add', '-b', branch, '--', path, input.base])
+    await git(path, ['config', 'core.longpaths', 'true']).catch(() => '')
     const made = (await listWorktrees(input.repoRoot)).find(
-      (tree) => tree.path.toLowerCase() === resolve(input.path).toLowerCase(),
+      (tree) => tree.path.toLowerCase() === resolve(path).toLowerCase(),
     )
-    if (!made) throw new Error(`git reported no worktree at ${input.path} after creating it.`)
+    if (!made) throw new Error(`git reported no worktree at ${path} after creating it.`)
     return made
   })
 }
@@ -165,7 +165,7 @@ export async function removeWorktree(
     }
     const dirty = opts?.force === true ? [] : await worktreeDirty(path).catch(() => [])
     if (dirty.length > 0) return { removed: false, dirty }
-    const args = ['worktree', 'remove', ...(opts?.force === true ? ['--force'] : []), path]
+    const args = ['worktree', 'remove', ...(opts?.force === true ? ['--force'] : []), '--', path]
     try {
       await git(repoRoot, args)
     } catch {
@@ -175,24 +175,4 @@ export async function removeWorktree(
     await git(repoRoot, ['worktree', 'prune']).catch(() => '')
     return { removed: true, dirty: [] }
   })
-}
-
-export async function sweepOrphanWorktrees(
-  repoRoot: string,
-  root: string,
-  keep: readonly string[],
-): Promise<{ removed: string[]; kept: string[] }> {
-  const wanted = new Set(keep.map((path) => resolve(path).toLowerCase()))
-  const under = resolve(root).toLowerCase()
-  const removed: string[] = []
-  const kept: string[] = []
-  for (const tree of await listWorktrees(repoRoot)) {
-    const path = tree.path.toLowerCase()
-    if (!path.startsWith(under) || path === under) continue
-    if (wanted.has(path)) continue
-    const outcome = await removeWorktree(repoRoot, tree.path).catch(() => ({ removed: false, dirty: ['unknown'] }))
-    if (outcome.removed) removed.push(tree.path)
-    else kept.push(tree.path)
-  }
-  return { removed, kept }
 }
