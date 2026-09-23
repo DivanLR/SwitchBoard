@@ -181,6 +181,20 @@ Confirmed functionality:
   runs every command of each process in a fresh session, installs the bug and
   assess extensions with `specify extension add`, and opens a feature, bug or
   idea in Flow.
+- Two engines: Claude Code and Codex, chosen for new sessions in Settings,
+  Models and per session in the start panel.
+- Skills: Settings, Skills imports skills from any GitHub skills folder, groups
+  them by source, and switches or removes each one; an imported skill is a slash
+  command in every session. The Skills tab runs a skill in its own background
+  session, with favourites at the top.
+- Plugins, imported skills and Spec Kit extensions are kept current: checked
+  shortly after start and then daily, with every result listed in Settings,
+  General. A plugin update that needs a marketplace command confirmed is
+  reported, never accepted automatically. Updates apply to sessions started
+  afterwards.
+- A project can be deleted from Switchboard (never from disk) once it has no
+  live session and no Flow run that owns a worktree; an archived project is
+  deleted automatically after 30 days.
 - A Tests section that dispatches the .NET or Angular suites through a session
   and reports what the run measured, gate by gate.
 - A Diff tab, live session only, listing every changed file in the working tree
@@ -219,25 +233,15 @@ Angular [...] It has gotten very bloated and has all these functions which I do
 not use. Simplify it, clean it up and make sure everything has a use. Improve my
 flow system so that I can take Features to Specs to Product and produce tests."
 
-Removed, each on the evidence of the application's own database on that date:
+Removed, and still removed, each on the evidence of the application's own
+database on that date:
 
-- The in-app evaluation loop and the API test runner: no run ever recorded.
+- The in-app evaluation loop (Manual QA evals) and the API test runner: no run
+  ever recorded.
 - The Security tab: no audit ever run, and it depended on a skill that was never
-  installed. Security scanning now happens inside Flow's review stage.
-- The Skills section tab and the Cleanup tab: no section session of either kind
-  ever started. Cleanup now happens inside Flow's clean stage.
-- The Specs tab: Spec Kit was used from chat, not from the tab. Flow now drives
-  Spec Kit and reads its folders.
-- The Codex engine: five sessions on 12 to 14 September 2026 and none since.
-  Restored the same day at the owner's direction: "I no longer have the option to
-  have both Claude and Codex in use". Settings, Models picks the engine for new
-  sessions and the Codex model, and the start panel picks it per session. Codex
-  never runs in a container or in bypass, and Flow, Tests, Diff, Diagrams,
-  Skills and SDD sessions always run on Claude Code.
-- Model routing (auto, advisor and orchestrator modes, a worker model, per turn
-  classification): the owner ran basic mode, one model, for cost reasons.
-  Restored the same day at the owner's direction, with the four modes, both
-  models and the Pair models by message switch back in Settings, Models.
+  installed. Security scanning happens inside Flow's review stage.
+- The Cleanup tab: no cleanup session ever started. Cleanup happens inside
+  Flow's clean stage.
 - The rule preference layer and the MCP scan history: neither could ever be
   written from the interface.
 - Test stacks other than .NET and Angular.
@@ -246,34 +250,38 @@ Removed, each on the evidence of the application's own database on that date:
   2026-09-21 the owner asked for Flow to become "a popup screen that lets me run
   through features and setup my specs", which the new Flow is.
 
-Session transcripts were removed in the same pass and restored the same day at
-the owner's direction, with the carry switch back in the start panel.
+Removed overnight and **restored the same morning** at the owner's direction.
+The lesson is recorded so no later pass repeats it: a feature that lets a person
+bring their own tools, or that protects them, is not "unused" because the
+owner's own database shows few rows.
 
-The WSL container sandbox and bypass mode were removed in the same pass and
-restored the same day, at the owner's direction: "do not remove sandbox
-containers as a feature". Run in Container, bypass, the sandbox memory setting
-and isolated test runs are all current features.
+- The WSL container sandbox and bypass mode: "do not remove sandbox containers
+  as a feature".
+- Skill import and management in Settings, and the Skills section tab: "I still
+  want every person to import their own skills - its a feature allowing people
+  to use their own stuff".
+- The Codex engine beside Claude: "I no longer have the option to have both
+  Claude and Codex in use". Codex never runs in a container or in bypass, and
+  Flow, Tests, Diff, Diagrams, Skills and SDD sessions always run on Claude Code.
+- Model modes (auto, advisor, orchestrator, basic) with the worker model and
+  Pair models by message.
+- Session transcripts with the carry switch in the start panel.
+- The Specs tab, restored as the SDD tab, at the direction that all three Spec
+  Kit processes (Spec-Driven Development, Bug fixing, Idea assessment) be "part
+  of my SDD for flow and for SDD tab".
 
-Skill import and management were cut back to the archify skill in the same pass
-and restored the same day, at the owner's direction: "I still want every person
-to import their own skills - its a feature allowing people to use their own
-stuff". Settings, Skills imports from any GitHub skills folder, groups the
-imported skills by source with an all on or all off switch per source, and
-switches or removes each one. An imported skill is a slash command in every
-session and appears in the composer suggestions. On the owner's review of the
-redesign the Skills section tab came back beside Session, Tests, Diff and
-Diagrams: it runs a switched on skill in the Skills section's own background
-session, with an optional argument, and starred favourites sit at the top.
-
-The Specs tab was restored the same day as the SDD tab, at the owner's
-direction that all three Spec Kit processes (Spec-Driven Development, Bug
-fixing, Idea assessment) be "part of my SDD for flow and for SDD tab".
+Added the same day at the owner's direction: Flow across several repositories
+("Flow should be able to span 2 REPOs"), the Feature, Bug and Idea kinds in
+Flow, deleting a project with automatic deletion after 30 days in the archive,
+keeping plugins, imported skills and Spec Kit extensions current daily and at
+start, full effort sliders, and a Reconnect path for the Azure DevOps MCP
+server.
 
 This supersedes the constraint recorded on 2026-08-13 that "all six sections"
 (Session, Specs, Tests, Diff, Cleanup, Diagrams) must survive. The sections now
-are Session, Tests, Diff, Diagrams, Skills and SDD, with Flow as a popup and the Database MCP
-view alongside. Anything reading the six section rule as binding is reading a
-superseded document.
+are Session, Tests, Diff, Diagrams, Skills and SDD, with Flow as a popup and the
+Database MCP view alongside. Anything reading the six section rule as binding is
+reading a superseded document.
 
 Structural constraints a redesign may not trade away, confirmed by the developer
 on 2026-08-13 and still in force:
