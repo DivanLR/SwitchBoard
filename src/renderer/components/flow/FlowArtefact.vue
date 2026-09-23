@@ -237,7 +237,29 @@ function toggleTasks(): void {
     </template>
 
     <template v-else-if="stage.stage === 'ship'">
-      <div v-if="stage.report?.prUrl" class="fa-line">
+      <template v-if="run.repos.length > 0">
+        <div
+          v-for="repo in run.repos"
+          :key="repo.projectId"
+          class="fa-line"
+          :data-testid="`flow-pr-${repo.projectId}`"
+        >
+          <span class="fa-label">{{ repo.name }}</span>
+          <button
+            v-if="repo.prUrl"
+            type="button"
+            class="ui-chip fa-pr"
+            :data-testid="`flow-pr-link-${repo.projectId}`"
+            :title="repo.prUrl"
+            @click="flow.openPullRequest(run.id, repo.projectId)"
+          >
+            <Icon name="external" :size="11" />
+            PR {{ repo.prId ?? '' }}
+          </button>
+          <span v-else class="ui-meta">No pull request yet.</span>
+        </div>
+      </template>
+      <div v-else-if="stage.report?.prUrl" class="fa-line">
         <span class="fa-label">Pull request</span>
         <button
           type="button"

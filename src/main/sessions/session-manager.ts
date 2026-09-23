@@ -74,6 +74,7 @@ interface HostedEntry {
   session: SessionHost
   row: Session
   projectPath: string
+  folders: string[]
   seq: number
   live: Map<string, LiveEventEntry>
   background: boolean
@@ -91,6 +92,7 @@ interface FlowHooks {
 interface StartOptions {
   background?: boolean
   cwd?: string
+  additionalDirectories?: string[]
   effort?: EffortLevel
   section?: SectionKind
   resumeSdkSessionId?: string
@@ -499,9 +501,12 @@ export class SessionManager {
 
     const workdir = opts?.cwd ?? project.path
 
+    const extraDirs = opts?.additionalDirectories ?? []
+
     const entry: HostedEntry = {
       row,
       projectPath: workdir,
+      folders: [workdir, ...extraDirs],
       seq: this.repos.events.maxSeq(row.id),
       live: new Map(),
       background: opts?.background === true,
@@ -529,6 +534,7 @@ export class SessionManager {
       entry.session = new HostedSession({
         sessionId: row.id,
         projectPath: workdir,
+        extraDirs,
         refDirs: project.refs.map((r) => r.path),
         resumeSdkSessionId,
         systemPromptAppend:
@@ -1017,6 +1023,10 @@ export class SessionManager {
       )
     }
     this.callbacks.onVerifyChanged(entry.row.projectId)
+  }
+
+  sessionFolders(sessionId: string): string[] {
+    return this.hosted.get(sessionId)?.folders ?? []
   }
 
   sinkFor(sessionId: string): EventSink {

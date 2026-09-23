@@ -84,6 +84,12 @@ verification report) and never invents a figure it did not measure.
   are never swept up by a `dotnet test` glob in the main checkout. A setting
   overrides the root. The worktree branches from the committed head of the base
   branch; uncommitted work in the main checkout is not carried over.
+- A Flow run belongs to the project it was opened from, where the spec lives,
+  and may also change other registered projects (the everyday case is an
+  Angular front end with a .NET API). Each of them gets its own worktree in its
+  own sibling folder on the same branch name, with its own base branch; the
+  stage sessions work in the primary worktree and see the others as extra
+  directories, and the Ship stage raises one pull request per repository.
 - Retention runs automatically: raw output for the twelve most recent sessions
   per project, decision history for 30 days, and the twenty most recent Flow runs
   per project.
@@ -222,10 +228,8 @@ Technical constraints:
 - Sessions must pass an explicit path to the standalone Claude Code executable.
   The SDK's own default crashes under Electron with a V8 snapshot assertion.
 
-Explicitly undecided: code signing for distributed builds, and whether Flow
-should support a feature that spans two repositories (an Angular front end and a
-.NET API) in one run. Today a run belongs to one project; the other repository
-can be referenced from the session but gets no worktree of its own.
+Explicitly undecided: code signing for distributed builds. On 2026-09-23 the
+owner decided that one Flow run may span two or more repositories.
 
 ## Brand Commitments
 

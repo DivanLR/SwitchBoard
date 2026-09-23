@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { cp, readFile, readdir, writeFile } from 'node:fs/promises'
-import { isAbsolute, join, relative } from 'node:path'
+import { basename, isAbsolute, join, relative } from 'node:path'
 import type {
+  FlowRepo,
   FlowRun,
   FlowStage,
   FlowStageAction,
@@ -19,7 +20,7 @@ import {
   flowStageActions,
   verifyVerdict,
 } from '@shared/domain'
-import type { FlowArtefactKind, FlowStartSource, IpcError } from '@shared/ipc-types'
+import type { FlowArtefactKind, FlowCompanionRequest, FlowStartSource, IpcError } from '@shared/ipc-types'
 import { nowIso, type Repositories } from '@main/store/repositories'
 import type { SessionManager } from '@main/sessions/session-manager'
 import {
@@ -40,12 +41,13 @@ import {
   specifyPrompt,
   testWritePrompt,
   featuresPrompt,
+  withRepos,
 } from './flow-prompts'
 import { allowedPullRequestUrl, type FlowMarker, type FlowStageMarker } from './flow-markers'
 import { artefactRelPath, defaultArtefactKind, resolveArtefactPath } from './artefacts'
-import { detectFlowStacks } from './stacks'
+import { STACK_ORDER, detectFlowStacks } from './stacks'
 import { readSpecKitState } from '@main/specs/spec-kit'
-import { defaultSelection, stackById } from '@shared/test-catalog'
+import { defaultSelection, stackById, type TestSuite } from '@shared/test-catalog'
 import {
   detectProjectSuites,
   planSuites,
@@ -115,6 +117,15 @@ function errorText(error: unknown): string {
   return typeof message === 'string' ? message : String(error)
 }
 
+function inRepository(suite: TestSuite, name: string, root: string): TestSuite {
+  return {
+    ...suite,
+    id: `${name}/${suite.id}`,
+    label: `${name} ${suite.label}`,
+    command: suite.mcp ? `For ${name} (${root}): ${suite.command}` : `cd "${root}" && ${suite.command}`,
+  }
+}
+
 interface StagePlan {
   steps: string[]
   handshake: string | null
@@ -126,7 +137,7 @@ export class FlowSupervisor {
   private pending = new Map<string, string[]>()
   private current = new Map<string, { text: string; resent: boolean }>()
   private busy = new Set<string>()
-  private origins = new Map<string, string | null>()
+  private origins = new Map<string, Record<string, string | null>>()
 
   constructor(
     private repos: Repositories,
@@ -188,19 +199,41 @@ export class FlowSupervisor {
     autopilot: boolean
     autoShip: boolean
     baseBranch?: string
+    companions?: readonly FlowCompanionRequest[]
   }): Promise<FlowRun> {
     const project = this.requireProject(input.projectId)
     const stacks = await detectFlowStacks(project.path)
     if (stacks.length === 0) {
       throw { code: 'UNSUPPORTED', message: 'Flow supports .NET and Angular projects.' } satisfies IpcError
     }
+    const companions = await this.companionsFor(project, input.companions ?? [])
     if (input.source.kind === 'spec') await this.requireSpec(project.path, input.source.specId)
     const base = await this.baseFor(project.path, input.baseBranch)
 
     const title = this.deriveTitle(input.source)
-    const root = this.git.root(project.path, this.settings().flowWorktreeRoot)
-    const tree = await this.git.create({ repoRoot: project.path, root, title, base })
+    const override = this.settings().flowWorktreeRoot.trim()
+    const root = this.git.root(project.path, override)
+    const others = companions.map((repo) => ({
+      repoRoot: repo.path,
+      root: this.git.root(repo.path, override ? join(override, basename(repo.path)) : null),
+    }))
+    const tree = await this.git.create({ repoRoot: project.path, root, title, base, others })
     const worktreePath = tree.path
+    const made: FlowRepo[] = []
+    for (const [at, repo] of companions.entries()) {
+      try {
+        const branch = tree.branch ?? undefined
+        const companion = await this.git.create({ repoRoot: repo.path, root: others[at].root, title, base: repo.baseBranch, branch })
+        made.push({ ...repo, branch: companion.branch, worktreePath: companion.path })
+      } catch (error) {
+        for (const done of made.reverse()) await this.git.remove(done.path, done.worktreePath ?? '', { force: true }).catch(() => {})
+        await this.git.remove(project.path, worktreePath, { force: true }).catch(() => {})
+        throw {
+          code: 'INTERNAL',
+          message: `Flow could not make the worktree in ${repo.name}, so it removed the ones it had made: ${errorText(error)}`,
+        } satisfies IpcError
+      }
+    }
     await copyMissing(project.path, worktreePath, '.specify')
 
     let specDir: string | null = null
@@ -223,7 +256,7 @@ export class FlowSupervisor {
             : null,
       sourceUrl: input.source.kind === 'ado' ? input.source.url : null,
       description: input.source.kind === 'text' ? input.source.description : '',
-      stacks,
+      stacks: STACK_ORDER.filter((id) => [stacks, ...made.map((repo) => repo.stacks)].some((list) => list.includes(id))),
       stage: startStage,
       autopilot: input.autopilot,
       autoShip: input.autoShip,
@@ -239,7 +272,19 @@ export class FlowSupervisor {
         })
       }
     }
-    this.repos.flowRuns.update(run.id, { branch: tree.branch, worktreePath, specDir })
+    const primary: FlowRepo = {
+      projectId: project.id,
+      name: project.name,
+      path: project.path,
+      stacks,
+      baseBranch: base,
+      branch: tree.branch,
+      worktreePath,
+      prUrl: null,
+      prId: null,
+    }
+    const repos = made.length > 0 ? [primary, ...made] : []
+    this.repos.flowRuns.update(run.id, { branch: tree.branch, worktreePath, specDir, repos })
     this.callbacks.onFlowChanged(project.id)
     return this.exclusive(run.id, () => this.beginStage(run.id, startStage))
   }
@@ -333,10 +378,11 @@ export class FlowSupervisor {
     return run
   }
 
-  async pullRequestUrl(runId: string): Promise<string> {
+  async pullRequestUrl(runId: string, projectId?: string): Promise<string> {
     const run = this.requireRun(runId)
-    if (!run.prUrl) throw { code: 'NOT_FOUND', message: 'This run has no pull request yet.' } satisfies IpcError
-    const url = allowedPullRequestUrl(run.prUrl, await this.git.origin(this.requireProject(run.projectId).path))
+    const repo = this.reposOf(run).find((entry) => entry.projectId === (projectId ?? run.projectId))
+    if (!repo?.prUrl) throw { code: 'NOT_FOUND', message: 'This run has no pull request yet.' } satisfies IpcError
+    const url = allowedPullRequestUrl(repo.prUrl, await this.git.origin(repo.path))
     if (!url) {
       throw {
         code: 'INVALID_PATH',
@@ -378,16 +424,22 @@ export class FlowSupervisor {
         message: 'This run still uses its worktree. Cancel the run or let it finish first.',
       } satisfies IpcError
     }
-    const project = this.requireProject(run.projectId)
-    const outcome = await this.git.remove(project.path, run.worktreePath, { force })
-    if (!outcome.removed) {
-      throw {
-        code: 'CONFIRM_REQUIRED',
-        message: `The worktree has ${outcome.dirty.length} uncommitted change${outcome.dirty.length === 1 ? '' : 's'}.`,
-      } satisfies IpcError
+    const repos = this.reposOf(run).map((repo) => ({ ...repo }))
+    const multi = run.repos.length > 0
+    for (const repo of [...repos.slice(1), repos[0]]) {
+      if (!repo.worktreePath) continue
+      const outcome = await this.git.remove(repo.path, repo.worktreePath, { force })
+      if (!outcome.removed) {
+        if (multi) this.repos.flowRuns.update(runId, { repos })
+        throw {
+          code: 'CONFIRM_REQUIRED',
+          message: `The worktree${multi ? ` of ${repo.name}` : ''} has ${outcome.dirty.length} uncommitted change${outcome.dirty.length === 1 ? '' : 's'}.`,
+        } satisfies IpcError
+      }
+      repo.worktreePath = null
     }
-    this.repos.flowRuns.update(runId, { worktreePath: null })
-    this.callbacks.onFlowChanged(project.id)
+    this.repos.flowRuns.update(runId, { worktreePath: null, ...(multi ? { repos } : {}) })
+    this.callbacks.onFlowChanged(run.projectId)
     return this.requireRun(runId)
   }
 
@@ -548,13 +600,13 @@ export class FlowSupervisor {
     }
   }
 
-  private async baseFor(repoRoot: string, requested: string | undefined): Promise<string> {
+  private async baseFor(repoRoot: string, requested: string | undefined, name?: string): Promise<string> {
     const named = requested?.trim()
     if (named) {
       if (named.startsWith('-') || !(await this.git.resolves(repoRoot, named))) {
         throw {
           code: 'INVALID_PATH',
-          message: `The base branch "${named}" is not a branch or commit in this repository.`,
+          message: `The base branch "${named}" is not a branch or commit in ${name ?? 'this repository'}.`,
         } satisfies IpcError
       }
       return named
@@ -563,10 +615,65 @@ export class FlowSupervisor {
     if (!current) {
       throw {
         code: 'INVALID_PATH',
-        message: 'This checkout is on a detached HEAD, so Flow cannot tell which branch to build on. Name a base branch and start again.',
+        message: `${name ? `The checkout of ${name}` : 'This checkout'} is on a detached HEAD, so Flow cannot tell which branch to build on. Name a base branch and start again.`,
       } satisfies IpcError
     }
     return current
+  }
+
+  private async companionsFor(primary: Project, requested: readonly FlowCompanionRequest[]): Promise<FlowRepo[]> {
+    const names = new Set([primary.name.toLowerCase()])
+    const repos: FlowRepo[] = []
+    for (const want of requested) {
+      const project = this.repos.projects.byId(want.projectId)
+      if (!project || project.archivedAt) {
+        throw { code: 'NOT_FOUND', message: 'One of the other repositories is not a registered project any more.' } satisfies IpcError
+      }
+      if (names.has(project.name.toLowerCase())) {
+        throw {
+          code: 'DUPLICATE',
+          message: `${project.name} is already part of this run. Pick each repository once, and rename a project that shares another's name.`,
+        } satisfies IpcError
+      }
+      names.add(project.name.toLowerCase())
+      const stacks = await detectFlowStacks(project.path)
+      if (stacks.length === 0) {
+        throw {
+          code: 'UNSUPPORTED',
+          message: `${project.name} has neither a .NET nor an Angular project, and Flow supports only those.`,
+        } satisfies IpcError
+      }
+      repos.push({
+        projectId: project.id,
+        name: project.name,
+        path: project.path,
+        stacks,
+        baseBranch: await this.baseFor(project.path, want.baseBranch, project.name),
+        branch: null,
+        worktreePath: null,
+        prUrl: null,
+        prId: null,
+      })
+    }
+    return repos
+  }
+
+  private reposOf(run: FlowRun): FlowRepo[] {
+    if (run.repos.length > 0) return run.repos
+    const project = this.requireProject(run.projectId)
+    return [
+      {
+        projectId: project.id,
+        name: project.name,
+        path: project.path,
+        stacks: run.stacks,
+        baseBranch: run.baseBranch ?? 'main',
+        branch: run.branch,
+        worktreePath: run.worktreePath,
+        prUrl: run.prUrl,
+        prId: run.prId,
+      },
+    ]
   }
 
   private deriveTitle(source: FlowStartSource): string {
@@ -579,6 +686,7 @@ export class FlowSupervisor {
     const session = await this.manager.startSession(project.id, false, project.defaultSessionMode, {
       background: true,
       cwd: run.worktreePath ?? project.path,
+      additionalDirectories: run.repos.slice(1).flatMap((repo) => (repo.worktreePath ? [repo.worktreePath] : [])),
       effort: stage === 'build' ? 'max' : undefined,
       section: 'flow',
       denyTool: stage === 'ship' ? shipForbidden : undefined,
@@ -637,16 +745,19 @@ export class FlowSupervisor {
     this.callbacks.onFlowChanged(project.id)
     this.manager.watchFlow(session.id)
     this.sessionStage.set(session.id, { runId: run.id, stage: run.stage })
-    await this.prepare(run, project, run.stage)
+    await this.prepare(run, run.stage)
     const tail = await this.tailFor(run, run.stage, session.id)
     if (!this.stillOn(run.id, run.stage, session.id)) return
     this.pending.set(session.id, tail)
-    this.sendStep(session.id, prompt)
+    this.sendStep(session.id, withRepos(prompt, run.repos))
   }
 
-  private async prepare(run: FlowRun, project: Project, stage: FlowStage): Promise<void> {
+  private async prepare(run: FlowRun, stage: FlowStage): Promise<void> {
     await this.pinFeature(run, stage)
-    if (stage === 'ship') this.origins.set(run.id, await this.git.origin(project.path))
+    if (stage !== 'ship') return
+    const hosts: Record<string, string | null> = {}
+    for (const repo of this.reposOf(run)) hosts[repo.projectId] = await this.git.origin(repo.path)
+    this.origins.set(run.id, hosts)
   }
 
   private async pinFeature(run: FlowRun, stage: FlowStage): Promise<void> {
@@ -681,18 +792,24 @@ export class FlowSupervisor {
 
   private async verifyStepPrompt(run: FlowRun, sessionId: string): Promise<string> {
     const settings = this.repos.settings.get()
-    const overrides = settings.projectSuiteCommands?.[run.projectId] ?? {}
-    const detected = await detectProjectSuites(run.worktreePath ?? this.requireProject(run.projectId).path).catch(() => [])
+    const multi = run.repos.length > 0
     const plans: PlannedSuite[] = []
     const labels: string[] = []
-    for (const stackId of run.stacks) {
-      const found = detected.find((stack) => stack.stackId === stackId)
-      const suites = (found?.suites ?? stackById(stackId)?.suites ?? []).map((suite) =>
-        overrides[suite.id] ? { ...suite, command: overrides[suite.id] } : suite,
-      )
-      if (suites.length === 0) continue
-      plans.push(...planSuites(suites, defaultSelection(suites)))
-      labels.push(found?.stackLabel ?? stackById(stackId)?.label ?? stackId)
+    for (const repo of this.reposOf(run)) {
+      const overrides = settings.projectSuiteCommands?.[repo.projectId] ?? {}
+      const root = repo.worktreePath ?? repo.path
+      const detected = await detectProjectSuites(root).catch(() => [])
+      for (const stackId of repo.stacks) {
+        const found = detected.find((stack) => stack.stackId === stackId)
+        const suites = (found?.suites ?? stackById(stackId)?.suites ?? []).map((suite) =>
+          overrides[suite.id] ? { ...suite, command: overrides[suite.id] } : suite,
+        )
+        if (suites.length === 0) continue
+        const planned = planSuites(suites, defaultSelection(suites))
+        const label = found?.stackLabel ?? stackById(stackId)?.label ?? stackId
+        plans.push(...(multi ? planned.map(({ suite }) => ({ suite: inRepository(suite, repo.name, root) })) : planned))
+        labels.push(multi ? `${repo.name} (${label})` : label)
+      }
     }
     const dbServers = await this.manager.connectedMcpServers(sessionId, settings.databaseMcpServers ?? [])
     return buildVerifyPrompt(plans, labels.join(' + ') || 'project', dbServers)
@@ -706,24 +823,28 @@ export class FlowSupervisor {
 
   private async planFor(run: FlowRun, stage: FlowStage, sessionId: string): Promise<StagePlan> {
     const base = run.baseBranch ?? 'main'
+    const repos = run.repos
     switch (stage) {
       case 'spec':
         return { steps: [specifyPrompt(run), clarifyPrompt(run.autopilot)], handshake: specHandshake() }
       case 'plan':
-        return { steps: planSteps(run.stacks, run.specDir), handshake: planHandshake() }
+        return { steps: planSteps(run.stacks, run.specDir, repos), handshake: planHandshake() }
       case 'build':
-        return { steps: buildSteps(run.stacks, run.specDir), handshake: buildHandshake() }
+        return { steps: buildSteps(run.stacks, run.specDir, repos), handshake: buildHandshake() }
       case 'clean':
-        return { steps: cleanSteps(run.stacks, base), handshake: cleanHandshake() }
+        return { steps: cleanSteps(run.stacks, base, repos), handshake: cleanHandshake() }
       case 'test':
         return {
-          steps: [testWritePrompt(run, run.stacks), await this.verifyStepPrompt(run, sessionId)],
+          steps: [testWritePrompt(run, run.stacks, repos), await this.verifyStepPrompt(run, sessionId)],
           handshake: null,
         }
       case 'review':
-        return { steps: reviewSteps(run.stacks, base), handshake: reviewHandshake(base, run.specDir, run.stacks) }
+        return {
+          steps: reviewSteps(run.stacks, base, repos),
+          handshake: reviewHandshake(base, run.specDir, run.stacks, repos),
+        }
       case 'ship':
-        return { steps: [], handshake: shipPrompt(run, await this.shipTest(run)) }
+        return { steps: [], handshake: shipPrompt(run, await this.shipTest(run), repos) }
     }
   }
 
@@ -771,29 +892,48 @@ export class FlowSupervisor {
         return
       }
     }
-    await this.prepare(run, project, stage)
+    await this.prepare(run, stage)
     const plan = await this.planFor(run, stage, session.id)
     if (!this.stillOn(runId, stage, session.id)) return
     const queue = [...plan.steps]
     if (plan.handshake) queue.push(plan.handshake)
     const first = queue.shift()
     this.pending.set(session.id, queue)
-    if (first) this.sendStep(session.id, first)
+    if (first) this.sendStep(session.id, withRepos(first, run.repos))
   }
 
   private completeStage(runId: string, stage: FlowStage, marker: FlowStageMarker): void {
+    const run = this.repos.flowRuns.byId(runId)
+    if (!run) return
     const patch: Parameters<Repositories['flowRuns']['update']>[1] = {}
-    if (stage === 'spec') {
-      const run = this.repos.flowRuns.byId(runId)
-      if (run) patch.specDir = this.resolveSpecDir(run, marker.specDir)
-    }
-    const prUrl = stage === 'ship' ? allowedPullRequestUrl(marker.prUrl, this.origins.get(runId) ?? null) : marker.prUrl
+    if (stage === 'spec') patch.specDir = this.resolveSpecDir(run, marker.specDir)
+    let prUrl = marker.prUrl
+    let prId = marker.prId
     let summary = marker.summary || null
     if (stage === 'ship') {
+      const hosts = this.origins.get(runId) ?? {}
+      const dropped: string[] = []
+      const keep = (repo: Pick<FlowRepo, 'name' | 'projectId'>, raw: string | null): string | null => {
+        const url = allowedPullRequestUrl(raw, hosts[repo.projectId] ?? null)
+        if (raw && !url) dropped.push(repo.name)
+        return url
+      }
+      if (run.repos.length > 0) {
+        const repos = run.repos.map((repo) => {
+          const reported = marker.pullRequests.find((pr) => pr.repository.trim().toLowerCase() === repo.name.toLowerCase())
+          return { ...repo, prUrl: keep(repo, reported?.prUrl ?? null), prId: reported?.prId ?? null }
+        })
+        patch.repos = repos
+        prUrl = repos[0].prUrl
+        prId = repos[0].prId
+      } else {
+        prUrl = keep({ name: '', projectId: run.projectId }, marker.prUrl)
+      }
       patch.prUrl = prUrl
-      patch.prId = marker.prId
-      if (marker.prUrl && !prUrl) {
-        summary = [summary, 'The reported pull request link was not an https address on an allowed host, so it was not kept.']
+      patch.prId = prId
+      if (dropped.length > 0) {
+        const whose = run.repos.length > 0 ? ` for ${dropped.join(' and ')}` : ''
+        summary = [summary, `The reported pull request link${whose} was not an https address on an allowed host, so it was not kept.`]
           .filter(Boolean)
           .join(' ')
       }
@@ -817,7 +957,7 @@ export class FlowSupervisor {
           findings: marker.findings,
           unmet: marker.unmet,
           prUrl,
-          prId: marker.prId,
+          prId,
           verify: null,
         },
       },

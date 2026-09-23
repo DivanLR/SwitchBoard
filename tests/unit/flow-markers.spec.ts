@@ -97,6 +97,28 @@ describe('the stage marker', () => {
     if (marker?.kind !== 'stage') throw new Error('expected a stage marker')
     expect(marker.prUrl).toBe('https://x/pr/9')
     expect(marker.prId).toBe('9')
+    expect(marker.pullRequests).toEqual([])
+  })
+
+  it('reads one pull request per repository, skipping an entry that names none', () => {
+    const marker = parseFlowMarker(
+      line({
+        kind: 'stage',
+        stage: 'ship',
+        outcome: 'done',
+        summary: 'pushed',
+        pullRequests: [
+          { repository: 'Einstein.Renewal.Api', prUrl: 'https://x/api/pr/9', prId: 9 },
+          { repository: 'Einstein.Renewal.FE', prUrl: null, prId: null },
+          { prUrl: 'https://x/who/pr/1', prId: '1' },
+        ],
+      }),
+    )
+    if (marker?.kind !== 'stage') throw new Error('expected a stage marker')
+    expect(marker.pullRequests).toEqual([
+      { repository: 'Einstein.Renewal.Api', prUrl: 'https://x/api/pr/9', prId: '9' },
+      { repository: 'Einstein.Renewal.FE', prUrl: null, prId: null },
+    ])
   })
 })
 

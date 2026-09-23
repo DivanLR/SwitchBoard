@@ -166,7 +166,9 @@ export class PermissionBroker {
     const withinOwnFolder =
       CWD_AUTO_APPROVE_TOOLS.has(context.toolName) &&
       project !== undefined &&
-      isPathWithinProject(project.path, context.input)
+      [project.path, ...this.manager.sessionFolders(context.sessionId)].some((folder) =>
+        isPathWithinProject(folder, context.input),
+      )
     const described = describeTool(context.toolName, context.input)
     const risk = classifyRisk(RISK_RULES, context.toolName, context.input)
     const settings = this.repos.settings.get()

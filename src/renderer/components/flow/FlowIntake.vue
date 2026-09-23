@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { FLOW_STACK_LABELS, type FlowFeature } from '@shared/domain'
+import { FLOW_STACK_LABELS, type FlowFeature, type FlowStackId } from '@shared/domain'
 import type { FlowStartSource } from '@shared/ipc-types'
 import { useFlowStore } from '@renderer/stores/flow'
+import { useProjectsStore } from '@renderer/stores/projects'
 import Icon from '@renderer/components/Icon.vue'
 
 type Source = 'text' | 'ado' | 'spec'
@@ -16,6 +17,7 @@ const SOURCES: readonly { id: Source; label: string }[] = [
 const props = defineProps<{ projectId: string }>()
 const emit = defineEmits<{ (e: 'started', runId: string): void }>()
 const flow = useFlowStore()
+const projects = useProjectsStore()
 
 const source = ref<Source>('text')
 const title = ref('')
@@ -27,11 +29,22 @@ const baseBranch = ref('')
 const autopilot = ref(false)
 const autoShip = ref(false)
 const searched = ref(false)
+const companions = ref<Record<string, string>>({})
+
+const candidates = computed(() => projects.visibleItems.filter((item) => item.id !== props.projectId))
+const stacksOf = (projectId: string): FlowStackId[] => flow.stacksByProject[projectId] ?? []
+const unsupported = (projectId: string): boolean => flow.stacksByProject[projectId]?.length === 0
 
 onMounted(() => {
   void flow.loadExistingSpecs(props.projectId)
   void flow.detectStacks(props.projectId)
+  for (const item of candidates.value) void flow.detectStacks(item.id)
 })
+
+function toggleCompanion(projectId: string): void {
+  const { [projectId]: picked, ...rest } = companions.value
+  companions.value = picked === undefined ? { ...companions.value, [projectId]: '' } : rest
+}
 
 const chosen = computed<FlowStartSource | null>(() => {
   if (source.value === 'text') {
@@ -68,12 +81,17 @@ async function search(): Promise<void> {
 async function start(): Promise<void> {
   const picked = chosen.value
   if (!picked) return
+  const others = Object.entries(companions.value).map(([projectId, base]) => ({
+    projectId,
+    baseBranch: base.trim() || undefined,
+  }))
   const runId = await flow.start(
     props.projectId,
     picked,
     autopilot.value,
     autopilot.value && autoShip.value,
     baseBranch.value.trim() || undefined,
+    others.length > 0 ? others : undefined,
   )
   if (runId) emit('started', runId)
 }
@@ -204,7 +222,7 @@ async function start(): Promise<void> {
         <span class="fin-label">Stacks</span>
         <div class="fin-stacks" data-testid="flow-stack-chips">
           <span
-            v-for="stackId in flow.detectedStacks"
+            v-for="stackId in stacksOf(projectId)"
             :key="stackId"
             class="ui-chip"
             :data-testid="`flow-stack-${stackId}`"
@@ -212,7 +230,7 @@ async function start(): Promise<void> {
             {{ FLOW_STACK_LABELS[stackId] }}
           </span>
           <span
-            v-if="flow.detectedStacks.length === 0"
+            v-if="stacksOf(projectId).length === 0"
             class="fin-hint"
             data-testid="flow-stack-none"
           >
@@ -229,6 +247,43 @@ async function start(): Promise<void> {
           placeholder="Leave blank for the current branch"
         />
       </label>
+      <div v-if="candidates.length > 0" class="fin-field">
+        <span id="flow-companions-label" class="fin-label">Also change</span>
+        <div class="fin-list" role="group" aria-labelledby="flow-companions-label" data-testid="flow-companions">
+          <div v-for="item in candidates" :key="item.id" class="fin-companion">
+            <button
+              type="button"
+              role="checkbox"
+              class="ui-row"
+              :class="{ 'is-selected': item.id in companions }"
+              :aria-checked="item.id in companions"
+              :disabled="unsupported(item.id) && !(item.id in companions)"
+              :data-testid="`flow-companion-${item.id}`"
+              @click="toggleCompanion(item.id)"
+            >
+              <Icon :name="item.id in companions ? 'check' : 'circle'" :size="11" class="fin-mark" />
+              <span class="ui-desc fin-name">{{ item.name }}</span>
+              <span
+                v-for="stackId in stacksOf(item.id)"
+                :key="stackId"
+                class="ui-chip"
+                :data-testid="`flow-companion-${item.id}-stack-${stackId}`"
+              >
+                {{ FLOW_STACK_LABELS[stackId] }}
+              </span>
+              <span v-if="unsupported(item.id)" class="ui-meta">No .NET or Angular project</span>
+            </button>
+            <input
+              v-if="item.id in companions"
+              v-model="companions[item.id]"
+              class="fin-branch"
+              :aria-label="`Base branch for ${item.name}`"
+              :data-testid="`flow-companion-base-${item.id}`"
+              placeholder="Base branch, blank for its current branch"
+            />
+          </div>
+        </div>
+      </div>
       <label class="fin-switch">
         <span class="fin-switch-text">
           <span class="fin-switch-name">Autopilot</span>
@@ -376,6 +431,16 @@ async function start(): Promise<void> {
 
 .fin-branch {
   max-width: 320px;
+}
+
+.fin-companion {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.fin-companion .fin-branch {
+  margin-left: var(--sp-6);
 }
 
 .fin-switch {

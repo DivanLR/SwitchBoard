@@ -686,6 +686,12 @@ const MIGRATIONS: Migration[] = [
       db.exec(`DROP TABLE IF EXISTS custom_skills;`)
     },
   },
+  {
+    name: '041-flow-repos',
+    up: (db) => {
+      db.exec(`ALTER TABLE flow_runs ADD COLUMN repos TEXT NOT NULL DEFAULT '[]';`)
+    },
+  },
 ]
 
 export function transaction<T>(db: AppDatabase, work: () => T): T {

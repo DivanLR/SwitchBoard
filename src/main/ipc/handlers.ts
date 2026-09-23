@@ -561,12 +561,16 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     },
     'flow.start': async (req) => {
       requireProject(req.projectId)
+      if (req.companions?.some((companion) => companion.projectId === dbProjectId)) {
+        throw { code: 'RULE_NOT_ALLOWED', message: 'The Database project cannot be part of a Flow run.' } satisfies IpcError
+      }
       const run = await flow.start({
         projectId: req.projectId,
         source: req.source,
         autopilot: req.autopilot,
         autoShip: req.autoShip,
         baseBranch: req.baseBranch,
+        companions: req.companions,
       })
       return { runId: run.id, ...flowSnapshot(req.projectId) }
     },
@@ -609,7 +613,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       return flowSnapshotForRun(req.runId)
     },
     'flow.openPullRequest': async (req) => {
-      await shell.openExternal(await flow.pullRequestUrl(req.runId))
+      await shell.openExternal(await flow.pullRequestUrl(req.runId, req.projectId))
     },
     'flow.artefact': async (req) => flow.artefact(req.runId, req.stage, req.kind),
     'queue.list': (req) => manager.listQueue(req.projectId),

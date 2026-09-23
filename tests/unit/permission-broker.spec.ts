@@ -49,7 +49,7 @@ interface Harness {
   planExited: string[]
 }
 
-function makeHarness(): Harness {
+function makeHarness(folders: string[] = []): Harness {
   const db = openDatabase(':memory:')
   const repos = createRepositories(db)
 
@@ -76,6 +76,7 @@ function makeHarness(): Harness {
   const attention = { raised: 0, cleared: 0 }
   const planExited: string[] = []
   const manager = {
+    sessionFolders: () => folders,
     sinkFor: () => sink,
     attentionRaised: () => {
       attention.raised += 1
@@ -311,6 +312,21 @@ describe('PermissionBroker lifecycle', () => {
     void h.gate('Read', { file_path: 'C:\\elsewhere\\x.ts' })
     await settle()
     expect(h.repos.requests.pending()).toHaveLength(2)
+  })
+
+  it('treats every worktree of a Flow run as the session folder, and nothing beside them', async () => {
+    const flow = makeHarness(['C:\\proj\\alpha.worktrees\\checkout', 'C:\\proj\\api.worktrees\\checkout'])
+    expect((await flow.gate('Edit', { file_path: 'C:\\proj\\alpha.worktrees\\checkout\\src\\a.ts' })).behavior).toBe('allow')
+    expect((await flow.gate('Read', { file_path: 'C:\\proj\\api.worktrees\\checkout\\Api\\Program.cs' })).behavior).toBe(
+      'allow',
+    )
+    expect(flow.repos.requests.pending()).toHaveLength(0)
+
+    void flow.gate('Edit', { file_path: 'C:\\proj\\api\\Program.cs' })
+    void flow.gate('Read', { file_path: 'C:\\proj\\api.worktrees\\other\\a.cs' })
+    void flow.gate('Write', { file_path: 'C:\\proj\\api.worktrees\\checkout\\..\\escape.cs' })
+    await settle()
+    expect(flow.repos.requests.pending()).toHaveLength(3)
   })
 
   it('shows a Bash request with the command verbatim in the title and detail', async () => {

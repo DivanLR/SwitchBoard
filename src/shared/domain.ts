@@ -598,9 +598,22 @@ export interface FlowStageRecord {
   finishedAt: string | null
 }
 
+export interface FlowRepo {
+  projectId: string
+  name: string
+  path: string
+  stacks: string[]
+  baseBranch: string
+  branch: string | null
+  worktreePath: string | null
+  prUrl: string | null
+  prId: string | null
+}
+
 export interface FlowRun {
   id: string
   projectId: string
+  repos: FlowRepo[]
   title: string
   source: FlowSource
   sourceRef: string | null

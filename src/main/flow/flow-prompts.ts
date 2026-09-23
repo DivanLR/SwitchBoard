@@ -1,6 +1,44 @@
-import type { FlowReviewFinding, FlowRun, FlowStage, FlowStageReport, Measured, VerifyReport } from '@shared/domain'
+import type {
+  FlowRepo,
+  FlowReviewFinding,
+  FlowRun,
+  FlowStackId,
+  FlowStage,
+  FlowStageReport,
+  Measured,
+  VerifyReport,
+} from '@shared/domain'
+import { FLOW_STACK_LABELS } from '@shared/domain'
 import { HONESTY } from '@main/verify/verify-dispatch'
 import { FLOW_MARKER } from './flow-markers'
+import { STACK_ORDER } from './stacks'
+
+type Repo = Pick<FlowRepo, 'name' | 'path' | 'worktreePath' | 'stacks' | 'baseBranch'>
+
+function where(repo: Repo): string {
+  return `${repo.name} (${repo.worktreePath ?? repo.path})`
+}
+
+function stackNames(stacks: readonly string[]): string {
+  return stacks.map((id) => FLOW_STACK_LABELS[id as FlowStackId] ?? id).join(' + ')
+}
+
+export function reposContext(repos: readonly Repo[]): string {
+  if (repos.length < 2) return ''
+  return [
+    `This feature spans ${repos.length} repositories, each in its own worktree on the same branch:`,
+    ...repos.map(
+      (repo, at) =>
+        `- ${where(repo)}${at === 0 ? ', the primary: the spec and tasks.md live here' : ''}; ${stackNames(repo.stacks)}; base ${repo.baseBranch}`,
+    ),
+  ].join('\n')
+}
+
+export function withRepos(text: string, repos: readonly Repo[]): string {
+  const context = reposContext(repos)
+  if (!context) return text
+  return text.startsWith('/') ? `${text}\n\n${context}` : `${context}\n\n${text}`
+}
 
 export const ADO_RULE =
   'Use the Azure DevOps MCP server for every DevOps read and write. Do not shell out to curl, ' +
@@ -106,11 +144,15 @@ export function stackContext(stacks: readonly string[]): string {
   return parts.join(' ')
 }
 
-export function planSteps(stacks: readonly string[], specDir: string | null): string[] {
+export function planSteps(stacks: readonly string[], specDir: string | null, repos: readonly Repo[] = []): string[] {
   const feature = featureLine(specDir)
+  const owner =
+    repos.length > 1
+      ? `Every task names the repository it belongs to, as ${repos.map((repo) => `[${repo.name}]`).join(' or ')} right after its id.`
+      : ''
   return [
     `/speckit-plan ${args(feature, stackContext(stacks))}`.trim(),
-    `/speckit-tasks ${feature}`.trim(),
+    `/speckit-tasks ${args(feature, owner)}`.trim(),
     `/speckit-analyze ${feature}`.trim(),
   ]
 }
@@ -127,13 +169,20 @@ const UNATTENDED =
   'This run is unattended: if a checklist is incomplete, proceed and list the open items in your report; ' +
   'if the architecture is ambiguous, use the one plan.md names. Report how many tasks are done and the total.'
 
-export function buildSteps(stacks: readonly string[], specDir: string | null): string[] {
+function workIn(repos: readonly Repo[], stack: FlowStackId): string {
+  if (repos.length < 2) return ''
+  const mine = repos.filter((repo) => repo.stacks.includes(stack))
+  return `Work in ${mine.map(where).join(' and ')}, on every unchecked task tasks.md gives ${mine.length === 1 ? 'that repository' : 'those repositories'}.`
+}
+
+export function buildSteps(stacks: readonly string[], specDir: string | null, repos: readonly Repo[] = []): string[] {
   const steps: string[] = []
   const dotnet = stacks.includes('dotnet')
   const context = args(UNATTENDED, featureLine(specDir), stackContext(stacks))
-  if (dotnet) steps.push(`/speckit-implement-scaffold ${context}`)
+  if (dotnet) steps.push(`/speckit-implement-scaffold ${args(context, workIn(repos, 'dotnet'))}`)
   if (stacks.includes('angular')) {
-    steps.push(`/speckit-implement ${args(dotnet ? 'Complete every task still unchecked in tasks.md.' : '', context)}`)
+    const rest = dotnet && repos.length < 2 ? 'Complete every task still unchecked in tasks.md.' : ''
+    steps.push(`/speckit-implement ${args(rest, context, workIn(repos, 'angular'))}`)
   }
   return steps
 }
@@ -142,20 +191,43 @@ export function buildHandshake(): string {
   return markerLine('build', ',"tasksDone":<checked task count or null>,"tasksTotal":<total task count or null>')
 }
 
-export function cleanSteps(stacks: readonly string[], base: string): string[] {
+interface Scope {
+  stacks: readonly string[]
+  base: string
+  name: string | null
+}
+
+function scopes(stacks: readonly string[], base: string, repos: readonly Repo[]): Scope[] {
+  return repos.length > 1
+    ? repos.map((repo) => ({ stacks: repo.stacks, base: repo.baseBranch, name: where(repo) }))
+    : [{ stacks, base, name: null }]
+}
+
+export function cleanSteps(stacks: readonly string[], base: string, repos: readonly Repo[] = []): string[] {
   const steps: string[] = []
-  if (stacks.includes('dotnet')) {
+  const targets = scopes(stacks, base, repos)
+  const multi = targets.length > 1
+  for (const target of targets.filter((t) => t.stacks.includes('dotnet'))) {
     steps.push(
-      `/dotnet-claude-kit:de-sloppify Only touch files changed on this branch against ${base}. ` +
+      `/dotnet-claude-kit:de-sloppify Only touch files${target.name ? ` in ${target.name}` : ''} changed on this branch against ${target.base}. ` +
         'Skip the step that creates issues: resolve or delete each TODO instead. Add no comments.',
     )
   }
-  steps.push(`/ponytail:ponytail-review Review the diff of this branch against ${base}.`)
+  for (const target of targets) {
+    steps.push(
+      `/ponytail:ponytail-review Review the diff of ${target.name ? `${target.name} on this branch` : 'this branch'} against ${target.base}.`,
+    )
+  }
+  const lint = multi
+    ? 'Also run the lint script with --fix in each Angular repository that has one.'
+    : "Also run the project's lint script with --fix if it has one."
   steps.push(
     args(
-      'Apply every finding from that review that is safe, keeping behaviour the same. Add no comments.',
-      stacks.includes('angular') ? "Also run the project's lint script with --fix if it has one." : '',
-      'Run the tests and keep them green, then commit the result.',
+      `Apply every finding from ${multi ? 'those reviews' : 'that review'} that is safe, keeping behaviour the same. Add no comments.`,
+      stacks.includes('angular') ? lint : '',
+      multi
+        ? 'Run the tests in each repository and keep them green, then commit the result in each one.'
+        : 'Run the tests and keep them green, then commit the result.',
     ),
   )
   return steps
@@ -165,30 +237,39 @@ export function cleanHandshake(): string {
   return markerLine('clean')
 }
 
-export function testWritePrompt(run: Pick<FlowRun, 'specDir'>, stacks: readonly string[]): string {
+const TEST_CONVENTIONS: Readonly<Record<FlowStackId, string>> = {
+  dotnet:
+    "match the repository's own test stack (its xUnit version, its assertion " +
+    'library, NSubstitute) and dotnet-claude-kit:testing conventions; unit tests for every ' +
+    'new handler, validator and service; integration tests through WebApplicationFactory ' +
+    'when the repo already has an integration test project; architecture tests when present.',
+  angular:
+    "specs with the repo's runner (Karma/Jasmine), TestBed with standalone " +
+    'imports, HttpTestingController for HTTP.',
+}
+
+export function testWritePrompt(
+  run: Pick<FlowRun, 'specDir'>,
+  stacks: readonly string[],
+  repos: readonly Repo[] = [],
+): string {
   const sections: string[] = []
-  if (stacks.includes('dotnet')) {
-    sections.push(
-      "- .NET: match the repository's own test stack (its xUnit version, its assertion " +
-        'library, NSubstitute) and dotnet-claude-kit:testing conventions; unit tests for every ' +
-        'new handler, validator and service; integration tests through WebApplicationFactory ' +
-        'when the repo already has an integration test project; architecture tests when present.',
-    )
-  }
-  if (stacks.includes('angular')) {
-    sections.push(
-      "- Angular: specs with the repo's runner (Karma/Jasmine), TestBed with standalone " +
-        'imports, HttpTestingController for HTTP.',
-    )
+  const multi = repos.length > 1
+  for (const target of scopes(stacks, '', repos)) {
+    for (const id of STACK_ORDER.filter((stack) => target.stacks.includes(stack))) {
+      sections.push(`- ${target.name ? `${target.name}, ` : ''}${FLOW_STACK_LABELS[id]}: ${TEST_CONVENTIONS[id]}`)
+    }
   }
   const postmanPath = run.specDir ? `${run.specDir}/postman/<slug>.postman_collection.json` : 'the spec folder'
   sections.push(
     `- API: if this feature adds or changes HTTP endpoints, write a Postman v2.1 collection at ` +
-      `${postmanPath} with a {{baseUrl}} variable, one success and one failure request per ` +
+      `${postmanPath}${multi ? ` in ${repos[0].name}` : ''} with a {{baseUrl}} variable, one success and one failure request per ` +
       'endpoint, minimal request bodies.',
   )
   return [
-    'Write the tests this feature is missing, then commit them.',
+    multi
+      ? "Write the tests this feature is missing in each repository, with that repository's own conventions, then commit them in each one."
+      : 'Write the tests this feature is missing, then commit them.',
     '',
     ...sections,
     '',
@@ -196,21 +277,32 @@ export function testWritePrompt(run: Pick<FlowRun, 'specDir'>, stacks: readonly 
   ].join('\n')
 }
 
-export function reviewSteps(stacks: readonly string[], base: string): string[] {
+export function reviewSteps(stacks: readonly string[], base: string, repos: readonly Repo[] = []): string[] {
   const steps: string[] = []
-  if (stacks.includes('dotnet')) {
-    steps.push(`/dotnet-claude-kit:code-review Review the changes on this branch against ${base}.`)
-    steps.push(`/dotnet-claude-kit:security-scan Scope: the changes on this branch against ${base}.`)
+  for (const target of scopes(stacks, base, repos).filter((t) => t.stacks.includes('dotnet'))) {
+    const scope = target.name ? `in ${target.name} ` : ''
+    steps.push(`/dotnet-claude-kit:code-review Review the changes ${scope}on this branch against ${target.base}.`)
+    steps.push(`/dotnet-claude-kit:security-scan Scope: the changes ${scope}on this branch against ${target.base}.`)
   }
   return steps
 }
 
-export function reviewHandshake(base: string, specDir: string | null, stacks: readonly string[]): string {
+export function reviewHandshake(
+  base: string,
+  specDir: string | null,
+  stacks: readonly string[],
+  repos: readonly Repo[] = [],
+): string {
   const conventions = stackContext(stacks)
+  const multi = repos.length > 1
+  const against = multi
+    ? `in every repository, each against its own base (${repos.map((repo) => `${repo.name} against ${repo.baseBranch}`).join(', ')})`
+    : `against ${base}`
   const lines = [
-    `Review the changes on this branch against ${base}, if you have not already. Check them`,
+    `Review the changes on this branch ${against}, if you have not already. Check them`,
     `against every acceptance criterion in ${specDir ? `${specDir}/spec.md` : "this feature's spec.md"}.`,
   ]
+  if (multi) lines.push("Give each finding's file as <repository name>/<path inside that repository>.")
   if (conventions) {
     lines.push(`Check them against these conventions too; every violation is a must_fix finding: ${conventions}`)
   }
@@ -320,20 +412,57 @@ export function testReportLines(verify: VerifyReport | null, postman: string | n
   return lines
 }
 
+function workItemLink(run: Pick<FlowRun, 'source' | 'sourceRef'>): string {
+  return run.source === 'ado' && run.sourceRef ? ` and link Azure DevOps work item ${run.sourceRef}.` : '.'
+}
+
+function shipEveryPrompt(
+  run: Pick<FlowRun, 'title' | 'branch' | 'source' | 'sourceRef'>,
+  test: { verify: VerifyReport | null; postman: string | null },
+  repos: readonly Repo[],
+): string {
+  return [
+    `Commit anything uncommitted in each repository, naming the feature "${run.title}". Push the branch` +
+      `${run.branch ? ` (${run.branch})` : ''} in each one.`,
+    'Raise one pull request per repository, each into its own base branch:',
+    ...repos.map((repo) => `- ${where(repo)} into ${repo.baseBranch}`),
+    'Before creating each one, look for an open pull request from this branch in that repository and report it',
+    'instead of opening a second.',
+    '',
+    "Read each repository's own remote. For an Azure Repos remote (dev.azure.com or visualstudio.com), use the ado MCP server" +
+      workItemLink(run),
+    'For a GitHub remote, use gh pr create.',
+    '',
+    'Title each pull request after the feature. In each description: a short summary of the spec,',
+    'what changed in that repository, the test report below, and the Postman collection path if one was written.',
+    'Once every pull request exists, edit each description to link the others. Do not merge, approve, or add reviewers.',
+    '',
+    ...testReportLines(test.verify, test.postman),
+    '',
+    ADO_RULE,
+    HONESTY,
+    'Report only the pull request ids and urls the servers actually returned to you, one entry per repository, named as above.',
+    '',
+    markerLine(
+      'ship',
+      ',"pullRequests":[{"repository":"<repository name>","prUrl":"<browser url or null>","prId":"<id or null>"}]',
+    ),
+  ].join('\n')
+}
+
 export function shipPrompt(
   run: Pick<FlowRun, 'title' | 'branch' | 'baseBranch' | 'source' | 'sourceRef'>,
   test: { verify: VerifyReport | null; postman: string | null } = { verify: null, postman: null },
+  repos: readonly Repo[] = [],
 ): string {
+  if (repos.length > 1) return shipEveryPrompt(run, test, repos)
   return [
     `Commit anything uncommitted, naming the feature "${run.title}". Push the branch` +
       `${run.branch ? ` (${run.branch})` : ''}.`,
     'Before creating a pull request, look for an open one from this branch and report it instead',
     'of opening a second.',
     '',
-    'For an Azure Repos remote (dev.azure.com or visualstudio.com), use the ado MCP server' +
-      (run.source === 'ado' && run.sourceRef
-        ? ` and link Azure DevOps work item ${run.sourceRef}.`
-        : '.'),
+    'For an Azure Repos remote (dev.azure.com or visualstudio.com), use the ado MCP server' + workItemLink(run),
     'For a GitHub remote, use gh pr create.',
     '',
     `Title the pull request after the feature. In the description: a short summary of the spec,`,

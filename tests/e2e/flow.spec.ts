@@ -387,6 +387,81 @@ test('the worktree can be removed only once the run has ended, and needs a secon
   await expect(page.getByTestId('flow-run-worktree')).toHaveCount(0)
 })
 
+async function startTwoRepoRun(page: Page): Promise<void> {
+  await openFlow(page)
+  await page.evaluate(() => {
+    window.__mock.setFlowStacks('p-alpha', ['dotnet'])
+    window.__mock.setFlowStacks('p-beta', ['angular'])
+  })
+  await page.getByTestId('flow-new').click()
+  await expect(page.getByTestId('flow-companion-p-beta')).toContainText('beta')
+  await expect(page.getByTestId('flow-companion-p-beta-stack-angular')).toHaveText('Angular')
+  await expect(page.getByTestId('flow-companion-p-beta')).toHaveAttribute('aria-checked', 'false')
+  await expect(page.getByTestId('flow-companion-base-p-beta')).toHaveCount(0)
+  await page.getByTestId('flow-companion-p-beta').click()
+  await expect(page.getByTestId('flow-companion-p-beta')).toHaveAttribute('aria-checked', 'true')
+  await page.getByTestId('flow-companion-base-p-beta').fill('develop')
+  await page.getByTestId('flow-text-title').fill('Renewal quote')
+  await page.getByTestId('flow-start').click()
+  await expect(page.getByTestId('flow-run')).toBeVisible()
+}
+
+test('Also change adds another project to the run, and the header lists every repository with its branch and stacks', async ({
+  page,
+}) => {
+  await startTwoRepoRun(page)
+  const alpha = page.getByTestId('flow-run-repo-p-alpha')
+  const beta = page.getByTestId('flow-run-repo-p-beta')
+  await expect(alpha).toContainText('alpha')
+  await expect(alpha).toContainText('feature/flow-1')
+  await expect(alpha).toContainText('base main')
+  await expect(alpha).toContainText('.NET')
+  await expect(beta).toContainText('feature/flow-1')
+  await expect(beta).toContainText('base develop')
+  await expect(beta).toContainText('Angular')
+  await expect(page.getByTestId('flow-run-worktree')).toHaveCount(0)
+
+  await page.getByTestId('flow-cancel').click()
+  await expect(page.getByTestId('flow-remove-worktree')).toHaveText('Remove 2 worktrees')
+  await page.getByTestId('flow-remove-worktree').click()
+  await expect(page.getByTestId('flow-remove-worktree')).toHaveText('Confirm remove 2 worktrees')
+  await page.getByTestId('flow-remove-worktree').click()
+  await expect(page.getByTestId('flow-remove-worktree')).toHaveCount(0)
+})
+
+test('the ship stage of a two-repository run shows and opens one pull request per repository', async ({ page }) => {
+  await startTwoRepoRun(page)
+  const runId = await currentRunId(page)
+  await approveThrough(page, runId, ['spec', 'plan', 'build', 'clean'])
+  await expect(page.getByTestId('flow-stage-test')).toContainText('running')
+  await page.evaluate((id) => window.__mock.reportFlowVerify(id, { suites: [{ id: 'alpha/unit', label: 'Unit', status: 'pass', detail: 'ok' }] }), runId)
+  await page.getByTestId('flow-approve').click()
+  await expect(page.getByTestId('flow-stage-review')).toContainText('running')
+  await page.evaluate((id) => window.__mock.reportFlowStage(id, 'review', { status: 'review', report: { verdict: 'ready', findings: [], unmet: [] } }), runId)
+  await page.getByTestId('flow-approve').click()
+  await page.getByTestId('flow-ship').click()
+  await expect(page.getByTestId('flow-stage-ship')).toContainText('running')
+  await expect(page.getByTestId('flow-pr-p-beta')).toContainText('No pull request yet.')
+
+  const api = 'https://dev.azure.com/x/_git/api/pullrequest/11'
+  const fe = 'https://github.com/x/fe/pull/12'
+  await page.evaluate(
+    ({ id, api, fe }) =>
+      window.__mock.reportFlowShip(id, api, '11', [
+        { projectId: 'p-alpha', prUrl: api, prId: '11' },
+        { projectId: 'p-beta', prUrl: fe, prId: '12' },
+      ]),
+    { id: runId, api, fe },
+  )
+  await expect(page.getByTestId('flow-pr-link-p-alpha')).toContainText('PR 11')
+  await expect(page.getByTestId('flow-pr-link-p-beta')).toContainText('PR 12')
+  await expect(page.getByTestId('flow-pr-link')).toHaveCount(0)
+  await page.getByTestId('flow-pr-link-p-beta').click()
+  await expect.poll(async () => (await page.evaluate(() => window.__mock.state().prOpens)).at(-1)).toBe(fe)
+  await page.getByTestId('flow-pr-link-p-alpha').click()
+  await expect.poll(async () => (await page.evaluate(() => window.__mock.state().prOpens)).at(-1)).toBe(api)
+})
+
 test('Escape and the close button both dismiss the popup, and it can be reopened', async ({ page }) => {
   await openFlow(page)
   await page.keyboard.press('Escape')

@@ -260,6 +260,7 @@ function specMarker(overrides: Partial<FlowStageMarker> = {}): FlowStageMarker {
     unmet: [],
     prUrl: null,
     prId: null,
+    pullRequests: [],
     ...overrides,
   }
 }
@@ -1111,5 +1112,254 @@ describe('reconcile on startup', () => {
     expect(h.repos.flowStages.get(run.id, 'spec')?.status).toBe('failed')
     expect(h.repos.flowRuns.byId(run.id)?.status).toBe('waiting')
     expect(h.changed).toContain(h.project.id)
+  })
+})
+
+describe('a run across two repositories', () => {
+  function angularProject(): string {
+    const dir = mkdtempSync(join(tmpdir(), 'flow-sup-ng-'))
+    tempDirs.push(dir)
+    writeFileSync(join(dir, 'angular.json'), '{"projects":{}}')
+    return dir
+  }
+
+  function twoRepos() {
+    const h = setup()
+    const beta = h.repos.projects.insert({ name: 'beta', path: angularProject(), source: 'manual' })
+    return { ...h, beta }
+  }
+
+  type Two = ReturnType<typeof twoRepos>
+
+  const startBoth = (h: Two, baseBranch?: string) =>
+    h.flow.start({
+      projectId: h.project.id,
+      source: textSource(),
+      autopilot: false,
+      autoShip: false,
+      companions: [{ projectId: h.beta.id, baseBranch }],
+    })
+
+  function stageTexts(h: Two, runId: string, stage: FlowStage): string[] {
+    const sid = sessionOf(h, runId, stage)
+    const texts = () => h.sent.filter((sent) => sent.sessionId === sid).map((sent) => sent.text)
+    while (!texts().at(-1)!.includes('SWB_FLOW:')) h.flow.onTurnEnded(sid)
+    h.flow.onFlowMarker(sid, specMarker({ stage, verdict: stage === 'review' ? 'ready' : null }))
+    return texts()
+  }
+
+  it('makes a worktree in each on one branch name free in both, and gives every stage session the companion', async () => {
+    const h = twoRepos()
+    const run = await startBoth(h, 'develop')
+    const companion = join(h.beta.path, '.worktrees', 'checkout-v2')
+
+    expect(h.git.create).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        repoRoot: h.project.path,
+        base: 'main',
+        others: [{ repoRoot: h.beta.path, root: join(h.beta.path, '.worktrees') }],
+      }),
+    )
+    expect(h.git.create).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ repoRoot: h.beta.path, base: 'develop', branch: 'feature/checkout-v2' }),
+    )
+    expect(run.stacks).toEqual(['dotnet', 'angular'])
+    expect(run.repos.map((repo) => [repo.name, repo.branch, repo.baseBranch, repo.stacks, repo.worktreePath])).toEqual([
+      ['alpha', 'feature/checkout-v2', 'main', ['dotnet'], run.worktreePath],
+      ['beta', 'feature/checkout-v2', 'develop', ['angular'], companion],
+    ])
+    expect(h.manager.startSession).toHaveBeenCalledWith(
+      h.project.id,
+      false,
+      h.project.defaultSessionMode,
+      expect.objectContaining({ cwd: run.worktreePath, additionalDirectories: [companion] }),
+    )
+    expect(h.sent[0].text).toMatch(/^\/speckit-specify Checkout v2/)
+    expect(h.sent[0].text).toContain(`- alpha (${run.worktreePath}), the primary: the spec and tasks.md live here; .NET; base main`)
+    expect(h.sent[0].text).toContain(`- beta (${companion}); Angular; base develop`)
+  })
+
+  it('checks the companion base like the primary one, before making any worktree', async () => {
+    const h = twoRepos()
+    await expect(startBoth(h, '--orphan')).rejects.toMatchObject({ code: 'INVALID_PATH', message: expect.stringContaining('in beta') })
+    h.git.resolves = vi.fn(async (root: string) => root !== h.beta.path)
+    await expect(startBoth(h, 'nope')).rejects.toMatchObject({ code: 'INVALID_PATH', message: expect.stringContaining('in beta') })
+    h.git.branch = vi.fn(async (root: string) => (root === h.beta.path ? null : 'main'))
+    await expect(startBoth(h)).rejects.toMatchObject({
+      code: 'INVALID_PATH',
+      message: expect.stringContaining('The checkout of beta is on a detached HEAD'),
+    })
+    expect(h.git.create).not.toHaveBeenCalled()
+  })
+
+  it('refuses a companion with neither stack, a repeated repository and an archived one', async () => {
+    const h = twoRepos()
+    const empty = mkdtempSync(join(tmpdir(), 'flow-sup-docs-'))
+    tempDirs.push(empty)
+    const docs = h.repos.projects.insert({ name: 'docs', path: empty, source: 'manual' })
+    const withCompanions = (...ids: string[]) =>
+      h.flow.start({
+        projectId: h.project.id,
+        source: textSource(),
+        autopilot: false,
+        autoShip: false,
+        companions: ids.map((projectId) => ({ projectId })),
+      })
+    await expect(withCompanions(docs.id)).rejects.toMatchObject({ code: 'UNSUPPORTED', message: expect.stringContaining('docs') })
+    await expect(withCompanions(h.project.id)).rejects.toMatchObject({ code: 'DUPLICATE' })
+    await expect(withCompanions(h.beta.id, h.beta.id)).rejects.toMatchObject({ code: 'DUPLICATE' })
+    h.repos.projects.archive(h.beta.id)
+    await expect(withCompanions(h.beta.id)).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    expect(h.git.create).not.toHaveBeenCalled()
+  })
+
+  it('removes the worktree it already made and keeps no run when the next one fails', async () => {
+    const h = twoRepos()
+    const create = h.git.create
+    h.git.create = vi.fn(async (input: Parameters<FlowGit['create']>[0]) => {
+      if (input.repoRoot === h.beta.path) throw new Error('fatal: a branch named feature/checkout-v2 already exists')
+      return create(input)
+    })
+    await expect(startBoth(h)).rejects.toMatchObject({ code: 'INTERNAL', message: expect.stringContaining('beta') })
+    expect(h.git.remove).toHaveBeenCalledWith(h.project.path, join(h.project.path, '.worktrees', 'checkout-v2'), { force: true })
+    expect(h.repos.flowRuns.listForProject(h.project.id)).toEqual([])
+    expect(h.manager.startSession).not.toHaveBeenCalled()
+  })
+
+  it('names the repository of every task, implement step, cleanup and review, each against its own base', async () => {
+    const h = twoRepos()
+    const run = await startBoth(h, 'develop')
+    const primary = `alpha (${run.worktreePath})`
+    const companion = `beta (${run.repos[1].worktreePath})`
+    const repoLine = `- ${companion}; Angular; base develop`
+
+    const spec = stageTexts(h, run.id, 'spec')
+    expect(spec[0]).toContain(repoLine)
+    await h.flow.approve(run.id)
+
+    const plan = stageTexts(h, run.id, 'plan')
+    expect(plan[0]).toContain(repoLine)
+    expect(plan[1]).toContain('Every task names the repository it belongs to, as [alpha] or [beta] right after its id.')
+    await h.flow.approve(run.id)
+
+    const build = stageTexts(h, run.id, 'build')
+    expect(build[0]).toMatch(/^\/speckit-implement-scaffold /)
+    expect(build[0]).toContain(`Work in ${primary}, on every unchecked task tasks.md gives that repository.`)
+    expect(build[1]).toMatch(/^\/speckit-implement /)
+    expect(build[1]).toContain(`Work in ${companion}, on every unchecked task tasks.md gives that repository.`)
+    await h.flow.approve(run.id)
+
+    const clean = stageTexts(h, run.id, 'clean')
+    expect(clean[0]).toContain(`/dotnet-claude-kit:de-sloppify Only touch files in ${primary} changed on this branch against main.`)
+    expect(clean.filter((text) => text.includes('de-sloppify'))).toHaveLength(1)
+    expect(clean).toContain(`/ponytail:ponytail-review Review the diff of ${primary} on this branch against main.`)
+    expect(clean).toContain(`/ponytail:ponytail-review Review the diff of ${companion} on this branch against develop.`)
+    await h.flow.approve(run.id)
+
+    const test = h.sent.filter((sent) => sent.sessionId === sessionOf(h, run.id, 'test'))[0].text
+    expect(test).toContain('in each repository')
+    expect(test).toContain(`- ${primary}, .NET: `)
+    expect(test).toContain(`- ${companion}, Angular: `)
+    await h.flow.skip(run.id)
+
+    const review = stageTexts(h, run.id, 'review')
+    expect(review[0]).toContain(repoLine)
+    expect(review).toContain(`/dotnet-claude-kit:security-scan Scope: the changes in ${primary} on this branch against main.`)
+    expect(review.filter((text) => text.includes('security-scan'))).toHaveLength(1)
+    expect(review.at(-1)).toContain('each against its own base (alpha against main, beta against develop)')
+  })
+
+  it('builds the verify step from the suites in each worktree, each run inside it under an id naming its repository', async () => {
+    const h = twoRepos()
+    h.repos.settings.set({ projectSuiteCommands: { [h.project.id]: { 'dotnet-unit': 'dotnet test Only.sln' } } })
+    const run = await startBoth(h)
+    const companion = run.repos[1].worktreePath!
+    writeFileSync(join(run.worktreePath!, 'App.sln'), '')
+    writeFileSync(join(companion, 'angular.json'), '{"projects":{}}')
+    writeFileSync(join(companion, 'package.json'), '{"devDependencies":{}}')
+    for (const stage of ['spec', 'plan', 'build', 'clean'] as const) {
+      h.flow.onFlowMarker(sessionOf(h, run.id, stage), specMarker({ stage }))
+      await h.flow.approve(run.id)
+    }
+    h.flow.onTurnEnded(sessionOf(h, run.id, 'test'))
+    const verify = h.sent.at(-1)!.text
+    expect(verify).toContain(`- alpha/dotnet-unit (alpha Unit tests): cd "${run.worktreePath}" && dotnet test Only.sln`)
+    expect(verify).toContain(`- beta/ng-unit (beta Unit tests (Karma/Jasmine)): cd "${companion}" && npx ng test`)
+    expect(verify).not.toContain('- dotnet-unit')
+  })
+
+  it('raises a pull request per repository and keeps each link only on an allowed host or its own origin', async () => {
+    const h = twoRepos()
+    h.git.origin = vi.fn(async (root: string) => (root === h.beta.path ? 'git.beta.internal' : 'git.example.internal'))
+    const run = await startBoth(h, 'develop')
+    for (const stage of ['spec', 'plan', 'build', 'clean', 'test', 'review'] as const) {
+      h.flow.onFlowMarker(sessionOf(h, run.id, stage), specMarker({ stage, verdict: stage === 'review' ? 'ready' : null }))
+      await h.flow.approve(run.id)
+    }
+    await h.flow.ship(run.id)
+    const prompt = h.sent.at(-1)!.text
+    expect(prompt).toContain('Raise one pull request per repository')
+    expect(prompt).toContain(`- beta (${run.repos[1].worktreePath}) into develop`)
+    expect(prompt).toContain('edit each description to link the others')
+    expect(prompt).toContain('"pullRequests":[{"repository":')
+
+    h.flow.onFlowMarker(
+      sessionOf(h, run.id, 'ship'),
+      specMarker({
+        stage: 'ship',
+        pullRequests: [
+          { repository: 'alpha', prUrl: 'https://github.com/o/alpha/pull/1', prId: '1' },
+          { repository: 'Beta', prUrl: 'https://git.beta.internal/beta/pulls/2', prId: '2' },
+        ],
+      }),
+    )
+    let after = h.repos.flowRuns.byId(run.id)!
+    expect(after.repos.map((repo) => [repo.prUrl, repo.prId])).toEqual([
+      ['https://github.com/o/alpha/pull/1', '1'],
+      ['https://git.beta.internal/beta/pulls/2', '2'],
+    ])
+    expect(after.prUrl).toBe('https://github.com/o/alpha/pull/1')
+    expect(await h.flow.pullRequestUrl(run.id)).toBe('https://github.com/o/alpha/pull/1')
+    expect(await h.flow.pullRequestUrl(run.id, h.beta.id)).toBe('https://git.beta.internal/beta/pulls/2')
+
+    await h.flow.revise(run.id, 'Link the two pull requests.')
+    h.flow.onFlowMarker(
+      sessionOf(h, run.id, 'ship'),
+      specMarker({
+        stage: 'ship',
+        pullRequests: [
+          { repository: 'alpha', prUrl: 'https://git.beta.internal/alpha/pulls/1', prId: '1' },
+          { repository: 'beta', prUrl: 'https://git.beta.internal/beta/pulls/2', prId: '2' },
+        ],
+      }),
+    )
+    after = h.repos.flowRuns.byId(run.id)!
+    expect(after.repos.map((repo) => repo.prUrl)).toEqual([null, 'https://git.beta.internal/beta/pulls/2'])
+    expect(h.repos.flowStages.get(run.id, 'ship')?.summary).toContain('link for alpha was not an https address on an allowed host')
+    await expect(h.flow.pullRequestUrl(run.id)).rejects.toMatchObject({ code: 'NOT_FOUND' })
+  })
+
+  it('removes every worktree of the run, the companion first, and names the one that is dirty', async () => {
+    const h = twoRepos()
+    const run = await startBoth(h)
+    await h.flow.cancel(run.id)
+    const after = await h.flow.removeWorktree(run.id, true)
+    expect(h.git.remove).toHaveBeenNthCalledWith(1, h.beta.path, run.repos[1].worktreePath, { force: true })
+    expect(h.git.remove).toHaveBeenNthCalledWith(2, h.project.path, run.worktreePath, { force: true })
+    expect(after.worktreePath).toBeNull()
+    expect(after.repos.map((repo) => repo.worktreePath)).toEqual([null, null])
+
+    const dirty = await startBoth(h)
+    await h.flow.cancel(dirty.id)
+    h.git.remove = vi.fn(async (root: string) =>
+      root === h.beta.path ? { removed: false, dirty: ['?? scratch.ts'] } : { removed: true, dirty: [] },
+    )
+    await expect(h.flow.removeWorktree(dirty.id, false)).rejects.toMatchObject({
+      code: 'CONFIRM_REQUIRED',
+      message: 'The worktree of beta has 1 uncommitted change.',
+    })
+    expect(h.repos.flowRuns.byId(dirty.id)?.worktreePath).not.toBeNull()
   })
 })

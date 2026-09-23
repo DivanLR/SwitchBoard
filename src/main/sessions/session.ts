@@ -78,6 +78,7 @@ export type PermissionGate = (context: {
 interface HostedSessionOptions {
   sessionId: string
   projectPath: string
+  extraDirs?: string[]
   refDirs?: string[]
   resumeSdkSessionId?: string
   systemPromptAppend?: string
@@ -186,7 +187,11 @@ export class HostedSession implements SessionHost {
         resume: this.options.resumeSdkSessionId,
         pathToClaudeCodeExecutable: this.options.claudeExecutablePath,
         settingSources: ['user', 'project', 'local'],
-        additionalDirectories: [this.options.projectPath, ...(this.options.refDirs ?? [])],
+        additionalDirectories: [
+          this.options.projectPath,
+          ...(this.options.extraDirs ?? []),
+          ...(this.options.refDirs ?? []),
+        ],
         model:
           this.options.mainModel && this.options.mainModel !== 'default'
             ? this.options.mainModel

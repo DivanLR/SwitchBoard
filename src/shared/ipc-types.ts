@@ -117,7 +117,12 @@ export type FlowStartSource =
   | { kind: 'text'; title: string; description: string }
   | { kind: 'spec'; specId: string }
 
-export type FlowArtefactKind = 'spec' | 'plan' | 'tasks' | 'postman' | 'report'
+export interface FlowCompanionRequest {
+  projectId: string
+  baseBranch?: string
+}
+
+export type FlowArtefactKind ='spec' | 'plan' | 'tasks' | 'postman' | 'report'
 
 export interface InvokeMap {
   'projects.list': { req: void; res: ProjectsSnapshot }
@@ -240,6 +245,7 @@ export interface InvokeMap {
       autopilot: boolean
       autoShip: boolean
       baseBranch?: string
+      companions?: FlowCompanionRequest[]
     }
     res: { runId: string } & FlowSnapshot
   }
@@ -252,7 +258,7 @@ export interface InvokeMap {
   'flow.revise': { req: { runId: string; feedback: string }; res: FlowSnapshot }
   'flow.setAutopilot': { req: { runId: string; autopilot: boolean }; res: FlowSnapshot }
   'flow.removeWorktree': { req: { runId: string; force?: boolean }; res: FlowSnapshot }
-  'flow.openPullRequest': { req: { runId: string }; res: void }
+  'flow.openPullRequest': { req: { runId: string; projectId?: string }; res: void }
   'flow.artefact': {
     req: { runId: string; stage: FlowStage; kind?: FlowArtefactKind }
     res: { path: string | null; content: string } | null
