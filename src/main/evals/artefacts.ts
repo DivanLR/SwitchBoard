@@ -113,7 +113,7 @@ interface Reconciled {
   disagreements: Disagreement[]
 }
 
-const RUNNER_SUITES = /^(dotnet-(unit|coverage|api|arch)|node-unit|ng-unit|py-unit)$/
+const RUNNER_SUITES = /^(dotnet-(unit|coverage|api|arch)|ng-unit)$/
 
 export function reconcile(report: VerifyReport, artefacts: RunArtefacts): Reconciled {
   const disagreements: Disagreement[] = []

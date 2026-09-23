@@ -3,7 +3,7 @@ import { stackById } from '@shared/test-catalog'
 import { parseVerifyReport, planSuites, verifyPrompt } from '@main/evals/verify-dispatch'
 
 const dotnet = stackById('dotnet')!
-const node = stackById('node')!
+const angular = stackById('angular')!
 
 describe('trimming the schema to what the plan can actually measure', () => {
   it('asks for none of coverage, quality gate, mutation or endpoints on a plan of unit suites alone', () => {
@@ -86,12 +86,12 @@ describe('trimming the schema to what the plan can actually measure', () => {
     const dotnetPlan = planSuites(dotnet.suites, ['dotnet-format'])
     expect(verifyPrompt(dotnetPlan, '.NET')).toContain('"gate"')
 
-    const nodePlan = planSuites(node.suites, ['node-unit', 'node-types'])
-    const nodePrompt = verifyPrompt(nodePlan, 'Node')
-    expect(nodePrompt).toContain('"gate"')
-    expect(nodePrompt).not.toContain('"coverage"')
-    expect(nodePrompt).not.toContain('"endpoints"')
-    expect(nodePrompt).not.toContain('mutationKilled')
+    const angularPlan = planSuites(angular.suites, ['ng-unit', 'ng-lint'])
+    const angularPrompt = verifyPrompt(angularPlan, 'Angular')
+    expect(angularPrompt).toContain('"gate"')
+    expect(angularPrompt).not.toContain('"coverage"')
+    expect(angularPrompt).not.toContain('"endpoints"')
+    expect(angularPrompt).not.toContain('mutationKilled')
   })
 })
 

@@ -22,7 +22,7 @@ test('a verify run and a diagram never share a session, nor take the chat one', 
   expect(chat).toBe('s-alpha')
 
   await page.getByTestId('tab-tests').click()
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
   await page.getByTestId('tests-run').click()
   await expect.poll(async () => (await sends(page)).length).toBeGreaterThan(1)
   const verify = (await sends(page)).at(-1)?.sessionId

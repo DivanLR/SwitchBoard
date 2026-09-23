@@ -10,13 +10,12 @@ import {
 } from '@main/evals/verify-dispatch'
 
 const dotnet = stackById('dotnet')!
-const node = stackById('node')!
 
 describe('planning a run', () => {
   it('leaves slow suites out of the default selection', () => {
-    const chosen = defaultSelection(node.suites)
-    expect(chosen).toContain('node-unit')
-    expect(chosen).not.toContain('node-mutation')
+    const chosen = defaultSelection(dotnet.suites)
+    expect(chosen).toContain('dotnet-unit')
+    expect(chosen).not.toContain('dotnet-mutation')
   })
 
   it('tells the session what to run and why, in order', () => {

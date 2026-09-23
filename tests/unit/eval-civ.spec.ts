@@ -60,122 +60,83 @@ describe('what kind of .NET application a project holds', () => {
     detectStacks(entries, (entry) => files[entry] ?? null).find((s) => s.stackId === 'dotnet')
       ?.stackLabel
 
-  it('offers a Web API the endpoint suites and none of the browser ones', () => {
+  it('labels a Web API by its routed endpoints, and offers the endpoint suites', () => {
     const entries = ['Api.sln', 'Program.cs', 'Api.csproj']
     const files = { 'Program.cs': 'builder.Services.AddControllers();\napp.MapControllers();\n' }
     const ids = suiteIds(entries, files)
     expect(ids).toContain('dotnet-http')
     expect(ids).toContain('dotnet-api')
-    expect(ids).not.toContain('blazor-ui')
-    expect(ids).not.toContain('blazor-interactive')
-    expect(label(entries, files)).toBe('.NET API')
-  })
-
-  it('offers a Blazor app the browser suites and never an HTTP smoke of endpoints', () => {
-    const entries = ['App.sln', 'Program.cs', 'App.csproj']
-    const files = {
-      'Program.cs':
-        'builder.Services.AddRazorComponents().AddInteractiveServerComponents();\n' +
-        'app.MapRazorComponents<App>().AddInteractiveServerRenderMode();\n',
-    }
-    const ids = suiteIds(entries, files)
-    expect(ids).toContain('blazor-ui')
-    expect(ids).toContain('blazor-interactive')
-    expect(ids).not.toContain('dotnet-http')
-    expect(ids).not.toContain('dotnet-api')
     expect(ids).toContain('dotnet-unit')
     expect(ids).toContain('dotnet-coverage')
-    expect(label(entries, files)).toBe('.NET Blazor')
-  })
-
-  it('recognises a standalone WebAssembly app from its root page and root component', () => {
-    const entries = ['Client.sln', 'wwwroot/index.html', 'Program.cs']
-    const files = { 'Program.cs': 'builder.RootComponents.Add<App>("#app");\n' }
-    expect(suiteIds(entries, files)).toContain('blazor-ui')
-    expect(label(entries, files)).toBe('.NET Blazor')
-  })
-
-  it('gives a solution holding both an API and a front end all of it', () => {
-    const entries = ['Both.sln', 'Api/Program.cs', 'Web/Program.cs']
-    const files = {
-      'Api/Program.cs': 'app.MapControllers();\napp.MapOpenApi();\n',
-      'Web/Program.cs': 'app.MapRazorComponents<App>();\n',
-    }
-    const ids = suiteIds(entries, files)
-    expect(ids).toContain('dotnet-http')
-    expect(ids).toContain('blazor-ui')
-    expect(label(entries, files)).toBe('.NET API + Blazor')
-  })
-
-  it('offers everything only when there is no reader at all', () => {
-    const all = TEST_STACKS.find((s) => s.id === 'dotnet')?.suites.map((s) => s.id)
-    expect(detectStacks(['Api.sln'])[0].suites.map((s) => s.id)).toEqual(all)
-  })
-
-  it('withholds the browser suites once a reader has looked and found no screens', () => {
-    const ids = suiteIds(['Api.sln', 'Program.cs'], {})
-    expect(ids).not.toContain('blazor-ui')
-    expect(ids).not.toContain('blazor-interactive')
-    expect(ids).toContain('dotnet-unit')
-    expect(ids).toContain('dotnet-http')
-    expect(label(['Api.sln'], {})).toBe('.NET')
-  })
-
-  it('does not read a class named like a controller as evidence of a routed API', () => {
-    const ids = suiteIds(['App.sln', 'Program.cs'], {
-      'Program.cs': 'app.MapRazorComponents<App>();\n// class PolicyController lives elsewhere\n',
-    })
-    expect(ids).not.toContain('dotnet-http')
-    expect(ids).toContain('blazor-ui')
+    expect(label(entries, files)).toBe('.NET API')
   })
 
   it('takes a Controllers folder as an API, the asymmetry being deliberate', () => {
     const entries = ['Api.sln', 'Sample.Api.csproj', 'Controllers', 'Controllers/PoliciesController.cs']
     const files = { 'Sample.Api.csproj': '<Project Sdk="Microsoft.NET.Sdk.Web"></Project>' }
     expect(label(entries, files)).toBe('.NET API')
-    expect(suiteIds(entries, files)).not.toContain('blazor-ui')
   })
 
-  it('withholds the browser suites from a .NET project with no screens at all', () => {
-    const entries = ['Service.sln', 'Directory.Build.props', 'src', 'tests']
-    const files = { 'Directory.Build.props': '<Project></Project>' }
-    const ids = suiteIds(entries, files)
-    expect(ids).not.toContain('blazor-ui')
-    expect(ids).not.toContain('blazor-interactive')
+  it('offers everything when the tree was never read at all', () => {
+    const all = TEST_STACKS.find((s) => s.id === 'dotnet')?.suites.map((s) => s.id)
+    expect(detectStacks(['Service.sln'])[0].suites.map((s) => s.id)).toEqual(all)
+  })
+
+  it('keeps the endpoint suites in the default label, even when a reader found no routes to confirm it', () => {
+    const ids = suiteIds(['Service.sln', 'Directory.Build.props'], {})
     expect(ids).toContain('dotnet-unit')
     expect(ids).toContain('dotnet-http')
-  })
-
-  it('still offers everything when the tree was never read', () => {
-    const ids = detectStacks(['Service.sln']).flatMap((s) => s.suites.map((x) => x.id))
-    expect(ids).toContain('blazor-ui')
+    expect(label(['Service.sln'], {})).toBe('.NET')
   })
 })
 
-describe('a coverage suite the project cannot run', () => {
-  const nodeSuites = (manifest: string): string[] => {
-    const stacks = detectStacks(['package.json'], () => manifest)
-    return stacks.find((s) => s.stackId === 'node')?.suites.map((s) => s.id) ?? []
+describe('Angular suites that depend on project configuration', () => {
+  const angularSuiteIds = (entries: string[], files: Record<string, string>): string[] => {
+    const stacks = detectStacks(entries, (entry) => files[entry] ?? null)
+    return stacks.find((s) => s.stackId === 'angular')?.suites.map((s) => s.id) ?? []
   }
 
-  it('is not offered when no coverage provider is installed', () => {
-    const ids = nodeSuites('{"devDependencies":{"vitest":"^4.1.0"}}')
-    expect(ids).not.toContain('node-coverage')
-    expect(ids).toContain('node-unit')
-    expect(ids).toContain('node-types')
+  it('always offers the unit, coverage and build suites', () => {
+    const ids = angularSuiteIds(['angular.json'], { 'angular.json': '{"projects":{}}' })
+    expect(ids).toContain('ng-unit')
+    expect(ids).toContain('ng-coverage')
+    expect(ids).toContain('ng-build')
   })
 
-  it('is offered as soon as a provider is there', () => {
-    expect(nodeSuites('{"devDependencies":{"@vitest/coverage-v8":"^4.1.0"}}')).toContain(
-      'node-coverage',
-    )
-    expect(nodeSuites('{"devDependencies":{"jest":"^30.0.0"}}')).toContain('node-coverage')
+  it('offers lint only once angular.json defines a lint target', () => {
+    const without = angularSuiteIds(['angular.json'], {
+      'angular.json': '{"projects":{"app":{"architect":{"build":{}}}}}',
+    })
+    expect(without).not.toContain('ng-lint')
+
+    const withLint = angularSuiteIds(['angular.json'], {
+      'angular.json': '{"projects":{"app":{"architect":{"build":{},"lint":{}}}}}',
+    })
+    expect(withLint).toContain('ng-lint')
   })
 
-  it('offers everything when the files cannot be read at all', () => {
-    const stacks = detectStacks(['package.json'])
-    expect(stacks.find((s) => s.stackId === 'node')?.suites.map((s) => s.id)).toContain(
-      'node-coverage',
-    )
+  it('offers e2e only once Playwright or Cypress is a dependency', () => {
+    const without = angularSuiteIds(['angular.json', 'package.json'], {
+      'angular.json': '{}',
+      'package.json': '{"devDependencies":{"karma":"^6.4.0"}}',
+    })
+    expect(without).not.toContain('ng-e2e')
+
+    const withPlaywright = angularSuiteIds(['angular.json', 'package.json'], {
+      'angular.json': '{}',
+      'package.json': '{"devDependencies":{"@playwright/test":"^1.63.0"}}',
+    })
+    expect(withPlaywright).toContain('ng-e2e')
+
+    const withCypress = angularSuiteIds(['angular.json', 'package.json'], {
+      'angular.json': '{}',
+      'package.json': '{"devDependencies":{"cypress":"^13.0.0"}}',
+    })
+    expect(withCypress).toContain('ng-e2e')
+  })
+
+  it('offers everything when the tree was never read at all', () => {
+    const all = TEST_STACKS.find((s) => s.id === 'angular')?.suites.map((s) => s.id)
+    expect(detectStacks(['angular.json'])[0].suites.map((s) => s.id)).toEqual(all)
   })
 })

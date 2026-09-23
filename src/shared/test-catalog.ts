@@ -1,8 +1,8 @@
 type SuiteKind = 'api' | 'unit' | 'ui' | 'coverage' | 'quality' | 'mutation'
 
-export type SuiteTool = 'dotnet' | 'node' | 'python' | 'browser'
+export type SuiteTool = 'dotnet' | 'node' | 'browser'
 
-type AppShape = 'api' | 'blazor'
+type AppShape = 'api'
 
 export interface TestSuite {
   id: string
@@ -66,26 +66,6 @@ export const TEST_STACKS: readonly TestStack[] = [
         appliesTo: ['api'],
       },
       {
-        id: 'blazor-ui',
-        kind: 'ui',
-        label: 'Screens in a real browser',
-        acceptance: 'the affected screens work end to end in a real browser',
-        command:
-          'start the app, drive the screens this working tree touched in a real browser with Playwright, and report each interaction with what actually happened',
-        needs: 'browser',
-        appliesTo: ['blazor'],
-      },
-      {
-        id: 'blazor-interactive',
-        kind: 'ui',
-        label: 'Components become interactive',
-        acceptance: 'a prerendered component actually takes over and responds to input',
-        command:
-          'load each affected page, then interact with a component that needs interactivity (a click that changes state) and report whether it responded, plus any error from the SignalR circuit or the WebAssembly bundle',
-        needs: 'browser',
-        appliesTo: ['blazor'],
-      },
-      {
         id: 'dotnet-arch',
         kind: 'quality',
         label: 'Architecture rules',
@@ -146,7 +126,7 @@ export const TEST_STACKS: readonly TestStack[] = [
       {
         id: 'ng-unit',
         kind: 'unit',
-        label: 'Unit tests (Karma/Jest)',
+        label: 'Unit tests (Karma/Jasmine)',
         acceptance: 'every component and service spec passes',
         command: 'npx ng test --watch=false --browsers=ChromeHeadless',
         needs: 'browser',
@@ -160,143 +140,28 @@ export const TEST_STACKS: readonly TestStack[] = [
         needs: 'browser',
       },
       {
+        id: 'ng-build',
+        kind: 'quality',
+        label: 'Production build',
+        acceptance: 'the production build succeeds with no new warnings',
+        command: 'npx ng build',
+        needs: 'node',
+      },
+      {
+        id: 'ng-lint',
+        kind: 'quality',
+        label: 'Lint',
+        acceptance: 'lint is clean',
+        command: 'npx ng lint',
+        needs: 'node',
+      },
+      {
         id: 'ng-e2e',
         kind: 'ui',
         label: 'UI end-to-end',
         acceptance: 'the affected screens work end to end in a real browser',
         command: 'npx playwright test',
         needs: 'browser',
-      },
-      {
-        id: 'ng-build',
-        kind: 'quality',
-        label: 'Production build',
-        acceptance: 'the production build succeeds with no new warnings',
-        command: 'npx ng build --configuration production',
-        needs: 'node',
-      },
-      {
-        id: 'ng-mutation',
-        kind: 'mutation',
-        label: 'Mutation testing (Stryker)',
-        acceptance: 'the specs fail when the code is broken on purpose',
-        command: 'npx stryker run',
-        needs: 'browser',
-        heavy: true,
-      },
-    ],
-  },
-  {
-    id: 'node',
-    label: 'Node / Vue / Electron',
-    detect: ['package.json'],
-    suites: [
-      {
-        id: 'node-unit',
-        kind: 'unit',
-        label: 'Unit tests',
-        acceptance: 'every unit test passes',
-        command: 'npm test',
-        needs: 'node',
-      },
-      {
-        id: 'node-coverage',
-        kind: 'coverage',
-        label: 'Coverage',
-        acceptance: 'the changed code is covered by tests',
-        command: 'npx vitest run --coverage --coverage.reporter=cobertura',
-        needs: 'node',
-      },
-      {
-        id: 'node-e2e',
-        kind: 'ui',
-        label: 'UI end-to-end (Playwright)',
-        acceptance: 'the affected screens work end to end',
-        command: 'npx playwright test',
-        needs: 'browser',
-      },
-      {
-        id: 'node-ui-shot',
-        kind: 'ui',
-        label: 'Screenshot the affected screen',
-        acceptance: 'the affected screen looks right',
-        command:
-          'launch the app (npm run dev), screenshot the affected screen with Playwright, and report what differs from the acceptance line',
-        needs: 'browser',
-      },
-      {
-        id: 'node-api',
-        kind: 'api',
-        label: 'HTTP smoke',
-        acceptance: 'every route answers with the status and shape it should',
-        command:
-          'start the server, then send one request per route and report status, shape, and any 4xx/5xx',
-        needs: 'node',
-      },
-      {
-        id: 'node-types',
-        kind: 'quality',
-        label: 'Types and lint',
-        acceptance: 'types and lint are clean',
-        command: 'npm run typecheck && npm run lint',
-        needs: 'node',
-      },
-      {
-        id: 'node-mutation',
-        kind: 'mutation',
-        label: 'Mutation testing (Stryker)',
-        acceptance: 'the tests fail when the code is broken on purpose',
-        command: 'npx stryker run',
-        needs: 'node',
-        heavy: true,
-      },
-    ],
-  },
-  {
-    id: 'python',
-    label: 'Python',
-    detect: ['pyproject.toml', 'requirements.txt'],
-    suites: [
-      {
-        id: 'py-unit',
-        kind: 'unit',
-        label: 'Unit tests',
-        acceptance: 'every test passes',
-        command: 'python -m pytest -q',
-        needs: 'python',
-      },
-      {
-        id: 'py-coverage',
-        kind: 'coverage',
-        label: 'Coverage',
-        acceptance: 'the changed code is covered',
-        command: 'python -m pytest -q --cov --cov-report=xml:coverage.cobertura.xml',
-        needs: 'python',
-      },
-      {
-        id: 'py-api',
-        kind: 'api',
-        label: 'HTTP smoke',
-        acceptance: 'every route answers with the status and shape it should',
-        command: 'start the app, then send one request per route and report status, shape, and errors',
-        needs: 'python',
-      },
-      {
-        id: 'py-quality',
-        kind: 'quality',
-        label: 'Lint and types',
-        acceptance: 'lint and types are clean',
-        command: 'python -m ruff check . && python -m mypy .',
-        needs: 'python',
-      },
-      {
-        id: 'py-mutation',
-        kind: 'mutation',
-        label: 'Mutation testing (mutmut)',
-        acceptance: 'the tests fail when the code is broken on purpose',
-        command: 'python -m mutmut run',
-        needs: 'python',
-        heavy: true,
       },
     ],
   },
@@ -340,15 +205,12 @@ export interface AvailableSuites {
   suites: readonly TestSuite[]
 }
 
-function detectAppShapes(
+function detectApiShape(
   entries: readonly string[],
   read: (entry: string) => string | null,
 ): AppShape[] {
   const MAX_READS = 12
   const lower = entries.map((entry) => entry.replace(/\\/g, '/').toLowerCase())
-  let blazor = lower.some(
-    (entry) => entry.endsWith('.razor') || entry.endsWith('wwwroot/index.html'),
-  )
   let api = lower.some(
     (entry) => entry.endsWith('.http') || entry === 'controllers' || entry.includes('controllers/'),
   )
@@ -358,47 +220,52 @@ function detectAppShapes(
     return name.endsWith('.csproj') || name.endsWith('program.cs') || name.endsWith('startup.cs')
   })
   for (const entry of readable.slice(0, MAX_READS)) {
-    if (blazor && api) break
+    if (api) break
     const text = read(entry)
     if (!text) continue
-    if (
-      /AddRazorComponents|MapRazorComponents|AddInteractive\w*Components|RootComponents\.Add|AddServerSideBlazor|Microsoft\.NET\.Sdk\.BlazorWebAssembly/.test(
-        text,
-      )
-    ) {
-      blazor = true
-    }
     if (/MapControllers|AddControllers|MapOpenApi|AddOpenApi|AddSwaggerGen/.test(text)) api = true
   }
 
-  const shapes: AppShape[] = []
-  if (api) shapes.push('api')
-  if (blazor) shapes.push('blazor')
-  return shapes
+  return api ? ['api'] : []
 }
 
-function suitesFor(
-  stack: TestStack,
-  shapes: readonly AppShape[],
-  scanned: boolean,
-): readonly TestSuite[] {
-  if (!scanned) return stack.suites
-  return stack.suites.filter((suite) => {
-    if (!suite.appliesTo) return true
-    if (suite.appliesTo.some((shape) => shapes.includes(shape))) return true
-    return shapes.length === 0 && !suite.appliesTo.every((shape) => shape === 'blazor')
-  })
+function angularHasLintTarget(
+  entries: readonly string[],
+  read: (entry: string) => string | null,
+): boolean {
+  for (const entry of entries.filter((e) => /(^|[\\/])angular\.json$/i.test(e)).slice(0, 4)) {
+    const text = read(entry)
+    if (text && /"lint"\s*:/.test(text)) return true
+  }
+  return false
 }
 
-function hasCoverageProvider(
+function angularHasE2e(
   entries: readonly string[],
   read: (entry: string) => string | null,
 ): boolean {
   for (const entry of entries.filter((e) => /(^|[\\/])package\.json$/i.test(e)).slice(0, 8)) {
     const text = read(entry)
-    if (text && /"@vitest\/coverage-[a-z0-9]+"|"jest"|"nyc"|"c8"/.test(text)) return true
+    if (text && /"(@playwright\/test|cypress)"\s*:/.test(text)) return true
   }
   return false
+}
+
+function suitesFor(
+  stack: TestStack,
+  shapes: readonly AppShape[],
+  angularLint: boolean,
+  angularE2e: boolean,
+  scanned: boolean,
+): readonly TestSuite[] {
+  if (!scanned) return stack.suites
+  return stack.suites.filter((suite) => {
+    if (suite.id === 'ng-lint') return angularLint
+    if (suite.id === 'ng-e2e') return angularE2e
+    if (!suite.appliesTo) return true
+    if (suite.appliesTo.some((shape) => shapes.includes(shape))) return true
+    return shapes.length === 0
+  })
 }
 
 export function detectStacks(
@@ -412,22 +279,18 @@ export function detectStacks(
       ? lower.some((entry) => entry.endsWith(needle.slice(1)))
       : lower.some((entry) => entry === needle || entry.endsWith(`/${needle}`))
   }
-  const shapes = read ? detectAppShapes(entries, read) : []
-  const coverage = read ? hasCoverageProvider(entries, read) : true
+  const shapes = read ? detectApiShape(entries, read) : []
+  const angularLint = read ? angularHasLintTarget(entries, read) : false
+  const angularE2e = read ? angularHasE2e(entries, read) : false
   return TEST_STACKS.filter((stack) => stack.detect.some(present)).map((stack) => ({
     stackId: stack.id,
     stackLabel: stack.id === 'dotnet' ? dotnetLabel(shapes) : stack.label,
-    suites: suitesFor(stack, shapes, read !== undefined).filter(
-      (suite) => coverage || suite.id !== 'node-coverage',
-    ),
+    suites: suitesFor(stack, shapes, angularLint, angularE2e, read !== undefined),
   }))
 }
 
 function dotnetLabel(shapes: readonly AppShape[]): string {
-  if (shapes.includes('api') && shapes.includes('blazor')) return '.NET API + Blazor'
-  if (shapes.includes('blazor')) return '.NET Blazor'
-  if (shapes.includes('api')) return '.NET API'
-  return '.NET'
+  return shapes.includes('api') ? '.NET API' : '.NET'
 }
 
 export function stackEntries(root: string, list: (dir: string) => string[]): string[] {

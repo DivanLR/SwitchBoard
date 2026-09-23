@@ -23,8 +23,8 @@ async function lastSend(
 function report(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     suites: [
-      { id: 'node-unit', label: 'Unit tests', status: 'pass', detail: '142 passed' },
-      { id: 'node-api', label: 'HTTP smoke', status: 'pass', detail: '9 routes, all 2xx' },
+      { id: 'dotnet-unit', label: 'Unit tests', status: 'pass', detail: '142 passed' },
+      { id: 'dotnet-http', label: 'HTTP smoke', status: 'pass', detail: '9 routes, all 2xx' },
     ],
     coverage: {
       line: { value: 81.4, source: 'vitest --coverage' },
@@ -76,7 +76,7 @@ async function openTests(page: Page, scenario: MockScenario = twoProjectScenario
 
 test('the headline quality figure counts gates, and says what it left out', async ({ page }) => {
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
   await expect(page.getByTestId('tests-score')).toHaveText('—')
   await expect(page.getByTestId('tests-score-sub')).toContainText('nothing measured yet')
 
@@ -95,7 +95,7 @@ test('a run takes its own session and leaves the conversation where it was', asy
   await openTests(page)
   await expect(page.getByTestId('sidebar-subsessions-alpha')).toHaveCount(0)
 
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
   await startRun(page)
 
   const rows = page.getByTestId('sidebar-subsessions-alpha').getByTestId(/^sidebar-subsession-/)
@@ -103,14 +103,14 @@ test('a run takes its own session and leaves the conversation where it was', asy
   await expect(page.getByTestId('sidebar-subsession-s-alpha')).toHaveClass(/sel/)
 
   const sent = await lastSend(page)
-  expect(sent).toContain('node-unit')
+  expect(sent).toContain('dotnet-unit')
   const target = await page.evaluate(() => window.__mock.state().sends.at(-1)?.sessionId)
   expect(target).not.toBe('s-alpha')
 })
 
 test('a second run reuses the tests session rather than spawning another', async ({ page }) => {
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
   await startRun(page)
   const first = await page.evaluate(() => window.__mock.state().sends.at(-1)?.sessionId)
 
@@ -126,17 +126,16 @@ test('a second run reuses the tests session rather than spawning another', async
 
 test('the section opens on a stack picker seeded by detection', async ({ page }) => {
   await openTests(page)
-  await expect(page.getByTestId('tests-detect-hint')).toContainText('Node / Vue / Electron')
+  await expect(page.getByTestId('tests-detect-hint')).toContainText('.NET')
   await expect(page.getByTestId('tests-stack-dotnet')).toBeVisible()
   await expect(page.getByTestId('tests-stack-angular')).toBeVisible()
-  await expect(page.getByTestId('tests-stack-python')).toBeVisible()
-  await expect(page.getByTestId('tests-stack-node')).toContainText('DETECTED')
-  await expect(page.getByTestId('tests-stack-dotnet')).not.toContainText('DETECTED')
+  await expect(page.getByTestId('tests-stack-dotnet')).toContainText('DETECTED')
+  await expect(page.getByTestId('tests-stack-angular')).not.toContainText('DETECTED')
 })
 
 test('before any run, every gate says nothing measured it', async ({ page }) => {
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
 
   for (const id of ['unit', 'integration', 'architecture', 'mutation', 'coverage', 'quality-service']) {
     await expect(page.getByTestId(`tests-gate-${id}`)).toContainText('no run yet')
@@ -146,7 +145,7 @@ test('before any run, every gate says nothing measured it', async ({ page }) => 
 
 test('a gate nothing measured can be accepted, and then reads green', async ({ page }) => {
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
 
   const gate = page.getByTestId('tests-gate-mutation')
   await expect(gate).toContainText('no run yet')
@@ -166,7 +165,7 @@ test('accepting a gate survives leaving the section, because it is a project fac
   page,
 }) => {
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
   await page.getByTestId('tests-gate-accept-mutation').click()
   await expect(page.getByTestId('tests-gate-mutation')).toContainText('accepted')
 
@@ -178,7 +177,7 @@ test('accepting a gate survives leaving the section, because it is a project fac
 
 test('a measured figure offers no way to accept it away', async ({ page }) => {
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
   await startRun(page)
   await page.evaluate(
     (r) => window.__mock.reportVerifyResult('p-alpha', 'fail', r),
@@ -193,12 +192,12 @@ test('a measured figure offers no way to accept it away', async ({ page }) => {
 
 test('a run sends the chosen suites to the session, and its report fills the gates', async ({ page }) => {
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
   await startRun(page)
 
   const sent = await lastSend(page)
-  expect(sent).toContain('node-unit')
-  expect(sent).not.toContain('node-mutation')
+  expect(sent).toContain('dotnet-unit')
+  expect(sent).not.toContain('dotnet-mutation')
 
   await expect(page.getByTestId('tests-run')).toContainText('Running')
   await expect(page.getByTestId('tests-panel-evidence')).toContainText('running')
@@ -209,37 +208,37 @@ test('a run sends the chosen suites to the session, and its report fills the gat
   await expect(page.getByTestId('tests-gate-coverage')).toContainText('93%')
   await expect(page.getByTestId('tests-gate-mutation')).toContainText('74%')
   await expect(page.getByTestId('tests-gate-quality-service')).toContainText('1.2% duplication')
-  await expect(page.getByTestId('tests-result-node-unit')).toContainText('142 passed')
+  await expect(page.getByTestId('tests-result-dotnet-unit')).toContainText('142 passed')
 })
 
 test('no suite offers a per-suite re-run control', async ({ page }) => {
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
-  await expect(page.getByTestId('tests-suite-node-unit')).toBeVisible()
-  await expect(page.getByTestId('tests-suite-rerun-node-unit')).toHaveCount(0)
+  await page.getByTestId('tests-stack-dotnet').click()
+  await expect(page.getByTestId('tests-suite-dotnet-unit')).toBeVisible()
+  await expect(page.getByTestId('tests-suite-rerun-dotnet-unit')).toHaveCount(0)
 
   await startRun(page)
   await page.evaluate((r) => window.__mock.reportVerifyResult('p-alpha', 'pass', r), report())
 
-  await expect(page.getByTestId('tests-suite-node-unit')).toHaveClass(/ran-pass/)
-  await expect(page.getByTestId('tests-suite-rerun-node-unit')).toHaveCount(0)
+  await expect(page.getByTestId('tests-suite-dotnet-unit')).toHaveClass(/ran-pass/)
+  await expect(page.getByTestId('tests-suite-rerun-dotnet-unit')).toHaveCount(0)
 })
 
 test('a ticked suite is visibly ticked even when its outcome left it grey', async ({ page }) => {
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
   await startRun(page)
   await page.evaluate(
     (r) => window.__mock.reportVerifyResult('p-alpha', 'fail', r),
     report({
       suites: [
-        { id: 'node-unit', label: 'Unit tests', status: 'pass', detail: '142 passed' },
-        { id: 'node-api', label: 'HTTP smoke', status: 'not_run', detail: 'no test database' },
+        { id: 'dotnet-unit', label: 'Unit tests', status: 'pass', detail: '142 passed' },
+        { id: 'dotnet-http', label: 'HTTP smoke', status: 'not_run', detail: 'no test database' },
       ],
     }),
   )
 
-  const grey = page.getByTestId('tests-suite-node-api')
+  const grey = page.getByTestId('tests-suite-dotnet-http')
   await expect(grey).toHaveClass(/ran-not_run/)
   await expect(grey).toHaveClass(/ on/)
 
@@ -254,7 +253,7 @@ test('a ticked suite is visibly ticked even when its outcome left it grey', asyn
 
 test('a run in progress can be stopped, and the panel says who stopped it', async ({ page }) => {
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
   await startRun(page)
   await expect(page.getByTestId('tests-run')).toContainText('Running')
 
@@ -268,30 +267,33 @@ test('a run in progress can be stopped, and the panel says who stopped it', asyn
 
 test('a suite command can be corrected, and that is what the run sends', async ({ page }) => {
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
 
-  await page.getByTestId('tests-suite-edit-node-unit').click()
-  const field = page.getByTestId('tests-suite-command-node-unit')
-  await expect(field).toHaveValue('npm test')
-  await field.fill('npm test --workspace packages/api')
+  await page.getByTestId('tests-suite-edit-dotnet-unit').click()
+  const field = page.getByTestId('tests-suite-command-dotnet-unit')
+  await expect(field).toHaveValue('dotnet test --nologo --logger trx')
+  await field.fill('dotnet test --nologo --logger trx --filter Category=Fast')
   await field.blur()
 
-  await expect(page.getByTestId('tests-suite-node-unit')).toContainText('edited')
-  await expect(page.getByTestId('tests-suite-node-unit')).toHaveAttribute(
+  await expect(page.getByTestId('tests-suite-dotnet-unit')).toContainText('edited')
+  await expect(page.getByTestId('tests-suite-dotnet-unit')).toHaveAttribute(
     'title',
-    'npm test --workspace packages/api',
+    'dotnet test --nologo --logger trx --filter Category=Fast',
   )
 
-  await page.getByTestId('tests-suite-edit-node-unit').click()
-  await page.getByTestId('tests-suite-command-node-unit').fill('')
-  await page.getByTestId('tests-suite-command-node-unit').blur()
-  await expect(page.getByTestId('tests-suite-node-unit')).not.toContainText('edited')
-  await expect(page.getByTestId('tests-suite-node-unit')).toHaveAttribute('title', 'npm test')
+  await page.getByTestId('tests-suite-edit-dotnet-unit').click()
+  await page.getByTestId('tests-suite-command-dotnet-unit').fill('')
+  await page.getByTestId('tests-suite-command-dotnet-unit').blur()
+  await expect(page.getByTestId('tests-suite-dotnet-unit')).not.toContainText('edited')
+  await expect(page.getByTestId('tests-suite-dotnet-unit')).toHaveAttribute(
+    'title',
+    'dotnet test --nologo --logger trx',
+  )
 })
 
 test('a figure the run did not measure stays a dash and names why', async ({ page }) => {
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
   await startRun(page)
   await page.evaluate(
     (r) => window.__mock.reportVerifyResult('p-alpha', 'pass', r),
@@ -321,7 +323,7 @@ test('a figure the run did not measure stays a dash and names why', async ({ pag
 
 test('the quality panel shows the service report, the mutants and the rule breaks', async ({ page }) => {
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
   await startRun(page)
   await page.evaluate(
     (r) => window.__mock.reportVerifyResult('p-alpha', 'fail', r),
@@ -351,7 +353,7 @@ test('the quality panel shows the service report, the mutants and the rule break
 
 test('evidence is captured against the run and shows what actually executed', async ({ page }) => {
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
   await expect(page.getByTestId('tests-evidence')).toBeDisabled()
 
   await startRun(page)
@@ -403,7 +405,7 @@ test('Run verification survives the clone boundary that used to break it', async
 
 test('an API run shows each real call, the row behind it, and what the row proved', async ({ page }) => {
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
   await startRun(page)
   await page.evaluate(
     (r) => window.__mock.reportVerifyResult('p-alpha', 'pass', r),
@@ -439,14 +441,14 @@ test('an API run shows each real call, the row behind it, and what the row prove
 
 test('a failed real call fails the integration gate, even with the suite green', async ({ page }) => {
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
   await startRun(page)
   await page.evaluate(
     (r) => window.__mock.reportVerifyResult('p-alpha', 'fail', r),
     report({
       suites: [
-        { id: 'node-unit', label: 'Unit tests', status: 'pass', detail: '142 passed' },
-        { id: 'node-api', label: 'HTTP smoke', status: 'pass', detail: '9 routes, all 2xx' },
+        { id: 'dotnet-unit', label: 'Unit tests', status: 'pass', detail: '142 passed' },
+        { id: 'dotnet-http', label: 'HTTP smoke', status: 'pass', detail: '9 routes, all 2xx' },
       ],
       endpoints: [call({ status: 200, outcome: 'fail', detail: 'empty body for a real id' })],
     }),
@@ -459,7 +461,7 @@ test('a failed real call fails the integration gate, even with the suite green',
 
 test('a run that reported nothing does not claim the API suite ran', async ({ page }) => {
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
   await startRun(page)
   await page.evaluate(() => window.__mock.reportVerifyResult('p-alpha', 'inconclusive', null))
 
@@ -473,7 +475,7 @@ test('with a database server connected and still no calls, it says exactly that'
   const scenario = twoProjectScenario()
   scenario.settings = { ...scenario.settings, databaseMcpServers: ['postgres — production'] }
   await openTests(page, scenario)
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
   await startRun(page)
   await page.evaluate((r) => window.__mock.reportVerifyResult('p-alpha', 'pass', r), report())
 
@@ -485,7 +487,7 @@ test('with a database server connected and still no calls, it says exactly that'
 
 test('a call that never completed shows no status at all, and does not read as a pass', async ({ page }) => {
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
   await startRun(page)
   await page.evaluate(
     (r) => window.__mock.reportVerifyResult('p-alpha', 'fail', r),
@@ -505,7 +507,7 @@ test('a call that never completed shows no status at all, and does not read as a
 
 test('with no endpoint calls, the panel says which of the reasons it was', async ({ page }) => {
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
   await startRun(page)
 
   await page.getByTestId('tests-sub-evidence').click()
@@ -516,7 +518,8 @@ test('with no endpoint calls, the panel says which of the reasons it was', async
 
   await expect(page.getByTestId('tests-endpoints-empty')).toContainText('No database MCP server was connected')
 
-  await page.getByTestId('tests-suite-node-api').click()
+  await page.getByTestId('tests-suite-dotnet-http').click()
+  await page.getByTestId('tests-suite-dotnet-api').click()
   await startRun(page)
   await page.evaluate((r) => window.__mock.reportVerifyResult('p-alpha', 'pass', r), report())
   await expect(page.getByTestId('tests-endpoints-empty')).toContainText('No API suite in this run')
@@ -524,7 +527,7 @@ test('with no endpoint calls, the panel says which of the reasons it was', async
 
 test('a run that reports nothing is inconclusive, never a pass', async ({ page }) => {
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
   await startRun(page)
   await page.evaluate(() => window.__mock.reportVerifyResult('p-alpha', 'inconclusive', null))
 
@@ -534,17 +537,17 @@ test('a run that reports nothing is inconclusive, never a pass', async ({ page }
 
 test('slow suites are opt-in, and ticking one puts it in the next run', async ({ page }) => {
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
-  await page.getByTestId('tests-suite-node-mutation').click()
+  await page.getByTestId('tests-stack-dotnet').click()
+  await page.getByTestId('tests-suite-dotnet-mutation').click()
   await startRun(page)
 
   const sent = await lastSend(page)
-  expect(sent).toContain('node-mutation')
+  expect(sent).toContain('dotnet-mutation')
 })
 
 test('the panels jump from a gate tile, and the skill tab is the dev fallback', async ({ page }) => {
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
 
   await page.getByTestId('tests-gate-coverage').click()
   await expect(page.getByTestId('tests-panel-coverage')).toBeVisible()
@@ -555,7 +558,7 @@ test('the panels jump from a gate tile, and the skill tab is the dev fallback', 
 
 test('the working tree is the only verify target offered', async ({ page }) => {
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
   await expect(page.getByTestId('tests-target-tree')).toBeEnabled()
   await expect(page.getByTestId('tests-target-head')).toHaveCount(0)
   await expect(page.getByTestId('tests-target-spec')).toHaveCount(0)
@@ -564,7 +567,14 @@ test('the working tree is the only verify target offered', async ({ page }) => {
 test('the section uses the width it is given, rather than an 840px column', async ({ page }) => {
   await page.setViewportSize({ width: 1800, height: 900 })
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
+
+  const prose = await page
+    .getByTestId('tests-view')
+    .locator('.intro')
+    .evaluate((el) => el.getBoundingClientRect().width)
+  expect(prose).toBeLessThanOrEqual(841)
+
+  await page.getByTestId('tests-stack-dotnet').click()
 
   const pane = await page.getByTestId('tests-view').evaluate((el) => el.clientWidth)
   expect(pane).toBeGreaterThan(880)
@@ -573,18 +583,12 @@ test('the section uses the width it is given, rather than an 840px column', asyn
     const width = await page.getByTestId(id).evaluate((el) => el.getBoundingClientRect().width)
     expect(width, id).toBeGreaterThan(840)
   }
-
-  const prose = await page
-    .getByTestId('tests-view')
-    .locator('.intro')
-    .evaluate((el) => el.getBoundingClientRect().width)
-  expect(prose).toBeLessThanOrEqual(841)
 })
 
 test('the section can take the whole window, and give it back', async ({ page }) => {
   await page.setViewportSize({ width: 1800, height: 900 })
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
 
   const before = await page.getByTestId('tests-view').evaluate((el) => el.clientWidth)
   await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
@@ -605,7 +609,7 @@ test('the section can take the whole window, and give it back', async ({ page })
 test('Escape leaves full screen, so the chrome is never trapped away', async ({ page }) => {
   await page.setViewportSize({ width: 1800, height: 900 })
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
   await page.getByTestId('tests-full-screen').click()
   await expect(page.getByTestId('tab-tests')).toHaveCount(0)
 
@@ -618,7 +622,7 @@ test('Escape leaves full screen, so the chrome is never trapped away', async ({ 
 test('leaving the project hands the chrome back rather than stranding the app', async ({ page }) => {
   await page.setViewportSize({ width: 1800, height: 900 })
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
   await page.getByTestId('tests-full-screen').click()
   await expect(page.getByTestId('sidebar-project-alpha')).toHaveCount(0)
 
@@ -631,7 +635,7 @@ test('leaving the project hands the chrome back rather than stranding the app', 
 
 test('the stack choice persists per project and can be changed', async ({ page }) => {
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
   await expect(page.getByTestId('tests-run')).toBeVisible()
 
   await page.getByTestId('tab-session').click()
@@ -639,18 +643,18 @@ test('the stack choice persists per project and can be changed', async ({ page }
   await expect(page.getByTestId('tests-run')).toBeVisible()
 
   await page.getByTestId('tests-change-stack').click()
-  await expect(page.getByTestId('tests-stack-node')).toBeVisible()
+  await expect(page.getByTestId('tests-stack-dotnet')).toBeVisible()
 })
 
 test('a figure checked against the runner’s own report file is marked as checked', async ({ page }) => {
   await openTests(page)
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
   await startRun(page)
   await page.evaluate(
     (r) => window.__mock.reportVerifyResult('p-alpha', 'pass', r),
     report({
       suites: [
-        { id: 'node-unit', label: 'Unit tests', status: 'pass', detail: '142 passed, 0 failed, per TestResults/r.trx', verified: true },
+        { id: 'dotnet-unit', label: 'Unit tests', status: 'pass', detail: '142 passed, 0 failed, per TestResults/r.trx', verified: true },
       ],
       coverage: {
         line: { value: 78.2, source: 'coverage/cobertura-coverage.xml', verified: true },

@@ -1746,7 +1746,7 @@ export function installMockHost(scenario: MockScenario): void {
 export function twoProjectScenario(): MockScenario {
   return {
     settings: DEFAULT_SETTINGS,
-    suites: detectStacks(['package.json']),
+    suites: detectStacks(['MyApi.sln']),
     projects: [
       {
         id: 'p-alpha',

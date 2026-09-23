@@ -140,7 +140,7 @@
         // this the sidebar's MCP section never appears.
         databaseMcpServers: ['postgres — production', 'mssql — reporting'],
         // Skips the stack picker so the Tests section opens on its six gates.
-        projectTestStacks: { 'p-alpha': 'node' },
+        projectTestStacks: { 'p-alpha': 'dotnet' },
       }
 
       installMockHost(scenario)
@@ -440,17 +440,17 @@
       // rows under storefront in the rail.
       await window.switchboard.invoke('verify.start', {
         projectId: 'p-alpha',
-        stackId: 'node',
-        suiteIds: ['node-unit', 'node-coverage', 'node-e2e', 'node-api', 'node-lint', 'node-mutation'],
+        stackId: 'dotnet',
+        suiteIds: ['dotnet-unit', 'dotnet-coverage', 'dotnet-arch', 'dotnet-http', 'dotnet-format', 'dotnet-mutation'],
       })
       m.reportVerifyResult('p-alpha', 'fail', {
         suites: [
-          { id: 'node-unit', label: 'Unit tests', status: 'pass', detail: '640 passed, 3 skipped', verified: true },
-          { id: 'node-coverage', label: 'Coverage', status: 'pass', detail: 'vitest --coverage', verified: true },
-          { id: 'node-e2e', label: 'UI end-to-end', status: 'fail', detail: '1 of 224 failed — empty-cart placeholder' },
-          { id: 'node-api', label: 'HTTP smoke', status: 'pass', detail: '9 routes, all 2xx' },
-          { id: 'node-lint', label: 'Types and lint', status: 'pass', detail: '0 problems', verified: true },
-          { id: 'node-mutation', label: 'Mutation testing', status: 'skipped', detail: 'slow suite, not ticked' },
+          { id: 'dotnet-unit', label: 'Unit tests', status: 'pass', detail: '640 passed, 3 skipped', verified: true },
+          { id: 'dotnet-coverage', label: 'Coverage', status: 'pass', detail: 'coverlet --coverage', verified: true },
+          { id: 'dotnet-arch', label: 'Architecture rules', status: 'fail', detail: '1 of 224 failed — empty-cart placeholder' },
+          { id: 'dotnet-http', label: 'HTTP smoke', status: 'pass', detail: '9 routes, all 2xx' },
+          { id: 'dotnet-format', label: 'Format and analyzers', status: 'pass', detail: '0 problems', verified: true },
+          { id: 'dotnet-mutation', label: 'Mutation testing', status: 'skipped', detail: 'slow suite, not ticked' },
         ],
         coverage: {
           line: { value: 81.4, source: 'vitest --coverage', verified: true },

@@ -10,16 +10,16 @@ test('the tests section on a wide window, with a grey suite ticked', async ({ pa
   await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
   await page.getByTestId('sidebar-project-alpha').click()
   await page.getByTestId('tab-tests').click()
-  await page.getByTestId('tests-stack-node').click()
+  await page.getByTestId('tests-stack-dotnet').click()
 
   await page.getByTestId('tests-run').click()
   await expect(page.getByTestId('tests-run')).toContainText('Running')
   await page.evaluate(() =>
     window.__mock.reportVerifyResult('p-alpha', 'fail', {
       suites: [
-        { id: 'node-unit', label: 'Unit tests', status: 'pass', detail: '142 passed' },
-        { id: 'node-api', label: 'HTTP smoke', status: 'not_run', detail: 'no test database' },
-        { id: 'node-e2e', label: 'End to end', status: 'fail', detail: '2 failed' },
+        { id: 'dotnet-unit', label: 'Unit tests', status: 'pass', detail: '142 passed' },
+        { id: 'dotnet-http', label: 'HTTP smoke', status: 'not_run', detail: 'no test database' },
+        { id: 'dotnet-arch', label: 'Architecture rules', status: 'fail', detail: '2 failed' },
       ],
       coverage: {
         line: { value: 81.4, source: 'vitest --coverage' },
@@ -42,7 +42,7 @@ test('the tests section on a wide window, with a grey suite ticked', async ({ pa
     }),
   )
 
-  await expect(page.getByTestId('tests-suite-node-api')).toHaveClass(/ran-not_run/)
+  await expect(page.getByTestId('tests-suite-dotnet-http')).toHaveClass(/ran-not_run/)
   await page.screenshot({ path: '.impeccable/shots/tests-wide.png' })
   await page.getByTestId('tests-gates').screenshot({ path: '.impeccable/shots/tests-gates.png' })
   await page.getByTestId('tests-suites').screenshot({ path: '.impeccable/shots/tests-suites.png' })
