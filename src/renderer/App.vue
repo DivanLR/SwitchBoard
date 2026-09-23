@@ -134,9 +134,9 @@ watch(selectedProject, (next, prev) => {
   if (showFlow.value && prev && next?.id !== prev.id) showFlow.value = false
 })
 watch(
-  () => terminal.state.signInFor,
-  (projectId) => {
-    if (projectId) showFlow.value = false
+  () => terminal.state.signInAsked,
+  () => {
+    showFlow.value = false
   },
 )
 const dbProject = computed(() => projects.dbProject)

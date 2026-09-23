@@ -107,6 +107,7 @@ export function featuresPrompt(query: string): string {
     PROJECT_PROMPT,
     'When a project\'s wit_query or wit_work_item call fails or times out, skip that project: do not call it again,',
     'still return the Features every other project gave, and name each skipped project and what happened in note.',
+    'note is JSON null when every project answered, and a string only when you skipped a project.',
     'Keep the 25 most recently changed across every project. An empty list is a correct answer.',
     'Build each url with the organisation named in the work item urls the server returned.',
     '',
@@ -114,7 +115,7 @@ export function featuresPrompt(query: string): string {
     '',
     `Finish your reply with one line, on its own, starting with ${FLOW_MARKER}: followed by JSON:`,
     '',
-    '{"kind":"features","features":[{"id":"<work item id>","title":"<title>","state":"<state>","project":"<project name>","url":"https://dev.azure.com/<organisation>/<project>/_workitems/edit/<id>"}],"note":"<each skipped project and why, or null>"}',
+    '{"kind":"features","features":[{"id":"<work item id>","title":"<title>","state":"<state>","project":"<project name>","url":"https://dev.azure.com/<organisation>/<project>/_workitems/edit/<id>"}],"note":null}',
     '',
     'Nothing after that line. No code fence around it.',
   ].join('\n')

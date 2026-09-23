@@ -96,7 +96,7 @@ const ADO_LISTED_MS = 10_000
 
 export const FEATURES_TIMEOUT_MS = 10 * 60_000
 
-export const LISTING_ENV = { CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT: '120000' }
+export const LISTING_ENV = { CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT: '300000' }
 
 const LISTING_CANCELLED: IpcError = { code: 'NOT_LIVE', message: 'The Feature list was cancelled.' }
 

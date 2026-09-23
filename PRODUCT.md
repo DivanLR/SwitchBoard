@@ -179,7 +179,8 @@ Confirmed functionality:
   existing Spec Kit folder. The Azure DevOps list shows the open Features
   assigned to you across every project, with the listing session's output and
   a Cancel while it loads (it waits up to 10 minutes). One ado call that sends
-  nothing for two minutes is abandoned, and a project whose query fails or times
+  nothing for five minutes is abandoned, which leaves room for a browser sign-in
+  inside the first call, and a project whose query fails or times
   out is skipped and named above the list while the other projects' Features
   still show. A pasted work item, board or backlog link (dev.azure.com or
   visualstudio.com), or the id with or without `#`, starts a run at once, named

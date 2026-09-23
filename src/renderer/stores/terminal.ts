@@ -10,6 +10,7 @@ const exitListeners = new Map<string, Set<ExitListener>>()
 const state = reactive({
   open: new Set<string>(),
   signInFor: null as string | null,
+  signInAsked: 0,
 })
 
 const store = {
@@ -17,6 +18,7 @@ const store = {
 
   requestSignIn(projectId: string): void {
     state.signInFor = projectId
+    state.signInAsked += 1
   },
 
   endSignIn(): void {

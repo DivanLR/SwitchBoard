@@ -538,15 +538,20 @@ describe('the Feature list', () => {
     const listing = h.flow.features(h.project.id, '')
     await vi.waitFor(() => expect(h.sent).toHaveLength(1))
     expect(h.sent[0].text).toContain('When a project\'s wit_query or wit_work_item call fails or times out, skip that project')
-    expect(h.sent[0].text).toContain('"note":"<each skipped project and why, or null>"')
+    expect(h.sent[0].text).toContain('"note":null}')
     const found = [{ id: '40235', title: 'A', state: 'Testing', project: 'A Plus', url: null }]
     const note = 'Legacy: wit_query timed out after 120 seconds.'
     h.flow.onFlowMarker('session-1', { kind: 'features', features: found, note })
     await expect(listing).resolves.toEqual({ features: found, note })
   })
 
-  it('starts only a listing session with a two minute MCP tool idle timeout, and no stage session', async () => {
-    expect(LISTING_ENV).toEqual({ CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT: '120000' })
+  it('gives a listing call five silent minutes, room for a browser sign-in inside it, and still half the list time', () => {
+    const idle = Number(LISTING_ENV.CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT)
+    expect(idle).toBe(5 * 60_000)
+    expect(idle).toBeLessThanOrEqual(FEATURES_TIMEOUT_MS / 2)
+  })
+
+  it('starts only a listing session with the MCP tool idle timeout, and no stage session', async () => {
     const h = setup()
     const listing = h.flow.features(h.project.id, '')
     await vi.waitFor(() => expect(h.sent).toHaveLength(1))

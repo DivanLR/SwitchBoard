@@ -685,7 +685,11 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       await manager.cancelVerifyRun(req.runId)
       return repos.verifyRuns.listForProject(req.projectId)
     },
-    'flow.list': (req) => flowSnapshot(req.projectId),
+    'flow.list': (req) => ({
+      ...flowSnapshot(req.projectId),
+      listing: flow.listingSession(req.projectId),
+      signingIn: flow.signingIn(req.projectId),
+    }),
     'flow.features': async (req) => {
       requireProject(req.projectId)
       return flow.features(req.projectId, req.query ?? '')

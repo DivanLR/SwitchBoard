@@ -151,7 +151,9 @@ onMounted(() => {
     if (push.projectId === props.project.id) setSuggestionCommands(push.commands)
   })
   unsubscribeFlow = window.switchboard.on('push.flowChanged', (push) => {
-    if (push.projectId === props.project.id) flow.applyPush(push.projectId, push.runs, push.stages, push.listing)
+    if (push.projectId === props.project.id) {
+      flow.applyPush(push.projectId, push.runs, push.stages, push.listing, push.signingIn)
+    }
   })
 })
 onUnmounted(() => {
@@ -276,15 +278,19 @@ watch(
 )
 
 watch(
-  signInTerminal,
-  (on) => {
-    if (!on) return
+  () => signInTerminal.value && terminals.state.signInAsked,
+  (asked) => {
+    if (!asked) return
     shellEverOpened.value = true
     terminalMode.value = 'shell'
     openTerminal()
   },
   { immediate: true },
 )
+
+watch(mainTab, (tab) => {
+  if (tab !== 'terminal' && signInTerminal.value) backToChat()
+})
 
 watch(
   [

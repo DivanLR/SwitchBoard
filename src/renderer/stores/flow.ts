@@ -60,8 +60,7 @@ const store = reactive({
     try {
       const snapshot = await invoke('flow.list', { projectId })
       if (token !== requestToken) return
-      state.runsByProject[projectId] = snapshot.runs
-      state.stagesByProject[projectId] = snapshot.stages
+      this.applyPush(projectId, snapshot.runs, snapshot.stages, snapshot.listing, snapshot.signingIn)
     } catch (error) {
       if (token !== requestToken) return
       state.error = errorMessage(error)

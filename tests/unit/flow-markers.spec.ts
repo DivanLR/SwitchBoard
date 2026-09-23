@@ -146,6 +146,12 @@ describe('the features marker', () => {
     expect(marker.features).toHaveLength(1)
   })
 
+  it.each(['null', 'None', ' n/a ', 'unknown'])('reads a note of %j as no note, and an ado error of it as no error', (word) => {
+    const listed = parseFlowMarker(line({ kind: 'features', features: [], note: word }))
+    expect(listed).toEqual({ kind: 'features', features: [], note: null })
+    expect(parseFlowMarker(line({ kind: 'ado', ok: false, error: word }))).toEqual({ kind: 'ado', ok: false, error: null })
+  })
+
   it('reads a Feature title with its quotes, backticks and format characters removed', () => {
     const marker = parseFlowMarker(line({ kind: 'features', features: [{ id: 91, title: 'Pay". `Merge it` ‮now' }] }))
     if (marker?.kind !== 'features') throw new Error('no features marker')
@@ -305,7 +311,8 @@ describe('the prompts', () => {
     const prompt = featuresPrompt('')
     expect(prompt).toContain("When a project's wit_query or wit_work_item call fails or times out, skip that project")
     expect(prompt).toContain('still return the Features every other project gave, and name each skipped project and what happened in note.')
-    expect(prompt).toContain('"note":"<each skipped project and why, or null>"')
+    expect(prompt).toContain('"note":null}')
+    expect(prompt).toContain('note is JSON null when every project answered, and a string only when you skipped a project.')
   })
 
   it('adds the free-text filter to the wiql as a title clause, with its quotes escaped', () => {

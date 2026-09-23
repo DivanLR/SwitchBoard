@@ -144,8 +144,8 @@ export function parseFlowMarker(text: string): FlowMarker | null {
   if (typeof body !== 'object' || body === null) return null
   const record = body as Record<string, unknown>
   const kind = str(record.kind)
-  if (kind === 'features') return { kind: 'features', features: features(record.features), note: adoTitle(record.note, 500) }
-  if (kind === 'ado') return { kind: 'ado', ok: bool(record.ok) === true, error: adoTitle(record.error, 500) }
+  if (kind === 'features') return { kind: 'features', features: features(record.features), note: adoTitle(str(record.note), 500) }
+  if (kind === 'ado') return { kind: 'ado', ok: bool(record.ok) === true, error: adoTitle(str(record.error), 500) }
   if (kind === 'stage') {
     const stage = str(record.stage)
     const outcome = str(record.outcome)

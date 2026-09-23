@@ -1246,7 +1246,14 @@ export function installMockHost(scenario: MockScenario): void {
       }
       return out
     },
-    'flow.list': (req) => flowSnapshot(String(req.projectId)),
+    'flow.list': (req) => {
+      const projectId = String(req.projectId)
+      return {
+        ...flowSnapshot(projectId),
+        listing: adoListing?.projectId === projectId ? adoListing.sessionId : null,
+        signingIn: adoSigningIn === projectId,
+      }
+    },
     'flow.reconnectAdo': async (req) => {
       adoReconnects += 1
       if (adoConnected && adoSignInHeld) {

@@ -276,7 +276,7 @@ export interface InvokeMap {
     res: { sessionId: string; runs: VerifyRun[] }
   }
   'verify.cancel': { req: { projectId: string; runId: string }; res: VerifyRun[] }
-  'flow.list': { req: { projectId: string }; res: FlowSnapshot }
+  'flow.list': { req: { projectId: string }; res: FlowSnapshot & { listing: string | null; signingIn: boolean } }
   'flow.features': { req: { projectId: string; query?: string }; res: FlowFeatureList }
   'flow.reconnectAdo': { req: { projectId: string; query?: string }; res: FlowFeatureList }
   'flow.cancelFeatures': { req: { projectId: string }; res: void }
