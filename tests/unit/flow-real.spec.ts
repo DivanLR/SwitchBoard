@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { execSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { FlowStageStatus } from '@shared/domain'
@@ -24,7 +24,7 @@ const CSPROJ = [
 
 describe.runIf(enabled)('a real Flow run (spec stage smoke)', () => {
   it(
-    'specifies a small feature in its own worktree and stops at review',
+    'specifies a small feature in its own worktree and holds it at review',
     async () => {
       const root = mkdtempSync(join(tmpdir(), 'switchboard-flow-'))
       const repo = join(root, 'health-api')
@@ -54,10 +54,15 @@ describe.runIf(enabled)('a real Flow run (spec stage smoke)', () => {
 
       const seen = new Set<FlowStageStatus>()
       let runId = ''
+      let holding = false
       const flow = new FlowSupervisor(repos, manager, {
         onFlowChanged: () => {
           const status = runId ? repos.flowStages.get(runId, 'spec')?.status : undefined
           if (status) seen.add(status)
+          if (status === 'review' && !holding) {
+            holding = true
+            flow.setAutopilot(runId, false)
+          }
         },
       })
       manager.setFlowHooks({
@@ -86,7 +91,11 @@ describe.runIf(enabled)('a real Flow run (spec stage smoke)', () => {
         const after = repos.flowRuns.byId(runId)!
         expect(after.worktreePath).not.toBeNull()
         expect(after.specDir).not.toBeNull()
-        expect(existsSync(join(after.worktreePath!, after.specDir!, 'spec.md'))).toBe(true)
+        const specPath = join(after.worktreePath!, after.specDir!, 'spec.md')
+        console.log(`spec stage: ${spec?.status} · ${spec?.summary} · ${specPath}`)
+        if (existsSync(specPath)) console.log(readFileSync(specPath, 'utf8').slice(0, 1200))
+        expect(existsSync(specPath)).toBe(true)
+        expect(repos.flowRuns.byId(runId)?.stage).toBe('spec')
       } finally {
         if (runId) {
           await flow.cancel(runId).catch(() => {})
@@ -94,7 +103,9 @@ describe.runIf(enabled)('a real Flow run (spec stage smoke)', () => {
         }
         await manager.endAllForAppExit()
         db.close()
-        rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 })
+        try {
+          rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 })
+        } catch {}
       }
     },
     20 * 60_000,
