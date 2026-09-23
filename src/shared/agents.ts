@@ -1,6 +1,6 @@
 import type { SessionEvent, ToolActivityPayload } from './domain'
 
-interface ActiveAgent {
+export interface ActiveAgent {
   id: string
   name: string
   task: string
