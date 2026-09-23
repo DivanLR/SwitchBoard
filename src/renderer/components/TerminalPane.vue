@@ -19,12 +19,13 @@ const props = defineProps<{
   live: boolean
   canTakeOver: boolean
   visible: boolean
+  freshClaude?: boolean
 }>()
 const emit = defineEmits<{ (e: 'takeover'): void; (e: 'chat'): void }>()
 
 const terminals = useTerminalStore()
 const launchEngine = computed((): SessionEngine | 'shell' =>
-  props.resumeSessionId ? props.engine : 'shell',
+  props.resumeSessionId ? props.engine : props.freshClaude ? 'claude' : 'shell',
 )
 const launched = ref<SessionEngine | 'shell'>('shell')
 const takingOver = ref(false)

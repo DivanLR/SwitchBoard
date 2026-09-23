@@ -9,10 +9,19 @@ const dataListeners = new Map<string, Set<DataListener>>()
 const exitListeners = new Map<string, Set<ExitListener>>()
 const state = reactive({
   open: new Set<string>(),
+  signInFor: null as string | null,
 })
 
 const store = {
   state,
+
+  requestSignIn(projectId: string): void {
+    state.signInFor = projectId
+  },
+
+  endSignIn(): void {
+    state.signInFor = null
+  },
 
   applyData(push: { id: string; data: string }): void {
     for (const listener of dataListeners.get(push.id) ?? []) listener(push.data)

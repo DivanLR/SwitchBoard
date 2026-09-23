@@ -34,6 +34,7 @@ import { useDiffStore } from '@renderer/stores/diff'
 import { useFlowStore } from '@renderer/stores/flow'
 import { useSpecsStore } from '@renderer/stores/specs'
 import { useToastsStore } from '@renderer/stores/toasts'
+import { useTerminalStore } from '@renderer/stores/terminal'
 import Icon from '@renderer/components/Icon.vue'
 import SpecsView from '@renderer/views/SpecsView.vue'
 import TestsView from '@renderer/views/TestsView.vue'
@@ -128,6 +129,14 @@ const terminalResumeId = computed(() => {
   if (ended.containerised) return null
   return ended.sdkSessionId
 })
+
+const terminals = useTerminalStore()
+const signInTerminal = computed(() => terminals.state.signInFor === props.project.id)
+
+function backToChat(): void {
+  terminals.endSignIn()
+  terminalMode.value = 'chat'
+}
 
 const { stopConfirm, cancelStop, confirmStop } = useStopConfirm({
   composerEl,
@@ -245,6 +254,7 @@ watch(
   () => props.project.id,
   (projectId, prevId) => {
     if (prevId) composerDrafts.set(prevId, composer.value)
+    if (prevId && terminals.state.signInFor === prevId) terminals.endSignIn()
     composer.value = composerDrafts.get(projectId) ?? ''
     restoredDraft.value = null
     mainTab.value = 'session'
@@ -261,6 +271,17 @@ watch(
     void diff.loadList(projectId)
     void queue.load(projectId)
     void flow.load(projectId)
+  },
+  { immediate: true },
+)
+
+watch(
+  signInTerminal,
+  (on) => {
+    if (!on) return
+    shellEverOpened.value = true
+    terminalMode.value = 'shell'
+    openTerminal()
   },
   { immediate: true },
 )
@@ -767,15 +788,16 @@ const { dragKind, onPaneDragOver, onPaneDragLeave, onPaneDrop } = projectRefs
     <TerminalPane
       v-if="shellEverOpened"
       v-show="mainTab === 'terminal' && terminalMode === 'shell'"
-      :id="terminalSession?.id ?? project.id"
+      :id="signInTerminal ? `${project.id}:sign-in` : (terminalSession?.id ?? project.id)"
       :cwd="project.path"
       :engine="terminalSession?.engine ?? startEngine"
-      :resume-session-id="terminalResumeId"
-      :live="!!liveSession"
-      :can-take-over="!liveSession?.containerised"
+      :resume-session-id="signInTerminal ? null : terminalResumeId"
+      :live="!signInTerminal && !!liveSession"
+      :can-take-over="!signInTerminal && !liveSession?.containerised"
       :visible="mainTab === 'terminal' && terminalMode === 'shell'"
+      :fresh-claude="signInTerminal"
       @takeover="stop()"
-      @chat="terminalMode = 'chat'"
+      @chat="backToChat()"
     />
 
     <SpecsView

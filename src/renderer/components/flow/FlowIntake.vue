@@ -6,6 +6,7 @@ import { parseAdoFeatureLink } from '@shared/ado-link'
 import { sddSlug } from '@shared/sdd'
 import { useFlowStore } from '@renderer/stores/flow'
 import { useProjectsStore } from '@renderer/stores/projects'
+import { useTerminalStore } from '@renderer/stores/terminal'
 import Icon from '@renderer/components/Icon.vue'
 import MiniTerminal from '@renderer/components/MiniTerminal.vue'
 
@@ -29,6 +30,7 @@ const props = defineProps<{ projectId: string }>()
 const emit = defineEmits<{ (e: 'started', runId: string): void }>()
 const flow = useFlowStore()
 const projects = useProjectsStore()
+const terminals = useTerminalStore()
 
 const kind = ref<FlowKind>('feature')
 const source = ref<Source>('text')
@@ -311,7 +313,10 @@ async function start(): Promise<void> {
         </div>
         <div v-if="flow.searching" class="fin-progress" data-testid="flow-features-progress">
           <div class="fin-progress-bar">
-            <span class="fin-hint">
+            <span v-if="flow.signingInByProject[projectId]" class="fin-hint fin-wait" role="status" data-testid="flow-ado-signing-in">
+              Waiting for you to sign in to Azure DevOps in your browser.
+            </span>
+            <span v-else class="fin-hint">
               Querying every project for the Features assigned to you. One Azure DevOps call can take minutes.
             </span>
             <button
@@ -325,7 +330,43 @@ async function start(): Promise<void> {
           </div>
           <MiniTerminal v-if="listing" :session-id="listing" label="ado session" data-testid="flow-features-session" />
         </div>
-        <div v-if="flow.adoDown" class="ui-err-banner is-warn fin-ado" role="alert" data-testid="flow-ado-state">
+        <section
+          v-if="flow.adoDown && flow.adoNeedsAuth"
+          class="ui-card is-warn fin-auth"
+          role="alert"
+          aria-label="Azure DevOps needs you to sign in"
+          data-testid="flow-ado-state"
+        >
+          <div class="fin-auth-head">
+            <span class="ui-kicker fin-auth-kicker"><Icon name="external" :size="11" /> Sign in needed</span>
+            <span class="mono fin-auth-server">ado</span>
+          </div>
+          <div class="fin-auth-title">Azure DevOps needs you to sign in before Flow can read your Features</div>
+          <div class="fin-hint" data-testid="flow-ado-why">{{ flow.adoDown }}</div>
+          <ol class="fin-steps" data-testid="flow-ado-steps">
+            <li>Open the Terminal tab and run <span class="mono">claude</span>. The first button does both.</li>
+            <li>
+              Type <span class="mono">/mcp</span>, choose <span class="mono">ado</span>, then Authenticate. Your browser
+              opens for the sign in.
+            </li>
+            <li>Come back to Flow and press Reconnect.</li>
+          </ol>
+          <div class="fin-auth-actions">
+            <button type="button" class="btn-solid" data-testid="flow-ado-terminal" @click="terminals.requestSignIn(projectId)">
+              Open the Terminal with claude
+            </button>
+            <button
+              type="button"
+              class="btn-outline"
+              data-testid="flow-ado-reconnect"
+              :disabled="flow.searching !== null"
+              @click="reconnect()"
+            >
+              {{ flow.searching === 'reconnect' ? 'Reconnecting…' : 'Reconnect' }}
+            </button>
+          </div>
+        </section>
+        <div v-else-if="flow.adoDown" class="ui-err-banner is-warn fin-ado" role="alert" data-testid="flow-ado-state">
           <span class="fin-ado-text">{{ flow.adoDown }}</span>
           <button
             type="button"
@@ -623,6 +664,56 @@ async function start(): Promise<void> {
 .fin-ado-text {
   flex: 1;
   min-width: 0;
+}
+
+.fin-wait {
+  color: var(--amber);
+}
+
+.fin-auth {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.fin-auth-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.fin-auth-kicker {
+  color: var(--amber);
+}
+
+.fin-auth-server {
+  font-size: var(--fs-meta);
+  color: var(--text-strong);
+}
+
+.fin-auth-title {
+  font-size: var(--fs-body);
+  font-weight: var(--w-em);
+  color: var(--text-title);
+  line-height: 1.4;
+}
+
+.fin-steps {
+  margin: 0;
+  padding-left: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  font-size: var(--fs-ui);
+  line-height: 1.5;
+  color: var(--text-body);
+}
+
+.fin-auth-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
 }
 
 .fin-list {

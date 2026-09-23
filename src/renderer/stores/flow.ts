@@ -16,7 +16,9 @@ const state = reactive({
   featuresSkipped: null as string | null,
   searching: null as 'search' | 'reconnect' | null,
   listingByProject: {} as Record<string, string | null>,
+  signingInByProject: {} as Record<string, boolean>,
   adoDown: null as string | null,
+  adoNeedsAuth: false,
   existingSpecs: [] as { id: string; title: string }[],
   stacksByProject: {} as Record<string, FlowStackId[]>,
   busy: null as string | null,
@@ -67,16 +69,24 @@ const store = reactive({
     }
   },
 
-  applyPush(projectId: string, runs: FlowRun[], stages: FlowStageRecord[], listing: string | null = null): void {
+  applyPush(
+    projectId: string,
+    runs: FlowRun[],
+    stages: FlowStageRecord[],
+    listing: string | null = null,
+    signingIn = false,
+  ): void {
     state.runsByProject[projectId] = runs
     state.stagesByProject[projectId] = stages
     state.listingByProject[projectId] = listing
+    state.signingInByProject[projectId] = signingIn
   },
 
   async searchFeatures(projectId: string, query: string, reconnect = false): Promise<void> {
     const token = ++listToken
     state.error = null
     state.adoDown = null
+    state.adoNeedsAuth = false
     state.featuresNote = null
     state.featuresSkipped = null
     state.searching = reconnect ? 'reconnect' : 'search'
@@ -95,6 +105,7 @@ const store = reactive({
       state.features = []
       if (isIpcError(error) && (error.code === 'MCP_NOT_CONNECTED' || error.code === 'MCP_NEEDS_AUTH')) {
         state.adoDown = error.message
+        state.adoNeedsAuth = error.code === 'MCP_NEEDS_AUTH'
       }
       else state.error = errorMessage(error)
     } finally {

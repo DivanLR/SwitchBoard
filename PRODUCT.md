@@ -115,6 +115,12 @@ Confirmed functionality:
   requests and plan approvals. Questions from a session render in the session
   stream (or in the Flow popup, for a Flow stage) and drive the "needs you"
   status.
+- MCP sign-in and input requests from any Claude session land in the inbox, the
+  session stream and, for a Flow session, the Flow popup. A sign-in opens its
+  link in the browser at once, only when it is https with no credentials in it,
+  and its card stays until the server confirms it; a form asks for the server's
+  own fields. Each card names the server and the tool call that asked, and keeps
+  only a link's host and path.
 - Risk classification as low, medium or high by first match rules. Anything no
   rule matches is treated as high risk. High risk approvals require an explicit
   confirmation step. Low and medium risk may be auto approved by setting.
@@ -177,7 +183,10 @@ Confirmed functionality:
   instruction. When the ado MCP server is not connected, Flow says
   whether it is still starting (it waits up to 90 seconds, since npx can be
   slow), needs sign in, or failed with its own error, and offers Reconnect,
-  which reconnects it on the same session and asks for the Features again.
+  which reconnects it on the same session, makes one cheap call so a browser
+  sign-in opens at once (saying it is waiting for you), and asks for the
+  Features again. A server that needs sign in shows the steps, `claude` then
+  `/mcp`, and a button that opens the Terminal tab running `claude`.
   Each stage waits for approval unless autopilot is on;
   autopilot allows at most two automatic fix rounds on review, retries a lost
   session once, and stops before the pull request unless the developer also

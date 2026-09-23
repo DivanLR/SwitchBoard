@@ -120,6 +120,67 @@ test('an unconnected ado server says which state it is in, and Reconnect retries
   expect((await page.evaluate(() => window.__mock.state())).adoReconnects).toBe(2)
 })
 
+test('a server that needs auth shows the sign-in steps, and its button opens the Terminal running claude', async ({ page }) => {
+  await openFlow(page)
+  await page.evaluate(() =>
+    window.__mock.setAdoConnected(
+      false,
+      'it needs you to sign in. Sign in to it in Claude Code with /mcp, then Reconnect',
+      'MCP_NEEDS_AUTH',
+    ),
+  )
+  await page.getByTestId('flow-new').click()
+  await page.getByTestId('flow-source-ado').click()
+  const card = page.getByTestId('flow-ado-state')
+  await expect(card).toContainText('Azure DevOps needs you to sign in before Flow can read your Features')
+  await expect(card.getByTestId('flow-ado-why')).toContainText('it needs you to sign in.')
+  await expect(card.getByTestId('flow-ado-steps').locator('li')).toHaveText([
+    'Open the Terminal tab and run claude. The first button does both.',
+    'Type /mcp, choose ado, then Authenticate. Your browser opens for the sign in.',
+    'Come back to Flow and press Reconnect.',
+  ])
+  await expect(card.getByTestId('flow-ado-reconnect')).toBeEnabled()
+
+  await card.getByTestId('flow-ado-terminal').click()
+  await expect(page.getByTestId('flow-popup')).toHaveCount(0)
+  await expect(page.getByTestId('terminal-pane')).toBeVisible()
+  await expect(page.getByTestId('terminal-title')).toHaveText('Claude Code')
+  await expect(page.getByTestId('terminal-takeover')).toHaveCount(0)
+  const opens = (await page.evaluate(() => window.__mock.state())).terminalOpens
+  expect(opens.at(-1)).toMatchObject({ id: 'p-alpha:sign-in', cwd: 'C:\\work\\alpha', engine: 'claude' })
+  expect(opens.at(-1)?.resumeSessionId).toBeUndefined()
+
+  await page.getByTestId('terminal-chat').click()
+  await page.getByTestId('open-flow').click()
+  await page.getByTestId('flow-new').click()
+  await page.evaluate(() => window.__mock.setAdoConnected(true))
+  await page.getByTestId('flow-source-ado').click()
+  await expect(page.getByTestId('flow-ado-state')).toHaveCount(0)
+})
+
+test('Reconnect says it is waiting for the browser sign-in while the first ado call runs', async ({ page }) => {
+  await openFlow(page)
+  await page.evaluate((features) => {
+    window.__mock.setAdoFeatures(features)
+    window.__mock.setAdoConnected(false, 'it failed to start: spawn npx ENOENT')
+  }, FEATURES)
+  await page.getByTestId('flow-new').click()
+  await page.getByTestId('flow-source-ado').click()
+  await expect(page.getByTestId('flow-ado-state')).toContainText('it failed to start')
+
+  await page.evaluate(() => {
+    window.__mock.setAdoConnected(true)
+    window.__mock.holdAdoSignIn(true)
+  })
+  await page.getByTestId('flow-ado-reconnect').click()
+  await expect(page.getByTestId('flow-ado-signing-in')).toHaveText('Waiting for you to sign in to Azure DevOps in your browser.')
+  await expect(page.getByTestId('flow-features-cancel')).toBeVisible()
+
+  await page.evaluate(() => window.__mock.holdAdoSignIn(false))
+  await expect(page.getByTestId('flow-feature-4711')).toContainText('Checkout v2')
+  await expect(page.getByTestId('flow-ado-signing-in')).toHaveCount(0)
+})
+
 test('the Feature list says it shows the Features assigned to you, with each one’s project', async ({ page }) => {
   await openFlow(page)
   await page.getByTestId('flow-new').click()
