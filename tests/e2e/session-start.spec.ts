@@ -138,7 +138,7 @@ test('the effort bar starts at xhigh and reveals the subagent bar only at max', 
   await expect(page.getByTestId('subagent-effort-bar-value')).toHaveText('low')
 
   await page.getByTestId('open-settings').click()
-  await page.getByTestId('settings-tab-term').click()
+  await page.getByTestId('settings-tab-models').click()
   await expect(page.getByTestId('setting-effort-value')).toHaveText('max')
   await page.getByTestId('setting-subagent-effort').fill('4')
   await page.getByTestId('settings-done').click()

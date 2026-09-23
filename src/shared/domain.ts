@@ -126,7 +126,6 @@ export interface Session {
   heavySubagents?: boolean
   mcpServers?: McpServer[]
   currentModel?: string | null
-  currentMode?: 'advisor' | 'orchestrator' | null
   backgroundTasks?: { taskId: string; description: string }[]
   modelTotals?: Record<string, { tokens: number; costUsd: number }>
 }
@@ -378,8 +377,6 @@ export function modelPrice(id: string): string {
   return FAMILY_PRICE[modelFamily(id) ?? ''] ?? '—'
 }
 
-export type ModelMode = 'auto' | 'advisor' | 'orchestrator' | 'basic'
-
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 export const EFFORT_LEVELS: readonly EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max']
@@ -391,10 +388,7 @@ export function subagentsAllowed(effort: EffortLevel): boolean {
 export interface Settings {
   defaultView: 'clean' | 'raw'
   notificationsEnabled: boolean
-  intelligentModel: string
-  workerModel: string
-  autoModelRouting: boolean
-  modelMode: ModelMode
+  model: string
   effort: EffortLevel
   subagentEffort: EffortLevel
   summaries: boolean
@@ -423,10 +417,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   defaultView: 'clean',
   notificationsEnabled: true,
-  intelligentModel: 'claude-opus-5',
-  workerModel: 'claude-sonnet-5',
-  autoModelRouting: true,
-  modelMode: 'auto',
+  model: 'claude-opus-5',
   effort: 'xhigh',
   subagentEffort: 'low',
   summaries: true,

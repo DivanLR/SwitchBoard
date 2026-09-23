@@ -938,19 +938,6 @@ const {
           {{ currentModelLabel }}
         </span>
         <span
-          v-if="liveSession?.currentMode"
-          class="ui-chip"
-          data-testid="session-mode"
-          :title="
-            liveSession.currentMode === 'advisor'
-              ? 'Advisor mode: cheap model executing, strong model consulted at decision points'
-              : 'Orchestrator mode: strong model planning, cheap workers executing in parallel'
-          "
-        >
-          <Icon :name="liveSession.currentMode === 'advisor' ? 'scales' : 'layers'" :size="12" />
-          {{ liveSession.currentMode === 'advisor' ? 'Advisor' : 'Orchestrator' }}
-        </span>
-        <span
           v-if="liveSession && liveSession.diffAdds != null"
           data-testid="diff-stats"
           class="mono"

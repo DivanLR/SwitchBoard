@@ -14,13 +14,13 @@ test('the status bar token count increases after a completed turn', async ({ pag
   await expect(tokens).not.toHaveText('0 tok')
 })
 
-test('settings exposes intelligent and worker model cards', async ({ page }) => {
+test('settings exposes model cards', async ({ page }) => {
   await page.getByTestId('open-settings').click()
   const panel = page.getByTestId('settings-panel')
-  await expect(panel.getByTestId('intelligent-model-claude-fable-5')).toBeVisible()
-  await expect(panel.getByTestId('worker-model-claude-sonnet-5')).toBeVisible()
-  await panel.getByTestId('intelligent-model-claude-opus-5[1m]').click()
-  await expect(panel.getByTestId('intelligent-model-claude-opus-5[1m]')).toHaveClass(/sel/)
+  await expect(panel.getByTestId('model-claude-fable-5')).toBeVisible()
+  await expect(panel.getByTestId('model-claude-sonnet-5')).toBeVisible()
+  await panel.getByTestId('model-claude-opus-5[1m]').click()
+  await expect(panel.getByTestId('model-claude-opus-5[1m]')).toHaveClass(/sel/)
   await panel.getByTestId('settings-done').click()
   await expect(page.getByTestId('model-summary')).toContainText('Opus 5')
 })
@@ -35,14 +35,14 @@ test('the picker follows the account: a new model appears, a retired one goes', 
   )
   await page.getByTestId('open-settings').click()
   const panel = page.getByTestId('settings-panel')
-  const newCard = panel.getByTestId('intelligent-model-claude-opus-7-2[1m]')
+  const newCard = panel.getByTestId('model-claude-opus-7-2[1m]')
   await expect(newCard).toBeVisible()
   await expect(newCard).toContainText('Opus 7.2 (1M)')
   await expect(newCard).toContainText('Newest Opus')
-  await expect(panel.getByTestId('intelligent-model-claude-fable-5')).toBeVisible()
-  await expect(panel.getByTestId('intelligent-model-claude-opus-5[1m]')).toHaveCount(0)
-  await expect(panel.getByTestId('intelligent-model-claude-opus-4-8')).toHaveCount(0)
-  await expect(panel.getByTestId('intelligent-model-default')).toBeVisible()
+  await expect(panel.getByTestId('model-claude-fable-5')).toBeVisible()
+  await expect(panel.getByTestId('model-claude-opus-5[1m]')).toHaveCount(0)
+  await expect(panel.getByTestId('model-claude-opus-4-8')).toHaveCount(0)
+  await expect(panel.getByTestId('model-default')).toBeVisible()
 })
 
 test('the This project tab configures the project, but never its models', async ({ page }) => {
@@ -55,7 +55,7 @@ test('the This project tab configures the project, but never its models', async 
   await expect(panel.getByTestId('proj-worker-global')).toHaveCount(0)
 
   await panel.getByTestId('settings-tab-models').click()
-  await expect(panel.getByTestId('intelligent-model-default')).toBeVisible()
+  await expect(panel.getByTestId('model-default')).toBeVisible()
 })
 
 test('no subscription rate-limit meter is rendered, even once usage reports', async ({ page }) => {

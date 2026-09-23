@@ -1,17 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
-import type { EffortLevel, EventKind, EventPayloadMap, ModelMode, SessionEvent } from '@shared/domain'
+import type { EffortLevel, EventKind, EventPayloadMap, SessionEvent } from '@shared/domain'
 import { HostedSession } from '@main/sessions/session'
-import { mainLoopModel } from '@main/sessions/model-routing'
 
-function makeSession(mode: ModelMode = 'auto') {
-  const routing = {
-    intelligentModel: 'claude-opus-5[1m]',
-    workerModel: 'claude-sonnet-5',
-    modelMode: mode,
-    autoModelRouting: true,
-    effort: 'xhigh' as EffortLevel,
-  }
+function makeSession() {
+  const routing = { model: 'claude-opus-5[1m]', effort: 'xhigh' as EffortLevel }
   const setModelCalls: (string | undefined)[] = []
   const effortCalls: unknown[] = []
   const sink = {
@@ -26,12 +19,9 @@ function makeSession(mode: ModelMode = 'auto') {
     sessionId: 's1',
     mode: 'auto',
     projectPath: '.',
-    mainModel: mainLoopModel(mode, routing),
-    strongModel: routing.intelligentModel,
-    workerModel: routing.workerModel,
-    autoModelRouting: true,
-    modelMode: mode,
-    resolveModels: () => ({ ...routing }),
+    mainModel: routing.model,
+    effort: routing.effort,
+    resolveModels: () => ({ effort: routing.effort }),
     sink,
     gate: (async () => ({ behavior: 'allow', updatedInput: {} })) as never,
     onStatusChange: () => {},
@@ -67,24 +57,17 @@ const limitResult = (): unknown => ({
 })
 
 describe('the main-loop model is pinned for the session', () => {
-  it('never switches between question and work turns (auto)', () => {
-    const { setModelCalls, send } = makeSession('auto')
+  it('never switches on an ordinary turn, however the settings model looks afterwards', () => {
+    const { routing, setModelCalls, send } = makeSession()
     send('What does this function do?')
+    routing.model = 'claude-fable-5'
     send('Fix the typo in SessionView.vue')
     send('Audit every view in the app and restyle all of them')
-    send('And what about the sidebar?')
-    expect(setModelCalls).toEqual(['claude-opus-5[1m]'])
+    expect(setModelCalls).toEqual([])
   })
 
-  it('runs the cheap model in Advisor mode, and stays there', () => {
-    const { setModelCalls, send } = makeSession('advisor')
-    send('What does this function do?')
-    send('Fix the typo in SessionView.vue')
-    expect(setModelCalls).toEqual(['claude-sonnet-5'])
-  })
-
-  it('sets the main loop to the Effort bar once, not per turn', () => {
-    const { effortCalls, send } = makeSession('auto')
+  it('sets the main loop to the Effort bar on every turn', () => {
+    const { effortCalls, send } = makeSession()
     send('Fix the typo in SessionView.vue')
     send('Audit every view in the app')
     expect(effortCalls).toEqual([{ effortLevel: 'xhigh' }])
@@ -93,7 +76,7 @@ describe('the main-loop model is pinned for the session', () => {
 
 describe('the Effort bar', () => {
   it('reaches a running session on its next message', () => {
-    const { routing, effortCalls, send } = makeSession('auto')
+    const { routing, effortCalls, send } = makeSession()
     send('Fix the typo in SessionView.vue')
     routing.effort = 'low'
     send('Fix the other typo')
@@ -101,7 +84,7 @@ describe('the Effort bar', () => {
   })
 
   it('still moves after a usage-limit downgrade pinned the model', () => {
-    const { routing, effortCalls, send, feed } = makeSession('auto')
+    const { routing, effortCalls, send, feed } = makeSession()
     feed(limitResult())
     routing.effort = 'medium'
     send('Carry on')
@@ -109,7 +92,7 @@ describe('the Effort bar', () => {
   })
 
   it('refuses the Agent tool below max and allows it at max, read live', async () => {
-    const { routing, gate } = makeSession('auto')
+    const { routing, gate } = makeSession()
     expect(await gate()).toBe('deny')
     routing.effort = 'max'
     expect(await gate()).toBeUndefined()
@@ -118,29 +101,11 @@ describe('the Effort bar', () => {
   })
 })
 
-describe('settings changes reach a running session', () => {
-  it('picks up a new intelligent model on the next turn', () => {
-    const { routing, setModelCalls, send } = makeSession('auto')
-    send('Fix the typo in SessionView.vue')
-    expect(setModelCalls).toEqual(['claude-opus-5[1m]'])
-
-    routing.intelligentModel = 'claude-fable-5'
-    send('Fix the other typo in SessionView.vue')
-    expect(setModelCalls.at(-1)).toBe('claude-fable-5')
-  })
-
-  it('follows a pairing-mode change to the other tier', () => {
-    const { routing, setModelCalls, send } = makeSession('auto')
-    send('Fix the typo in SessionView.vue')
-    routing.modelMode = 'advisor'
-    send('Fix the other typo in SessionView.vue')
-    expect(setModelCalls).toEqual(['claude-opus-5[1m]', 'claude-sonnet-5'])
-  })
-
-  it('keeps a usage-limit downgrade instead of re-reading back up', () => {
-    const { setModelCalls, send, feed } = makeSession('auto')
+describe('a usage-limit downgrade', () => {
+  it('drops one rung and keeps it, instead of re-reading the settings model back up', () => {
+    const { setModelCalls, send, feed } = makeSession()
     feed(limitResult())
-    expect(setModelCalls.at(-1)).toBe('sonnet') 
+    expect(setModelCalls.at(-1)).toBe('sonnet')
 
     send('Audit every view in the app and restyle all of them')
     expect(setModelCalls.at(-1)).toBe('sonnet')

@@ -1,55 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { subagentsAllowed, EFFORT_LEVELS } from '@shared/domain'
-import {
-  classifyIntent,
-  classifyWorkload,
-  mainLoopModel,
-  nextStrongestModel,
-} from '@main/sessions/model-routing'
-
-describe('classifyIntent', () => {
-  it('routes questions and discussion to the plan model', () => {
-    expect(classifyIntent('What does this function do?')).toBe('plan')
-    expect(classifyIntent('Why is the session resetting?')).toBe('plan')
-    expect(classifyIntent('Explain the permission broker to me')).toBe('plan')
-    expect(classifyIntent('')).toBe('plan')
-  })
-
-  it('routes code changes and script runs to the work model', () => {
-    expect(classifyIntent('Fix the off-by-one in the pager')).toBe('work')
-    expect(classifyIntent('implement a stop button')).toBe('work')
-    expect(classifyIntent('run the test suite')).toBe('work')
-    expect(classifyIntent('add white-space: pre-wrap to StreamEvent.vue')).toBe('work')
-  })
-
-  it('treats a file path or code fence as work', () => {
-    expect(classifyIntent('look at src/main/sessions/session.ts')).toBe('work')
-    expect(classifyIntent('```ts\nconst a = 1\n```')).toBe('work')
-  })
-})
-
-describe('classifyWorkload (Advisor/Orchestrator auto mode)', () => {
-  it('keeps questions on plan', () => {
-    expect(classifyWorkload('why does the pager skip the last row?')).toBe('plan')
-    expect(classifyWorkload('what is the difference between the two views?')).toBe('plan')
-  })
-
-  it('routes scoped mechanical work to advisor', () => {
-    expect(classifyWorkload('Fix the off-by-one in the pager')).toBe('advisor')
-    expect(classifyWorkload('rename the helper in src/shared/markdown.ts')).toBe('advisor')
-    expect(classifyWorkload('add white-space: pre-wrap to StreamEvent.vue')).toBe('advisor')
-  })
-
-  it('routes broad multi-step goals to orchestrator', () => {
-    expect(classifyWorkload('audit the whole app for accessibility issues')).toBe('orchestrator')
-    expect(classifyWorkload('restyle every component to match the new design')).toBe('orchestrator')
-    expect(classifyWorkload('migrate all files across the repo to the new API')).toBe('orchestrator')
-    expect(classifyWorkload('research the best approach and implement it end-to-end')).toBe('orchestrator')
-    expect(
-      classifyWorkload('do all of the following\n- fix the header\n- add a toggle\n- update the tests'),
-    ).toBe('orchestrator')
-  })
-})
+import { modelDeviation, nextStrongestModel } from '@main/sessions/model-routing'
 
 describe('nextStrongestModel (usage-limit fallback ladder)', () => {
   it('drops the account default and unknown ids to the Sonnet workhorse', () => {
@@ -78,35 +29,18 @@ describe('subagentsAllowed (subagents are a max-effort feature)', () => {
   })
 })
 
-describe('mainLoopModel (one model per session, never switched)', () => {
-  const models = { intelligentModel: 'claude-opus-5', workerModel: 'claude-sonnet-5' }
-
-  it('runs the cheap model in Advisor mode — the strong tier is the advisor subagent', () => {
-    expect(mainLoopModel('advisor', models)).toBe('claude-sonnet-5')
+describe('modelDeviation (a skill naming its own model)', () => {
+  it('is false when nothing was reported, nothing is wanted, or the account default is wanted', () => {
+    expect(modelDeviation(undefined, 'claude-opus-5')).toBe(false)
+    expect(modelDeviation('claude-sonnet-5', undefined)).toBe(false)
+    expect(modelDeviation('claude-sonnet-5', 'default')).toBe(false)
   })
 
-  it('runs the intelligent model for Orchestrator and auto', () => {
-    expect(mainLoopModel('orchestrator', models)).toBe('claude-opus-5')
-    expect(mainLoopModel('auto', models)).toBe('claude-opus-5')
-    expect(mainLoopModel(undefined, models)).toBe('claude-opus-5')
+  it('is false when the reported model is the same family as the one configured', () => {
+    expect(modelDeviation('claude-opus-5[1m]', 'claude-opus-4-8')).toBe(false)
   })
 
-  it('falls back to the intelligent model when no worker is configured', () => {
-    expect(mainLoopModel('advisor', { intelligentModel: 'claude-opus-5' })).toBe('claude-opus-5')
-  })
-})
-
-describe('basic mode', () => {
-  const models = { intelligentModel: 'opus', workerModel: 'haiku' }
-
-  it('runs the cheap model, like advisor and unlike the rest', () => {
-    expect(mainLoopModel('basic', models)).toBe('haiku')
-    expect(mainLoopModel('advisor', models)).toBe('haiku')
-    expect(mainLoopModel('orchestrator', models)).toBe('opus')
-    expect(mainLoopModel('auto', models)).toBe('opus')
-  })
-
-  it('falls back to the intelligent model when no worker is set', () => {
-    expect(mainLoopModel('basic', { intelligentModel: 'opus' })).toBe('opus')
+  it('is true when a turn ran on a different family than the one configured', () => {
+    expect(modelDeviation('claude-haiku-4-5', 'claude-opus-5')).toBe(true)
   })
 })

@@ -14,7 +14,7 @@ import SessionView from '@renderer/views/SessionView.vue'
 import McpView from '@renderer/views/McpView.vue'
 import InboxView from '@renderer/views/InboxView.vue'
 import ProjectRegistration from '@renderer/components/ProjectRegistration.vue'
-import SettingsPanel from '@renderer/components/SettingsPanel.vue'
+import SettingsPanel, { type SettingsTab } from '@renderer/components/SettingsPanel.vue'
 import FlowPopup from '@renderer/components/FlowPopup.vue'
 import GlobalSpinner from '@renderer/components/GlobalSpinner.vue'
 import ToastHost from '@renderer/components/ToastHost.vue'
@@ -33,9 +33,9 @@ const updates = useUpdatesStore()
 const showRegistration = ref(false)
 const showSettings = ref(false)
 const showFlow = ref(false)
-const settingsTab = ref<'models' | 'proj' | 'allowed' | 'term' | 'gen'>('models')
+const settingsTab = ref<SettingsTab>('models')
 
-function openSettings(tab: 'models' | 'proj' | 'allowed' | 'term' | 'gen' = 'models'): void {
+function openSettings(tab: SettingsTab = 'models'): void {
   settingsTab.value = tab
   showSettings.value = true
 }
@@ -254,7 +254,7 @@ const dbProject = computed(() => projects.dbProject)
       v-if="projects.starting"
       testid="session-start-overlay"
       title="Starting session…"
-      sub="First bypass start builds its container — this can take a few minutes."
+      sub="This can take a few moments."
     />
   </div>
 

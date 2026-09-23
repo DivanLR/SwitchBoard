@@ -18,20 +18,13 @@ import {
   type AvailableModel,
   type EffortLevel,
   type McpServer,
-  type ModelMode,
   type ProjectCommand,
   type SessionMode,
   type SessionStatus,
 } from '@shared/domain'
 import { MessageMapper, type EventSink } from './message-mapper'
 import { toAvailableModels } from './model-catalog'
-import {
-  classifyWorkload,
-  mainLoopModel,
-  modelDeviation,
-  nextStrongestModel,
-} from './model-routing'
-import { modeAgents } from './session-shaping'
+import { modelDeviation, nextStrongestModel } from './model-routing'
 
 const EXIT_GRACE_MS = 5_000
 
@@ -89,22 +82,10 @@ interface HostedSessionOptions {
   systemPromptAppend?: string
   claudeExecutablePath?: string
   mainModel?: string
-  workerMainLoop?: boolean
-  workerModel?: string
-  strongModel?: string
-  autoModelRouting?: boolean
-  modelMode?: ModelMode
   effort?: EffortLevel
-  subagents?: boolean
-  subagentEffort?: EffortLevel
   resolveModels?: () => {
-    intelligentModel: string
-    workerModel: string
-    modelMode: ModelMode
-    autoModelRouting: boolean
     effort: EffortLevel
   }
-  onTurnMode?: (mode: 'advisor' | 'orchestrator' | null) => void
   mode: SessionMode
   onPlanModeChange?: (inPlanMode: boolean) => void
   summaries?: boolean
@@ -209,12 +190,6 @@ export class HostedSession implements SessionHost {
         systemPrompt: this.options.systemPromptAppend
           ? { type: 'preset', preset: 'claude_code', append: this.options.systemPromptAppend }
           : undefined,
-        agents: modeAgents({
-          strongModel: this.options.strongModel ?? this.options.mainModel,
-          cheapModel: this.options.workerModel,
-          mode: this.options.subagents === false ? 'basic' : this.options.modelMode,
-          effort: this.options.subagentEffort,
-        }),
         canUseTool: (toolName, input, canUseToolOptions) =>
           this.options.gate({
             sessionId: this.sessionId,
@@ -288,37 +263,9 @@ export class HostedSession implements SessionHost {
     }
   }
 
-  private appliedModel: string | null = null
-
-  private downgraded = false
   private refreshModelRouting(): void {
     const next = this.options.resolveModels?.()
-    if (!next) return
-    this.options.effort = next.effort
-    if (this.downgraded) return
-    this.options.mainModel = this.options.workerMainLoop
-      ? next.workerModel
-      : mainLoopModel(next.modelMode, next)
-    this.options.workerModel = next.workerModel
-    this.options.modelMode = next.modelMode
-    this.options.autoModelRouting = next.autoModelRouting
-  }
-
-  private applyModelForTurn(text: string): void {
-    if (!this.options.autoModelRouting) return
-    const auto = classifyWorkload(text)
-    const forced = this.options.modelMode
-    const pinned = forced === 'advisor' || forced === 'orchestrator' ? forced : null
-    const workload = pinned && auto !== 'plan' ? pinned : auto
-    this.options.onTurnMode?.(workload === 'plan' ? null : workload)
-
-    const model = this.options.mainModel
-    const wanted = model && model !== 'default' ? model : undefined
-    const target = wanted ?? '__default__'
-    if (this.appliedModel === target) return 
-    this.appliedModel = target
-    void this.q?.setModel(wanted).catch(() => {
-    })
+    if (next) this.options.effort = next.effort
   }
 
   private currentEffort(): EffortLevel {
@@ -397,7 +344,6 @@ export class HostedSession implements SessionHost {
   private reconcileModel(reported: string): void {
     const wanted = this.options.mainModel
     if (!modelDeviation(reported, wanted)) return
-    this.appliedModel = null
     this.options.sink.append('assistant_text', {
       text:
         `⚙ This turn ran on ${modelLabel(reported)}, not the ${modelLabel(wanted ?? 'default')} ` +
@@ -441,8 +387,6 @@ export class HostedSession implements SessionHost {
       return
     }
     this.options.mainModel = next
-    this.downgraded = true 
-    this.appliedModel = null 
     void this.q?.setModel(next).catch(() => {})
     this.options.onModel?.(next)
     this.options.sink.append('assistant_text', {
@@ -546,7 +490,6 @@ export class HostedSession implements SessionHost {
   private deliverNow(eventId: string, text: string): void {
     this.refreshModelRouting()
     this.applyEffort(this.options.effort ?? DEFAULT_SETTINGS.effort)
-    this.applyModelForTurn(text)
     this.options.sink.update(eventId, { text, pending: false }, { persist: true })
     this.mapper.noteDelivered(text)
     this.input.push({

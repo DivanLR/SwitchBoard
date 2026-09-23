@@ -573,11 +573,18 @@ class SettingsRepo {
     if (!('mcpActiveServers' in stored) && Array.isArray(stored.databaseMcpServers)) {
       stored.mcpActiveServers = [...stored.databaseMcpServers]
     }
-    if (!('intelligentModel' in stored)) {
+    if (!('intelligentModel' in stored) && !('model' in stored)) {
       const work = typeof stored.workModel === 'string' ? stored.workModel : 'default'
       const plan = typeof stored.planModel === 'string' ? stored.planModel : 'default'
       stored.intelligentModel = work !== 'default' ? work : plan
     }
+    if (!('model' in stored)) {
+      stored.model = typeof stored.intelligentModel === 'string' ? stored.intelligentModel : DEFAULT_SETTINGS.model
+    }
+    delete stored.intelligentModel
+    delete stored.workerModel
+    delete stored.autoModelRouting
+    delete stored.modelMode
     delete stored.planModel
     delete stored.workModel
     delete stored.dailySpendLimit

@@ -16,7 +16,6 @@ import type {
   EffortLevel,
   EventPayloadMap,
   FileDiffContent,
-  ModelMode,
   Project,
   ProjectCommand,
   QueuedTask,
@@ -41,11 +40,7 @@ import { HostedSession, type PermissionGate, type SessionHost } from './session'
 import { switchboardMcp } from './inter-session'
 import { probeAvailableModels } from './model-catalog'
 import { foldModelTotals, type EventSink } from './message-mapper'
-import {
-  heavySubagentSystemPromptAppend,
-  heavySubagentModelMode,
-  modesSystemPromptAppend,
-} from './session-shaping'
+import { heavySubagentSystemPromptAppend } from './session-shaping'
 import {
   TRANSCRIPT_EVENT_CAP,
   transcriptContextAppend,
@@ -61,7 +56,6 @@ import {
 import { parseDiagramPlan } from '@shared/diagram'
 import { reconcile } from '@main/evals/artefacts'
 import { scanArtefacts } from '@main/evals/artefact-scan'
-import { mainLoopModel } from './model-routing'
 import { resolveClaudeExecutable } from './claude-executable'
 
 type NoiseClassifier = (event: SessionEvent) => string | null
@@ -104,8 +98,6 @@ const CANCEL_NOTE = 'You stopped this run before it reported, so nothing it meas
 const MODELS_TTL_MS = 10 * 60_000
 
 const NEVER_REUSED: ReadonlySet<SectionKind> = new Set(['diagram', 'spec'])
-
-const WORKER_KINDS: ReadonlySet<SectionKind> = new Set(['diff'])
 
 const UPDATABLE_KINDS: ReadonlySet<EventKind> = new Set([
   'prompt',
@@ -436,18 +428,12 @@ export class SessionManager {
   }
 
   private resolveModelRouting(): {
-    intelligentModel: string
-    workerModel: string
-    modelMode: ModelMode
-    autoModelRouting: boolean
+    model: string
     effort: EffortLevel
   } {
     const settings = this.repos.settings.get()
     return {
-      intelligentModel: settings.intelligentModel,
-      workerModel: settings.workerModel,
-      modelMode: settings.modelMode ?? 'auto',
-      autoModelRouting: settings.autoModelRouting,
+      model: settings.model,
       effort: settings.effort,
     }
   }
@@ -459,7 +445,6 @@ export class SessionManager {
     carryTranscriptFrom?: string,
     opts?: {
       background?: boolean
-      workerMainLoop?: boolean
       cwd?: string
       effort?: EffortLevel
     },
@@ -480,7 +465,6 @@ export class SessionManager {
     opts:
       | {
           background?: boolean
-          workerMainLoop?: boolean
           cwd?: string
           effort?: EffortLevel
         }
@@ -531,7 +515,7 @@ export class SessionManager {
     }
 
     const settings = this.repos.settings.get()
-    const { intelligentModel, workerModel } = this.resolveModelRouting()
+    const { model: sessionModel } = this.resolveModelRouting()
     const activeCombo = settings.mcpActiveServers ?? []
     const schemaDoc = (
       (activeCombo.length > 0 ? readComboDoc(project.path, activeCombo) : null) ??
@@ -541,14 +525,10 @@ export class SessionManager {
       ? `## Database schema (from a previous MCP scan)\n\n${schemaDoc}`
       : null
     const effort = opts?.effort ?? settings.effort
-    const basic = settings.modelMode === 'basic'
-    const subagents = !basic && subagentsAllowed(effort)
+    const subagents = subagentsAllowed(effort)
     const heavySubagents = subagents && settings.subagentEffort === 'max'
     row.heavySubagents = heavySubagents
     const heavyAppend = heavySubagentSystemPromptAppend(heavySubagents)
-    const modesAppend = modesSystemPromptAppend(
-      subagents ? heavySubagentModelMode(heavySubagents, settings.modelMode ?? 'auto') : 'basic',
-    )
     const carried = carryTranscriptFrom ? transcriptFor(carryTranscriptFrom) : null
     const transcriptAppend = carried ? transcriptContextAppend(carried) : null
     try {
@@ -559,7 +539,6 @@ export class SessionManager {
         resumeSdkSessionId,
         systemPromptAppend:
           [
-            modesAppend,
             heavyAppend,
             schemaAppend,
             transcriptAppend,
@@ -567,23 +546,9 @@ export class SessionManager {
             .filter((s): s is string => Boolean(s))
             .join('\n\n') || undefined,
         claudeExecutablePath: claudeExecutablePath ?? undefined,
-        mainModel: opts?.workerMainLoop
-          ? workerModel
-          : mainLoopModel(settings.modelMode, { intelligentModel, workerModel }),
-        workerMainLoop: opts?.workerMainLoop,
-        strongModel: intelligentModel,
-        workerModel,
-        autoModelRouting: !basic && settings.autoModelRouting,
-        modelMode: settings.modelMode,
+        mainModel: sessionModel,
         effort,
-        subagents,
-        subagentEffort: settings.subagentEffort,
         resolveModels: () => this.resolveModelRouting(),
-        onTurnMode: (mode) => {
-          if (entry.row.currentMode === mode) return
-          entry.row.currentMode = mode
-          this.pushStatus(entry)
-        },
         mode,
         onPlanModeChange: (inPlanMode) => {
           if (entry.row.inPlanMode === inPlanMode) return
@@ -786,7 +751,6 @@ export class SessionManager {
     const project = this.repos.projects.byId(projectId)
     const session = await this.startSession(projectId, false, project?.defaultSessionMode, undefined, {
       background: true,
-      workerMainLoop: WORKER_KINDS.has(kind),
     })
     const entry = this.hosted.get(session.id)
     if (entry) entry.sectionKind = kind
