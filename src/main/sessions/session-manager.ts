@@ -45,10 +45,10 @@ import {
   parseSuiteProgress,
   parseVerifyReport,
   verifyMarkerBroken,
-} from '@main/evals/verify-dispatch'
+} from '@main/verify/verify-dispatch'
 import { parseDiagramPlan } from '@shared/diagram'
-import { reconcile } from '@main/evals/artefacts'
-import { scanArtefacts } from '@main/evals/artefact-scan'
+import { reconcile } from '@main/verify/artefacts'
+import { scanArtefacts } from '@main/verify/artefact-scan'
 import { resolveClaudeExecutable } from './claude-executable'
 
 type NoiseClassifier = (event: SessionEvent) => string | null
@@ -435,7 +435,7 @@ export class SessionManager {
     }
   }
 
-  private resolveModelRouting(): {
+  private resolveModelSettings(): {
     model: string
     effort: EffortLevel
   } {
@@ -511,7 +511,7 @@ export class SessionManager {
     }
 
     const settings = this.repos.settings.get()
-    const { model: sessionModel } = this.resolveModelRouting()
+    const { model: sessionModel } = this.resolveModelSettings()
     const activeCombo = settings.mcpActiveServers ?? []
     const schemaDoc = (
       (activeCombo.length > 0 ? readComboDoc(project.path, activeCombo) : null) ??
@@ -536,7 +536,7 @@ export class SessionManager {
         claudeExecutablePath: claudeExecutablePath ?? undefined,
         mainModel: sessionModel,
         effort,
-        resolveModels: opts?.effort ? undefined : () => this.resolveModelRouting(),
+        resolveModels: opts?.effort ? undefined : () => this.resolveModelSettings(),
         mode,
         agents: workerAgents(settings.subagentEffort),
         denyTool: opts?.denyTool,

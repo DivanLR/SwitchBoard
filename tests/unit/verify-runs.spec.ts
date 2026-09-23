@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { openDatabase } from '@main/store/db'
 import { createRepositories } from '@main/store/repositories'
 import { SessionManager } from '@main/sessions/session-manager'
-import { VERIFY_MARKER, verifyPrompt, planSuites } from '@main/evals/verify-dispatch'
+import { VERIFY_MARKER, verifyPrompt, planSuites } from '@main/verify/verify-dispatch'
 import { stackById } from '@shared/test-catalog'
 
 function setup() {

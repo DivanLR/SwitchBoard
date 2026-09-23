@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openDatabase } from '../../src/main/store/db'
 import { createRepositories } from '../../src/main/store/repositories'
-import { parseVerifyReport, VERIFY_MARKER } from '../../src/main/evals/verify-dispatch'
+import { parseVerifyReport, VERIFY_MARKER } from '../../src/main/verify/verify-dispatch'
 import { verifyVerdict, DEFAULT_SETTINGS } from '../../src/shared/domain'
 
 export interface SeededApp {

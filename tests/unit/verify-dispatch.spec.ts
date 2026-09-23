@@ -7,7 +7,7 @@ import {
   verifyMarkerBroken,
   verifyPrompt,
   VERIFY_MARKER,
-} from '@main/evals/verify-dispatch'
+} from '@main/verify/verify-dispatch'
 
 const dotnet = stackById('dotnet')!
 

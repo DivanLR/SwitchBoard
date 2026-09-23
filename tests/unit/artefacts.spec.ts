@@ -7,7 +7,7 @@ import {
   parseTrx,
   reconcile,
   type RunArtefacts,
-} from '@main/evals/artefacts'
+} from '@main/verify/artefacts'
 
 const TRX = `<?xml version="1.0" encoding="utf-8"?>
 <TestRun id="a" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">

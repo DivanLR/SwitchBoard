@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { modelDeviation } from '@main/sessions/model-routing'
+import { modelDeviation } from '@main/sessions/model-fallback'
 
 describe('modelDeviation', () => {
   it('catches a turn that moved to another family', () => {

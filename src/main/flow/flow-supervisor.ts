@@ -51,7 +51,7 @@ import {
   planSuites,
   verifyPrompt as buildVerifyPrompt,
   type PlannedSuite,
-} from '@main/evals/verify-dispatch'
+} from '@main/verify/verify-dispatch'
 import { createWorktree, currentBranch, originHost, removeWorktree, resolvesToCommit, worktreeRoot } from './worktrees'
 import type { FlowFeature } from '@shared/domain'
 

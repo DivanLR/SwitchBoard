@@ -1,5 +1,5 @@
 import type { FlowFeature, FlowReviewFinding, FlowReviewSeverity, FlowStage } from '@shared/domain'
-import { firstJsonObject, markerTail, str } from '@main/evals/parse'
+import { firstJsonObject, markerTail, str } from '@main/verify/parse'
 
 export const FLOW_MARKER = 'SWB_FLOW'
 

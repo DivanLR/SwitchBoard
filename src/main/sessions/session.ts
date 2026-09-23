@@ -25,7 +25,7 @@ import {
 } from '@shared/domain'
 import { MessageMapper, type EventSink } from './message-mapper'
 import { toAvailableModels } from './model-catalog'
-import { modelDeviation, nextStrongestModel } from './model-routing'
+import { modelDeviation, nextStrongestModel } from './model-fallback'
 
 const EXIT_GRACE_MS = 5_000
 
@@ -277,7 +277,7 @@ export class HostedSession implements SessionHost {
     }
   }
 
-  private refreshModelRouting(): void {
+  private refreshModelSettings(): void {
     const next = this.options.resolveModels?.()
     if (next) this.options.effort = next.effort
   }
@@ -509,7 +509,7 @@ export class HostedSession implements SessionHost {
   }
 
   private deliverNow(eventId: string, text: string): void {
-    this.refreshModelRouting()
+    this.refreshModelSettings()
     this.applyEffort(this.options.effort ?? DEFAULT_SETTINGS.effort)
     this.options.sink.update(eventId, { text, pending: false }, { persist: true })
     this.mapper.noteDelivered(text)

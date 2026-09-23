@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { stackById } from '@shared/test-catalog'
-import { parseVerifyReport, planSuites, verifyPrompt } from '@main/evals/verify-dispatch'
+import { parseVerifyReport, planSuites, verifyPrompt } from '@main/verify/verify-dispatch'
 
 const dotnet = stackById('dotnet')!
 const angular = stackById('angular')!

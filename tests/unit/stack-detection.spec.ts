@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { detectStacks, stackEntries, TEST_STACKS } from '@shared/test-catalog'
-import { detectProjectSuites } from '@main/evals/verify-dispatch'
+import { detectProjectSuites } from '@main/verify/verify-dispatch'
 
 describe('stack detection', () => {
   it('reports every stack present, so an API and its front end both get suites', () => {

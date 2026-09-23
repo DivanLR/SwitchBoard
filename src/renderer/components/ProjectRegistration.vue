@@ -146,9 +146,9 @@ async function startSession(): Promise<void> {
             :value="m.value"
             :data-testid="`session-mode-${m.value}`"
           />
-          <span class="bypass-text">
-            <span class="bypass-label">{{ m.label }}</span>
-            <span class="bypass-desc">{{ m.detail }}</span>
+          <span class="mode-text">
+            <span class="mode-label">{{ m.label }}</span>
+            <span class="mode-desc">{{ m.detail }}</span>
           </span>
         </label>
       </div>
@@ -291,7 +291,7 @@ async function startSession(): Promise<void> {
   color: var(--amber);
 }
 
-.bypass-text {
+.mode-text {
   flex: 1;
   min-width: 0;
   display: flex;
@@ -339,7 +339,7 @@ async function startSession(): Promise<void> {
   outline-offset: -1px;
 }
 
-.mode-row.on .bypass-label {
+.mode-row.on .mode-label {
   color: var(--text-bright);
 }
 
@@ -350,13 +350,13 @@ async function startSession(): Promise<void> {
   color: var(--text-faint);
 }
 
-.bypass-label {
+.mode-label {
   font-size: var(--fs-body);
   font-weight: var(--w-em);
   color: var(--text-title);
 }
 
-.bypass-desc {
+.mode-desc {
   font-size: var(--fs-meta);
   color: var(--text-tab);
   margin-top: 2px;

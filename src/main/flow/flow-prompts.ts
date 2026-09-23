@@ -1,5 +1,5 @@
 import type { FlowReviewFinding, FlowRun, FlowStage, FlowStageReport, Measured, VerifyReport } from '@shared/domain'
-import { HONESTY } from '@main/evals/verify-dispatch'
+import { HONESTY } from '@main/verify/verify-dispatch'
 import { FLOW_MARKER } from './flow-markers'
 
 export const ADO_RULE =
