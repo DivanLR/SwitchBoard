@@ -54,7 +54,7 @@ describe('toAvailableModels (SDK report → selectable list)', () => {
       { value: '' },
     ])
     expect(models).toEqual([
-      { id: 'claude-sonnet-5', label: 'claude-sonnet-5', description: '' },
+      { id: 'claude-sonnet-5', label: 'claude-sonnet-5', description: '', engine: 'claude' },
     ])
   })
 })

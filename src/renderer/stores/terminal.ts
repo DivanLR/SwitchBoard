@@ -1,4 +1,5 @@
 import { reactive } from 'vue'
+import type { SessionEngine } from '@shared/domain'
 import { invoke } from '@renderer/ipc'
 
 type DataListener = (data: string) => void
@@ -41,7 +42,7 @@ const store = {
     cwd: string
     cols: number
     rows: number
-    engine: 'claude' | 'shell'
+    engine: SessionEngine | 'shell'
     resumeSessionId?: string
   }): Promise<{ scrollback: string; reused: boolean }> {
     const result = await invoke('terminal.open', input)

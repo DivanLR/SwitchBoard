@@ -73,9 +73,8 @@ describe('migrating a settings row from before the model rename', () => {
     const db = openDatabase(':memory:')
     const settings = createRepositories(db).settings
     const retired = {
-      defaultEngine: 'codex',
-      codexModel: 'gpt-5-codex',
       flowConcurrency: 4,
+      heavySubagents: true,
     }
     db.prepare(`INSERT INTO settings (key, value) VALUES ('settings', @value)`).run({
       value: JSON.stringify({ model: 'claude-opus-5', ...retired }),
@@ -100,5 +99,17 @@ describe('migrating a settings row from before the model rename', () => {
     expect(settings.get().sandboxMemory).toBe('12G')
     expect(settings.get().projectIsolatedRuns).toEqual({ p: true })
     expect(DEFAULT_SETTINGS.sandboxMemory).toBe('6g')
+  })
+
+  it('keeps the Codex engine and model an older install stored', () => {
+    const db = openDatabase(':memory:')
+    const settings = createRepositories(db).settings
+    db.prepare(`INSERT INTO settings (key, value) VALUES ('settings', @value)`).run({
+      value: JSON.stringify({ defaultEngine: 'codex', codexModel: 'gpt-5-codex' }),
+    })
+
+    expect(settings.get().defaultEngine).toBe('codex')
+    expect(settings.get().codexModel).toBe('gpt-5-codex')
+    expect(DEFAULT_SETTINGS.defaultEngine).toBe('claude')
   })
 })

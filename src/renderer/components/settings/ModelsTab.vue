@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { ModelChoice, Settings } from '@shared/domain'
-import { modelLabel, modelPrice } from '@shared/domain'
+import type { ModelChoice, SessionEngine, Settings } from '@shared/domain'
+import { engineOf, modelLabel, modelPrice } from '@shared/domain'
 import { useSettingsStore } from '@renderer/stores/settings'
 import Icon from '@renderer/components/Icon.vue'
 import EffortBar from '@renderer/components/EffortBar.vue'
@@ -14,7 +14,8 @@ function save(patch: Partial<Settings>): void {
   void store.save(patch)
 }
 
-const availableModels = computed(() => store.availableModels)
+const claudeModels = computed(() => store.availableModels.filter((m) => engineOf(m) === 'claude'))
+const codexModels = computed(() => store.availableModels.filter((m) => engineOf(m) === 'codex'))
 const modelChoices = computed<ModelChoice[]>(() => [
   {
     id: 'default',
@@ -22,7 +23,7 @@ const modelChoices = computed<ModelChoice[]>(() => [
     desc: 'Follows your subscription default model',
     price: '—',
   },
-  ...availableModels.value.map((m) => ({
+  ...claudeModels.value.map((m) => ({
     id: m.id,
     label: modelLabel(m.id),
     desc: m.description,
@@ -30,12 +31,61 @@ const modelChoices = computed<ModelChoice[]>(() => [
   })),
 ])
 
+const codexChoices = computed<ModelChoice[]>(() => [
+  {
+    id: '',
+    label: 'CLI default',
+    desc: 'Whatever model the Codex CLI is configured to use',
+    price: '—',
+  },
+  ...codexModels.value.map((m) => ({ id: m.id, label: m.label, desc: m.description, price: '—' })),
+])
+
+const ENGINE_CHOICES: { id: SessionEngine; label: string; desc: string }[] = [
+  {
+    id: 'claude',
+    label: 'Claude Code',
+    desc: 'The full app: permission inbox, plan mode, WSL containers and subagents.',
+  },
+  {
+    id: 'codex',
+    label: 'Codex',
+    desc: 'The OpenAI Codex CLI. One model, its own sandbox, and no approval prompts routed here.',
+  },
+]
+
 function setModel(id: string): void {
   save({ model: id })
 }
 </script>
 
 <template>
+  <div class="group">
+    <div class="ui-kicker group-label">ENGINE FOR NEW SESSIONS</div>
+    <div class="group-desc">
+      Which CLI a new session starts on. A Codex session has no permission inbox, no plan mode
+      and no container: Codex decides inside its own sandbox, and the session's mode chooses
+      which sandbox. Either engine can be picked per session when starting one. Flow stages,
+      Tests, Diff and Diagrams always run on Claude Code.
+    </div>
+    <div class="cards">
+      <button
+        v-for="e in ENGINE_CHOICES"
+        :key="e.id"
+        class="ui-card card-opt is-actionable"
+        :class="{ sel: settings.defaultEngine === e.id, 'is-selected': settings.defaultEngine === e.id }"
+        :data-testid="`default-engine-${e.id}`"
+        @click="save({ defaultEngine: e.id })"
+      >
+        <span class="opt-dot" :class="{ on: settings.defaultEngine === e.id }"></span>
+        <div class="opt-body">
+          <div class="opt-name">{{ e.label }}</div>
+          <div class="opt-sub">{{ e.desc }}</div>
+        </div>
+      </button>
+    </div>
+  </div>
+
   <div class="group">
     <div class="ui-kicker group-label">MODEL</div>
     <div class="group-desc">
@@ -58,6 +108,34 @@ function setModel(id: string): void {
           <div class="opt-sub">{{ m.desc }}</div>
         </div>
         <span class="opt-price mono">{{ m.price }}</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="group">
+    <div class="ui-kicker group-label">CODEX MODEL</div>
+    <div class="group-desc">
+      The model Codex sessions run, read from the Codex CLI itself.
+      <template v-if="codexModels.length === 0">
+        No models listed: the Codex CLI was not found, or it did not answer. Install it with
+        <span class="mono">npm i -g @openai/codex</span> and sign in with
+        <span class="mono">codex login</span>.
+      </template>
+    </div>
+    <div class="cards">
+      <button
+        v-for="m in codexChoices"
+        :key="m.id || 'cli-default'"
+        class="ui-card card-opt is-actionable"
+        :class="{ sel: settings.codexModel === m.id, 'is-selected': settings.codexModel === m.id }"
+        :data-testid="`codex-model-${m.id || 'default'}`"
+        @click="save({ codexModel: m.id })"
+      >
+        <span class="opt-dot" :class="{ on: settings.codexModel === m.id }"></span>
+        <div class="opt-body">
+          <div class="opt-name mono">{{ m.label }}</div>
+          <div class="opt-sub">{{ m.desc }}</div>
+        </div>
       </button>
     </div>
   </div>

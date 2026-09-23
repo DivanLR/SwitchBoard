@@ -192,6 +192,11 @@ Removed, each on the evidence of the application's own database on that date:
 - The Specs tab: Spec Kit was used from chat, not from the tab. Flow now drives
   Spec Kit and reads its folders.
 - The Codex engine: five sessions on 12 to 14 September 2026 and none since.
+  Restored the same day at the owner's direction: "I no longer have the option to
+  have both Claude and Codex in use". Settings, Models picks the engine for new
+  sessions and the Codex model, and the start panel picks it per session. Codex
+  never runs in a container or in bypass, and Flow, Tests, Diff and Diagrams
+  sessions always run on Claude Code.
 - Model routing (auto, advisor and orchestrator modes, a worker model, per turn
   classification): the owner ran basic mode, one model, for cost reasons.
 - The rule preference layer and the MCP scan history: neither could ever be

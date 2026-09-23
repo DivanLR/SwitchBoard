@@ -146,6 +146,7 @@ describe('crash revive and Resume', () => {
       const row: Session = {
         id,
         projectId: project.id,
+        engine: 'claude',
         sdkSessionId: `sdk-${id}`,
         status: 'done',
         statusDetail: null,

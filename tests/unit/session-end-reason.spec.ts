@@ -107,6 +107,7 @@ describe('a session that ends says why', () => {
     const row = {
       id: 'left-open',
       projectId: project.id,
+      engine: 'claude' as const,
       sdkSessionId: null,
       status: 'working' as const,
       statusDetail: null,
@@ -138,6 +139,7 @@ describe('a session that ends says why', () => {
     repos.sessions.insert({
       id: 'already-explained',
       projectId: project.id,
+      engine: 'claude' as const,
       sdkSessionId: null,
       status: 'error',
       statusDetail: 'The sandbox container was killed from outside.',

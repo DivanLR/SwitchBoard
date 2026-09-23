@@ -58,6 +58,7 @@ function makeHarness(folders: string[] = []): Harness {
   repos.sessions.insert({
     id: sessionId,
     projectId: project.id,
+    engine: 'claude',
     sdkSessionId: null,
     status: 'working',
     statusDetail: null,

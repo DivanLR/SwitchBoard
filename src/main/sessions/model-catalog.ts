@@ -15,6 +15,7 @@ export function toAvailableModels(models: readonly ReportedModel[]): AvailableMo
       id,
       label: model.displayName ?? id,
       description: model.description ?? '',
+      engine: 'claude',
     })
   }
   return [...byId.values()]

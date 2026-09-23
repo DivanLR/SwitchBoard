@@ -156,7 +156,7 @@ const sessionError = ref<string | null>(null)
 async function startDbSession(): Promise<void> {
   sessionError.value = null
   try {
-    await projects.startSession(props.project.id, false)
+    await projects.startSession(props.project.id, false, undefined, undefined, 'claude')
   } catch (e) {
     sessionError.value = isIpcError(e)
       ? e.code === 'ALREADY_ACTIVE'

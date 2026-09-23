@@ -10,6 +10,7 @@ const props = defineProps<{
 
 const {
   startMode,
+  startEngine,
   modeOpen,
   resumeSession,
   runInContainer,
@@ -32,47 +33,81 @@ const {
       <span v-if="session.statusDetail" class="faint"> — {{ session.statusDetail }}</span>
     </div>
     <div class="ended-actions">
-      <div class="mode-pick">
-        <button
-          type="button"
-          class="mode-dd"
-          :class="{ armed: startMode === 'bypass' }"
-          data-testid="start-mode-picker"
-          :aria-expanded="modeOpen"
-          aria-haspopup="listbox"
-          :title="startModeDetail"
-          :disabled="busy"
-          @click="modeOpen = !modeOpen"
-        >
-          <span class="mode-dd-eyebrow">Mode</span>
-          <span class="mode-dd-name">{{ startModeLabel }}</span>
-          <span class="mode-dd-arrow" aria-hidden="true">
-            <Icon :name="modeOpen ? 'chevron-up' : 'chevron-down'" :size="10" />
-          </span>
-        </button>
-        <div v-if="modeOpen" class="mode-list" role="listbox" data-testid="start-mode-list">
+      <div class="start-pick">
+        <div class="ui-segments" data-testid="start-engine" role="radiogroup" aria-label="Engine">
           <button
-            v-for="m in modeChoices"
-            :key="m.value"
             type="button"
-            class="mode-item"
-            :class="{ sel: m.value === startMode, armed: m.value === 'bypass' }"
-            role="option"
-            :aria-selected="m.value === startMode"
-            :data-testid="`start-mode-${m.value}`"
-            :title="m.detail"
-            @click="((startMode = m.value), (modeOpen = false))"
+            class="ui-seg"
+            :class="{ 'is-on': startEngine === 'claude' }"
+            data-testid="start-engine-claude"
+            role="radio"
+            :aria-checked="startEngine === 'claude'"
+            :disabled="busy"
+            title="Claude Code: the permission inbox, plan mode, containers and subagents."
+            @click="startEngine = 'claude'"
           >
-            <span class="mode-item-name">{{ m.label }}</span>
-            <span class="mode-item-detail">{{ m.detail }}</span>
+            Claude
           </button>
-          <div v-if="resumeSession" class="mode-note">
-            Resuming keeps the last session's sandbox: its transcript lives
-            {{
-              session.containerised
-                ? 'inside the container, so the resumed session runs in one too.'
-                : 'on this machine, so bypass, which always runs in a container, is not offered.'
-            }}
+          <button
+            type="button"
+            class="ui-seg"
+            :class="{ 'is-on': startEngine === 'codex' }"
+            data-testid="start-engine-codex"
+            role="radio"
+            :aria-checked="startEngine === 'codex'"
+            :disabled="busy"
+            title="OpenAI Codex CLI. No permission inbox, no plan mode and no container: Codex decides inside its own sandbox, and the mode chooses which sandbox."
+            @click="startEngine = 'codex'"
+          >
+            Codex
+          </button>
+        </div>
+        <div class="mode-pick">
+          <button
+            type="button"
+            class="mode-dd"
+            :class="{ armed: startMode === 'bypass' }"
+            data-testid="start-mode-picker"
+            :aria-expanded="modeOpen"
+            aria-haspopup="listbox"
+            :title="startModeDetail"
+            :disabled="busy"
+            @click="modeOpen = !modeOpen"
+          >
+            <span class="mode-dd-eyebrow">Mode</span>
+            <span class="mode-dd-name">{{ startModeLabel }}</span>
+            <span class="mode-dd-arrow" aria-hidden="true">
+              <Icon :name="modeOpen ? 'chevron-up' : 'chevron-down'" :size="10" />
+            </span>
+          </button>
+          <div v-if="modeOpen" class="mode-list" role="listbox" data-testid="start-mode-list">
+            <button
+              v-for="m in modeChoices"
+              :key="m.value"
+              type="button"
+              class="mode-item"
+              :class="{ sel: m.value === startMode, armed: m.value === 'bypass' }"
+              role="option"
+              :aria-selected="m.value === startMode"
+              :data-testid="`start-mode-${m.value}`"
+              :title="m.detail"
+              @click="((startMode = m.value), (modeOpen = false))"
+            >
+              <span class="mode-item-name">{{ m.label }}</span>
+              <span class="mode-item-detail">{{ m.detail }}</span>
+            </button>
+            <div v-if="startEngine === 'codex'" class="mode-note">
+              Codex runs on this machine in its own sandbox, so bypass, which always runs in a
+              container, is not offered.
+            </div>
+            <div v-else-if="resumeSession" class="mode-note">
+              Resuming keeps the last session's sandbox: its transcript lives
+              {{
+                session.containerised
+                  ? 'inside the container, so the resumed session runs in one too.'
+                  : 'on this machine, so bypass, which always runs in a container, is not offered.'
+              }}
+            </div>
           </div>
         </div>
       </div>
@@ -97,7 +132,7 @@ const {
         <span :class="{ faint: !canResume }">Resume session</span>
       </span>
 
-      <span class="resume-inline container-inline">
+      <span v-if="startEngine === 'claude'" class="resume-inline container-inline">
         <button
           class="switch"
           :class="{ on: containerOn }"
@@ -153,9 +188,12 @@ const {
   margin-top: 10px;
 }
 
-.ended-actions .mode-pick {
+.ended-actions .start-pick {
   grid-column: 1;
   grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
 }
 
 .ended-actions .btn-solid {
@@ -181,6 +219,10 @@ const {
   grid-row: 2;
   margin-top: 14px;
   border-radius: var(--rc) var(--rc) 0 0;
+}
+
+.ended-actions .resume-inline:not(.container-inline):last-of-type {
+  border-radius: var(--rc);
 }
 
 .ended-actions .container-inline {

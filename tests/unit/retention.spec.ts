@@ -19,6 +19,7 @@ function insertSession(
   repos.sessions.insert({
     id,
     projectId,
+    engine: 'claude',
     sdkSessionId: null,
     status: live ? 'working' : 'done',
     statusDetail: null,

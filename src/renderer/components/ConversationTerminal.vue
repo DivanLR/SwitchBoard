@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch 
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import type { LineTone, RawLine } from '@shared/stream-lines'
+import type { SessionEngine } from '@shared/domain'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { useClipboardStore } from '@renderer/stores/clipboard'
 import { xtermFontFamily, xtermFontSize, xtermTheme } from '@renderer/composables/xtermTheme'
@@ -10,6 +11,7 @@ import { xtermFontFamily, xtermFontSize, xtermTheme } from '@renderer/composable
 const props = defineProps<{
   lines: readonly RawLine[]
   sessionKey: string
+  engine: SessionEngine
   live: boolean
   visible: boolean
   sending: boolean
@@ -290,7 +292,7 @@ async function onContextMenu(): Promise<void> {
     <div class="conv-bar ui-head">
       <div class="cb-meaning ui-meaning">
         <span class="cb-title" data-testid="conversation-terminal-title">
-          {{ live ? 'Claude Code' : 'Claude Code (ended)' }}
+          {{ engine === 'codex' ? 'Codex' : 'Claude Code' }}{{ live ? '' : ' (ended)' }}
         </span>
         <span class="cb-note">the same conversation as Clean and Raw · Enter sends · Ctrl+C interrupts</span>
       </div>

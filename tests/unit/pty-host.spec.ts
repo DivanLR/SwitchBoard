@@ -7,10 +7,12 @@ describe('launchCommand', () => {
   })
 
   it('never emits the PowerShell call operator', () => {
-    const command = launchCommand('claude')
-    if (command === null) return
-    expect(command.startsWith('&')).toBe(false)
-    expect(command.trim()).not.toBe('')
+    for (const engine of ['claude', 'codex'] as const) {
+      const command = launchCommand(engine)
+      if (command === null) continue
+      expect(command.startsWith('&')).toBe(false)
+      expect(command.trim()).not.toBe('')
+    }
   }, 30_000)
 
   it('quotes the Claude path, which lives under a home directory that may have spaces', () => {
@@ -20,12 +22,24 @@ describe('launchCommand', () => {
     expect(command.endsWith('"')).toBe(true)
   })
 
+  it('launches Codex by name, so the shell resolves the shim spawn cannot', () => {
+    const command = launchCommand('codex')
+    if (command === null) return
+    expect(command).toBe('codex')
+  })
+
   it('continues a Claude conversation with --resume and ignores ids that are not plain tokens', () => {
     expect(launchCommand('shell', 'abc-123')).toBeNull()
     const command = launchCommand('claude', 'abc-123')
     if (command !== null) expect(command.endsWith('" --resume abc-123')).toBe(true)
     const unsafe = launchCommand('claude', 'abc; rm -rf /')
     if (unsafe !== null) expect(unsafe).not.toContain('--resume')
+  })
+
+  it('continues a Codex thread with the resume subcommand', () => {
+    const command = launchCommand('codex', 'thread-1')
+    if (command === null) return
+    expect(command).toBe('codex resume thread-1')
   })
 })
 

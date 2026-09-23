@@ -21,6 +21,7 @@ import type {
   FlowStage,
   FlowStageRecord,
   SessionEvent,
+  SessionEngine,
   SessionMode,
   Settings,
   SkillImportResult,
@@ -154,7 +155,7 @@ export interface InvokeMap {
       cwd: string
       cols: number
       rows: number
-      engine: 'claude' | 'shell'
+      engine: SessionEngine | 'shell'
       resumeSessionId?: string
     }
     res: { scrollback: string; reused: boolean }
@@ -168,6 +169,7 @@ export interface InvokeMap {
       resume?: boolean
       mode?: SessionMode
       containerised?: boolean
+      engine?: SessionEngine
     }
     res: Session
   }

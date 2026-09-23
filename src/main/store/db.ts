@@ -599,19 +599,6 @@ const MIGRATIONS: Migration[] = [
     },
   },
   {
-    name: '037-claude-only',
-    up: (db) => {
-      for (const statement of [
-        "UPDATE sessions SET sdkSessionId = NULL WHERE engine = 'codex'",
-        'ALTER TABLE sessions DROP COLUMN engine',
-      ]) {
-        try {
-          db.exec(statement)
-        } catch {}
-      }
-    },
-  },
-  {
     name: '039-flow-pipeline',
     up: (db) => {
       db.exec(`

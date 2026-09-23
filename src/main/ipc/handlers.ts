@@ -361,6 +361,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'sessions.start': (req) =>
       manager.startSession(req.projectId, req.resume ?? false, req.mode, {
         containerised: req.containerised === true,
+        engine: req.engine ?? repos.settings.get().defaultEngine,
       }),
     'clipboard.write': (req) => {
       clipboard.writeText(req.text)

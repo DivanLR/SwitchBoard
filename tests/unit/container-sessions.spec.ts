@@ -60,10 +60,16 @@ function setup() {
     onProjectCommands: () => {},
     gate: (async () => ({ behavior: 'allow', updatedInput: {} })) as never,
   })
-  const ended = (id: string, endedAt: string, homeVolumeOf: string | null = null): void => {
+  const ended = (
+    id: string,
+    endedAt: string,
+    homeVolumeOf: string | null = null,
+    engine: Session['engine'] = 'claude',
+  ): void => {
     const row: Session = {
       id,
       projectId: project.id,
+      engine,
       sdkSessionId: `sdk-${id}`,
       status: 'done',
       statusDetail: null,
@@ -116,6 +122,38 @@ describe('a start that names no container choice', () => {
     const handedOver = await manager.startSession(project.id)
 
     expect(manager.runsInContainer(handedOver.id)).toBe(true)
+  })
+})
+
+describe('the engine a session starts on', () => {
+  it('refuses Codex in a container or in bypass, which always runs in one', async () => {
+    const { project, manager } = setup()
+
+    await expect(
+      manager.startSession(project.id, false, 'default', { containerised: true, engine: 'codex' }),
+    ).rejects.toMatchObject({ code: 'UNSUPPORTED' })
+    await expect(manager.startSession(project.id, false, 'bypass', { engine: 'codex' })).rejects.toMatchObject({
+      code: 'UNSUPPORTED',
+    })
+  })
+
+  it('resumes the last conversation of its own engine, never a Codex thread as a Claude one', async () => {
+    const { repos, project, manager, ended } = setup()
+    ended('claude-one', '2026-09-01T01:00:00.000Z')
+    ended('codex-one', '2026-09-02T01:00:00.000Z', null, 'codex')
+
+    const resumed = await manager.startSession(project.id, true, 'default', { containerised: false })
+
+    expect(repos.sessions.byId(resumed.id)).toMatchObject({ engine: 'claude', homeVolumeOf: 'claude-one' })
+  })
+
+  it('keeps section sessions on Claude whatever the default engine is', async () => {
+    const { repos, project, manager } = setup()
+    repos.settings.set({ defaultEngine: 'codex' })
+
+    const section = await manager.backgroundSessionFor(project.id, 'diagram')
+
+    expect(repos.sessions.byId(section.id)?.engine).toBe('claude')
   })
 })
 

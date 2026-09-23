@@ -16,6 +16,7 @@ export interface MockSessionSeed {
   mcpServers?: { name: string; status: string }[]
   bypassPermissions?: boolean
   containerised?: boolean
+  engine?: 'claude' | 'codex'
   planMode?: boolean
 }
 
@@ -108,6 +109,7 @@ export interface MockDriver {
       planMode?: boolean
       resume?: boolean
       containerised?: boolean
+      engine?: string
     }[]
     verifyStarts: { projectId: string; suiteIds: string[]; isolated: boolean }[]
     planModeChanges: { sessionId: string; enabled: boolean }[]
@@ -130,6 +132,7 @@ export function installMockHost(scenario: MockScenario): void {
   interface MockSession {
     id: string
     projectId: string
+    engine: string
     sdkSessionId: string | null
     status: string
     statusDetail: string | null
@@ -265,6 +268,7 @@ export function installMockHost(scenario: MockScenario): void {
       session = {
         id: p.session.id,
         projectId: p.id,
+        engine: p.session.engine ?? 'claude',
         sdkSessionId: `sdk-${p.session.id}`,
         status: p.session.status,
         statusDetail: null,
@@ -310,11 +314,12 @@ export function installMockHost(scenario: MockScenario): void {
   const projectCommands = new Map<string, { name: string; description?: string }[]>()
   const specKitByProject = new Map<string, AnyRecord>()
   const mcpSchemaByProject = new Map<string, string>()
-  let availableModels: { id: string; label: string; description: string }[] = [
+  let availableModels: { id: string; label: string; description: string; engine?: string }[] = [
     { id: 'claude-fable-5', label: 'Fable', description: 'Most capable for the hardest tasks' },
     { id: 'claude-opus-5[1m]', label: 'Opus (1M context)', description: 'Best for everyday, complex tasks' },
     { id: 'claude-sonnet-5', label: 'Sonnet', description: 'Efficient for routine tasks' },
     { id: 'claude-haiku-4-5-20251001', label: 'Haiku', description: 'Fastest for quick answers' },
+    { id: 'gpt-5-codex', label: 'gpt-5-codex', description: 'Codex coding model', engine: 'codex' },
   ]
   const standingRules: AnyRecord[] = []
   let costToday = 0
@@ -434,6 +439,7 @@ export function installMockHost(scenario: MockScenario): void {
     planMode?: boolean
     resume?: boolean
     containerised?: boolean
+    engine?: string
   }[] = []
   const verifyStarts: { projectId: string; suiteIds: string[]; isolated: boolean }[] = []
   const planModeChanges: { sessionId: string; enabled: boolean }[] = []
@@ -957,10 +963,12 @@ export function installMockHost(scenario: MockScenario): void {
         planMode,
         resume: req.resume === true,
         containerised: req.containerised === true,
+        engine: req.engine as string | undefined,
       })
       const session: MockSession = {
         id: nextId('sess'),
         projectId: project.id,
+        engine: String(req.engine ?? 'claude'),
         sdkSessionId: null,
         status: 'done',
         statusDetail: null,

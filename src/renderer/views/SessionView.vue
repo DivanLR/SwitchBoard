@@ -273,7 +273,7 @@ const sessionStart = useSessionStart({
   endedSession,
 })
 resetStart = sessionStart.reset
-const { busy } = sessionStart
+const { busy, startEngine } = sessionStart
 
 const derivedFrom = computed<SessionEvent[]>(() => {
   const all = active.events
@@ -706,6 +706,7 @@ const { dragKind, onPaneDragOver, onPaneDragLeave, onPaneDrop } = projectRefs
       ref="convTerm"
       :lines="rawLines"
       :session-key="terminalSession?.id ?? project.id"
+      :engine="terminalSession?.engine ?? startEngine"
       :live="!!liveSession"
       :visible="mainTab === 'terminal' && terminalMode === 'chat'"
       :sending="busy"
@@ -718,6 +719,7 @@ const { dragKind, onPaneDragOver, onPaneDragLeave, onPaneDrop } = projectRefs
       v-show="mainTab === 'terminal' && terminalMode === 'shell'"
       :id="terminalSession?.id ?? project.id"
       :cwd="project.path"
+      :engine="terminalSession?.engine ?? startEngine"
       :resume-session-id="terminalResumeId"
       :live="!!liveSession"
       :can-take-over="!liveSession?.containerised"

@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import type { SessionEngine } from '@shared/domain'
 import { useTerminalStore } from '@renderer/stores/terminal'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
@@ -13,6 +14,7 @@ import Icon from '@renderer/components/Icon.vue'
 const props = defineProps<{
   id: string
   cwd: string
+  engine: SessionEngine
   resumeSessionId: string | null
   live: boolean
   canTakeOver: boolean
@@ -21,10 +23,10 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: 'takeover'): void; (e: 'chat'): void }>()
 
 const terminals = useTerminalStore()
-const launchEngine = computed((): 'claude' | 'shell' =>
-  props.resumeSessionId ? 'claude' : 'shell',
+const launchEngine = computed((): SessionEngine | 'shell' =>
+  props.resumeSessionId ? props.engine : 'shell',
 )
-const launched = ref<'claude' | 'shell'>('shell')
+const launched = ref<SessionEngine | 'shell'>('shell')
 const takingOver = ref(false)
 const settingsStore = useSettingsStore()
 const host = ref<HTMLDivElement | null>(null)
@@ -312,7 +314,7 @@ async function restart(): Promise<void> {
       <div class="ui-meaning tb-meaning">
         <Icon name="terminal" :size="15" />
         <span class="tb-title" data-testid="terminal-title">{{
-          launched === 'shell' ? 'Shell' : 'Claude Code'
+          launched === 'shell' ? 'Shell' : launched === 'codex' ? 'Codex CLI' : 'Claude Code'
         }}</span>
         <span class="tb-path mono" :title="cwd">{{ cwd }}</span>
       </div>
