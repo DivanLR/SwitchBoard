@@ -158,6 +158,10 @@ const store = reactive({
     state.seed = { projectId, source }
   },
 
+  async pickDesigns(): Promise<string[]> {
+    return (await invoke('dialog.pickDesigns', undefined)).paths
+  },
+
   takeSeed(projectId: string): FlowStartSource | null {
     const seed = state.seed
     if (seed?.projectId !== projectId) return null
@@ -177,6 +181,7 @@ const store = reactive({
     baseBranch?: string,
     companions?: FlowCompanionRequest[],
     checklist?: boolean,
+    designs?: string[],
   ): Promise<string | null> {
     let runId: string | null = null
     await this.act('start', async () => {
@@ -188,6 +193,7 @@ const store = reactive({
         checklist,
         baseBranch,
         companions,
+        designs,
       })
       runId = snapshot.runId
       state.runsByProject[projectId] = snapshot.runs

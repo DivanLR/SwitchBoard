@@ -45,6 +45,7 @@ export interface MockDriver {
   setDrafts: (projectId: string, texts: string[]) => void
   setNextFolderPick: (path: string | null) => void
   setNextFilePick: (path: string | null) => void
+  setNextDesignPicks: (paths: string[]) => void
   emitEvent: (sessionId: string, kind: string, payload: Record<string, unknown>) => string
   updateEvent: (sessionId: string, eventId: string, payload: Record<string, unknown>) => void
   focusSession: (sessionId: string) => void
@@ -133,6 +134,7 @@ export interface MockDriver {
     prOpens: string[]
     pluginInstalls: { marketplace: string; pkg: string }[]
     diffApplies: { projectId: string; path: string; lines: string[]; instruction: string }[]
+    flowDesigns: (string[] | null)[]
     adoReconnects: number
     adoCancels: number
     elicitationAnswers: { id: string; action: string; values?: Record<string, unknown> }[]
@@ -494,6 +496,7 @@ export function installMockHost(scenario: MockScenario): void {
   let adoWhy = 'it failed to start'
   let adoReconnects = 0
   let adoCancels = 0
+  const flowDesigns: (string[] | null)[] = []
   let adoHeld = false
   let adoListing: { projectId: string; sessionId: string; settle: (cancelled: boolean) => void } | null = null
   let adoCode = 'MCP_NOT_CONNECTED'
@@ -782,6 +785,7 @@ export function installMockHost(scenario: MockScenario): void {
     }),
     'dialog.pickFolder': () => ({ path: nextFolderPick }),
     'dialog.pickFile': () => ({ path: nextFilePick }),
+    'dialog.pickDesigns': () => ({ paths: [...nextDesignPicks] }),
     'projects.register': (req) => {
       const path = String(req.path)
       if (path.includes('missing')) throw { code: 'INVALID_PATH', message: 'The folder does not exist' }
@@ -1371,6 +1375,7 @@ export function installMockHost(scenario: MockScenario): void {
           message: `The Azure DevOps MCP server is not connected for this session: ${adoWhy}.`,
         }
       }
+      flowDesigns.push((req.designs as string[] | undefined) ?? null)
       const stacks = [...(flowStacksByProject.get(projectId) ?? ['dotnet'])]
       if (stacks.length === 0) {
         throw { code: 'UNSUPPORTED', message: 'Flow supports .NET and Angular projects.' }
@@ -1882,6 +1887,7 @@ export function installMockHost(scenario: MockScenario): void {
   let floodTimer: number | null = null
   let nextFolderPick: string | null = null
   let nextFilePick: string | null = null
+  let nextDesignPicks: string[] = []
   const draftsByProject = new Map<string, string[]>(
     scenario.projects.filter((p) => p.drafts?.length).map((p) => [p.id, p.drafts as string[]]),
   )
@@ -1895,6 +1901,9 @@ export function installMockHost(scenario: MockScenario): void {
     },
     setNextFilePick: (path) => {
       nextFilePick = path
+    },
+    setNextDesignPicks: (paths) => {
+      nextDesignPicks = paths
     },
     emitEvent: (sessionId, kind, payload) => String(appendEvent(sessionId, kind, payload).id),
     updateEvent: (sessionId, eventId, payload) => updateEvent(sessionId, eventId, payload),
@@ -2198,6 +2207,7 @@ export function installMockHost(scenario: MockScenario): void {
       prOpens: [...prOpens],
       pluginInstalls: [...pluginInstalls],
       diffApplies: [...diffApplies],
+      flowDesigns: [...flowDesigns],
       adoReconnects,
       adoCancels,
       elicitationAnswers: [...elicitationAnswers],

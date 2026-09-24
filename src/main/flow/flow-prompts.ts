@@ -171,9 +171,15 @@ const ANSWER_YOURSELF =
 export function specifyPrompt(
   run: Pick<FlowRun, 'source' | 'sourceRef' | 'sourceUrl' | 'title' | 'description' | 'autopilot'> &
     Partial<Pick<FlowRun, 'specDir' | 'branch'>>,
+  designs: readonly string[] = [],
 ): string {
   return [
     `/speckit-specify ${specDescription(run)}`,
+    designs.length > 0
+      ? `The developer attached these design files: ${designs.join(', ')}. Open and read every one before you write ` +
+        'the spec, and build the spec on what they show. Add a Design references section to spec.md that lists each ' +
+        'file by its path and says what it shows, so the plan and the build read them too.'
+      : '',
     run.specDir
       ? `SPECIFY_FEATURE_DIRECTORY=${run.specDir}: create the spec in that folder and write it to .specify/feature.json. ` +
         `If ${run.specDir}/spec.md exists from an earlier attempt, continue it rather than starting another folder.`

@@ -155,6 +155,7 @@ export interface InvokeMap {
   'projects.list': { req: void; res: ProjectsSnapshot }
   'dialog.pickFolder': { req: void; res: { path: string | null } }
   'dialog.pickFile': { req: { command: string }; res: { path: string | null } }
+  'dialog.pickDesigns': { req: void; res: { paths: string[] } }
   'projects.register': {
     req: { path: string; name?: string; defaultSessionMode?: SessionMode }
     res: Project
@@ -298,6 +299,7 @@ export interface InvokeMap {
       checklist?: boolean
       baseBranch?: string
       companions?: FlowCompanionRequest[]
+      designs?: string[]
     }
     res: { runId: string } & FlowSnapshot
   }

@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
-import { cp, readFile, readdir } from 'node:fs/promises'
+import { cp, mkdir, readFile, readdir, stat } from 'node:fs/promises'
 import { basename, isAbsolute, join, relative } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import type {
@@ -71,6 +71,7 @@ import {
 } from './flow-prompts'
 import { FLOW_MARKER, allowedPullRequestUrl, type FlowMarker, type FlowStageMarker } from './flow-markers'
 import { commandSource, missingCommands, slashCommandOf } from '@shared/flow-plan'
+import { MAX_DESIGN_BYTES, MAX_DESIGNS, designFileNames, designName, isDesignFile } from '@shared/flow-designs'
 import { artefactRelPath, defaultArtefactKind, resolveArtefactPath } from './artefacts'
 import { STACK_ORDER, detectFlowStacks } from './stacks'
 import {
@@ -177,6 +178,37 @@ const defaultGit: FlowGit = {
 const LOCAL_CONFIG = ['CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md', '.claude', join('.claude', 'settings.local.json')]
 
 const CLAUDE_WORKTREES = /[\\/]\.claude[\\/]worktrees([\\/]|$)/
+
+async function checkDesigns(paths: readonly string[], allowed: boolean): Promise<string[]> {
+  if (paths.length === 0) return []
+  if (!allowed) {
+    throw {
+      code: 'RULE_NOT_ALLOWED',
+      message: 'Design files go with a new feature, described or from Azure DevOps.',
+    } satisfies IpcError
+  }
+  if (paths.length > MAX_DESIGNS) {
+    throw { code: 'INVALID_PATH', message: `Attach at most ${MAX_DESIGNS} design files.` } satisfies IpcError
+  }
+  for (const path of paths) {
+    const name = designName(path)
+    if (!isAbsolute(path) || !isDesignFile(path)) {
+      throw { code: 'INVALID_PATH', message: `${name} is not an image, PDF, SVG, HTML, Markdown or text file.` } satisfies IpcError
+    }
+    const info = await stat(path).catch(() => null)
+    if (!info?.isFile()) throw { code: 'INVALID_PATH', message: `${name} could not be read.` } satisfies IpcError
+    if (info.size > MAX_DESIGN_BYTES) {
+      throw { code: 'INVALID_PATH', message: `${name} is larger than ${MAX_DESIGN_BYTES / 1024 / 1024} MB.` } satisfies IpcError
+    }
+  }
+  return [...paths]
+}
+
+async function copyDesigns(paths: readonly string[], dir: string): Promise<void> {
+  await mkdir(dir, { recursive: true })
+  const names = designFileNames(paths)
+  for (const [at, path] of paths.entries()) await cp(path, join(dir, names[at]))
+}
 
 function countTasks(worktreePath: string, specDir: string): { done: number; total: number } | null {
   const file = resolveArtefactPath(worktreePath, join(specDir, 'tasks.md'))
@@ -553,9 +585,11 @@ export class FlowSupervisor {
     checklist?: boolean
     baseBranch?: string
     companions?: readonly FlowCompanionRequest[]
+    designs?: readonly string[]
   }): Promise<FlowRun> {
     const project = this.requireProject(input.projectId)
     const kind = kindOf(input.source)
+    const designs = await checkDesigns(input.designs ?? [], input.source.kind === 'text' || input.source.kind === 'ado')
     const stacks = await detectFlowStacks(project.path)
     if (stacks.length === 0 && kind !== 'idea') {
       throw { code: 'UNSUPPORTED', message: 'Flow supports .NET and Angular projects.' } satisfies IpcError
@@ -627,6 +661,7 @@ export class FlowSupervisor {
     } else if (kind === 'feature') {
       specDir = this.nextSpecDir(project, worktreePath, input.source, title)
       if (existsSync(join(worktreePath, '.specify'))) await pinFeature(worktreePath, specDir).catch(() => {})
+      if (designs.length > 0) await copyDesigns(designs, join(worktreePath, specDir, 'design'))
     }
     if (slug) startStage = this.firstUndone(kind, worktreePath, slug) === 'assess' ? 'assess' : 'fix'
 
@@ -1433,6 +1468,16 @@ export class FlowSupervisor {
     await pinFeature(run.worktreePath, run.specDir).catch(() => {})
   }
 
+  private designsOf(root: string, specDir: string): string[] {
+    try {
+      return readdirSync(join(root, specDir, 'design'))
+        .filter(isDesignFile)
+        .map((name) => `${specDir}/design/${name}`)
+    } catch {
+      return []
+    }
+  }
+
   private resolveSpecDir(run: FlowRun, reported: string | null): string | null {
     const root = run.worktreePath
     if (!root) return null
@@ -1498,7 +1543,11 @@ export class FlowSupervisor {
       case 'spec': {
         const root = this.rootOf(run) ?? this.requireProject(run.projectId).path
         const constitution = (await readConstitutionState(root)) === 'written' ? [] : [constitutionPrompt(run.autopilot)]
-        return { steps: [...constitution, specifyPrompt(run), clarifyPrompt(run.autopilot)], handshake: specHandshake(run.source === 'ado') }
+        const designs = run.specDir ? this.designsOf(root, run.specDir) : []
+        return {
+          steps: [...constitution, specifyPrompt(run, designs), clarifyPrompt(run.autopilot)],
+          handshake: specHandshake(run.source === 'ado'),
+        }
       }
       case 'plan':
         return {

@@ -551,6 +551,28 @@ test('autopilot with autoShip on raises the pull request stage automatically too
   await expect(page.getByTestId('flow-stage-ship')).toContainText('running')
 })
 
+test('design files picked at intake travel with the start, and one can be removed first', async ({ page }) => {
+  await openFlow(page)
+  await page.getByTestId('flow-new').click()
+  await page.getByTestId('flow-text-title').fill('Checkout page')
+  await page.evaluate(() =>
+    window.__mock.setNextDesignPicks(['C:\\designs\\checkout.png', 'C:\\designs\\flow.pdf', 'C:\\designs\\notes.docx']),
+  )
+  await page.getByTestId('flow-designs-browse').click()
+  await expect(page.getByTestId('flow-design-checkout.png')).toBeVisible()
+  await expect(page.getByTestId('flow-design-flow.pdf')).toBeVisible()
+  await expect(page.getByTestId('flow-designs-note')).toContainText('1 file was left out')
+  await page.getByTestId('flow-design-remove-flow.pdf').click()
+  await expect(page.getByTestId('flow-design-flow.pdf')).toHaveCount(0)
+
+  await page.getByTestId('flow-source-spec').click()
+  await expect(page.getByTestId('flow-designs')).toHaveCount(0)
+  await page.getByTestId('flow-source-text').click()
+  await page.getByTestId('flow-start').click()
+  await expect(page.getByTestId('flow-run')).toBeVisible()
+  expect((await page.evaluate(() => window.__mock.state().flowDesigns)).at(-1)).toEqual(['C:\\designs\\checkout.png'])
+})
+
 test('every question of one AskUserQuestion call is shown, and each stays until it is answered', async ({ page }) => {
   await startTextRun(page)
   const runId = await currentRunId(page)

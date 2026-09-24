@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.setConfig({ testTimeout: 20_000 })
 import { execSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { FlowGit } from '@main/flow/flow-supervisor'
@@ -176,6 +176,43 @@ describe('starting a run', () => {
     const stages = h.repos.flowStages.listForRun(run.id)
     expect(stages.find((s) => s.stage === 'spec')?.status).toBe('running')
     expect(stages.find((s) => s.stage === 'spec')?.attempts).toBe(1)
+  })
+
+  it('copies attached design files into the spec folder and tells the spec stage to build on them', async () => {
+    const h = setup()
+    const from = mkdtempSync(join(tmpdir(), 'flow-designs-'))
+    tempDirs.push(from)
+    writeFileSync(join(from, 'home page.png'), 'png')
+    mkdirSync(join(from, 'b'))
+    writeFileSync(join(from, 'b', 'home page.png'), 'png2')
+    const run = await h.flow.start({
+      projectId: h.project.id,
+      source: textSource(),
+      autopilot: false,
+      autoShip: false,
+      designs: [join(from, 'home page.png'), join(from, 'b', 'home page.png')],
+    })
+    const dir = join(run.worktreePath!, run.specDir!, 'design')
+    expect(readdirSync(dir).sort()).toEqual(['home-page-2.png', 'home-page.png'])
+    expect(readFileSync(join(dir, 'home-page-2.png'), 'utf8')).toBe('png2')
+    expect(h.sent[0].text).toContain(`${run.specDir}/design/home-page.png`)
+    expect(h.sent[0].text).toContain('Design references section')
+  })
+
+  it('refuses a design file that is not a design, is missing, or goes with an existing spec, before any worktree', async () => {
+    const h = setup()
+    const from = mkdtempSync(join(tmpdir(), 'flow-designs-'))
+    tempDirs.push(from)
+    writeFileSync(join(from, 'notes.docx'), 'x')
+    const start = (designs: string[], source = textSource()) =>
+      h.flow.start({ projectId: h.project.id, source, autopilot: false, autoShip: false, designs })
+    await expect(start([join(from, 'notes.docx')])).rejects.toMatchObject({ code: 'INVALID_PATH' })
+    await expect(start([join(from, 'gone.png')])).rejects.toMatchObject({ code: 'INVALID_PATH' })
+    await expect(start(['relative.png'])).rejects.toMatchObject({ code: 'INVALID_PATH' })
+    await expect(start([join(from, 'a.png')], { kind: 'bug', title: 'Crash', symptom: 'It crashes' })).rejects.toMatchObject({
+      code: 'RULE_NOT_ALLOWED',
+    })
+    expect(h.git.create).not.toHaveBeenCalled()
   })
 
   it('refuses a project with neither a .NET nor an Angular project', async () => {

@@ -1,3 +1,4 @@
+import { DESIGN_EXTENSIONS } from '@shared/flow-designs'
 import { clipboard, dialog, ipcMain, shell, type BrowserWindow } from 'electron'
 import type { CustomSkill, KeepCurrentReport, Project, Session, SessionEvent } from '@shared/domain'
 import type { SectionKind } from '@shared/domain'
@@ -311,6 +312,16 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         : await dialog.showOpenDialog(opts)
       const path = picked.canceled ? undefined : picked.filePaths[0]
       return { path: path ?? null }
+    },
+    'dialog.pickDesigns': async () => {
+      const opts = {
+        title: 'Attach design files',
+        properties: ['openFile' as const, 'multiSelections' as const],
+        filters: [{ name: 'Designs', extensions: [...DESIGN_EXTENSIONS] }],
+      }
+      const parent = deps.getWindow()
+      const picked = parent ? await dialog.showOpenDialog(parent, opts) : await dialog.showOpenDialog(opts)
+      return { paths: picked.canceled ? [] : picked.filePaths }
     },
     'projects.register': async (req) => {
       const suggested = (await suggestProjects(repos)).some(
@@ -728,6 +739,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
         checklist: req.checklist,
         baseBranch: req.baseBranch,
         companions: req.companions,
+        designs: req.designs,
       })
       return { runId: run.id, ...flowSnapshot(req.projectId) }
     },

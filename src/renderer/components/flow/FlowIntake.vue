@@ -13,6 +13,7 @@ import type { FlowStartSource } from '@shared/ipc-types'
 import { parseAdoFeatureLink } from '@shared/ado-link'
 import { commandSource, flowModeNote, flowStagePlan, missingCommands } from '@shared/flow-plan'
 import { sddSlug } from '@shared/sdd'
+import { MAX_DESIGNS, designName, isDesignFile } from '@shared/flow-designs'
 import { useFlowStore } from '@renderer/stores/flow'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { useTerminalStore } from '@renderer/stores/terminal'
@@ -57,6 +58,37 @@ const autoShip = ref(false)
 const searched = ref(false)
 const companions = ref<Record<string, string>>({})
 const projectCommands = ref<ProjectCommand[]>([])
+const designs = ref<string[]>([])
+const designNote = ref<string | null>(null)
+const designDrop = ref(false)
+const takesDesigns = computed(() => kind.value === 'feature' && source.value !== 'spec')
+
+function addDesigns(paths: readonly string[]): void {
+  const fresh = paths.filter((path) => !designs.value.includes(path))
+  const kept = fresh.filter(isDesignFile)
+  const next = [...designs.value, ...kept].slice(0, MAX_DESIGNS)
+  const dropped = fresh.length - (next.length - designs.value.length)
+  designNote.value =
+    dropped > 0
+      ? `${dropped} file${dropped === 1 ? ' was' : 's were'} left out: attach up to ${MAX_DESIGNS} images, PDFs, SVG, HTML, Markdown or text files.`
+      : null
+  designs.value = next
+}
+
+async function browseDesigns(): Promise<void> {
+  addDesigns(await flow.pickDesigns())
+}
+
+function onDesignDrop(event: DragEvent): void {
+  designDrop.value = false
+  const files = [...(event.dataTransfer?.files ?? [])]
+  addDesigns(files.map((file) => window.switchboard.pathForFile?.(file) ?? '').filter((path) => path !== ''))
+}
+
+function removeDesign(path: string): void {
+  designs.value = designs.value.filter((item) => item !== path)
+  designNote.value = null
+}
 
 const candidates = computed(() => projects.visibleItems.filter((item) => item.id !== props.projectId))
 const stacksOf = (projectId: string): FlowStackId[] => flow.stacksByProject[projectId] ?? []
@@ -211,6 +243,7 @@ async function start(): Promise<void> {
     changesCode.value ? baseBranch.value.trim() || undefined : undefined,
     others.length > 0 ? others : undefined,
     kind.value === 'feature' && checklist.value,
+    takesDesigns.value && designs.value.length > 0 ? [...designs.value] : undefined,
   )
   if (runId) emit('started', runId)
 }
@@ -482,6 +515,43 @@ async function start(): Promise<void> {
           No spec folders found under specs/ in this project.
         </div>
       </div>
+    </div>
+
+    <div v-if="takesDesigns" class="fin-field">
+      <span id="flow-designs-label" class="fin-label">Design files</span>
+      <div
+        class="fin-drop"
+        :class="{ 'is-over': designDrop }"
+        role="group"
+        aria-labelledby="flow-designs-label"
+        data-testid="flow-designs"
+        @dragover.prevent="designDrop = true"
+        @dragleave="designDrop = false"
+        @drop.prevent="onDesignDrop"
+      >
+        <span class="fin-hint">
+          Optional. Drop mock ups, screenshots or a PDF here. They are copied into the spec folder, and the spec is built on them.
+        </span>
+        <button type="button" class="btn-quiet" data-testid="flow-designs-browse" @click="browseDesigns()">
+          Browse…
+        </button>
+      </div>
+      <ul v-if="designs.length > 0" class="fin-designs" data-testid="flow-designs-list">
+        <li v-for="path in designs" :key="path" class="fin-design" :data-testid="`flow-design-${designName(path)}`">
+          <Icon name="file" :size="11" class="fin-mark" />
+          <span class="ui-desc fin-name" :title="path">{{ designName(path) }}</span>
+          <button
+            type="button"
+            class="btn-quiet"
+            :aria-label="`Remove ${designName(path)}`"
+            :data-testid="`flow-design-remove-${designName(path)}`"
+            @click="removeDesign(path)"
+          >
+            <Icon name="close" :size="11" />
+          </button>
+        </li>
+      </ul>
+      <span v-if="designNote" class="fin-hint fin-bad" role="status" data-testid="flow-designs-note">{{ designNote }}</span>
     </div>
 
     <div class="fin-options">
@@ -808,6 +878,44 @@ async function start(): Promise<void> {
 .fin-name {
   font-size: var(--fs-ui);
   color: var(--text-body);
+}
+
+.fin-drop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--rc);
+}
+
+.fin-drop.is-over {
+  border-color: var(--green);
+  background: color-mix(in srgb, var(--green) 8%, transparent);
+}
+
+.fin-designs {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fin-design {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.fin-design .fin-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .fin-options {
