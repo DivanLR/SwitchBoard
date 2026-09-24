@@ -49,6 +49,7 @@ export interface MockDriver {
   updateEvent: (sessionId: string, eventId: string, payload: Record<string, unknown>) => void
   focusSession: (sessionId: string) => void
   focusInbox: (requestId: string) => void
+  focusFlow: (projectId: string, runId: string) => void
   setCommands: (
     projectId: string,
     commands: (string | { name: string; description?: string })[],
@@ -65,6 +66,7 @@ export interface MockDriver {
   setAvailableModels: (models: { id: string; label: string; description: string }[]) => void
   setBackgroundTasks: (sessionId: string, tasks: { taskId: string; description: string }[]) => void
   setTurnMode: (sessionId: string, mode: 'advisor' | 'orchestrator' | null) => void
+  setJevRoute: (sessionId: string, route: { model: string; switched: boolean; note: string } | null) => void
   emitLines: (sessionId: string, lines: string[]) => void
   raisePermission: (options: {
     projectId: string
@@ -372,6 +374,7 @@ export function installMockHost(scenario: MockScenario): void {
     },
   ]
   let settings: AnyRecord = { ...(scenario.settings as unknown as AnyRecord) }
+  let jevKey: string | null = null
 
   const listeners = new Map<string, Set<(payload: unknown) => void>>()
   function push(channel: string, payload: unknown): void {
@@ -447,6 +450,11 @@ export function installMockHost(scenario: MockScenario): void {
     session.statusDetail = detail ?? null
     push('push.sessionStatus', { ...session })
     pushCounters()
+    for (const [runId, entry] of liveByRun) {
+      if (entry.sessionId !== sessionId) continue
+      const run = flowRun(runId)
+      if (run) pushFlow(run.projectId as string)
+    }
   }
 
   const sends: { sessionId: string; text: string }[] = []
@@ -473,6 +481,13 @@ export function installMockHost(scenario: MockScenario): void {
   const flowRunsByProject = new Map<string, AnyRecord[]>()
   const flowStagesByRun = new Map<string, AnyRecord[]>()
   const flowStacksByProject = new Map<string, string[]>()
+  const liveByRun = new Map<string, { stage: string; sessionId: string; step: string; index: number; total: number }>()
+
+  function stepLabelFor(text: string): string {
+    const first = text.split('\n').find((line) => line.trim())?.trim() ?? ''
+    if (/^\/[\w:.-]+/.test(first)) return first.split(/\s+/)[0]
+    return first.length > 90 ? `${first.slice(0, 89)}…` : first || 'Starting the session'
+  }
   let adoFeatures: AnyRecord[] = []
   let adoNote: string | null = null
   let adoConnected = true
@@ -503,11 +518,23 @@ export function installMockHost(scenario: MockScenario): void {
     return { tasksDone: null, tasksTotal: null, verdict: null, findings: [], unmet: [], prUrl: null, prId: null, verify: null }
   }
 
-  const flowSnapshot = (projectId: string): { runs: AnyRecord[]; stages: AnyRecord[] } => {
+  const flowSnapshot = (projectId: string): { runs: AnyRecord[]; stages: AnyRecord[]; live: AnyRecord[] } => {
     const runs = flowRunsByProject.get(projectId) ?? []
+    const ids = new Set(runs.map((run) => String(run.id)))
+    const live = [...liveByRun.entries()]
+      .filter(([runId]) => ids.has(runId))
+      .map(([runId, entry]) => ({
+        runId,
+        stage: entry.stage,
+        step: entry.step,
+        index: entry.index,
+        total: entry.total,
+        waiting: sessions.get(entry.sessionId)?.status === 'needs_you',
+      }))
     return {
       runs: [...runs],
       stages: runs.flatMap((run) => [...(flowStagesByRun.get(String(run.id)) ?? [])]),
+      live,
     }
   }
 
@@ -565,7 +592,9 @@ export function installMockHost(scenario: MockScenario): void {
         feedback: null,
       })
       updateRun(runId, { stage, status: 'running' })
-      deliver(session.id, `Working on the ${stage} stage.\nSWB_FLOW`)
+      const text = `Working on the ${stage} stage.\nSWB_FLOW`
+      liveByRun.set(runId, { stage, sessionId: session.id, step: stepLabelFor(text), index: 1, total: 1 })
+      deliver(session.id, text)
       pushFlow(projectId)
     })
   }
@@ -575,6 +604,8 @@ export function installMockHost(scenario: MockScenario): void {
       const row = flowStage(runId, stage)
       updateStage(runId, stage, { status: 'running', sessionId: session.id, attempts: Number(row?.attempts ?? 0) + 1 })
       updateRun(runId, { status: 'running' })
+      const index = (liveByRun.get(runId)?.total ?? 0) + 1
+      liveByRun.set(runId, { stage, sessionId: session.id, step: stepLabelFor(text), index, total: index })
       deliver(session.id, text)
       const run = flowRun(runId)
       if (run) pushFlow(run.projectId as string)
@@ -584,6 +615,7 @@ export function installMockHost(scenario: MockScenario): void {
   function advanceFlow(projectId: string, runId: string): void {
     const run = flowRun(runId)
     if (!run) return
+    liveByRun.delete(runId)
     const order = stagesOfRun(run)
     const next = order[order.indexOf(String(run.stage)) + 1]
     if (!next) {
@@ -1450,6 +1482,7 @@ export function installMockHost(scenario: MockScenario): void {
       const runId = String(req.runId)
       const run = flowRun(runId)
       if (!run) throw { code: 'NOT_FOUND', message: 'Run not found' }
+      liveByRun.delete(runId)
       updateStage(runId, run.stage as string, { status: 'skipped', finishedAt: new Date().toISOString() })
       if (run.stage === stagesOfRun(run).at(-1)) {
         updateRun(runId, { status: 'done', finishedAt: new Date().toISOString() })
@@ -1462,8 +1495,17 @@ export function installMockHost(scenario: MockScenario): void {
     'flow.fix': (req) => {
       const runId = String(req.runId)
       const run = flowRun(runId)
-      const row = run ? flowStage(runId, 'review') : undefined
-      if (!run || run.stage !== 'review' || !row || (row.report as AnyRecord | null)?.verdict !== 'needs_fixes') {
+      if (!run) throw { code: 'NOT_FOUND', message: 'Run not found' }
+      if (run.stage === 'test') {
+        const row = flowStage(runId, 'test')
+        if (!row || row.status !== 'failed') {
+          throw { code: 'RULE_NOT_ALLOWED', message: 'Fix only applies to a test that failed.' }
+        }
+        continueFlowStage(runId, 'test', 'Fix the failing tests, keep everything else green, and commit.\nSWB_FLOW')
+        return flowSnapshot(run.projectId as string)
+      }
+      const row = flowStage(runId, 'review')
+      if (run.stage !== 'review' || !row || (row.report as AnyRecord | null)?.verdict !== 'needs_fixes') {
         throw { code: 'RULE_NOT_ALLOWED', message: 'Fix only applies to a review that found something to fix.' }
       }
       continueFlowStage(runId, 'review', fixText(row))
@@ -1492,6 +1534,7 @@ export function installMockHost(scenario: MockScenario): void {
       const run = flowRun(runId)
       if (!run) throw { code: 'NOT_FOUND', message: 'Run not found' }
       const stage = flowStage(runId, run.stage as string)
+      liveByRun.delete(runId)
       if (stage?.status === 'running' && stage.sessionId) {
         interrupts.push(String(stage.sessionId))
         setStatus(String(stage.sessionId), 'done')
@@ -1787,6 +1830,23 @@ export function installMockHost(scenario: MockScenario): void {
       settings = { ...settings, ...req }
       return { ...settings }
     },
+    'jev.status': () => ({ configured: jevKey !== null, encryption: true }),
+    'jev.setKey': (req) => {
+      const key = typeof req.key === 'string' ? req.key.trim() : ''
+      if (key.length < 8 || key.length > 400 || /\s/.test(key)) {
+        throw { code: 'INVALID_PATH', message: 'That does not look like an API key: paste the key alone, with no spaces.' }
+      }
+      jevKey = key
+      return { configured: true, encryption: true }
+    },
+    'jev.clearKey': () => {
+      jevKey = null
+      return { configured: false, encryption: true }
+    },
+    'jev.test': () =>
+      jevKey
+        ? { ok: true, message: 'Jev answered: worker model, 92% sure.' }
+        : { ok: false, message: 'No Jev API key is set.' },
     'models.available': () => availableModels,
   }
 
@@ -1840,6 +1900,7 @@ export function installMockHost(scenario: MockScenario): void {
     updateEvent: (sessionId, eventId, payload) => updateEvent(sessionId, eventId, payload),
     focusSession: (sessionId) => push('push.focusRequest', { target: 'session', sessionId }),
     focusInbox: (requestId) => push('push.focusRequest', { target: 'inbox', requestId }),
+    focusFlow: (projectId, runId) => push('push.focusRequest', { target: 'flow', projectId, runId }),
     setCommands: (projectId, commands) => {
       const shaped = commands.map((c) => (typeof c === 'string' ? { name: c } : c))
       projectCommands.set(projectId, shaped)
@@ -1880,6 +1941,12 @@ export function installMockHost(scenario: MockScenario): void {
       const s = sessions.get(sessionId)
       if (!s) return
       ;(s as unknown as AnyRecord).currentMode = mode
+      push('push.sessionStatus', { ...s })
+    },
+    setJevRoute: (sessionId, route) => {
+      const s = sessions.get(sessionId)
+      if (!s) return
+      ;(s as unknown as AnyRecord).jevRoute = route
       push('push.sessionStatus', { ...s })
     },
     endSession: (sessionId) => {
@@ -2026,6 +2093,7 @@ export function installMockHost(scenario: MockScenario): void {
       if (patch.status === 'review' || patch.status === 'failed') {
         stagePatch.finishedAt = new Date().toISOString()
         updateRun(runId, { status: 'waiting' })
+        liveByRun.delete(runId)
       }
       updateStage(runId, stage, stagePatch)
       pushFlow(run.projectId as string)
@@ -2057,6 +2125,7 @@ export function installMockHost(scenario: MockScenario): void {
         finishedAt: new Date().toISOString(),
       })
       updateRun(runId, { status: 'waiting' })
+      liveByRun.delete(runId)
       pushFlow(run.projectId as string)
       if (!failed) maybeAutopilotAdvance(runId, 'test')
     },
@@ -2075,6 +2144,7 @@ export function installMockHost(scenario: MockScenario): void {
         return { ...repo, prUrl: pr?.prUrl ?? null, prId: pr?.prId ?? null }
       })
       updateRun(runId, { prUrl, prId, repos, status: 'waiting' })
+      liveByRun.delete(runId)
       pushFlow(run.projectId as string)
       maybeAutopilotAdvance(runId, 'ship')
     },

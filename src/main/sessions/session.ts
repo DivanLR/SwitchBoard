@@ -33,6 +33,7 @@ import { MessageMapper, type EventSink } from './message-mapper'
 import { toAvailableModels } from './model-catalog'
 import { modelDeviation, nextStrongestModel } from './model-fallback'
 import { classifyWorkload, mainLoopModel } from './model-routing'
+import { jevRoute, type JevAnswer, type JevRoute } from './jev-router'
 
 const EXIT_GRACE_MS = 5_000
 
@@ -126,8 +127,11 @@ interface HostedSessionOptions {
     modelMode: ModelMode
     autoModelRouting: boolean
     effort: EffortLevel
+    jevSwitchLimit?: number
   }
   onTurnMode?: (mode: 'advisor' | 'orchestrator' | null) => void
+  askJev?: (text: string) => Promise<JevAnswer>
+  onRoute?: (route: JevRoute | null) => void
   mode: SessionMode
   containerised?: boolean
   denyTool?: (toolName: string, input: unknown) => string | null
@@ -175,6 +179,7 @@ export interface SessionHost {
   reloadPlugins(): Promise<void>
   mcpServerStatus(): Promise<McpServerStatus[]>
   reconnectMcpServer(name: string): Promise<void>
+  slashCommands?(): Promise<string[]>
 }
 
 export function explainExit(raw: string, containerised: boolean): string {
@@ -354,6 +359,7 @@ export class HostedSession implements SessionHost {
     this.captureBackgroundTasks(message)
     this.capturePermissionMode(message)
     this.captureModel(message)
+    this.captureContext(message)
     this.captureUsage(message)
     this.maybeDowngradeOnLimit(message)
     this.trackMcpCalls(message)
@@ -422,21 +428,69 @@ export class HostedSession implements SessionHost {
     if (!next) return
     this.options.effort = next.effort
     if (this.downgraded) return
-    this.options.mainModel = this.options.workerMainLoop
-      ? next.workerModel
-      : mainLoopModel(next.modelMode, next)
+    const routed =
+      next.modelMode === 'jev' && this.routedModel && [next.intelligentModel, next.workerModel].includes(this.routedModel)
+        ? this.routedModel
+        : null
+    this.options.mainModel = this.options.workerMainLoop ? next.workerModel : (routed ?? mainLoopModel(next.modelMode, next))
     this.options.modelMode = next.modelMode
     this.options.autoModelRouting = next.autoModelRouting
+    this.switchLimit = (next.jevSwitchLimit ?? this.switchLimit / 1000) * 1000
+  }
+
+  private routedModel: string | null = null
+
+  private switchLimit = 60_000
+
+  private contextTokens: number | null = null
+
+  private captureContext(message: SDKMessage): void {
+    const msg = message as {
+      type?: string
+      parent_tool_use_id?: string | null
+      message?: { usage?: { input_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number } }
+    }
+    const usage = msg.type === 'assistant' && !msg.parent_tool_use_id ? msg.message?.usage : undefined
+    if (!usage) return
+    this.contextTokens =
+      (usage.input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0)
+  }
+
+  private jevEnabled(): boolean {
+    return !!this.options.askJev && this.options.modelMode === 'jev' && !this.downgraded && !this.options.workerMainLoop
+  }
+
+  private applyJev(answer: JevAnswer, text: string): void {
+    const next = this.options.resolveModels?.()
+    const current = this.options.mainModel ?? next?.intelligentModel ?? 'default'
+    const route = jevRoute({
+      answer,
+      current,
+      models: { intelligent: next?.intelligentModel ?? current, worker: next?.workerModel ?? current },
+      contextTokens: this.contextTokens ?? (this.options.resumeSdkSessionId ? Number.POSITIVE_INFINITY : null),
+      limitTokens: this.switchLimit,
+    })
+    this.routedModel = route.model
+    this.options.mainModel = route.model
+    this.options.onRoute?.(route)
+    if (!answer.ok) {
+      const auto = classifyWorkload(text)
+      this.options.onTurnMode?.(auto === 'plan' || !this.startedPaired ? null : auto)
+    } else {
+      this.options.onTurnMode?.(null)
+    }
+    this.applyMainModel()
   }
 
   private applyModelForTurn(text: string): void {
     if (!this.options.autoModelRouting) return
-    const auto = classifyWorkload(text)
+    const workload = classifyWorkload(text)
     const forced = this.options.modelMode
-    const pinned = forced === 'advisor' || forced === 'orchestrator' ? forced : null
-    const workload = pinned && auto !== 'plan' ? pinned : auto
     this.options.onTurnMode?.(workload === 'plan' || forced === 'basic' || !this.startedPaired ? null : workload)
+    this.applyMainModel()
+  }
 
+  private applyMainModel(): void {
     const model = this.options.mainModel
     const wanted = model && model !== 'default' ? model : undefined
     const target = wanted ?? '__default__'
@@ -491,6 +545,10 @@ export class HostedSession implements SessionHost {
       )
     } catch {
     }
+  }
+
+  async slashCommands(): Promise<string[]> {
+    return this.q ? (await this.q.supportedCommands()).map((c) => c.name) : []
   }
 
   async mcpServerStatus(): Promise<McpServerStatus[]> {
@@ -582,6 +640,10 @@ export class HostedSession implements SessionHost {
     }
     this.options.mainModel = next
     this.downgraded = true
+    if (this.routedModel) {
+      this.routedModel = null
+      this.options.onRoute?.(null)
+    }
     this.appliedModel = null
     void this.q?.setModel(next).catch(() => {})
     this.options.onModel?.(next)
@@ -687,7 +749,31 @@ export class HostedSession implements SessionHost {
     if (this.sandbox) text = toContainerPaths(text, this.sandbox.mounts)
     this.refreshModelSettings()
     this.applyEffort(this.options.effort ?? DEFAULT_SETTINGS.effort)
+    if (this.jevEnabled() && this.options.askJev) {
+      const ask = this.options.askJev
+      this.turnInFlight = true
+      this.jevWaiting = { eventId, text }
+      this.recomputeStatus()
+      void ask(text)
+        .catch((): JevAnswer => ({ ok: false, why: 'Jev could not be reached' }))
+        .then((answer) => {
+          if (this.jevWaiting?.eventId !== eventId) return
+          this.jevWaiting = null
+          if (this.stopping || this.fatal) return
+          this.applyJev(answer, text)
+          this.pushTurn(eventId, text)
+        })
+      return
+    }
+    if (this.routedModel) {
+      this.routedModel = null
+      this.options.onRoute?.(null)
+    }
     this.applyModelForTurn(text)
+    this.pushTurn(eventId, text)
+  }
+
+  private pushTurn(eventId: string, text: string): void {
     this.options.sink.update(eventId, { text, pending: false }, { persist: true })
     this.mapper.noteDelivered(text)
     this.input.push({
@@ -723,7 +809,14 @@ export class HostedSession implements SessionHost {
     return true
   }
 
+  private jevWaiting: QueuedSend | null = null
+
   async interrupt(): Promise<{ stillQueued: number }> {
+    const waiting = this.jevWaiting
+    this.jevWaiting = null
+    if (waiting) {
+      this.options.sink.update(waiting.eventId, { text: waiting.text, pending: false, withdrawn: true }, { persist: true })
+    }
     try {
       await this.q?.interrupt()
     } catch {

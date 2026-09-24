@@ -15,6 +15,7 @@ describe('a fresh install', () => {
     expect(settings.intelligentModel).not.toBe(settings.workerModel)
     expect(settings.modelMode).toBe('auto')
     expect(settings.autoModelRouting).toBe(true)
+    expect(settings.jevSwitchLimit).toBe(60)
 
     expect(settings.effort).toBe('xhigh')
     expect(settings.subagentEffort).toBe('low')
@@ -101,5 +102,30 @@ describe('reading a settings row an install already stored', () => {
     expect(settings.get().defaultEngine).toBe('codex')
     expect(settings.get().codexModel).toBe('gpt-5-codex')
     expect(DEFAULT_SETTINGS.defaultEngine).toBe('claude')
+  })
+
+  it('reads a retired Advisor or Orchestrator mode back as Auto, and defaults the switch limit', () => {
+    const db = openDatabase(':memory:')
+    const settings = createRepositories(db).settings
+    db.prepare(`INSERT INTO settings (key, value) VALUES ('settings', @value)`).run({
+      value: JSON.stringify({ modelMode: 'advisor' }),
+    })
+    expect(settings.get().modelMode).toBe('auto')
+    expect(settings.get().jevSwitchLimit).toBe(60)
+
+    db.prepare(`UPDATE settings SET value = @value WHERE key = 'settings'`).run({
+      value: JSON.stringify({ modelMode: 'orchestrator' }),
+    })
+    expect(settings.get().modelMode).toBe('auto')
+  })
+
+  it('keeps Jev mode and a stored switch limit as an install set them', () => {
+    const db = openDatabase(':memory:')
+    const settings = createRepositories(db).settings
+    db.prepare(`INSERT INTO settings (key, value) VALUES ('settings', @value)`).run({
+      value: JSON.stringify({ modelMode: 'jev', jevSwitchLimit: 120 }),
+    })
+    expect(settings.get().modelMode).toBe('jev')
+    expect(settings.get().jevSwitchLimit).toBe(120)
   })
 })

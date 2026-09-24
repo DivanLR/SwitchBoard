@@ -551,6 +551,30 @@ test('autopilot with autoShip on raises the pull request stage automatically too
   await expect(page.getByTestId('flow-stage-ship')).toContainText('running')
 })
 
+test('every question of one AskUserQuestion call is shown, and each stays until it is answered', async ({ page }) => {
+  await startTextRun(page)
+  const runId = await currentRunId(page)
+  await expect(page.getByTestId('flow-stage-session')).toBeVisible()
+  const first = await page.evaluate((id) => window.__mock.askFlowQuestion(id, 'Which database?', ['Postgres', 'SQL Server']), runId)
+  const second = await page.evaluate((id) => window.__mock.askFlowQuestion(id, 'Which auth?', ['Entra', 'None']), runId)
+  const cards = page.getByTestId('mini-terminal-question')
+  await expect(cards).toHaveCount(2)
+  await expect(cards.nth(0)).toContainText('Which database?')
+  await expect(cards.nth(1)).toContainText('Which auth?')
+
+  await page.getByTestId('question-option-Entra').click()
+  await expect(cards).toHaveCount(1)
+  await expect(cards).toContainText('Which database?')
+  await page.getByTestId('question-option-Postgres').click()
+  await expect(cards).toHaveCount(0)
+  await expect
+    .poll(async () => (await page.evaluate(() => window.__mock.state().answers)).slice(-2))
+    .toEqual([
+      { eventId: second, choice: 'Entra' },
+      { eventId: first, choice: 'Postgres' },
+    ])
+})
+
 test('a question the stage session asks through AskUserQuestion is answered inline, into that tool call', async ({
   page,
 }) => {
@@ -743,4 +767,134 @@ test('the popup shows the pending inbox count for this project, and answering it
   await page.getByTestId('flow-popup-inbox').click()
   await expect(page.getByTestId('flow-popup')).toHaveCount(0)
   await expect(page.getByTestId('inbox-badge')).toBeVisible()
+})
+
+test('the stage card explains what the stage does, its commands, and the live step while it runs', async ({ page }) => {
+  await startTextRun(page)
+  const runId = await currentRunId(page)
+
+  await expect(page.getByTestId('flow-stage-work')).toContainText('Writes the spec from the source')
+  await expect(page.getByTestId('flow-stage-commands')).toContainText('/speckit-specify')
+  await expect(page.getByTestId('flow-stage-commands')).toContainText('when the project has no constitution yet')
+  await expect(page.getByTestId('flow-stage-step')).toContainText('Step 1 of 1')
+
+  await page.evaluate((id) => window.__mock.reportFlowStage(id, 'spec', { status: 'review', summary: 'Spec drafted.' }), runId)
+  await expect(page.getByTestId('flow-stage-step')).toHaveCount(0)
+
+  await page.getByTestId('flow-approve').click()
+  await expect(page.getByTestId('flow-stage-work')).toContainText('Writes the plan and the task list')
+  await expect(page.getByTestId('flow-stage-commands')).toContainText('/speckit-plan')
+  await expect(page.getByTestId('flow-stage-step')).toContainText('Step 1 of 1')
+})
+
+test('a stage session blocked mid task shows needs you in the run list, the stage rail and the stage card', async ({
+  page,
+}) => {
+  await startTextRun(page, 'Blocked run')
+  const runId = await currentRunId(page)
+  await expect(page.getByTestId('flow-stage-session')).toBeVisible()
+
+  await page.evaluate((id) => window.__mock.askFlowQuestion(id, 'Which option?', ['Yes', 'No']), runId)
+
+  await expect(page.getByTestId(`flow-run-needs-you-${runId}`)).toBeVisible()
+  await expect(page.getByTestId('flow-stage-spec')).toContainText('needs you')
+  await expect(page.getByTestId('flow-stage-waiting')).toContainText('waiting for you')
+  await expect(page.getByTestId('flow-terminal-toggle')).toBeDisabled()
+
+  await page.getByTestId('question-option-Yes').click()
+  await expect(page.getByTestId(`flow-run-needs-you-${runId}`)).toHaveCount(0)
+  await expect(page.getByTestId('flow-stage-waiting')).toHaveCount(0)
+  await expect(page.getByTestId('flow-stage-spec')).not.toContainText('needs you')
+})
+
+test('a failed feature Test offers Fix the failing tests, which restarts the stage', async ({ page }) => {
+  await startTextRun(page)
+  const runId = await currentRunId(page)
+  await approveThrough(page, runId, ['spec', 'plan', 'build', 'clean'])
+  await expect(page.getByTestId('flow-stage-test')).toContainText('running')
+
+  await page.evaluate(
+    (id) => window.__mock.reportFlowStage(id, 'test', { status: 'failed', summary: 'Two suites failed.' }),
+    runId,
+  )
+  await expect(page.getByTestId('flow-stage-status')).toHaveText('failed')
+  await expect(page.getByTestId('flow-stage-actions').locator('button')).toHaveText([
+    'Fix the failing tests',
+    'Retry',
+    'Skip this stage',
+  ])
+
+  await page.getByTestId('flow-fix').click()
+  await expect.poll(() => lastSend(page)).toContain('Fix the failing tests')
+  await expect(page.getByTestId('flow-stage-status')).toHaveText('running')
+})
+
+test('the intake warns about commands this session does not have for the chosen kind, without blocking Start', async ({
+  page,
+}) => {
+  await openFlow(page)
+  await page.getByTestId('flow-new').click()
+  await expect(page.getByTestId('flow-prereqs-warning')).toHaveCount(0)
+
+  await page.evaluate(() => window.__mock.setCommands('p-alpha', ['speckit-specify']))
+  await expect(page.getByTestId('flow-prereqs-warning')).toContainText('/speckit-clarify')
+  await expect(page.getByTestId('flow-prereqs-warning')).not.toContainText('/speckit-constitution')
+
+  await page.getByTestId('flow-text-title').fill('Needs plugins')
+  await expect(page.getByTestId('flow-start')).toBeEnabled()
+  await expect(page.getByTestId('flow-prereqs-warning')).toBeVisible()
+})
+
+test('the intake and the run header say why autopilot cannot run unattended in this session mode', async ({ page }) => {
+  const scenario = twoProjectScenario()
+  Object.assign(scenario.projects[0], { defaultSessionMode: 'default' })
+  await page.addInitScript(installMockHost, scenario)
+  await page.goto('/')
+  await page.getByTestId('open-flow').click()
+  await page.getByTestId('flow-new').click()
+  await expect(page.getByTestId('flow-mode-note')).toHaveCount(0)
+
+  await page.getByTestId('flow-autopilot-new').click()
+  await expect(page.getByTestId('flow-mode-note')).toContainText('Default mode asks you before each command')
+
+  await page.getByTestId('flow-text-title').fill('Guarded run')
+  await page.getByTestId('flow-start').click()
+  await expect(page.getByTestId('flow-run')).toBeVisible()
+  await expect(page.getByTestId('flow-mode-note')).toContainText('Default mode asks you before each command')
+})
+
+test('a project in plan mode always shows the mode note, even before autopilot is on', async ({ page }) => {
+  const scenario = twoProjectScenario()
+  Object.assign(scenario.projects[0], { defaultSessionMode: 'plan' })
+  await page.addInitScript(installMockHost, scenario)
+  await page.goto('/')
+  await page.getByTestId('open-flow').click()
+  await page.getByTestId('flow-new').click()
+  await expect(page.getByTestId('flow-mode-note')).toContainText('accept edits, not plan first')
+})
+
+test('a Flow attention notification opens the popup on the right project and run', async ({ page }) => {
+  await startTextRun(page)
+  const runId = await currentRunId(page)
+  await page.getByTestId('flow-popup-close').click()
+  await expect(page.getByTestId('flow-popup')).toHaveCount(0)
+
+  await page.evaluate(({ runId }) => window.__mock.focusFlow('p-alpha', runId), { runId })
+  await expect(page.getByTestId('flow-popup')).toBeVisible()
+  await expect(page.getByTestId('flow-run')).toHaveAttribute('data-run-id', runId)
+})
+
+test('a Flow attention notification for a project other than the one selected still opens the popup', async ({ page }) => {
+  await startTextRun(page)
+  const runId = await currentRunId(page)
+  await page.getByTestId('flow-popup-close').click()
+  await expect(page.getByTestId('flow-popup')).toHaveCount(0)
+
+  await page.getByTestId('sidebar-project-beta').click()
+  await expect(page.getByTestId('sidebar-project-beta')).toHaveClass(/active/)
+
+  await page.evaluate(({ runId }) => window.__mock.focusFlow('p-alpha', runId), { runId })
+  await expect(page.getByTestId('flow-popup')).toBeVisible()
+  await expect(page.getByTestId('flow-run')).toHaveAttribute('data-run-id', runId)
+  await expect(page.getByTestId('sidebar-project-alpha')).toHaveClass(/active/)
 })

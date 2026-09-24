@@ -23,7 +23,7 @@ import {
   flowStagesOf,
   verifyVerdict,
 } from '@shared/domain'
-import type { FlowArtefactKind, FlowCompanionRequest, FlowStartSource, IpcError } from '@shared/ipc-types'
+import type { FlowArtefactKind, FlowCompanionRequest, FlowSnapshot, FlowStartSource, IpcError } from '@shared/ipc-types'
 import {
   SDD_COMMANDS,
   bugResultOf,
@@ -58,17 +58,19 @@ import {
   reviewSteps,
   revisePrompt,
   sddHandshake,
-  shipForbidden,
+  flowToolGuard,
   shipPrompt,
   specHandshake,
   specifyPrompt,
+  testFixPrompt,
   testWritePrompt,
   adoSignInPrompt,
   featuresPrompt,
   withRepos,
   type ShipTest,
 } from './flow-prompts'
-import { allowedPullRequestUrl, type FlowMarker, type FlowStageMarker } from './flow-markers'
+import { FLOW_MARKER, allowedPullRequestUrl, type FlowMarker, type FlowStageMarker } from './flow-markers'
+import { commandSource, missingCommands, slashCommandOf } from '@shared/flow-plan'
 import { artefactRelPath, defaultArtefactKind, resolveArtefactPath } from './artefacts'
 import { STACK_ORDER, detectFlowStacks } from './stacks'
 import {
@@ -85,8 +87,16 @@ import {
   verifyPrompt as buildVerifyPrompt,
   type PlannedSuite,
 } from '@main/verify/verify-dispatch'
-import { createWorktree, currentBranch, originHost, removeWorktree, resolvesToCommit, worktreeRoot } from './worktrees'
-import type { FlowFeatureList } from '@shared/domain'
+import {
+  createWorktree,
+  currentBranch,
+  isIgnored,
+  originHost,
+  removeWorktree,
+  resolvesToCommit,
+  worktreeRoot,
+} from './worktrees'
+import type { FlowFeatureList, FlowStageLive } from '@shared/domain'
 
 export const ADO_SERVER = 'ado'
 
@@ -132,6 +142,7 @@ export const MAX_CONVERGE_ROUNDS = 3
 
 interface FlowCallbacks {
   onFlowChanged: (projectId: string) => void
+  onAttention?: (note: { projectId: string; runId: string; text: string }) => void
 }
 
 type FeaturesWaiter = {
@@ -150,6 +161,7 @@ export interface FlowGit {
   root: typeof worktreeRoot
   resolves: typeof resolvesToCommit
   origin: typeof originHost
+  ignored?: typeof isIgnored
 }
 
 const defaultGit: FlowGit = {
@@ -159,6 +171,36 @@ const defaultGit: FlowGit = {
   root: worktreeRoot,
   resolves: resolvesToCommit,
   origin: originHost,
+  ignored: isIgnored,
+}
+
+const LOCAL_CONFIG = ['CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md', '.claude', join('.claude', 'settings.local.json')]
+
+const CLAUDE_WORKTREES = /[\\/]\.claude[\\/]worktrees([\\/]|$)/
+
+function countTasks(worktreePath: string, specDir: string): { done: number; total: number } | null {
+  const file = resolveArtefactPath(worktreePath, join(specDir, 'tasks.md'))
+  if (!file) return null
+  try {
+    const boxes = readFileSync(file, 'utf8').match(/^\s*-\s*\[[ xX]\]/gm) ?? []
+    return { done: boxes.filter((box) => /\[[xX]\]/.test(box)).length, total: boxes.length }
+  } catch {
+    return null
+  }
+}
+
+function stepLabel(text: string): string {
+  const body = text.replace(/^This feature spans[\s\S]*?\n\n/, '')
+  const command = slashCommandOf(body)
+  if (command) return `/${command}`
+  if (body.includes(`${FLOW_MARKER}:`)) return 'Reporting the stage result'
+  if (body.includes('SWB_VERIFY')) return 'Running the test suites'
+  const first = body.split('\n').find((line) => line.trim())?.trim() ?? ''
+  return first.length > 90 ? `${first.slice(0, 89)}…` : first
+}
+
+function azureHost(host: string | null): boolean {
+  return !!host && (host.endsWith('dev.azure.com') || host.endsWith('.visualstudio.com'))
 }
 
 const REFUSED: Record<FlowStageAction, string> = {
@@ -239,6 +281,7 @@ export class FlowSupervisor {
   private looped = new Set<string>()
   private adoSessions = new Map<string, { sessionId: string; timer: ReturnType<typeof setTimeout> }>()
   private listings = new Map<string, Listing>()
+  private progress = new Map<string, { index: number; total: number }>()
 
   constructor(
     private repos: Repositories,
@@ -259,6 +302,66 @@ export class FlowSupervisor {
     )) {
       this.callbacks.onFlowChanged(projectId)
     }
+  }
+
+  snapshot(projectId: string): FlowSnapshot & { listing: string | null; signingIn: boolean } {
+    const runs = this.repos.flowRuns.listForProject(projectId)
+    const ids = new Set(runs.map((run) => run.id))
+    const live: FlowStageLive[] = []
+    for (const [sessionId, ctx] of this.sessionStage) {
+      if (!ids.has(ctx.runId)) continue
+      const step = this.current.get(sessionId)
+      const at = this.progress.get(sessionId)
+      live.push({
+        runId: ctx.runId,
+        stage: ctx.stage,
+        step: step ? stepLabel(step.text) : 'Starting the session',
+        index: at?.index ?? 0,
+        total: at?.total ?? 0,
+        waiting: this.waitingOn(sessionId),
+      })
+    }
+    return {
+      runs,
+      stages: this.repos.flowStages.listForProject(projectId),
+      live,
+      listing: this.listingSession(projectId),
+      signingIn: this.signingIn(projectId),
+    }
+  }
+
+  stageOf(sessionId: string): { projectId: string; runId: string } | null {
+    const ctx = this.sessionStage.get(sessionId)
+    const projectId = ctx ? this.repos.flowRuns.byId(ctx.runId)?.projectId : undefined
+    return ctx && projectId ? { projectId, runId: ctx.runId } : null
+  }
+
+  onSessionStatus(sessionId: string): void {
+    const at = this.stageOf(sessionId)
+    if (at) this.callbacks.onFlowChanged(at.projectId)
+  }
+
+  private waitingOn(sessionId: string): boolean {
+    try {
+      return this.manager.liveSessionRow(sessionId)?.status === 'needs_you'
+    } catch {
+      return false
+    }
+  }
+
+  private attention(run: Pick<FlowRun, 'id' | 'projectId' | 'title'>, text: string): void {
+    this.callbacks.onAttention?.({ projectId: run.projectId, runId: run.id, text: `${run.title}: ${text}` })
+  }
+
+  private auto(runId: string, action: () => Promise<unknown>): void {
+    const go = (): void => {
+      action().catch((error: unknown) => {
+        if ((error as Partial<IpcError> | null)?.code !== 'RULE_NOT_ALLOWED' || !this.busy.has(runId)) return
+        const timer = setTimeout(go, 250)
+        timer.unref?.()
+      })
+    }
+    go()
   }
 
   listingSession(projectId: string): string | null {
@@ -383,11 +486,14 @@ export class FlowSupervisor {
 
   private failSignIn(sessionId: string, error: string | null): void {
     const projectId = [...this.listings].find(([, listed]) => listed.sessionId === sessionId)?.[0]
+    const reason = error ?? 'the call failed and gave no reason'
     this.settleListing(
       sessionId,
       {
         code: 'MCP_NOT_CONNECTED',
-        message: `Azure DevOps did not sign in: ${error ?? 'the call failed and gave no reason'}. Reconnect to try again.`,
+        message: /TF400813/.test(reason)
+          ? `Azure DevOps is signed in with an account that has no access to this organisation: ${reason} Sign in with the account that belongs to the organisation (for the Azure CLI: az login --tenant <the organisation's tenant>), then Reconnect.`
+          : `Azure DevOps did not sign in: ${reason}. Reconnect to try again.`,
       },
       'gone',
     )
@@ -479,13 +585,20 @@ export class FlowSupervisor {
       taken.add(folder.toLowerCase())
       return { repoRoot: repo.path, root: this.git.root(repo.path, override ? join(override, folder) : null) }
     })
-    const tree = await this.git.create({ repoRoot: project.path, root, title, base, others })
+    const named = this.branchTitle(input.source, title)
+    const tree = await this.git.create({ repoRoot: project.path, root, title: named, base, others })
     const worktreePath = tree.path
     const made: FlowRepo[] = []
     for (const [at, repo] of companions.entries()) {
       try {
         const branch = tree.branch ?? undefined
-        const companion = await this.git.create({ repoRoot: repo.path, root: others[at].root, title, base: repo.baseBranch, branch })
+        const companion = await this.git.create({
+          repoRoot: repo.path,
+          root: others[at].root,
+          title: named,
+          base: repo.baseBranch,
+          branch,
+        })
         made.push({ ...repo, branch: companion.branch, worktreePath: companion.path })
       } catch (error) {
         for (const done of made.reverse()) {
@@ -501,6 +614,8 @@ export class FlowSupervisor {
       }
     }
     await copyMissing(project.path, worktreePath, '.specify')
+    await this.carryLocal(project.path, worktreePath)
+    for (const repo of made) if (repo.worktreePath) await this.carryLocal(repo.path, repo.worktreePath)
     if (process && slug) await this.carrySdd(project.path, worktreePath, process, slug)
 
     let specDir: string | null = null
@@ -509,6 +624,9 @@ export class FlowSupervisor {
       specDir = `specs/${input.source.specId}`
       await copyMissing(project.path, worktreePath, specDir)
       startStage = existsSync(join(worktreePath, specDir, 'tasks.md')) ? 'build' : 'plan'
+    } else if (kind === 'feature') {
+      specDir = this.nextSpecDir(project, worktreePath, input.source, title)
+      if (existsSync(join(worktreePath, '.specify'))) await pinFeature(worktreePath, specDir).catch(() => {})
     }
     if (slug) startStage = this.firstUndone(kind, worktreePath, slug) === 'assess' ? 'assess' : 'fix'
 
@@ -610,6 +728,55 @@ export class FlowSupervisor {
     return docs.find((stage) => !existsSync(join(root, sddDocPath(kind, slug, stage) ?? ''))) ?? null
   }
 
+  private branchTitle(source: FlowStartSource, title: string): string {
+    if (source.kind !== 'ado') return title
+    return title === `Feature ${source.featureId}` ? source.featureId : `${source.featureId} ${title}`
+  }
+
+  private async carryLocal(repoRoot: string, tree: string): Promise<void> {
+    const ignored = this.git.ignored ?? isIgnored
+    for (const rel of LOCAL_CONFIG) {
+      if (!existsSync(join(repoRoot, rel)) || existsSync(join(tree, rel)) || !(await ignored(repoRoot, rel))) continue
+      await cp(join(repoRoot, rel), join(tree, rel), {
+        recursive: true,
+        filter: (src) => !CLAUDE_WORKTREES.test(src),
+      }).catch(() => {})
+    }
+  }
+
+  private nextSpecDir(project: Project, worktreePath: string, source: FlowStartSource, title: string): string {
+    const listed = (dir: string): string[] => {
+      try {
+        return readdirSync(dir)
+      } catch {
+        return []
+      }
+    }
+    const numbers = [
+      ...listed(join(project.path, 'specs')),
+      ...listed(join(worktreePath, 'specs')),
+      ...this.repos.flowRuns.listForProject(project.id).map((run) => basename(run.specDir ?? '')),
+    ].flatMap((name) => {
+      if (/^\d{8}-\d{6}-/.test(name)) return []
+      const found = /^(\d{3,})-/.exec(name)
+      return found ? [Number(found[1])] : []
+    })
+    let numbering: unknown = null
+    try {
+      const options = JSON.parse(readFileSync(join(worktreePath, '.specify', 'init-options.json'), 'utf8')) as Record<string, unknown>
+      numbering = options.feature_numbering ?? options.branch_numbering
+    } catch {}
+    const prefix =
+      numbering === 'timestamp'
+        ? nowIso().replace(/[-:]/g, '').replace('T', '-').slice(0, 15)
+        : String(Math.max(0, ...numbers) + 1).padStart(3, '0')
+    const name =
+      source.kind === 'ado' && title === `Feature ${source.featureId}`
+        ? `feature-${source.featureId}`
+        : sddSlug(title).split('-').slice(0, 4).join('-')
+    return `specs/${prefix}-${name}`
+  }
+
   private async carrySdd(from: string, to: string, process: SddProcess, slug: string): Promise<void> {
     await copyMissing(from, to, join('.specify', 'extensions', process))
     for (const command of SDD_COMMANDS[process]) await copyMissing(from, to, join('.claude', 'skills', command.command))
@@ -686,12 +853,57 @@ export class FlowSupervisor {
     return this.exclusive(runId, async () => {
       const run = this.requireRun(runId)
       const stageRow = this.requireAction(run, 'fix')
-      if (run.stage === 'test') {
+      if (run.stage === 'test' && run.kind === 'bug') {
         await this.refix(run, stageRow)
         return
       }
-      await this.restartStage(run, stageRow, fixFindingsPrompt(stageRow.report, run), stageRow.feedback)
+      if (run.stage === 'review' && run.kind === 'bug') {
+        await this.reviewFixBug(run, stageRow)
+        return
+      }
+      if (run.stage === 'test') {
+        await this.beginStage(runId, 'test', testFixPrompt(stageRow.report?.verify ?? null, run))
+        return
+      }
+      const lead = fixFindingsPrompt(stageRow.report, run)
+      if (this.repos.flowStages.get(runId, 'test')?.status === 'skipped') {
+        await this.restartStage(run, stageRow, lead, stageRow.feedback)
+        return
+      }
+      await this.retest(run, stageRow, lead)
     })
+  }
+
+  private async retest(run: FlowRun, reviewRow: FlowStageRecord, lead: string): Promise<void> {
+    this.release(reviewRow.sessionId)
+    const stages = flowStagesOf(run.kind)
+    for (const stage of stages.slice(stages.indexOf('test') + 1, stages.indexOf('review') + 1)) {
+      this.repos.flowStages.update(run.id, stage, { status: 'pending', finishedAt: null })
+    }
+    this.repos.flowStages.update(run.id, 'review', {
+      summary: 'Fixing the findings below. The tests run again, then a fresh review.',
+    })
+    this.repos.flowRuns.update(run.id, { stage: 'test', status: 'waiting' })
+    this.callbacks.onFlowChanged(run.projectId)
+    await this.beginStage(run.id, 'test', lead)
+  }
+
+  private async reviewFixBug(run: FlowRun, reviewRow: FlowStageRecord): Promise<void> {
+    const fixRow = this.repos.flowStages.get(run.id, 'fix')
+    if (!fixRow) return
+    this.release(reviewRow.sessionId)
+    const stages = flowStagesOf(run.kind)
+    for (const stage of stages.slice(stages.indexOf('fix') + 1, stages.indexOf('review') + 1)) {
+      this.repos.flowStages.update(run.id, stage, { status: 'pending', finishedAt: null })
+    }
+    this.repos.flowRuns.update(run.id, { stage: 'fix', status: 'waiting' })
+    const back = { ...run, stage: 'fix' as const }
+    await this.restartStage(
+      back,
+      fixRow,
+      `${bugFixPrompt(back, run.stacks, run.repos)}\n${fixFindingsPrompt(reviewRow.report, run)}`,
+      null,
+    )
   }
 
   private async refix(run: FlowRun, testRow: FlowStageRecord): Promise<void> {
@@ -750,7 +962,7 @@ export class FlowSupervisor {
     const row = this.repos.flowStages.get(runId, run.stage)
     if (autopilot && !run.finishedAt && row) {
       if (row.status === 'review') this.maybeAutopilot(runId, run.stage)
-      else if (run.stage === 'ship' && row.status === 'pending' && run.autoShip) void this.ship(runId).catch(() => {})
+      else if (run.stage === 'ship' && row.status === 'pending' && run.autoShip) this.auto(runId, () => this.ship(runId))
     }
     return run
   }
@@ -936,6 +1148,7 @@ export class FlowSupervisor {
     const ctx = this.sessionStage.get(sessionId)
     if (!ctx) return
     this.sessionStage.delete(sessionId)
+    this.progress.delete(sessionId)
     this.pending.delete(sessionId)
     this.current.delete(sessionId)
     this.rounds.delete(sessionId)
@@ -991,7 +1204,10 @@ export class FlowSupervisor {
   private sendStep(sessionId: string, text: string): void {
     this.looped.delete(sessionId)
     this.current.set(sessionId, { text, resent: false })
+    const at = this.progress.get(sessionId)
+    if (at) at.index += 1
     this.manager.sendMessage(sessionId, text)
+    this.onSessionStatus(sessionId)
   }
 
   private async requireSpec(projectPath: string, specId: string): Promise<void> {
@@ -1102,7 +1318,8 @@ export class FlowSupervisor {
       additionalDirectories: run.repos.slice(1).flatMap((repo) => (repo.worktreePath ? [repo.worktreePath] : [])),
       effort: stage === 'build' ? 'max' : undefined,
       section: 'flow',
-      denyTool: stage === 'ship' ? shipForbidden : undefined,
+      env: run.kind === 'feature' && run.specDir ? { SPECIFY_FEATURE_DIRECTORY: run.specDir } : undefined,
+      denyTool: flowToolGuard(stage, this.reposOf(run).map((repo) => repo.baseBranch)),
     })
     this.manager.renameSession(session.id, `Flow · ${FLOW_STAGE_LABELS[stage]} · ${run.title}`.slice(0, 60))
     return session
@@ -1111,6 +1328,7 @@ export class FlowSupervisor {
   private release(sessionId: string | null): void {
     if (!sessionId) return
     this.sessionStage.delete(sessionId)
+    this.progress.delete(sessionId)
     this.pending.delete(sessionId)
     this.current.delete(sessionId)
     this.rounds.delete(sessionId)
@@ -1143,7 +1361,13 @@ export class FlowSupervisor {
   ): Promise<void> {
     const project = this.requireProject(run.projectId)
     this.release(stageRow.sessionId)
-    const session = await this.startStageSession(run, project, run.stage)
+    let session: { id: string }
+    try {
+      session = await this.startStageSession(run, project, run.stage)
+    } catch (error) {
+      if (!this.movedOn(run.id, run.stage)) this.failStage(run.id, run.stage, errorText(error), { retryOnce: false })
+      return
+    }
     if (this.movedOn(run.id, run.stage)) {
       this.release(session.id)
       return
@@ -1163,8 +1387,36 @@ export class FlowSupervisor {
     await this.prepare(run, run.stage)
     const tail = await this.tailFor(run, run.stage, session.id)
     if (!this.stillOn(run.id, run.stage, session.id)) return
+    if (!(await this.commandsReady(run, run.stage, session.id, tail))) return
     this.pending.set(session.id, tail)
+    this.progress.set(session.id, { index: 0, total: tail.length + 1 })
     this.sendStep(session.id, withRepos(prompt, run.repos))
+  }
+
+  private async commandsReady(run: FlowRun, stage: FlowStage, sessionId: string, steps: readonly string[]): Promise<boolean> {
+    const needed = steps.flatMap((step) => slashCommandOf(step) ?? [])
+    if (needed.length === 0) return true
+    const available = await Promise.resolve()
+      .then(() => this.manager.slashCommands(sessionId))
+      .catch((): null => null)
+    if (!this.stillOn(run.id, stage, sessionId)) return false
+    if (available === null) return true
+    const missing = missingCommands(needed, available)
+    if (missing.length === 0) return true
+    const sources = [...new Set(missing.map(commandSource))]
+    this.failStage(
+      run.id,
+      stage,
+      `This stage runs ${missing.map((name) => `/${name}`).join(' and ')}, which Claude Code does not have here. ` +
+        `Install ${sources.join(' and ')}, then Retry.`,
+      { retryOnce: false },
+    )
+    return false
+  }
+
+  private shipsToAzure(run: FlowRun): boolean {
+    const hosts = this.origins.get(run.id) ?? {}
+    return this.reposOf(run).some((repo) => azureHost(hosts[repo.projectId] ?? null))
   }
 
   private async prepare(run: FlowRun, stage: FlowStage): Promise<void> {
@@ -1190,7 +1442,7 @@ export class FlowSupervisor {
         .feature_directory
       pinned = typeof raw === 'string' ? raw : null
     } catch {}
-    for (const candidate of [pinned, reported]) {
+    for (const candidate of [run.specDir, pinned, reported]) {
       if (!candidate) continue
       const rel = (isAbsolute(candidate) ? relative(root, candidate) : candidate).replace(/\\/g, '/').replace(/\/+$/, '')
       const spec = resolveArtefactPath(root, join(rel, 'spec.md'))
@@ -1292,10 +1544,11 @@ export class FlowSupervisor {
   private async tailFor(run: FlowRun, stage: FlowStage, sessionId: string): Promise<string[]> {
     if (stage === 'test' && run.kind !== 'bug') return [await this.verifyStepPrompt(run, sessionId)]
     const plan = await this.planFor(run, stage, sessionId)
-    return plan.handshake ? [plan.handshake] : []
+    const again = stage === 'review' || stage === 'test' ? plan.steps : []
+    return [...again, ...(plan.handshake ? [plan.handshake] : [])]
   }
 
-  private async beginStage(runId: string, stage: FlowStage): Promise<void> {
+  private async beginStage(runId: string, stage: FlowStage, lead?: string): Promise<void> {
     const run = this.requireRun(runId)
     if (this.movedOn(runId, stage)) return
     const project = this.requireProject(run.projectId)
@@ -1334,12 +1587,25 @@ export class FlowSupervisor {
       }
     }
     await this.prepare(run, stage)
-    const plan = await this.planFor(run, stage, session.id)
+    if (stage === 'ship' && this.shipsToAzure(run)) {
+      try {
+        await this.requireAdo(session.id, 'Retry')
+      } catch (error) {
+        if (this.stillOn(runId, stage, session.id)) this.failStage(runId, stage, errorText(error), { retryOnce: false })
+        return
+      }
+    }
+    let queue: string[]
+    if (lead) queue = [lead, ...(await this.tailFor(run, stage, session.id))]
+    else {
+      const plan = await this.planFor(run, stage, session.id)
+      queue = [...plan.steps, ...(plan.handshake ? [plan.handshake] : [])]
+    }
     if (!this.stillOn(runId, stage, session.id)) return
-    const queue = [...plan.steps]
-    if (plan.handshake) queue.push(plan.handshake)
+    if (!(await this.commandsReady(run, stage, session.id, queue))) return
     const first = queue.shift()
     this.pending.set(session.id, queue)
+    this.progress.set(session.id, { index: 0, total: queue.length + (first ? 1 : 0) })
     if (first) this.sendStep(session.id, withRepos(first, run.repos))
   }
 
@@ -1352,7 +1618,10 @@ export class FlowSupervisor {
     this.rounds.set(sessionId, round + 1)
     this.looped.add(sessionId)
     const [first, ...rest] = this.buildRound(run)
-    this.pending.set(sessionId, [withRepos(first, run.repos), ...rest, buildHandshake()])
+    const again = [withRepos(first, run.repos), ...rest, buildHandshake()]
+    this.pending.set(sessionId, again)
+    const at = this.progress.get(sessionId)
+    if (at) at.total += again.length
     this.repos.flowStages.update(run.id, 'build', {
       summary: `Converge round ${round} appended unbuilt work, so round ${round + 1} of ${MAX_CONVERGE_ROUNDS} is running.`,
     })
@@ -1396,6 +1665,28 @@ export class FlowSupervisor {
         notes.push(`Converge still found unbuilt work after ${extra.rounds} round${extra.rounds === 1 ? '' : 's'}.`)
       }
     }
+    if ((stage === 'build' || stage === 'plan') && run.kind === 'feature' && run.specDir && run.worktreePath) {
+      const counted = countTasks(run.worktreePath, run.specDir)
+      extra.tasksDone = counted?.done ?? null
+      extra.tasksTotal = counted?.total ?? null
+      if (!counted) {
+        notes.push(`No tasks.md was found in ${run.specDir}, so the task count could not be measured.`)
+      } else if (
+        marker.tasksDone !== null &&
+        marker.tasksTotal !== null &&
+        (marker.tasksDone !== counted.done || marker.tasksTotal !== counted.total)
+      ) {
+        notes.push(
+          `The session reported ${marker.tasksDone} of ${marker.tasksTotal} tasks done; tasks.md shows ${counted.done} of ${counted.total}.`,
+        )
+      }
+    }
+    if (stage === 'review') {
+      const unscanned = this.reposOf(run).filter((repo) => !repo.stacks.includes('dotnet')).map((repo) => repo.name)
+      if (unscanned.length > 0) {
+        notes.push(`No review skill ran for ${unscanned.join(' or ')}; the session reviewed its changes by reading them.`)
+      }
+    }
     if (stage === 'plan' && run.checklist && run.specDir && run.worktreePath) {
       const open = openChecklistItems(run.worktreePath, run.specDir)
       extra.checklistOpen = open
@@ -1415,7 +1706,20 @@ export class FlowSupervisor {
       return
     }
     const patch: Parameters<Repositories['flowRuns']['update']>[1] = {}
-    if (stage === 'spec') patch.specDir = this.resolveSpecDir(run, marker.specDir)
+    if (stage === 'spec') {
+      const specDir = this.resolveSpecDir(run, marker.specDir)
+      if (!specDir && run.kind === 'feature') {
+        const where = [run.specDir, marker.specDir].filter((dir, at, all): dir is string => !!dir && all.indexOf(dir) === at)
+        this.failStage(
+          runId,
+          stage,
+          `The spec stage reported done, but no spec.md exists in ${where.length > 0 ? where.join(' or ') : 'the specs folder'}. Retry it.`,
+          { retryOnce: false },
+        )
+        return
+      }
+      patch.specDir = specDir
+    }
     if (stage === 'spec' && run.source === 'ado' && marker.title) patch.title = marker.title
     let prUrl = marker.prUrl
     let prId = marker.prId
@@ -1502,7 +1806,7 @@ export class FlowSupervisor {
     })
     this.repos.flowRuns.update(runId, { ...runPatch, status: 'waiting' })
     this.callbacks.onFlowChanged(run.projectId)
-    this.maybeAutopilot(runId, stage)
+    if (!this.maybeAutopilot(runId, stage)) this.attention(run, `${FLOW_STAGE_LABELS[stage]} waits for your approval.`)
   }
 
   private failStage(
@@ -1525,26 +1829,35 @@ export class FlowSupervisor {
     this.repos.flowRuns.update(runId, { status: 'waiting' })
     this.callbacks.onFlowChanged(run.projectId)
     if (opts.retryOnce && run.autopilot && stageRow?.attempts === 1) {
-      void this.retry(runId).catch(() => {})
+      this.auto(runId, () => this.retry(runId))
+      return
     }
+    const ran = stageRow?.status === 'running'
+    if (!opts.retryOnce && ran && run.autopilot && stage === 'test' && (stageRow?.attempts ?? 0) <= MAX_FIX_ROUNDS) {
+      this.auto(runId, () => this.fix(runId))
+      return
+    }
+    this.attention(run, `${FLOW_STAGE_LABELS[stage]} failed.`)
   }
 
-  private maybeAutopilot(runId: string, stage: FlowStage): void {
+  private maybeAutopilot(runId: string, stage: FlowStage): boolean {
     const run = this.repos.flowRuns.byId(runId)
-    if (!run?.autopilot || run.finishedAt) return
+    if (!run?.autopilot || run.finishedAt) return false
     const stageRow = this.repos.flowStages.get(runId, stage)
-    if (!stageRow || stageRow.status !== 'review') return
+    if (!stageRow || stageRow.status !== 'review') return false
     const report = stageRow.report
-    if (stage === 'build' && report?.tasksDone != null && report.tasksTotal != null && report.tasksDone < report.tasksTotal) {
-      return
+    if (stage === 'build' && (report?.tasksDone == null || report?.tasksTotal == null || report.tasksDone < report.tasksTotal)) {
+      return false
     }
-    if (stage === 'build' && report?.converged === false) return
-    if (stage === 'plan' && run.checklist && report?.checklistOpen !== 0) return
+    if (stage === 'build' && report?.converged === false) return false
+    if (stage === 'plan' && run.checklist && report?.checklistOpen !== 0) return false
     if (stage === 'review' && report?.verdict !== 'ready') {
-      if (report?.verdict === 'needs_fixes' && stageRow.attempts <= MAX_FIX_ROUNDS) void this.fix(runId).catch(() => {})
-      return
+      if (report?.verdict !== 'needs_fixes' || stageRow.attempts > MAX_FIX_ROUNDS) return false
+      this.auto(runId, () => this.fix(runId))
+      return true
     }
-    void this.approve(runId).catch(() => {})
+    this.auto(runId, () => this.approve(runId))
+    return true
   }
 
   private async advance(runId: string, from: FlowStage): Promise<void> {
@@ -1555,11 +1868,15 @@ export class FlowSupervisor {
     if (!next) {
       this.repos.flowRuns.finish(runId, 'done', null)
       this.callbacks.onFlowChanged(run.projectId)
+      this.attention(run, 'the run finished.')
       return
     }
     this.repos.flowRuns.update(runId, { stage: next, status: 'waiting' })
     this.callbacks.onFlowChanged(run.projectId)
-    if (next === 'ship' && !(run.autopilot && run.autoShip)) return
+    if (next === 'ship' && !(run.autopilot && run.autoShip)) {
+      this.attention(run, 'ready to raise its pull request.')
+      return
+    }
     await this.beginStage(runId, next)
   }
 

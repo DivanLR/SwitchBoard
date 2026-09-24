@@ -502,6 +502,39 @@ describe('a bug run', () => {
     expect(t.h.repos.flowStages.get(t.run.id, 'test')?.status).toBe('running')
   })
 
+  it('sends a bug review that needs fixes back to Fix with bugFixPrompt and the review findings, resetting test and clean', async () => {
+    const t = await atTest()
+    write(t.root, '.specify/bugs/login-times-out/test.md', '- **Result**: verified\n')
+    t.h.flow.onFlowMarker(t.session, marker('test'))
+    await t.h.flow.approve(t.run.id)
+    t.h.flow.onFlowMarker(sessionOf(t.h, t.run.id, 'clean'), marker('clean'))
+    await t.h.flow.approve(t.run.id)
+    const review = sessionOf(t.h, t.run.id, 'review')
+    t.h.flow.onFlowMarker(
+      review,
+      marker('review', {
+        verdict: 'needs_fixes',
+        findings: [{ severity: 'must_fix', file: 'Auth.cs', line: 5, what: 'Session token never expires.' }],
+      }),
+    )
+
+    await t.h.flow.fix(t.run.id)
+
+    expect(t.h.repos.flowRuns.byId(t.run.id)?.stage).toBe('fix')
+    expect(t.h.repos.flowStages.get(t.run.id, 'test')?.status).toBe('pending')
+    expect(t.h.repos.flowStages.get(t.run.id, 'clean')?.status).toBe('pending')
+    const sent = textsTo(t.h, sessionOf(t.h, t.run.id, 'fix')).at(-1)!
+    expect(sent).toMatch(/^\/speckit-bug-fix slug=login-times-out /)
+    expect(sent).toContain('Must fix:')
+    expect(sent).toContain('Auth.cs:5: Session token never expires.')
+
+    write(t.root, '.specify/bugs/login-times-out/fix.md', '# Fix again\n')
+    t.h.flow.onFlowMarker(sessionOf(t.h, t.run.id, 'fix'), marker('fix'))
+    await t.h.flow.approve(t.run.id)
+    expect(t.h.repos.flowRuns.byId(t.run.id)?.stage).toBe('test')
+    expect(t.h.repos.flowStages.get(t.run.id, 'test')?.status).toBe('running')
+  })
+
   it('keeps its reports in the primary checkout when its worktree is removed', async () => {
     const t = await atTest()
     write(t.root, '.specify/bugs/login-times-out/test.md', '- **Result**: verified\n')

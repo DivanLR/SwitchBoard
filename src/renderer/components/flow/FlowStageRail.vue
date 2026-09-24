@@ -5,6 +5,7 @@ import {
   flowStagesOf,
   type FlowKind,
   type FlowStage,
+  type FlowStageLive,
   type FlowStageRecord,
   type FlowStageStatus,
 } from '@shared/domain'
@@ -14,6 +15,7 @@ const props = defineProps<{
   kind: FlowKind
   stages: FlowStageRecord[]
   selected: FlowStage
+  live?: FlowStageLive | null
 }>()
 
 const rail = computed(() => flowStagesOf(props.kind))
@@ -21,6 +23,10 @@ const emit = defineEmits<{ (e: 'select', stage: FlowStage): void }>()
 
 function statusOf(stage: FlowStage): FlowStageStatus {
   return props.stages.find((row) => row.stage === stage)?.status ?? 'pending'
+}
+
+function needsYou(stage: FlowStage): boolean {
+  return props.live?.stage === stage && props.live.waiting
 }
 
 const STATUS_ICON: Record<FlowStageStatus, string> = {
@@ -47,14 +53,14 @@ const STATUS_ICON: Record<FlowStageStatus, string> = {
       type="button"
       role="tab"
       class="ui-tab fsr-tab"
-      :class="[`is-${statusOf(s)}`, { 'is-selected': s === selected }]"
+      :class="[`is-${statusOf(s)}`, { 'is-selected': s === selected, 'is-needs-you': needsYou(s) }]"
       :aria-selected="s === selected"
       :data-testid="`flow-stage-${s}`"
       @click="emit('select', s)"
     >
-      <Icon :name="STATUS_ICON[statusOf(s)]" :size="10" class="fsr-icon" />
+      <Icon :name="needsYou(s) ? 'warning' : STATUS_ICON[statusOf(s)]" :size="10" class="fsr-icon" />
       {{ FLOW_STAGE_LABELS[s] }}
-      <span class="fsr-status">{{ statusOf(s) }}</span>
+      <span class="fsr-status">{{ needsYou(s) ? 'needs you' : statusOf(s) }}</span>
     </button>
   </div>
 </template>
@@ -83,5 +89,10 @@ const STATUS_ICON: Record<FlowStageStatus, string> = {
 .fsr-tab.is-failed .fsr-icon,
 .fsr-tab.is-failed .fsr-status {
   color: var(--red);
+}
+
+.fsr-tab.is-needs-you .fsr-icon,
+.fsr-tab.is-needs-you .fsr-status {
+  color: var(--amber);
 }
 </style>

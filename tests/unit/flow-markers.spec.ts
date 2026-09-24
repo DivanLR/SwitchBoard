@@ -412,6 +412,26 @@ describe('the prompts', () => {
     )
   })
 
+  it('tells the model the feature folder and that the branch is already checked out, only when the run set them', () => {
+    const run = {
+      source: 'text' as const,
+      sourceRef: null,
+      sourceUrl: null,
+      title: 'Checkout v2',
+      description: '',
+      autopilot: false,
+    }
+    const set = specifyPrompt({ ...run, specDir: 'specs/003-cart', branch: 'feature/cart' })
+    expect(set).toContain(
+      'SPECIFY_FEATURE_DIRECTORY=specs/003-cart: create the spec in that folder and write it to .specify/feature.json.',
+    )
+    expect(set).toContain('GIT_BRANCH_NAME=feature/cart: this worktree is already on that branch. Stay on it.')
+
+    const unset = specifyPrompt(run)
+    expect(unset).not.toContain('SPECIFY_FEATURE_DIRECTORY')
+    expect(unset).not.toContain('GIT_BRANCH_NAME')
+  })
+
   it('mentions only the stacks the run actually detected', () => {
     expect(planSteps(['dotnet'], null)[0]).toContain('.NET:')
     expect(planSteps(['dotnet'], null)[0]).not.toContain('Angular:')

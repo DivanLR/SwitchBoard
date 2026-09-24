@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ProjectGroup } from '@shared/domain'
 import Icon from '@renderer/components/Icon.vue'
+import { GROUP_COLORS } from '@renderer/project-accent'
 
 export interface ContextTarget {
   kind: 'project' | 'group'
@@ -15,6 +16,7 @@ defineProps<{
   groups: ProjectGroup[]
   grouped: boolean
   liveCount: number
+  groupColor?: string
 }>()
 const emit = defineEmits<{
   (e: 'close'): void
@@ -28,6 +30,7 @@ const emit = defineEmits<{
   (e: 'remove'): void
   (e: 'delete'): void
   (e: 'remove-group'): void
+  (e: 'color', color: string): void
 }>()
 </script>
 
@@ -94,14 +97,26 @@ const emit = defineEmits<{
           <span><Icon name="trash" /></span>Delete from Switchboard…
         </button>
       </template>
-      <button
-        v-else
-        class="ctx-item danger"
-        data-testid="ctx-remove-group"
-        @click="emit('remove-group')"
-      >
-        <span><Icon name="trash" /></span>Remove group (keeps projects)
-      </button>
+      <template v-else>
+        <div class="ctx-sep"></div>
+        <div class="ctx-colors" role="group" aria-label="Group colour">
+          <button
+            v-for="(c, i) in GROUP_COLORS"
+            :key="c"
+            class="ctx-color"
+            :class="{ on: c === groupColor }"
+            :style="{ background: c }"
+            :aria-label="`Colour ${i + 1}`"
+            :aria-pressed="c === groupColor"
+            :data-testid="`ctx-color-${i}`"
+            @click="emit('color', c)"
+          ></button>
+        </div>
+        <div class="ctx-sep"></div>
+        <button class="ctx-item danger" data-testid="ctx-remove-group" @click="emit('remove-group')">
+          <span><Icon name="trash" /></span>Remove group (keeps projects)
+        </button>
+      </template>
     </div>
   </div>
 </template>
@@ -145,6 +160,30 @@ html.sb-light .ctx-menu {
   height: 1px;
   margin: 3px 0;
   background: color-mix(in srgb, var(--green) 18%, transparent);
+}
+
+.ctx-colors {
+  display: flex;
+  gap: 8px;
+  padding: 8px 13px;
+}
+
+.ctx-color {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  cursor: pointer;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+}
+
+.ctx-color:hover,
+.ctx-color:focus-visible {
+  outline-color: var(--border-strong);
+}
+
+.ctx-color.on {
+  outline-color: var(--text-strong);
 }
 
 .ctx-item {

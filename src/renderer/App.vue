@@ -7,6 +7,7 @@ import { useElicitationsStore } from '@renderer/stores/elicitations'
 import { useQueueStore } from '@renderer/stores/queue'
 import { useTerminalStore } from '@renderer/stores/terminal'
 import { useDiagramsStore } from '@renderer/stores/diagrams'
+import { useFlowStore } from '@renderer/stores/flow'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { useUpdatesStore } from '@renderer/stores/updates'
 import Sidebar from '@renderer/components/Sidebar.vue'
@@ -29,12 +30,14 @@ const elicitations = useElicitationsStore()
 const queue = useQueueStore()
 const terminal = useTerminalStore()
 const diagrams = useDiagramsStore()
+const flow = useFlowStore()
 const settingsStore = useSettingsStore()
 const updates = useUpdatesStore()
 
 const showRegistration = ref(false)
 const showSettings = ref(false)
 const showFlow = ref(false)
+let openingFlowFocus = false
 const settingsTab = ref<SettingsTab>('models')
 
 function openSettings(tab: SettingsTab = 'models'): void {
@@ -105,6 +108,14 @@ onMounted(async () => {
       if (push.target === 'inbox') {
         setInboxCollapsed(false)
         inbox.focusRequest(push.requestId)
+      } else if (push.target === 'flow') {
+        const project = projects.items.find((p) => p.id === push.projectId)
+        if (project) {
+          openingFlowFocus = true
+          projects.select(project.id)
+        }
+        flow.focusRun(push.projectId, push.runId)
+        showFlow.value = true
       } else {
         const project = projects.items.find((p) => p.session?.id === push.sessionId)
         if (project) projects.select(project.id)
@@ -131,6 +142,10 @@ onUnmounted(() => {
 
 const selectedProject = computed(() => projects.selected)
 watch(selectedProject, (next, prev) => {
+  if (openingFlowFocus) {
+    openingFlowFocus = false
+    return
+  }
   if (showFlow.value && prev && next?.id !== prev.id) showFlow.value = false
 })
 watch(

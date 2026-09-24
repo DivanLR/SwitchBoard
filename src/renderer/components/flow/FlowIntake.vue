@@ -1,8 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { FLOW_KIND_LABELS, FLOW_STACK_LABELS, type FlowFeature, type FlowKind, type FlowStackId } from '@shared/domain'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import {
+  flowStagesOf,
+  FLOW_KIND_LABELS,
+  FLOW_STACK_LABELS,
+  type FlowFeature,
+  type FlowKind,
+  type FlowStackId,
+  type ProjectCommand,
+} from '@shared/domain'
 import type { FlowStartSource } from '@shared/ipc-types'
 import { parseAdoFeatureLink } from '@shared/ado-link'
+import { commandSource, flowModeNote, flowStagePlan, missingCommands } from '@shared/flow-plan'
 import { sddSlug } from '@shared/sdd'
 import { useFlowStore } from '@renderer/stores/flow'
 import { useProjectsStore } from '@renderer/stores/projects'
@@ -47,6 +56,7 @@ const autopilot = ref(false)
 const autoShip = ref(false)
 const searched = ref(false)
 const companions = ref<Record<string, string>>({})
+const projectCommands = ref<ProjectCommand[]>([])
 
 const candidates = computed(() => projects.visibleItems.filter((item) => item.id !== props.projectId))
 const stacksOf = (projectId: string): FlowStackId[] => flow.stacksByProject[projectId] ?? []
@@ -62,8 +72,34 @@ const hostNote = computed(() => {
   }
   return null
 })
+const modeNote = computed(() => {
+  const mode = currentProject.value?.defaultSessionMode
+  return mode ? flowModeNote(mode, autopilot.value) : null
+})
+
+const neededCommands = computed(() => {
+  const stacks = stacksOf(props.projectId)
+  const names = flowStagesOf(kind.value).flatMap((stage) =>
+    flowStagePlan(kind.value, stage, stacks, checklist.value)
+      .commands.filter((cmd) => !cmd.only)
+      .map((cmd) => cmd.name),
+  )
+  return [...new Set(names)]
+})
+const missingPrereqs = computed(() => {
+  const names = projectCommands.value.map((cmd) => cmd.name)
+  return names.length === 0 ? [] : missingCommands(neededCommands.value, names)
+})
+
+let stopCommands: (() => void) | null = null
 
 onMounted(() => {
+  void projects.commands(props.projectId).then((commands) => {
+    projectCommands.value = commands
+  })
+  stopCommands = window.switchboard.on('push.projectCommands', (push) => {
+    if (push.projectId === props.projectId) projectCommands.value = push.commands
+  })
   const seed = flow.takeSeed(props.projectId)
   if (seed?.kind === 'spec') {
     source.value = 'spec'
@@ -81,6 +117,8 @@ onMounted(() => {
   void flow.detectStacks(props.projectId)
   for (const item of candidates.value) void flow.detectStacks(item.id)
 })
+
+onUnmounted(() => stopCommands?.())
 
 function toggleCompanion(projectId: string): void {
   const { [projectId]: picked, ...rest } = companions.value
@@ -560,6 +598,7 @@ async function start(): Promise<void> {
         <span class="fin-switch-text">
           <span class="fin-switch-name">Autopilot</span>
           <span class="fin-hint">Run every stage without stopping for approval.</span>
+          <span v-if="modeNote" class="fin-hint fin-wait" data-testid="flow-mode-note">{{ modeNote }}</span>
         </span>
         <button
           type="button"
@@ -590,6 +629,15 @@ async function start(): Promise<void> {
           <span class="knob"></span>
         </button>
       </label>
+    </div>
+
+    <div v-if="missingPrereqs.length > 0" class="ui-err-banner is-warn fin-prereqs" role="status" data-testid="flow-prereqs-warning">
+      This run sends commands Claude Code does not have here yet:
+      <ul class="fin-prereqs-list">
+        <li v-for="name in missingPrereqs" :key="name">
+          <span class="mono">/{{ name }}</span>, from {{ commandSource(name) }}
+        </li>
+      </ul>
     </div>
 
     <div class="fin-start">
@@ -829,6 +877,14 @@ async function start(): Promise<void> {
   font-size: var(--fs-meta);
   line-height: 1.4;
   color: var(--text-meta);
+}
+
+.fin-prereqs-list {
+  margin: var(--sp-1) 0 0;
+  padding-left: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .fin-start {

@@ -1,6 +1,6 @@
 import { computed, reactive, toRefs } from 'vue'
-import type { FlowFeature, FlowRun, FlowStackId, FlowStage, FlowStageRecord } from '@shared/domain'
-import { isIpcError, type FlowArtefactKind, type FlowCompanionRequest, type FlowStartSource } from '@shared/ipc-types'
+import type { FlowFeature, FlowRun, FlowStackId, FlowStage, FlowStageLive, FlowStageRecord } from '@shared/domain'
+import { isIpcError, type FlowArtefactKind, type FlowCompanionRequest, type FlowStartSource, type FlowSnapshot } from '@shared/ipc-types'
 import { errorMessage, invoke } from '@renderer/ipc'
 import { useProjectsStore } from '@renderer/stores/projects'
 
@@ -10,6 +10,8 @@ let listToken = 0
 const state = reactive({
   runsByProject: {} as Record<string, FlowRun[]>,
   stagesByProject: {} as Record<string, FlowStageRecord[]>,
+  liveByProject: {} as Record<string, FlowStageLive[]>,
+  focusRunRequest: null as { projectId: string; runId: string } | null,
   projectId: null as string | null,
   features: [] as FlowFeature[],
   featuresNote: null as string | null,
@@ -41,6 +43,13 @@ const stagesByRun = computed(() => {
   return byRun
 })
 
+const liveByRun = computed(() => {
+  const byRun = new Map<string, FlowStageLive>()
+  const live = state.projectId ? (state.liveByProject[state.projectId] ?? []) : []
+  for (const entry of live) byRun.set(entry.runId, entry)
+  return byRun
+})
+
 const store = reactive({
   ...toRefs(state),
   runs,
@@ -53,6 +62,21 @@ const store = reactive({
     return stagesByRun.value.get(runId) ?? []
   },
 
+  liveFor(runId: string): FlowStageLive | null {
+    return liveByRun.value.get(runId) ?? null
+  },
+
+  focusRun(projectId: string, runId: string): void {
+    state.focusRunRequest = { projectId, runId }
+  },
+
+  takeFocusedRun(projectId: string): string | null {
+    const request = state.focusRunRequest
+    if (request?.projectId !== projectId) return null
+    state.focusRunRequest = null
+    return request.runId
+  },
+
   async load(projectId: string): Promise<void> {
     const token = ++requestToken
     state.projectId = projectId
@@ -60,7 +84,7 @@ const store = reactive({
     try {
       const snapshot = await invoke('flow.list', { projectId })
       if (token !== requestToken) return
-      this.applyPush(projectId, snapshot.runs, snapshot.stages, snapshot.listing, snapshot.signingIn)
+      this.applyPush(projectId, snapshot.runs, snapshot.stages, snapshot.live, snapshot.listing, snapshot.signingIn)
     } catch (error) {
       if (token !== requestToken) return
       state.error = errorMessage(error)
@@ -72,11 +96,13 @@ const store = reactive({
     projectId: string,
     runs: FlowRun[],
     stages: FlowStageRecord[],
+    live: FlowStageLive[] = [],
     listing: string | null = null,
     signingIn = false,
   ): void {
     state.runsByProject[projectId] = runs
     state.stagesByProject[projectId] = stages
+    state.liveByProject[projectId] = live
     state.listingByProject[projectId] = listing
     state.signingInByProject[projectId] = signingIn
   },
@@ -166,6 +192,7 @@ const store = reactive({
       runId = snapshot.runId
       state.runsByProject[projectId] = snapshot.runs
       state.stagesByProject[projectId] = snapshot.stages
+      state.liveByProject[projectId] = snapshot.live
       await useProjectsStore().refresh()
     })
     return runId
@@ -236,11 +263,12 @@ const store = reactive({
     return invoke('flow.artefact', { runId, stage, kind })
   },
 
-  applySnapshot(snapshot: { runs: FlowRun[]; stages: FlowStageRecord[] }): void {
+  applySnapshot(snapshot: FlowSnapshot): void {
     const projectId = state.projectId
     if (!projectId) return
     state.runsByProject[projectId] = snapshot.runs
     state.stagesByProject[projectId] = snapshot.stages
+    state.liveByProject[projectId] = snapshot.live
   },
 
   async act(name: string, work: () => Promise<void>): Promise<boolean> {

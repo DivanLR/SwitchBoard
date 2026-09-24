@@ -139,11 +139,19 @@ Confirmed functionality:
 - A composer that accepts input mid task, queues it, and sends it when the
   session is ready, with slash command suggestions, project references and an
   "up next" queue. Undelivered messages survive a quit as drafts.
-- Model modes: auto, advisor, orchestrator and basic pair an intelligent model
-  with a worker model. The session runs one main loop model chosen from the mode,
-  and reaches the other tier through the advisor and worker subagents; it is
-  never switched between turns unless the setting itself changes. Pair models by
-  message reports the pattern each turn picks as an Advisor or Orchestrator chip.
+- Model modes: Jev, Auto and Basic pair an intelligent model with a worker
+  model. Auto runs the intelligent model and reaches the other tier through the
+  advisor and worker subagents; Pair models by message reports the pattern each
+  turn picks as an Advisor or Orchestrator chip. Basic runs the worker model
+  alone. Jev routes with TypeSafe AI's Jev decision model, through the
+  developer's own API key, which is stored encrypted with the operating system's
+  key store and never returned to the interface. Before each message typed into
+  a Session tab, Jev chooses the intelligent or the worker model, and the
+  session switches only when Jev is at least 60% sure and the context is still
+  under the switch limit (60 thousand tokens by default), so a long session
+  keeps its prompt cache. The header chip says what Jev chose and why the model
+  stayed or changed. With no key, or when Jev does not answer within three
+  seconds, the turn runs as Auto. Flow and the section tabs never use Jev.
   A Diff comment runs on the worker model. On a usage limit the session drops to
   the next strongest model instead of stopping. Subagents are allowed only at
   maximum effort, enforced by a hook, and maximum subagent effort adds a fan out
@@ -162,10 +170,36 @@ Confirmed functionality:
      change), then the verification report for the detected stacks.
   6. Review: `/dotnet-claude-kit:code-review` and
      `/dotnet-claude-kit:security-scan`, with a verdict, findings and every
-     acceptance criterion the code does not meet.
+     acceptance criterion the code does not meet. A repository without .NET gets
+     a written checklist instead, and the stage says that no review skill ran
+     for it.
   7. Ship: commit, push and open the pull request (Azure Repos through the ado
      MCP server, or GitHub through `gh`), never merged, approved or given
-     reviewers.
+     reviewers. For an Azure Repos remote it waits for the ado server first.
+  Every stage session carries a tool guard. No stage merges, completes,
+  abandons, approves or votes on a pull request, adds reviewers, bypasses a
+  policy, deletes a branch, force pushes, pushes to a base branch or calls the
+  Azure DevOps or GitHub REST APIs by hand. Only Ship pushes, opens the pull
+  request or writes to Azure DevOps; every earlier stage only reads it.
+  Before a stage sends anything, it checks that the session has each slash
+  command the stage runs, and fails with the command and the plugin or skill to
+  install when one is missing. The intake warns about missing commands, and
+  about a session mode that stops an unattended Autopilot run, before the run
+  starts. The stage card says what the stage does, which commands it sends,
+  which step is running, and when it waits for you; the run list and the stage
+  rail mark a run that waits for you. A desktop notification says when a run
+  stops for you, and opens the Flow popup on that run.
+  A feature's spec folder is chosen when the run starts, numbered after every
+  spec in the checkout, the worktree and the project's other runs, and every
+  stage session gets it as `SPECIFY_FEATURE_DIRECTORY`. A Spec stage that
+  writes no spec.md fails. The Build and Plan task counts are read from
+  tasks.md, not taken from the session. Fix on a failed Test fixes the code and
+  runs the suites again; Fix on Review sends the run back through Test, then a
+  fresh Review runs the review skills again, so the pull request quotes a test
+  report that matches the code it ships. A worktree gets the checkout's
+  gitignored CLAUDE.md, CLAUDE.local.md, AGENTS.md and `.claude` settings, and
+  a run that spans several repositories tells the session to follow each
+  repository's own CLAUDE.md.
   A feature writes the constitution first when the project has none, builds
   with implement then `/speckit-converge`, repeated until converge reports
   Converged (at most three rounds), and may hold the plan on a checklist gate.
@@ -194,9 +228,10 @@ Confirmed functionality:
   Features again. A server that needs sign in shows the steps, `claude` then
   `/mcp`, and a button that opens the Terminal tab running `claude`.
   Each stage waits for approval unless autopilot is on;
-  autopilot allows at most two automatic fix rounds on review, retries a lost
-  session once, and stops before the pull request unless the developer also
-  chose to raise it at the end.
+  autopilot allows at most two automatic fix rounds on review and two on a
+  failed test, retries a lost session once, and stops before the pull request
+  unless the developer also chose to raise it at the end. A Flow stage never
+  runs in plan first mode, because each stage has to write files.
 - An SDD tab over the project's Spec Kit folders, in three processes. Features
   (`specs/<id>/`) shows the spec, plan, tasks progress, clarifications and the
   converge state; Bugs (`.specify/bugs/<slug>/`) shows each report and the final
@@ -300,6 +335,15 @@ Flow, deleting a project with automatic deletion after 30 days in the archive,
 keeping plugins, imported skills and Spec Kit extensions current daily and at
 start, full effort sliders, and a Reconnect path for the Azure DevOps MCP
 server.
+
+**2026-09-24.** At the owner's direction ("implement Typesafe's jev ai as a model
+router option, so remove orchestrator and advisor modes, add a option for me to
+add jev via my own api key and then use that as a model router"), the Advisor
+and Orchestrator modes were removed and the Jev mode added. The owner chose that
+Jev reads every message but switches the model only while the context is small,
+that Auto and Basic stay, with Auto as Jev's fallback, and that Flow keeps its
+fixed models. A stored Advisor or Orchestrator setting reads as Auto. The Jev
+key is the one credential the application stores.
 
 This supersedes the constraint recorded on 2026-08-13 that "all six sections"
 (Session, Specs, Tests, Diff, Cleanup, Diagrams) must survive. The sections now
@@ -406,9 +450,11 @@ pricing. No WCAG conformance has been audited, so none may be claimed.
    does not carry a private copy of them.
 4. **Everything has a use.** A feature that the application's own records show
    nobody uses is removed rather than kept "for later".
-5. **Nothing leaves the machine** except what the developer's own sessions send.
-   Storage is local, the application sends no telemetry, and desktop
-   notifications carry no more than a project name and an item title.
+5. **Nothing leaves the machine** except what the developer's own sessions send,
+   and, in Jev mode only, the text of each typed message (its first 8,000
+   characters) to TypeSafe AI to choose the model. Storage is local, the
+   application sends no telemetry, and desktop notifications carry no more than
+   a project name and an item title.
 6. **Work in progress survives the interface.** Closing the window keeps
    sessions alive, quitting warns first, and drafts, conversation context and
    Flow runs come back on the next launch.

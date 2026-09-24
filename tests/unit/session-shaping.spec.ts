@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  heavySubagentModelMode,
+  promptPattern,
   heavySubagentSystemPromptAppend,
   modeAgents,
   modesSystemPromptAppend,
@@ -27,45 +27,39 @@ describe('heavySubagentSystemPromptAppend', () => {
   })
 })
 
-describe('heavySubagentModelMode', () => {
-  it('leaves an explicitly chosen mode alone when the setting is off', () => {
-    expect(heavySubagentModelMode(false, 'advisor')).toBe('advisor')
-    expect(heavySubagentModelMode(false, 'orchestrator')).toBe('orchestrator')
-    expect(heavySubagentModelMode(false, 'basic')).toBe('basic')
+describe('promptPattern', () => {
+  it('teaches the advisor pattern for every paired mode when heavy subagents are off', () => {
+    expect(promptPattern(false, 'auto')).toBe('advisor')
+    expect(promptPattern(false, 'jev')).toBe('advisor')
   })
 
-  it('drops auto to advisor when off, so nothing still tells the loop to delegate', () => {
-    expect(heavySubagentModelMode(false, 'auto')).toBe('advisor')
-    expect(modesSystemPromptAppend(heavySubagentModelMode(false, 'auto'))).not.toContain(
-      'delegate each chunk',
-    )
-  })
-
-  it('pins to orchestrator when on, so the two appends cannot contradict', () => {
-    for (const chosen of ['auto', 'advisor', 'orchestrator'] as const) {
-      expect(heavySubagentModelMode(true, chosen)).toBe('orchestrator')
+  it('pins to orchestrator when heavy subagents are on, so the two appends cannot contradict', () => {
+    for (const chosen of ['auto', 'jev'] as const) {
+      expect(promptPattern(true, chosen)).toBe('orchestrator')
     }
-    expect(modesSystemPromptAppend(heavySubagentModelMode(true, 'advisor'))).not.toContain(
+    expect(modesSystemPromptAppend(promptPattern(true, 'auto'))).not.toContain(
       'implement directly yourself',
     )
+  })
+
+  it('turns off for basic no matter the heavy-subagent setting, since there is no second tier', () => {
+    expect(promptPattern(false, 'basic')).toBe('none')
+    expect(promptPattern(true, 'basic')).toBe('none')
   })
 })
 
 describe('modesSystemPromptAppend', () => {
-  it('teaches only the forced pattern, and both under auto', () => {
+  it('teaches only the pattern it is given', () => {
     const advisor = modesSystemPromptAppend('advisor')
     const orchestrator = modesSystemPromptAppend('orchestrator')
-    const auto = modesSystemPromptAppend('auto')
     expect(advisor).toContain('SCOPED WORK')
     expect(advisor).not.toContain('BROAD WORK')
     expect(orchestrator).toContain('BROAD WORK')
     expect(orchestrator).not.toContain('SCOPED WORK')
-    expect(auto).toContain('SCOPED WORK')
-    expect(auto).toContain('BROAD WORK')
   })
 
   it('names both subagents so either tier can reach for them', () => {
-    for (const mode of ['advisor', 'orchestrator', 'auto'] as const) {
+    for (const mode of ['advisor', 'orchestrator'] as const) {
       const text = modesSystemPromptAppend(mode)
       expect(text).toContain('`advisor`')
       expect(text).toContain('`worker`')
@@ -75,7 +69,7 @@ describe('modesSystemPromptAppend', () => {
   it('states the advisor cap once, in the agent description, not again in the protocol text', () => {
     const description = modeAgents({}).advisor?.description ?? ''
     expect(description).toContain('at most 3 consults')
-    for (const mode of ['advisor', 'orchestrator', 'auto'] as const) {
+    for (const mode of ['advisor', 'orchestrator'] as const) {
       expect(modesSystemPromptAppend(mode)).not.toContain('at most 3')
     }
   })
@@ -85,6 +79,13 @@ describe('modesSystemPromptAppend', () => {
     const orchestrator = modesSystemPromptAppend('orchestrator')
     expect(orchestrator).toContain('Keep your own turns')
     expect(heavy).not.toContain('Keep your own turns')
+  })
+
+  it('appends nothing for none, because there is no second tier to describe', () => {
+    expect(modesSystemPromptAppend('none')).toBe('')
+    for (const mode of ['advisor', 'orchestrator'] as const) {
+      expect(modesSystemPromptAppend(mode)).not.toBe('')
+    }
   })
 })
 
@@ -103,20 +104,13 @@ describe('heavySubagentSystemPromptAppend prose', () => {
 })
 
 describe('basic mode shaping', () => {
-  it('appends no protocol, because there is no second tier to describe', () => {
-    expect(modesSystemPromptAppend('basic')).toBe('')
-    for (const mode of ['auto', 'advisor', 'orchestrator'] as const) {
-      expect(modesSystemPromptAppend(mode)).not.toBe('')
-    }
-  })
-
   it('registers no subagents, so the expensive tier cannot be reached at all', () => {
     const agents = modeAgents({ strongModel: 'opus', cheapModel: 'haiku', mode: 'basic' })
     expect(Object.keys(agents)).toEqual([])
   })
 
   it('still registers both for every paired mode', () => {
-    for (const mode of ['auto', 'advisor', 'orchestrator'] as const) {
+    for (const mode of ['auto', 'jev'] as const) {
       const agents = modeAgents({ strongModel: 'opus', cheapModel: 'haiku', mode })
       expect(Object.keys(agents).sort()).toEqual(['advisor', 'worker'])
       expect(agents.advisor.model).toBe('opus')

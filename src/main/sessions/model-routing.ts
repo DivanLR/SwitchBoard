@@ -19,9 +19,7 @@ export function mainLoopModel(
   mode: ModelMode | undefined,
   models: { intelligentModel?: string; workerModel?: string },
 ): string | undefined {
-  return mode === 'advisor' || mode === 'basic'
-    ? (models.workerModel ?? models.intelligentModel)
-    : models.intelligentModel
+  return mode === 'basic' ? (models.workerModel ?? models.intelligentModel) : models.intelligentModel
 }
 
 const BROAD_SCOPE =

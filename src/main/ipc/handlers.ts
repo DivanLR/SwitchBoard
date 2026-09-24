@@ -50,6 +50,8 @@ import { transcriptFor } from '@main/sessions/transcript'
 import { readDiagramList } from '@main/diagrams/list'
 import { importSkills } from '@main/skills/import'
 import type { FlowSupervisor } from '@main/flow/flow-supervisor'
+import { clearJevKey, jevKeyStatus, readJevKey, saveJevKey } from '@main/sessions/jev-key'
+import { askJev } from '@main/sessions/jev-router'
 import { disableSkill, enableSkill, installedSkillNames, liveSkillFolders, removeSkill } from '@main/skills/install'
 import { detectFlowStacks } from '@main/flow/stacks'
 import {
@@ -217,10 +219,10 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       .map((skill) => ({ ...skill, enabled: skill.enabled && live.has(skill.name) }))
   }
 
-  const flowSnapshot = (projectId: string): FlowSnapshot => ({
-    runs: repos.flowRuns.listForProject(projectId),
-    stages: repos.flowStages.listForProject(projectId),
-  })
+  const flowSnapshot = (projectId: string): FlowSnapshot => {
+    const { runs, stages, live } = flow.snapshot(projectId)
+    return { runs, stages, live }
+  }
 
   const flowSnapshotForRun = (runId: string): FlowSnapshot => {
     const run = repos.flowRuns.byId(runId)
@@ -685,11 +687,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       await manager.cancelVerifyRun(req.runId)
       return repos.verifyRuns.listForProject(req.projectId)
     },
-    'flow.list': (req) => ({
-      ...flowSnapshot(req.projectId),
-      listing: flow.listingSession(req.projectId),
-      signingIn: flow.signingIn(req.projectId),
-    }),
+    'flow.list': (req) => flow.snapshot(req.projectId),
     'flow.features': async (req) => {
       requireProject(req.projectId)
       return flow.features(req.projectId, req.query ?? '')
@@ -845,6 +843,17 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'plugins.keepCurrent': () => deps.keepCurrent(),
     'settings.get': () => repos.settings.get(),
     'settings.set': (req) => repos.settings.set(req),
+    'jev.status': () => jevKeyStatus(),
+    'jev.setKey': (req) => saveJevKey(typeof req?.key === 'string' ? req.key : ''),
+    'jev.clearKey': () => clearJevKey(),
+    'jev.test': async () => {
+      const key = readJevKey()
+      if (!key) return { ok: false, message: 'No Jev API key is set.' }
+      const answer = await askJev(key, 'Rename the variable total to sum in one file.')
+      return answer.ok
+        ? { ok: true, message: `Jev answered: ${answer.tier} model, ${Math.round(answer.confidence * 100)}% sure.` }
+        : { ok: false, message: `${answer.why}.` }
+    },
     'models.available': () => manager.models(),
     'updates.check': async () => ({ status: await checkForUpdates() }),
     'updates.install': () => installNow(),

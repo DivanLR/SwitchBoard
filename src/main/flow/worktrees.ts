@@ -63,6 +63,15 @@ export async function resolvesToCommit(repoRoot: string, ref: string): Promise<b
   }
 }
 
+export async function isIgnored(repoRoot: string, rel: string): Promise<boolean> {
+  try {
+    await git(repoRoot, ['check-ignore', '--quiet', '--', rel])
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function remoteHost(remote: string): string | null {
   const url = remote.trim()
   if (URL.canParse(url)) return new URL(url).hostname.toLowerCase() || null

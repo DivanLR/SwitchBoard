@@ -76,8 +76,8 @@ describe('the main-loop model is pinned for the session', () => {
     expect(setModelCalls).toEqual(['claude-opus-5[1m]'])
   })
 
-  it('runs the cheap model in Advisor mode, and stays there', () => {
-    const { setModelCalls, send } = makeSession('advisor')
+  it('runs the cheap model in Basic mode, and stays there', () => {
+    const { setModelCalls, send } = makeSession('basic')
     send('What does this function do?')
     send('Fix the typo in SessionView.vue')
     expect(setModelCalls).toEqual(['claude-sonnet-5'])
@@ -98,12 +98,6 @@ describe('the per-turn mode report', () => {
     send('Audit every view in the app and restyle all of them')
     send('What does this function do?')
     expect(turnModes).toEqual(['advisor', 'orchestrator', null])
-  })
-
-  it('keeps a forced mode for every work turn', () => {
-    const { turnModes, send } = makeSession('orchestrator')
-    send('Fix the typo in SessionView.vue')
-    expect(turnModes).toEqual(['orchestrator'])
   })
 
   it('reports no pattern after Settings leaves basic, since the session started without its advisor and worker', () => {
@@ -164,7 +158,7 @@ describe('settings changes reach a running session', () => {
   it('follows a pairing-mode change to the other tier', () => {
     const { routing, setModelCalls, send } = makeSession('auto')
     send('Fix the typo in SessionView.vue')
-    routing.modelMode = 'advisor'
+    routing.modelMode = 'basic'
     send('Fix the other typo in SessionView.vue')
     expect(setModelCalls).toEqual(['claude-opus-5[1m]', 'claude-sonnet-5'])
   })

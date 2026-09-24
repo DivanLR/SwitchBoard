@@ -9,6 +9,7 @@ import {
   type FlowStageRecord,
   type FlowStageStatus,
 } from '@shared/domain'
+import { flowStagePlan } from '@shared/flow-plan'
 import { useFlowStore } from '@renderer/stores/flow'
 import Icon from '@renderer/components/Icon.vue'
 import MiniTerminal from '@renderer/components/MiniTerminal.vue'
@@ -20,6 +21,13 @@ const emit = defineEmits<{ (e: 'start-feature', runId: string): void }>()
 const flow = useFlowStore()
 const feedback = ref('')
 const terminalOpen = ref(true)
+
+const plan = computed(() => flowStagePlan(props.run.kind, props.stage.stage, props.run.stacks, props.run.checklist))
+const live = computed(() => {
+  const entry = flow.liveFor(props.run.id)
+  return entry?.stage === props.stage.stage ? entry : null
+})
+const sessionOpen = computed(() => terminalOpen.value || live.value?.waiting === true)
 
 watch(
   () => props.stage.stage,
@@ -48,7 +56,10 @@ const last = computed(() => {
 
 function label(action: FlowStageAction): string {
   if (action === 'approve') return last.value ? 'Finish' : 'Approve'
-  if (action === 'fix') return 'Fix findings'
+  if (action === 'fix') {
+    if (props.stage.stage !== 'test') return 'Fix findings'
+    return props.run.kind === 'bug' ? 'Fix again' : 'Fix the failing tests'
+  }
   if (action === 'retry') return 'Retry'
   if (action === 'ship') return 'Raise pull request'
   if (action === 'feature') return 'Start a feature from this decision'
@@ -87,6 +98,23 @@ async function sendRevise(): Promise<void> {
       <span v-if="!current" class="fsd-readonly" data-testid="flow-stage-readonly">Read only</span>
     </div>
 
+    <div class="fsd-plan" data-testid="flow-stage-work">
+      <p v-if="plan.work" class="fsd-work">{{ plan.work }}</p>
+      <ul v-if="plan.commands.length > 0" class="fsd-commands" data-testid="flow-stage-commands">
+        <li v-for="cmd in plan.commands" :key="cmd.name">
+          <span class="mono">/{{ cmd.name }}</span>
+          <span v-if="cmd.only" class="fsd-only">, {{ cmd.only }}</span>
+        </li>
+      </ul>
+    </div>
+
+    <div v-if="live" class="fsd-step" data-testid="flow-stage-step">
+      Step {{ live.index }} of {{ live.total }}: {{ live.step }}
+    </div>
+    <div v-if="live?.waiting" class="ui-err-banner is-warn fsd-waiting" role="status" data-testid="flow-stage-waiting">
+      This stage is waiting for you. Answer the question in the session output below, or a permission in the Inbox.
+    </div>
+
     <div
       v-if="stage.summary"
       :class="stage.status === 'failed' ? 'ui-err-banner' : 'fsd-summary'"
@@ -102,14 +130,15 @@ async function sendRevise(): Promise<void> {
         type="button"
         class="btn-quiet fsd-session-toggle"
         data-testid="flow-terminal-toggle"
-        :aria-expanded="terminalOpen"
+        :aria-expanded="sessionOpen"
+        :disabled="live?.waiting === true"
         @click="terminalOpen = !terminalOpen"
       >
-        <Icon :name="terminalOpen ? 'minus' : 'plus'" :size="11" />
-        {{ terminalOpen ? 'Hide session output' : 'Show session output' }}
+        <Icon :name="sessionOpen ? 'minus' : 'plus'" :size="11" />
+        {{ sessionOpen ? 'Hide session output' : 'Show session output' }}
       </button>
       <MiniTerminal
-        v-if="terminalOpen"
+        v-if="sessionOpen"
         :session-id="stage.sessionId"
         data-testid="flow-stage-session"
       />
@@ -170,6 +199,39 @@ async function sendRevise(): Promise<void> {
 
 .fsd-readonly {
   margin-left: auto;
+  font-size: var(--fs-meta);
+  color: var(--text-meta);
+}
+
+.fsd-plan {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.fsd-work {
+  margin: 0;
+  font-size: var(--fs-ui);
+  line-height: 1.5;
+  color: var(--text-mid);
+}
+
+.fsd-commands {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--fs-meta);
+  color: var(--text-meta);
+}
+
+.fsd-only {
+  color: var(--text-faint);
+}
+
+.fsd-step {
   font-size: var(--fs-meta);
   color: var(--text-meta);
 }

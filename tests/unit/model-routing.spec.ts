@@ -48,29 +48,28 @@ describe('classifyWorkload (Advisor/Orchestrator auto mode)', () => {
 describe('mainLoopModel (one model per session, never switched)', () => {
   const models = { intelligentModel: 'claude-opus-5', workerModel: 'claude-sonnet-5' }
 
-  it('runs the cheap model in Advisor mode — the strong tier is the advisor subagent', () => {
-    expect(mainLoopModel('advisor', models)).toBe('claude-sonnet-5')
-  })
-
-  it('runs the intelligent model for Orchestrator and auto', () => {
-    expect(mainLoopModel('orchestrator', models)).toBe('claude-opus-5')
+  it('runs the intelligent model for Auto, Jev and no mode at all', () => {
     expect(mainLoopModel('auto', models)).toBe('claude-opus-5')
+    expect(mainLoopModel('jev', models)).toBe('claude-opus-5')
     expect(mainLoopModel(undefined, models)).toBe('claude-opus-5')
   })
 
+  it('runs the cheap model in Basic mode', () => {
+    expect(mainLoopModel('basic', models)).toBe('claude-sonnet-5')
+  })
+
   it('falls back to the intelligent model when no worker is configured', () => {
-    expect(mainLoopModel('advisor', { intelligentModel: 'claude-opus-5' })).toBe('claude-opus-5')
+    expect(mainLoopModel('basic', { intelligentModel: 'claude-opus-5' })).toBe('claude-opus-5')
   })
 })
 
 describe('basic mode', () => {
   const models = { intelligentModel: 'opus', workerModel: 'haiku' }
 
-  it('runs the cheap model, like advisor and unlike the rest', () => {
+  it('runs the cheap model, unlike every other mode', () => {
     expect(mainLoopModel('basic', models)).toBe('haiku')
-    expect(mainLoopModel('advisor', models)).toBe('haiku')
-    expect(mainLoopModel('orchestrator', models)).toBe('opus')
     expect(mainLoopModel('auto', models)).toBe('opus')
+    expect(mainLoopModel('jev', models)).toBe('opus')
   })
 
   it('falls back to the intelligent model when no worker is set', () => {

@@ -16,6 +16,17 @@ async function createGroup(page: import('@playwright/test').Page, name: string):
   await expect(page.getByTestId(`group-head-${name}`)).toBeVisible()
 }
 
+test('a group colour can be picked from its menu', async ({ page }) => {
+  await createGroup(page, 'Work')
+  const swatch = page.getByTestId('group-head-Work').locator('.group-swatch')
+  await expect(swatch).toHaveAttribute('style', /--green/)
+  await page.getByTestId('group-head-Work').click({ button: 'right' })
+  await expect(page.getByTestId('ctx-color-0')).toHaveAttribute('aria-pressed', 'true')
+  await page.getByTestId('ctx-color-2').click()
+  await expect(page.getByTestId('project-ctx-menu')).toHaveCount(0)
+  await expect(swatch).toHaveAttribute('style', /--blue/)
+})
+
 test('a group can be created and named inline', async ({ page }) => {
   await createGroup(page, 'Work')
   await expect(page.getByTestId('group-count-Work')).toHaveText('0')

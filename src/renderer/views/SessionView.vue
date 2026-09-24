@@ -152,7 +152,7 @@ onMounted(() => {
   })
   unsubscribeFlow = window.switchboard.on('push.flowChanged', (push) => {
     if (push.projectId === props.project.id) {
-      flow.applyPush(push.projectId, push.runs, push.stages, push.listing, push.signingIn)
+      flow.applyPush(push.projectId, push.runs, push.stages, push.live, push.listing, push.signingIn)
     }
   })
 })

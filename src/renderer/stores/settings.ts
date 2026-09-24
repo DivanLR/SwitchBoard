@@ -1,5 +1,6 @@
 import { reactive } from 'vue'
 import type { AvailableModel, KeepCurrentReport, Settings } from '@shared/domain'
+import type { JevKeyStatus } from '@shared/ipc-types'
 import { errorMessage, invoke } from '@renderer/ipc'
 
 let latest = 0
@@ -9,6 +10,11 @@ const store = reactive({
   availableModels: [] as AvailableModel[],
   checkingPlugins: false,
   pluginCheckError: null as string | null,
+  jevStatus: null as JevKeyStatus | null,
+  jevSaveError: null as string | null,
+  jevSaving: false,
+  jevTesting: false,
+  jevTestResult: null as { ok: boolean; message: string } | null,
 
   async load(): Promise<void> {
     latest += 1
@@ -44,6 +50,44 @@ const store = reactive({
 
   applyKeepCurrent(report: KeepCurrentReport): void {
     if (this.settings) this.settings = { ...this.settings, keepCurrentLast: report }
+  },
+
+  async loadJevStatus(): Promise<void> {
+    this.jevStatus = await invoke('jev.status', undefined)
+  },
+
+  async saveJevKey(key: string): Promise<boolean> {
+    this.jevSaveError = null
+    this.jevSaving = true
+    try {
+      this.jevStatus = await invoke('jev.setKey', { key })
+      return true
+    } catch (e) {
+      this.jevSaveError = errorMessage(e)
+      return false
+    } finally {
+      this.jevSaving = false
+    }
+  },
+
+  async clearJevKey(): Promise<void> {
+    this.jevStatus = await invoke('jev.clearKey', undefined)
+    this.jevTestResult = null
+  },
+
+  resetJevKeyError(): void {
+    this.jevSaveError = null
+  },
+
+  async testJevKey(): Promise<void> {
+    this.jevTesting = true
+    try {
+      this.jevTestResult = await invoke('jev.test', undefined)
+    } catch (e) {
+      this.jevTestResult = { ok: false, message: errorMessage(e) }
+    } finally {
+      this.jevTesting = false
+    }
   },
 
   toggleMcpActiveServer(name: string): void {

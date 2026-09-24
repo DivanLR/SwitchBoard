@@ -29,6 +29,7 @@ import type {
   FlowStageRecord,
   FlowStageReport,
   FlowStageStatus,
+  ModelMode,
   SuiteResult,
   SessionEndReason,
   SessionEngine,
@@ -43,6 +44,7 @@ import {
   DEFAULT_SESSION_ENGINE,
   DEFAULT_SESSION_MODE,
   DEFAULT_SETTINGS,
+  MODEL_MODES,
   emptyVerifyReport,
   flowStagesOf,
 } from '@shared/domain'
@@ -618,6 +620,7 @@ class SettingsRepo {
       const plan = typeof stored.planModel === 'string' ? stored.planModel : 'default'
       stored.intelligentModel = work !== 'default' ? work : plan
     }
+    if (!MODEL_MODES.includes(stored.modelMode as ModelMode)) stored.modelMode = DEFAULT_SETTINGS.modelMode
     const merged: Record<string, unknown> = { ...DEFAULT_SETTINGS, ...stored }
     return Object.fromEntries(Object.keys(DEFAULT_SETTINGS).map((key) => [key, merged[key]])) as unknown as Settings
   }

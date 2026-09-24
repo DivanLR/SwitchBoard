@@ -292,6 +292,22 @@ describe('subagents', () => {
     expect(systemPrompt?.append ?? '').not.toContain('DIVIDE AND CONQUER')
   })
 
+  it('runs Jev mode with no key as Basic, and as Jev once a key is saved', async () => {
+    const { repos, project, manager } = setup()
+    repos.settings.set({ effort: 'max', subagentEffort: 'max', modelMode: 'jev' })
+    let key: string | null = null
+    manager.setJevKey(() => key)
+
+    await manager.startSession(project.id)
+    expect(queries[0].options.agents).toEqual({})
+    expect(queries[0].options.model).toBe(repos.settings.get().workerModel)
+
+    key = 'saved'
+    await manager.startSession(project.id)
+    expect(Object.keys(queries[1].options.agents as object).sort()).toEqual(['advisor', 'worker'])
+    expect(queries[1].options.model).toBe(repos.settings.get().intelligentModel)
+  })
+
   it('runs the worker at the lower Subagents effort when the bar is below max', async () => {
     const { repos, project, manager } = setup()
     repos.settings.set({ effort: 'max', subagentEffort: 'low' })

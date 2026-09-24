@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { FLOW_KIND_LABELS, FLOW_STACK_LABELS, FLOW_STAGE_LABELS, type FlowStage } from '@shared/domain'
+import { flowModeNote } from '@shared/flow-plan'
 import { useFlowStore } from '@renderer/stores/flow'
+import { useProjectsStore } from '@renderer/stores/projects'
 import FlowIntake from '@renderer/components/flow/FlowIntake.vue'
 import FlowStageRail from '@renderer/components/flow/FlowStageRail.vue'
 import FlowStageDetail from '@renderer/components/flow/FlowStageDetail.vue'
 
 const props = defineProps<{ projectId: string }>()
 const flow = useFlowStore()
+const projects = useProjectsStore()
 
 const selectedRunId = ref<string | null>(null)
 const selectedStage = ref<FlowStage | null>(null)
@@ -15,16 +18,25 @@ const creating = ref(false)
 const removeConfirm = ref(false)
 
 let stopPush: (() => void) | null = null
+
+function applyFocus(): void {
+  const runId = flow.takeFocusedRun(props.projectId)
+  if (runId) selectRun(runId)
+}
+
 onMounted(() => {
   if (flow.seed?.projectId === props.projectId) creating.value = true
   void flow.load(props.projectId)
+  applyFocus()
   stopPush = window.switchboard.on('push.flowChanged', (push) => {
     if (push.projectId === props.projectId) {
-      flow.applyPush(push.projectId, push.runs, push.stages, push.listing, push.signingIn)
+      flow.applyPush(push.projectId, push.runs, push.stages, push.live, push.listing, push.signingIn)
     }
   })
 })
 onUnmounted(() => stopPush?.())
+
+watch(() => flow.focusRunRequest, () => applyFocus())
 
 watch(
   () => props.projectId,
@@ -48,6 +60,12 @@ const removeLabel = computed(() => {
 })
 const loaded = computed(() => flow.runsByProject[props.projectId] !== undefined)
 const empty = computed(() => loaded.value && flow.runs.length === 0 && !creating.value)
+const modeNote = computed(() => {
+  const current = run.value
+  if (!current) return null
+  const project = projects.items.find((p) => p.id === current.projectId)
+  return project ? flowModeNote(project.defaultSessionMode, current.autopilot) : null
+})
 
 watch([() => run.value?.id, () => run.value?.stage], () => {
   selectedStage.value = run.value?.stage ?? null
@@ -120,6 +138,13 @@ async function removeWorktree(): Promise<void> {
           <span class="frr-meta">
             <span class="ui-chip" :data-testid="`flow-run-kind-${item.id}`">{{ FLOW_KIND_LABELS[item.kind] }}</span>
             <span class="frr-stage">{{ FLOW_STAGE_LABELS[item.stage] }}</span>
+            <span
+              v-if="flow.liveFor(item.id)?.waiting"
+              class="ui-chip is-warn"
+              :data-testid="`flow-run-needs-you-${item.id}`"
+            >
+              needs you
+            </span>
             <span class="fv-spacer"></span>
             <span class="pill" :class="item.status">{{ item.status }}</span>
           </span>
@@ -175,6 +200,7 @@ async function removeWorktree(): Promise<void> {
                 </div>
               </template>
               <div v-if="run.note" class="frh-note" data-testid="flow-run-note">{{ run.note }}</div>
+              <div v-if="modeNote" class="frh-note" data-testid="flow-mode-note">{{ modeNote }}</div>
             </div>
             <div class="ui-controls frh-controls">
               <label v-if="!finished" class="frh-switch">
@@ -219,6 +245,7 @@ async function removeWorktree(): Promise<void> {
             :kind="run.kind"
             :stages="stages"
             :selected="selectedStage ?? run.stage"
+            :live="flow.liveFor(run.id)"
             @select="(s) => (selectedStage = s)"
           />
 

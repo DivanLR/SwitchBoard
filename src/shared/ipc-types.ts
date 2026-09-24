@@ -24,6 +24,7 @@ import type {
   FlowRun,
   FlowStackId,
   FlowStage,
+  FlowStageLive,
   FlowStageRecord,
   SessionEvent,
   SessionEngine,
@@ -54,6 +55,11 @@ type IpcErrorCode =
   | 'MCP_NOT_CONNECTED'
   | 'MCP_NEEDS_AUTH'
   | 'INTERNAL'
+
+export interface JevKeyStatus {
+  configured: boolean
+  encryption: boolean
+}
 
 export interface IpcError {
   code: IpcErrorCode
@@ -128,6 +134,7 @@ interface ProjectsSnapshot {
 export interface FlowSnapshot {
   runs: FlowRun[]
   stages: FlowStageRecord[]
+  live: FlowStageLive[]
 }
 
 export type FlowStartSource =
@@ -349,6 +356,10 @@ export interface InvokeMap {
   'sessions.editQueued': { req: { sessionId: string; eventId: string; text: string }; res: void }
   'settings.get': { req: void; res: Settings }
   'settings.set': { req: Partial<Settings>; res: Settings }
+  'jev.status': { req: void; res: JevKeyStatus }
+  'jev.setKey': { req: { key: string }; res: JevKeyStatus }
+  'jev.clearKey': { req: void; res: JevKeyStatus }
+  'jev.test': { req: void; res: { ok: boolean; message: string } }
   'models.available': { req: void; res: AvailableModel[] }
   'updates.check': { req: void; res: { status: UpdateStatus['state'] } }
   'updates.install': { req: void; res: void }
@@ -383,6 +394,7 @@ interface ProjectCommandsPush {
 export type FocusRequestPush =
   | { target: 'inbox'; requestId: string }
   | { target: 'session'; sessionId: string; eventId?: string }
+  | { target: 'flow'; projectId: string; runId: string }
 
 interface VerifyChangedPush {
   projectId: string

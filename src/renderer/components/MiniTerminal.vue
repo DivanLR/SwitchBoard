@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { toRawLines } from '@shared/stream-lines'
-import { pendingQuestion } from '@shared/inline-question'
+import { pendingQuestions } from '@shared/inline-question'
 import QuestionEvent from '@renderer/components/QuestionEvent.vue'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 
@@ -26,11 +26,11 @@ onUnmounted(() => active.unwatchTail(props.sessionId))
 
 const lines = computed(() => toRawLines(active.tails[props.sessionId] ?? [], false))
 
-const answered = ref<string | null>(null)
-const question = computed(() => pendingQuestion(active.tails[props.sessionId] ?? [], answered.value))
+const answered = ref<string[]>([])
+const questions = computed(() => pendingQuestions(active.tails[props.sessionId] ?? [], answered.value))
 
 function answer(eventId: string, choice: string): void {
-  answered.value = eventId
+  answered.value = [...answered.value, eventId]
   const asked = (active.tails[props.sessionId] ?? []).some((e) => e.id === eventId && e.kind === 'question')
   if (asked) void active.answerQuestion(eventId, choice, props.sessionId)
   else void active.sendTo(props.sessionId, choice.replace(/\s*\(recommended\)\s*$/i, ''))
@@ -55,7 +55,8 @@ watch(lines, () => {
       </div>
     </div>
     <QuestionEvent
-      v-if="question"
+      v-for="question in questions"
+      :key="question.eventId"
       :event-id="question.eventId"
       :payload="question.payload"
       data-testid="mini-terminal-question"

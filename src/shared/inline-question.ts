@@ -32,25 +32,28 @@ export function parseInlineQuestion(text: string): QuestionPayload | null {
   }
 }
 
-export function pendingQuestion(
+export function pendingQuestions(
   events: readonly { id: string; kind: string; payload: unknown }[],
-  answeredId?: string | null,
-): { eventId: string; payload: QuestionPayload } | null {
+  answeredIds: readonly string[] = [],
+): { eventId: string; payload: QuestionPayload }[] {
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const event = events[i]
-    if (event.kind === 'prompt') return null
+    if (event.kind === 'prompt') return []
     if (event.kind === 'question') {
-      if (event.id === answeredId) return null
-      const payload = event.payload as QuestionPayload & { answered?: boolean }
-      if (payload?.answered || !payload?.options?.length) return null
-      return { eventId: event.id, payload }
+      const open: { eventId: string; payload: QuestionPayload }[] = []
+      for (let j = i; j >= 0 && events[j].kind === 'question'; j -= 1) {
+        const payload = events[j].payload as QuestionPayload & { answered?: boolean }
+        if (answeredIds.includes(events[j].id) || payload?.answered || !payload?.options?.length) continue
+        open.unshift({ eventId: events[j].id, payload })
+      }
+      return open
     }
     if (event.kind === 'assistant_text' || event.kind === 'summary') {
-      if (event.id === answeredId) return null
+      if (answeredIds.includes(event.id)) return []
       const text = (event.payload as { text?: string }).text ?? ''
       const payload = parseInlineQuestion(text)
-      return payload ? { eventId: event.id, payload } : null
+      return payload ? [{ eventId: event.id, payload }] : []
     }
   }
-  return null
+  return []
 }

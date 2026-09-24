@@ -1,9 +1,21 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+vi.setConfig({ testTimeout: 20_000 })
+import { execSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { FlowGit } from '@main/flow/flow-supervisor'
 import { parseFlowMarker, type FlowStageMarker } from '@main/flow/flow-markers'
+import {
+  createWorktree,
+  currentBranch,
+  isIgnored,
+  originHost,
+  removeWorktree,
+  resolvesToCommit,
+  worktreeRoot,
+} from '@main/flow/worktrees'
 import type { FlowStage, FlowStageAction, FlowStageStatus } from '@shared/domain'
 import { FLOW_STAGES, emptyFlowStageReport, flowStageActions } from '@shared/domain'
 import type { FlowStartSource } from '@shared/ipc-types'
@@ -64,7 +76,12 @@ function specProject(): string {
 
 type McpState = { status: string; error: string | null } | null
 
-function setup(options?: { ado?: boolean; projectPath?: string; mcp?: () => McpState }) {
+function setup(options?: {
+  ado?: boolean
+  projectPath?: string
+  mcp?: () => McpState
+  onAttention?: (note: { projectId: string; runId: string; text: string }) => void
+}) {
   const repos: Repos = createRepositories(openDatabase(':memory:'))
   const project = repos.projects.insert({
     name: 'alpha',
@@ -76,6 +93,7 @@ function setup(options?: { ado?: boolean; projectPath?: string; mcp?: () => McpS
   const changed: string[] = []
   const ended: string[] = []
   const stopped: string[] = []
+  const sessionStatus = new Map<string, { status: string }>()
   let sessionCount = 0
 
   const manager = {
@@ -99,15 +117,20 @@ function setup(options?: { ado?: boolean; projectPath?: string; mcp?: () => McpS
       stopped.push(sessionId)
     }),
     renameSession: vi.fn(),
+    slashCommands: vi.fn(async (_sessionId: string): Promise<string[] | null> => null),
+    liveSessionRow: vi.fn((sessionId: string) => sessionStatus.get(sessionId)),
   }
 
   const git = fakeGit()
-  const flow = new FlowSupervisor(repos, manager as never, { onFlowChanged: (id) => changed.push(id) }, git, {
-    waitMs: 1000,
-    pollMs: 10,
-  })
+  const flow = new FlowSupervisor(
+    repos,
+    manager as never,
+    { onFlowChanged: (id) => changed.push(id), onAttention: options?.onAttention },
+    git,
+    { waitMs: 1000, pollMs: 10 },
+  )
 
-  return { repos, project, flow, manager, git, sent, watched, changed, ended, stopped }
+  return { repos, project, flow, manager, git, sent, watched, changed, ended, stopped, sessionStatus }
 }
 
 const textSource = (title = 'Checkout v2', description = 'Let a guest pay.'): FlowStartSource => ({
@@ -294,6 +317,12 @@ function specMarker(overrides: Partial<FlowStageMarker> = {}): FlowStageMarker {
   }
 }
 
+function writeTasksMd(run: { worktreePath: string | null }): void {
+  const dir = join(run.worktreePath!, 'specs', '001-checkout')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'tasks.md'), '- [x] T001 one\n')
+}
+
 describe('turn-by-turn steps', () => {
   it('sends the next queued step when a turn ends, and stops once the marker resolves the stage', async () => {
     const h = setup()
@@ -405,6 +434,7 @@ describe('autopilot', () => {
     const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: true, autoShip: true })
     for (const stage of FLOW_STAGES.slice(0, FLOW_STAGES.indexOf(stop))) {
       await vi.waitFor(() => expect(h.repos.flowStages.get(run.id, stage)?.status).toBe('running'), WAIT)
+      if (stage === 'build') writeTasksMd(run)
       h.flow.onFlowMarker(sessionOf(h, run.id, stage), specMarker({ stage }))
     }
     await vi.waitFor(() => expect(h.repos.flowStages.get(run.id, stop)?.status).toBe('running'), WAIT)
@@ -420,16 +450,36 @@ describe('autopilot', () => {
     expect(h.repos.flowStages.get(run.id, 'build')?.status).toBe('review')
   })
 
-  it('treats a review without a clean ready verdict as needing fixes, and never ships it', async () => {
+  it('treats a review without a clean ready verdict as needing fixes, sends it back to Test, and never ships it', async () => {
     const h = setup()
     const run = await toStage(h, 'review')
-    const before = h.repos.flowStages.get(run.id, 'review')!.attempts
     h.flow.onFlowMarker(
       sessionOf(h, run.id),
       specMarker({ stage: 'review', verdict: null, findings: [{ severity: 'must_fix', file: 'A.cs', line: 3, what: 'SQL injection' }] }),
     )
-    await vi.waitFor(() => expect(h.repos.flowStages.get(run.id, 'review')?.attempts).toBe(before + 1), WAIT)
+    await vi.waitFor(() => expect(h.repos.flowStages.get(run.id, 'test')?.status).toBe('running'), WAIT)
+    expect(h.repos.flowRuns.byId(run.id)?.stage).toBe('test')
     expect(h.repos.flowStages.get(run.id, 'ship')?.status).toBe('pending')
+
+    h.flow.onVerifyReport(h.repos.flowStages.get(run.id, 'test')!.sessionId!, {
+      suites: [{ id: 'dotnet-unit', label: 'Unit tests', status: 'pass', detail: 'ok' }],
+      coverage: { line: { value: null, source: null }, changed: { value: null, source: null }, files: [] },
+      quality: {
+        gate: null,
+        gateSource: null,
+        duplication: { value: null, source: null },
+        debt: null,
+        mutation: { value: null, source: null },
+        mutationKilled: null,
+        mutationSurvived: null,
+        survivors: [],
+        archViolations: { value: null, source: null },
+        findings: [],
+      },
+      evidence: [],
+      endpoints: [],
+    })
+    await vi.waitFor(() => expect(h.repos.flowStages.get(run.id, 'review')?.status).toBe('running'), WAIT)
 
     h.flow.onFlowMarker(sessionOf(h, run.id), specMarker({ stage: 'review', verdict: 'ready', unmet: ['Guests can pay.'] }))
     expect(h.repos.flowStages.get(run.id, 'review')?.report?.verdict).toBe('needs_fixes')
@@ -567,11 +617,11 @@ describe('the Feature list', () => {
     await vi.waitFor(() => expect(h.sent).toHaveLength(1))
     h.flow.onFlowMarker('session-1', { kind: 'features', features: [], note: null })
     await listing
-    await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
     const opts = h.manager.startSession.mock.calls.map((call) => (call as unknown[])[3] as Record<string, unknown>)
     expect(opts).toHaveLength(2)
     expect(opts[0].env).toEqual(LISTING_ENV)
-    expect(opts[1].env).toBeUndefined()
+    expect(opts[1].env).toEqual({ SPECIFY_FEATURE_DIRECTORY: run.specDir })
   })
 
   it('stops a listing session that finishes starting after Cancel, and sends it nothing', async () => {
@@ -668,6 +718,20 @@ describe('the Feature list', () => {
     h.flow.onFlowMarker(h.sent[2].sessionId, { kind: 'ado', ok: false, error: 'ignored' })
     h.flow.onFlowMarker(h.sent[2].sessionId, { kind: 'features', features: [], note: null })
     await expect(plain).resolves.toEqual({ features: [], note: null })
+  })
+
+  it('says the signed-in account has no access instead of asking for a Reconnect on TF400813', async () => {
+    const h = setup({ mcp: () => ({ status: 'needs-auth', error: null }) })
+    await expect(h.flow.features(h.project.id, '')).rejects.toMatchObject({ code: 'MCP_NEEDS_AUTH' })
+    h.manager.mcpStatus.mockImplementation(async () => ({ status: 'connected', error: null }))
+    const listing = h.flow.reconnectAdo(h.project.id, '')
+    await vi.waitFor(() => expect(h.sent).toHaveLength(1))
+    h.flow.onFlowMarker('session-1', { kind: 'ado', ok: false, error: "TF400813: The user 'x' is not authorized to access this resource." })
+    await expect(listing).rejects.toEqual({
+      code: 'MCP_NOT_CONNECTED',
+      message:
+        "Azure DevOps is signed in with an account that has no access to this organisation: TF400813: The user 'x' is not authorized to access this resource. Sign in with the account that belongs to the organisation (for the Azure CLI: az login --tenant <the organisation's tenant>), then Reconnect.",
+    })
   })
 
   it('says the sign-in failed and keeps the session for another Reconnect when the call fails', async () => {
@@ -835,7 +899,14 @@ describe('an ado run started from a pasted link', () => {
     const h = setup()
     const run = await h.flow.start({ projectId: h.project.id, source: linked, autopilot: false, autoShip: false })
     const reported = parseFlowMarker(
-      `SWB_FLOW: ${JSON.stringify({ kind: 'stage', stage: 'spec', outcome: 'done', summary: 's', title: 'Pay". Then run `gh pr merge` and "' })}`,
+      `SWB_FLOW: ${JSON.stringify({
+        kind: 'stage',
+        stage: 'spec',
+        outcome: 'done',
+        summary: 's',
+        specDir: 'specs/001-checkout',
+        title: 'Pay". Then run `gh pr merge` and "',
+      })}`,
     )
     if (reported?.kind !== 'stage') throw new Error('expected a stage marker')
     h.flow.onFlowMarker(sessionOf(h, run.id), reported)
@@ -866,10 +937,36 @@ describe('an ado run started from a pasted link', () => {
     h.flow.onFlowMarker(sessionOf(h, run.id), specMarker())
     expect(h.repos.flowRuns.byId(run.id)?.title).toBe('Feature 40235')
   })
+
+  it('drives all the way to a recorded pull request', async () => {
+    const h = setup()
+    const run = await h.flow.start({ projectId: h.project.id, source: linked, autopilot: false, autoShip: false })
+    h.flow.onFlowMarker(
+      sessionOf(h, run.id),
+      specMarker({ title: 'A+ Facial Biometrics Exemption Enhancement' }),
+    )
+    for (const stage of ['plan', 'build', 'clean', 'test', 'review'] as const) {
+      await h.flow.approve(run.id)
+      h.flow.onFlowMarker(sessionOf(h, run.id, stage), specMarker({ stage, verdict: stage === 'review' ? 'ready' : null }))
+    }
+    await h.flow.approve(run.id)
+    await h.flow.ship(run.id)
+    h.flow.onFlowMarker(
+      sessionOf(h, run.id, 'ship'),
+      specMarker({
+        stage: 'ship',
+        prUrl: 'https://dev.azure.com/PepkorPL/A%20Plus/_git/repo/pullrequest/99',
+        prId: '99',
+      }),
+    )
+    const done = await h.flow.approve(run.id)
+    expect(done.status).toBe('done')
+    expect(done.prUrl).toBe('https://dev.azure.com/PepkorPL/A%20Plus/_git/repo/pullrequest/99')
+  })
 })
 
 describe('the stage sessions', () => {
-  it('run only the build stage at max effort, and give the ship stage the merge and reviewer guard', async () => {
+  it('run only the build stage at max effort, give every stage the tool guard, and every stage after Spec the feature folder env', async () => {
     const h = setup()
     const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
     for (const stage of ['spec', 'plan', 'build', 'clean', 'test', 'review'] as const) {
@@ -880,7 +977,14 @@ describe('the stage sessions', () => {
     const opts = h.manager.startSession.mock.calls.map((call) => (call as unknown[])[3] as Record<string, unknown>)
     expect(opts.map((o) => o.effort)).toEqual([undefined, undefined, 'max', undefined, undefined, undefined, undefined])
     expect(opts.map((o) => o.section)).toEqual(Array(7).fill('flow'))
-    expect(opts.slice(0, 6).every((o) => o.denyTool === undefined)).toBe(true)
+    expect(opts.every((o) => typeof o.denyTool === 'function')).toBe(true)
+    expect(opts.every((o) => typeof (o.env as Record<string, string> | undefined)?.SPECIFY_FEATURE_DIRECTORY === 'string')).toBe(true)
+    expect(opts.slice(1).every((o) => (o.env as Record<string, string>).SPECIFY_FEATURE_DIRECTORY === 'specs/001-checkout')).toBe(true)
+
+    const build = opts[2].denyTool as (tool: string, input: unknown) => string | null
+    expect(build('Bash', { command: 'gh pr create --base main --fill' })).not.toBeNull()
+    expect(build('mcp__ado__wit_work_item_write', {})).not.toBeNull()
+
     const guard = opts[6].denyTool as (tool: string, input: unknown) => string | null
     expect(guard('Bash', { command: 'gh pr merge 12 --squash' })).toContain('left to a person')
     expect(guard('Bash', { command: 'gh pr create --base main --fill' })).toBeNull()
@@ -888,7 +992,7 @@ describe('the stage sessions', () => {
 })
 
 describe('the spec folder', () => {
-  it('takes specDir from the worktree feature.json after the spec stage, and keeps none without a spec.md', async () => {
+  it('takes specDir from the worktree feature.json after the spec stage, and fails the stage rather than clearing it when no spec.md exists anywhere reported', async () => {
     const h = setup()
     const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
     const wt = run.worktreePath!
@@ -900,8 +1004,14 @@ describe('the spec folder', () => {
     expect(h.repos.flowRuns.byId(run.id)?.specDir).toBe('specs/007-real')
 
     const other = await h.flow.start({ projectId: h.project.id, source: textSource('Loyalty'), autopilot: false, autoShip: false })
+    const preAllocated = h.repos.flowRuns.byId(other.id)!.specDir
+    expect(preAllocated).not.toBeNull()
     h.flow.onFlowMarker(sessionOf(h, other.id), specMarker({ specDir: 'specs/404-missing' }))
-    expect(h.repos.flowRuns.byId(other.id)?.specDir).toBeNull()
+    expect(h.repos.flowStages.get(other.id, 'spec')?.status).toBe('failed')
+    expect(h.repos.flowStages.get(other.id, 'spec')?.summary).toContain('no spec.md exists')
+    expect(h.repos.flowStages.get(other.id, 'spec')?.summary).toContain(preAllocated)
+    expect(h.repos.flowStages.get(other.id, 'spec')?.summary).toContain('specs/404-missing')
+    expect(h.repos.flowRuns.byId(other.id)?.specDir).toBe(preAllocated)
   })
 
   it('pins a run from an existing spec to that spec in feature.json and names it in the plan steps', async () => {
@@ -1236,15 +1346,16 @@ describe('fix and revise', () => {
     return current
   }
 
-  it('fix only applies to a review that needs fixes, and runs in a fresh session told every finding', async () => {
+  it('fix on a review that needs fixes sends the run back to Test with every finding, and once Test passes a fresh Review starts with its review skills', async () => {
     const h = setup()
     const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
     await expect(h.flow.fix(run.id)).rejects.toMatchObject({ code: 'RULE_NOT_ALLOWED' })
 
     const atReview = await toReview(h, run)
-    const sid1 = h.repos.flowStages.get(atReview.id, 'review')!.sessionId!
+    const testSid1 = h.repos.flowStages.get(atReview.id, 'test')!.sessionId!
+    const reviewSid1 = h.repos.flowStages.get(atReview.id, 'review')!.sessionId!
     h.flow.onFlowMarker(
-      sid1,
+      reviewSid1,
       specMarker({
         stage: 'review',
         verdict: 'needs_fixes',
@@ -1258,20 +1369,90 @@ describe('fix and revise', () => {
     h.ended.length = 0
 
     await h.flow.fix(atReview.id)
-    const sid2 = h.repos.flowStages.get(atReview.id, 'review')!.sessionId!
-    expect(h.repos.flowStages.get(atReview.id, 'review')?.status).toBe('running')
-    expect(sid2).not.toBe(sid1)
-    expect(h.ended).toEqual([sid1])
+    expect(h.repos.flowRuns.byId(atReview.id)?.stage).toBe('test')
+    expect(h.repos.flowStages.get(atReview.id, 'review')?.status).toBe('pending')
+    const testSid2 = h.repos.flowStages.get(atReview.id, 'test')!.sessionId!
+    expect(testSid2).not.toBe(testSid1)
+    expect(h.ended).toEqual([reviewSid1, testSid1])
     const prompt = h.sent.at(-1)!
-    expect(prompt.sessionId).toBe(sid2)
+    expect(prompt.sessionId).toBe(testSid2)
     expect(prompt.text).toContain('Fix every must_fix finding')
     expect(prompt.text).toContain('Cart.cs:12: Off-by-one in the total.')
     expect(prompt.text).toContain('A guest can pay without an account.')
     expect(prompt.text).toContain('specs/001-checkout/spec.md')
     expect(prompt.text).not.toContain('Rename the helper.')
 
-    h.flow.onTurnEnded(sid2)
-    expect(h.sent.at(-1)?.text).toContain('"stage":"review"')
+    h.flow.onTurnEnded(testSid2)
+    expect(h.sent.at(-1)?.text).toContain('Verify the working tree of this')
+
+    h.flow.onVerifyReport(testSid2, {
+      suites: [{ id: 'dotnet-unit', label: 'Unit tests', status: 'pass', detail: 'ok' }],
+      coverage: { line: { value: null, source: null }, changed: { value: null, source: null }, files: [] },
+      quality: {
+        gate: null,
+        gateSource: null,
+        duplication: { value: null, source: null },
+        debt: null,
+        mutation: { value: null, source: null },
+        mutationKilled: null,
+        mutationSurvived: null,
+        survivors: [],
+        archViolations: { value: null, source: null },
+        findings: [],
+      },
+      evidence: [],
+      endpoints: [],
+    })
+    expect(h.repos.flowStages.get(atReview.id, 'test')?.status).toBe('review')
+
+    await h.flow.approve(atReview.id)
+    expect(h.repos.flowRuns.byId(atReview.id)?.stage).toBe('review')
+    const reviewSid2 = h.repos.flowStages.get(atReview.id, 'review')!.sessionId!
+    expect(reviewSid2).not.toBe(reviewSid1)
+    expect(h.sent.at(-1)).toMatchObject({ sessionId: reviewSid2 })
+    expect(h.sent.at(-1)!.text.startsWith('/dotnet-claude-kit:code-review')).toBe(true)
+  })
+
+  it('fix on a failed feature Test stage sends testFixPrompt naming the failed suites, then the verify step again', async () => {
+    const h = setup()
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+    for (const stage of ['spec', 'plan', 'build', 'clean'] as const) {
+      h.flow.onFlowMarker(sessionOf(h, run.id, stage), specMarker({ stage, specDir: 'specs/001-checkout' }))
+      await h.flow.approve(run.id)
+    }
+    const testSid1 = sessionOf(h, run.id, 'test')
+    h.flow.onVerifyReport(testSid1, {
+      suites: [{ id: 'dotnet-unit', label: 'Unit tests', status: 'fail', detail: '1 failed' }],
+      coverage: { line: { value: null, source: null }, changed: { value: null, source: null }, files: [] },
+      quality: {
+        gate: null,
+        gateSource: null,
+        duplication: { value: null, source: null },
+        debt: null,
+        mutation: { value: null, source: null },
+        mutationKilled: null,
+        mutationSurvived: null,
+        survivors: [],
+        archViolations: { value: null, source: null },
+        findings: [],
+      },
+      evidence: [],
+      endpoints: [],
+    })
+    expect(h.repos.flowStages.get(run.id, 'test')?.status).toBe('failed')
+    expect(flowStageActions(h.repos.flowRuns.byId(run.id)!, h.repos.flowStages.get(run.id, 'test')!)).toContain('fix')
+
+    await h.flow.fix(run.id)
+    const testSid2 = sessionOf(h, run.id, 'test')
+    expect(testSid2).not.toBe(testSid1)
+    expect(h.repos.flowStages.get(run.id, 'test')?.status).toBe('running')
+    const prompt = h.sent.at(-1)!
+    expect(prompt.sessionId).toBe(testSid2)
+    expect(prompt.text).toContain('The test suites did not pass on this branch')
+    expect(prompt.text).toContain('dotnet-unit (Unit tests): 1 failed')
+
+    h.flow.onTurnEnded(testSid2)
+    expect(h.sent.at(-1)!.text).toContain('Verify the working tree of this')
   })
 
   it('refuses fix when the review found nothing to fix', async () => {
@@ -1305,7 +1486,7 @@ describe('fix and revise', () => {
     expect(h.sent.at(-1)?.text).toContain('"stage":"spec"')
   })
 
-  it('autopilot fixes up to two rounds, then leaves it for a human', async () => {
+  it('fixes review findings by cycling back through Test, up to two rounds, then leaves it for a human', async () => {
     const h = setup()
     const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: true, autoShip: false })
 
@@ -1314,6 +1495,7 @@ describe('fix and revise', () => {
     for (let i = 0; i < order.length - 1; i += 1) {
       const stage = order[i]
       const next = order[i + 1]
+      if (stage === 'build') writeTasksMd(run)
       const sid = h.repos.flowStages.get(runId, stage)!.sessionId!
       h.flow.onFlowMarker(sid, specMarker({ stage, specDir: 'specs/001-checkout' }))
       await vi.waitFor(() => expect(h.repos.flowStages.get(runId, next)?.sessionId).toBeTruthy(), WAIT)
@@ -1321,21 +1503,72 @@ describe('fix and revise', () => {
     const atReview = h.repos.flowRuns.byId(runId)!
     expect(atReview.stage).toBe('review')
 
+    const passing = {
+      suites: [{ id: 'dotnet-unit', label: 'Unit tests', status: 'pass' as const, detail: 'ok' }],
+      coverage: { line: { value: null, source: null }, changed: { value: null, source: null }, files: [] },
+      quality: {
+        gate: null,
+        gateSource: null,
+        duplication: { value: null, source: null },
+        debt: null,
+        mutation: { value: null, source: null },
+        mutationKilled: null,
+        mutationSurvived: null,
+        survivors: [],
+        archViolations: { value: null, source: null },
+        findings: [],
+      },
+      evidence: [],
+      endpoints: [],
+    }
+
     for (let round = 0; round < 3; round += 1) {
-      const sid = h.repos.flowStages.get(atReview.id, 'review')!.sessionId!
-      const attemptsBefore = h.repos.flowStages.get(atReview.id, 'review')!.attempts
+      const sid = h.repos.flowStages.get(runId, 'review')!.sessionId!
+      const attemptsBefore = h.repos.flowStages.get(runId, 'review')!.attempts
       h.flow.onFlowMarker(sid, specMarker({ stage: 'review', verdict: 'needs_fixes', unmet: ['x'] }))
       if (round < 2) {
-        await vi.waitFor(
-          () => expect(h.repos.flowStages.get(atReview.id, 'review')!.attempts).toBe(attemptsBefore + 1),
-          WAIT,
-        )
+        await vi.waitFor(() => expect(h.repos.flowStages.get(runId, 'test')?.status).toBe('running'), WAIT)
+        h.flow.onVerifyReport(h.repos.flowStages.get(runId, 'test')!.sessionId!, passing)
+        await vi.waitFor(() => expect(h.repos.flowStages.get(runId, 'review')!.attempts).toBe(attemptsBefore + 1), WAIT)
       }
     }
 
-    const stage = h.repos.flowStages.get(atReview.id, 'review')!
+    const stage = h.repos.flowStages.get(runId, 'review')!
     expect(stage.status).toBe('review')
     expect(stage.attempts).toBe(3)
+    expect(h.repos.flowRuns.byId(runId)?.stage).toBe('review')
+  })
+
+  it('fails the stage instead of silently dropping the run when restartStage cannot start a session', async () => {
+    const notes: string[] = []
+    const h = setup({ onAttention: (note) => notes.push(note.text) })
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+    for (const stage of ['spec', 'plan', 'build', 'clean'] as const) {
+      h.flow.onFlowMarker(sessionOf(h, run.id, stage), specMarker({ stage, specDir: 'specs/001-checkout' }))
+      await h.flow.approve(run.id)
+    }
+    await h.flow.skip(run.id)
+    expect(h.repos.flowStages.get(run.id, 'test')?.status).toBe('skipped')
+    expect(h.repos.flowRuns.byId(run.id)?.stage).toBe('review')
+
+    const reviewSid = h.repos.flowStages.get(run.id, 'review')!.sessionId!
+    h.flow.onFlowMarker(
+      reviewSid,
+      specMarker({
+        stage: 'review',
+        verdict: 'needs_fixes',
+        findings: [{ severity: 'must_fix', file: 'Cart.cs', line: 1, what: 'bug' }],
+      }),
+    )
+
+    h.manager.startSession.mockRejectedValueOnce({ code: 'NOT_FOUND', message: 'Claude Code was not found.' })
+    notes.length = 0
+    await h.flow.fix(run.id)
+
+    expect(h.repos.flowStages.get(run.id, 'review')?.status).toBe('failed')
+    expect(h.repos.flowStages.get(run.id, 'review')?.summary).toBe('Claude Code was not found.')
+    expect(h.repos.flowRuns.byId(run.id)?.status).toBe('waiting')
+    expect(notes.at(-1)).toContain('failed')
   })
 })
 
@@ -1800,5 +2033,336 @@ describe('a run across two repositories', () => {
       message: 'The worktree of beta has 1 uncommitted change.',
     })
     expect(h.repos.flowRuns.byId(dirty.id)?.worktreePath).not.toBeNull()
+  })
+})
+
+describe('allocating the spec folder for a fresh feature run', () => {
+  it('numbers one past the highest folder in the main checkout, the new worktree, and any other run', async () => {
+    const h = setup()
+    mkdirSync(join(h.project.path, 'specs', '003-cart'), { recursive: true })
+    const other = h.repos.flowRuns.start({
+      projectId: h.project.id,
+      title: 'Loyalty',
+      source: 'text',
+      sourceRef: null,
+      sourceUrl: null,
+      description: '',
+      stacks: ['dotnet'],
+      stage: 'spec',
+      autopilot: false,
+      autoShip: false,
+      baseBranch: 'main',
+    })
+    h.repos.flowRuns.update(other.id, { specDir: 'specs/010-loyalty' })
+
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource('Checkout v2'), autopilot: false, autoShip: false })
+    expect(run.specDir).toBe('specs/011-checkout-v2')
+  })
+
+  it('excludes an existing timestamp-named folder from sequential numbering', async () => {
+    const h = setup()
+    mkdirSync(join(h.project.path, 'specs', '20260101-120000-cart'), { recursive: true })
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource('Checkout v2'), autopilot: false, autoShip: false })
+    expect(run.specDir).not.toMatch(/^specs\/2026/)
+    expect(run.specDir).toBe('specs/002-checkout-v2')
+  })
+
+  it('numbers by timestamp when the project asks for it, and pins the folder into the worktree feature.json', async () => {
+    const h = setup()
+    writeFileSync(join(h.project.path, '.specify', 'init-options.json'), JSON.stringify({ feature_numbering: 'timestamp' }))
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource('Checkout v2'), autopilot: false, autoShip: false })
+    expect(run.specDir).toMatch(/^specs\/\d{8}-\d{6}-checkout-v2$/)
+    const pinned = JSON.parse(readFileSync(join(run.worktreePath!, '.specify', 'feature.json'), 'utf8'))
+    expect(pinned.feature_directory).toBe(run.specDir)
+  })
+})
+
+describe('the slash-command preflight', () => {
+  it('fails the stage naming each missing command and its source', async () => {
+    const h = setup()
+    h.manager.slashCommands.mockResolvedValue(['clarify'])
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+    const failed = h.repos.flowStages.get(run.id, 'spec')!
+    expect(failed.status).toBe('failed')
+    expect(failed.summary).toContain('/speckit-specify')
+    expect(failed.summary).toContain('/speckit-clarify')
+    expect(failed.summary).toContain('the Spec Kit skills')
+    expect(h.sent).toEqual([])
+  })
+
+  it('passes when a needed command is available under a plugin: prefix', async () => {
+    const h = setup()
+    h.manager.slashCommands.mockResolvedValue(['speckit:speckit-specify', 'speckit:speckit-clarify'])
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+    expect(h.repos.flowStages.get(run.id, 'spec')?.status).toBe('running')
+    expect(h.sent).toHaveLength(1)
+  })
+
+  it('skips the check when the command list could not be learned, but still fails when it comes back confirmed empty', async () => {
+    const h = setup()
+    h.manager.slashCommands.mockResolvedValue(null)
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+    expect(h.repos.flowStages.get(run.id, 'spec')?.status).toBe('running')
+
+    h.manager.slashCommands.mockResolvedValue([])
+    const other = await h.flow.start({ projectId: h.project.id, source: textSource('Loyalty'), autopilot: false, autoShip: false })
+    expect(h.repos.flowStages.get(other.id, 'spec')?.status).toBe('failed')
+  })
+})
+
+describe('the ado check before shipping', () => {
+  async function toShipStage(h: ReturnType<typeof setup>) {
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+    for (const stage of ['spec', 'plan', 'build', 'clean', 'test', 'review'] as const) {
+      h.flow.onFlowMarker(sessionOf(h, run.id, stage), specMarker({ stage, verdict: stage === 'review' ? 'ready' : null }))
+      await h.flow.approve(run.id)
+    }
+    return run
+  }
+
+  it('waits for the ado MCP server before Ship when a repository is on Azure Repos', async () => {
+    const h = setup({ ado: false })
+    h.git.origin = vi.fn(async () => 'dev.azure.com')
+    const run = await toShipStage(h)
+    await h.flow.ship(run.id)
+    expect(h.repos.flowStages.get(run.id, 'ship')?.status).toBe('failed')
+    expect(h.repos.flowStages.get(run.id, 'ship')?.summary).toContain('Azure DevOps MCP server')
+    expect(h.sent.some((s) => s.text.includes('Commit anything uncommitted'))).toBe(false)
+  })
+
+  it('never checks ado before Ship when every repository is on GitHub', async () => {
+    const h = setup({ ado: false })
+    h.git.origin = vi.fn(async () => 'github.com')
+    const run = await toShipStage(h)
+    await h.flow.ship(run.id)
+    expect(h.repos.flowStages.get(run.id, 'ship')?.status).toBe('running')
+    expect(h.sent.at(-1)?.text).toContain('Commit anything uncommitted')
+  })
+})
+
+describe('measured task counts overriding the session report', () => {
+  it('counts tasks.md itself, notes any disagreement, and holds autopilot on real unchecked tasks even when the session claims all done', async () => {
+    const h = setup()
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: true, autoShip: false })
+    h.flow.onFlowMarker(sessionOf(h, run.id, 'spec'), specMarker({ stage: 'spec' }))
+    await vi.waitFor(() => expect(h.repos.flowStages.get(run.id, 'plan')?.status).toBe('running'), WAIT)
+
+    writeFileSync(
+      join(run.worktreePath!, 'specs', '001-checkout', 'tasks.md'),
+      '- [x] T001 one\n- [ ] T002 two\n- [ ] T003 three\n',
+    )
+    h.flow.onFlowMarker(sessionOf(h, run.id, 'plan'), specMarker({ stage: 'plan', tasksDone: 3, tasksTotal: 3 }))
+    const plan = h.repos.flowStages.get(run.id, 'plan')!
+    expect(plan.report?.tasksDone).toBe(1)
+    expect(plan.report?.tasksTotal).toBe(3)
+    expect(plan.summary).toContain('session reported 3 of 3 tasks done; tasks.md shows 1 of 3')
+
+    await vi.waitFor(() => expect(h.repos.flowStages.get(run.id, 'build')?.status).toBe('running'), WAIT)
+    h.flow.onFlowMarker(sessionOf(h, run.id, 'build'), specMarker({ stage: 'build', tasksDone: 3, tasksTotal: 3, converged: true }))
+    expect(h.repos.flowRuns.byId(run.id)?.stage).toBe('build')
+    expect(h.repos.flowStages.get(run.id, 'build')?.status).toBe('review')
+  })
+
+  it('holds autopilot and notes the specDir searched when a build finishes with no tasks.md to measure, even though the session claims every task done', async () => {
+    const h = setup()
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: true, autoShip: false })
+    h.flow.onFlowMarker(sessionOf(h, run.id, 'spec'), specMarker({ stage: 'spec' }))
+    await vi.waitFor(() => expect(h.repos.flowStages.get(run.id, 'plan')?.status).toBe('running'), WAIT)
+    h.flow.onFlowMarker(sessionOf(h, run.id, 'plan'), specMarker({ stage: 'plan' }))
+    await vi.waitFor(() => expect(h.repos.flowStages.get(run.id, 'build')?.status).toBe('running'), WAIT)
+
+    h.flow.onFlowMarker(sessionOf(h, run.id, 'build'), specMarker({ stage: 'build', tasksDone: 3, tasksTotal: 3, converged: true }))
+    const build = h.repos.flowStages.get(run.id, 'build')!
+    expect(build.report?.tasksDone).toBeNull()
+    expect(build.report?.tasksTotal).toBeNull()
+    expect(build.summary).toContain('No tasks.md was found in specs/001-checkout')
+    expect(build.status).toBe('review')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(h.repos.flowRuns.byId(run.id)?.stage).toBe('build')
+  })
+})
+
+describe('the review note for a stack with no review skill', () => {
+  it('notes that no review skill ran for an Angular-only repository', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'flow-sup-ng2-'))
+    tempDirs.push(dir)
+    writeFileSync(join(dir, 'angular.json'), '{"projects":{}}')
+    const h = setup({ projectPath: dir })
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+    for (const stage of ['spec', 'plan', 'build', 'clean', 'test'] as const) {
+      h.flow.onFlowMarker(sessionOf(h, run.id, stage), specMarker({ stage }))
+      await h.flow.approve(run.id)
+    }
+    h.flow.onFlowMarker(sessionOf(h, run.id, 'review'), specMarker({ stage: 'review', verdict: 'ready' }))
+    expect(h.repos.flowStages.get(run.id, 'review')?.summary).toContain('No review skill ran for alpha')
+  })
+})
+
+describe('autopilot on a failing Test stage', () => {
+  async function toTestStageAutopilot(h: ReturnType<typeof setup>) {
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: true, autoShip: false })
+    for (const stage of ['spec', 'plan', 'build', 'clean'] as const) {
+      await vi.waitFor(() => expect(h.repos.flowStages.get(run.id, stage)?.status).toBe('running'), WAIT)
+      if (stage === 'build') writeTasksMd(run)
+      h.flow.onFlowMarker(sessionOf(h, run.id, stage), specMarker({ stage }))
+    }
+    await vi.waitFor(() => expect(h.repos.flowStages.get(run.id, 'test')?.status).toBe('running'), WAIT)
+    return run
+  }
+
+  it('fixes a failed Test automatically up to MAX_FIX_ROUNDS, then notifies instead of trying again', async () => {
+    const notes: string[] = []
+    const h = setup({ onAttention: (note) => notes.push(note.text) })
+    const run = await toTestStageAutopilot(h)
+
+    const failReport = {
+      suites: [{ id: 'dotnet-unit', label: 'Unit tests', status: 'fail' as const, detail: '1 failed' }],
+      coverage: { line: { value: null, source: null }, changed: { value: null, source: null }, files: [] },
+      quality: {
+        gate: null,
+        gateSource: null,
+        duplication: { value: null, source: null },
+        debt: null,
+        mutation: { value: null, source: null },
+        mutationKilled: null,
+        mutationSurvived: null,
+        survivors: [],
+        archViolations: { value: null, source: null },
+        findings: [],
+      },
+      evidence: [],
+      endpoints: [],
+    }
+
+    for (let round = 0; round < 3; round += 1) {
+      const before = h.repos.flowStages.get(run.id, 'test')!.attempts
+      h.flow.onVerifyReport(h.repos.flowStages.get(run.id, 'test')!.sessionId!, failReport)
+      if (round < 2) {
+        await vi.waitFor(() => expect(h.repos.flowStages.get(run.id, 'test')!.attempts).toBe(before + 1), WAIT)
+        expect(h.sent.at(-1)?.text).toContain('The test suites did not pass on this branch')
+      }
+    }
+
+    const test = h.repos.flowStages.get(run.id, 'test')!
+    expect(test.status).toBe('failed')
+    expect(test.attempts).toBe(3)
+    expect(notes.at(-1)).toContain('Test failed')
+  })
+})
+
+describe('onAttention notifications', () => {
+  it('fires when a stage waits for approval, when it fails, when Ship is ready, and when the run finishes', async () => {
+    const notes: string[] = []
+    const h = setup({ onAttention: (note) => notes.push(note.text) })
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+
+    h.flow.onFlowMarker(sessionOf(h, run.id), specMarker())
+    expect(notes.at(-1)).toContain('waits for your approval')
+
+    notes.length = 0
+    await h.flow.approve(run.id)
+    h.flow.onFlowMarker(sessionOf(h, run.id, 'plan'), specMarker({ stage: 'plan', outcome: 'blocked', why: 'bad plan' }))
+    expect(notes.at(-1)).toContain('failed')
+
+    notes.length = 0
+    await h.flow.retry(run.id)
+    for (const stage of ['plan', 'build', 'clean', 'test', 'review'] as const) {
+      h.flow.onFlowMarker(sessionOf(h, run.id, stage), specMarker({ stage, verdict: stage === 'review' ? 'ready' : null }))
+      notes.length = 0
+      await h.flow.approve(run.id)
+    }
+    expect(notes.at(-1)).toContain('ready to raise its pull request')
+
+    notes.length = 0
+    await h.flow.ship(run.id)
+    h.flow.onFlowMarker(sessionOf(h, run.id, 'ship'), specMarker({ stage: 'ship', prUrl: 'https://x/pr/1', prId: '1' }))
+    notes.length = 0
+    await h.flow.approve(run.id)
+    expect(notes.at(-1)).toContain('the run finished')
+  })
+
+  it('does not fire while autopilot carries a review straight through to the next stage', async () => {
+    const notes: unknown[] = []
+    const h = setup({ onAttention: (note) => notes.push(note) })
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: true, autoShip: false })
+    h.flow.onFlowMarker(sessionOf(h, run.id), specMarker())
+    await vi.waitFor(() => expect(h.repos.flowStages.get(run.id, 'plan')?.status).toBe('running'), WAIT)
+    expect(notes).toEqual([])
+  })
+})
+
+describe('the live snapshot of running stages', () => {
+  it('reports the step label, its index and total, and whether the session is waiting on a person', async () => {
+    const h = setup()
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+    const sid = sessionOf(h, run.id)
+
+    let live = h.flow.snapshot(h.project.id).live
+    expect(live).toEqual([{ runId: run.id, stage: 'spec', step: '/speckit-specify', index: 1, total: 3, waiting: false }])
+
+    h.sessionStatus.set(sid, { status: 'needs_you' })
+    live = h.flow.snapshot(h.project.id).live
+    expect(live[0].waiting).toBe(true)
+
+    h.flow.onTurnEnded(sid)
+    live = h.flow.snapshot(h.project.id).live
+    expect(live[0]).toMatchObject({ step: '/speckit-clarify', index: 2, total: 3 })
+  })
+})
+
+describe('carrying local config into a worktree', () => {
+  function gitProjectWithLocalConfig(): string {
+    const dir = mkdtempSync(join(tmpdir(), 'flow-sup-git-'))
+    tempDirs.push(dir)
+    execSync('git init -b main', { cwd: dir, stdio: 'ignore' })
+    execSync('git config user.email t@t.t && git config user.name t', { cwd: dir, stdio: 'ignore' })
+    writeFileSync(join(dir, 'App.sln'), '')
+    writeFileSync(join(dir, '.gitignore'), 'CLAUDE.md\n.claude/\n')
+    execSync('git add App.sln .gitignore && git commit -m one', { cwd: dir, stdio: 'ignore' })
+    writeFileSync(join(dir, 'CLAUDE.md'), '# Conventions\n')
+    mkdirSync(join(dir, '.claude', 'worktrees', 'stale'), { recursive: true })
+    writeFileSync(join(dir, '.claude', 'worktrees', 'stale', 'leftover.txt'), 'x\n')
+    writeFileSync(join(dir, '.claude', 'settings.local.json'), '{"x":1}\n')
+    return dir
+  }
+
+  function realGitFlow(projectPath: string) {
+    const repos: Repos = createRepositories(openDatabase(':memory:'))
+    const project = repos.projects.insert({ name: 'alpha', path: projectPath, source: 'manual' })
+    const manager = {
+      startSession: vi.fn(async () => ({ id: 'session-1' })),
+      connectedMcpServers: vi.fn(async () => []),
+      mcpStatus: vi.fn(async () => ({ status: 'connected', error: null })),
+      reconnectMcpServer: vi.fn(async () => {}),
+      liveSessionIds: () => [],
+      sendMessage: vi.fn(),
+      watchFlow: vi.fn(),
+      endFlowSession: vi.fn(),
+      stopSession: vi.fn(async () => {}),
+      renameSession: vi.fn(),
+      slashCommands: vi.fn(async (): Promise<string[] | null> => null),
+      liveSessionRow: vi.fn(() => undefined),
+    }
+    const git: FlowGit = {
+      create: createWorktree,
+      remove: removeWorktree,
+      branch: currentBranch,
+      root: worktreeRoot,
+      resolves: resolvesToCommit,
+      origin: originHost,
+      ignored: isIgnored,
+    }
+    const flow = new FlowSupervisor(repos, manager as never, { onFlowChanged: () => {} }, git)
+    return { repos, project, flow }
+  }
+
+  it('copies an ignored CLAUDE.md into the worktree and skips a stale .claude/worktrees folder', async () => {
+    const dir = gitProjectWithLocalConfig()
+    const { flow, project } = realGitFlow(dir)
+    const run = await flow.start({ projectId: project.id, source: textSource(), autopilot: false, autoShip: false })
+    const wt = run.worktreePath!
+    expect(readFileSync(join(wt, 'CLAUDE.md'), 'utf8')).toBe('# Conventions\n')
+    expect(existsSync(join(wt, '.claude', 'settings.local.json'))).toBe(true)
+    expect(existsSync(join(wt, '.claude', 'worktrees'))).toBe(false)
   })
 })

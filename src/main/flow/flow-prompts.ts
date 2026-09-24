@@ -34,6 +34,7 @@ export function reposContext(repos: readonly Repo[]): string {
       (repo, at) =>
         `- ${where(repo)}${at === 0 ? ', the primary: the spec and tasks.md live here' : ''}; ${stackNames(repo.stacks)}; base ${repo.baseBranch}`,
     ),
+    'Each repository keeps its own conventions: before you change files in one, read its CLAUDE.md, if it has one, and follow it.',
   ].join('\n')
 }
 
@@ -168,10 +169,16 @@ const ANSWER_YOURSELF =
   'Answer each question yourself with your recommended option, record the answer in the spec, and do not wait for me.'
 
 export function specifyPrompt(
-  run: Pick<FlowRun, 'source' | 'sourceRef' | 'sourceUrl' | 'title' | 'description' | 'autopilot'>,
+  run: Pick<FlowRun, 'source' | 'sourceRef' | 'sourceUrl' | 'title' | 'description' | 'autopilot'> &
+    Partial<Pick<FlowRun, 'specDir' | 'branch'>>,
 ): string {
   return [
     `/speckit-specify ${specDescription(run)}`,
+    run.specDir
+      ? `SPECIFY_FEATURE_DIRECTORY=${run.specDir}: create the spec in that folder and write it to .specify/feature.json. ` +
+        `If ${run.specDir}/spec.md exists from an earlier attempt, continue it rather than starting another folder.`
+      : '',
+    run.branch ? `GIT_BRANCH_NAME=${run.branch}: this worktree is already on that branch. Stay on it.` : '',
     run.autopilot ? ANSWER_YOURSELF : ASK_ME,
     run.source === 'ado' ? ADO_RULE : '',
   ]
@@ -275,7 +282,11 @@ export function buildSteps(stacks: readonly string[], specDir: string | null, re
   const context = args(UNATTENDED, featureLine(specDir), stackContext(stacks))
   if (dotnet) steps.push(`/speckit-implement-scaffold ${args(context, workIn(repos, 'dotnet'))}`)
   if (stacks.includes('angular')) {
-    const rest = dotnet && repos.length < 2 ? 'Complete every task still unchecked in tasks.md.' : ''
+    const rest =
+      dotnet && repos.length < 2
+        ? 'Complete every task still unchecked in tasks.md that belongs to the Angular front end. Leave each unchecked .NET ' +
+          'task for the next converge round, which builds it with /speckit-implement-scaffold.'
+        : ''
     steps.push(`/speckit-implement ${args(rest, context, workIn(repos, 'angular'))}`)
   }
   return steps
@@ -472,6 +483,15 @@ export function reviewHandshake(
   if (conventions) {
     lines.push(`Check them against these conventions too; every violation is a must_fix finding: ${conventions}`)
   }
+  const unscanned = scopes(stacks, base, repos).filter((target) => !target.stacks.includes('dotnet'))
+  if (unscanned.length > 0) {
+    lines.push(
+      `No review skill runs for ${unscanned.map((target) => target.name ?? 'this repository').join(' or ')}, so read its ` +
+        'changes for these yourself: secrets or tokens in TypeScript or environment files, [innerHTML] and ' +
+        'bypassSecurityTrust* use, HttpClient calls that skip the app’s interceptors or send credentials to another ' +
+        'origin, forms without validation, and subscriptions never ended.',
+    )
+  }
   lines.push(
     'Every Critical or High security finding is a must_fix finding.',
     '',
@@ -491,19 +511,43 @@ function findingLine(finding: FlowReviewFinding): string {
   return `- ${where}${finding.what}`
 }
 
-export function fixFindingsPrompt(
-  report: Pick<FlowStageReport, 'findings' | 'unmet'> | null,
-  run: Pick<FlowRun, 'baseBranch' | 'specDir'> & { repos?: readonly Repo[] },
-): string {
+type FixRun = Pick<FlowRun, 'baseBranch' | 'specDir'> & { stacks?: readonly string[]; repos?: readonly Repo[] }
+
+function fixRules(run: FixRun): string[] {
+  const conventions = stackContext(run.stacks ?? [])
+  return [
+    ...(run.specDir ? [`The acceptance criteria are in ${run.specDir}/spec.md.`] : []),
+    ...(conventions ? [`Keep to these conventions: ${conventions}`] : []),
+  ]
+}
+
+export function fixFindingsPrompt(report: Pick<FlowStageReport, 'findings' | 'unmet'> | null, run: FixRun): string {
   const mustFix = (report?.findings ?? []).filter((finding) => finding.severity === 'must_fix')
   const unmet = report?.unmet ?? []
   const lines = [
     `A review of the changes on this branch ${againstBase(run.baseBranch ?? 'the base branch', run.repos ?? [])} found the problems below.`,
-    'Fix every must_fix finding and every unmet acceptance criterion listed here, keep the tests green, and commit.',
+    'Fix every must_fix finding and every unmet acceptance criterion listed here, add or update the tests for what you ' +
+      'change, and commit. The test suites run after you, then a fresh review.',
+    ...fixRules(run),
   ]
-  if (run.specDir) lines.push(`The acceptance criteria are in ${run.specDir}/spec.md.`)
   if (mustFix.length > 0) lines.push('', 'Must fix:', ...mustFix.map(findingLine))
   if (unmet.length > 0) lines.push('', 'Unmet acceptance criteria:', ...unmet.map((line) => `- ${line}`))
+  return lines.join('\n')
+}
+
+export function testFixPrompt(verify: VerifyReport | null, run: FixRun): string {
+  const failed = (verify?.suites ?? []).filter((suite) => suite.status === 'fail')
+  const lines = [
+    'The test suites did not pass on this branch. Find out why and fix the code, or the test where the test is wrong ' +
+      'about the spec, then commit. Do not delete, skip or weaken a test to make it pass. The suites run again after you.',
+    ...fixRules(run),
+    '',
+  ]
+  if (failed.length > 0) {
+    lines.push('Failed:', ...failed.map((suite) => `- ${suite.id} (${suite.label})${suite.detail ? `: ${suite.detail}` : ''}`))
+  } else {
+    lines.push('No suite recorded a pass or a fail, so first find out why the suites did not run, and fix that.')
+  }
   return lines.join('\n')
 }
 
@@ -550,26 +594,149 @@ export function revisePrompt(
   return lines.join('\n')
 }
 
-const SHIP_FORBIDDEN_COMMANDS: readonly RegExp[] = [
-  /\bgh\s+pr\s+(merge|review)\b/i,
+const PR_COMMANDS: readonly RegExp[] = [
+  /\bgh\s+pr\s+(merge|review|close)\b/i,
   /\bgh\s+pr\s+edit\b.*--add-reviewer/i,
   /\bgh\s+api\b.*\/(merge|reviews|requested_reviewers)\b/i,
-  /\baz\s+repos\s+pr\s+(update|set-vote|reviewer)\b/i,
+  /\bgh\s+api\b[^;&|]*\/pulls\/\d+/i,
+  /\baz\s+repos\s+pr\s+(set-vote|reviewer)\b/i,
 ]
 
-const SHIP_REFUSAL =
-  'The Ship stage raises the pull request and nothing more. Merging, approving, voting on or adding reviewers to it is left to a person.'
+const EARLY_COMMANDS: readonly RegExp[] = [
+  /\bgh\s+pr\s+create\b/i,
+  /\baz\s+repos\s+pr\s+create\b/i,
+  /\bgh\s+api\b[^;&|]*\/pulls\b(?!\/\d)/i,
+]
 
-export function shipForbidden(toolName: string, input: unknown): string | null {
-  const record = typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {}
-  const command = typeof record.command === 'string' ? record.command : ''
-  if (SHIP_FORBIDDEN_COMMANDS.some((pattern) => pattern.test(command))) return SHIP_REFUSAL
-  if (!toolName.startsWith('mcp__')) return null
-  if (/reviewer|vote|approve|merge/i.test(toolName)) return SHIP_REFUSAL
-  if (/update_pull_request/i.test(toolName) && /"autoComplete"\s*:\s*true|"status"\s*:\s*"completed"/i.test(JSON.stringify(record))) {
-    return SHIP_REFUSAL
+const PR_REFUSED =
+  'Flow raises the pull request and nothing more. Merging, completing, abandoning, approving, voting on or adding reviewers to it is left to a person.'
+
+const PUSH_REFUSED = 'Flow never force pushes, deletes a branch or pushes to a base branch. Push the run’s own branch only.'
+
+const EARLY_REFUSED = 'Only the Ship stage pushes or opens a pull request. Commit on this branch and report; Ship pushes it.'
+
+const ADO_WRITE_REFUSED = 'Only the Ship stage writes to Azure DevOps. This stage reads it and nothing more.'
+
+const REST_REFUSED = 'Reach Azure DevOps through the ado MCP server and GitHub through gh, never through their REST APIs by hand.'
+
+function truthy(value: unknown): boolean {
+  return value === true || (typeof value === 'string' && value.toLowerCase() === 'true')
+}
+
+function branchName(ref: string): string {
+  return ref.replace(/^refs\/heads\//, '').replace(/^(refs\/remotes\/[^/]+\/|origin\/)/, '').toLowerCase()
+}
+
+const GIT_PUSH_RE = /\bgit\b(?:\s+-[cC]\s+\S+)*\s+push\b(.*)$/i
+
+function isGitPush(command: string): boolean {
+  return command.split(/&&|\|\||;|\|/).some((part) => GIT_PUSH_RE.test(part))
+}
+
+function definesGitAlias(command: string): boolean {
+  return /\bgit\s+config\b[^;&|]*\balias\./i.test(command) || /\bgit\b(?:\s+-[cC]\s+\S*alias\.\S*)/i.test(command)
+}
+
+function badAzPrCreateFlags(command: string): boolean {
+  if (!/\baz\s+repos\s+pr\s+create\b/i.test(command)) return false
+  return /--auto-complete\b|--bypass-policy\b|--delete-source-branch\b|--merge-strategy\b|(?:^|\s)-d(?:\s|$)/i.test(command)
+}
+
+function badAzPrUpdateFlags(command: string): boolean {
+  if (!/\baz\s+repos\s+pr\s+update\b/i.test(command)) return false
+  return /--auto-complete\b|--bypass-policy\b|--status\b|--delete-source-branch\b|--merge-strategy\b|(?:^|\s)-d(?:\s|$)/i.test(command)
+}
+
+function badPush(command: string, bases: readonly string[]): boolean {
+  const targets = new Set(bases.map(branchName))
+  for (const part of command.split(/&&|\|\||;|\|/)) {
+    const push = GIT_PUSH_RE.exec(part)
+    if (!push) continue
+    const args = push[1].trim().split(/\s+/).filter(Boolean)
+    if (args.some((arg) => /^(-f|--force|--force-with-lease(=.*)?|--force-if-includes|--delete|-d|--mirror|--all|--prune)$/.test(arg))) {
+      return true
+    }
+    for (const spec of args.filter((arg) => !arg.startsWith('-')).slice(1)) {
+      if (spec.startsWith('+') || spec.startsWith(':')) return true
+      if (targets.has(branchName(spec.split(':').pop() ?? spec))) return true
+    }
   }
+  return false
+}
+
+function badPullRequestWrite(toolName: string, record: Record<string, unknown>): boolean {
+  if (!/pull_?request/i.test(toolName) || /thread/i.test(toolName) || !/create|write/i.test(toolName)) return false
+  if (/reviewer|vote|approve|merge|complete/i.test(toolName)) return true
+  const action = typeof record.action === 'string' ? record.action : ''
+  if (/reviewer|vote|approve|merge|complete/i.test(action)) return true
+  const status = typeof record.status === 'string' ? record.status.toLowerCase() : ''
+  return (
+    truthy(record.autoComplete) ||
+    truthy(record.bypassPolicy) ||
+    truthy(record.deleteSourceBranch) ||
+    typeof record.mergeStrategy === 'string' ||
+    (status !== '' && status !== 'active')
+  )
+}
+
+const SCRIPT_FILE_RE = /\.(sh|bash|ps1|psm1|cmd|bat|py|js|mjs|cjs)$/i
+
+function scriptTexts(toolName: string, record: Record<string, unknown>): string[] {
+  if (toolName === 'Write' && typeof record.content === 'string') return [record.content]
+  if (toolName === 'Edit' && typeof record.new_string === 'string') return [record.new_string]
+  if (toolName === 'MultiEdit') {
+    const edits = record.edits
+    if (Array.isArray(edits)) {
+      return edits.flatMap((edit: unknown) =>
+        typeof edit === 'object' && edit !== null && typeof (edit as Record<string, unknown>).new_string === 'string'
+          ? [(edit as Record<string, unknown>).new_string as string]
+          : [],
+      )
+    }
+  }
+  return []
+}
+
+function checkCommandText(command: string, bases: readonly string[], shipping: boolean): string | null {
+  if (PR_COMMANDS.some((pattern) => pattern.test(command))) return PR_REFUSED
+  if (badAzPrUpdateFlags(command)) return PR_REFUSED
+  if (
+    /\b(curl|wget|invoke-restmethod|invoke-webrequest|irm|iwr|az\s+rest)\b/i.test(command) &&
+    /(dev\.azure\.com|visualstudio\.com|api\.github\.com)/i.test(command)
+  ) {
+    return REST_REFUSED
+  }
+  if (definesGitAlias(command)) return PUSH_REFUSED
+  if (!shipping && (EARLY_COMMANDS.some((pattern) => pattern.test(command)) || isGitPush(command))) return EARLY_REFUSED
+  if (badPush(command, bases)) return PUSH_REFUSED
+  if (badAzPrCreateFlags(command)) return PR_REFUSED
   return null
+}
+
+export function flowToolGuard(stage: FlowStage, bases: readonly string[]): (toolName: string, input: unknown) => string | null {
+  const shipping = stage === 'ship'
+  return (toolName, input) => {
+    const record = typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {}
+    const command = typeof record.command === 'string' ? record.command : ''
+    if (command) {
+      const refused = checkCommandText(command, bases, shipping)
+      if (refused) return refused
+    }
+    const filePath = typeof record.file_path === 'string' ? record.file_path : ''
+    if (filePath && SCRIPT_FILE_RE.test(filePath)) {
+      for (const text of scriptTexts(toolName, record)) {
+        for (const line of text.split(/\r?\n/)) {
+          const refused = checkCommandText(line, bases, shipping)
+          if (refused) return refused
+        }
+      }
+    }
+    if (!toolName.startsWith('mcp__')) return null
+    if (badPullRequestWrite(toolName, record)) return PR_REFUSED
+    if (!shipping && /pull_?request/i.test(toolName) && /create|write/i.test(toolName)) return EARLY_REFUSED
+    if (!shipping && toolName.startsWith('mcp__ado__') && /_write$|upsert|create/i.test(toolName)) return ADO_WRITE_REFUSED
+    return null
+  }
 }
 
 function measured(label: string, value: Measured): string[] {

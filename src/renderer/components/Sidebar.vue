@@ -265,6 +265,19 @@ async function ctxEndAll(): Promise<void> {
   if (ids.length > 0) await projects.endSessions(ids)
 }
 
+const ctxGroupColor = computed<string | undefined>(() => {
+  if (ctx.value?.kind !== 'group') return undefined
+  const index = groups.value.findIndex((g) => g.id === ctx.value?.id)
+  return groups.value[index]?.color ?? GROUP_COLORS[index % GROUP_COLORS.length]
+})
+
+function ctxColor(color: string): void {
+  if (!ctx.value || ctx.value.kind !== 'group') return
+  const id = ctx.value.id
+  ctx.value = null
+  saveGroups(groups.value.map((g) => (g.id === id ? { ...g, color } : g)))
+}
+
 function ctxRemoveGroup(): void {
   if (!ctx.value || ctx.value.kind !== 'group') return
   removeGroup(ctx.value.id)
@@ -756,6 +769,7 @@ function restore(projectId: string): void {
     :groups="groups"
     :grouped="!!groupOf[ctx.id]"
     :live-count="ctxLiveSessions.length"
+    :group-color="ctxGroupColor"
     @close="closeCtx"
     @rename="startRename"
     @move="ctxMove"
@@ -767,6 +781,7 @@ function restore(projectId: string): void {
     @remove="ctxDelete"
     @delete="ctxDeleteProject"
     @remove-group="ctxRemoveGroup"
+    @color="ctxColor"
   />
 
   <RepointDialog

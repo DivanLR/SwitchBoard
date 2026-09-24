@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
 import type { Session } from '@shared/domain'
+import { modelLabel } from '@shared/domain'
 import type { ProjectListItem } from '@shared/ipc-types'
 import { useActiveSessionStore } from '@renderer/stores/activeSession'
 import { useProjectsStore } from '@renderer/stores/projects'
@@ -287,6 +288,17 @@ function onContainersToggle(e: Event): void {
         {{ currentModelLabel }}
       </span>
       <span
+        v-if="liveSession?.jevRoute"
+        class="ui-chip jev-chip"
+        :class="{ switched: liveSession.jevRoute.switched }"
+        data-testid="session-jev-chip"
+        :title="liveSession.jevRoute.note"
+        :aria-label="liveSession.jevRoute.note"
+      >
+        <Icon :name="liveSession.jevRoute.switched ? 'swap' : 'spark'" :size="12" />
+        Jev · {{ modelLabel(liveSession.jevRoute.model) }}{{ liveSession.jevRoute.switched ? ' · switched' : '' }}
+      </span>
+      <span
         v-if="liveSession?.currentMode"
         class="ui-chip"
         data-testid="session-mode"
@@ -519,6 +531,12 @@ function onContainersToggle(e: Event): void {
   color: var(--amber);
   background: color-mix(in srgb, var(--amber) 9%, transparent);
   border-color: color-mix(in srgb, var(--amber) 40%, transparent);
+}
+
+.jev-chip.switched {
+  color: var(--blue);
+  border-color: color-mix(in srgb, var(--blue) 40%, transparent);
+  background: color-mix(in srgb, var(--blue) 9%, transparent);
 }
 
 .head-meta {

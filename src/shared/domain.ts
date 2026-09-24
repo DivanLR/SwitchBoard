@@ -153,6 +153,7 @@ export interface Session {
   mcpServers?: McpServer[]
   currentModel?: string | null
   currentMode?: 'advisor' | 'orchestrator' | null
+  jevRoute?: { model: string; switched: boolean; note: string } | null
   backgroundTasks?: { taskId: string; description: string }[]
   modelTotals?: Record<string, { tokens: number; costUsd: number }>
 }
@@ -446,7 +447,9 @@ export function modelPrice(id: string): string {
   return FAMILY_PRICE[modelFamily(id) ?? ''] ?? '—'
 }
 
-export type ModelMode = 'auto' | 'advisor' | 'orchestrator' | 'basic'
+export type ModelMode = 'jev' | 'auto' | 'basic'
+
+export const MODEL_MODES: readonly ModelMode[] = ['jev', 'auto', 'basic']
 
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
@@ -477,6 +480,7 @@ export interface Settings {
   workerModel: string
   autoModelRouting: boolean
   modelMode: ModelMode
+  jevSwitchLimit: number
   defaultEngine: SessionEngine
   codexModel: string
   effort: EffortLevel
@@ -515,6 +519,7 @@ export const DEFAULT_SETTINGS: Settings = {
   workerModel: 'claude-sonnet-5',
   autoModelRouting: true,
   modelMode: 'auto',
+  jevSwitchLimit: 60,
   defaultEngine: DEFAULT_SESSION_ENGINE,
   codexModel: '',
   effort: 'xhigh',
@@ -824,6 +829,15 @@ export interface FlowRun {
   finishedAt: string | null
 }
 
+export interface FlowStageLive {
+  runId: string
+  stage: FlowStage
+  step: string
+  index: number
+  total: number
+  waiting: boolean
+}
+
 export type FlowStageAction = 'approve' | 'fix' | 'revise' | 'retry' | 'ship' | 'skip' | 'feature'
 
 export function flowStageActions(
@@ -839,7 +853,7 @@ export function flowStageActions(
   if (row.stage !== run.stage) return []
   const bugTest = run.kind === 'bug' && row.stage === 'test'
   if (row.status === 'running') return bugTest ? [] : ['skip']
-  if (row.status === 'failed') return bugTest ? ['fix', 'retry'] : ['retry', 'skip']
+  if (row.status === 'failed') return bugTest ? ['fix', 'retry'] : row.stage === 'test' ? ['fix', 'retry', 'skip'] : ['retry', 'skip']
   if (row.status === 'pending') return row.stage === 'ship' ? ['ship', 'skip'] : bugTest ? [] : ['skip']
   if (row.status !== 'review') return []
   if (row.stage === stages[stages.length - 1] || bugTest) return ['approve', 'revise']

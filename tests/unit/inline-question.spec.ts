@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isInteractiveQuestion, parseInlineQuestion, pendingQuestion } from '@shared/inline-question'
+import { isInteractiveQuestion, parseInlineQuestion, pendingQuestions } from '@shared/inline-question'
 
 const CLARIFY = `Contract defines run-level passRate and metric-level pass booleans, but never what makes a single test case pass. Asking max 2 questions, one at a time.
 
@@ -45,48 +45,48 @@ describe('inline questions', () => {
   })
 })
 
-describe('pendingQuestion', () => {
+describe('pendingQuestions', () => {
   const ev = (id: string, kind: string, text?: string) => ({ id, kind, payload: { text } })
   const QUESTION =
     'Question 1 of 1\n\n| Option | Description |\n| A | Six per-domain sheets |\n| B | One wall chart |\n\nReply with the option letter.'
 
   it('finds the question a session is waiting on', () => {
-    const found = pendingQuestion([ev('e1', 'assistant_text', QUESTION)])
-    expect(found?.eventId).toBe('e1')
-    expect(found?.payload.options.map((o) => o.label)).toEqual(['A', 'B'])
+    const found = pendingQuestions([ev('e1', 'assistant_text', QUESTION)])
+    expect(found[0]?.eventId).toBe('e1')
+    expect(found[0]?.payload.options.map((o) => o.label)).toEqual(['A', 'B'])
   })
 
   it('is null once a prompt follows the question', () => {
     expect(
-      pendingQuestion([ev('e1', 'assistant_text', QUESTION), ev('e2', 'prompt', 'A')]),
-    ).toBeNull()
+      pendingQuestions([ev('e1', 'assistant_text', QUESTION), ev('e2', 'prompt', 'A')]),
+    ).toEqual([])
   })
 
   it('looks past tool activity and results between the question and now', () => {
-    const found = pendingQuestion([
+    const found = pendingQuestions([
       ev('e1', 'assistant_text', QUESTION),
       ev('e2', 'tool_activity'),
       ev('e3', 'result'),
     ])
-    expect(found?.eventId).toBe('e1')
+    expect(found[0]?.eventId).toBe('e1')
   })
 
   it('is null for a card the developer has just answered', () => {
-    expect(pendingQuestion([ev('e1', 'assistant_text', QUESTION)], 'e1')).toBeNull()
+    expect(pendingQuestions([ev('e1', 'assistant_text', QUESTION)], ['e1'])).toEqual([])
   })
 
   it('is null for ordinary output, and for an empty session', () => {
-    expect(pendingQuestion([ev('e1', 'assistant_text', 'Wrote the file.')])).toBeNull()
-    expect(pendingQuestion([])).toBeNull()
+    expect(pendingQuestions([ev('e1', 'assistant_text', 'Wrote the file.')])).toEqual([])
+    expect(pendingQuestions([])).toEqual([])
   })
 
   it('answers about the most recent question, not the first', () => {
-    const found = pendingQuestion([
+    const found = pendingQuestions([
       ev('e1', 'assistant_text', QUESTION),
       ev('e2', 'prompt', 'A'),
       ev('e3', 'assistant_text', QUESTION),
     ])
-    expect(found?.eventId).toBe('e3')
+    expect(found[0]?.eventId).toBe('e3')
   })
 
   describe('a question asked as a tool call', () => {
@@ -102,25 +102,33 @@ describe('pendingQuestion', () => {
     })
 
     it('is offered with its options', () => {
-      const found = pendingQuestion([asked('q1')])
-      expect(found?.eventId).toBe('q1')
-      expect(found?.payload.options.map((o) => o.label)).toEqual([
+      const found = pendingQuestions([asked('q1')])
+      expect(found[0]?.eventId).toBe('q1')
+      expect(found[0]?.payload.options.map((o) => o.label)).toEqual([
         'Device code',
         'Personal access token',
       ])
     })
 
     it('is gone once answered, by the record on the event or by this click', () => {
-      expect(pendingQuestion([asked('q1', { answered: true })])).toBeNull()
-      expect(pendingQuestion([asked('q1')], 'q1')).toBeNull()
+      expect(pendingQuestions([asked('q1', { answered: true })])).toEqual([])
+      expect(pendingQuestions([asked('q1')], ['q1'])).toEqual([])
     })
 
     it('is gone once the run has moved on past it', () => {
-      expect(pendingQuestion([asked('q1'), ev('e2', 'assistant_text', 'Wrote plan.md.')])).toBeNull()
+      expect(pendingQuestions([asked('q1'), ev('e2', 'assistant_text', 'Wrote plan.md.')])).toEqual([])
+    })
+
+    it('offers every question of one call, in order, and keeps the rest open as each is answered', () => {
+      const group = [ev('e0', 'tool_activity'), asked('q1'), asked('q2')]
+      expect(pendingQuestions(group).map((q) => q.eventId)).toEqual(['q1', 'q2'])
+      expect(pendingQuestions(group, ['q2']).map((q) => q.eventId)).toEqual(['q1'])
+      expect(pendingQuestions([ev('e0', 'tool_activity'), asked('q1'), asked('q2', { answered: true })]).map((q) => q.eventId)).toEqual(['q1'])
+      expect(pendingQuestions(group, ['q1', 'q2'])).toEqual([])
     })
 
     it('is ignored when it carries no options to choose from', () => {
-      expect(pendingQuestion([asked('q1', { options: [] })])).toBeNull()
+      expect(pendingQuestions([asked('q1', { options: [] })])).toEqual([])
     })
   })
 })

@@ -49,13 +49,14 @@ import { probeCodexModels } from './codex-catalog'
 import { CodexSession } from './codex-session'
 import { foldModelTotals, type EventSink } from './message-mapper'
 import {
-  heavySubagentModelMode,
+  promptPattern,
   heavySubagentSystemPromptAppend,
   modeAgents,
   modesSystemPromptAppend,
   sandboxSystemPromptAppend,
 } from './session-shaping'
 import { mainLoopModel } from './model-routing'
+import { askJev, type JevAnswer } from './jev-router'
 import {
   TRANSCRIPT_EVENT_CAP,
   transcriptContextAppend,
@@ -127,6 +128,7 @@ interface FlowHooks {
   onSessionEnded: (sessionId: string, reason: SessionEndReason | 'crashed') => void
   onVerifyReport: (sessionId: string, report: VerifyReport) => void
   onTurnEnded: (sessionId: string, error: string | null) => void
+  onStatus?: (sessionId: string) => void
 }
 
 interface StartOptions {
@@ -498,6 +500,20 @@ export class SessionManager {
     this.elicitation = gate
   }
 
+  private jevKey: (() => string | null) | null = null
+
+  setJevKey(read: () => string | null): void {
+    this.jevKey = read
+  }
+
+  private jevFor(opts: StartOptions | undefined): ((text: string) => Promise<JevAnswer>) | undefined {
+    if (opts?.section || opts?.workerMainLoop || opts?.mainModel || opts?.engine === 'codex') return undefined
+    return (text) => {
+      const key = this.jevKey?.() ?? null
+      return key ? askJev(key, text) : Promise.resolve({ ok: false, why: 'No Jev API key is set' })
+    }
+  }
+
   reconcileOnStartup(sweepContainers = false): void {
     const leftOpen = this.repos.sessions.listUnended().map((s) => s.id)
     this.repos.sessions.reconcileAllEnded(
@@ -541,14 +557,16 @@ export class SessionManager {
     modelMode: ModelMode
     autoModelRouting: boolean
     effort: EffortLevel
+    jevSwitchLimit: number
   } {
     const settings = this.repos.settings.get()
     return {
       intelligentModel: settings.intelligentModel,
       workerModel: settings.workerModel,
-      modelMode: settings.modelMode ?? 'auto',
+      modelMode: settings.modelMode === 'jev' && !this.jevKey?.() ? 'basic' : (settings.modelMode ?? 'auto'),
       autoModelRouting: settings.autoModelRouting,
       effort: settings.effort,
+      jevSwitchLimit: settings.jevSwitchLimit,
     }
   }
 
@@ -564,7 +582,12 @@ export class SessionManager {
       opts?.section === 'flow' || (opts?.cwd !== undefined && relative(project.path, opts.cwd) !== '')
     const codex = opts?.engine === 'codex'
     const chosen = requestedMode ?? project.defaultSessionMode
-    const mode = onHost || (codex && requestedMode === undefined) ? nativeMode(chosen) : chosen
+    const mode =
+      opts?.section === 'flow' && chosen === 'plan'
+        ? 'acceptEdits'
+        : onHost || (codex && requestedMode === undefined)
+          ? nativeMode(chosen)
+          : chosen
     const containerised =
       !onHost && ((opts?.containerised ?? (!codex && project.useContainers)) === true || mode === 'bypass')
     if (codex && (containerised || mode === 'bypass')) {
@@ -675,7 +698,7 @@ export class SessionManager {
     }
 
     const settings = this.repos.settings.get()
-    const { intelligentModel, workerModel } = this.resolveModelSettings()
+    const { intelligentModel, workerModel, modelMode } = this.resolveModelSettings()
     const activeCombo = settings.mcpActiveServers ?? []
     const schemaDoc = (
       (activeCombo.length > 0 ? readComboDoc(project.path, activeCombo) : null) ??
@@ -685,13 +708,13 @@ export class SessionManager {
       ? `## Database schema (from a previous MCP scan)\n\n${schemaDoc}`
       : null
     const effort = opts?.effort ?? settings.effort
-    const basic = settings.modelMode === 'basic'
+    const basic = modelMode === 'basic'
     const subagents = !basic && subagentsAllowed(effort)
     const heavySubagents = subagents && settings.subagentEffort === 'max'
     row.heavySubagents = heavySubagents
     const heavyAppend = heavySubagentSystemPromptAppend(heavySubagents)
     const modesAppend = modesSystemPromptAppend(
-      subagents ? heavySubagentModelMode(heavySubagents, settings.modelMode ?? 'auto') : 'basic',
+      subagents ? promptPattern(heavySubagents, modelMode) : 'none',
     )
     const sandboxAppend = containerised
       ? sandboxSystemPromptAppend(
@@ -747,16 +770,21 @@ export class SessionManager {
         claudeExecutablePath: claudeExecutablePath ?? undefined,
         mainModel:
           opts?.mainModel ??
-          (opts?.workerMainLoop ? workerModel : mainLoopModel(settings.modelMode, { intelligentModel, workerModel })),
+          (opts?.workerMainLoop ? workerModel : mainLoopModel(modelMode, { intelligentModel, workerModel })),
         downgraded: opts?.mainModel !== undefined,
         workerMainLoop: opts?.workerMainLoop,
         autoModelRouting: !basic && settings.autoModelRouting,
-        modelMode: settings.modelMode,
+        modelMode,
         effort,
         resolveModels: opts?.effort ? undefined : () => this.resolveModelSettings(),
         onTurnMode: (turnMode) => {
           if (entry.row.currentMode === turnMode) return
           entry.row.currentMode = turnMode
+          this.pushStatus(entry)
+        },
+        askJev: this.jevFor(opts),
+        onRoute: (route) => {
+          entry.row.jevRoute = route
           this.pushStatus(entry)
         },
         mode,
@@ -765,7 +793,7 @@ export class SessionManager {
         agents: modeAgents({
           strongModel: intelligentModel,
           cheapModel: workerModel,
-          mode: settings.modelMode,
+          mode: modelMode,
           effort: settings.subagentEffort,
         }),
         denyTool: opts?.denyTool,
@@ -1116,6 +1144,12 @@ export class SessionManager {
     if (!all) return { status: 'pending', error: null }
     const found = all.find((server) => server.name === name)
     return found ? { status: found.status, error: found.error ?? null } : { status: 'missing', error: null }
+  }
+
+  async slashCommands(sessionId: string): Promise<string[] | null> {
+    const entry = this.hosted.get(sessionId)
+    if (!entry?.session.slashCommands) return null
+    return Promise.race([entry.session.slashCommands(), delay(30_000).then((): null => null)]).catch((): null => null)
   }
 
   async reconnectMcpServer(sessionId: string, name: string): Promise<void> {
@@ -1522,6 +1556,7 @@ export class SessionManager {
     this.repos.sessions.update(entry.row.id, { status, statusDetail: detail ?? null })
     this.pushStatus(entry)
     this.callbacks.onCountersChanged()
+    if (this.flowWatch.has(entry.row.id)) this.flowHooks?.onStatus?.(entry.row.id)
     if (status === 'done') {
       if (this.flowEnding.has(entry.row.id)) void this.closeFlowSession(entry.row.id)
       else if (this.flowWatch.has(entry.row.id) && !this.quitting) {

@@ -13,9 +13,10 @@ interface NotifierDeps {
 interface NeedsYouContext {
   projectId: string
   sessionId: string
-  kind: 'permission' | 'plan' | 'question' | 'sign_in' | 'input'
+  kind: 'permission' | 'plan' | 'question' | 'sign_in' | 'input' | 'flow'
   requestId?: string
   eventId?: string
+  flowRunId?: string
   title: string
 }
 
@@ -25,6 +26,7 @@ const KIND_LABEL: Record<NeedsYouContext['kind'], string> = {
   question: 'Question',
   sign_in: 'Sign in',
   input: 'Input request',
+  flow: 'Flow',
 }
 
 export function createNotifier(deps: NotifierDeps): (context: NeedsYouContext) => void {
@@ -51,7 +53,9 @@ export function createNotifier(deps: NotifierDeps): (context: NeedsYouContext) =
     })
     notification.on('click', () => {
       deps.showWindow()
-      if (context.kind === 'question') {
+      if (context.flowRunId) {
+        deps.pushFocusRequest({ target: 'flow', projectId: context.projectId, runId: context.flowRunId })
+      } else if (context.kind === 'question') {
         deps.pushFocusRequest({
           target: 'session',
           sessionId: context.sessionId,

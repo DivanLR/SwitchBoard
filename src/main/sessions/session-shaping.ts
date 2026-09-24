@@ -71,12 +71,14 @@ export function heavySubagentSystemPromptAppend(enabled: boolean): string | null
   return enabled ? HEAVY_SUBAGENTS_APPEND : null
 }
 
-export function heavySubagentModelMode(enabled: boolean, chosen: ModelMode): ModelMode {
-  if (enabled) return 'orchestrator'
-  return chosen === 'auto' ? 'advisor' : chosen
+export type PromptPattern = 'advisor' | 'orchestrator' | 'none'
+
+export function promptPattern(heavy: boolean, chosen: ModelMode): PromptPattern {
+  if (chosen === 'basic') return 'none'
+  return heavy ? 'orchestrator' : 'advisor'
 }
 
-export function modesSystemPromptAppend(mode: ModelMode): string {
+export function modesSystemPromptAppend(mode: PromptPattern): string {
   const header =
     '## MODEL MODES — cost-aware execution protocol\n' +
     'Two subagents are available: `advisor` (strong model, expensive, consulted rarely) and ' +
@@ -101,10 +103,8 @@ export function modesSystemPromptAppend(mode: ModelMode): string {
     `Token hygiene: prefer \`${WORKER_AGENT}\` delegation for templated or repetitive work; keep ` +
     'delegation specs short and precise; a worker that reports ambiguity gets a tighter spec, ' +
     'not a retry of the same one.'
-  if (mode === 'basic') return ''
-  if (mode === 'advisor') return header + advisor + hygiene
-  if (mode === 'orchestrator') return header + orchestrator + hygiene
-  return header + advisor + orchestrator + hygiene
+  if (mode === 'none') return ''
+  return header + (mode === 'advisor' ? advisor : orchestrator) + hygiene
 }
 
 export function sandboxSystemPromptAppend(

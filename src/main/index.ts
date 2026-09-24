@@ -17,6 +17,7 @@ import { computeCounters, registerIpcHandlers, RendererPush } from './ipc/handle
 import { readDiagramList } from './diagrams/list'
 import { reconcileSkills, stagingSkillsRoot } from './skills/install'
 import { keepCurrentService } from './keep-current'
+import { readJevKey } from '@main/sessions/jev-key'
 import { FlowSupervisor } from './flow/flow-supervisor'
 import { initUpdater } from './updater'
 import { PtyHost } from './terminal/pty-host'
@@ -237,10 +238,12 @@ async function main(): Promise<void> {
     projectName: (projectId) => repos.projects.byId(projectId)?.name ?? 'A project',
   })
 
+  const notifyStage = (context: Parameters<typeof notify>[0]): void =>
+    notify(context.kind === 'question' ? { ...context, flowRunId: flow.stageOf(context.sessionId)?.runId } : context)
   broker = new PermissionBroker(repos, manager, {
     onInboxChanged: (push) => pusher.push('push.inboxChanged', push),
     onCountersChanged: () => pusher.countersChanged(),
-    onNeedsYou: (context) => notify(context),
+    onNeedsYou: (context) => notifyStage(context),
   })
   elicitations = new ElicitationBroker(repos, manager, {
     onChanged: (pending) => pusher.push('push.elicitations', pending),
@@ -248,6 +251,7 @@ async function main(): Promise<void> {
     openExternal: (url) => shell.openExternal(url),
   })
   manager.setElicitation(elicitations)
+  manager.setJevKey(readJevKey)
 
   const swallowRules = defaultSwallowRules()
   manager.setNoiseClassifier((event) => classifyNoise(swallowRules, event))
@@ -272,20 +276,16 @@ async function main(): Promise<void> {
   deepLinkIn(process.argv)
 
   const flow = new FlowSupervisor(repos, manager, {
-    onFlowChanged: (projectId) =>
-      pusher.push('push.flowChanged', {
-        projectId,
-        runs: repos.flowRuns.listForProject(projectId),
-        stages: repos.flowStages.listForProject(projectId),
-        listing: flow.listingSession(projectId),
-        signingIn: flow.signingIn(projectId),
-      }),
+    onFlowChanged: (projectId) => pusher.push('push.flowChanged', { projectId, ...flow.snapshot(projectId) }),
+    onAttention: (note) =>
+      notify({ projectId: note.projectId, sessionId: '', kind: 'flow', title: note.text, flowRunId: note.runId }),
   })
   manager.setFlowHooks({
     onMarker: (sessionId, marker) => flow.onFlowMarker(sessionId, marker),
     onSessionEnded: (sessionId, reason) => flow.onSessionEnded(sessionId, reason),
     onVerifyReport: (sessionId, report) => flow.onVerifyReport(sessionId, report),
     onTurnEnded: (sessionId, error) => flow.onTurnEnded(sessionId, error),
+    onStatus: (sessionId) => flow.onSessionStatus(sessionId),
   })
   flow.reconcileOnStartup()
 

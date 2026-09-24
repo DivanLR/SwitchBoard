@@ -25,11 +25,11 @@ test('settings exposes intelligent and worker model cards', async ({ page }) => 
   await expect(page.getByTestId('model-summary')).toContainText('Opus 5')
 })
 
-test('settings offers the four model modes and the pair by message switch', async ({ page }) => {
+test('settings offers the three model modes and the pair by message switch', async ({ page }) => {
   await page.getByTestId('open-settings').click()
   const panel = page.getByTestId('settings-panel')
   await expect(panel.getByTestId('mode-auto')).toHaveClass(/sel/)
-  for (const mode of ['advisor', 'orchestrator', 'basic']) {
+  for (const mode of ['jev', 'basic']) {
     await expect(panel.getByTestId(`mode-${mode}`)).not.toHaveClass(/sel/)
   }
   await panel.getByTestId('mode-basic').click()
