@@ -606,6 +606,14 @@ async function startTwoRepoRun(page: Page): Promise<void> {
     window.__mock.setFlowStacks('p-beta', ['angular'])
   })
   await page.getByTestId('flow-new').click()
+  const current = page.getByTestId('flow-companion-p-alpha')
+  await expect(current).toContainText('alpha')
+  await expect(current).toHaveAttribute('aria-checked', 'true')
+  await expect(current).toHaveAttribute('aria-current', 'true')
+  await expect(page.getByTestId('flow-companion-p-alpha-current')).toHaveText('Current')
+  await expect(page.getByTestId('flow-companion-p-alpha-stack-dotnet')).toHaveText('.NET')
+  await expect(current).toBeDisabled()
+  await expect(page.getByTestId('flow-companion-base-p-alpha')).toHaveCount(0)
   await expect(page.getByTestId('flow-companion-p-beta')).toContainText('beta')
   await expect(page.getByTestId('flow-companion-p-beta-stack-angular')).toHaveText('Angular')
   await expect(page.getByTestId('flow-companion-p-beta')).toHaveAttribute('aria-checked', 'false')
@@ -618,7 +626,7 @@ async function startTwoRepoRun(page: Page): Promise<void> {
   await expect(page.getByTestId('flow-run')).toBeVisible()
 }
 
-test('Also change adds another project to the run, and the header lists every repository with its branch and stacks', async ({
+test('Repositories in this run adds another project to the run, and the header lists every repository with its branch and stacks', async ({
   page,
 }) => {
   await startTwoRepoRun(page)

@@ -51,8 +51,9 @@ const companions = ref<Record<string, string>>({})
 const candidates = computed(() => projects.visibleItems.filter((item) => item.id !== props.projectId))
 const stacksOf = (projectId: string): FlowStackId[] => flow.stacksByProject[projectId] ?? []
 const unsupported = (projectId: string): boolean => flow.stacksByProject[projectId]?.length === 0
+const currentProject = computed(() => projects.items.find((item) => item.id === props.projectId) ?? null)
 const hostNote = computed(() => {
-  const project = projects.items.find((item) => item.id === props.projectId)
+  const project = currentProject.value
   if (project?.defaultSessionMode === 'bypass') {
     return 'Stages run on this machine in accept edits, not bypass: a container mounts only the project folder, not the run’s worktrees.'
   }
@@ -477,8 +478,31 @@ async function start(): Promise<void> {
         />
       </label>
       <div v-if="changesCode && candidates.length > 0" class="fin-field">
-        <span id="flow-companions-label" class="fin-label">Also change</span>
+        <span id="flow-companions-label" class="fin-label">Repositories in this run</span>
         <div class="fin-list" role="group" aria-labelledby="flow-companions-label" data-testid="flow-companions">
+          <div class="fin-companion">
+            <div
+              role="checkbox"
+              class="ui-row is-selected fin-current"
+              aria-checked="true"
+              aria-disabled="true"
+              aria-current="true"
+              :data-testid="`flow-companion-${projectId}`"
+              title="The project you are in. It is always part of the run, on the base branch above."
+            >
+              <Icon name="check" :size="11" class="fin-mark" />
+              <span class="ui-desc fin-name">{{ currentProject?.name ?? 'This project' }}</span>
+              <span class="fin-cur" :data-testid="`flow-companion-${projectId}-current`">Current</span>
+              <span
+                v-for="stackId in stacksOf(projectId)"
+                :key="stackId"
+                class="ui-chip"
+                :data-testid="`flow-companion-${projectId}-stack-${stackId}`"
+              >
+                {{ FLOW_STACK_LABELS[stackId] }}
+              </span>
+            </div>
+          </div>
           <div v-for="item in candidates" :key="item.id" class="fin-companion">
             <button
               type="button"
@@ -762,6 +786,19 @@ async function start(): Promise<void> {
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
+}
+
+.fin-current {
+  cursor: default;
+}
+
+.fin-cur {
+  flex-shrink: 0;
+  font-size: var(--fs-micro);
+  color: var(--text-bright);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--rp);
+  padding: 0 6px;
 }
 
 .fin-companion .fin-branch {
