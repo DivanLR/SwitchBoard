@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { FlowGit } from '@main/flow/flow-supervisor'
 import type { FlowStageMarker } from '@main/flow/flow-markers'
-import type { FlowKind, FlowStage, FlowStageAction, FlowStageStatus } from '@shared/domain'
+import type { FlowKind, FlowStage, FlowStageAction, FlowStageStatus, Project } from '@shared/domain'
 import { FLOW_KIND_STAGES, emptyFlowStageReport, flowStageActions, flowStagesOf } from '@shared/domain'
 import type { FlowStartSource } from '@shared/ipc-types'
 
@@ -57,13 +57,14 @@ function fakeGit(): FlowGit {
   }
 }
 
-function setup(path: string) {
-  const repos = createRepositories(openDatabase(':memory:'))
-  const proj = repos.projects.insert({ name: 'shop', path, source: 'manual' })
+function setup(path: string, relaunch?: { repos: ReturnType<typeof createRepositories>; project: Project }) {
+  const repos = relaunch?.repos ?? createRepositories(openDatabase(':memory:'))
+  const proj = relaunch?.project ?? repos.projects.insert({ name: 'shop', path, source: 'manual' })
   const sent: { sessionId: string; text: string }[] = []
   let count = 0
+  const prefix = relaunch ? 'relaunched' : 'session'
   const manager = {
-    startSession: vi.fn(async () => ({ id: `session-${++count}` })),
+    startSession: vi.fn(async () => ({ id: `${prefix}-${++count}` })),
     connectedMcpServers: vi.fn(async (_id: string, wanted: readonly string[]) => [...wanted]),
     sendMessage: (sessionId: string, text: string) => sent.push({ sessionId, text }),
     watchFlow: vi.fn(),
@@ -277,6 +278,55 @@ describe('a feature run', () => {
     expect(done.status).toBe('review')
     expect(done.report?.rounds).toBe(2)
     expect(done.report?.converged).toBe(true)
+  })
+
+  it('resumes a build at its next converge round after a restart, and keeps counting rounds from there', async () => {
+    const { h, run, session } = await atBuild()
+    h.flow.onTurnEnded(session)
+    h.flow.onTurnEnded(session)
+    h.flow.onFlowMarker(session, marker('build', { converged: false }))
+    const saved = h.repos.flowStages.queueOf(run.id, 'build', session)!
+    expect(saved.round).toBe(2)
+    expect(saved.current).toMatch(/^\/speckit-implement-scaffold /)
+    h.repos.sessions.insert({
+      id: session,
+      projectId: h.project.id,
+      engine: 'claude',
+      sdkSessionId: 'sdk-build',
+      status: 'done',
+      statusDetail: null,
+      branch: null,
+      diffAdds: null,
+      diffDels: null,
+      usageUtilization: null,
+      usageResetsAt: null,
+      usageLimitType: null,
+      startedAt: '2026-09-25T08:00:00.000Z',
+      endedAt: '2026-09-25T08:10:00.000Z',
+      endReason: 'app_exit',
+    })
+
+    const next = setup(h.project.path, { repos: h.repos, project: h.project })
+    next.flow.reconcileOnStartup()
+
+    await vi.waitFor(() => expect(next.sent).toHaveLength(1), WAIT)
+    expect(next.manager.startSession).toHaveBeenCalledWith(
+      h.project.id,
+      false,
+      h.project.defaultSessionMode,
+      expect.objectContaining({ resumeSdkSessionId: 'sdk-build' }),
+    )
+    expect(next.sent[0].text).toContain(saved.current)
+    expect(next.sent[0].text).not.toContain('"converged"')
+    next.flow.onTurnEnded('relaunched-1')
+    expect(next.sent[1].text).toMatch(/^\/speckit-converge /)
+    next.flow.onTurnEnded('relaunched-1')
+    expect(next.sent[2].text).toContain('"converged"')
+
+    next.flow.onFlowMarker('relaunched-1', marker('build', { converged: false }))
+    expect(h.repos.flowStages.get(run.id, 'build')?.summary).toBe(
+      `Converge round 2 appended unbuilt work, so round 3 of ${MAX_CONVERGE_ROUNDS} is running.`,
+    )
   })
 
   it('stops after three rounds, says converge still found work, and autopilot holds the build', async () => {

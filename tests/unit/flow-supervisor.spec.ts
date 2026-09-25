@@ -16,7 +16,7 @@ import {
   resolvesToCommit,
   worktreeRoot,
 } from '@main/flow/worktrees'
-import type { FlowStage, FlowStageAction, FlowStageStatus } from '@shared/domain'
+import type { FlowStage, FlowStageAction, FlowStageStatus, Project } from '@shared/domain'
 import { FLOW_STAGES, emptyFlowStageReport, flowStageActions } from '@shared/domain'
 import type { FlowStartSource } from '@shared/ipc-types'
 
@@ -81,13 +81,17 @@ function setup(options?: {
   projectPath?: string
   mcp?: () => McpState
   onAttention?: (note: { projectId: string; runId: string; text: string }) => void
+  relaunch?: { repos: Repos; project: Project }
 }) {
-  const repos: Repos = createRepositories(openDatabase(':memory:'))
-  const project = repos.projects.insert({
-    name: 'alpha',
-    path: options?.projectPath ?? dotnetProject(),
-    source: 'manual',
-  })
+  const repos: Repos = options?.relaunch?.repos ?? createRepositories(openDatabase(':memory:'))
+  const project =
+    options?.relaunch?.project ??
+    repos.projects.insert({
+      name: 'alpha',
+      path: options?.projectPath ?? dotnetProject(),
+      source: 'manual',
+    })
+  const prefix = options?.relaunch ? 'relaunched' : 'session'
   const sent: { sessionId: string; text: string }[] = []
   const watched: string[] = []
   const changed: string[] = []
@@ -99,7 +103,7 @@ function setup(options?: {
   const manager = {
     startSession: vi.fn(async () => {
       sessionCount += 1
-      return { id: `session-${sessionCount}` }
+      return { id: `${prefix}-${sessionCount}` }
     }),
     connectedMcpServers: vi.fn(async (_sessionId: string, wanted: readonly string[]) =>
       options?.ado === false ? [] : [...wanted],
@@ -109,7 +113,7 @@ function setup(options?: {
       return options?.ado === false ? { status: 'failed', error: 'spawn npx ENOENT' } : { status: 'connected', error: null }
     }),
     reconnectMcpServer: vi.fn(async (_sessionId: string, _name: string) => {}),
-    liveSessionIds: () => Array.from({ length: sessionCount }, (_, at) => `session-${at + 1}`).filter((id) => !ended.includes(id)),
+    liveSessionIds: () => Array.from({ length: sessionCount }, (_, at) => `${prefix}-${at + 1}`).filter((id) => !ended.includes(id)),
     sendMessage: (sessionId: string, text: string) => sent.push({ sessionId, text }),
     watchFlow: (sessionId: string) => watched.push(sessionId),
     endFlowSession: (sessionId: string) => ended.push(sessionId),
@@ -1753,6 +1757,35 @@ describe('every stage status and action against the supervisor', () => {
 })
 
 describe('reconcile on startup', () => {
+  const INTERRUPTED = 'Switchboard closed while this stage was running. Retry it.'
+
+  function closedSession(h: ReturnType<typeof setup>, id: string, sdkSessionId: string | null): void {
+    h.repos.sessions.insert({
+      id,
+      projectId: h.project.id,
+      engine: 'claude',
+      sdkSessionId,
+      status: 'done',
+      statusDetail: null,
+      branch: null,
+      diffAdds: null,
+      diffDels: null,
+      usageUtilization: null,
+      usageResetsAt: null,
+      usageLimitType: null,
+      startedAt: '2026-09-25T08:00:00.000Z',
+      endedAt: '2026-09-25T08:10:00.000Z',
+      endReason: 'app_exit',
+    })
+  }
+
+  async function midSpec() {
+    const h = setup()
+    const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
+    h.flow.onTurnEnded(sessionOf(h, run.id))
+    return { h, run }
+  }
+
   it('fails whatever stage was mid-flight when the app last closed', async () => {
     const h = setup()
     const run = await h.flow.start({ projectId: h.project.id, source: textSource(), autopilot: false, autoShip: false })
@@ -1763,6 +1796,92 @@ describe('reconcile on startup', () => {
     expect(h.repos.flowStages.get(run.id, 'spec')?.status).toBe('failed')
     expect(h.repos.flowRuns.byId(run.id)?.status).toBe('waiting')
     expect(h.changed).toContain(h.project.id)
+  })
+
+  it('resumes a stage left running in its own conversation, at the step it was on', async () => {
+    const { h, run } = await midSpec()
+    expect(h.sent.map((s) => s.text.split(' ')[0])).toEqual(['/speckit-specify', '/speckit-clarify'])
+    const saved = h.repos.flowStages.queueOf(run.id, 'spec', 'session-1')
+    expect(saved).toMatchObject({ current: h.sent[1].text, index: 2, total: 3 })
+    closedSession(h, 'session-1', 'sdk-1')
+
+    const next = setup({ relaunch: h })
+    next.flow.reconcileOnStartup()
+
+    await vi.waitFor(() => expect(next.sent).toHaveLength(1), WAIT)
+    expect(next.manager.startSession).toHaveBeenCalledWith(
+      h.project.id,
+      false,
+      h.project.defaultSessionMode,
+      expect.objectContaining({ resumeSdkSessionId: 'sdk-1', cwd: run.worktreePath, section: 'flow' }),
+    )
+    expect(next.sent[0].text).toContain('resumed this conversation')
+    expect(next.sent[0].text).toContain(h.sent[1].text)
+    expect(next.sent[0].text.startsWith('/')).toBe(false)
+    expect(h.repos.flowStages.get(run.id, 'spec')).toMatchObject({ status: 'running', sessionId: 'relaunched-1', attempts: 1 })
+    expect(h.repos.flowRuns.byId(run.id)?.status).toBe('running')
+    expect(next.flow.snapshot(h.project.id).live).toEqual([
+      expect.objectContaining({ runId: run.id, stage: 'spec', step: '/speckit-clarify', index: 2, total: 3 }),
+    ])
+
+    next.flow.onTurnEnded('relaunched-1')
+
+    expect(next.sent.map((s) => s.text)).toEqual([next.sent[0].text, saved!.pending[0]])
+    expect(h.repos.flowStages.queueOf(run.id, 'spec', 'relaunched-1')).toMatchObject({ pending: [], index: 3, total: 3 })
+  })
+
+  it('fails the stage as before when its session never reported a conversation id', async () => {
+    const { h, run } = await midSpec()
+    closedSession(h, 'session-1', null)
+
+    const next = setup({ relaunch: h })
+    next.flow.reconcileOnStartup()
+
+    expect(h.repos.flowStages.get(run.id, 'spec')).toMatchObject({ status: 'failed', summary: INTERRUPTED })
+    expect(h.repos.flowRuns.byId(run.id)?.status).toBe('waiting')
+    expect(next.manager.startSession).not.toHaveBeenCalled()
+  })
+
+  it('fails the stage as before when its worktree is gone', async () => {
+    const { h, run } = await midSpec()
+    closedSession(h, 'session-1', 'sdk-1')
+    rmSync(run.worktreePath!, { recursive: true, force: true })
+
+    const next = setup({ relaunch: h })
+    next.flow.reconcileOnStartup()
+
+    expect(h.repos.flowStages.get(run.id, 'spec')).toMatchObject({ status: 'failed', summary: INTERRUPTED })
+    expect(next.manager.startSession).not.toHaveBeenCalled()
+  })
+
+  it('fails the stage with the reason when the resumed session cannot start', async () => {
+    const { h, run } = await midSpec()
+    closedSession(h, 'session-1', 'sdk-1')
+
+    const next = setup({ relaunch: h })
+    next.manager.startSession.mockRejectedValueOnce(new Error('Claude Code was not found.'))
+    next.flow.reconcileOnStartup()
+
+    await vi.waitFor(() => expect(h.repos.flowStages.get(run.id, 'spec')?.status).toBe('failed'), WAIT)
+    expect(h.repos.flowStages.get(run.id, 'spec')?.summary).toContain('Claude Code was not found.')
+    expect(h.repos.flowRuns.byId(run.id)?.status).toBe('waiting')
+    expect(next.sent).toEqual([])
+  })
+
+  it('refuses another action on the run while its stage is resuming', async () => {
+    const { h, run } = await midSpec()
+    closedSession(h, 'session-1', 'sdk-1')
+
+    const next = setup({ relaunch: h })
+    let started: (value: { id: string }) => void = () => {}
+    next.manager.startSession.mockImplementationOnce(() => new Promise((resolve) => (started = resolve)))
+    next.flow.reconcileOnStartup()
+
+    await expect(next.flow.skip(run.id)).rejects.toMatchObject({ code: 'RULE_NOT_ALLOWED' })
+    started({ id: 'relaunched-1' })
+
+    await vi.waitFor(() => expect(next.sent).toHaveLength(1), WAIT)
+    expect(h.repos.flowStages.get(run.id, 'spec')).toMatchObject({ status: 'running', sessionId: 'relaunched-1' })
   })
 })
 

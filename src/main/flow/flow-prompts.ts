@@ -600,6 +600,17 @@ export function revisePrompt(
   return lines.join('\n')
 }
 
+export function resumePrompt(step: string): string {
+  return [
+    'Switchboard closed while this stage was running, and it has now resumed this conversation.',
+    'Carry on with the step you were working on, from where you stopped. First check the state on disk, ' +
+      'for example git status and the files this stage writes. Do not repeat work that is already done, ' +
+      'and do not repeat a one off action such as opening a pull request or posting a comment.',
+    'The step was:',
+    step,
+  ].join('\n\n')
+}
+
 const PR_COMMANDS: readonly RegExp[] = [
   /\bgh\s+pr\s+(merge|review|close)\b/i,
   /\bgh\s+pr\s+edit\b.*--add-reviewer/i,

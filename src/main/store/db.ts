@@ -735,6 +735,20 @@ const MIGRATIONS: Migration[] = [
       `)
     },
   },
+  {
+    name: '045-flow-stage-queue',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE flow_stage_queue (
+          runId TEXT NOT NULL REFERENCES flow_runs(id) ON DELETE CASCADE,
+          stage TEXT NOT NULL,
+          sessionId TEXT NOT NULL,
+          queue TEXT NOT NULL,
+          PRIMARY KEY (runId, stage)
+        );
+      `)
+    },
+  },
 ]
 
 const FOREIGN_DROPS = ['037-claude-only', '040-drop-custom-skills']

@@ -213,6 +213,7 @@ function fillProject(repos: Repos, projectId: string): string {
   const run = startRun(repos, projectId)
   repos.flowStages.ensureAll(run.id)
   repos.flowStages.update(run.id, 'spec', { sessionId })
+  repos.flowStages.saveQueue(run.id, 'spec', sessionId, { current: '/speckit-specify', pending: [], index: 1, total: 1, round: 1 })
   const settings = repos.settings.get()
   repos.settings.set({
     projectGroupOf: { ...settings.projectGroupOf, [projectId]: 'g1' },
@@ -271,6 +272,7 @@ describe('deleting a project', () => {
         'diagram_requests',
         'flow_runs',
         'flow_stages',
+        'flow_stage_queue',
       ]),
     )
 

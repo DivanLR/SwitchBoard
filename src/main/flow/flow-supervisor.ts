@@ -35,7 +35,7 @@ import {
   sddProcessOf,
   sddSlug,
 } from '@shared/sdd'
-import { nowIso, type Repositories } from '@main/store/repositories'
+import { nowIso, type FlowStageQueue, type Repositories } from '@main/store/repositories'
 import type { SessionManager } from '@main/sessions/session-manager'
 import {
   bugAssessPrompt,
@@ -56,6 +56,7 @@ import {
   planSteps,
   reviewHandshake,
   reviewSteps,
+  resumePrompt,
   revisePrompt,
   sddHandshake,
   flowToolGuard,
@@ -302,11 +303,18 @@ interface StagePlan {
   handshake: string | null
 }
 
+interface StageResume {
+  sdkSessionId: string
+  saved: FlowStageQueue
+}
+
+const STAGE_INTERRUPTED = 'Switchboard closed while this stage was running. Retry it.'
+
 export class FlowSupervisor {
   private featuresWaiters = new Map<string, FeaturesWaiter>()
   private sessionStage = new Map<string, { runId: string; stage: FlowStage }>()
   private pending = new Map<string, string[]>()
-  private current = new Map<string, { text: string; resent: boolean }>()
+  private current = new Map<string, { text: string; resent: boolean; step: string }>()
   private busy = new Set<string>()
   private origins = new Map<string, Record<string, string | null>>()
   private rounds = new Map<string, number>()
@@ -329,10 +337,23 @@ export class FlowSupervisor {
   }
 
   reconcileOnStartup(): void {
-    for (const projectId of this.repos.flowRuns.reconcileRunning(
-      'Switchboard closed while this stage was running. Retry it.',
-    )) {
+    const resumable = this.repos.flowStages.listRunning().flatMap((row) => {
+      const run = this.repos.flowRuns.byId(row.runId)
+      const saved = row.sessionId ? this.repos.flowStages.queueOf(row.runId, row.stage, row.sessionId) : null
+      const sdkSessionId = row.sessionId ? this.repos.sessions.byId(row.sessionId)?.sdkSessionId : null
+      const trees = run ? [run.worktreePath, ...run.repos.map((repo) => repo.worktreePath)] : []
+      if (!run || !saved || !sdkSessionId || !trees.every((tree) => !tree || existsSync(tree))) return []
+      return [{ runId: row.runId, stage: row.stage, resume: { sdkSessionId, saved } }]
+    })
+    for (const projectId of this.repos.flowRuns.reconcileRunning(STAGE_INTERRUPTED, resumable)) {
       this.callbacks.onFlowChanged(projectId)
+    }
+    for (const { runId, stage, resume } of resumable) {
+      this.exclusive(runId, () => this.beginStage(runId, stage, undefined, resume)).catch((error: unknown) => {
+        if (this.repos.flowStages.get(runId, stage)?.status === 'running') {
+          this.failStage(runId, stage, errorText(error), { retryOnce: false })
+        }
+      })
     }
   }
 
@@ -347,7 +368,7 @@ export class FlowSupervisor {
       live.push({
         runId: ctx.runId,
         stage: ctx.stage,
-        step: step ? stepLabel(step.text) : 'Starting the session',
+        step: step ? stepLabel(step.step) : 'Starting the session',
         index: at?.index ?? 0,
         total: at?.total ?? 0,
         waiting: this.waitingOn(sessionId),
@@ -1236,13 +1257,29 @@ export class FlowSupervisor {
     this.failStage(ctx.runId, ctx.stage, verifying ? NO_VERIFY_REPORT : NO_REPORT, { retryOnce: true })
   }
 
-  private sendStep(sessionId: string, text: string): void {
+  private sendStep(sessionId: string, text: string, step = text): void {
     this.looped.delete(sessionId)
-    this.current.set(sessionId, { text, resent: false })
+    this.current.set(sessionId, { text, resent: false, step })
     const at = this.progress.get(sessionId)
     if (at) at.index += 1
+    this.persist(sessionId)
     this.manager.sendMessage(sessionId, text)
     this.onSessionStatus(sessionId)
+  }
+
+  private persist(sessionId: string, answered = false): void {
+    const ctx = this.sessionStage.get(sessionId)
+    const pending = [...(this.pending.get(sessionId) ?? [])]
+    const current = answered ? pending.shift() : this.current.get(sessionId)?.step
+    if (!ctx || current === undefined) return
+    const at = this.progress.get(sessionId)
+    this.repos.flowStages.saveQueue(ctx.runId, ctx.stage, sessionId, {
+      current,
+      pending,
+      index: (at?.index ?? 0) + (answered ? 1 : 0),
+      total: at?.total ?? 0,
+      round: this.rounds.get(sessionId) ?? 1,
+    })
   }
 
   private async requireSpec(projectPath: string, specId: string): Promise<void> {
@@ -1346,9 +1383,15 @@ export class FlowSupervisor {
     return source.title.trim()
   }
 
-  private async startStageSession(run: FlowRun, project: Project, stage: FlowStage): Promise<{ id: string }> {
+  private async startStageSession(
+    run: FlowRun,
+    project: Project,
+    stage: FlowStage,
+    resumeSdkSessionId?: string,
+  ): Promise<{ id: string }> {
     const session = await this.manager.startSession(project.id, false, project.defaultSessionMode, {
       background: true,
+      resumeSdkSessionId,
       cwd: run.worktreePath ?? project.path,
       additionalDirectories: run.repos.slice(1).flatMap((repo) => (repo.worktreePath ? [repo.worktreePath] : [])),
       effort: stage === 'build' ? 'max' : undefined,
@@ -1597,7 +1640,7 @@ export class FlowSupervisor {
     return [...again, ...(plan.handshake ? [plan.handshake] : [])]
   }
 
-  private async beginStage(runId: string, stage: FlowStage, lead?: string): Promise<void> {
+  private async beginStage(runId: string, stage: FlowStage, lead?: string, resume?: StageResume): Promise<void> {
     const run = this.requireRun(runId)
     if (this.movedOn(runId, stage)) return
     const project = this.requireProject(run.projectId)
@@ -1605,24 +1648,30 @@ export class FlowSupervisor {
     this.release(stageRow?.sessionId ?? null)
     let session: { id: string }
     try {
-      session = await this.startStageSession(run, project, stage)
+      session = await this.startStageSession(run, project, stage, resume?.sdkSessionId)
     } catch (error) {
       if (!this.movedOn(runId, stage)) this.failStage(runId, stage, errorText(error), { retryOnce: false })
       return
     }
-    if (this.movedOn(runId, stage)) {
+    if (this.movedOn(runId, stage) || (resume && this.repos.flowStages.get(runId, stage)?.status !== 'running')) {
       this.release(session.id)
       return
     }
-    this.repos.flowStages.update(runId, stage, {
-      status: 'running',
-      sessionId: session.id,
-      attempts: (stageRow?.attempts ?? 0) + 1,
-      summary: null,
-      feedback: null,
-      startedAt: nowIso(),
-      finishedAt: null,
-    })
+    this.repos.flowStages.update(
+      runId,
+      stage,
+      resume
+        ? { sessionId: session.id }
+        : {
+            status: 'running',
+            sessionId: session.id,
+            attempts: (stageRow?.attempts ?? 0) + 1,
+            summary: null,
+            feedback: null,
+            startedAt: nowIso(),
+            finishedAt: null,
+          },
+    )
     this.repos.flowRuns.update(runId, { stage, status: 'running' })
     this.callbacks.onFlowChanged(project.id)
     this.manager.watchFlow(session.id)
@@ -1645,7 +1694,8 @@ export class FlowSupervisor {
       }
     }
     let queue: string[]
-    if (lead) queue = [lead, ...(await this.tailFor(run, stage, session.id))]
+    if (resume) queue = [resumePrompt(resume.saved.current), ...resume.saved.pending]
+    else if (lead) queue = [lead, ...(await this.tailFor(run, stage, session.id))]
     else {
       const plan = await this.planFor(run, stage, session.id)
       queue = [...plan.steps, ...(plan.handshake ? [plan.handshake] : [])]
@@ -1654,6 +1704,12 @@ export class FlowSupervisor {
     if (!(await this.commandsReady(run, stage, session.id, queue))) return
     const first = queue.shift()
     this.pending.set(session.id, queue)
+    if (resume) {
+      this.progress.set(session.id, { index: Math.max(0, resume.saved.index - 1), total: resume.saved.total })
+      if (resume.saved.round > 1) this.rounds.set(session.id, resume.saved.round)
+      if (first) this.sendStep(session.id, first, resume.saved.current)
+      return
+    }
     this.progress.set(session.id, { index: 0, total: queue.length + (first ? 1 : 0) })
     if (first) this.sendStep(session.id, withRepos(first, run.repos))
   }
@@ -1671,6 +1727,7 @@ export class FlowSupervisor {
     this.pending.set(sessionId, again)
     const at = this.progress.get(sessionId)
     if (at) at.total += again.length
+    this.persist(sessionId, true)
     this.repos.flowStages.update(run.id, 'build', {
       summary: `Converge round ${round} appended unbuilt work, so round ${round + 1} of ${MAX_CONVERGE_ROUNDS} is running.`,
     })

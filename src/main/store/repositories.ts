@@ -1065,29 +1065,37 @@ class FlowRunsRepo {
       .run(status, note, now, now, id)
   }
 
-  reconcileRunning(note: string): string[] {
-    const stuck = this.db
-      .prepare(
-        `SELECT DISTINCT flow_runs.projectId AS projectId, flow_runs.id AS runId
-           FROM flow_stages JOIN flow_runs ON flow_runs.id = flow_stages.runId
-         WHERE flow_stages.status = 'running'`,
-      )
-      .all() as { projectId: string; runId: string }[]
+  reconcileRunning(note: string, keep: readonly { runId: string; stage: FlowStage }[] = []): string[] {
+    const kept = new Set(keep.map((row) => `${row.runId}:${row.stage}`))
+    const stuck = (
+      this.db
+        .prepare(
+          `SELECT flow_runs.projectId AS projectId, flow_runs.id AS runId, flow_stages.stage AS stage
+             FROM flow_stages JOIN flow_runs ON flow_runs.id = flow_stages.runId
+           WHERE flow_stages.status = 'running'`,
+        )
+        .all() as { projectId: string; runId: string; stage: FlowStage }[]
+    ).filter((row) => !kept.has(`${row.runId}:${row.stage}`))
     if (stuck.length === 0) return []
     const now = nowIso()
-    this.db
-      .prepare(
-        `UPDATE flow_stages SET status = 'failed', summary = ?, finishedAt = ?
-         WHERE status = 'running'`,
-      )
-      .run(note, now)
-    for (const { runId } of stuck) {
-      this.db
-        .prepare(`UPDATE flow_runs SET status = 'waiting', updatedAt = ? WHERE id = ?`)
-        .run(now, runId)
+    const failStage = this.db.prepare(
+      `UPDATE flow_stages SET status = 'failed', summary = ?, finishedAt = ? WHERE runId = ? AND stage = ?`,
+    )
+    const waitRun = this.db.prepare(`UPDATE flow_runs SET status = 'waiting', updatedAt = ? WHERE id = ?`)
+    for (const row of stuck) {
+      failStage.run(note, now, row.runId, row.stage)
+      waitRun.run(now, row.runId)
     }
     return [...new Set(stuck.map((row) => row.projectId))]
   }
+}
+
+export interface FlowStageQueue {
+  current: string
+  pending: string[]
+  index: number
+  total: number
+  round: number
 }
 
 class FlowStagesRepo {
@@ -1160,6 +1168,28 @@ class FlowStagesRepo {
     this.db
       .prepare(`UPDATE flow_stages SET ${sets} WHERE runId = ? AND stage = ?`)
       .run(...values, runId, stage)
+  }
+
+  listRunning(): { runId: string; stage: FlowStage; sessionId: string | null }[] {
+    return this.db
+      .prepare(`SELECT runId, stage, sessionId FROM flow_stages WHERE status = 'running'`)
+      .all() as { runId: string; stage: FlowStage; sessionId: string | null }[]
+  }
+
+  saveQueue(runId: string, stage: FlowStage, sessionId: string, queue: FlowStageQueue): void {
+    this.db
+      .prepare(
+        `INSERT INTO flow_stage_queue (runId, stage, sessionId, queue) VALUES (?, ?, ?, ?)
+         ON CONFLICT (runId, stage) DO UPDATE SET sessionId = excluded.sessionId, queue = excluded.queue`,
+      )
+      .run(runId, stage, sessionId, JSON.stringify(queue))
+  }
+
+  queueOf(runId: string, stage: FlowStage, sessionId: string): FlowStageQueue | null {
+    const row = this.db
+      .prepare('SELECT queue FROM flow_stage_queue WHERE runId = ? AND stage = ? AND sessionId = ?')
+      .get(runId, stage, sessionId) as { queue: string } | undefined
+    return row ? parseJson<FlowStageQueue>(row.queue) : null
   }
 }
 

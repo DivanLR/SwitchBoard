@@ -179,3 +179,32 @@ describe('044-flow-kinds', () => {
     expect(left).toEqual([{ runId: 'i', stage: 'decide' }])
   })
 })
+
+describe('045-flow-stage-queue', () => {
+  it('adds the stage queue to a database that lacks it, and a deleted run takes its queue with it', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'migrate-045-'))
+    dirs.push(dir)
+    const path = join(dir, 'switchboard.db')
+    const before = openDatabase(path)
+    before.exec(`
+      DELETE FROM migrations WHERE name = '045-flow-stage-queue';
+      DROP TABLE flow_stage_queue;
+      INSERT INTO projects (id, name, path, source, createdAt, position)
+        VALUES ('p', 'p', 'C:/p', 'manual', '2026-09-01T00:00:00.000Z', 0);
+      INSERT INTO flow_runs (id, projectId, title, source, stage, status, createdAt, updatedAt)
+        VALUES ('r', 'p', 'Cart', 'text', 'build', 'running', '2026-09-01', '2026-09-01');
+    `)
+    before.close()
+
+    const after = openDatabase(path)
+    const repos = createRepositories(after)
+    repos.flowStages.saveQueue('r', 'build', 's', { current: '/speckit-implement', pending: [], index: 1, total: 1, round: 1 })
+    const saved = repos.flowStages.queueOf('r', 'build', 's')
+    after.exec(`DELETE FROM flow_runs WHERE id = 'r'`)
+    const left = after.prepare('SELECT COUNT(*) AS n FROM flow_stage_queue').get()
+    after.close()
+
+    expect(saved).toMatchObject({ current: '/speckit-implement' })
+    expect(left).toEqual({ n: 0 })
+  })
+})

@@ -299,4 +299,66 @@ describe('reconcileRunning', () => {
     expect(repos.flowRuns.reconcileRunning('note')).toEqual([])
     expect(repos.flowRuns.byId(run.id)?.status).toBe('running')
   })
+
+  it('keeps a stage it is told to resume, and fails only the others', () => {
+    const { repos, project } = setup()
+    const runAt = (stage: 'build' | 'plan') => {
+      const run = repos.flowRuns.start({
+        projectId: project.id,
+        title: stage,
+        source: 'text',
+        sourceRef: null,
+        sourceUrl: null,
+        description: '',
+        stacks: ['dotnet'],
+        stage,
+        autopilot: false,
+        autoShip: false,
+        baseBranch: 'main',
+      })
+      repos.flowStages.ensureAll(run.id)
+      repos.flowStages.update(run.id, stage, { status: 'running', sessionId: `s-${stage}`, attempts: 1 })
+      return run
+    }
+    const kept = runAt('build')
+    const failed = runAt('plan')
+
+    const affected = repos.flowRuns.reconcileRunning('note', [{ runId: kept.id, stage: 'build' }])
+
+    expect(affected).toEqual([project.id])
+    expect(repos.flowStages.get(kept.id, 'build')?.status).toBe('running')
+    expect(repos.flowRuns.byId(kept.id)?.status).toBe('running')
+    expect(repos.flowStages.get(failed.id, 'plan')).toMatchObject({ status: 'failed', summary: 'note' })
+    expect(repos.flowRuns.byId(failed.id)?.status).toBe('waiting')
+    expect(repos.flowStages.listRunning()).toEqual([{ runId: kept.id, stage: 'build', sessionId: 's-build' }])
+  })
+})
+
+describe('the stage queue', () => {
+  it('keeps one queue per stage and gives it back only to the session that wrote it last', () => {
+    const { repos, project } = setup()
+    const run = repos.flowRuns.start({
+      projectId: project.id,
+      title: 'X',
+      source: 'text',
+      sourceRef: null,
+      sourceUrl: null,
+      description: '',
+      stacks: ['dotnet'],
+      stage: 'build',
+      autopilot: false,
+      autoShip: false,
+      baseBranch: 'main',
+    })
+    const first = { current: '/speckit-implement', pending: ['/speckit-converge', 'report'], index: 1, total: 3, round: 1 }
+    const second = { current: '/speckit-converge', pending: ['report'], index: 2, total: 3, round: 2 }
+
+    repos.flowStages.saveQueue(run.id, 'build', 's-1', first)
+    expect(repos.flowStages.queueOf(run.id, 'build', 's-1')).toEqual(first)
+    repos.flowStages.saveQueue(run.id, 'build', 's-2', second)
+
+    expect(repos.flowStages.queueOf(run.id, 'build', 's-2')).toEqual(second)
+    expect(repos.flowStages.queueOf(run.id, 'build', 's-1')).toBeNull()
+    expect(repos.flowStages.queueOf(run.id, 'plan', 's-2')).toBeNull()
+  })
 })
