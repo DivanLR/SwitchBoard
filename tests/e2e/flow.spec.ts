@@ -256,6 +256,9 @@ test('a pasted Feature link or id shows what it names, and Start begins the run 
   await page.getByTestId('flow-new').click()
   await page.getByTestId('flow-source-ado').click()
   await expect(page.getByTestId('flow-features-empty')).toBeVisible()
+  await expect
+    .poll(() => page.evaluate(() => window.__mock.state().sends.some((send) => send.text.includes('Features assigned to me'))))
+    .toBe(true)
 
   const link = page.getByTestId('flow-feature-link')
   await link.fill('https://dev.azure.com/PepkorPL/A%20Plus/_workitems/edit')
