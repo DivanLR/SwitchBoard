@@ -144,7 +144,7 @@ Confirmed functionality:
   always resolve to the newest build. The cheaper tier is the model one family
   down (Fable to Opus, Opus to Sonnet, Sonnet to Haiku); worker subagents and
   the Diff worker run on it. Basic runs the Model alone, with no advisor and no
-  per message routing, and at maximum effort still fans out to worker
+  per message routing, and at maximum effort can still hand parts to worker
   subagents. Jev routes with TypeSafe AI's Jev decision model, through the
   developer's own API key, which is stored encrypted with the operating system's
   key store and never returned to the interface. Jev cannot be chosen until a
@@ -158,9 +158,9 @@ Confirmed functionality:
   the pattern each turn picks as an Advisor or Orchestrator chip. When Jev does
   not answer within three seconds, the turn keeps its model. Flow and the
   section tabs never use Jev. On a usage limit the session drops to the next
-  strongest model instead of stopping. Subagents are allowed only at maximum
-  effort, enforced by a hook, and maximum subagent effort adds a fan out
-  directive.
+  strongest model instead of stopping. There is one effort flag: subagents are
+  allowed only at maximum effort, enforced by a hook, and reason at the
+  session's effort.
 - **Flow**, a large popup opened from the session header, which takes one
   feature through seven stages, each a fresh Claude Code session in the run's
   worktree:
@@ -361,6 +361,11 @@ such as the Diff worker use the cheaper model, and that a stored Auto becomes
 Jev when a key is saved and Basic otherwise. New installs start on Basic. This
 narrows the model modes restored on 2026-09-23 and supersedes Auto as Jev's
 fallback.
+
+Later the same day, at the owner's direction ("please remove my heavy subagent
+option, I just want a effort flag now"), the Subagents effort bar was removed,
+with the divide and conquer directive and the Fan-out pill it switched on.
+Subagents now reason at the one effort flag, and still exist only at maximum.
 
 This supersedes the constraint recorded on 2026-08-13 that "all six sections"
 (Session, Specs, Tests, Diff, Cleanup, Diagrams) must survive. The sections now

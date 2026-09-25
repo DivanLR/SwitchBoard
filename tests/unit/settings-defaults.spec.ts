@@ -16,7 +16,7 @@ describe('a fresh install', () => {
     expect(settings.jevSwitchLimit).toBe(60)
 
     expect(settings.effort).toBe('xhigh')
-    expect(settings.subagentEffort).toBe('low')
+    expect(settings).not.toHaveProperty('subagentEffort')
     expect(settings.summaries).toBe(true)
   })
 
@@ -64,6 +64,7 @@ describe('reading a settings row an install already stored', () => {
       workerModel: 'claude-sonnet-5',
       flowConcurrency: 4,
       heavySubagents: true,
+      subagentEffort: 'max',
     }
     db.prepare(`INSERT INTO settings (key, value) VALUES ('settings', @value)`).run({
       value: JSON.stringify({ model: 'claude-opus-4', ...retired }),

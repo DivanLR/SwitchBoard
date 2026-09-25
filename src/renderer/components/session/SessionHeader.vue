@@ -133,17 +133,8 @@ function onContainersToggle(e: Event): void {
           label="Effort"
           icon="spark"
           testid="effort-bar"
-          title="Reasoning effort for the main loop. Applies from the next message, to every session. Subagents exist only at max."
+          title="Reasoning effort for the session and its subagents. Applies from the next message, to every session. Subagents exist only at max."
           @update:model-value="(effort) => settingsStore.save({ effort })"
-        />
-        <EffortBar
-          v-if="settingsStore.settings.effort === 'max'"
-          :model-value="settingsStore.settings.subagentEffort"
-          label="Subagents"
-          icon="fork"
-          testid="subagent-effort-bar"
-          title="Reasoning effort for the subagents a session creates. Max also switches on divide and conquer. Read at session start."
-          @update:model-value="(subagentEffort) => settingsStore.save({ subagentEffort })"
         />
       </template>
       <span
@@ -153,14 +144,6 @@ function onContainersToggle(e: Event): void {
         :title="project.gitNotice"
       >
         <Icon name="warning" :size="12" /> No git
-      </span>
-      <span
-        v-if="liveSession?.heavySubagents"
-        class="pill fanout-pill"
-        data-testid="fanout-pill"
-        title="Started with the subagent effort bar at max: this session is told to split work across as many subagents as it can. Moving the bar applies from the next session."
-      >
-        <Icon name="fork" :size="12" /> Fan-out
       </span>
       <span
         v-if="agentCount > 1"
@@ -487,12 +470,6 @@ function onContainersToggle(e: Event): void {
   width: 9px;
   height: 9px;
   background: currentColor;
-}
-
-.pill.fanout-pill {
-  color: var(--purple);
-  border: 1px solid color-mix(in srgb, var(--purple) 30%, transparent);
-  background: color-mix(in srgb, var(--purple) 10%, transparent);
 }
 
 .pill.agents-pill {

@@ -204,27 +204,24 @@ test('a failed resume turns Resume back off, and says why in the message', async
   await expect(page.getByTestId('resume-session')).toHaveAttribute('aria-checked', 'false')
 })
 
-test('the effort bar starts at xhigh and reveals the subagent bar only at max', async ({ page }) => {
+test('one effort bar starts at xhigh, reaches Settings, and no subagent bar appears even at max', async ({ page }) => {
   const bar = page.getByTestId('effort-bar')
   await expect(bar).toBeVisible()
   await expect(page.getByTestId('effort-bar-value')).toHaveText('xhigh')
-  await expect(page.getByTestId('subagent-effort-bar')).toHaveCount(0)
 
   await bar.fill('4')
   await expect(page.getByTestId('effort-bar-value')).toHaveText('max')
-  await expect(page.getByTestId('subagent-effort-bar')).toBeVisible()
-  await expect(page.getByTestId('subagent-effort-bar-value')).toHaveText('low')
+  await expect(page.getByTestId('subagent-effort-bar')).toHaveCount(0)
+  await expect(page.getByTestId('fanout-pill')).toHaveCount(0)
 
   await page.getByTestId('open-settings').click()
   await page.getByTestId('settings-tab-models').click()
   await expect(page.getByTestId('setting-effort-value')).toHaveText('max')
-  await page.getByTestId('setting-subagent-effort').fill('4')
+  await expect(page.getByTestId('setting-subagent-effort')).toHaveCount(0)
   await page.getByTestId('settings-done').click()
-  await expect(page.getByTestId('subagent-effort-bar-value')).toHaveText('max')
 
   await bar.fill('0')
   await expect(page.getByTestId('effort-bar-value')).toHaveText('low')
-  await expect(page.getByTestId('subagent-effort-bar')).toHaveCount(0)
 })
 
 test('at max the effort fill spans the whole track in both themes', async ({ page }) => {
@@ -240,18 +237,15 @@ test('at max the effort fill spans the whole track in both themes', async ({ pag
   expect(partial.fill).toBeLessThan(partial.track * 0.75)
 
   await bar.fill('4')
-  await page.getByTestId('subagent-effort-bar').fill('4')
   for (const dark of [false, true]) {
     if (dark) {
       await page.getByTestId('theme-toggle').click()
       await expect(page.locator('html')).not.toHaveClass(/sb-light/)
     }
-    for (const testid of ['effort-bar', 'subagent-effort-bar']) {
-      const full = await span(testid)
-      expect(full.track).toBeGreaterThan(60)
-      expect(Math.abs(full.fill - full.track)).toBeLessThan(0.5)
-      expect(Math.abs(full.gap)).toBeLessThan(0.5)
-    }
+    const full = await span('effort-bar')
+    expect(full.track).toBeGreaterThan(60)
+    expect(Math.abs(full.fill - full.track)).toBeLessThan(0.5)
+    expect(Math.abs(full.gap)).toBeLessThan(0.5)
   }
 
   await bar.focus()

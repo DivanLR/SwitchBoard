@@ -149,7 +149,6 @@ export interface Session {
   homeVolumeOf?: string | null
   planMode?: boolean
   inPlanMode?: boolean
-  heavySubagents?: boolean
   mcpServers?: McpServer[]
   currentModel?: string | null
   currentMode?: 'advisor' | 'orchestrator' | null
@@ -508,7 +507,6 @@ export interface Settings {
   defaultEngine: SessionEngine
   codexModel: string
   effort: EffortLevel
-  subagentEffort: EffortLevel
   summaries: boolean
   fontSize: 'sm' | 'md' | 'lg'
   showToolRows: boolean
@@ -546,7 +544,6 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultEngine: DEFAULT_SESSION_ENGINE,
   codexModel: '',
   effort: 'xhigh',
-  subagentEffort: 'low',
   summaries: true,
   fontSize: 'md',
   showToolRows: false,

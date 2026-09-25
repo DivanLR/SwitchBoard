@@ -1,5 +1,5 @@
 import type { AgentDefinition } from '@anthropic-ai/claude-agent-sdk'
-import type { EffortLevel, ModelMode } from '@shared/domain'
+import type { ModelMode } from '@shared/domain'
 
 export const WORKER_AGENT = 'worker'
 
@@ -9,7 +9,6 @@ export function modeAgents(options: {
   strongModel?: string
   cheapModel?: string
   mode?: ModelMode
-  effort?: EffortLevel
 }): Record<string, AgentDefinition> {
   const worker: AgentDefinition = {
     description:
@@ -22,7 +21,6 @@ export function modeAgents(options: {
       'raw and complete, no commentary. If the input is ambiguous or does not match what the ' +
       'instructions assume, STOP and return one short clarifying question instead of guessing.',
     model: norm(options.cheapModel),
-    effort: options.effort,
   }
   if (options.mode === 'basic') return { [WORKER_AGENT]: worker }
   return {
@@ -38,45 +36,15 @@ export function modeAgents(options: {
         'Do NOT write full implementations — sketches and diffs of the tricky part only. ' +
         'If the question is under-specified, state the assumption you would proceed on.',
       model: norm(options.strongModel),
-      effort: options.effort,
     },
     [WORKER_AGENT]: worker,
   }
 }
 
-const HEAVY_SUBAGENTS_APPEND =
-  '## WORK SHAPE — DIVIDE AND CONQUER. THIS OVERRIDES YOUR DEFAULT TENDENCY TO WORK ALONE.\n' +
-  'This session is configured for heavy subagent use, and that is a hard directive for ' +
-  'every turn, not a hint. Use as many dynamic subagents as the work allows, split the ' +
-  'work between them, and get it done as fast as parallelism permits.\n' +
-  '1. Before starting any non-trivial work, decompose it and NAME the parts. Anything ' +
-  "that does not need another part's result runs NOW, not next.\n" +
-  '2. Dispatch every independent part in ONE batch so they run concurrently. Two ' +
-  'sequential dispatches of one agent each is the exact failure mode to avoid.\n' +
-  '3. Scale the fleet to the work, not to your comfort. A broad audit, a multi-file ' +
-  'refactor, a sweep across call sites, or research with several angles each deserve ' +
-  'as many agents as there are independent parts.\n' +
-  '4. Give each agent a bounded task, the context it needs, and the exact shape of ' +
-  'the result you want back, so nothing is re-run over a misunderstanding. Dispatch ' +
-  `each part to the "${WORKER_AGENT}" agent (subagent_type "${WORKER_AGENT}") unless a ` +
-  'specialised agent fits that part better.\n' +
-  '5. Verify in parallel too: a finding worth acting on is worth an independent agent ' +
-  'trying to refute it.\n' +
-  'The ONLY work exempt from this is work that is a single action: one edit to one ' +
-  'file, one command, one lookup, or a chain where every step literally needs the ' +
-  'previous step\'s output. "It would be quicker to just do it" is not an exemption — ' +
-  'fan-out spends more tokens than one thread, and paying that for speed is precisely ' +
-  'the trade this setting was switched on to make.'
+export type PromptPattern = 'advisor' | 'none'
 
-export function heavySubagentSystemPromptAppend(enabled: boolean): string | null {
-  return enabled ? HEAVY_SUBAGENTS_APPEND : null
-}
-
-export type PromptPattern = 'advisor' | 'orchestrator' | 'none'
-
-export function promptPattern(heavy: boolean, chosen: ModelMode): PromptPattern {
-  if (chosen === 'basic') return 'none'
-  return heavy ? 'orchestrator' : 'advisor'
+export function promptPattern(chosen: ModelMode): PromptPattern {
+  return chosen === 'basic' ? 'none' : 'advisor'
 }
 
 export function modesSystemPromptAppend(mode: PromptPattern): string {
@@ -88,24 +56,12 @@ export function modesSystemPromptAppend(mode: PromptPattern): string {
     'SCOPED WORK (single file/feature, mechanical turns): implement directly yourself. ' +
     "Consult `advisor` at the decision points its own description names, and follow its " +
     'guidance.\n'
-  const orchestrator =
-    'BROAD WORK (multi-step goals, many files, research/audit/migration): act as the ' +
-    'orchestrator — plan first, split the goal into chunks with explicit inputs and expected ' +
-    `outputs, delegate each chunk to \`${WORKER_AGENT}\` subagents (in parallel when independent), then ` +
-    'review and integrate the results yourself. Keep your own turns for planning, review and ' +
-    'the genuinely hard parts. Do not read large files wholesale when a worker can extract ' +
-    'the relevant part; do not hand a worker an ambiguous chunk — tighten the spec first.\n' +
-    'ONE SUMMARY, AT THE END. While delegated work or background tasks are still running, do ' +
-    'NOT post a summary after each partial result — at most a single short status line ' +
-    "(e.g. \"3 of 6 auditors back\"). Gather every result and post exactly ONE consolidated " +
-    'summary once ALL delegated and background work has returned. Interim turns should read as ' +
-    'progress, not conclusions.\n'
   const hygiene =
     `Token hygiene: prefer \`${WORKER_AGENT}\` delegation for templated or repetitive work; keep ` +
     'delegation specs short and precise; a worker that reports ambiguity gets a tighter spec, ' +
     'not a retry of the same one.'
   if (mode === 'none') return ''
-  return header + (mode === 'advisor' ? advisor : orchestrator) + hygiene
+  return header + advisor + hygiene
 }
 
 export function sandboxSystemPromptAppend(

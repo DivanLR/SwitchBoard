@@ -107,7 +107,7 @@ const MODE_CHOICES: { id: Settings['modelMode']; label: string; desc: string }[]
   {
     id: 'basic',
     label: 'Basic',
-    desc: 'Your model answers every message directly, with no router and no advisor. At max subagent effort it still hands independent parts to worker subagents on the model one family cheaper.',
+    desc: 'Your model answers every message directly, with no router and no advisor. At max effort it can still hand independent parts to worker subagents on the model one family cheaper.',
   },
 ]
 
@@ -338,7 +338,7 @@ const cheaperLabel = computed(() => modelLabel(cheaperModel(props.settings.model
     <div class="sr-text">
       <div class="sr-label">Effort</div>
       <div class="sr-desc">
-        How hard the main loop reasons on every turn, for every session. The same bar
+        How hard each session and its subagents reason on every turn. The same bar
         sits in the session header, and a move reaches a running session on its next
         message. Lower it on a small subscription: effort is what empties the usage
         meter.
@@ -353,29 +353,6 @@ const cheaperLabel = computed(() => modelLabel(cheaperModel(props.settings.model
       label="Effort"
       testid="setting-effort"
       @update:model-value="(effort) => save({ effort })"
-    />
-  </div>
-
-  <div class="ui-card setting-row is-actionable">
-    <div class="sr-text">
-      <div class="sr-label">Subagent effort</div>
-      <div class="sr-desc">
-        How hard the advisor and worker subagents reason, once Effort is at max. At max
-        it also switches on divide and conquer: the session is told to split work into
-        independent parts and dispatch them to as many workers as the work allows, in
-        one batch, and is pinned to the Orchestrator protocol so the two instructions
-        agree.
-        <strong class="sr-warn">
-          Read when a session starts, so it applies from the next session. A session
-          started at max carries a <Icon name="fork" :size="11" /> Fan-out pill.
-        </strong>
-      </div>
-    </div>
-    <EffortBar
-      :model-value="settings.subagentEffort"
-      label="Subagents"
-      testid="setting-subagent-effort"
-      @update:model-value="(subagentEffort) => save({ subagentEffort })"
     />
   </div>
 

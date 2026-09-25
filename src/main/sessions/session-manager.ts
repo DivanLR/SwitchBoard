@@ -51,7 +51,6 @@ import { CodexSession } from './codex-session'
 import { foldModelTotals, type EventSink } from './message-mapper'
 import {
   promptPattern,
-  heavySubagentSystemPromptAppend,
   modeAgents,
   modesSystemPromptAppend,
   sandboxSystemPromptAppend,
@@ -709,13 +708,7 @@ export class SessionManager {
       : null
     const effort = opts?.effort ?? settings.effort
     const basic = modelMode === 'basic'
-    const subagents = subagentsAllowed(effort)
-    const heavySubagents = subagents && settings.subagentEffort === 'max'
-    row.heavySubagents = heavySubagents
-    const heavyAppend = heavySubagentSystemPromptAppend(heavySubagents)
-    const modesAppend = modesSystemPromptAppend(
-      subagents ? promptPattern(heavySubagents, modelMode) : 'none',
-    )
+    const modesAppend = modesSystemPromptAppend(subagentsAllowed(effort) ? promptPattern(modelMode) : 'none')
     const sandboxAppend = containerised
       ? sandboxSystemPromptAppend(
           [{ container: '/workspace' }, ...refMounts(project.refs.map((r) => r.path))],
@@ -764,7 +757,7 @@ export class SessionManager {
         resumeSdkSessionId,
         resumeFromSessionId,
         systemPromptAppend:
-          [sandboxAppend, modesAppend, heavyAppend, schemaAppend, transcriptAppend]
+          [sandboxAppend, modesAppend, schemaAppend, transcriptAppend]
             .filter((s): s is string => Boolean(s))
             .join('\n\n') || undefined,
         claudeExecutablePath: claudeExecutablePath ?? undefined,
@@ -794,7 +787,6 @@ export class SessionManager {
           strongModel: intelligentModel,
           cheapModel: workerModel,
           mode: modelMode,
-          effort: settings.subagentEffort,
         }),
         denyTool: opts?.denyTool,
         env: opts?.env,

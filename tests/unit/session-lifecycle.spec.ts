@@ -262,27 +262,28 @@ describe('quitting the application', () => {
 })
 
 describe('subagents', () => {
-  it('registers the advisor and one worker at the Subagents effort, and the fan-out directive names the worker', async () => {
+  it('registers the advisor and one worker in Jev, inheriting the one effort, with the protocol naming the worker', async () => {
     const { repos, project, manager } = setup()
-    repos.settings.set({ effort: 'max', subagentEffort: 'max', modelMode: 'jev', model: 'opus' })
+    repos.settings.set({ effort: 'max', modelMode: 'jev', model: 'opus' })
     manager.setJevKey(() => 'saved')
 
     await manager.startSession(project.id)
 
     const agents = queries[0].options.agents as Record<string, { effort?: string; model?: string }>
     expect(Object.keys(agents).sort()).toEqual(['advisor', 'worker'])
-    expect(agents.worker.effort).toBe('max')
-    expect(agents.advisor.effort).toBe('max')
+    expect(agents.worker.effort).toBeUndefined()
+    expect(agents.advisor.effort).toBeUndefined()
     expect(agents.advisor.model).toBe('opus')
     expect(agents.worker.model).toBe('sonnet')
     const systemPrompt = queries[0].options.systemPrompt as { append: string }
-    expect(systemPrompt.append).toContain('"worker"')
+    expect(systemPrompt.append).toContain('`worker`')
     expect(systemPrompt.append).toContain('MODEL MODES')
+    expect(systemPrompt.append).not.toContain('DIVIDE AND CONQUER')
   })
 
-  it('runs the Model in basic mode with only the worker, and keeps the fan-out directive but no protocol', async () => {
+  it('runs the Model in basic mode with only the worker, and no protocol or fan out directive', async () => {
     const { repos, project, manager } = setup()
-    repos.settings.set({ effort: 'max', subagentEffort: 'max', modelMode: 'basic', model: 'opus' })
+    repos.settings.set({ effort: 'max', modelMode: 'basic', model: 'opus' })
 
     await manager.startSession(project.id)
 
@@ -292,22 +293,23 @@ describe('subagents', () => {
     expect(queries[0].options.model).toBe('opus')
     const systemPrompt = queries[0].options.systemPrompt as { append: string } | undefined
     expect(systemPrompt?.append ?? '').not.toContain('MODEL MODES')
-    expect(systemPrompt?.append ?? '').toContain('DIVIDE AND CONQUER')
+    expect(systemPrompt?.append ?? '').not.toContain('DIVIDE AND CONQUER')
   })
 
-  it('keeps basic mode free of the fan-out directive below max effort', async () => {
+  it('teaches the protocol only at max effort, where subagents exist', async () => {
     const { repos, project, manager } = setup()
-    repos.settings.set({ effort: 'xhigh', subagentEffort: 'max', modelMode: 'basic' })
+    repos.settings.set({ effort: 'xhigh', modelMode: 'jev' })
+    manager.setJevKey(() => 'saved')
 
     await manager.startSession(project.id)
 
     const systemPrompt = queries[0].options.systemPrompt as { append: string } | undefined
-    expect(systemPrompt?.append ?? '').not.toContain('DIVIDE AND CONQUER')
+    expect(systemPrompt?.append ?? '').not.toContain('MODEL MODES')
   })
 
   it('runs Jev mode with no key as Basic, and as Jev once a key is saved', async () => {
     const { repos, project, manager } = setup()
-    repos.settings.set({ effort: 'max', subagentEffort: 'max', modelMode: 'jev' })
+    repos.settings.set({ effort: 'max', modelMode: 'jev' })
     let key: string | null = null
     manager.setJevKey(() => key)
 
@@ -319,15 +321,5 @@ describe('subagents', () => {
     await manager.startSession(project.id)
     expect(Object.keys(queries[1].options.agents as object).sort()).toEqual(['advisor', 'worker'])
     expect(queries[1].options.model).toBe(repos.settings.get().model)
-  })
-
-  it('runs the worker at the lower Subagents effort when the bar is below max', async () => {
-    const { repos, project, manager } = setup()
-    repos.settings.set({ effort: 'max', subagentEffort: 'low' })
-
-    await manager.startSession(project.id)
-
-    const agents = queries[0].options.agents as Record<string, { effort?: string }>
-    expect(agents.worker.effort).toBe('low')
   })
 })
