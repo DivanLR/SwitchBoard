@@ -19,12 +19,17 @@ async function createGroup(page: import('@playwright/test').Page, name: string):
 test('a group colour can be picked from its menu', async ({ page }) => {
   await createGroup(page, 'Work')
   const swatch = page.getByTestId('group-head-Work').locator('.group-swatch')
+  const head = page.getByTestId('group-head-Work')
   await expect(swatch).toHaveAttribute('style', /--green/)
-  await page.getByTestId('group-head-Work').click({ button: 'right' })
+  await expect(head).toHaveClass(/tinted/)
+  await expect(head).toHaveAttribute('style', /--group-tint:\s*var\(--green\)/)
+  await head.click({ button: 'right' })
   await expect(page.getByTestId('ctx-color-0')).toHaveAttribute('aria-pressed', 'true')
   await page.getByTestId('ctx-color-2').click()
   await expect(page.getByTestId('project-ctx-menu')).toHaveCount(0)
   await expect(swatch).toHaveAttribute('style', /--blue/)
+  await expect(head).toHaveAttribute('style', /--group-tint:\s*var\(--blue\)/)
+  await expect(page.getByTestId('group-head-ungrouped')).not.toHaveClass(/tinted/)
 })
 
 test('a group can be created and named inline', async ({ page }) => {

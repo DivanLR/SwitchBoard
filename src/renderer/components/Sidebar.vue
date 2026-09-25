@@ -552,7 +552,8 @@ function restore(projectId: string): void {
         <div
           v-if="section.head && !collapsed"
           class="group-head"
-          :class="{ folded: section.folded, 'drop-into': groupDrop === (section.group?.id ?? UNGROUPED) }"
+          :class="{ folded: section.folded, tinted: !!section.group, 'drop-into': groupDrop === (section.group?.id ?? UNGROUPED) }"
+          :style="section.group ? { '--group-tint': section.color } : undefined"
           :data-testid="section.group ? `group-head-${section.name}` : 'group-head-ungrouped'"
           :title="`${section.name} · ${section.items.length} ${section.items.length === 1 ? 'project' : 'projects'} — drag a project here to move it in`"
           @click="toggleGroup(section.group?.id ?? null)"
@@ -1077,6 +1078,14 @@ function restore(projectId: string): void {
 
 .group-head > * {
   position: relative;
+}
+
+.group-head.tinted {
+  background: color-mix(in srgb, var(--group-tint) 18%, var(--bg-sticky));
+}
+
+.group-head.tinted .group-name {
+  color: var(--text-strong);
 }
 
 .group-head:hover .group-name {
