@@ -19,6 +19,7 @@ import {
   DEFAULT_SESSION_MODE,
   DEFAULT_SETTINGS,
   modelLabel,
+  nextStrongestModel,
   subagentsAllowed,
   type AvailableModel,
   type EffortLevel,
@@ -31,8 +32,8 @@ import {
 import { sandboxSpawn, toContainerPaths, type SandboxPlan } from './wslc-sandbox'
 import { MessageMapper, type EventSink } from './message-mapper'
 import { toAvailableModels } from './model-catalog'
-import { modelDeviation, nextStrongestModel } from './model-fallback'
-import { classifyWorkload, mainLoopModel } from './model-routing'
+import { modelDeviation } from './model-fallback'
+import { classifyWorkload } from './model-routing'
 import { jevRoute, type JevAnswer, type JevRoute } from './jev-router'
 
 const EXIT_GRACE_MS = 5_000
@@ -432,7 +433,7 @@ export class HostedSession implements SessionHost {
       next.modelMode === 'jev' && this.routedModel && [next.intelligentModel, next.workerModel].includes(this.routedModel)
         ? this.routedModel
         : null
-    this.options.mainModel = this.options.workerMainLoop ? next.workerModel : (routed ?? mainLoopModel(next.modelMode, next))
+    this.options.mainModel = this.options.workerMainLoop ? next.workerModel : (routed ?? next.intelligentModel)
     this.options.modelMode = next.modelMode
     this.options.autoModelRouting = next.autoModelRouting
     this.switchLimit = (next.jevSwitchLimit ?? this.switchLimit / 1000) * 1000

@@ -2,6 +2,7 @@ import { app, safeStorage } from 'electron'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { IpcError, JevKeyStatus } from '@shared/ipc-types'
+import type { Repositories } from '@main/store/repositories'
 
 let cached: string | null | undefined
 
@@ -37,6 +38,10 @@ export function readJevKey(): string | null {
     cached = null
   }
   return cached
+}
+
+export function settleJevMode(settings: Pick<Repositories['settings'], 'get' | 'set'>): void {
+  if (settings.get().modelMode === 'jev' && !readJevKey()) settings.set({ modelMode: 'basic' })
 }
 
 export function clearJevKey(): JevKeyStatus {

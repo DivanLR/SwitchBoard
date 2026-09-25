@@ -47,6 +47,7 @@ import {
   MODEL_MODES,
   emptyVerifyReport,
   flowStagesOf,
+  modelAlias,
 } from '@shared/domain'
 
 export function newId(): string {
@@ -615,11 +616,13 @@ class SettingsRepo {
     if (!('mcpActiveServers' in stored) && Array.isArray(stored.databaseMcpServers)) {
       stored.mcpActiveServers = [...stored.databaseMcpServers]
     }
-    if (!('intelligentModel' in stored)) {
+    if (typeof stored.intelligentModel === 'string') stored.model = modelAlias(stored.intelligentModel)
+    else if (!('model' in stored)) {
       const work = typeof stored.workModel === 'string' ? stored.workModel : 'default'
       const plan = typeof stored.planModel === 'string' ? stored.planModel : 'default'
-      stored.intelligentModel = work !== 'default' ? work : plan
+      stored.model = modelAlias(work !== 'default' ? work : plan)
     }
+    if (stored.modelMode === 'auto') stored.modelMode = 'jev'
     if (!MODEL_MODES.includes(stored.modelMode as ModelMode)) stored.modelMode = DEFAULT_SETTINGS.modelMode
     const merged: Record<string, unknown> = { ...DEFAULT_SETTINGS, ...stored }
     return Object.fromEntries(Object.keys(DEFAULT_SETTINGS).map((key) => [key, merged[key]])) as unknown as Settings

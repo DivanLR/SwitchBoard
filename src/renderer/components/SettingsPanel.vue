@@ -24,6 +24,10 @@ const store = useSettingsStore()
 
 const projects = useProjectsStore()
 const settings = computed(() => store.settings)
+const modelName = computed(() => {
+  const id = store.settings?.model ?? 'default'
+  return store.availableModels.find((m) => m.id === id)?.label ?? modelLabel(id)
+})
 
 const tab = ref<SettingsTab>(props.initialTab ?? 'models')
 const TABS: { id: SettingsTab; label: string; icon: string }[] = [
@@ -86,7 +90,7 @@ onMounted(() => {
           </button>
           <span class="spacer"></span>
           <div v-if="settings" class="rail-foot mono">
-            Smart {{ modelLabel(settings.intelligentModel) }}<br />Worker {{ modelLabel(settings.workerModel) }}
+            {{ settings.modelMode === 'jev' ? 'Jev' : 'Basic' }} · {{ modelName }}
           </div>
         </div>
 

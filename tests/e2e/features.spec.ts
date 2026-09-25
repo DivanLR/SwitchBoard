@@ -14,27 +14,55 @@ test('the status bar token count increases after a completed turn', async ({ pag
   await expect(tokens).not.toHaveText('0 tok')
 })
 
-test('settings exposes intelligent and worker model cards', async ({ page }) => {
+test('settings offers one Model list, the newest of each family, and names the cheaper tier', async ({ page }) => {
   await page.getByTestId('open-settings').click()
   const panel = page.getByTestId('settings-panel')
-  await expect(panel.getByTestId('intelligent-model-claude-fable-5')).toBeVisible()
-  await expect(panel.getByTestId('worker-model-claude-sonnet-5')).toBeVisible()
-  await panel.getByTestId('intelligent-model-claude-opus-5[1m]').click()
-  await expect(panel.getByTestId('intelligent-model-claude-opus-5[1m]')).toHaveClass(/sel/)
+  await expect(panel.locator('[data-testid^="intelligent-model-"], [data-testid^="worker-model-"]')).toHaveCount(0)
+  await expect(panel.getByTestId('model-opus')).toHaveClass(/sel/)
+  await expect(panel.getByTestId('model-opus')).toContainText('Opus 5.5')
+  await expect(panel.getByTestId('model-claude-fable-5-1')).toBeVisible()
+  await expect(panel.getByTestId('model-opus[1m]')).toContainText('Opus 5.5 (1M)')
+  await expect(panel).toContainText('now Sonnet')
+
+  await panel.getByTestId('model-sonnet').click()
+  await expect(panel.getByTestId('model-sonnet')).toHaveClass(/sel/)
+  await expect(panel.getByTestId('model-opus')).not.toHaveClass(/sel/)
+  await expect(panel).toContainText('now Haiku')
   await panel.getByTestId('settings-done').click()
-  await expect(page.getByTestId('model-summary')).toContainText('Opus 5')
+  await expect(page.getByTestId('model-summary')).toHaveText('Sonnet 5')
 })
 
-test('settings offers the three model modes and the pair by message switch', async ({ page }) => {
+test('a saved model the account no longer lists still shows, selected, so the choice is never blank', async ({
+  page,
+}) => {
+  await page.evaluate(() => window.switchboard.invoke('settings.set', { model: 'claude-fable-5' }))
   await page.getByTestId('open-settings').click()
   const panel = page.getByTestId('settings-panel')
-  await expect(panel.getByTestId('mode-auto')).toHaveClass(/sel/)
-  for (const mode of ['jev', 'basic']) {
-    await expect(panel.getByTestId(`mode-${mode}`)).not.toHaveClass(/sel/)
-  }
-  await panel.getByTestId('mode-basic').click()
+  const kept = panel.getByTestId('model-claude-fable-5')
+  await expect(kept).toHaveClass(/sel/)
+  await expect(kept).toContainText('Fable 5')
+  await expect(panel.getByTestId('model-claude-fable-5-1')).not.toHaveClass(/sel/)
+})
+
+test('settings offers Jev and Basic, Jev greyed out until a key is saved, and the pair by message switch', async ({
+  page,
+}) => {
+  await page.getByTestId('open-settings').click()
+  const panel = page.getByTestId('settings-panel')
+  await expect(panel.getByTestId('mode-auto')).toHaveCount(0)
   await expect(panel.getByTestId('mode-basic')).toHaveClass(/sel/)
-  await expect(panel.getByTestId('mode-auto')).not.toHaveClass(/sel/)
+  await expect(panel.getByTestId('mode-jev')).toBeDisabled()
+
+  await panel.getByTestId('jev-key-input').fill('sk-jev-test-key-1234')
+  await panel.getByTestId('jev-key-save').click()
+  await expect(panel.getByTestId('mode-jev')).toBeEnabled()
+  await panel.getByTestId('mode-jev').click()
+  await expect(panel.getByTestId('mode-jev')).toHaveClass(/sel/)
+  await expect(panel.getByTestId('mode-basic')).not.toHaveClass(/sel/)
+
+  await panel.getByTestId('jev-key-remove').click()
+  await expect(panel.getByTestId('mode-jev')).toBeDisabled()
+  await expect(panel.getByTestId('mode-basic')).toHaveClass(/sel/)
 
   const routing = panel.getByTestId('setting-auto-routing')
   await expect(routing).toHaveAttribute('aria-checked', 'true')
@@ -88,21 +116,21 @@ test('General keeps plugins and skills up to date, checks on demand and lists ev
 test('the picker follows the account: a new model appears, a retired one goes', async ({ page }) => {
   await page.evaluate(() =>
     window.__mock.setAvailableModels([
-      { id: 'claude-fable-5', label: 'Fable', description: '' },
-      { id: 'claude-sonnet-5', label: 'Sonnet', description: '' },
-      { id: 'claude-opus-7-2[1m]', label: 'Opus (1M context)', description: 'Newest Opus' },
+      { id: 'claude-fable-5', label: 'Fable 5', description: '' },
+      { id: 'claude-sonnet-5', label: 'Sonnet 5', description: '' },
+      { id: 'claude-opus-7-2[1m]', label: 'Opus 7.2 (1M)', description: 'Newest Opus' },
     ]),
   )
   await page.getByTestId('open-settings').click()
   const panel = page.getByTestId('settings-panel')
-  const newCard = panel.getByTestId('intelligent-model-claude-opus-7-2[1m]')
+  const newCard = panel.getByTestId('model-claude-opus-7-2[1m]')
   await expect(newCard).toBeVisible()
   await expect(newCard).toContainText('Opus 7.2 (1M)')
   await expect(newCard).toContainText('Newest Opus')
-  await expect(panel.getByTestId('intelligent-model-claude-fable-5')).toBeVisible()
-  await expect(panel.getByTestId('intelligent-model-claude-opus-5[1m]')).toHaveCount(0)
-  await expect(panel.getByTestId('intelligent-model-claude-opus-4-8')).toHaveCount(0)
-  await expect(panel.getByTestId('intelligent-model-default')).toBeVisible()
+  await expect(panel.getByTestId('model-claude-fable-5')).toBeVisible()
+  await expect(panel.getByTestId('model-opus[1m]')).toHaveCount(0)
+  await expect(panel.getByTestId('model-claude-opus-4-8')).toHaveCount(0)
+  await expect(panel.getByTestId('model-default')).toBeVisible()
 })
 
 test('the This project tab configures the project, but never its models', async ({ page }) => {
@@ -115,7 +143,7 @@ test('the This project tab configures the project, but never its models', async 
   await expect(panel.getByTestId('proj-worker-global')).toHaveCount(0)
 
   await panel.getByTestId('settings-tab-models').click()
-  await expect(panel.getByTestId('intelligent-model-default')).toBeVisible()
+  await expect(panel.getByTestId('model-default')).toBeVisible()
 })
 
 test('no subscription rate-limit meter is rendered, even once usage reports', async ({ page }) => {

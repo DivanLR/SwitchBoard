@@ -17,7 +17,7 @@ import { computeCounters, registerIpcHandlers, RendererPush } from './ipc/handle
 import { readDiagramList } from './diagrams/list'
 import { reconcileSkills, stagingSkillsRoot } from './skills/install'
 import { keepCurrentService } from './keep-current'
-import { readJevKey } from '@main/sessions/jev-key'
+import { readJevKey, settleJevMode } from '@main/sessions/jev-key'
 import { FlowSupervisor } from './flow/flow-supervisor'
 import { initUpdater } from './updater'
 import { PtyHost } from './terminal/pty-host'
@@ -252,6 +252,7 @@ async function main(): Promise<void> {
   })
   manager.setElicitation(elicitations)
   manager.setJevKey(readJevKey)
+  settleJevMode(repos.settings)
 
   const swallowRules = defaultSwallowRules()
   manager.setNoiseClassifier((event) => classifyNoise(swallowRules, event))

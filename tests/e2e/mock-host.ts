@@ -339,10 +339,11 @@ export function installMockHost(scenario: MockScenario): void {
   const specKitByProject = new Map<string, AnyRecord>()
   const mcpSchemaByProject = new Map<string, string>()
   let availableModels: { id: string; label: string; description: string; engine?: string }[] = [
-    { id: 'claude-fable-5', label: 'Fable', description: 'Most capable for the hardest tasks' },
-    { id: 'claude-opus-5[1m]', label: 'Opus (1M context)', description: 'Best for everyday, complex tasks' },
-    { id: 'claude-sonnet-5', label: 'Sonnet', description: 'Efficient for routine tasks' },
-    { id: 'claude-haiku-4-5-20251001', label: 'Haiku', description: 'Fastest for quick answers' },
+    { id: 'opus', label: 'Opus 5.5', description: 'Most capable for ambitious work' },
+    { id: 'claude-fable-5-1', label: 'Fable 5.1', description: 'For your toughest challenges' },
+    { id: 'sonnet', label: 'Sonnet 5', description: 'Most efficient for everyday tasks' },
+    { id: 'haiku', label: 'Haiku 4.5', description: 'Fastest for quick answers' },
+    { id: 'opus[1m]', label: 'Opus 5.5 (1M)', description: 'Opus 5.5 with a million token context' },
     { id: 'gpt-5-codex', label: 'gpt-5-codex', description: 'Codex coding model', engine: 'codex' },
   ]
   const standingRules: AnyRecord[] = []
@@ -1846,6 +1847,7 @@ export function installMockHost(scenario: MockScenario): void {
     },
     'jev.clearKey': () => {
       jevKey = null
+      if (settings.modelMode === 'jev') settings = { ...settings, modelMode: 'basic' }
       return { configured: false, encryption: true }
     },
     'jev.test': () =>

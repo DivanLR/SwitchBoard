@@ -2,6 +2,9 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ModelMode } from '@shared/domain'
+import { openDatabase } from '@main/store/db'
+import { createRepositories } from '@main/store/repositories'
 
 const state = { dir: '', encryption: true }
 
@@ -65,5 +68,32 @@ describe('the Jev key store', () => {
     jev.saveJevKey('ts_live_abcdef123')
     expect(jev.clearJevKey()).toEqual({ configured: false, encryption: true })
     expect(jev.readJevKey()).toBeNull()
+  })
+})
+
+describe('settling the mode against the key', () => {
+  function settings(modelMode: ModelMode) {
+    const repos = createRepositories(openDatabase(':memory:'))
+    repos.settings.set({ modelMode })
+    return repos.settings
+  }
+
+  it('moves Jev to Basic when no key is saved, and leaves it on Jev once one is', async () => {
+    const jev = await load()
+    const keyless = settings('jev')
+    jev.settleJevMode(keyless)
+    expect(keyless.get().modelMode).toBe('basic')
+
+    jev.saveJevKey('ts_live_abcdef123')
+    const keyed = settings('jev')
+    jev.settleJevMode(keyed)
+    expect(keyed.get().modelMode).toBe('jev')
+  })
+
+  it('never moves Basic', async () => {
+    const jev = await load()
+    const basic = settings('basic')
+    jev.settleJevMode(basic)
+    expect(basic.get().modelMode).toBe('basic')
   })
 })

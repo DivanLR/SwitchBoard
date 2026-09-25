@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { classifyIntent, classifyWorkload, mainLoopModel } from '@main/sessions/model-routing'
+import { classifyIntent, classifyWorkload } from '@main/sessions/model-routing'
+import { cheaperModel, modelAlias } from '@shared/domain'
 
 describe('classifyIntent', () => {
   it('routes questions and discussion to the plan model', () => {
@@ -45,34 +46,22 @@ describe('classifyWorkload (Advisor/Orchestrator auto mode)', () => {
   })
 })
 
-describe('mainLoopModel (one model per session, never switched)', () => {
-  const models = { intelligentModel: 'claude-opus-5', workerModel: 'claude-sonnet-5' }
-
-  it('runs the intelligent model for Auto, Jev and no mode at all', () => {
-    expect(mainLoopModel('auto', models)).toBe('claude-opus-5')
-    expect(mainLoopModel('jev', models)).toBe('claude-opus-5')
-    expect(mainLoopModel(undefined, models)).toBe('claude-opus-5')
+describe('the one Model and its cheaper tier', () => {
+  it('steps one family down for the cheaper tier, and keeps Haiku when nothing is cheaper', () => {
+    expect(cheaperModel('claude-fable-5-1')).toBe('opus')
+    expect(cheaperModel('opus')).toBe('sonnet')
+    expect(cheaperModel('opus[1m]')).toBe('sonnet')
+    expect(cheaperModel('sonnet')).toBe('haiku')
+    expect(cheaperModel('haiku')).toBe('haiku')
+    expect(cheaperModel('default')).toBe('sonnet')
   })
 
-  it('runs the cheap model in Basic mode', () => {
-    expect(mainLoopModel('basic', models)).toBe('claude-sonnet-5')
-  })
-
-  it('falls back to the intelligent model when no worker is configured', () => {
-    expect(mainLoopModel('basic', { intelligentModel: 'claude-opus-5' })).toBe('claude-opus-5')
-  })
-})
-
-describe('basic mode', () => {
-  const models = { intelligentModel: 'opus', workerModel: 'haiku' }
-
-  it('runs the cheap model, unlike every other mode', () => {
-    expect(mainLoopModel('basic', models)).toBe('haiku')
-    expect(mainLoopModel('auto', models)).toBe('opus')
-    expect(mainLoopModel('jev', models)).toBe('opus')
-  })
-
-  it('falls back to the intelligent model when no worker is set', () => {
-    expect(mainLoopModel('basic', { intelligentModel: 'opus' })).toBe('opus')
+  it('names an aliased family by its alias, so it always resolves to the newest build', () => {
+    expect(modelAlias('claude-opus-5')).toBe('opus')
+    expect(modelAlias('claude-opus-4-8')).toBe('opus')
+    expect(modelAlias('claude-opus-5-5[1m]')).toBe('opus[1m]')
+    expect(modelAlias('claude-haiku-4-5-20251001')).toBe('haiku')
+    expect(modelAlias('claude-fable-5-1')).toBe('claude-fable-5-1')
+    expect(modelAlias('default')).toBe('default')
   })
 })

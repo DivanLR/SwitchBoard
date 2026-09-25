@@ -139,22 +139,27 @@ Confirmed functionality:
 - A composer that accepts input mid task, queues it, and sends it when the
   session is ready, with slash command suggestions, project references and an
   "up next" queue. Undelivered messages survive a quit as drafts.
-- Model modes: Jev, Auto and Basic pair an intelligent model with a worker
-  model. Auto runs the intelligent model and reaches the other tier through the
-  advisor and worker subagents; Pair models by message reports the pattern each
-  turn picks as an Advisor or Orchestrator chip. Basic runs the worker model
-  alone. Jev routes with TypeSafe AI's Jev decision model, through the
+- Model modes: Jev and Basic, over one Model setting that lists the newest
+  version of each family. Opus, Sonnet and Haiku are stored by alias, so they
+  always resolve to the newest build. The cheaper tier is the model one family
+  down (Fable to Opus, Opus to Sonnet, Sonnet to Haiku); worker subagents and
+  the Diff worker run on it. Basic runs the Model alone, with no advisor and no
+  per message routing, and at maximum effort still fans out to worker
+  subagents. Jev routes with TypeSafe AI's Jev decision model, through the
   developer's own API key, which is stored encrypted with the operating system's
-  key store and never returned to the interface. Before each message typed into
-  a Session tab, Jev chooses the intelligent or the worker model, and the
-  session switches only when Jev is at least 60% sure and the context is still
-  under the switch limit (60 thousand tokens by default), so a long session
-  keeps its prompt cache. The header chip says what Jev chose and why the model
-  stayed or changed. With no key, or when Jev does not answer within three
-  seconds, the turn runs as Auto. Flow and the section tabs never use Jev.
-  A Diff comment runs on the worker model. On a usage limit the session drops to
-  the next strongest model instead of stopping. Subagents are allowed only at
-  maximum effort, enforced by a hook, and maximum subagent effort adds a fan out
+  key store and never returned to the interface. Jev cannot be chosen until a
+  key is saved, and removing the key moves the mode to Basic. Before each
+  message typed into a Session tab, Jev chooses the Model or the cheaper tier,
+  and the session switches only when Jev is at least 60% sure and the context is
+  still under the switch limit (60 thousand tokens by default), so a long
+  session keeps its prompt cache. The header chip says what Jev chose and why
+  the model stayed or changed. In Jev the session also reaches the other tier
+  through the advisor and worker subagents, and Pair models by message reports
+  the pattern each turn picks as an Advisor or Orchestrator chip. When Jev does
+  not answer within three seconds, the turn keeps its model. Flow and the
+  section tabs never use Jev. On a usage limit the session drops to the next
+  strongest model instead of stopping. Subagents are allowed only at maximum
+  effort, enforced by a hook, and maximum subagent effort adds a fan out
   directive.
 - **Flow**, a large popup opened from the session header, which takes one
   feature through seven stages, each a fresh Claude Code session in the run's
@@ -344,6 +349,18 @@ Jev reads every message but switches the model only while the context is small,
 that Auto and Basic stay, with Auto as Jev's fallback, and that Flow keeps its
 fixed models. A stored Advisor or Orchestrator setting reads as Auto. The Jev
 key is the one credential the application stores.
+
+**2026-09-25.** At the owner's direction ("I should have 2 model modes - JEV and
+Basic, If there is no jev key provided grey it out please" and "Remove the
+intelligent and worker model sections it should now just be Model and it should
+be the latest of each"), Auto was removed and the intelligent and worker model
+settings became one Model, listed as the newest version of each family. The
+owner chose that Jev routes between the Model and the model one family cheaper,
+that Basic runs the Model and keeps worker subagents, that background workers
+such as the Diff worker use the cheaper model, and that a stored Auto becomes
+Jev when a key is saved and Basic otherwise. New installs start on Basic. This
+narrows the model modes restored on 2026-09-23 and supersedes Auto as Jev's
+fallback.
 
 This supersedes the constraint recorded on 2026-08-13 that "all six sections"
 (Session, Specs, Tests, Diff, Cleanup, Diagrams) must survive. The sections now

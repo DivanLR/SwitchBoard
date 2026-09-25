@@ -1,16 +1,17 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { modelLabel, type DiffFileEntry } from '@shared/domain'
+import { cheaperModel, modelLabel, type DiffFileEntry } from '@shared/domain'
 import { useDiffStore } from '@renderer/stores/diff'
 import { useSettingsStore } from '@renderer/stores/settings'
 import Icon from '@renderer/components/Icon.vue'
+import MiniTerminal from '@renderer/components/MiniTerminal.vue'
 
 const props = defineProps<{ projectId: string }>()
 const diff = useDiffStore()
 const settings = useSettingsStore()
 
 const workerLabel = computed(() =>
-  settings.settings ? modelLabel(settings.settings.workerModel) : 'the worker model',
+  settings.settings ? modelLabel(cheaperModel(settings.settings.model)) : 'the worker model',
 )
 
 const anchor = ref<number | null>(null)
@@ -106,6 +107,7 @@ async function sendInstruction(): Promise<void> {
   if (sent) clearSelection()
 }
 
+const appliedSession = computed(() => diff.appliedFor[props.projectId] ?? null)
 const result = computed(() => diff.resultFor(props.projectId))
 const notLive = computed(() => diff.isNotLive(props.projectId))
 const files = computed(() => result.value.files)
@@ -114,6 +116,7 @@ interface DiffGroup {
   dir: string
   label: string
   depth: number
+  shownAncestors: string[]
   files: DiffFileEntry[]
   added: number | null
   removed: number | null
@@ -133,7 +136,18 @@ const groups = computed<DiffGroup[]>(() => {
     for (let i = 1; i < parts.length; i++) dirs.add(parts.slice(0, i).join('/'))
   }
 
-  const ordered = [...dirs].sort((a, b) => {
+  const parentOf = (dir: string): string => dir.slice(0, Math.max(0, dir.lastIndexOf('/')))
+  const childDirs = new Map<string, number>()
+  for (const dir of dirs) {
+    if (dir !== '') childDirs.set(parentOf(dir), (childDirs.get(parentOf(dir)) ?? 0) + 1)
+  }
+  const merged = (dir: string): boolean => dir !== '' && !byDir[dir]?.length && childDirs.get(dir) === 1
+  const shownAncestorsOf = (dir: string): string[] => {
+    const parts = dir === '' ? [] : dir.split('/')
+    return parts.slice(1).map((_, i) => parts.slice(0, i + 1).join('/')).filter((a) => !merged(a))
+  }
+
+  const ordered = [...dirs].filter((dir) => !merged(dir)).sort((a, b) => {
     if (a === '') return -1
     if (b === '') return 1
     const x = a.split('/')
@@ -149,10 +163,13 @@ const groups = computed<DiffGroup[]>(() => {
     const own = byDir[dir] ?? []
     const under = files.value.filter((f) => (dir === '' ? true : f.path.startsWith(`${dir}/`)))
     const known = under.filter((f) => f.addedLines !== null && f.removedLines !== null)
+    const shownAncestors = shownAncestorsOf(dir)
+    const parent = shownAncestors.at(-1)
     return {
       dir,
-      label: dir === '' ? '/' : (dir.split('/').at(-1) ?? dir),
-      depth: dir === '' ? 0 : dir.split('/').length - 1,
+      label: dir === '' ? '/' : parent ? dir.slice(parent.length + 1) : dir,
+      depth: shownAncestors.length,
+      shownAncestors,
       files: own,
       added: known.length === 0 ? null : known.reduce((n, f) => n + (f.addedLines ?? 0), 0),
       removed: known.length === 0 ? null : known.reduce((n, f) => n + (f.removedLines ?? 0), 0),
@@ -162,14 +179,7 @@ const groups = computed<DiffGroup[]>(() => {
 })
 
 const visibleGroups = computed<DiffGroup[]>(() =>
-  groups.value.filter((g) => {
-    if (g.dir === '') return true
-    const parts = g.dir.split('/')
-    for (let i = 1; i < parts.length; i++) {
-      if (folded.value.has(parts.slice(0, i).join('/'))) return false
-    }
-    return true
-  }),
+  groups.value.filter((g) => !g.shownAncestors.some((a) => folded.value.has(a))),
 )
 
 const folded = ref(new Set<string>())
@@ -353,6 +363,18 @@ const keyedLines = computed(() =>
       </div>
       </div>
     </div>
+    <div v-if="appliedSession" class="diff-worker" data-testid="diff-worker">
+      <button
+        type="button"
+        class="dw-x"
+        data-testid="diff-worker-hide"
+        title="Hide the worker session"
+        @click="diff.hideApplied(props.projectId)"
+      >
+        <Icon name="close" :size="11" />
+      </button>
+      <MiniTerminal :session-id="appliedSession" label="worker session applying your comments" />
+    </div>
   </div>
 </template>
 
@@ -360,7 +382,31 @@ const keyedLines = computed(() =>
 .diff-view {
   flex: 1;
   display: flex;
+  flex-direction: column;
   min-height: 0;
+}
+
+.diff-worker {
+  position: relative;
+  flex-shrink: 0;
+  padding: 0 var(--sp-6) var(--sp-4);
+  border-top: 1px solid var(--border);
+}
+
+.dw-x {
+  position: absolute;
+  top: 8px;
+  right: var(--sp-6);
+  display: flex;
+  padding: 2px;
+  border: none;
+  background: none;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.dw-x:hover {
+  color: var(--text-strong);
 }
 
 .diff-empty {

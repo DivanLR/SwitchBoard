@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { subagentsAllowed, EFFORT_LEVELS } from '@shared/domain'
-import { modelDeviation, nextStrongestModel } from '@main/sessions/model-fallback'
+import { subagentsAllowed, EFFORT_LEVELS, nextStrongestModel } from '@shared/domain'
+import { modelDeviation } from '@main/sessions/model-fallback'
 
 describe('nextStrongestModel (usage-limit fallback ladder)', () => {
   it('drops the account default and unknown ids to the Sonnet workhorse', () => {

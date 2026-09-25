@@ -86,7 +86,7 @@ describe('the session a section dispatch lands in', () => {
     expect(tests.id).not.toBe(flow.id)
   })
 
-  it('runs a diff comment on the worker model and leaves other sections on the main one', async () => {
+  it('runs a diff comment on the model one family cheaper and leaves other sections on the Model', async () => {
     const { project, manager } = setup()
 
     const diff = await manager.backgroundSessionFor(project.id, 'diff')
@@ -97,8 +97,9 @@ describe('the session a section dispatch lands in', () => {
         hosted: Map<string, { session: { options: { mainModel?: string } } }>
       }
     ).hosted
-    expect(hosted.get(diff.id)?.session.options.mainModel).toBe(DEFAULT_SETTINGS.workerModel)
-    expect(hosted.get(flow.id)?.session.options.mainModel).toBe(DEFAULT_SETTINGS.intelligentModel)
+    expect(DEFAULT_SETTINGS.model).toBe('opus')
+    expect(hosted.get(diff.id)?.session.options.mainModel).toBe('sonnet')
+    expect(hosted.get(flow.id)?.session.options.mainModel).toBe('opus')
   })
 
   it('runs a session in the worktree it is given, without moving the project', async () => {

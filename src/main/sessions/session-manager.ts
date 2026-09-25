@@ -34,6 +34,7 @@ import type {
 import {
   DEFAULT_SESSION_ENGINE,
   SWALLOWABLE_KINDS,
+  cheaperModel,
   emptyVerifyReport,
   subagentsAllowed,
   verifyVerdict,
@@ -55,7 +56,6 @@ import {
   modesSystemPromptAppend,
   sandboxSystemPromptAppend,
 } from './session-shaping'
-import { mainLoopModel } from './model-routing'
 import { askJev, type JevAnswer } from './jev-router'
 import {
   TRANSCRIPT_EVENT_CAP,
@@ -561,9 +561,9 @@ export class SessionManager {
   } {
     const settings = this.repos.settings.get()
     return {
-      intelligentModel: settings.intelligentModel,
-      workerModel: settings.workerModel,
-      modelMode: settings.modelMode === 'jev' && !this.jevKey?.() ? 'basic' : (settings.modelMode ?? 'auto'),
+      intelligentModel: settings.model,
+      workerModel: cheaperModel(settings.model),
+      modelMode: settings.modelMode === 'jev' && this.jevKey?.() ? 'jev' : 'basic',
       autoModelRouting: settings.autoModelRouting,
       effort: settings.effort,
       jevSwitchLimit: settings.jevSwitchLimit,
@@ -709,7 +709,7 @@ export class SessionManager {
       : null
     const effort = opts?.effort ?? settings.effort
     const basic = modelMode === 'basic'
-    const subagents = !basic && subagentsAllowed(effort)
+    const subagents = subagentsAllowed(effort)
     const heavySubagents = subagents && settings.subagentEffort === 'max'
     row.heavySubagents = heavySubagents
     const heavyAppend = heavySubagentSystemPromptAppend(heavySubagents)
@@ -770,7 +770,7 @@ export class SessionManager {
         claudeExecutablePath: claudeExecutablePath ?? undefined,
         mainModel:
           opts?.mainModel ??
-          (opts?.workerMainLoop ? workerModel : mainLoopModel(modelMode, { intelligentModel, workerModel })),
+          (opts?.workerMainLoop ? workerModel : intelligentModel),
         downgraded: opts?.mainModel !== undefined,
         workerMainLoop: opts?.workerMainLoop,
         autoModelRouting: !basic && settings.autoModelRouting,

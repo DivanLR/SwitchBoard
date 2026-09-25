@@ -7,15 +7,24 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
 })
 
-test('the mode list offers Jev, Auto and Basic, and no Advisor or Orchestrator card', async ({ page }) => {
+test('the mode list offers only Jev and Basic, and Jev cannot be chosen without a key', async ({ page }) => {
   await page.getByTestId('open-settings').click()
   const panel = page.getByTestId('settings-panel')
   await expect(panel.getByTestId('mode-jev')).toBeVisible()
-  await expect(panel.getByTestId('mode-auto')).toBeVisible()
   await expect(panel.getByTestId('mode-basic')).toBeVisible()
-  await expect(panel.getByTestId('mode-advisor')).toHaveCount(0)
-  await expect(panel.getByTestId('mode-orchestrator')).toHaveCount(0)
+  for (const retired of ['auto', 'advisor', 'orchestrator']) {
+    await expect(panel.getByTestId(`mode-${retired}`)).toHaveCount(0)
+  }
 
+  await expect(panel.getByTestId('mode-jev')).toBeDisabled()
+  await panel.getByTestId('mode-jev').click({ force: true })
+  await expect(panel.getByTestId('mode-jev')).not.toHaveClass(/sel/)
+  await expect
+    .poll(() => page.evaluate(() => window.switchboard.invoke('settings.get', undefined)))
+    .toMatchObject({ modelMode: 'basic' })
+
+  await panel.getByTestId('jev-key-input').fill('sk-jev-test-key-1234')
+  await panel.getByTestId('jev-key-save').click()
   await panel.getByTestId('mode-jev').click()
   await expect(panel.getByTestId('mode-jev')).toHaveClass(/sel/)
 })

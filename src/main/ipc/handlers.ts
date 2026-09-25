@@ -51,7 +51,7 @@ import { transcriptFor } from '@main/sessions/transcript'
 import { readDiagramList } from '@main/diagrams/list'
 import { importSkills } from '@main/skills/import'
 import type { FlowSupervisor } from '@main/flow/flow-supervisor'
-import { clearJevKey, jevKeyStatus, readJevKey, saveJevKey } from '@main/sessions/jev-key'
+import { clearJevKey, jevKeyStatus, readJevKey, saveJevKey, settleJevMode } from '@main/sessions/jev-key'
 import { askJev } from '@main/sessions/jev-router'
 import { disableSkill, enableSkill, installedSkillNames, liveSkillFolders, removeSkill } from '@main/skills/install'
 import { detectFlowStacks } from '@main/flow/stacks'
@@ -857,7 +857,11 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     'settings.set': (req) => repos.settings.set(req),
     'jev.status': () => jevKeyStatus(),
     'jev.setKey': (req) => saveJevKey(typeof req?.key === 'string' ? req.key : ''),
-    'jev.clearKey': () => clearJevKey(),
+    'jev.clearKey': () => {
+      const status = clearJevKey()
+      settleJevMode(repos.settings)
+      return status
+    },
     'jev.test': async () => {
       const key = readJevKey()
       if (!key) return { ok: false, message: 'No Jev API key is set.' }

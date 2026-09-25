@@ -1,5 +1,3 @@
-import type { ModelMode } from '@shared/domain'
-
 export function classifyIntent(text: string): 'plan' | 'work' {
   const t = text.trim()
   if (t.length === 0) return 'plan'
@@ -14,13 +12,6 @@ export function classifyIntent(text: string): 'plan' | 'work' {
 }
 
 type Workload = 'plan' | 'advisor' | 'orchestrator'
-
-export function mainLoopModel(
-  mode: ModelMode | undefined,
-  models: { intelligentModel?: string; workerModel?: string },
-): string | undefined {
-  return mode === 'basic' ? (models.workerModel ?? models.intelligentModel) : models.intelligentModel
-}
 
 const BROAD_SCOPE =
   /\b(all|every|each|entire|whole|across)\b[\s\S]{0,40}\b(files?|tests?|modules?|components?|views?|routes?|endpoints?|pages?|screens?|repo|repositor\w*|codebase|project|app)\b/i

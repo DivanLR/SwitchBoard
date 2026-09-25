@@ -7,13 +7,11 @@ describe('a fresh install', () => {
   const fresh = (): ReturnType<typeof createRepositories>['settings'] =>
     createRepositories(openDatabase(':memory:')).settings
 
-  it('arrives with the strong model, the worker, xhigh effort and summaries on', () => {
+  it('arrives on Basic with the newest Opus, xhigh effort and summaries on', () => {
     const settings = fresh().get()
 
-    expect(settings.intelligentModel).not.toBe('default')
-    expect(settings.workerModel).not.toBe('default')
-    expect(settings.intelligentModel).not.toBe(settings.workerModel)
-    expect(settings.modelMode).toBe('auto')
+    expect(settings.model).toBe('opus')
+    expect(settings.modelMode).toBe('basic')
     expect(settings.autoModelRouting).toBe(true)
     expect(settings.jevSwitchLimit).toBe(60)
 
@@ -22,10 +20,10 @@ describe('a fresh install', () => {
     expect(settings.summaries).toBe(true)
   })
 
-  it('names the intelligent model concretely, not by family alias', () => {
-    for (const id of [DEFAULT_SETTINGS.intelligentModel, DEFAULT_SETTINGS.workerModel]) {
-      expect(id).toMatch(/^claude-/)
-    }
+  it('names the Model by family alias, so it always resolves to the newest build', () => {
+    expect(DEFAULT_SETTINGS.model).toBe('opus')
+    expect(DEFAULT_SETTINGS).not.toHaveProperty('intelligentModel')
+    expect(DEFAULT_SETTINGS).not.toHaveProperty('workerModel')
   })
 
   it('still lets the developer switch any of them off', () => {
@@ -38,7 +36,7 @@ describe('a fresh install', () => {
 })
 
 describe('reading a settings row an install already stored', () => {
-  it('keeps the model modes and both models exactly as stored', () => {
+  it('moves a stored intelligent model to the one Model, keeping a Fable id and aliasing an older Opus', () => {
     const db = openDatabase(':memory:')
     const settings = createRepositories(db).settings
     db.prepare(`INSERT INTO settings (key, value) VALUES ('settings', @value)`).run({
@@ -52,8 +50,7 @@ describe('reading a settings row an install already stored', () => {
     })
 
     const stored = settings.get()
-    expect(stored.intelligentModel).toBe('claude-fable-5')
-    expect(stored.workerModel).toBe('claude-haiku-4-5')
+    expect(stored.model).toBe('claude-fable-5')
     expect(stored.modelMode).toBe('basic')
     expect(stored.autoModelRouting).toBe(false)
     expect(stored.effort).toBe('high')
@@ -63,15 +60,17 @@ describe('reading a settings row an install already stored', () => {
     const db = openDatabase(':memory:')
     const settings = createRepositories(db).settings
     const retired = {
-      model: 'claude-opus-5',
+      intelligentModel: 'claude-opus-4-8',
+      workerModel: 'claude-sonnet-5',
       flowConcurrency: 4,
       heavySubagents: true,
     }
     db.prepare(`INSERT INTO settings (key, value) VALUES ('settings', @value)`).run({
-      value: JSON.stringify({ intelligentModel: 'claude-opus-5', ...retired }),
+      value: JSON.stringify({ model: 'claude-opus-4', ...retired }),
     })
 
     expect(Object.keys(settings.get()).sort()).toEqual(Object.keys(DEFAULT_SETTINGS).sort())
+    expect(settings.get().model).toBe('opus')
     settings.set({ effort: 'high' })
     const stored = JSON.parse(
       (db.prepare(`SELECT value FROM settings WHERE key = 'settings'`).get() as { value: string })
@@ -104,19 +103,28 @@ describe('reading a settings row an install already stored', () => {
     expect(DEFAULT_SETTINGS.defaultEngine).toBe('claude')
   })
 
-  it('reads a retired Advisor or Orchestrator mode back as Auto, and defaults the switch limit', () => {
+  it('reads a retired Advisor or Orchestrator mode back as Basic, and defaults the switch limit', () => {
     const db = openDatabase(':memory:')
     const settings = createRepositories(db).settings
     db.prepare(`INSERT INTO settings (key, value) VALUES ('settings', @value)`).run({
       value: JSON.stringify({ modelMode: 'advisor' }),
     })
-    expect(settings.get().modelMode).toBe('auto')
+    expect(settings.get().modelMode).toBe('basic')
     expect(settings.get().jevSwitchLimit).toBe(60)
 
     db.prepare(`UPDATE settings SET value = @value WHERE key = 'settings'`).run({
       value: JSON.stringify({ modelMode: 'orchestrator' }),
     })
-    expect(settings.get().modelMode).toBe('auto')
+    expect(settings.get().modelMode).toBe('basic')
+  })
+
+  it('reads a retired Auto mode as Jev, which startup then settles to Basic when no key is saved', () => {
+    const db = openDatabase(':memory:')
+    const settings = createRepositories(db).settings
+    db.prepare(`INSERT INTO settings (key, value) VALUES ('settings', @value)`).run({
+      value: JSON.stringify({ modelMode: 'auto' }),
+    })
+    expect(settings.get().modelMode).toBe('jev')
   })
 
   it('keeps Jev mode and a stored switch limit as an install set them', () => {

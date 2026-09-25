@@ -73,6 +73,7 @@ const store = reactive({
   async clearJevKey(): Promise<void> {
     this.jevStatus = await invoke('jev.clearKey', undefined)
     this.jevTestResult = null
+    await this.load()
   },
 
   resetJevKeyError(): void {

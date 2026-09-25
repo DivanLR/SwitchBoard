@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import type { ModelChoice, SessionEngine, Settings } from '@shared/domain'
-import { engineOf, modelLabel, modelPrice } from '@shared/domain'
+import { cheaperModel, engineOf, modelLabel, modelPrice } from '@shared/domain'
 import { useSettingsStore } from '@renderer/stores/settings'
 import Icon from '@renderer/components/Icon.vue'
 import EffortBar from '@renderer/components/EffortBar.vue'
@@ -55,20 +55,25 @@ function onSwitchLimitChange(e: Event): void {
 
 const claudeModels = computed(() => store.availableModels.filter((m) => engineOf(m) === 'claude'))
 const codexModels = computed(() => store.availableModels.filter((m) => engineOf(m) === 'codex'))
-const modelChoices = computed<ModelChoice[]>(() => [
-  {
-    id: 'default',
-    label: modelLabel('default'),
-    desc: 'Follows your subscription default model',
-    price: '—',
-  },
-  ...claudeModels.value.map((m) => ({
-    id: m.id,
-    label: modelLabel(m.id),
-    desc: m.description,
-    price: modelPrice(m.id),
-  })),
-])
+const modelChoices = computed<ModelChoice[]>(() => {
+  const listed: ModelChoice[] = [
+    {
+      id: 'default',
+      label: modelLabel('default'),
+      desc: 'Follows your subscription default model',
+      price: '—',
+    },
+    ...claudeModels.value.map((m) => ({
+      id: m.id,
+      label: m.label,
+      desc: m.description,
+      price: modelPrice(m.id),
+    })),
+  ]
+  const current = props.settings.model
+  if (listed.some((m) => m.id === current)) return listed
+  return [...listed, { id: current, label: modelLabel(current), desc: 'Your current model', price: modelPrice(current) }]
+})
 
 const codexChoices = computed<ModelChoice[]>(() => [
   {
@@ -97,38 +102,18 @@ const MODE_CHOICES: { id: Settings['modelMode']; label: string; desc: string }[]
   {
     id: 'jev',
     label: 'Jev',
-    desc: 'Before each message, Jev, a routing model from TypeSafe AI, reads it and chooses the intelligent model for reasoning heavy work or the worker model for routine, well scoped work. With no key configured, Jev mode works exactly like Basic. When Jev cannot be reached, a turn falls back to Auto and the model stays put.',
-  },
-  {
-    id: 'auto',
-    label: 'Auto (Recommended)',
-    desc: 'Intelligent model runs the session; each message picks the pattern — scoped work consults the advisor, broad work delegates to workers.',
+    desc: 'Before each message, Jev, a routing model from TypeSafe AI, reads it and chooses your model for reasoning heavy work or the model one family cheaper for routine, well scoped work. Scoped work can consult an advisor and broad work goes to worker subagents. When Jev cannot be reached, the turn keeps its model.',
   },
   {
     id: 'basic',
-    label: 'Basic (cheapest)',
-    desc: 'Worker model alone. No advisor, no workers, no delegation protocol — one model answering directly. Turns heavy subagents and per-message routing off for the session, whatever they are set to.',
+    label: 'Basic',
+    desc: 'Your model answers every message directly, with no router and no advisor. At max subagent effort it still hands independent parts to worker subagents on the model one family cheaper.',
   },
 ]
 
-const MODEL_SECTIONS = [
-  {
-    key: 'intelligentModel',
-    testid: 'intelligent-model',
-    label: 'INTELLIGENT MODEL',
-    desc: 'The strong one: plans, answers questions, orchestrates broad work, and advises the worker.',
-  },
-  {
-    key: 'workerModel',
-    testid: 'worker-model',
-    label: 'WORKER MODEL',
-    desc: 'Always the cheaper one: runs scoped turns and the parallel worker subagents, and is the tier Jev and Basic hand a whole turn to directly.',
-  },
-] as const
+const jevReady = computed(() => store.jevStatus?.configured === true)
 
-function setModel(key: 'intelligentModel' | 'workerModel', id: string): void {
-  save(key === 'intelligentModel' ? { intelligentModel: id } : { workerModel: id })
-}
+const cheaperLabel = computed(() => modelLabel(cheaperModel(props.settings.model)))
 </script>
 
 <template>
@@ -161,9 +146,8 @@ function setModel(key: 'intelligentModel' | 'workerModel', id: string): void {
   <div class="group">
     <div class="ui-kicker group-label">MODE</div>
     <div class="group-desc">
-      How the strong and cheap models pair up on work. Auto picks the pattern per message
-      from the workload; Jev asks an external router instead. Both keep most tokens on the
-      cheaper model.
+      Jev routes each message between your model and {{ cheaperLabel }}; Basic always uses your
+      model. Jev can be chosen once a Jev API key is saved below.
     </div>
     <div class="cards">
       <button
@@ -171,6 +155,8 @@ function setModel(key: 'intelligentModel' | 'workerModel', id: string): void {
         :key="m.id"
         class="ui-card card-opt is-actionable"
         :class="{ sel: settings.modelMode === m.id, 'is-selected': settings.modelMode === m.id }"
+        :disabled="m.id === 'jev' && !jevReady"
+        :title="m.id === 'jev' && !jevReady ? 'Save a Jev API key below to use Jev' : undefined"
         :data-testid="`mode-${m.id}`"
         @click="save({ modelMode: m.id })"
       >
@@ -186,12 +172,12 @@ function setModel(key: 'intelligentModel' | 'workerModel', id: string): void {
   <div class="group">
     <div class="ui-kicker group-label">JEV API KEY</div>
     <div class="group-desc">
-      Jev mode routes each message through TypeSafe AI. Jev mode with no key set works
-      exactly like Basic.
+      Jev mode routes each message through TypeSafe AI. Jev stays unavailable until a key is
+      saved, and removing the key moves the mode back to Basic.
     </div>
     <div v-if="store.jevStatus?.encryption === false" class="ui-err" data-testid="jev-encryption-warning">
       This machine cannot encrypt a saved key, so Switchboard will not store one here.
-      Jev mode works like Basic until it runs somewhere that can.
+      Jev stays unavailable until it runs somewhere that can.
     </div>
     <div v-if="store.jevStatus?.configured && !editingJevKey" class="ui-card setting-row is-actionable">
       <div class="sr-text">
@@ -269,19 +255,22 @@ function setModel(key: 'intelligentModel' | 'workerModel', id: string): void {
     </div>
   </div>
 
-  <div v-for="section in MODEL_SECTIONS" :key="section.key" class="group">
-    <div class="ui-kicker group-label">{{ section.label }}</div>
-    <div class="group-desc">{{ section.desc }}</div>
+  <div class="group">
+    <div class="ui-kicker group-label">MODEL</div>
+    <div class="group-desc">
+      The model sessions run on, newest version of each family. Worker subagents, the Diff
+      worker and Jev's routine turns use the model one family cheaper, now {{ cheaperLabel }}.
+    </div>
     <div class="cards">
       <button
         v-for="m in modelChoices"
         :key="m.id"
         class="ui-card card-opt is-actionable"
-        :class="{ sel: settings[section.key] === m.id, 'is-selected': settings[section.key] === m.id }"
-        :data-testid="`${section.testid}-${m.id}`"
-        @click="setModel(section.key, m.id)"
+        :class="{ sel: settings.model === m.id, 'is-selected': settings.model === m.id }"
+        :data-testid="`model-${m.id}`"
+        @click="save({ model: m.id })"
       >
-        <span class="opt-dot" :class="{ on: settings[section.key] === m.id }"></span>
+        <span class="opt-dot" :class="{ on: settings.model === m.id }"></span>
         <div class="opt-body">
           <div class="opt-name mono">{{ m.label }}</div>
           <div class="opt-sub">{{ m.desc }}</div>

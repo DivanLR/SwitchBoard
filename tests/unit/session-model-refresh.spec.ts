@@ -2,9 +2,8 @@ import { describe, expect, it } from 'vitest'
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { EffortLevel, EventKind, EventPayloadMap, ModelMode, SessionEvent } from '@shared/domain'
 import { HostedSession } from '@main/sessions/session'
-import { mainLoopModel } from '@main/sessions/model-routing'
 
-function makeSession(mode: ModelMode = 'auto') {
+function makeSession(mode: ModelMode = 'jev') {
   const routing = {
     intelligentModel: 'claude-opus-5[1m]',
     workerModel: 'claude-sonnet-5',
@@ -27,7 +26,7 @@ function makeSession(mode: ModelMode = 'auto') {
     sessionId: 's1',
     mode: 'auto',
     projectPath: '.',
-    mainModel: mainLoopModel(mode, routing),
+    mainModel: routing.intelligentModel,
     autoModelRouting: true,
     modelMode: mode,
     resolveModels: () => ({ ...routing }),
@@ -67,8 +66,8 @@ const limitResult = (): unknown => ({
 })
 
 describe('the main-loop model is pinned for the session', () => {
-  it('never switches between question and work turns (auto)', () => {
-    const { setModelCalls, send } = makeSession('auto')
+  it('never switches between question and work turns', () => {
+    const { setModelCalls, send } = makeSession('jev')
     send('What does this function do?')
     send('Fix the typo in SessionView.vue')
     send('Audit every view in the app and restyle all of them')
@@ -76,15 +75,15 @@ describe('the main-loop model is pinned for the session', () => {
     expect(setModelCalls).toEqual(['claude-opus-5[1m]'])
   })
 
-  it('runs the cheap model in Basic mode, and stays there', () => {
+  it('runs the one Model in Basic mode too, and stays there', () => {
     const { setModelCalls, send } = makeSession('basic')
     send('What does this function do?')
     send('Fix the typo in SessionView.vue')
-    expect(setModelCalls).toEqual(['claude-sonnet-5'])
+    expect(setModelCalls).toEqual(['claude-opus-5[1m]'])
   })
 
   it('sets the main loop to the Effort bar once, not per turn', () => {
-    const { effortCalls, send } = makeSession('auto')
+    const { effortCalls, send } = makeSession('jev')
     send('Fix the typo in SessionView.vue')
     send('Audit every view in the app')
     expect(effortCalls).toEqual([{ effortLevel: 'xhigh' }])
@@ -93,7 +92,7 @@ describe('the main-loop model is pinned for the session', () => {
 
 describe('the per-turn mode report', () => {
   it('names the pattern each turn picks, and clears it on a question', () => {
-    const { turnModes, send } = makeSession('auto')
+    const { turnModes, send } = makeSession('jev')
     send('Fix the typo in SessionView.vue')
     send('Audit every view in the app and restyle all of them')
     send('What does this function do?')
@@ -103,7 +102,7 @@ describe('the per-turn mode report', () => {
   it('reports no pattern after Settings leaves basic, since the session started without its advisor and worker', () => {
     const { routing, turnModes, send } = makeSession('basic')
     send('Fix the typo in SessionView.vue')
-    routing.modelMode = 'auto'
+    routing.modelMode = 'jev'
     send('Fix the other typo in SessionView.vue')
     send('Audit every view in the app and restyle all of them')
     expect(turnModes).toEqual([null, null, null])
@@ -119,7 +118,7 @@ describe('the per-turn mode report', () => {
 
 describe('the Effort bar', () => {
   it('reaches a running session on its next message', () => {
-    const { routing, effortCalls, send } = makeSession('auto')
+    const { routing, effortCalls, send } = makeSession('jev')
     send('Fix the typo in SessionView.vue')
     routing.effort = 'low'
     send('Fix the other typo')
@@ -127,7 +126,7 @@ describe('the Effort bar', () => {
   })
 
   it('still moves after a usage-limit downgrade pinned the model', () => {
-    const { routing, effortCalls, send, feed } = makeSession('auto')
+    const { routing, effortCalls, send, feed } = makeSession('jev')
     feed(limitResult())
     routing.effort = 'medium'
     send('Carry on')
@@ -135,7 +134,7 @@ describe('the Effort bar', () => {
   })
 
   it('refuses the Agent tool below max and allows it at max, read live', async () => {
-    const { routing, gate } = makeSession('auto')
+    const { routing, gate } = makeSession('jev')
     expect(await gate()).toBe('deny')
     routing.effort = 'max'
     expect(await gate()).toBeUndefined()
@@ -145,8 +144,8 @@ describe('the Effort bar', () => {
 })
 
 describe('settings changes reach a running session', () => {
-  it('picks up a new intelligent model on the next turn', () => {
-    const { routing, setModelCalls, send } = makeSession('auto')
+  it('picks up a new Model on the next turn', () => {
+    const { routing, setModelCalls, send } = makeSession('jev')
     send('Fix the typo in SessionView.vue')
     expect(setModelCalls).toEqual(['claude-opus-5[1m]'])
 
@@ -155,16 +154,16 @@ describe('settings changes reach a running session', () => {
     expect(setModelCalls.at(-1)).toBe('claude-fable-5')
   })
 
-  it('follows a pairing-mode change to the other tier', () => {
-    const { routing, setModelCalls, send } = makeSession('auto')
+  it('keeps the Model when the mode changes to Basic', () => {
+    const { routing, setModelCalls, send } = makeSession('jev')
     send('Fix the typo in SessionView.vue')
     routing.modelMode = 'basic'
     send('Fix the other typo in SessionView.vue')
-    expect(setModelCalls).toEqual(['claude-opus-5[1m]', 'claude-sonnet-5'])
+    expect(setModelCalls).toEqual(['claude-opus-5[1m]'])
   })
 
   it('keeps a usage-limit downgrade instead of re-reading back up', () => {
-    const { setModelCalls, send, feed } = makeSession('auto')
+    const { setModelCalls, send, feed } = makeSession('jev')
     feed(limitResult())
     expect(setModelCalls.at(-1)).toBe('sonnet')
 
@@ -176,13 +175,13 @@ describe('settings changes reach a running session', () => {
 
 describe('a usage-limit downgrade', () => {
   it('recognises a 429 by its status alone, whatever the result text says', () => {
-    const { setModelCalls, feed } = makeSession('auto')
+    const { setModelCalls, feed } = makeSession('jev')
     feed({ ...(limitResult() as object), result: 'Request failed' })
     expect(setModelCalls).toEqual(['sonnet'])
   })
 
   it('leaves the model alone on a successful turn that only talks about limits', () => {
-    const { setModelCalls, feed } = makeSession('auto')
+    const { setModelCalls, feed } = makeSession('jev')
     feed({
       type: 'result', subtype: 'success', is_error: false, api_error_status: null, session_id: 'sdk-1',
       result: 'Fixed the rate limit handling.', total_cost_usd: 0, duration_ms: 1, usage: {},

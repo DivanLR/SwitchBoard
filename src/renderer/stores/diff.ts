@@ -50,7 +50,7 @@ const store = reactive({
 
   applying: false,
   applyError: null as string | null,
-  appliedSessionId: null as string | null,
+  appliedFor: {} as Record<string, string>,
 
   async applyToRegion(
     projectId: string,
@@ -63,7 +63,7 @@ const store = reactive({
     this.applyError = null
     try {
       const { sessionId } = await invoke('diff.apply', { projectId, path, lines, instruction })
-      this.appliedSessionId = sessionId
+      this.appliedFor[projectId] = sessionId
       return true
     } catch (e) {
       this.applyError = isIpcError(e)
@@ -75,6 +75,10 @@ const store = reactive({
     } finally {
       this.applying = false
     }
+  },
+
+  hideApplied(projectId: string): void {
+    delete this.appliedFor[projectId]
   },
 
   async selectFile(projectId: string, path: string): Promise<void> {

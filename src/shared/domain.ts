@@ -447,9 +447,34 @@ export function modelPrice(id: string): string {
   return FAMILY_PRICE[modelFamily(id) ?? ''] ?? '—'
 }
 
-export type ModelMode = 'jev' | 'auto' | 'basic'
+const ONE_DOWN: Record<string, string | null> = {
+  fable: 'opus',
+  opus: 'sonnet',
+  sonnet: 'haiku',
+  haiku: null,
+}
 
-export const MODEL_MODES: readonly ModelMode[] = ['jev', 'auto', 'basic']
+export function nextStrongestModel(current: string | undefined): string | null {
+  const family = modelFamily(current)
+  if (!family) return 'sonnet'
+  return ONE_DOWN[family] ?? null
+}
+
+export function cheaperModel(model: string): string {
+  return nextStrongestModel(model) ?? model
+}
+
+const ALIASED_FAMILIES = new Set(['opus', 'sonnet', 'haiku'])
+
+export function modelAlias(id: string): string {
+  const family = modelFamily(id)
+  if (!family || !ALIASED_FAMILIES.has(family)) return id
+  return /\[1m\]/i.test(id) ? `${family}[1m]` : family
+}
+
+export type ModelMode = 'jev' | 'basic'
+
+export const MODEL_MODES: readonly ModelMode[] = ['jev', 'basic']
 
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
@@ -476,8 +501,7 @@ export interface KeepCurrentReport {
 export interface Settings {
   defaultView: 'clean' | 'raw'
   notificationsEnabled: boolean
-  intelligentModel: string
-  workerModel: string
+  model: string
   autoModelRouting: boolean
   modelMode: ModelMode
   jevSwitchLimit: number
@@ -515,10 +539,9 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   defaultView: 'clean',
   notificationsEnabled: true,
-  intelligentModel: 'claude-opus-5',
-  workerModel: 'claude-sonnet-5',
+  model: 'opus',
   autoModelRouting: true,
-  modelMode: 'auto',
+  modelMode: 'basic',
   jevSwitchLimit: 60,
   defaultEngine: DEFAULT_SESSION_ENGINE,
   codexModel: '',

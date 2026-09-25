@@ -11,7 +11,20 @@ export function modeAgents(options: {
   mode?: ModelMode
   effort?: EffortLevel
 }): Record<string, AgentDefinition> {
-  if (options.mode === 'basic') return {}
+  const worker: AgentDefinition = {
+    description:
+      'Mechanical executor on the cheap model for well-scoped chunks with CLEAR inputs and ' +
+      'outputs: file edits, renames, boilerplate, running tests/builds, extracting or ' +
+      'summarising parts of files. Parallel-safe — fan out independent chunks in one turn.',
+    prompt:
+      'You are a WORKER: execute exactly the scoped chunk you were given. Expect an explicit ' +
+      'input (files/paths/content) and an explicit expected output; deliver precisely that, ' +
+      'raw and complete, no commentary. If the input is ambiguous or does not match what the ' +
+      'instructions assume, STOP and return one short clarifying question instead of guessing.',
+    model: norm(options.cheapModel),
+    effort: options.effort,
+  }
+  if (options.mode === 'basic') return { [WORKER_AGENT]: worker }
   return {
     advisor: {
       description:
@@ -27,19 +40,7 @@ export function modeAgents(options: {
       model: norm(options.strongModel),
       effort: options.effort,
     },
-    [WORKER_AGENT]: {
-      description:
-        'Mechanical executor on the cheap model for well-scoped chunks with CLEAR inputs and ' +
-        'outputs: file edits, renames, boilerplate, running tests/builds, extracting or ' +
-        'summarising parts of files. Parallel-safe — fan out independent chunks in one turn.',
-      prompt:
-        'You are a WORKER: execute exactly the scoped chunk you were given. Expect an explicit ' +
-        'input (files/paths/content) and an explicit expected output; deliver precisely that, ' +
-        'raw and complete, no commentary. If the input is ambiguous or does not match what the ' +
-        'instructions assume, STOP and return one short clarifying question instead of guessing.',
-      model: norm(options.cheapModel),
-      effort: options.effort,
-    },
+    [WORKER_AGENT]: worker,
   }
 }
 

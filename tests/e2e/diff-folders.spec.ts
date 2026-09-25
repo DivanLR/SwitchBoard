@@ -79,36 +79,45 @@ test('folding a folder hides everything under it, and keeps its heading', async 
   await expect(page.getByTestId('diff-folder-src/renderer')).toBeVisible()
 })
 
-test('a folder with no files of its own still appears, so the tree has its levels', async ({
-  page,
-}) => {
+async function openDiffWith(page: import('@playwright/test').Page, paths: string[]): Promise<void> {
   const scenario = twoProjectScenario()
   scenario.projects[0].diff = {
     gitNotice: null,
-    files: [
-      {
-        path: 'src/main/sessions/session.ts',
-        status: 'modified',
-        addedLines: 5,
-        removedLines: 2,
-        binary: false,
-      },
-    ],
+    files: paths.map((path) => ({ path, status: 'modified', addedLines: 5, removedLines: 2, binary: false })),
   }
   await page.addInitScript(installMockHost, scenario)
   await page.goto('/')
   await expect(page.getByTestId('sidebar-project-alpha')).toBeVisible()
   await page.getByTestId('sidebar-project-alpha').click()
   await page.getByTestId('tab-diff').click()
+  await expect(page.getByTestId('diff-file-list')).toBeVisible()
+}
 
-  await expect(page.getByTestId('diff-folder-src')).toBeVisible()
-  await expect(page.getByTestId('diff-folder-src/main')).toBeVisible()
-  await expect(page.getByTestId('diff-folder-src/main/sessions')).toBeVisible()
-  await expect(page.getByTestId('diff-folder-src/main').locator('.dfo-path')).toHaveText('main')
+test('a chain of folders with nothing else in them shows as one folder with the full path', async ({ page }) => {
+  await openDiffWith(page, ['src/main/sessions/session.ts'])
+
+  const headings = page.locator('.diff-folder')
+  await expect(headings).toHaveCount(1)
+  await expect(page.getByTestId('diff-folder-src/main/sessions').locator('.dfo-path')).toHaveText('src/main/sessions')
+  await expect(page.getByTestId('diff-folder-src')).toHaveCount(0)
+  await expect(page.getByTestId('diff-folder-src/main')).toHaveCount(0)
+
+  await page.getByTestId('diff-folder-src/main/sessions').click()
+  await expect(page.getByTestId('diff-file-src/main/sessions/session.ts')).toHaveCount(0)
+})
+
+test('a folder that branches stays, and each branch below it joins its own single folders', async ({ page }) => {
+  await openDiffWith(page, ['src/main/sessions/session.ts', 'src/renderer/views/DiffView.vue'])
+
+  const headings = page.locator('.diff-folder')
+  await expect(headings).toHaveCount(3)
+  await expect(page.getByTestId('diff-folder-src').locator('.dfo-path')).toHaveText('src')
+  await expect(page.getByTestId('diff-folder-src/main/sessions').locator('.dfo-path')).toHaveText('main/sessions')
+  await expect(page.getByTestId('diff-folder-src/renderer/views').locator('.dfo-path')).toHaveText('renderer/views')
 
   await page.getByTestId('diff-folder-src').click()
-  await expect(page.getByTestId('diff-folder-src/main')).toHaveCount(0)
-  await expect(page.getByTestId('diff-file-src/main/sessions/session.ts')).toHaveCount(0)
+  await expect(page.getByTestId('diff-folder-src/main/sessions')).toHaveCount(0)
+  await expect(page.getByTestId('diff-file-src/renderer/views/DiffView.vue')).toHaveCount(0)
 })
 
 test('selecting a file still opens its diff, grouped or not', async ({ page }) => {

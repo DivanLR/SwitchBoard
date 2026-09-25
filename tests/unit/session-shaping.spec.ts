@@ -28,16 +28,13 @@ describe('heavySubagentSystemPromptAppend', () => {
 })
 
 describe('promptPattern', () => {
-  it('teaches the advisor pattern for every paired mode when heavy subagents are off', () => {
-    expect(promptPattern(false, 'auto')).toBe('advisor')
+  it('teaches the advisor pattern in Jev when heavy subagents are off', () => {
     expect(promptPattern(false, 'jev')).toBe('advisor')
   })
 
   it('pins to orchestrator when heavy subagents are on, so the two appends cannot contradict', () => {
-    for (const chosen of ['auto', 'jev'] as const) {
-      expect(promptPattern(true, chosen)).toBe('orchestrator')
-    }
-    expect(modesSystemPromptAppend(promptPattern(true, 'auto'))).not.toContain(
+    expect(promptPattern(true, 'jev')).toBe('orchestrator')
+    expect(modesSystemPromptAppend(promptPattern(true, 'jev'))).not.toContain(
       'implement directly yourself',
     )
   })
@@ -99,30 +96,30 @@ describe('heavySubagentSystemPromptAppend prose', () => {
 
   it('sends the fan-out to the same worker the model modes register', () => {
     expect(heavySubagentSystemPromptAppend(true)).toContain('subagent_type "worker"')
-    expect(Object.keys(modeAgents({ mode: 'auto' }))).toContain('worker')
+    expect(Object.keys(modeAgents({ mode: 'jev' }))).toContain('worker')
+    expect(Object.keys(modeAgents({ mode: 'basic' }))).toContain('worker')
   })
 })
 
 describe('basic mode shaping', () => {
-  it('registers no subagents, so the expensive tier cannot be reached at all', () => {
-    const agents = modeAgents({ strongModel: 'opus', cheapModel: 'haiku', mode: 'basic' })
-    expect(Object.keys(agents)).toEqual([])
+  it('registers only the worker, on the cheaper tier, and no advisor', () => {
+    const agents = modeAgents({ strongModel: 'opus', cheapModel: 'sonnet', mode: 'basic' })
+    expect(Object.keys(agents)).toEqual(['worker'])
+    expect(agents.worker.model).toBe('sonnet')
   })
 
-  it('still registers both for every paired mode', () => {
-    for (const mode of ['auto', 'jev'] as const) {
-      const agents = modeAgents({ strongModel: 'opus', cheapModel: 'haiku', mode })
-      expect(Object.keys(agents).sort()).toEqual(['advisor', 'worker'])
-      expect(agents.advisor.model).toBe('opus')
-      expect(agents.worker.model).toBe('haiku')
-    }
+  it('registers the advisor on the Model and the worker on the cheaper tier in Jev', () => {
+    const agents = modeAgents({ strongModel: 'opus', cheapModel: 'sonnet', mode: 'jev' })
+    expect(Object.keys(agents).sort()).toEqual(['advisor', 'worker'])
+    expect(agents.advisor.model).toBe('opus')
+    expect(agents.worker.model).toBe('sonnet')
   })
 
   it('gives both agents the subagent effort bar, and inherits when it is unset', () => {
-    const set = modeAgents({ mode: 'auto', effort: 'medium' })
+    const set = modeAgents({ mode: 'jev', effort: 'medium' })
     expect(set.advisor.effort).toBe('medium')
     expect(set.worker.effort).toBe('medium')
-    const unset = modeAgents({ mode: 'auto' })
+    const unset = modeAgents({ mode: 'jev' })
     expect(unset.advisor.effort).toBeUndefined()
     expect(unset.worker.effort).toBeUndefined()
   })

@@ -43,9 +43,9 @@ const emit = defineEmits<{
 }>()
 
 const modelSummary = computed(() => {
-  const id = settings.settings?.intelligentModel ?? 'default'
+  const id = settings.settings?.model ?? 'default'
   if (id === 'default') return 'default model'
-  return modelLabel(id)
+  return settings.availableModels.find((m) => m.id === id)?.label ?? modelLabel(id)
 })
 
 const collapsed = ref(false)

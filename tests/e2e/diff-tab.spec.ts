@@ -130,6 +130,29 @@ test('a comment on one diff line is applied by the container session', async ({ 
   await expect(page.getByTestId('diff-comment')).toHaveCount(0)
 })
 
+test('a sent comment shows its worker session in the Diff tab, per project, until hidden', async ({ page }) => {
+  await openDiffWithLines(page)
+  await expect(page.getByTestId('diff-worker')).toHaveCount(0)
+
+  await page.getByTestId('diff-line-2').click()
+  await page.getByTestId('diff-comment-input').fill('make this configurable')
+  await page.getByTestId('diff-comment-send').click()
+
+  const worker = page.getByTestId('diff-worker')
+  await expect(worker).toBeVisible()
+  await expect(worker.getByTestId('mini-terminal')).toBeVisible()
+  await expect(worker).toContainText('worker session applying your comments')
+
+  await openProject(page, 'beta')
+  await expect(page.getByTestId('diff-worker')).toHaveCount(0)
+
+  await openProject(page, 'alpha')
+  await expect(page.getByTestId('diff-worker')).toBeVisible()
+
+  await page.getByTestId('diff-worker-hide').click()
+  await expect(page.getByTestId('diff-worker')).toHaveCount(0)
+})
+
 test('shift-click extends the selection over several lines, in order', async ({ page }) => {
   await openDiffWithLines(page)
 

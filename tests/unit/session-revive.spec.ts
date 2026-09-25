@@ -118,7 +118,7 @@ describe('a crashed session is restarted by the app', () => {
 
   it('brings a session that dropped a model on a usage limit back on the lower model', async () => {
     const { repos, project, manager } = setup()
-    repos.settings.set({ modelMode: 'auto', intelligentModel: 'claude-opus-5' })
+    repos.settings.set({ modelMode: 'basic', model: 'claude-opus-5' })
     const first = await manager.startSession(project.id)
     expect(queryOptions.at(-1)?.model).toBe('claude-opus-5')
     const hosted = (manager as unknown as { hosted: Map<string, { session: { handleMessage(m: unknown): void } }> })
